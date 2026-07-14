@@ -5,6 +5,7 @@ import { Brain, PlugZap } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import type { GoatBrainSummaryView, GoatWorkspaceView } from "@/components/GoatAppDataProvider";
+import { GoatBrainImport } from "@/components/GoatBrainImport";
 import { GoatBrainOverviewFlow } from "@/components/GoatBrainOverviewFlow";
 import { BrainSourcesSection } from "@/components/GoatBrainSourceCards";
 import { VisibilityOption } from "@/components/GoatBrainSwitcher";
@@ -70,6 +71,10 @@ export function GoatBrainSettings({
 
           <SettingsSection title="Sources">
             <BrainSourcesSection brainRef={brain.id} />
+          </SettingsSection>
+
+          <SettingsSection title="Company context">
+            <GoatBrainImport brainRef={brain.id} compact />
           </SettingsSection>
         </div>
       )}
@@ -263,7 +268,10 @@ function EnrichmentSection({ brainRef }: { brainRef: string }) {
     const next = !enabled;
     setEnrichmentState({ brainRef, enabled: next });
     startTransition(async () => {
-      const result = await setGoatBrainEnrichmentAction({ brainRef, enabled: next });
+      const result = await setGoatBrainEnrichmentAction({
+        brainRef,
+        enabled: next,
+      });
       if (!result.ok) {
         setEnrichmentState((current) =>
           current.brainRef === brainRef ? { brainRef, enabled: !next } : current,

@@ -16,6 +16,7 @@ import {
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
+  isNormalizedGoatImportSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
   isNormalizedJamieMeetingSourceItem,
   isNormalizedLinearIssueSourceItem,
@@ -46,6 +47,7 @@ import {
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
+  runGoatImportAgentIngest,
   runGoogleDriveDocumentAgentIngest,
   runJamieMeetingAgentIngest,
   runLinearIssueAgentIngest,
@@ -59,7 +61,10 @@ import {
 } from "./goat-brain-jamie-writes";
 import { rowsFromExecute } from "./sql-exec";
 
-const logger = createLogger({ service: "opencompany-runner", runtime: "goat-brain-ingest" });
+const logger = createLogger({
+  service: "opencompany-runner",
+  runtime: "goat-brain-ingest",
+});
 
 // A running job's lease must outlive one full agent-ingest attempt so a transient
 // heartbeat outage (DB blip, brief event-loop stall) can't let a second worker
@@ -85,10 +90,11 @@ const ATTEMPT_ERROR_MAX_CHARS = 500;
 
 export type GoatBrainIngestJobWithSource = Omit<
   GoatBrainIngestJob,
-  "workspaceId" | "planPaused"
+  "workspaceId" | "planPaused" | "importRunId"
 > & {
   workspaceId?: string | null;
   planPaused?: boolean;
+  importRunId?: string | null;
   sourceType: GoatBrainSourceType;
   normalizedPayload: unknown;
 };
@@ -109,6 +115,7 @@ export type GoatBrainIngestHandlerInput<
   // Lets handlers look up per-(brain, integration) source config live at
   // ingest time (e.g. Gmail ingestion instructions).
   integrationId: string | null;
+  importRunId?: string | null;
   item: TItem;
   env: GoatBrainAgentIngestEnv;
 };
@@ -177,6 +184,12 @@ const GOOGLE_DRIVE_DOCUMENT_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "document",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const GOAT_IMPORT_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "goat-import",
+  sourceType: "run",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
   {
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
@@ -222,6 +235,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: GOOGLE_DRIVE_DOCUMENT_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGoogleDriveDocumentSourceItem,
     run: runTypedGoatBrainIngestHandler(runGoogleDriveDocumentAgentIngest),
+  },
+  {
+    descriptor: GOAT_IMPORT_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedGoatImportSourceItem,
+    run: runTypedGoatBrainIngestHandler(runGoatImportAgentIngest),
   },
 ];
 
@@ -666,11 +684,12 @@ export async function runClaimedGoatBrainIngestJob(input: {
             userWorkosId: input.job.userWorkosId,
             brainRef: input.job.brainRef ?? null,
             integrationId: input.job.integrationId ?? null,
+            ...(input.job.importRunId ? { importRunId: input.job.importRunId } : {}),
             item: normalizedPayload,
             env: {
               vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey,
               blobReadWriteToken: input.env.blobReadWriteToken,
-              exaApiKey: input.env.exaApiKey,
+              ...(input.env.exaApiKey ? { exaApiKey: input.env.exaApiKey } : {}),
             },
           }),
       ),
@@ -839,7 +858,12 @@ export function startGoatBrainIngestWorker(
             leaseTtlMs: GOAT_BRAIN_INGEST_LEASE_TTL_MS,
           });
           if (!job) break;
-          const running = runClaimedGoatBrainIngestJob({ job, env, handlers, store })
+          const running = runClaimedGoatBrainIngestJob({
+            job,
+            env,
+            handlers,
+            store,
+          })
             .catch((error) => {
               captureException(error, {
                 event: "opencompany.goat_brain_ingest_job_failed",
@@ -855,7 +879,9 @@ export function startGoatBrainIngestWorker(
           active.add(running);
         }
       } catch (error) {
-        captureException(error, { event: "opencompany.goat_brain_ingest_worker_failed" });
+        captureException(error, {
+          event: "opencompany.goat_brain_ingest_worker_failed",
+        });
         logger.error("Goat Brain ingest worker failed", {
           event: "opencompany.goat_brain_ingest_worker_failed",
           error,

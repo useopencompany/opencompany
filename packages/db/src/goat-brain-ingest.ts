@@ -53,6 +53,7 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   item: NormalizedBrainSourceItem;
   rawPayload: unknown;
   kind?: GoatBrainIngestJobKind;
+  importRunId?: string | null;
   brainRef?: string | null;
   // Target brains for fan-out; one ingest job per entry. Takes precedence over
   // `brainRef`. An empty array persists the source item without enqueuing.
@@ -174,6 +175,7 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
               sourceConnectionId: input.sourceConnectionId,
               integrationId,
               workspaceId: brainRef ? (workspaceByBrain.get(brainRef) ?? null) : null,
+              importRunId: input.importRunId ?? null,
               brainRef,
               kind,
               contentHash: input.item.contentHash,
@@ -181,7 +183,11 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
               nextRunAt: now,
               ...(skipReason
                 ? {
-                    result: { skipped: true, reason: skipReason, summary: skipReason },
+                    result: {
+                      skipped: true,
+                      reason: skipReason,
+                      summary: skipReason,
+                    },
                     completedAt: now,
                   }
                 : {}),

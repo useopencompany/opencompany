@@ -74,6 +74,13 @@ function proxyHttpRequest({ request, response, target }) {
       headers: forwardedHeaders(request),
     },
     (proxyResponse) => {
+      if (response.destroyed) {
+        proxyResponse.destroy();
+        return;
+      }
+
+      proxyResponse.once("aborted", () => response.destroy());
+      proxyResponse.once("error", () => response.destroy());
       response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.statusMessage, {
         ...proxyResponse.headers,
       });
@@ -81,9 +88,17 @@ function proxyHttpRequest({ request, response, target }) {
     },
   );
 
-  proxyRequest.on("error", (error) => {
+  request.once("aborted", () => proxyRequest.destroy());
+  request.once("error", () => proxyRequest.destroy());
+  response.once("close", () => {
+    if (!response.writableEnded) proxyRequest.destroy();
+  });
+  response.once("error", () => proxyRequest.destroy());
+
+  proxyRequest.on("error", () => {
+    if (response.destroyed) return;
     if (response.headersSent) {
-      response.destroy(error);
+      response.destroy();
       return;
     }
     response.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
@@ -96,7 +111,16 @@ function proxyHttpRequest({ request, response, target }) {
 function proxyUpgradeRequest({ request, socket, head, target }) {
   const upstream = connect(Number(target.port), LOCAL_HOST);
 
+  socket.once("error", () => upstream.destroy());
+  socket.once("close", () => upstream.destroy());
+  upstream.once("error", () => socket.destroy());
+  upstream.once("close", () => socket.destroy());
+
   upstream.on("connect", () => {
+    if (socket.destroyed) {
+      upstream.destroy();
+      return;
+    }
     upstream.write(`${request.method} ${request.url} HTTP/${request.httpVersion}\r\n`);
     for (const [name, value] of Object.entries(request.headers)) {
       if (value === undefined) continue;
@@ -105,10 +129,6 @@ function proxyUpgradeRequest({ request, socket, head, target }) {
     upstream.write("\r\n");
     if (head.length > 0) upstream.write(head);
     socket.pipe(upstream).pipe(socket);
-  });
-
-  upstream.on("error", () => {
-    socket.destroy();
   });
 }
 

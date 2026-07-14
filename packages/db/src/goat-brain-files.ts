@@ -535,6 +535,7 @@ export async function upsertGoatBrainFile(
     content: string;
     id?: string;
     taskId?: string | null;
+    importRunId?: string | null;
     // Recorded only when the row is created; conflicting upserts never touch
     // it. Defaults to the acting user; pass null when no human originated the
     // content (e.g. Slack-window ingestion).
@@ -544,12 +545,22 @@ export async function upsertGoatBrainFile(
 ): Promise<GoatBrainDocument> {
   const db = options.db ?? getDb();
   return runAtomically(db, async (tx: DbLike) => {
-    const projection = deriveGoatBrainFileProjection({ path: input.path, content: input.content });
+    const projection = deriveGoatBrainFileProjection({
+      path: input.path,
+      content: input.content,
+    });
     const now = new Date();
     const existing = await findDocumentForUpsert(tx, input.brainRef, projection.path);
     const documentId = existing?.id ?? input.id ?? `goat_brain_doc_${randomUUID()}`;
     if (existing && existing.contentHash !== projection.contentHash) {
-      await insertVersion(tx, input.userWorkosId, existing, "overwrite", input.taskId ?? null);
+      await insertVersion(
+        tx,
+        input.userWorkosId,
+        existing,
+        "overwrite",
+        input.taskId ?? null,
+        input.importRunId ?? null,
+      );
     }
 
     const rows = await tx
@@ -568,7 +579,11 @@ export async function upsertGoatBrainFile(
       })
       .onConflictDoUpdate({
         target: [goatBrainDocuments.brainRef, goatBrainDocuments.brainId],
-        set: { ...documentValues(projection), userWorkosId: input.userWorkosId, updatedAt: now },
+        set: {
+          ...documentValues(projection),
+          userWorkosId: input.userWorkosId,
+          updatedAt: now,
+        },
       })
       .returning();
     const row = rows[0];
@@ -628,7 +643,11 @@ export async function createGoatBrainMarkdownDocument(
 }
 
 export async function updateGoatBrainFileContent(
-  input: GoatBrainScope & { fileId: string; content: string; expectedContentHash?: string },
+  input: GoatBrainScope & {
+    fileId: string;
+    content: string;
+    expectedContentHash?: string;
+  },
   options: { db?: DbClient } = {},
 ): Promise<GoatBrainDocument> {
   const db = options.db ?? getDb();
@@ -643,7 +662,7 @@ export async function updateGoatBrainFileContent(
       content: input.content,
     });
     if (existing.contentHash !== projection.contentHash) {
-      await insertVersion(tx, input.userWorkosId, existing, "overwrite", null);
+      await insertVersion(tx, input.userWorkosId, existing, "overwrite", null, null);
     }
     const rows = await tx
       .update(goatBrainDocuments)
@@ -674,12 +693,15 @@ export async function moveGoatBrainFile(
   return runAtomically(db, async (tx: DbLike) => {
     const existing = await getDocumentById(tx, input.brainRef, input.fileId);
     if (!existing) throw new Error("Brain document not found.");
-    const projection = deriveGoatBrainFileProjection({ path: input.path, content: input.content });
+    const projection = deriveGoatBrainFileProjection({
+      path: input.path,
+      content: input.content,
+    });
     if (
       existing.contentHash !== projection.contentHash ||
       existing.folderPath !== projection.folderPath
     ) {
-      await insertVersion(tx, input.userWorkosId, existing, "overwrite", null);
+      await insertVersion(tx, input.userWorkosId, existing, "overwrite", null, null);
     }
     const rows = await tx
       .update(goatBrainDocuments)
@@ -703,14 +725,25 @@ export async function moveGoatBrainFile(
 }
 
 export async function deleteGoatBrainFile(
-  input: GoatBrainScope & { fileId: string; taskId?: string | null },
+  input: GoatBrainScope & {
+    fileId: string;
+    taskId?: string | null;
+    importRunId?: string | null;
+  },
   options: { db?: DbClient } = {},
 ): Promise<void> {
   const db = options.db ?? getDb();
   const deleted = await runAtomically(db, async (tx: DbLike) => {
     const existing = await getDocumentById(tx, input.brainRef, input.fileId);
     if (existing)
-      await insertVersion(tx, input.userWorkosId, existing, "delete", input.taskId ?? null);
+      await insertVersion(
+        tx,
+        input.userWorkosId,
+        existing,
+        "delete",
+        input.taskId ?? null,
+        input.importRunId ?? null,
+      );
     await tx
       .delete(goatBrainDocuments)
       .where(
@@ -768,7 +801,11 @@ export async function createGoatBrainAssetDocument(
     status: "draft",
     compiledTruth: `Uploaded file \`${input.originalFileName}\`. Ingestion pending.`,
     sources: [
-      { ref: input.sourceRef, title: input.originalFileName, capturedAt: now.toISOString() },
+      {
+        ref: input.sourceRef,
+        title: input.originalFileName,
+        capturedAt: now.toISOString(),
+      },
     ],
   });
   const projection = deriveGoatBrainFileProjection({
@@ -1013,6 +1050,7 @@ export async function syncGoatBrainFiles(input: {
   baseSnapshot: MaterializedGoatBrainFile[];
   db?: DbClient;
   taskId?: string | null;
+  importRunId?: string | null;
   folders?: GoatBrainFolderManifestEntry[] | null;
   // Attribution for documents this sync *creates* (existing rows keep theirs).
   // Defaults to the acting user; pass null when no human originated the
@@ -1046,7 +1084,10 @@ export async function syncGoatBrainFiles(input: {
     if (skip) {
       skippedPaths.add(normalizedPath);
     } else {
-      deriveGoatBrainFileProjection({ path: normalizedPath, content: file.content });
+      deriveGoatBrainFileProjection({
+        path: normalizedPath,
+        content: file.content,
+      });
     }
     nextByPath.set(normalizedPath, {
       path: normalizedPath,
@@ -1086,7 +1127,12 @@ export async function syncGoatBrainFiles(input: {
     (conflict) => !handledConflictPaths.has(conflict.path),
   );
   if (unhandledConflicts.length > 0)
-    return { upserted: 0, deleted: 0, conflicts: unhandledConflicts, pages: [] };
+    return {
+      upserted: 0,
+      deleted: 0,
+      conflicts: unhandledConflicts,
+      pages: [],
+    };
 
   let upserted = 0;
   const pages: GoatBrainSyncPage[] = [];
@@ -1101,6 +1147,7 @@ export async function syncGoatBrainFiles(input: {
       content: file.content,
       current,
       taskId: input.taskId ?? null,
+      importRunId: input.importRunId ?? null,
       createdByWorkosId:
         input.createdByWorkosId === undefined ? input.userWorkosId : input.createdByWorkosId,
       db,
@@ -1122,6 +1169,7 @@ export async function syncGoatBrainFiles(input: {
         content: file.content,
         ...(existing?.id ? { id: existing.id } : {}),
         taskId: input.taskId ?? null,
+        importRunId: input.importRunId ?? null,
         ...(input.createdByWorkosId !== undefined
           ? { createdByWorkosId: input.createdByWorkosId }
           : {}),
@@ -1151,6 +1199,7 @@ export async function syncGoatBrainFiles(input: {
         userWorkosId: input.userWorkosId,
         fileId: id,
         taskId: input.taskId ?? null,
+        importRunId: input.importRunId ?? null,
       },
       { db },
     );
@@ -1172,6 +1221,7 @@ export async function syncGoatBrainFilesFromRoot(input: {
   baseSnapshot: MaterializedGoatBrainFile[];
   db?: DbClient;
   taskId?: string | null;
+  importRunId?: string | null;
   createdByWorkosId?: string | null;
 }): Promise<GoatBrainSyncResult> {
   const files = await readGoatBrainFilesFromRoot(input.root);
@@ -1183,6 +1233,7 @@ export async function syncGoatBrainFilesFromRoot(input: {
     baseSnapshot: input.baseSnapshot,
     ...(input.db ? { db: input.db } : {}),
     taskId: input.taskId ?? null,
+    importRunId: input.importRunId ?? null,
     folders,
     ...(input.createdByWorkosId !== undefined
       ? { createdByWorkosId: input.createdByWorkosId }
@@ -1197,6 +1248,7 @@ async function upsertConflictDocument(input: {
   content: string;
   current: GoatBrainDocument;
   taskId: string | null;
+  importRunId: string | null;
   createdByWorkosId: string | null;
   db: DbClient;
 }): Promise<GoatBrainDocument> {
@@ -1233,6 +1285,7 @@ async function upsertConflictDocument(input: {
       path: goatBrainFilePathFor(folderPath, conflictId),
       content: conflictContent,
       taskId: input.taskId,
+      importRunId: input.importRunId,
       createdByWorkosId: input.createdByWorkosId,
     },
     { db: input.db },
@@ -1529,12 +1582,14 @@ async function insertVersion(
   row: GoatBrainDocument,
   operation: "overwrite" | "delete",
   taskId: string | null,
+  importRunId: string | null,
 ) {
   await db.insert(goatBrainDocumentVersions).values({
     userWorkosId,
     brainRef: row.brainRef,
     documentId: row.id,
     taskId,
+    importRunId,
     brainId: row.brainId,
     folderPath: row.folderPath,
     content: row.content,
