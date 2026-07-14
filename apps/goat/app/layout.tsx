@@ -9,6 +9,21 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Goat",
   description: "Experimental just-in-time agent harness.",
+  icons: {
+    icon: [
+      {
+        url: "/icon/oc-icon-v3.svg",
+        type: "image/svg+xml",
+        media: "(prefers-color-scheme: light)",
+      },
+      {
+        url: "/icon/oc-icon-v3_white.svg",
+        type: "image/svg+xml",
+        media: "(prefers-color-scheme: dark)",
+      },
+    ],
+    shortcut: [{ url: "/icon/oc-icon-v3.svg", type: "image/svg+xml" }],
+  },
 };
 
 export const viewport: Viewport = {
