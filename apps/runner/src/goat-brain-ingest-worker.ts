@@ -758,6 +758,9 @@ export async function runClaimedGoatBrainIngestJob(input: {
       ...goatBrainIngestBudgetAttributes(result),
     });
   } catch (error) {
+    if (error instanceof GoatBrainIngestBudgetError) {
+      recordBrainIngestModelCost(error.result);
+    }
     const message = errorMessage(error);
     const maxAttempts =
       error instanceof GoatBrainIngestBudgetError

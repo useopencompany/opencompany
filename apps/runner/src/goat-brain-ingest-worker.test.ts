@@ -683,5 +683,21 @@ describe("Goat Brain ingest worker", () => {
         }),
       }),
     );
+    const expectedCost = calculateModelUsageCost({
+      modelName: failureResult.trace.model,
+      inputTokens: usage.inputTokens,
+      inputNoCacheTokens: usage.inputTokens,
+      inputCacheReadTokens: 0,
+      inputCacheWriteTokens: 0,
+      outputTokens: usage.outputTokens,
+    });
+    expect(telemetry.recordGoatModelCost).toHaveBeenCalledOnce();
+    expect(telemetry.recordGoatModelCost).toHaveBeenCalledWith({
+      costUsdMicros: expectedCost.totalCostUsdMicros,
+      attributes: {
+        "goat.model": failureResult.trace.model,
+        "goat.surface": "brain_ingest",
+      },
+    });
   });
 });
