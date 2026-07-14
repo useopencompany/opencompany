@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
@@ -199,6 +199,24 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
     expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
+  });
+
+  it("keeps the painted composer overlay aligned with textarea scrolling", async () => {
+    const user = userEvent.setup();
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    await user.type(textarea, "@codex inspect this long prompt");
+    const overlay = textarea.previousElementSibling as HTMLDivElement | null;
+    expect(overlay).toHaveAttribute("aria-hidden", "true");
+
+    textarea.scrollTop = 48;
+    fireEvent.scroll(textarea);
+    expect(overlay?.scrollTop).toBe(48);
+
+    textarea.scrollTop = 72;
+    await user.type(textarea, " after resizing");
+    expect(overlay?.scrollTop).toBe(72);
   });
 
   it("selects from the active goat model list and sends the chosen model", async () => {
