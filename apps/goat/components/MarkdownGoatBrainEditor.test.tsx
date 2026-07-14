@@ -20,7 +20,7 @@ describe("MarkdownGoatBrainEditor", () => {
   });
 
   it("keeps a leading link collapsed in read-only documents", async () => {
-    render(
+    const { container } = render(
       <MarkdownGoatBrainEditor
         content="[[page:acme|Acme]] is a customer."
         onChange={vi.fn()}
@@ -32,7 +32,7 @@ describe("MarkdownGoatBrainEditor", () => {
     expect((await screen.findByRole("link", { name: "Acme" })).getAttribute("href")).toBe(
       "/brain/companies/acme",
     );
-    expect(document.querySelector(".wiki-brain-syntax")).toBeNull();
+    expect(container.querySelector(".wiki-brain-syntax")).toBeNull();
   });
 
   it("preserves document positions after hard breaks", async () => {
@@ -116,5 +116,25 @@ describe("MarkdownGoatBrainEditor", () => {
     const link = await screen.findByRole("link", { name: "Acme" });
     expect(fireEvent.click(link)).toBe(false);
     expect(onNavigateInternal).toHaveBeenCalledOnce();
+  });
+
+  it("uses the latest internal navigation handler after a prop update", async () => {
+    const firstHandler = vi.fn(() => true);
+    const secondHandler = vi.fn(() => true);
+    const props = {
+      content: "See [[page:acme|Acme]].",
+      onChange: vi.fn(),
+      brainLinks: { "page:acme": "/brain/companies/acme" },
+      readOnly: true,
+    } as const;
+    const { rerender } = render(
+      <MarkdownGoatBrainEditor {...props} onNavigateInternal={firstHandler} />,
+    );
+
+    const link = await screen.findByRole("link", { name: "Acme" });
+    rerender(<MarkdownGoatBrainEditor {...props} onNavigateInternal={secondHandler} />);
+    expect(fireEvent.click(link)).toBe(false);
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).toHaveBeenCalledOnce();
   });
 });

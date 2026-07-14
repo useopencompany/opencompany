@@ -236,14 +236,14 @@ const WikiLinkDecoration = Extension.create<WikiLinkPluginState>({
                   decorations.push(
                     Decoration.widget(
                       start,
-                      () =>
+                      (view) =>
                         buildWikiChip(
                           chip.label,
                           href,
                           link.kind,
                           chip.icon,
                           chipTitle,
-                          pluginState.onNavigateInternal,
+                          () => WIKI_LINK_PLUGIN_KEY.getState(view.state) ?? initialState,
                         ),
                       {
                         side: -1,
@@ -261,8 +261,30 @@ const WikiLinkDecoration = Extension.create<WikiLinkPluginState>({
           },
           handleClick(view, _pos, event) {
             const target = event.target instanceof Element ? event.target : null;
-            const href = target?.closest("[data-brain-href]")?.getAttribute("data-brain-href");
+            const decoratedLink = target?.closest("[data-brain-href]");
+            const href = decoratedLink?.getAttribute("data-brain-href");
             if (!href) return false;
+
+            // Widget decorations are real anchors. Preserve their native external,
+            // modifier-key, and full-page navigation behavior, only intercepting a
+            // plain internal click when the latest client-side handler accepts it.
+            if (decoratedLink instanceof HTMLAnchorElement) {
+              if (
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey ||
+                isExternalHref(href)
+              ) {
+                return false;
+              }
+              const pluginState = WIKI_LINK_PLUGIN_KEY.getState(view.state) ?? initialState;
+              if (!pluginState.onNavigateInternal?.(href)) return false;
+              event.preventDefault();
+              return true;
+            }
+
             event.preventDefault();
             const pluginState = WIKI_LINK_PLUGIN_KEY.getState(view.state) ?? initialState;
             openDecoratedHref(href, pluginState.onNavigateInternal);
@@ -280,7 +302,7 @@ function buildWikiChip(
   kind: ReturnType<typeof parseGoatBrainInlineLinks>[number]["kind"],
   icon: "github" | "link" = "link",
   title?: string,
-  onNavigate?: (href: string) => boolean,
+  getPluginState?: () => WikiLinkPluginState,
 ): HTMLElement {
   const chip = document.createElement(href ? "a" : "span");
   chip.className = href ? "wiki-brain-chip" : "wiki-brain-chip wiki-brain-chip-unresolved";
@@ -307,9 +329,10 @@ function buildWikiChip(
         event.shiftKey ||
         event.altKey ||
         isExternalHref(href)
-      )
+      ) {
         return;
-      if (onNavigate?.(href)) event.preventDefault();
+      }
+      if (getPluginState?.().onNavigateInternal?.(href)) event.preventDefault();
     });
   }
   return chip;

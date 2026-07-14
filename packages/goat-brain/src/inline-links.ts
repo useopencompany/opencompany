@@ -150,10 +150,21 @@ function isValidInlineLinkLabel(label: string): boolean {
 }
 
 type TextRange = { start: number; end: number };
+type ListContext = { markerIndent: number; contentIndent: number };
 
 function markdownCodeRanges(text: string): TextRange[] {
   const fencedRanges: TextRange[] = [];
-  let openFence: { start: number; marker: "`" | "~"; length: number } | null = null;
+  let openFence: {
+    start: number;
+    marker: "`" | "~";
+    length: number;
+    quoteDepth: number;
+    listContentIndent: number | null;
+    listMarkerIndent: number | null;
+  } | null = null;
+  const listContexts: ListContext[] = [];
+  let previousLineBlank = true;
+  let inIndentedCode = false;
   let lineStart = 0;
 
   while (lineStart <= text.length) {
@@ -161,26 +172,71 @@ function markdownCodeRanges(text: string): TextRange[] {
     const lineEnd = newline === -1 ? text.length : newline;
     const nextLineStart = newline === -1 ? text.length : newline + 1;
     const line = text.slice(lineStart, lineEnd);
+    const containerLine = stripBlockQuotePrefixes(line);
+    const blank = /^[ \t]*\r?$/.test(containerLine);
+    let listContext = listContexts.at(-1) ?? null;
+    let closedFence = false;
+
+    if (openFence && fenceContainerEnded(openFence, line, blank, previousLineBlank)) {
+      fencedRanges.push({ start: openFence.start, end: lineStart });
+      openFence = null;
+      inIndentedCode = false;
+      const indent = leadingIndent(containerLine);
+      while (listContexts.length > 0 && indent < (listContexts.at(-1)?.contentIndent ?? 0)) {
+        listContexts.pop();
+      }
+      listContext = listContexts.at(-1) ?? null;
+    }
 
     if (openFence) {
-      const closing = /^ {0,3}(`{3,}|~{3,})[ \t]*\r?$/.exec(line)?.[1];
+      const closing = fenceRun(line, listContext, true);
       if (closing?.[0] === openFence.marker && closing.length >= openFence.length) {
         fencedRanges.push({ start: openFence.start, end: nextLineStart });
         openFence = null;
+        closedFence = true;
       }
     } else {
-      const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-      const markerRun = opening?.[1];
-      if (markerRun && !(markerRun[0] === "`" && opening?.[2]?.includes("`"))) {
+      const nextListContext = listContextForLine(containerLine);
+      if (nextListContext) {
+        while (
+          listContexts.length > 0 &&
+          (listContexts.at(-1)?.markerIndent ?? -1) >= nextListContext.markerIndent
+        ) {
+          listContexts.pop();
+        }
+        listContexts.push(nextListContext);
+      } else if (!blank && previousLineBlank) {
+        const indent = leadingIndent(containerLine);
+        while (listContexts.length > 0 && indent < (listContexts.at(-1)?.contentIndent ?? 0)) {
+          listContexts.pop();
+        }
+      }
+      listContext = listContexts.at(-1) ?? null;
+
+      const markerRun = fenceRun(line, listContext, false);
+      if (markerRun) {
         openFence = {
           start: lineStart,
           marker: markerRun[0] as "`" | "~",
           length: markerRun.length,
+          quoteDepth: blockQuoteDepth(line),
+          listContentIndent: listContext?.contentIndent ?? null,
+          listMarkerIndent: listContext?.markerIndent ?? null,
         };
-      } else if (/^(?: {4}|\t)/.test(line)) {
-        fencedRanges.push({ start: lineStart, end: nextLineStart });
+        inIndentedCode = false;
+      } else if (!blank) {
+        const requiredIndent = (listContext?.contentIndent ?? 0) + 4;
+        const indented = leadingIndent(containerLine) >= requiredIndent;
+        if (indented && (inIndentedCode || previousLineBlank)) {
+          fencedRanges.push({ start: lineStart, end: nextLineStart });
+          inIndentedCode = true;
+        } else {
+          inIndentedCode = false;
+        }
       }
     }
+
+    previousLineBlank = blank || closedFence;
 
     if (newline === -1) break;
     lineStart = nextLineStart;
@@ -220,6 +276,106 @@ function markdownCodeRanges(text: string): TextRange[] {
   }
 
   return ranges.sort((a, b) => a.start - b.start);
+}
+
+function fenceRun(line: string, listContext: ListContext | null, closing: boolean): string | null {
+  let content = stripBlockQuotePrefixes(line).replace(/\r$/, "");
+
+  const listMarker = /^( *)(?:[-+*]|\d{1,9}[.)])([ \t]+)/.exec(content);
+  if (listMarker) {
+    content = content.slice(listMarker[0].length);
+  } else if (listContext) {
+    content = content.slice(Math.min(listContext.contentIndent, leadingIndent(content)));
+  }
+
+  const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(content);
+  const marker = match?.[1];
+  if (!marker) return null;
+  const rest = match?.[2] ?? "";
+  if (closing) return /^[ \t]*$/.test(rest) ? marker : null;
+  return marker[0] === "`" && rest.includes("`") ? null : marker;
+}
+
+function fenceContainerEnded(
+  fence: {
+    quoteDepth: number;
+    listContentIndent: number | null;
+    listMarkerIndent: number | null;
+  },
+  line: string,
+  blank: boolean,
+  previousLineBlank: boolean,
+): boolean {
+  if (blockQuoteDepth(line) < fence.quoteDepth) return true;
+  if (blank || fence.listContentIndent === null) return false;
+  const containerLine = stripBlockQuotePrefixes(line, fence.quoteDepth);
+  const indent = leadingIndent(containerLine);
+  if (indent >= fence.listContentIndent) return false;
+  const nextList = listContextForLine(containerLine);
+  if (
+    nextList &&
+    fence.listMarkerIndent !== null &&
+    nextList.markerIndent <= fence.listMarkerIndent
+  ) {
+    return true;
+  }
+  if (previousLineBlank || blockQuoteDepth(line) > fence.quoteDepth) return true;
+  return interruptsLazyListContinuation(containerLine);
+}
+
+function interruptsLazyListContinuation(line: string): boolean {
+  const content = line.trimStart();
+  return (
+    /^#{1,6}(?:[ \t]+|$)/.test(content) ||
+    /^(?:`{3,}|~{3,})/.test(content) ||
+    /^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(content) ||
+    /^<(?:[a-z].*>|!--)/i.test(content)
+  );
+}
+
+function blockQuoteDepth(line: string): number {
+  let content = line;
+  let depth = 0;
+  while (true) {
+    const quote = /^ {0,3}>[ \t]?/.exec(content);
+    if (!quote) return depth;
+    depth += 1;
+    content = content.slice(quote[0].length);
+  }
+}
+
+function stripBlockQuotePrefixes(line: string, maxDepth = Number.POSITIVE_INFINITY): string {
+  let content = line;
+  let depth = 0;
+  while (depth < maxDepth) {
+    const quote = /^ {0,3}>[ \t]?/.exec(content);
+    if (!quote) return content;
+    depth += 1;
+    content = content.slice(quote[0].length);
+  }
+  return content;
+}
+
+function listContextForLine(line: string): ListContext | null {
+  const match = /^( *)([-+*]|\d{1,9}[.)])([ \t]+)/.exec(line);
+  if (!match) return null;
+  const markerIndent = match[1]?.length ?? 0;
+  const marker = match[2] ?? "";
+  let contentIndent = markerIndent + marker.length;
+  for (const character of match[3] ?? "") {
+    contentIndent += character === "\t" ? 4 - (contentIndent % 4) : 1;
+  }
+  return { markerIndent, contentIndent };
+}
+
+function leadingIndent(value: string): number {
+  let columns = 0;
+  for (const character of value) {
+    if (character === " ") columns += 1;
+    else if (character === "\t") columns += 4 - (columns % 4);
+    else break;
+  }
+  return columns;
 }
 
 function matchingBacktickRun(
