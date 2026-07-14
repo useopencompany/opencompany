@@ -434,6 +434,32 @@ Settings and Brain use the same pattern for `goat.integrations`, `goat.brain_fol
 `goat.brain_documents`. Server props are initial render fallbacks; after hydration, live Electric
 rows are the source of truth for persisted Goat state.
 
+## Company bootstrap imports
+
+Brain bootstrap imports deliberately separate discovery from model ingestion:
+
+1. An admin supplies the public company origin, optional focus, and source scopes. The runner
+   scans a fixed 30-day window, reuses normalized source items, and performs a bounded public
+   search (at most eight searches and 40 canonical results). Discovery persists candidates with
+   no target brain, so it cannot enqueue an ingestion model.
+2. The UI displays provider totals, already-known entries, selected windows, and the exact number
+   of planned ingestion runs. The count includes one cached public-research bundle when present
+   and one final organization pass. Only explicit confirmation creates child jobs.
+3. Confirmed jobs run through the normal per-brain ingest lock. Import jobs carry
+   `import_run_id` through document versions and disable incidental live-web enrichment, keeping
+   the confirmed workload bounded. Connected source scopes are also saved as ongoing Brain
+   sources.
+4. The import worker polls child jobs without holding its lease. The finalizer runs only after all
+   children are terminal and may merge duplicates, repair backlinks, and run health checks, but it
+   may not add new claims or uncited sources. Mixed outcomes end as `partial`; completed documents
+   remain available.
+
+Cancellation before confirmation does no model work. During ingestion it skips queued children,
+lets a running child finish safely, and prevents finalization. Import candidates are intentionally
+not exposed through Electric; only the aggregate `brain_import_runs` row is brain-scoped for live
+progress. Provenance is recorded now so a later undo flow can identify affected versions without
+reconstructing history.
+
 ## Relationship To The Full Agent Runtime
 
 The full OpenCompany agent runner is documented in root docs and lives mostly in `apps/runner/src`.

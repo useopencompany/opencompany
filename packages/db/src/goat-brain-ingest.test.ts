@@ -2,12 +2,152 @@ import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { describe, expect, it, vi } from "vitest";
 import { goatBrainIngestJobs, goatBrainSourceItems, goatBrains } from "./goat-schema";
 
-const { getDbMock } = vi.hoisted(() => ({ getDbMock: vi.fn() }));
+const { getDbMock, reserveGoatWorkspaceIngestionMock } = vi.hoisted(() => ({
+  getDbMock: vi.fn(),
+  reserveGoatWorkspaceIngestionMock: vi.fn(async ({ workspaceId }: { workspaceId: string }) => ({
+    reservation: { workspaceId },
+    window: { plan: "free", limit: 200 },
+    consumedBefore: 0,
+    usedAfter: 1,
+    pendingUnits: 0,
+    paused: false,
+    created: false,
+  })),
+}));
 vi.mock("./client", () => ({ getDb: getDbMock }));
+vi.mock("./goat-billing", () => ({
+  reserveGoatWorkspaceIngestion: reserveGoatWorkspaceIngestionMock,
+}));
 
 const { upsertGoatBrainSourceItemAndEnqueue } = await import("./goat-brain-ingest");
 
 describe("upsertGoatBrainSourceItemAndEnqueue", () => {
+  it("persists discovery candidates without enqueueing an ingest job", async () => {
+    let jobInsertAttempted = false;
+    const db = {
+      insert: (table: unknown) => {
+        if (table === goatBrainIngestJobs) jobInsertAttempted = true;
+        return {
+          values: () => ({
+            onConflictDoUpdate: () => ({
+              returning: async () => [{ id: "gbsrc_discovery" }],
+            }),
+          }),
+        };
+      },
+    };
+
+    const result = await upsertGoatBrainSourceItemAndEnqueue({
+      userWorkosId: "user_123",
+      sourceConnectionId: "gbimp_123",
+      item: {
+        sourceProvider: "goat-import",
+        sourceType: "run",
+        externalId: "gbimp_123:research",
+        sourceRef: "goat-import:gbimp_123:research",
+        title: "Company bootstrap",
+        occurredAt: "2026-07-13T10:00:00.000Z",
+        capturedAt: "2026-07-13T10:00:00.000Z",
+        contentHash: "hash_123",
+        contentHashInput: {},
+        content: {},
+      },
+      rawPayload: {},
+      kind: "brain_agent_ingest",
+      brainRefs: [],
+      db,
+    });
+
+    expect(jobInsertAttempted).toBe(false);
+    expect(result).toMatchObject({
+      sourceItemId: "gbsrc_discovery",
+      jobId: null,
+      jobIds: [],
+      enqueued: false,
+    });
+  });
+
+  it("propagates the import run id to newly enqueued jobs", async () => {
+    let insertedJobValues: Array<Record<string, unknown>> = [];
+    const db = {
+      insert: (table: unknown) => ({
+        values: (values: Record<string, unknown> | Array<Record<string, unknown>>) => ({
+          onConflictDoUpdate: () => ({
+            returning: async () => {
+              if (table !== goatBrainSourceItems)
+                throw new Error("Unexpected source insert table.");
+              return [{ id: "gbsrc_import" }];
+            },
+          }),
+          onConflictDoNothing: () => ({
+            returning: async () => {
+              if (table !== goatBrainIngestJobs) throw new Error("Unexpected job insert table.");
+              insertedJobValues = Array.isArray(values) ? values : [values];
+              return [
+                {
+                  id: "gbjob_import",
+                  brainRef: "goat_brain_123",
+                  status: "queued",
+                  completedAt: null,
+                  lastError: null,
+                },
+              ];
+            },
+          }),
+        }),
+      }),
+      update: (table: unknown) => ({
+        set: () => ({
+          where: async () => {
+            if (table !== goatBrainSourceItems) throw new Error("Unexpected update table.");
+          },
+        }),
+      }),
+      select: () => ({
+        from: (table: unknown) => ({
+          where: async () => {
+            if (table !== goatBrains) throw new Error("Unexpected select table.");
+            return [{ id: "goat_brain_123", workspaceId: "goat_workspace_123" }];
+          },
+        }),
+      }),
+    };
+
+    const result = await upsertGoatBrainSourceItemAndEnqueue({
+      userWorkosId: "user_123",
+      sourceConnectionId: "gbimp_123",
+      importRunId: "gbimp_123",
+      brainRef: "goat_brain_123",
+      item: {
+        sourceProvider: "goat-import",
+        sourceType: "run",
+        externalId: "gbimp_123:research",
+        sourceRef: "goat-import:gbimp_123:research",
+        title: "Company bootstrap",
+        occurredAt: "2026-07-13T10:00:00.000Z",
+        capturedAt: "2026-07-13T10:00:00.000Z",
+        contentHash: "hash_123",
+        contentHashInput: {},
+        content: {},
+      },
+      rawPayload: {},
+      kind: "brain_agent_ingest",
+      db,
+    });
+
+    expect(insertedJobValues).toHaveLength(1);
+    expect(insertedJobValues[0]).toMatchObject({
+      importRunId: "gbimp_123",
+      brainRef: "goat_brain_123",
+      sourceItemId: "gbsrc_import",
+    });
+    expect(result).toMatchObject({
+      jobId: "gbjob_import",
+      enqueued: true,
+      skipped: false,
+    });
+  });
+
   it("transitions duplicate queued jobs to skipped on repeated skip delivery", async () => {
     const now = new Date("2026-07-10T10:15:00.000Z");
     const sourceItem = { id: "gbsrc_existing" };

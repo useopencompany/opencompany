@@ -53,6 +53,12 @@ vi.mock("@/components/GoatBrainActivity", () => ({
   ),
 }));
 
+vi.mock("@/components/GoatBrainImport", () => ({
+  GoatBrainImport: ({ brainRef }: { brainRef: string }) => (
+    <span data-testid="brain-import">{brainRef}</span>
+  ),
+}));
+
 vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
   MarkdownGoatBrainEditor: ({
     content,
@@ -403,6 +409,7 @@ describe("GoatBrainView", () => {
     expect(screen.queryByRole("button", { name: "Add folder" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upload PDF" })).not.toBeInTheDocument();
     expect(screen.getByTestId("brain-activity")).toBeInTheDocument();
+    expect(screen.getByTestId("brain-import")).toHaveTextContent("goat_brain_1");
     expect(screen.getByRole("button", { name: /Open settings for/ })).toBeInTheDocument();
   });
 

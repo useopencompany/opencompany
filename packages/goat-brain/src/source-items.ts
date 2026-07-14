@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 export type BrainSourceProvider =
   | "jamie"
   | "goat-chat"
+  | "goat-import"
   | "upload"
   | "slack"
   | "linear"
@@ -11,6 +12,7 @@ export type BrainSourceProvider =
   | "google_drive";
 export type BrainSourceType =
   | "meeting"
+  | "run"
   | "capture"
   | "asset"
   | "conversation"
@@ -31,6 +33,138 @@ export type NormalizedBrainSourceItem<TContent = unknown> = {
   contentHashInput: unknown;
   content: TContent;
 };
+
+export type GoatImportResearchResult = {
+  title: string;
+  url: string;
+  publishedDate?: string;
+  author?: string;
+  highlights: string[];
+  summary?: string;
+};
+
+export type NormalizedGoatImportContent =
+  | {
+      phase: "research";
+      importRunId: string;
+      companyUrl: string;
+      companyDomain: string;
+      companyName?: string;
+      focus?: string;
+      searches: Array<{
+        query: string;
+        category: "company" | "people" | "general";
+      }>;
+      results: GoatImportResearchResult[];
+    }
+  | {
+      phase: "finalize";
+      importRunId: string;
+      companyUrl: string;
+      companyDomain: string;
+      companyName?: string;
+      focus?: string;
+      childSummary: Array<{
+        provider: string;
+        status: "succeeded" | "failed" | "skipped";
+        summary?: string;
+      }>;
+    };
+
+export type NormalizedGoatImportSourceItem =
+  NormalizedBrainSourceItem<NormalizedGoatImportContent> & {
+    sourceProvider: "goat-import";
+    sourceType: "run";
+  };
+
+export function normalizeGoatImportRun(input: {
+  phase: "research" | "finalize";
+  importRunId: string;
+  companyUrl: string;
+  companyDomain: string;
+  companyName?: string;
+  focus?: string;
+  searches?: Array<{
+    query: string;
+    category: "company" | "people" | "general";
+  }>;
+  results?: GoatImportResearchResult[];
+  childSummary?: Array<{
+    provider: string;
+    status: "succeeded" | "failed" | "skipped";
+    summary?: string;
+  }>;
+  capturedAt?: string;
+}): NormalizedGoatImportSourceItem {
+  const importRunId = readNonEmpty(input.importRunId, "import importRunId");
+  const companyUrl = readNonEmpty(input.companyUrl, "import companyUrl");
+  const companyDomain = readNonEmpty(input.companyDomain, "import companyDomain");
+  const capturedAt = input.capturedAt ?? new Date().toISOString();
+  const companyName = optionalString(input.companyName);
+  const focus = optionalString(input.focus);
+  const content: NormalizedGoatImportContent =
+    input.phase === "research"
+      ? {
+          phase: "research",
+          importRunId,
+          companyUrl,
+          companyDomain,
+          ...(companyName ? { companyName } : {}),
+          ...(focus ? { focus } : {}),
+          searches: input.searches ?? [],
+          results: input.results ?? [],
+        }
+      : {
+          phase: "finalize",
+          importRunId,
+          companyUrl,
+          companyDomain,
+          ...(companyName ? { companyName } : {}),
+          ...(focus ? { focus } : {}),
+          childSummary: input.childSummary ?? [],
+        };
+  const contentHashInput = content;
+  return {
+    sourceProvider: "goat-import",
+    sourceType: "run",
+    externalId: `${importRunId}:${input.phase}`,
+    sourceRef: `goat-import:${importRunId}:${input.phase}`,
+    title:
+      input.phase === "research"
+        ? `Company bootstrap for ${companyName ?? companyDomain}`
+        : `Finalize company bootstrap for ${companyName ?? companyDomain}`,
+    occurredAt: capturedAt,
+    capturedAt,
+    contentHashInput,
+    contentHash: sha256(stableJson(contentHashInput)),
+    content,
+  };
+}
+
+export function isNormalizedGoatImportSourceItem(
+  value: unknown,
+): value is NormalizedGoatImportSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedGoatImportSourceItem>;
+  if (
+    item.sourceProvider !== "goat-import" ||
+    item.sourceType !== "run" ||
+    typeof item.externalId !== "string" ||
+    typeof item.sourceRef !== "string" ||
+    typeof item.contentHash !== "string" ||
+    !item.content ||
+    typeof item.content !== "object"
+  ) {
+    return false;
+  }
+  const content = item.content as Partial<NormalizedGoatImportContent>;
+  return (
+    (content.phase === "research" || content.phase === "finalize") &&
+    typeof content.importRunId === "string" &&
+    typeof content.companyUrl === "string" &&
+    typeof content.companyDomain === "string"
+  );
+}
 
 export type NormalizedJamieMeetingParticipant = {
   id?: string;
@@ -952,7 +1086,11 @@ function buildGitHubActivityItem(input: {
   };
 }
 
-function readGitHubRepository(value: unknown): { id: string; fullName: string; private: boolean } {
+function readGitHubRepository(value: unknown): {
+  id: string;
+  fullName: string;
+  private: boolean;
+} {
   const repository = readObject(value, "repository");
   const id = repository.id;
   if (typeof id !== "number" && typeof id !== "string") {
@@ -1439,7 +1577,11 @@ function normalizeParticipants(value: unknown): NormalizedJamieMeetingParticipan
     throw invalid("data.event.participants must be an array", "invalid_participants");
   return value.flatMap((participant, index) => {
     if (typeof participant === "string") {
-      return [{ name: readNonEmpty(participant, `data.event.participants[${index}]`) }];
+      return [
+        {
+          name: readNonEmpty(participant, `data.event.participants[${index}]`),
+        },
+      ];
     }
     const object = readObject(participant, `data.event.participants[${index}]`);
     const id = optionalString(object.id);

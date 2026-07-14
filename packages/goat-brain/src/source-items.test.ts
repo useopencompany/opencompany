@@ -5,6 +5,7 @@ import {
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
+  isNormalizedGoatImportSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
   isNormalizedLinearIssueSourceItem,
   isNormalizedSlackConversationSourceItem,
@@ -12,6 +13,7 @@ import {
   normalizeGitHubActivityWebhook,
   normalizeGmailThreadWindow,
   normalizeGoatChatCapture,
+  normalizeGoatImportRun,
   normalizeGoogleDriveDocument,
   normalizeJamieMeetingCompletedWebhook,
   normalizeLinearIssueWindow,
@@ -19,6 +21,57 @@ import {
   normalizeUploadAsset,
   slackTsToIso,
 } from "./source-items";
+
+describe("Goat company import normalization", () => {
+  const base = {
+    phase: "research" as const,
+    importRunId: "gbimp_123",
+    companyUrl: "https://acme.example",
+    companyDomain: "acme.example",
+    companyName: "Acme",
+    searches: [{ query: "acme.example company", category: "company" as const }],
+    results: [
+      {
+        title: "Acme",
+        url: "https://acme.example/about",
+        highlights: ["Acme builds rockets."],
+      },
+    ],
+    capturedAt: "2026-07-13T08:05:00.000Z",
+  };
+
+  it("creates a stable research source item", () => {
+    const first = normalizeGoatImportRun(base);
+    const second = normalizeGoatImportRun({
+      ...base,
+      capturedAt: "2026-07-13T09:05:00.000Z",
+    });
+
+    expect(first).toMatchObject({
+      sourceProvider: "goat-import",
+      sourceType: "run",
+      externalId: "gbimp_123:research",
+      sourceRef: "goat-import:gbimp_123:research",
+    });
+    expect(first.contentHash).toBe(second.contentHash);
+    expect(isNormalizedGoatImportSourceItem(first)).toBe(true);
+  });
+
+  it("hashes finalization separately and rejects unrelated payloads", () => {
+    const finalizer = normalizeGoatImportRun({
+      phase: "finalize",
+      importRunId: base.importRunId,
+      companyUrl: base.companyUrl,
+      companyDomain: base.companyDomain,
+      childSummary: [{ provider: "github", status: "succeeded", summary: "Updated Acme." }],
+      capturedAt: base.capturedAt,
+    });
+
+    expect(finalizer.externalId).toBe("gbimp_123:finalize");
+    expect(finalizer.contentHash).not.toBe(normalizeGoatImportRun(base).contentHash);
+    expect(isNormalizedGoatImportSourceItem({ sourceProvider: "goat-import" })).toBe(false);
+  });
+});
 
 describe("Google Drive document normalization", () => {
   const base = {
