@@ -17,6 +17,7 @@ const base: GoatBillingPanelData = {
   monthlyPriceUsdCents: 9_900,
   monthlyIngestionsUsed: 42,
   monthlyIngestionLimit: 150,
+  baseMonthlyLimit: 150,
   freeMonthlyLimit: 150,
   proMonthlyLimit: 1_500,
   sourceBonus: 0,
@@ -72,6 +73,7 @@ describe("GoatBillingPanel", () => {
           paymentNeedsAttention: true,
           monthlyIngestionsUsed: 381,
           monthlyIngestionLimit: 1_500,
+          baseMonthlyLimit: 1_500,
         }}
       />,
     );

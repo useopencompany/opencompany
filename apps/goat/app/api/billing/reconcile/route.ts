@@ -11,6 +11,8 @@ export async function GET(request: Request) {
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const released = await releasePendingGoatIngestionReservations({ maxWorkspaces: 200 });
-  return Response.json({ released });
+  const { released, failed } = await releasePendingGoatIngestionReservations({
+    maxWorkspaces: 200,
+  });
+  return Response.json({ released, failed });
 }

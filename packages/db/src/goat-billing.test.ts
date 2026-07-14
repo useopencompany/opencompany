@@ -120,4 +120,28 @@ describe("Goat billing entitlements", () => {
       }),
     ).toBe(false);
   });
+
+  it("admits a batch larger than the whole allowance into an untouched window", () => {
+    // Flush batches go up to 200 raw events while the Free base is 150; a
+    // batch that never fits would otherwise wedge the FIFO backlog forever.
+    expect(
+      goatReservationFitsAllowance({
+        consumedUnits: 0,
+        pendingUnits: 0,
+        rawEventCount: 200,
+        limit: 150,
+      }),
+    ).toBe(true);
+  });
+
+  it("still pauses an oversized batch once the window has any usage", () => {
+    expect(
+      goatReservationFitsAllowance({
+        consumedUnits: 1,
+        pendingUnits: 0,
+        rawEventCount: 200,
+        limit: 150,
+      }),
+    ).toBe(false);
+  });
 });

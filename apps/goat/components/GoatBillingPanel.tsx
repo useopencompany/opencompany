@@ -15,6 +15,7 @@ export type GoatBillingPanelData = {
   monthlyPriceUsdCents: number;
   monthlyIngestionsUsed: number;
   monthlyIngestionLimit: number;
+  baseMonthlyLimit: number;
   freeMonthlyLimit: number;
   proMonthlyLimit: number;
   sourceBonus: number;
@@ -35,7 +36,7 @@ export function GoatBillingPanel({ data }: { data: GoatBillingPanelData }) {
     data.subscriptionStatus !== "canceled" &&
     data.subscriptionStatus !== "incomplete_expired";
   const formattedMonthlyPrice = formatUsd(data.monthlyPriceUsdCents);
-  const baseMonthlyLimit = isPro ? data.proMonthlyLimit : data.freeMonthlyLimit;
+  const baseMonthlyLimit = data.baseMonthlyLimit;
   const bonusFeature = `+${data.sourceBonusPerSource} items/month per connected source (up to +${data.sourceBonusMax})`;
 
   function run(action: () => Promise<{ ok: false; error: string }>) {

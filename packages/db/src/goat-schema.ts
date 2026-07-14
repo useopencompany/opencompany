@@ -1393,6 +1393,11 @@ export const goatWorkspaceIngestionReservations = goat.table(
       table.status,
       table.createdAt,
     ),
+    // The backlog-release sweep filters on status alone; this stays near-empty
+    // because pending rows are transient, while the table itself only grows.
+    pendingWorkspaceIdx: index("goat_ingestion_reservations_pending_idx")
+      .on(table.workspaceId)
+      .where(sql`${table.status} = 'pending'`),
     workspaceConsumedIdx: index("goat_ingestion_reservations_consumed_idx").on(
       table.workspaceId,
       table.consumedAt,

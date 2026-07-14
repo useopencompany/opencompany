@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS,
+  GOAT_SOURCE_BONUS_MONTHLY_ITEMS,
+  goatSourceBonusItems,
+} from "@opencompany/db/goat-billing-constants";
+import {
   ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
   HARD_DEFAULT_GOAT_BRAIN_FOLDERS,
   normalizeGoatBrainFolder,
@@ -114,11 +119,10 @@ const MEMBER_STEPS: StepDef[] = [
   { key: "finish", label: "You're all set" },
 ];
 
-// Mirrors GOAT_SOURCE_BONUS_MONTHLY_ITEMS / GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS
-// in @opencompany/db/goat-billing (server-only, so not importable here): each
-// connected source adds monthly ingestion allowance, capped at four sources.
-const ITEMS_PER_SOURCE = 25;
-const ITEMS_BONUS_MAX = 100;
+// Each connected source adds monthly ingestion allowance, capped at four
+// sources — the same constants the server enforces.
+const ITEMS_PER_SOURCE = GOAT_SOURCE_BONUS_MONTHLY_ITEMS;
+const ITEMS_BONUS_MAX = GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS;
 
 // Role presets — the first onboarding step. Picking one seeds the adjustable
 // brain folders with a set that matches how that person actually works (the
@@ -1156,7 +1160,7 @@ function SourcesStep({
               : `Configure ${SOURCE_GOAL - count} more to get the most out of your Brain`}
           </span>
           <span className="font-medium text-success">
-            +{Math.min(count * ITEMS_PER_SOURCE, ITEMS_BONUS_MAX)} items/month
+            +{goatSourceBonusItems(count)} items/month
           </span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-subtle">

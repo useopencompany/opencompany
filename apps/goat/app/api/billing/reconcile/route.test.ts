@@ -19,13 +19,16 @@ describe("GET /api/billing/reconcile", () => {
   });
 
   it("releases paused ingestion backlogs and reports the count", async () => {
-    vi.mocked(releasePendingGoatIngestionReservations).mockResolvedValue(4);
+    vi.mocked(releasePendingGoatIngestionReservations).mockResolvedValue({
+      released: 4,
+      failed: 1,
+    });
     const response = await GET(
       new Request("https://goat.test/api/billing/reconcile", {
         headers: { authorization: "Bearer cron-secret" },
       }),
     );
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ released: 4 });
+    await expect(response.json()).resolves.toEqual({ released: 4, failed: 1 });
   });
 });
