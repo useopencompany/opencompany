@@ -80,8 +80,12 @@ import {
   buildJamieMeetingAgentIngestPrompt,
   buildSlackConversationAgentIngestPrompt,
   formatGoatBrainFolderInventoryPrompt,
+  GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS,
+  GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
+  GOAT_BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS,
   type GoatBrainAgentCliRunner,
   GoatBrainAgentOutcomeError,
+  GoatBrainIngestBudgetError,
   placeMovingAnthropicCacheBreakpoint,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
@@ -214,14 +218,19 @@ function mockAgentRun(input: {
   toolInvocations?: Array<{ command: string; args?: string[]; stdin?: string }>;
 }) {
   aiMock.generateText.mockImplementationOnce(
-    async (options: { tools: Record<string, CapturedTool> }) => {
+    async (options: {
+      tools: Record<string, CapturedTool>;
+      onStepFinish?: (event: { usage: Record<string, unknown> }) => Promise<void> | void;
+    }) => {
       for (const invocation of input.toolInvocations ?? []) {
         await options.tools.goat_brain?.execute(invocation);
       }
+      const totalUsage = { inputTokens: 100, outputTokens: 50, totalTokens: 150 };
+      await options.onStepFinish?.({ usage: totalUsage });
       return {
         text: input.finalText,
         steps: [{}, {}],
-        totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        totalUsage,
       };
     },
   );
@@ -910,6 +919,166 @@ describe("runGoatChatCaptureAgentIngest", () => {
     );
   });
 
+  it("records model and Brain query provider spend in the durable result", async () => {
+    vi.mocked(okCli).mockResolvedValueOnce({
+      ok: true,
+      exitCode: 0,
+      stdout: "match",
+      stderr:
+        '__GOAT_BRAIN_USAGE__ {"entries":[{"model":"openai/text-embedding-3-small","operation":"embeddings","inputTokens":50,"outputTokens":0,"totalTokens":50,"costUsd":0.001}]}\n',
+    });
+    mockAgentRun({
+      finalText: "Updated the pricing page.",
+      toolInvocations: [
+        { command: "query", args: ["pricing"] },
+        { command: "set", args: ["pricing-teardown-reference", "--status", "active"] },
+      ],
+    });
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(okCli).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ argv: ["query", "pricing", "--report-usage"] }),
+    );
+    expect(result).toMatchObject({
+      budget: {
+        limitUsdMicros: GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS,
+        stopThresholdUsdMicros: GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
+        modelCostUsdMicros: 1_050,
+        brainQueryCostUsdMicros: 1_000,
+        webSearchCostUsdMicros: 0,
+        totalCostUsdMicros: 2_050,
+        accountingComplete: true,
+        exhausted: false,
+      },
+      trace: {
+        budget: { totalCostUsdMicros: 2_050, exhausted: false },
+        toolCalls: expect.arrayContaining([
+          expect.objectContaining({ command: "query", stderrPreview: "" }),
+        ]),
+      },
+    });
+  });
+
+  it("stops the loop at the spend threshold and preserves valid mutations", async () => {
+    aiMock.generateText.mockImplementationOnce(
+      async (options: {
+        tools: Record<string, CapturedTool>;
+        maxOutputTokens: number;
+        stopWhen: Array<(input: { steps: unknown[] }) => boolean>;
+        onStepFinish: (event: { usage: Record<string, unknown> }) => void;
+      }) => {
+        await options.tools.goat_brain?.execute({
+          command: "set",
+          args: ["pricing-teardown-reference", "--status", "active"],
+        });
+        options.onStepFinish({
+          usage: { inputTokens: 100, outputTokens: 30_000, totalTokens: 30_100 },
+        });
+        expect(options.maxOutputTokens).toBe(GOAT_BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS);
+        expect(options.stopWhen[1]?.({ steps: [{}] })).toBe(true);
+        return {
+          text: "",
+          steps: [{}],
+          totalUsage: { inputTokens: 100, outputTokens: 30_000, totalTokens: 30_100 },
+        };
+      },
+    );
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      mutations: 1,
+      budget: {
+        modelCostUsdMicros: 450_300,
+        totalCostUsdMicros: 450_300,
+        exhausted: true,
+      },
+    });
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when Brain query usage cannot be priced", async () => {
+    vi.mocked(okCli).mockResolvedValueOnce({
+      ok: true,
+      exitCode: 0,
+      stdout: "match",
+      stderr:
+        '__GOAT_BRAIN_USAGE__ {"entries":[{"model":"unknown/embedding-model","operation":"embeddings","inputTokens":50,"outputTokens":0,"totalTokens":50,"costUsd":null}]}\n',
+    });
+    mockAgentRun({
+      finalText: "",
+      toolInvocations: [{ command: "query", args: ["pricing"] }],
+    });
+
+    const error = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GoatBrainIngestBudgetError);
+    expect((error as GoatBrainIngestBudgetError).result).toMatchObject({
+      budget: { accountingComplete: false, exhausted: true },
+      trace: { budget: { accountingComplete: false, exhausted: true } },
+    });
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
+  });
+
+  it("fails without retryable partial state when the budget is exhausted before a mutation", async () => {
+    aiMock.generateText.mockImplementationOnce(
+      async (options: { onStepFinish: (event: { usage: Record<string, unknown> }) => void }) => {
+        options.onStepFinish({
+          usage: { inputTokens: 100, outputTokens: 30_000, totalTokens: 30_100 },
+        });
+        return {
+          text: "",
+          steps: [{}],
+          totalUsage: { inputTokens: 100, outputTokens: 30_000, totalTokens: 30_100 },
+        };
+      },
+    );
+
+    const error = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GoatBrainIngestBudgetError);
+    expect((error as GoatBrainIngestBudgetError).result).toMatchObject({
+      budget: { totalCostUsdMicros: 450_300, exhausted: true },
+      mutations: 0,
+      trace: { budget: { exhausted: true } },
+    });
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
+  });
+
   it("allows merge for capture curation", async () => {
     mockAgentRun({
       finalText: "Folded the capture into the existing pricing page.",
@@ -1190,6 +1359,47 @@ describe("runGoatChatCaptureAgentIngest", () => {
         args: expect.not.objectContaining({ category: expect.anything() }),
       }),
     );
+  });
+
+  it("fails closed when a provider reports a non-finite enrichment cost", async () => {
+    agentRuntimeMock.executeExaSearchRequest.mockResolvedValue({
+      output: { searchType: "fast", costDollars: 0, results: [] },
+      usage: {
+        provider: "exa",
+        operation: "search",
+        costUsdMicros: Number.NaN,
+        rawUsage: {},
+      },
+    });
+    aiMock.generateText.mockImplementationOnce(
+      async (options: { tools: Record<string, CapturedTool> }) => {
+        await options.tools.web_search?.execute({
+          entityName: "Ada Example",
+          anchor: "ExampleCo",
+        });
+        return {
+          text: "",
+          steps: [{}],
+          totalUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        };
+      },
+    );
+
+    const error = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test", exaApiKey: "exa_test" },
+      },
+      { runCli: okCli },
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(GoatBrainIngestBudgetError);
+    expect((error as GoatBrainIngestBudgetError).result).toMatchObject({
+      budget: { accountingComplete: false, exhausted: true },
+    });
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
   });
 });
 

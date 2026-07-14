@@ -53,6 +53,9 @@ describe("@opencompany/goat-observability", () => {
         "goat.user_id_hash": "abc123",
         "goat.stage": "running",
         "goat.signup_source": "user_sync",
+        "goat.cost_source": "brain_query",
+        "goat.budget_exhausted": true,
+        "goat.budget_accounting_complete": true,
         "goat.prompt": "secret prompt",
       }),
     ).toEqual({
@@ -62,6 +65,9 @@ describe("@opencompany/goat-observability", () => {
       "goat.failure_category": "tool",
       "goat.stage": "running",
       "goat.signup_source": "user_sync",
+      "goat.cost_source": "brain_query",
+      "goat.budget_exhausted": true,
+      "goat.budget_accounting_complete": true,
     });
   });
 
@@ -144,6 +150,9 @@ describe("@opencompany/goat-observability", () => {
     );
     expect(categorizeGoatFailure(new Error("VERCEL_AI_GATEWAY_API_KEY is required."))).toBe("auth");
     expect(categorizeGoatFailure(new Error("Gmail integration needs reauth."))).toBe("integration");
+    expect(categorizeGoatFailure(new Error("Goat Brain ingestion budget exhausted."))).toBe(
+      "budget",
+    );
     expect(categorizeGoatFailure(new TypeError("Cannot read properties of undefined"))).toBe("bug");
   });
 

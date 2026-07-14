@@ -18,6 +18,17 @@ export type GoatBrainIngestTraceUsage = {
   cacheWriteInputTokens?: number | null;
 };
 
+export type GoatBrainIngestBudget = {
+  limitUsdMicros: number;
+  stopThresholdUsdMicros: number;
+  modelCostUsdMicros: number;
+  brainQueryCostUsdMicros: number;
+  webSearchCostUsdMicros: number;
+  totalCostUsdMicros: number;
+  accountingComplete: boolean;
+  exhausted: boolean;
+};
+
 export type GoatBrainIngestTraceToolCallStatus = "completed" | "failed" | "blocked";
 
 export type GoatBrainIngestTraceToolCall = {
@@ -50,6 +61,9 @@ export type GoatBrainIngestTrace = {
   // unavailable, or unused). Optional so existing v1 traces normalize cleanly.
   webSearchCount?: number;
   webSearchCostUsdMicros?: number;
+  // Provider spend accumulated at step boundaries for the current worker
+  // attempt. Optional so pre-budget traces continue to normalize.
+  budget?: GoatBrainIngestBudget;
   createdAt: string;
 };
 
@@ -63,6 +77,7 @@ export function normalizeGoatBrainIngestTrace(value: unknown): GoatBrainIngestTr
       const toolCall = normalizeTraceToolCall(item);
       return toolCall ? [toolCall] : [];
     });
+  const budget = normalizeBudget(record.budget);
 
   return {
     schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
@@ -79,6 +94,7 @@ export function normalizeGoatBrainIngestTrace(value: unknown): GoatBrainIngestTr
     truncatedToolCalls: readNonNegativeInteger(record.truncatedToolCalls),
     webSearchCount: readNonNegativeInteger(record.webSearchCount),
     webSearchCostUsdMicros: readNonNegativeInteger(record.webSearchCostUsdMicros),
+    ...(budget ? { budget } : {}),
     createdAt: readString(record.createdAt),
   };
 }
@@ -113,6 +129,21 @@ function normalizeTraceUsage(value: unknown): GoatBrainIngestTraceUsage {
     totalTokens: readNullableNonNegativeInteger(record?.totalTokens),
     cacheReadInputTokens: readNullableNonNegativeInteger(record?.cacheReadInputTokens),
     cacheWriteInputTokens: readNullableNonNegativeInteger(record?.cacheWriteInputTokens),
+  };
+}
+
+function normalizeBudget(value: unknown): GoatBrainIngestBudget | undefined {
+  const record = readRecord(value);
+  if (!record) return undefined;
+  return {
+    limitUsdMicros: readNonNegativeInteger(record.limitUsdMicros),
+    stopThresholdUsdMicros: readNonNegativeInteger(record.stopThresholdUsdMicros),
+    modelCostUsdMicros: readNonNegativeInteger(record.modelCostUsdMicros),
+    brainQueryCostUsdMicros: readNonNegativeInteger(record.brainQueryCostUsdMicros),
+    webSearchCostUsdMicros: readNonNegativeInteger(record.webSearchCostUsdMicros),
+    totalCostUsdMicros: readNonNegativeInteger(record.totalCostUsdMicros),
+    accountingComplete: record.accountingComplete === true,
+    exhausted: record.exhausted === true,
   };
 }
 
