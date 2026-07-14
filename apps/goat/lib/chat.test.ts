@@ -15,7 +15,7 @@ import {
   textFromGoatChatUiMessage,
 } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION } from "@/lib/chat-agent";
-import { START_TASK_TOOL_NAME } from "@/lib/chat-ui";
+import { GOAT_PINNED_CHAT_LIMIT, START_TASK_TOOL_NAME } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
 vi.mock("next/cache", () => ({
@@ -289,6 +289,73 @@ describe("Goat chat history helpers", () => {
     }
   });
 
+  it("bounds pinned chat hydration and rejects pins beyond the limit", async () => {
+    const { store, sessions } = createInMemoryChatStore();
+    const candidate = await createGoatChatUserTurn(
+      { userWorkosId: "user_1", prompt: "candidate", model: DEFAULT_GOAT_MODEL },
+      store,
+    );
+    const now = new Date();
+    for (let index = 0; index < GOAT_PINNED_CHAT_LIMIT + 1; index += 1) {
+      sessions.push({
+        ...candidate.session,
+        id: `pinned_${index}`,
+        title: `Pinned ${index}`,
+        pinnedAt: new Date(now.getTime() + index),
+      });
+    }
+
+    const summaries = await listRecentGoatChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
+    expect(summaries.filter((summary) => summary.pinnedAt)).toHaveLength(GOAT_PINNED_CHAT_LIMIT);
+    await expect(
+      setGoatChatSessionPinnedForUser(
+        { userWorkosId: "user_1", sessionId: candidate.session.id, pinned: true },
+        store,
+      ),
+    ).resolves.toBe(false);
+  });
+
+  it("keeps concurrent pin requests within the per-user limit", async () => {
+    const { store, sessions } = createInMemoryChatStore();
+    const first = await createGoatChatUserTurn(
+      { userWorkosId: "user_1", prompt: "first candidate", model: DEFAULT_GOAT_MODEL },
+      store,
+    );
+    const second = await createGoatChatUserTurn(
+      { userWorkosId: "user_1", prompt: "second candidate", model: DEFAULT_GOAT_MODEL },
+      store,
+    );
+    const now = new Date();
+    for (let index = 0; index < GOAT_PINNED_CHAT_LIMIT - 1; index += 1) {
+      sessions.push({
+        ...first.session,
+        id: `existing_pin_${index}`,
+        title: `Existing pin ${index}`,
+        pinnedAt: new Date(now.getTime() + index),
+      });
+    }
+
+    const results = await Promise.all([
+      setGoatChatSessionPinnedForUser(
+        { userWorkosId: "user_1", sessionId: first.session.id, pinned: true },
+        store,
+      ),
+      setGoatChatSessionPinnedForUser(
+        { userWorkosId: "user_1", sessionId: second.session.id, pinned: true },
+        store,
+      ),
+    ]);
+
+    expect(results).toEqual([true, false]);
+    expect(sessions.filter((session) => session.pinnedAt)).toHaveLength(GOAT_PINNED_CHAT_LIMIT);
+    await expect(
+      setGoatChatSessionPinnedForUser(
+        { userWorkosId: "user_1", sessionId: first.session.id, pinned: true },
+        store,
+      ),
+    ).resolves.toBe(true);
+  });
+
   it("loads only the requested user's open chat", async () => {
     const { store } = createInMemoryChatStore();
     const own = await createGoatChatUserTurn(
@@ -401,7 +468,8 @@ function createInMemoryChatStore(
       );
       const pinned = open
         .filter((session) => session.pinnedAt)
-        .toSorted((a, b) => (b.pinnedAt?.getTime() ?? 0) - (a.pinnedAt?.getTime() ?? 0));
+        .toSorted((a, b) => (b.pinnedAt?.getTime() ?? 0) - (a.pinnedAt?.getTime() ?? 0))
+        .slice(0, GOAT_PINNED_CHAT_LIMIT);
       const recent = open
         .filter((session) => !session.pinnedAt)
         .filter((session) =>
@@ -484,6 +552,16 @@ function createInMemoryChatStore(
           item.id === input.sessionId && item.userWorkosId === input.userWorkosId && !item.closedAt,
       );
       if (!session) return false;
+      if (
+        input.pinned &&
+        !session.pinnedAt &&
+        sessions.filter(
+          (item) =>
+            item.userWorkosId === input.userWorkosId && !item.closedAt && Boolean(item.pinnedAt),
+        ).length >= GOAT_PINNED_CHAT_LIMIT
+      ) {
+        return false;
+      }
       session.pinnedAt = input.pinned ? input.now : null;
       return true;
     },

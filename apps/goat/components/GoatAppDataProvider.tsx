@@ -5,7 +5,7 @@ import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 import { useLiveQuery } from "@tanstack/react-db";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { GoatTaskView } from "@/components/GoatSurface";
-import type { GoatChatSummaryView } from "@/lib/chat-ui";
+import { GOAT_PINNED_CHAT_LIMIT, type GoatChatSummaryView } from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
@@ -146,13 +146,14 @@ export function GoatAppDataProvider({
     const openRows = ((chatSessionRows ?? []) as GoatChatSessionRow[]).filter(
       (row) => !row.closed_at,
     );
-    // Pinned chats stay visible regardless of the recency window; the 8-row cap
-    // only bounds the unpinned recents (mirrors listOpenSessions on the server).
+    // Pinned chats stay visible regardless of the recency window, with separate
+    // caps for pinned and unpinned hydration (mirrors listOpenSessions on the server).
     const pinned = openRows
       .filter((row) => row.pinned_at)
       .toSorted(
         (a, b) => new Date(b.pinned_at ?? 0).getTime() - new Date(a.pinned_at ?? 0).getTime(),
       )
+      .slice(0, GOAT_PINNED_CHAT_LIMIT)
       .map(toSummary);
     const recent = openRows
       .filter((row) => !row.pinned_at && isRecentGoatHomeActivity(row.updated_at))

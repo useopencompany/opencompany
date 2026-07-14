@@ -172,15 +172,24 @@ function GoatSidebarRecentChats() {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [archivingId, setArchivingId] = useState<string | null>(null);
-  const [pinningId, setPinningId] = useState<string | null>(null);
+  const [pinningIds, setPinningIds] = useState<Set<string>>(() => new Set());
+  const [pinOverrides, setPinOverrides] = useState<Map<string, boolean>>(() => new Map());
+  const [previousRecentChats, setPreviousRecentChats] = useState(recentChats);
+
+  if (previousRecentChats !== recentChats) {
+    setPreviousRecentChats(recentChats);
+    setPinOverrides((current) => reconcilePinOverrides(current, recentChats));
+  }
 
   // Keep the footer pinned to the bottom when there is nothing to show.
   if (recentChats.length === 0) {
     return <div className="min-h-0 flex-1" />;
   }
 
-  const pinnedChats = recentChats.filter((chat) => chat.pinnedAt);
-  const unpinnedChats = recentChats.filter((chat) => !chat.pinnedAt);
+  const isPinned = (chat: GoatChatSummaryView) =>
+    pinOverrides.get(chat.id) ?? Boolean(chat.pinnedAt);
+  const pinnedChats = recentChats.filter(isPinned);
+  const unpinnedChats = recentChats.filter((chat) => !isPinned(chat));
 
   const archiveChat = (chatId: string, chatTitle: string, href: string) => {
     setArchivingId(chatId);
@@ -199,33 +208,57 @@ function GoatSidebarRecentChats() {
   };
 
   const togglePin = (chatId: string, chatTitle: string, currentlyPinned: boolean) => {
-    if (pinningId === chatId) return;
-    setPinningId(chatId);
+    if (pinningIds.has(chatId)) return;
+    const desiredPinned = !currentlyPinned;
+    setPinOverrides((current) => new Map(current).set(chatId, desiredPinned));
+    setPinningIds((current) => new Set(current).add(chatId));
     startTransition(async () => {
-      const result = await setGoatChatPinnedAction(chatId, !currentlyPinned);
-      setPinningId((current) => (current === chatId ? null : current));
-      if (!result.ok) {
+      try {
+        const result = await setGoatChatPinnedAction(chatId, desiredPinned);
+        if (result.ok) return;
+
+        setPinOverrides((current) => {
+          const next = new Map(current);
+          next.delete(chatId);
+          return next;
+        });
         toast.error(
           result.error ??
             (currentlyPinned ? `Could not unpin "${chatTitle}".` : `Could not pin "${chatTitle}".`),
         );
+      } catch {
+        setPinOverrides((current) => {
+          const next = new Map(current);
+          next.delete(chatId);
+          return next;
+        });
+        toast.error(
+          currentlyPinned ? `Could not unpin "${chatTitle}".` : `Could not pin "${chatTitle}".`,
+        );
+      } finally {
+        setPinningIds((current) => {
+          const next = new Set(current);
+          next.delete(chatId);
+          return next;
+        });
       }
     });
   };
 
   const renderRow = (chat: GoatChatSummaryView) => {
     const href = chatHref(chat.id);
+    const pinned = isPinned(chat);
     return (
       <GoatSidebarChatRow
         key={chat.id}
         chat={chat}
         href={href}
         active={pathname === href}
-        pinned={Boolean(chat.pinnedAt)}
+        pinned={pinned}
         archiving={archivingId === chat.id}
-        pinning={pinningId === chat.id}
+        pinning={pinningIds.has(chat.id)}
         onPrefetch={() => router.prefetch(href)}
-        onTogglePin={() => togglePin(chat.id, chat.title, Boolean(chat.pinnedAt))}
+        onTogglePin={() => togglePin(chat.id, chat.title, pinned)}
         onArchive={() => archiveChat(chat.id, chat.title, href)}
       />
     );
@@ -258,6 +291,20 @@ function GoatSidebarRecentChats() {
       ) : null}
     </div>
   );
+}
+
+function reconcilePinOverrides(
+  current: ReadonlyMap<string, boolean>,
+  recentChats: readonly GoatChatSummaryView[],
+) {
+  const next = new Map(current);
+  for (const [chatId, desiredPinned] of current) {
+    const chat = recentChats.find((item) => item.id === chatId);
+    if (!chat || Boolean(chat.pinnedAt) === desiredPinned) {
+      next.delete(chatId);
+    }
+  }
+  return next;
 }
 
 function GoatSidebarChatRow({

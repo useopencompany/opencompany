@@ -321,6 +321,8 @@ export type GoatChatSummaryView = {
   pinnedAt?: string | null;
 };
 
+export const GOAT_PINNED_CHAT_LIMIT = 20;
+
 export type GoatStoredChatMessage = Pick<
   GoatChatMessage,
   | "id"

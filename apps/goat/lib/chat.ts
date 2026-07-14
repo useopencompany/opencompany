@@ -12,11 +12,13 @@ import {
   goatChatSessions,
   goatCodexChatTurns,
   goatTasks,
+  goatUsers,
 } from "@opencompany/db/goat-schema";
-import { and, asc, desc, eq, gte, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
   compareGoatChatMessageOrder,
+  GOAT_PINNED_CHAT_LIMIT,
   type GoatChatSessionView,
   type GoatChatSummaryView,
   type GoatStoredChatMessage,
@@ -282,8 +284,8 @@ export function createDbGoatChatStore(): GoatChatStore {
     },
 
     async listOpenSessions(input) {
-      // Pinned sessions always surface (the sidebar shows them regardless of the
-      // recency window); the limit only bounds the unpinned recents.
+      // Pinned sessions surface regardless of the recency window, with separate
+      // caps for pinned and unpinned hydration.
       const [pinned, recent] = await Promise.all([
         getDb()
           .select()
@@ -295,7 +297,8 @@ export function createDbGoatChatStore(): GoatChatStore {
               isNotNull(goatChatSessions.pinnedAt),
             ),
           )
-          .orderBy(desc(goatChatSessions.pinnedAt)),
+          .orderBy(desc(goatChatSessions.pinnedAt))
+          .limit(GOAT_PINNED_CHAT_LIMIT),
         getDb()
           .select()
           .from(goatChatSessions)
@@ -414,18 +417,44 @@ export function createDbGoatChatStore(): GoatChatStore {
     },
 
     async setSessionPinned(input) {
-      const [session] = await getDb()
-        .update(goatChatSessions)
-        .set({ pinnedAt: input.pinned ? input.now : null })
-        .where(
-          and(
-            eq(goatChatSessions.id, input.sessionId),
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-            isNull(goatChatSessions.closedAt),
-          ),
-        )
-        .returning({ id: goatChatSessions.id });
-      return Boolean(session);
+      return getDb().transaction(async (tx) => {
+        // Serialize pin changes for this user so concurrent requests cannot both
+        // pass the cap check. Every chat session owner has a goat.users row.
+        const [owner] = await tx
+          .select({ workosUserId: goatUsers.workosUserId })
+          .from(goatUsers)
+          .where(eq(goatUsers.workosUserId, input.userWorkosId))
+          .limit(1)
+          .for("update");
+        if (!owner) return false;
+
+        if (input.pinned) {
+          const [result] = await tx
+            .select({ count: sql<number>`count(*)::integer` })
+            .from(goatChatSessions)
+            .where(
+              and(
+                eq(goatChatSessions.userWorkosId, input.userWorkosId),
+                ne(goatChatSessions.id, input.sessionId),
+                isNull(goatChatSessions.closedAt),
+                isNotNull(goatChatSessions.pinnedAt),
+              ),
+            );
+          if ((result?.count ?? 0) >= GOAT_PINNED_CHAT_LIMIT) return false;
+        }
+        const [session] = await tx
+          .update(goatChatSessions)
+          .set({ pinnedAt: input.pinned ? input.now : null })
+          .where(
+            and(
+              eq(goatChatSessions.id, input.sessionId),
+              eq(goatChatSessions.userWorkosId, input.userWorkosId),
+              isNull(goatChatSessions.closedAt),
+            ),
+          )
+          .returning({ id: goatChatSessions.id });
+        return Boolean(session);
+      });
     },
   };
 }
