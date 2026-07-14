@@ -18,6 +18,7 @@ import {
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
+  isNormalizedGoatImportSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
   isNormalizedJamieMeetingSourceItem,
   isNormalizedLinearIssueSourceItem,
@@ -45,9 +46,11 @@ import {
   GOAT_BRAIN_AGENT_SKIP_SENTINEL,
   type GoatBrainAgentIngestEnv,
   GoatBrainAgentOutcomeError,
+  GoatBrainIngestBudgetError,
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
+  runGoatImportAgentIngest,
   runGoogleDriveDocumentAgentIngest,
   runJamieMeetingAgentIngest,
   runLinearIssueAgentIngest,
@@ -61,7 +64,10 @@ import {
 } from "./goat-brain-jamie-writes";
 import { rowsFromExecute } from "./sql-exec";
 
-const logger = createLogger({ service: "opencompany-runner", runtime: "goat-brain-ingest" });
+const logger = createLogger({
+  service: "opencompany-runner",
+  runtime: "goat-brain-ingest",
+});
 
 // A running job's lease must outlive one full agent-ingest attempt so a transient
 // heartbeat outage (DB blip, brief event-loop stall) can't let a second worker
@@ -87,10 +93,11 @@ const ATTEMPT_ERROR_MAX_CHARS = 500;
 
 export type GoatBrainIngestJobWithSource = Omit<
   GoatBrainIngestJob,
-  "workspaceId" | "planPaused"
+  "workspaceId" | "planPaused" | "importRunId"
 > & {
   workspaceId?: string | null;
   planPaused?: boolean;
+  importRunId?: string | null;
   sourceType: GoatBrainSourceType;
   normalizedPayload: unknown;
 };
@@ -111,6 +118,7 @@ export type GoatBrainIngestHandlerInput<
   // Lets handlers look up per-(brain, integration) source config live at
   // ingest time (e.g. Gmail ingestion instructions).
   integrationId: string | null;
+  importRunId?: string | null;
   item: TItem;
   env: GoatBrainAgentIngestEnv;
 };
@@ -179,6 +187,12 @@ const GOOGLE_DRIVE_DOCUMENT_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "document",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const GOAT_IMPORT_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "goat-import",
+  sourceType: "run",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
   {
     descriptor: JAMIE_MEETING_INGEST_DESCRIPTOR,
@@ -224,6 +238,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: GOOGLE_DRIVE_DOCUMENT_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGoogleDriveDocumentSourceItem,
     run: runTypedGoatBrainIngestHandler(runGoogleDriveDocumentAgentIngest),
+  },
+  {
+    descriptor: GOAT_IMPORT_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedGoatImportSourceItem,
+    run: runTypedGoatBrainIngestHandler(runGoatImportAgentIngest),
   },
 ];
 
@@ -274,6 +293,7 @@ export type GoatBrainIngestStore = {
     attempts: number;
     error: string;
     maxAttempts?: number;
+    result?: Record<string, unknown>;
   }): Promise<boolean>;
 };
 
@@ -443,6 +463,7 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
           error: input.error.slice(0, ATTEMPT_ERROR_MAX_CHARS),
         },
       ]);
+      const failureResultJson = JSON.stringify(input.result ?? {});
       const result = await getDb().execute(sql`
         WITH failed_job AS (
           UPDATE goat.brain_ingest_jobs
@@ -452,7 +473,7 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
               lease_expires_at = NULL,
               next_run_at = ${nextRunAt},
               last_error = ${input.error},
-              result = result || jsonb_build_object(
+              result = result || ${failureResultJson}::jsonb || jsonb_build_object(
                 'attemptErrors',
                 COALESCE(result->'attemptErrors', '[]'::jsonb) || ${attemptErrorJson}::jsonb
               ),
@@ -555,7 +576,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
       outcome === "failure" && error
         ? runSpan.fail(error, attributes)
         : (attributes["goat.failure_category"] as string | undefined);
-    const finalAttributes = {
+    const finalAttributes: GoatAttributes = {
       ...baseAttributes,
       "goat.outcome": outcome,
       ...(failureCategory ? { "goat.failure_category": failureCategory } : {}),
@@ -580,6 +601,14 @@ export async function runClaimedGoatBrainIngestJob(input: {
       status: finalAttributes["goat.status"],
       attempts: input.job.attempts,
       duration_ms: durationMs,
+      budget_limit_usd_micros: finalAttributes["goat.budget_limit_usd_micros"],
+      budget_stop_threshold_usd_micros: finalAttributes["goat.budget_stop_threshold_usd_micros"],
+      model_cost_usd_micros: finalAttributes["goat.model_cost_usd_micros"],
+      brain_query_cost_usd_micros: finalAttributes["goat.brain_query_cost_usd_micros"],
+      web_search_cost_usd_micros: finalAttributes["goat.web_search_cost_usd_micros"],
+      total_cost_usd_micros: finalAttributes["goat.total_cost_usd_micros"],
+      budget_accounting_complete: finalAttributes["goat.budget_accounting_complete"],
+      budget_exhausted: finalAttributes["goat.budget_exhausted"],
     };
     if (outcome === "success" || outcome === "skipped") {
       logger.info("Goat Brain ingest job finished", logFields);
@@ -658,11 +687,12 @@ export async function runClaimedGoatBrainIngestJob(input: {
             userWorkosId: input.job.userWorkosId,
             brainRef: input.job.brainRef ?? null,
             integrationId: input.job.integrationId ?? null,
+            ...(input.job.importRunId ? { importRunId: input.job.importRunId } : {}),
             item: normalizedPayload,
             env: {
               vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey,
               blobReadWriteToken: input.env.blobReadWriteToken,
-              exaApiKey: input.env.exaApiKey,
+              ...(input.env.exaApiKey ? { exaApiKey: input.env.exaApiKey } : {}),
             },
           }),
       ),
@@ -699,6 +729,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
       }
       finishTelemetry("skipped", {
         "goat.status": "skipped",
+        ...goatBrainIngestBudgetAttributes(result),
       });
       return;
     }
@@ -724,13 +755,16 @@ export async function runClaimedGoatBrainIngestJob(input: {
     }
     finishTelemetry("success", {
       "goat.status": "succeeded",
+      ...goatBrainIngestBudgetAttributes(result),
     });
   } catch (error) {
     const message = errorMessage(error);
     const maxAttempts =
-      error instanceof GoatBrainAgentOutcomeError
-        ? GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS
-        : GOAT_BRAIN_INGEST_MAX_ATTEMPTS;
+      error instanceof GoatBrainIngestBudgetError
+        ? 1
+        : error instanceof GoatBrainAgentOutcomeError
+          ? GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS
+          : GOAT_BRAIN_INGEST_MAX_ATTEMPTS;
     const terminal = input.job.attempts >= maxAttempts;
     const active = await runSpan.runInContext(() =>
       withGoatSpan(GOAT_SPANS.brainIngestFail, baseAttributes, () =>
@@ -743,6 +777,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
           attempts: input.job.attempts,
           error: message,
           maxAttempts,
+          ...(error instanceof GoatBrainIngestBudgetError ? { result: error.result } : {}),
         }),
       ),
     );
@@ -753,7 +788,16 @@ export async function runClaimedGoatBrainIngestJob(input: {
       });
       throw error;
     }
-    finishTelemetry("failure", { "goat.status": terminal ? "failed" : "queued" }, error);
+    finishTelemetry(
+      "failure",
+      {
+        "goat.status": terminal ? "failed" : "queued",
+        ...(error instanceof GoatBrainIngestBudgetError
+          ? goatBrainIngestBudgetAttributes(error.result)
+          : {}),
+      },
+      error,
+    );
     throw error;
   } finally {
     clearInterval(heartbeatTimer);
@@ -843,7 +887,12 @@ export function startGoatBrainIngestWorker(
             leaseTtlMs: GOAT_BRAIN_INGEST_LEASE_TTL_MS,
           });
           if (!job) break;
-          const running = runClaimedGoatBrainIngestJob({ job, env, handlers, store })
+          const running = runClaimedGoatBrainIngestJob({
+            job,
+            env,
+            handlers,
+            store,
+          })
             .catch((error) => {
               captureException(error, {
                 event: "opencompany.goat_brain_ingest_job_failed",
@@ -859,7 +908,9 @@ export function startGoatBrainIngestWorker(
           active.add(running);
         }
       } catch (error) {
-        captureException(error, { event: "opencompany.goat_brain_ingest_worker_failed" });
+        captureException(error, {
+          event: "opencompany.goat_brain_ingest_worker_failed",
+        });
         logger.error("Goat Brain ingest worker failed", {
           event: "opencompany.goat_brain_ingest_worker_failed",
           error,
@@ -956,6 +1007,26 @@ function newGoatBrainIngestLeaseId() {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown Goat Brain ingest error.";
+}
+
+function goatBrainIngestBudgetAttributes(result: Record<string, unknown>): GoatAttributes {
+  const budget = result.budget;
+  if (!budget || typeof budget !== "object" || Array.isArray(budget)) return {};
+  const record = budget as Record<string, unknown>;
+  return {
+    "goat.budget_limit_usd_micros": finiteNumber(record.limitUsdMicros),
+    "goat.budget_stop_threshold_usd_micros": finiteNumber(record.stopThresholdUsdMicros),
+    "goat.model_cost_usd_micros": finiteNumber(record.modelCostUsdMicros),
+    "goat.brain_query_cost_usd_micros": finiteNumber(record.brainQueryCostUsdMicros),
+    "goat.web_search_cost_usd_micros": finiteNumber(record.webSearchCostUsdMicros),
+    "goat.total_cost_usd_micros": finiteNumber(record.totalCostUsdMicros),
+    "goat.budget_accounting_complete": record.accountingComplete === true,
+    "goat.budget_exhausted": record.exhausted === true,
+  };
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function isSkippedIngestResult(result: Record<string, unknown>) {

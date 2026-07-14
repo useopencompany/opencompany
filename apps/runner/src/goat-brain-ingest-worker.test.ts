@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   GOAT_BRAIN_AGENT_SKIP_SENTINEL,
   GoatBrainAgentOutcomeError,
+  GoatBrainIngestBudgetError,
 } from "./goat-brain-agent-ingest";
 import {
   GOAT_BRAIN_INGEST_MAX_ATTEMPTS,
@@ -567,6 +568,119 @@ describe("Goat Brain ingest worker", () => {
       expect.objectContaining({
         outcome: "failure",
         attributes: expect.objectContaining({ "goat.status": "failed" }),
+      }),
+    );
+  });
+
+  it("persists budget failure details and does not retry the ingest", async () => {
+    const normalizedPayload = {
+      sourceProvider: "jamie" as const,
+      sourceType: "meeting" as const,
+      externalId: "external_123",
+      sourceRef: "jamie:meeting:external_123",
+      title: "Budget Test",
+      occurredAt: "2026-01-01T10:00:00.000Z",
+      capturedAt: "2026-01-01T10:01:00.000Z",
+      contentHash: "hash_123",
+      contentHashInput: {},
+      content: {},
+    };
+    const budget = {
+      limitUsdMicros: 500_000,
+      stopThresholdUsdMicros: 400_000,
+      modelCostUsdMicros: 450_000,
+      brainQueryCostUsdMicros: 500,
+      webSearchCostUsdMicros: 1_000,
+      totalCostUsdMicros: 451_500,
+      accountingComplete: true,
+      exhausted: true,
+    };
+    const usage = { inputTokens: 100, outputTokens: 30_000, totalTokens: 30_100 };
+    const failureResult = {
+      budget,
+      trace: {
+        schemaVersion: "goat.brain_ingest_trace.v1" as const,
+        model: "anthropic/claude-sonnet-5",
+        steps: 1,
+        toolCallCount: 0,
+        mutations: 0,
+        usage,
+        finalText: "",
+        toolCalls: [],
+        truncatedToolCalls: 0,
+        budget,
+        createdAt: "2026-01-01T10:00:00.000Z",
+      },
+      usage,
+      steps: 1,
+      toolCalls: 0,
+      mutations: 0,
+    };
+    const run = vi.fn(async () => {
+      throw new GoatBrainIngestBudgetError("Goat Brain ingestion budget exhausted.", failureResult);
+    });
+    const fail = vi.fn(async () => true);
+    const store: GoatBrainIngestStore = {
+      claimNext: vi.fn(async () => null),
+      heartbeat: vi.fn(async () => true),
+      complete: vi.fn(async () => true),
+      skip: vi.fn(async () => true),
+      fail,
+    };
+
+    await expect(
+      runClaimedGoatBrainIngestJob({
+        env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
+        store,
+        handlers: [
+          {
+            descriptor: {
+              kind: "brain_agent_ingest",
+              sourceProvider: "jamie",
+              sourceType: "meeting",
+            },
+            isPayload: (value): value is typeof normalizedPayload => value === normalizedPayload,
+            run,
+          },
+        ],
+        job: {
+          id: "gbjob_budget",
+          sourceItemId: "gbsrc_123",
+          userWorkosId: "user_123",
+          sourceProvider: "jamie",
+          sourceConnectionId: "gint_123",
+          integrationId: "gint_123",
+          brainRef: "gbrain_123",
+          sourceType: "meeting",
+          kind: "brain_agent_ingest",
+          contentHash: "hash_123",
+          status: "running",
+          attempts: 1,
+          nextRunAt: new Date("2026-01-01T10:00:00.000Z"),
+          leaseId: "lease_123",
+          leaseOwner: "runner_123",
+          leaseExpiresAt: new Date("2026-01-01T10:05:00.000Z"),
+          lastError: null,
+          result: {},
+          completedAt: null,
+          createdAt: new Date("2026-01-01T10:00:00.000Z"),
+          updatedAt: new Date("2026-01-01T10:00:00.000Z"),
+          normalizedPayload,
+        },
+      }),
+    ).rejects.toThrow("budget exhausted");
+
+    expect(fail).toHaveBeenCalledWith(
+      expect.objectContaining({ attempts: 1, maxAttempts: 1, result: failureResult }),
+    );
+    expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "failure",
+        attributes: expect.objectContaining({
+          "goat.status": "failed",
+          "goat.budget_exhausted": true,
+          "goat.total_cost_usd_micros": 451_500,
+        }),
       }),
     );
   });
