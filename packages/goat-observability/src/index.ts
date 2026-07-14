@@ -43,6 +43,8 @@ export const GOAT_METRICS = {
   taskStageDurationMs: "goat.task_stage_duration_ms",
   brainIngestRunsTotal: "goat.brain_ingest_runs_total",
   brainIngestRunDurationMs: "goat.brain_ingest_run_duration_ms",
+  brainIngestSpendUsdMicros: "goat.brain_ingest_spend_usd_micros",
+  brainIngestBudgetExhaustionsTotal: "goat.brain_ingest_budget_exhaustions_total",
   toolCallsTotal: "goat.tool_calls_total",
   toolCallDurationMs: "goat.tool_call_duration_ms",
   modelUsageTokens: "goat.model_usage_tokens",
@@ -58,6 +60,7 @@ export type GoatFailureCategory =
   | "tool"
   | "auth"
   | "integration"
+  | "budget"
   | "lease_lost"
   | "timeout"
   | "validation"
@@ -140,6 +143,9 @@ const LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS = new Set([
   "goat.ingest_kind",
   "goat.source_provider",
   "goat.source_type",
+  "goat.cost_source",
+  "goat.budget_exhausted",
+  "goat.budget_accounting_complete",
   "goat.web_search_provider",
   "goat.web_search_operation",
   "goat.token_direction",
@@ -244,6 +250,7 @@ export function categorizeGoatFailure(error: unknown): GoatFailureCategory {
   const message = errorMessage(error).toLowerCase();
   const name = error instanceof Error ? error.name.toLowerCase() : "";
 
+  if (message.includes("budget exhausted") || name.includes("budgeterror")) return "budget";
   if (message.includes("lease lost")) return "lease_lost";
   if (message.includes("runner is not configured") || message.includes("runner request skipped")) {
     return "runner_unconfigured";
@@ -450,6 +457,27 @@ export function recordGoatBrainIngestRun(input: {
   attributes?: GoatAttributes;
 }) {
   recordGoatRunOutcome({ ...input, surface: "brain_ingest" });
+}
+
+export function recordGoatBrainIngestSpend(input: {
+  costUsdMicros: number;
+  source: "model" | "brain_query" | "web_search";
+  attributes?: GoatAttributes;
+}) {
+  if (!Number.isFinite(input.costUsdMicros) || input.costUsdMicros <= 0) return;
+  recordGoatCounter(GOAT_METRICS.brainIngestSpendUsdMicros, Math.round(input.costUsdMicros), {
+    ...input.attributes,
+    "goat.surface": "brain_ingest",
+    "goat.cost_source": input.source,
+  });
+}
+
+export function recordGoatBrainIngestBudgetExhausted(attributes?: GoatAttributes) {
+  recordGoatCounter(GOAT_METRICS.brainIngestBudgetExhaustionsTotal, 1, {
+    ...attributes,
+    "goat.surface": "brain_ingest",
+    "goat.budget_exhausted": true,
+  });
 }
 
 export function recordGoatToolCall(input: {
