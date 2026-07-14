@@ -114,7 +114,11 @@ const MEMBER_STEPS: StepDef[] = [
   { key: "finish", label: "You're all set" },
 ];
 
-const PAGES_PER_SOURCE = 50;
+// Mirrors GOAT_SOURCE_BONUS_MONTHLY_ITEMS / GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS
+// in @opencompany/db/goat-billing (server-only, so not importable here): each
+// connected source adds monthly ingestion allowance, capped at four sources.
+const ITEMS_PER_SOURCE = 25;
+const ITEMS_BONUS_MAX = 100;
 
 // Role presets — the first onboarding step. Picking one seeds the adjustable
 // brain folders with a set that matches how that person actually works (the
@@ -986,7 +990,7 @@ function NewFolderControl({ onAdd }: { onAdd: (value: string) => boolean }) {
 // Step — Sources
 // ---------------------------------------------------------------------------
 
-const SOURCE_GOAL = 3;
+const SOURCE_GOAL = ITEMS_BONUS_MAX / ITEMS_PER_SOURCE;
 const POPUP_WIDTH = 560;
 const POPUP_HEIGHT = 760;
 
@@ -1130,7 +1134,7 @@ function SourcesStep({
     <div>
       <StepHeader
         title="Connect your sources"
-        subtitle="Authorize an account, then choose exactly what should flow into this Brain. Each configured source adds 50 free pages."
+        subtitle={`Authorize an account, then choose exactly what should flow into this Brain. Each connected source adds +${ITEMS_PER_SOURCE} items/month to your ingestion allowance, up to +${ITEMS_BONUS_MAX}.`}
       />
 
       {connectionError ? (
@@ -1151,7 +1155,9 @@ function SourcesStep({
               ? "Your Brain has a strong starting set of sources."
               : `Configure ${SOURCE_GOAL - count} more to get the most out of your Brain`}
           </span>
-          <span className="font-medium text-success">+{count * PAGES_PER_SOURCE} pages</span>
+          <span className="font-medium text-success">
+            +{Math.min(count * ITEMS_PER_SOURCE, ITEMS_BONUS_MAX)} items/month
+          </span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-subtle">
           <div

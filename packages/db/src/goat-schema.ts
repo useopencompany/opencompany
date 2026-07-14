@@ -521,9 +521,6 @@ export const goatWorkspaceBilling = goat.table(
     subscriptionStatus: text("subscription_status").$type<GoatStripeSubscriptionStatus>(),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
-    desiredSeatQuantity: integer("desired_seat_quantity").notNull().default(1),
-    stripeSeatQuantity: integer("stripe_seat_quantity"),
-    seatSyncPendingAt: timestamp("seat_sync_pending_at", { withTimezone: true }),
     paymentNeedsAttention: boolean("payment_needs_attention").notNull().default(false),
     lastStripeEventCreated: timestamp("last_stripe_event_created", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -534,12 +531,7 @@ export const goatWorkspaceBilling = goat.table(
     subscriptionIdx: uniqueIndex("goat_workspace_billing_subscription_idx").on(
       table.stripeSubscriptionId,
     ),
-    seatSyncIdx: index("goat_workspace_billing_seat_sync_idx").on(table.seatSyncPendingAt),
     planCheck: check("goat_workspace_billing_plan_check", sql`${table.plan} IN ('free', 'pro')`),
-    desiredSeatQuantityCheck: check(
-      "goat_workspace_billing_desired_seat_quantity_check",
-      sql`${table.desiredSeatQuantity} > 0`,
-    ),
     subscriptionStatusCheck: check(
       "goat_workspace_billing_subscription_status_check",
       sql`${table.subscriptionStatus} IS NULL OR ${table.subscriptionStatus} IN ('incomplete', 'incomplete_expired', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused')`,

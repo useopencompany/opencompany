@@ -1,9 +1,9 @@
+import { releasePendingGoatIngestionReservations } from "@opencompany/db/goat-billing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { reconcileGoatWorkspaceSeatQuantities } from "@/lib/billing/seat-sync";
 import { GET } from "./route";
 
-vi.mock("@/lib/billing/seat-sync", () => ({
-  reconcileGoatWorkspaceSeatQuantities: vi.fn(),
+vi.mock("@opencompany/db/goat-billing", () => ({
+  releasePendingGoatIngestionReservations: vi.fn(),
 }));
 
 describe("GET /api/billing/reconcile", () => {
@@ -15,20 +15,17 @@ describe("GET /api/billing/reconcile", () => {
   it("rejects requests without the cron bearer secret", async () => {
     const response = await GET(new Request("https://goat.test/api/billing/reconcile"));
     expect(response.status).toBe(401);
-    expect(reconcileGoatWorkspaceSeatQuantities).not.toHaveBeenCalled();
+    expect(releasePendingGoatIngestionReservations).not.toHaveBeenCalled();
   });
 
-  it("reports reconciliation failures without exposing their messages", async () => {
-    vi.mocked(reconcileGoatWorkspaceSeatQuantities).mockResolvedValue([
-      { workspaceId: "goat_ws_1", ok: true },
-      { workspaceId: "goat_ws_2", ok: false, error: "sensitive provider response" },
-    ]);
+  it("releases paused ingestion backlogs and reports the count", async () => {
+    vi.mocked(releasePendingGoatIngestionReservations).mockResolvedValue(4);
     const response = await GET(
       new Request("https://goat.test/api/billing/reconcile", {
         headers: { authorization: "Bearer cron-secret" },
       }),
     );
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({ checked: 2, failed: 1 });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ released: 4 });
   });
 });

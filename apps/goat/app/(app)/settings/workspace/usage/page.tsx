@@ -14,6 +14,8 @@ export default async function WorkspaceUsageSettingsPage() {
         plan: overview.plan,
         used: overview.used,
         limit: overview.window.limit,
+        baseLimit: overview.window.baseLimit,
+        sourceBonus: overview.window.sourceBonus,
         pending: overview.pending,
         resetAt: overview.window.resetAt.toISOString(),
         providers: overview.providers,

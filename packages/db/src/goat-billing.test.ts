@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   GOAT_FREE_MONTHLY_INGESTION_LIMIT,
-  GOAT_PRO_DAILY_INGESTION_LIMIT,
+  GOAT_PRO_MONTHLY_INGESTION_LIMIT,
+  GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS,
   goatCalendarMonthWindow,
   goatIngestionWindow,
   goatPlanForSubscriptionStatus,
   goatReservationFitsAllowance,
+  goatSourceBonusItems,
 } from "./goat-billing";
 
 describe("Goat billing entitlements", () => {
@@ -35,7 +37,7 @@ describe("Goat billing entitlements", () => {
     expect(goatPlanForSubscriptionStatus(status)).toBe("free");
   });
 
-  it("uses a UTC calendar month for Free", () => {
+  it("uses a pooled UTC calendar month for Free", () => {
     const window = goatIngestionWindow({
       plan: "free",
       planStartedAt: new Date("2026-06-15T12:00:00.000Z"),
@@ -44,22 +46,26 @@ describe("Goat billing entitlements", () => {
     expect(window).toEqual({
       plan: "free",
       limit: GOAT_FREE_MONTHLY_INGESTION_LIMIT,
+      baseLimit: GOAT_FREE_MONTHLY_INGESTION_LIMIT,
+      sourceBonus: 0,
       start: new Date("2026-07-01T00:00:00.000Z"),
       resetAt: new Date("2026-08-01T00:00:00.000Z"),
     });
   });
 
-  it("uses a UTC calendar day for Pro", () => {
+  it("uses a pooled UTC calendar month for Pro", () => {
     const window = goatIngestionWindow({
       plan: "pro",
-      planStartedAt: new Date("2026-07-10T12:00:00.000Z"),
+      planStartedAt: new Date("2026-06-10T12:00:00.000Z"),
       now: new Date("2026-07-13T08:30:00.000Z"),
     });
     expect(window).toEqual({
       plan: "pro",
-      limit: GOAT_PRO_DAILY_INGESTION_LIMIT,
-      start: new Date("2026-07-13T00:00:00.000Z"),
-      resetAt: new Date("2026-07-14T00:00:00.000Z"),
+      limit: GOAT_PRO_MONTHLY_INGESTION_LIMIT,
+      baseLimit: GOAT_PRO_MONTHLY_INGESTION_LIMIT,
+      sourceBonus: 0,
+      start: new Date("2026-07-01T00:00:00.000Z"),
+      resetAt: new Date("2026-08-01T00:00:00.000Z"),
     });
   });
 
@@ -71,6 +77,26 @@ describe("Goat billing entitlements", () => {
       now: new Date("2026-07-13T08:30:00.000Z"),
     });
     expect(window.start).toEqual(planStartedAt);
+    expect(window.resetAt).toEqual(new Date("2026-08-01T00:00:00.000Z"));
+  });
+
+  it("adds 25 monthly items per connected source on top of the base allowance", () => {
+    const window = goatIngestionWindow({
+      plan: "free",
+      planStartedAt: new Date("2026-06-15T12:00:00.000Z"),
+      now: new Date("2026-07-13T08:30:00.000Z"),
+      connectedSourceCount: 2,
+    });
+    expect(window.sourceBonus).toBe(50);
+    expect(window.limit).toBe(GOAT_FREE_MONTHLY_INGESTION_LIMIT + 50);
+  });
+
+  it("caps the source bonus at +100 items per month", () => {
+    expect(goatSourceBonusItems(0)).toBe(0);
+    expect(goatSourceBonusItems(1)).toBe(25);
+    expect(goatSourceBonusItems(4)).toBe(GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS);
+    expect(goatSourceBonusItems(9)).toBe(GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS);
+    expect(goatSourceBonusItems(-3)).toBe(0);
   });
 
   it("pauses a whole raw-event batch when it cannot fit", () => {

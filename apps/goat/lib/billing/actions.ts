@@ -2,7 +2,7 @@
 
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
-  GOAT_PRO_MONTHLY_SEAT_PRICE_EUR_CENTS,
+  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
   loadGoatBillingOverview,
   setGoatStripeCustomerId,
 } from "@opencompany/db/goat-billing";
@@ -74,7 +74,7 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
         billing_address_collection: "required",
         tax_id_collection: { enabled: true },
         customer_update: { address: "auto", name: "auto" },
-        line_items: [{ price: getGoatProPriceId(), quantity: overview.seatCount }],
+        line_items: [{ price: getGoatProPriceId(), quantity: 1 }],
         metadata: {
           billingProduct: "goat",
           goatWorkspaceId: context.workspace.id,
@@ -94,8 +94,7 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
     await captureServerEvent("goat_billing_checkout_started", context.user.workosUserId, {
       user_id: context.user.workosUserId,
       workspace_id: context.workspace.id,
-      seat_quantity: overview.seatCount,
-      subtotal_eur_cents: overview.seatCount * GOAT_PRO_MONTHLY_SEAT_PRICE_EUR_CENTS,
+      monthly_price_usd_cents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
     });
     checkoutUrl = session.url;
   } catch (error) {

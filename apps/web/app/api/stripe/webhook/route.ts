@@ -3,7 +3,7 @@ import {
   applyGoatStripeInvoicePaymentState,
   applyGoatStripeSubscriptionProjection,
   findGoatWorkspaceIdForStripeSubscription,
-  GOAT_PRO_MONTHLY_SEAT_PRICE_EUR_CENTS,
+  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
 } from "@opencompany/db/goat-billing";
 import type { GoatStripeSubscriptionStatus } from "@opencompany/db/goat-schema";
 import { after, NextResponse } from "next/server";
@@ -110,7 +110,6 @@ async function handleGoatSubscriptionEvent(
     status: subscription.status as GoatStripeSubscriptionStatus,
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
     currentPeriodEnd: item?.current_period_end ? new Date(item.current_period_end * 1_000) : null,
-    seatQuantity: Math.max(1, item?.quantity ?? 1),
   });
   if (!projection.applied) return;
   if (projection.planChanged) {
@@ -120,11 +119,9 @@ async function handleGoatSubscriptionEvent(
       subscription_status: subscription.status,
     });
     if (projection.plan === "pro") {
-      const seatQuantity = Math.max(1, item?.quantity ?? 1);
       await captureServerEvent("goat_billing_checkout_completed", workspaceId, {
         workspace_id: workspaceId,
-        seat_quantity: seatQuantity,
-        subtotal_eur_cents: seatQuantity * GOAT_PRO_MONTHLY_SEAT_PRICE_EUR_CENTS,
+        monthly_price_usd_cents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
       });
     }
   }

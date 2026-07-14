@@ -12,12 +12,14 @@ export type GoatBillingPanelData = {
   cancelAtPeriodEnd: boolean;
   currentPeriodEnd: string | null;
   paymentNeedsAttention: boolean;
-  seatSyncPending: boolean;
-  seatCount: number;
-  seatPriceEurCents: number;
-  monthlySubtotalEurCents: number;
+  monthlyPriceUsdCents: number;
   monthlyIngestionsUsed: number;
-  monthlyIngestionLimit: number | null;
+  monthlyIngestionLimit: number;
+  freeMonthlyLimit: number;
+  proMonthlyLimit: number;
+  sourceBonus: number;
+  sourceBonusPerSource: number;
+  sourceBonusMax: number;
   monthStartedAt: string;
   monthResetAt: string;
   isAdmin: boolean;
@@ -32,7 +34,9 @@ export function GoatBillingPanel({ data }: { data: GoatBillingPanelData }) {
     Boolean(data.subscriptionStatus) &&
     data.subscriptionStatus !== "canceled" &&
     data.subscriptionStatus !== "incomplete_expired";
-  const formattedSeatPrice = formatEur(data.seatPriceEurCents);
+  const formattedMonthlyPrice = formatUsd(data.monthlyPriceUsdCents);
+  const baseMonthlyLimit = isPro ? data.proMonthlyLimit : data.freeMonthlyLimit;
+  const bonusFeature = `+${data.sourceBonusPerSource} items/month per connected source (up to +${data.sourceBonusMax})`;
 
   function run(action: () => Promise<{ ok: false; error: string }>) {
     startTransition(async () => {
@@ -69,16 +73,11 @@ export function GoatBillingPanel({ data }: { data: GoatBillingPanelData }) {
         </div>
         {isPro ? (
           <div className="text-[12.5px] leading-5 text-ink-subtle">
-            {formattedSeatPrice} × {data.seatCount} active seat
-            {data.seatCount === 1 ? "" : "s"} ={" "}
-            <span className="font-medium text-ink">
-              {formatEur(data.monthlySubtotalEurCents)}/month
-            </span>{" "}
-            plus applicable tax.
+            <span className="font-medium text-ink">{formattedMonthlyPrice}/month</span> flat, plus
+            applicable tax. Unlimited members.
             {data.cancelAtPeriodEnd && data.currentPeriodEnd
               ? ` Pro remains active until ${formatDate(data.currentPeriodEnd)}.`
               : null}
-            {data.seatSyncPending ? " Stripe seat quantity is being synchronized." : null}
           </div>
         ) : isActivating ? (
           <div className="text-[12.5px] leading-5 text-ink-subtle">
@@ -87,7 +86,9 @@ export function GoatBillingPanel({ data }: { data: GoatBillingPanelData }) {
           </div>
         ) : (
           <div className="text-[12.5px] leading-5 text-ink-subtle">
-            Unlimited workspace members and 200 ingestions per calendar month.
+            Unlimited workspace members and {baseMonthlyLimit.toLocaleString()} ingested items each
+            month. Every connected source adds +{data.sourceBonusPerSource} items/month, up to +
+            {data.sourceBonusMax}.
           </div>
         )}
 
@@ -96,16 +97,15 @@ export function GoatBillingPanel({ data }: { data: GoatBillingPanelData }) {
             icon={<DatabaseZap size={14} />}
             label={`Ingestions in ${formatMonth(data.monthStartedAt)}`}
             value={`${data.monthlyIngestionsUsed.toLocaleString()} ingestion${data.monthlyIngestionsUsed === 1 ? "" : "s"}`}
-            detail={
-              data.monthlyIngestionLimit
-                ? `${data.monthlyIngestionsUsed.toLocaleString()} of ${data.monthlyIngestionLimit.toLocaleString()} monthly allowance`
-                : "Across this calendar month"
-            }
-            progress={
-              data.monthlyIngestionLimit
-                ? Math.min(100, (data.monthlyIngestionsUsed / data.monthlyIngestionLimit) * 100)
-                : null
-            }
+            detail={`${data.monthlyIngestionsUsed.toLocaleString()} of ${data.monthlyIngestionLimit.toLocaleString()} monthly allowance${
+              data.sourceBonus > 0
+                ? ` (${baseMonthlyLimit.toLocaleString()} base + ${data.sourceBonus} source bonus)`
+                : ""
+            }`}
+            progress={Math.min(
+              100,
+              (data.monthlyIngestionsUsed / data.monthlyIngestionLimit) * 100,
+            )}
           />
           <BillingMetric
             icon={<CalendarDays size={14} />}
@@ -159,15 +159,24 @@ export function GoatBillingPanel({ data }: { data: GoatBillingPanelData }) {
       <section className="grid gap-3 sm:grid-cols-2">
         <PlanCard
           title="Free"
-          price="€0"
+          price="$0"
           active={!isPro && !isActivating}
-          features={["200 ingestions each month", "Unlimited workspace members"]}
+          features={[
+            `${data.freeMonthlyLimit.toLocaleString()} ingested items each month`,
+            bonusFeature,
+            "Unlimited workspace members",
+          ]}
         />
         <PlanCard
           title="OpenCompany Pro"
-          price={`${formattedSeatPrice}/seat/month`}
+          price={`${formattedMonthlyPrice}/month`}
           active={isPro}
-          features={["200 ingestions each day", "Unlimited billable seats", "Plus applicable tax"]}
+          features={[
+            `${data.proMonthlyLimit.toLocaleString()} ingested items each month`,
+            bonusFeature,
+            "Unlimited workspace members",
+            "Plus applicable tax",
+          ]}
         />
       </section>
     </GoatSettingsContent>
@@ -242,10 +251,13 @@ function PlanCard({
   );
 }
 
-function formatEur(cents: number) {
+function formatUsd(cents: number) {
+  const wholeDollars = cents % 100 === 0;
   return new Intl.NumberFormat(undefined, {
     style: "currency",
-    currency: "EUR",
+    currency: "USD",
+    minimumFractionDigits: wholeDollars ? 0 : 2,
+    maximumFractionDigits: wholeDollars ? 0 : 2,
   }).format(cents / 100);
 }
 

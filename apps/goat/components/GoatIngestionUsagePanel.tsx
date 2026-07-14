@@ -5,6 +5,8 @@ export type GoatIngestionUsageData = {
   plan: "free" | "pro";
   used: number;
   limit: number;
+  baseLimit: number;
+  sourceBonus: number;
   pending: number;
   resetAt: string;
   providers: Array<{ provider: string; count: number }>;
@@ -28,8 +30,12 @@ export function GoatIngestionUsagePanel({ data }: { data: GoatIngestionUsageData
         <div className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
           <AlertCircle size={15} className="mt-0.5 shrink-0" />
           <span>
-            {data.pending} event{data.pending === 1 ? " is" : "s are"} paused by the plan limit.
-            They will resume oldest-first after the allowance resets or the workspace upgrades.
+            You&apos;ve used your monthly allowance, so {data.pending} event
+            {data.pending === 1 ? " is" : "s are"} paused. They resume oldest-first when the
+            allowance resets {formatReset(data.resetAt)}
+            {data.plan === "free"
+              ? " — or sooner if the workspace upgrades to Pro or connects more sources."
+              : " — or sooner if the workspace connects more sources."}
           </span>
         </div>
       ) : null}
@@ -38,12 +44,20 @@ export function GoatIngestionUsagePanel({ data }: { data: GoatIngestionUsageData
         <div className="flex items-end justify-between gap-3">
           <div>
             <div className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-              {data.plan === "pro" ? "Daily Pro allowance" : "Monthly Free allowance"}
+              {data.plan === "pro" ? "Monthly Pro allowance" : "Monthly Free allowance"}
             </div>
             <div className="mt-1 text-[24px] font-semibold tracking-tight text-ink">
               {data.used}{" "}
-              <span className="text-[14px] font-normal text-ink-subtle">of {data.limit}</span>
+              <span className="text-[14px] font-normal text-ink-subtle">
+                of {data.limit.toLocaleString()}
+              </span>
             </div>
+            {data.sourceBonus > 0 ? (
+              <div className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
+                {data.baseLimit.toLocaleString()} plan allowance + {data.sourceBonus} connected
+                source bonus
+              </div>
+            ) : null}
           </div>
           <div className="text-right text-[11.5px] leading-4 text-ink-subtle">
             Resets {formatReset(data.resetAt)}
