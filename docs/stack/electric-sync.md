@@ -67,19 +67,20 @@ component -> collection.update()   Neon --logical repl-->         runner/web app
    **Local dev (automatic):** `bun run setup` starts a local `electricsql/electric`
    container in insecure mode, pointed at your Neon direct connection (derived from
    `DATABASE_URL` by stripping the `-pooler` label, same as the runner), and writes
-   `ELECTRIC_URL=http://localhost:3010` to `.env.local`. A container runtime is
+   its local URL to `.env.local`. Outside Conductor it uses `http://localhost:3010`;
+   Conductor workspaces automatically receive an isolated container name and port so
+   parallel Neon branches cannot replace one another's Electric source. A container runtime is
    required — install [OrbStack](https://orbstack.dev) (`brew install orbstack`) or
    Docker Desktop; setup fails fast with install instructions if it's missing or not
    running. The container is detached (`--restart unless-stopped`), so it
-   survives dev restarts and reboots. Remove it with
-   `docker rm -f opencompany-electric`. `bun run electric:dev` runs it in the
+   survives dev restarts and reboots. Remove it with the container name printed by
+   setup (normally `opencompany-electric`). `bun run electric:dev` runs it in the
    foreground to tail logs / restart against a freshly rebranched database. Leave
    `ELECTRIC_SOURCE_ID`/`ELECTRIC_SOURCE_SECRET`/`ELECTRIC_TOKEN` empty — the dev
    service is unauthenticated and the proxy adds no upstream credentials.
 
-   Port (`3010`) and container name (`opencompany-electric`) are overridable via
-   `ELECTRIC_DEV_PORT` / `ELECTRIC_CONTAINER_NAME` if you run more than one workspace's
-   Electric at once.
+   Port and container name remain overridable via `ELECTRIC_DEV_PORT` /
+   `ELECTRIC_CONTAINER_NAME`.
 3. **Run Durable Streams.** No Docker needed — it's a pure-JS reference server.
    `bun run dev` starts a local Durable Streams server automatically (in-memory,
    `@durable-streams/server`) and injects `DURABLE_STREAMS_URL` into the web + runner

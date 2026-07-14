@@ -1,0 +1,35 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { resolveElectricDevConfig } from "./electric-dev.mjs";
+
+test("Electric keeps its conventional identity outside Conductor", () => {
+  assert.deepEqual(resolveElectricDevConfig({}), {
+    container: "opencompany-electric",
+    port: "3010",
+  });
+});
+
+test("Electric is isolated for each Conductor workspace", () => {
+  assert.deepEqual(resolveElectricDevConfig({ CONDUCTOR_PORT: "55010" }), {
+    container: "opencompany-electric-55010",
+    port: "55014",
+  });
+});
+
+test("explicit Electric overrides take precedence", () => {
+  assert.deepEqual(
+    resolveElectricDevConfig({
+      CONDUCTOR_PORT: "55010",
+      ELECTRIC_CONTAINER_NAME: "custom-electric",
+      ELECTRIC_DEV_PORT: "4010",
+    }),
+    { container: "custom-electric", port: "4010" },
+  );
+});
+
+test("Electric rejects a Conductor range that exceeds the TCP port limit", () => {
+  assert.throws(
+    () => resolveElectricDevConfig({ CONDUCTOR_PORT: "65532" }),
+    /no available Electric port/,
+  );
+});

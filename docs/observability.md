@@ -171,11 +171,13 @@ these series once fresh counter data is present:
 - `goat.chat.turns_total` and `goat.chat.turn_duration_ms`
 - `goat.task_runs_total` and `goat.task_run_duration_ms`
 - `goat.brain_ingest_runs_total` and `goat.brain_ingest_run_duration_ms` for Brain agent ingest jobs
+- `goat.brain_ingest_spend_usd_micros` grouped by `goat.cost_source`
+- `goat.brain_ingest_budget_exhaustions_total` for attempts stopped by the spend gate
 
 Safe metric dimensions are intentionally low-cardinality: signup source, surface, outcome, failure
 category, model, status, stage, task-started boolean, Brain ingest kind/source provider/source type,
-and web-search provider/operation. Do not put run IDs, user IDs, source refs, prompts, tool args, or
-result text on metrics.
+cost source, budget state, and web-search provider/operation. Do not put run IDs, user IDs, source
+refs, prompts, tool args, or result text on metrics.
 
 Use traces or structured logs for investigation IDs:
 
@@ -197,6 +199,9 @@ Suggested SigNoz dashboard panels:
 - p95 duration: `p95(goat.run_duration_ms)` grouped by `goat.surface`
 - Brain agent ingest failures by source: `goat.brain_ingest_runs_total` grouped by
   `goat.source_provider` and `goat.source_type`
+- Brain ingest provider spend: `goat.brain_ingest_spend_usd_micros` grouped by `goat.cost_source`
+- Brain ingest budget exhaustion rate: `rate(goat.brain_ingest_budget_exhaustions_total[5m])`
+  divided by `rate(goat.brain_ingest_runs_total[5m])`
 
 Suggested first alerts:
 

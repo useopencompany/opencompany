@@ -1,5 +1,8 @@
 import type {
   GoatBrainFolderSource,
+  GoatBrainImportDiscoverySummary,
+  GoatBrainImportSourceSelection,
+  GoatBrainImportStatus,
   GoatChatMessageAttachment,
   GoatIntegrationProvider,
   GoatIntegrationStatus,
@@ -246,14 +249,24 @@ export type GoatBrainDocumentRow = {
   title: string | null;
   content: string;
   body: string;
-  timeline: Array<{ evidenceId?: string; evidence_id?: string; at: string; body: string }>;
+  timeline: Array<{
+    evidenceId?: string;
+    evidence_id?: string;
+    at: string;
+    body: string;
+  }>;
   format: string;
   mime_type: string | null;
   original_file_name: string | null;
   asset_storage_key: string | null;
   asset_size_bytes: number | null;
   relations: Array<{ type: string; to: string }>;
-  sources: Array<{ ref: string; capturedAt?: string; captured_at?: string; title?: string }>;
+  sources: Array<{
+    ref: string;
+    capturedAt?: string;
+    captured_at?: string;
+    title?: string;
+  }>;
   content_hash: string;
   size_bytes: number;
   kind: string;
@@ -299,6 +312,7 @@ export type GoatBrainIngestJobRow = {
   source_provider: string;
   source_connection_id: string;
   integration_id: string | null;
+  import_run_id?: string | null;
   brain_ref: string | null;
   kind: string;
   content_hash: string;
@@ -311,6 +325,31 @@ export type GoatBrainIngestJobRow = {
   lease_expires_at: string | null;
   last_error: string | null;
   result: Record<string, unknown>;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GoatBrainImportRunRow = {
+  id: string;
+  brain_ref: string;
+  user_workos_id: string;
+  company_url: string;
+  company_domain: string;
+  company_name: string | null;
+  focus: string | null;
+  history_start_at: string;
+  history_end_at: string;
+  source_selection: GoatBrainImportSourceSelection;
+  discovery_summary: GoatBrainImportDiscoverySummary;
+  result: Record<string, unknown>;
+  status: GoatBrainImportStatus;
+  next_run_at: string;
+  lease_id: string | null;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  last_error: string | null;
+  confirmed_at: string | null;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -401,6 +440,12 @@ function createBrainCollections(brainRef: string) {
     ingestJobs: createGoatElectricCollection<GoatBrainIngestJobRow>({
       id: `goat:brain_ingest_jobs:${brainRef}`,
       table: "goat.brain_ingest_jobs",
+      params: { brain_ref: brainRef },
+      getKey: (row) => row.id,
+    }),
+    importRuns: createGoatElectricCollection<GoatBrainImportRunRow>({
+      id: `goat:brain_import_runs:${brainRef}`,
+      table: "goat.brain_import_runs",
       params: { brain_ref: brainRef },
       getKey: (row) => row.id,
     }),
