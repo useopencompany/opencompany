@@ -89,10 +89,11 @@ describe("GoatSidebar", () => {
 
   it("renders home, the brain list, and settings in the account footer", () => {
     pathnameMock.value = "/";
-    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+    const { container } = render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(screen.getByText("Ada's Workspace")).toBeInTheDocument();
     expect(screen.queryByText("admin")).not.toBeInTheDocument();
+    expect(container.querySelector('svg[viewBox="0 0 100 100"]')).toBeInTheDocument();
 
     const nav = screen.getByRole("navigation", { name: "Goat primary" });
     const home = within(nav).getByRole("link", { name: "Home" });
