@@ -71,6 +71,8 @@ export default async function OnboardingPage({
       // never the auto-generated "…'s Workspace" default.
       initialWorkspaceName={savedSlug ? context.workspace.name : ""}
       initialSlug={savedSlug}
+      initialRole={onboarding?.role ?? null}
+      initialBuilding={onboarding?.building ?? ""}
       initialCompanyDomain={onboarding?.companyDomain ?? ""}
       initialContextUrls={onboarding?.contextUrls ?? []}
       initialReferral={onboarding?.referralSource ?? null}

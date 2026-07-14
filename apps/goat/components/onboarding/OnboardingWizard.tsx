@@ -13,22 +13,30 @@ import {
   ArrowRight,
   BookOpen,
   Brain,
+  Briefcase,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
   Check,
+  Code2,
   FlaskConical,
   Folder,
   GripVertical,
   History,
   Inbox,
   Lightbulb,
+  LineChart,
   Link2,
   Lock,
+  Megaphone,
   MessagesSquare,
+  Microscope,
   Plus,
+  Rocket,
+  Settings2,
   ShieldCheck,
   Sparkles,
+  Target,
   Users,
   X,
 } from "lucide-react";
@@ -50,6 +58,7 @@ import {
   finishGoatOnboardingAction,
   saveGoatOnboardingBrainFoldersAction,
   saveGoatOnboardingContextAction,
+  saveGoatOnboardingProfileAction,
   saveGoatOnboardingWorkspaceAction,
 } from "@/lib/onboarding-actions";
 import {
@@ -67,14 +76,23 @@ type OnboardingUser = {
   avatarUrl: string | null;
 };
 
-type StepKey = "workspace" | "brain" | "sources" | "context" | "connect" | "finish" | "welcome";
+type StepKey =
+  | "profile"
+  | "workspace"
+  | "brain"
+  | "sources"
+  | "context"
+  | "connect"
+  | "finish"
+  | "welcome";
 
 type StepDef = { key: StepKey; label: string };
 
-// Activation-optimized order: name it → shape it (light) → feed it (peak) →
-// teach it → use it → done. Referral is folded into the finish so it never
-// interrupts a value step.
+// Activation-optimized order: know them → name it → shape it (pre-tailored from
+// their role) → feed it (peak) → teach it → use it → done. Referral is folded
+// into the finish so it never interrupts a value step.
 const OWNER_STEPS: StepDef[] = [
+  { key: "profile", label: "About you" },
   { key: "workspace", label: "Create workspace" },
   { key: "brain", label: "Set up your brain" },
   { key: "sources", label: "Connect sources" },
@@ -94,6 +112,84 @@ const MEMBER_STEPS: StepDef[] = [
 
 const PAGES_PER_SOURCE = 50;
 
+// Role presets — the first onboarding step. Picking one seeds the adjustable
+// brain folders with a set that matches how that person actually works (the
+// hard defaults inbox/people/companies/evidence are always added on top). Every
+// folder here must satisfy GOAT_BRAIN_FOLDER_PATTERN (lowercase, single word).
+type RoleProfile = {
+  id: string;
+  label: string;
+  hint: string;
+  icon: LucideIcon;
+  folders: string[];
+};
+
+const ROLE_PROFILES: RoleProfile[] = [
+  {
+    id: "founder",
+    label: "Founder / CEO",
+    hint: "Running the whole company",
+    icon: Rocket,
+    folders: ["thoughts", "projects", "meetings", "decisions", "fundraising", "metrics"],
+  },
+  {
+    id: "product",
+    label: "Product / Engineering",
+    hint: "Building the product",
+    icon: Code2,
+    folders: ["projects", "specs", "meetings", "decisions", "research", "incidents"],
+  },
+  {
+    id: "sales",
+    label: "Sales / GTM",
+    hint: "Pipeline & closing deals",
+    icon: Target,
+    folders: ["deals", "meetings", "calls", "playbooks", "competitors", "notes"],
+  },
+  {
+    id: "marketing",
+    label: "Marketing / Growth",
+    hint: "Demand & brand",
+    icon: Megaphone,
+    folders: ["campaigns", "content", "research", "meetings", "ideas", "competitors"],
+  },
+  {
+    id: "operations",
+    label: "Operations / Finance",
+    hint: "Keeping it all running",
+    icon: Settings2,
+    folders: ["projects", "processes", "meetings", "decisions", "metrics", "vendors"],
+  },
+  {
+    id: "investing",
+    label: "Investing / VC",
+    hint: "Sourcing & backing companies",
+    icon: LineChart,
+    folders: ["deals", "meetings", "research", "thesis", "portfolio", "notes"],
+  },
+  {
+    id: "consulting",
+    label: "Consulting / Agency",
+    hint: "Serving clients",
+    icon: Briefcase,
+    folders: ["clients", "projects", "meetings", "deliverables", "research", "notes"],
+  },
+  {
+    id: "research",
+    label: "Research / Analysis",
+    hint: "Digging into topics",
+    icon: Microscope,
+    folders: ["research", "sources", "notes", "concepts", "meetings", "reports"],
+  },
+];
+
+// Folders to seed the brain step with for a given role — falls back to the
+// generic adjustable defaults when no role is chosen or recognized.
+function foldersForRole(role: string | null): string[] {
+  const profile = role ? ROLE_PROFILES.find((p) => p.id === role) : null;
+  return profile ? [...profile.folders] : [...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS];
+}
+
 // ---------------------------------------------------------------------------
 
 type SlugStatus = "idle" | "checking" | "available" | "taken";
@@ -106,6 +202,8 @@ export function OnboardingWizard({
   initialStep,
   initialWorkspaceName,
   initialSlug,
+  initialRole,
+  initialBuilding,
   initialCompanyDomain,
   initialContextUrls,
   initialReferral,
@@ -122,6 +220,8 @@ export function OnboardingWizard({
   initialStep: number;
   initialWorkspaceName: string;
   initialSlug: string;
+  initialRole: string | null;
+  initialBuilding: string;
   initialCompanyDomain: string;
   initialContextUrls: string[];
   initialReferral: string | null;
@@ -141,9 +241,9 @@ export function OnboardingWizard({
   const [slugTouched, setSlugTouched] = useState(Boolean(initialSlug));
   const [slug, setSlug] = useState(initialSlug);
   const [referral, setReferral] = useState<string | null>(initialReferral);
-  const [workingFolders, setWorkingFolders] = useState<string[]>(() => [
-    ...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
-  ]);
+  const [role, setRole] = useState<string | null>(initialRole);
+  const [building, setBuilding] = useState(initialBuilding);
+  const [workingFolders, setWorkingFolders] = useState<string[]>(() => foldersForRole(initialRole));
   const [companyDomain, setCompanyDomain] = useState(initialCompanyDomain);
   const [contextUrls, setContextUrls] = useState<string[]>(
     initialContextUrls.length > 0 ? initialContextUrls : [""],
@@ -198,6 +298,10 @@ export function OnboardingWizard({
 
   // Saves the current step server-side; returns false (and toasts) on rejection.
   const persistCurrentStep = async (): Promise<boolean> => {
+    if (step.key === "profile") {
+      const r = await saveGoatOnboardingProfileAction({ role, building });
+      return r.ok || toastFail(r.error);
+    }
     if (step.key === "workspace") {
       const r = await saveGoatOnboardingWorkspaceAction({
         name: workspaceName,
@@ -245,10 +349,21 @@ export function OnboardingWizard({
   };
   const goBack = () => setStepIndex((i) => Math.max(i - 1, 0));
 
+  // Picking a role re-seeds the brain folders with that role's preset. We only
+  // reseed on an actual change so a user who tweaked folders and stepped back
+  // doesn't lose their edits by re-clicking the role they already had.
+  const selectRole = (next: string) => {
+    if (next === role) return;
+    setRole(next);
+    setWorkingFolders(foldersForRole(next));
+  };
+
   const canContinue =
-    step.key === "workspace"
-      ? workspaceName.trim().length > 0 && effectiveSlug.length > 0 && slugStatus !== "taken"
-      : true;
+    step.key === "profile"
+      ? role !== null
+      : step.key === "workspace"
+        ? workspaceName.trim().length > 0 && effectiveSlug.length > 0 && slugStatus !== "taken"
+        : true;
 
   return (
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -267,6 +382,15 @@ export function OnboardingWizard({
             <ImportingScreen domain={companyDomain} />
           ) : (
             <>
+              {step.key === "profile" && (
+                <ProfileStep
+                  user={user}
+                  role={role}
+                  onRole={selectRole}
+                  building={building}
+                  onBuilding={setBuilding}
+                />
+              )}
               {step.key === "workspace" && (
                 <WorkspaceStep
                   user={user}
@@ -432,6 +556,88 @@ function IdentityRow({ user }: { user: OnboardingUser }) {
 }
 
 // ---------------------------------------------------------------------------
+// Step — Profile (role + what they're building)
+// ---------------------------------------------------------------------------
+
+function ProfileStep({
+  user,
+  role,
+  onRole,
+  building,
+  onBuilding,
+}: {
+  user: OnboardingUser;
+  role: string | null;
+  onRole: (id: string) => void;
+  building: string;
+  onBuilding: (v: string) => void;
+}) {
+  return (
+    <div>
+      <StepHeader
+        title={`Welcome, ${user.name.split(" ")[0]}`}
+        subtitle="Two quick questions so we can shape your brain around how you actually work."
+      />
+
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-2.5">
+          <span className="text-[12px] font-medium text-ink">What best describes your role?</span>
+          <div className="grid grid-cols-2 gap-2.5">
+            {ROLE_PROFILES.map((profile) => {
+              const active = role === profile.id;
+              const Icon = profile.icon;
+              return (
+                <button
+                  key={profile.id}
+                  type="button"
+                  onClick={() => onRole(profile.id)}
+                  className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors ${
+                    active
+                      ? "border-ink bg-surface-active/50"
+                      : "border-border bg-surface hover:border-border-strong"
+                  }`}
+                >
+                  <div
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                      active ? "bg-ink text-canvas" : "bg-surface-muted text-ink-muted"
+                    }`}
+                  >
+                    <Icon size={17} strokeWidth={1.9} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className={`truncate text-[13px] font-medium ${active ? "text-ink" : "text-ink-muted"}`}
+                    >
+                      {profile.label}
+                    </div>
+                    <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                      {profile.hint}
+                    </div>
+                  </div>
+                  {active && <Check size={15} strokeWidth={2.4} className="shrink-0 text-ink" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <Field
+          label="What are you building?"
+          hint="One line is plenty — we use it to tailor how your brain files things."
+        >
+          <input
+            className={inputClass}
+            value={building}
+            onChange={(e) => onBuilding(e.target.value)}
+            placeholder="A B2B analytics platform for logistics teams"
+          />
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Step — Workspace
 // ---------------------------------------------------------------------------
 
@@ -490,7 +696,7 @@ function WorkspaceStep({
             }`}
           >
             <span className="flex items-center bg-surface-muted px-3 text-[13px] text-ink-subtle">
-              opencompany.com/
+              opencompany.chat/
             </span>
             <input
               className="w-full bg-transparent px-2.5 py-2 text-[14px] text-ink outline-none placeholder:text-ink-subtle"

@@ -118,6 +118,24 @@ export async function saveGoatOnboardingBrainFoldersAction(input: {
   return { ok: true };
 }
 
+export async function saveGoatOnboardingProfileAction(input: {
+  role: string | null;
+  building: string | null;
+}): Promise<GoatOnboardingActionResult> {
+  const context = await currentGoatUser();
+  try {
+    await upsertGoatOnboarding({
+      userWorkosId: context.user.workosUserId,
+      workspaceId: context.workspace.id,
+      role: input.role?.trim() || null,
+      building: input.building?.trim().slice(0, 280) || null,
+    });
+    return { ok: true };
+  } catch (error) {
+    return errorResult(error, "Could not save your profile.");
+  }
+}
+
 export async function saveGoatOnboardingContextAction(input: {
   companyDomain: string;
   contextUrls: string[];

@@ -883,6 +883,13 @@
       "when": 1783981700000,
       "tag": "0125_goat_task_spawning_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1783981800000,
+      "tag": "0126_goat_onboarding_profile",
+      "breakpoints": true
     }
   ]
 }
