@@ -13,7 +13,7 @@ import {
   goatCodexChatTurns,
   goatTasks,
 } from "@opencompany/db/goat-schema";
-import { and, asc, desc, eq, gte, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, isNull } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
   compareGoatChatMessageOrder,
@@ -75,6 +75,12 @@ export type GoatChatStore = {
   }): Promise<GoatChatMessage>;
   touchSession(input: { sessionId: string; now: Date }): Promise<void>;
   closeSession(input: { userWorkosId: string; sessionId: string; now: Date }): Promise<boolean>;
+  setSessionPinned(input: {
+    userWorkosId: string;
+    sessionId: string;
+    pinned: boolean;
+    now: Date;
+  }): Promise<boolean>;
 };
 
 export async function loadCurrentGoatChatSession(): Promise<GoatChatSessionView | null> {
@@ -239,6 +245,18 @@ export async function closeGoatChatSessionForUser(
   });
 }
 
+export async function setGoatChatSessionPinnedForUser(
+  input: { userWorkosId: string; sessionId: string; pinned: boolean },
+  store: GoatChatStore = createDbGoatChatStore(),
+) {
+  return store.setSessionPinned({
+    userWorkosId: input.userWorkosId,
+    sessionId: input.sessionId,
+    pinned: input.pinned,
+    now: new Date(),
+  });
+}
+
 export function createDbGoatChatStore(): GoatChatStore {
   return {
     async findOpenSession(input) {
@@ -264,18 +282,35 @@ export function createDbGoatChatStore(): GoatChatStore {
     },
 
     async listOpenSessions(input) {
-      return getDb()
-        .select()
-        .from(goatChatSessions)
-        .where(
-          and(
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-            isNull(goatChatSessions.closedAt),
-            ...(input.updatedAfter ? [gte(goatChatSessions.updatedAt, input.updatedAfter)] : []),
-          ),
-        )
-        .orderBy(desc(goatChatSessions.updatedAt))
-        .limit(input.limit);
+      // Pinned sessions always surface (the sidebar shows them regardless of the
+      // recency window); the limit only bounds the unpinned recents.
+      const [pinned, recent] = await Promise.all([
+        getDb()
+          .select()
+          .from(goatChatSessions)
+          .where(
+            and(
+              eq(goatChatSessions.userWorkosId, input.userWorkosId),
+              isNull(goatChatSessions.closedAt),
+              isNotNull(goatChatSessions.pinnedAt),
+            ),
+          )
+          .orderBy(desc(goatChatSessions.pinnedAt)),
+        getDb()
+          .select()
+          .from(goatChatSessions)
+          .where(
+            and(
+              eq(goatChatSessions.userWorkosId, input.userWorkosId),
+              isNull(goatChatSessions.closedAt),
+              isNull(goatChatSessions.pinnedAt),
+              ...(input.updatedAfter ? [gte(goatChatSessions.updatedAt, input.updatedAfter)] : []),
+            ),
+          )
+          .orderBy(desc(goatChatSessions.updatedAt))
+          .limit(input.limit),
+      ]);
+      return [...pinned, ...recent];
     },
 
     async createSession(input) {
@@ -377,6 +412,21 @@ export function createDbGoatChatStore(): GoatChatStore {
         .returning({ id: goatChatSessions.id });
       return Boolean(session);
     },
+
+    async setSessionPinned(input) {
+      const [session] = await getDb()
+        .update(goatChatSessions)
+        .set({ pinnedAt: input.pinned ? input.now : null })
+        .where(
+          and(
+            eq(goatChatSessions.id, input.sessionId),
+            eq(goatChatSessions.userWorkosId, input.userWorkosId),
+            isNull(goatChatSessions.closedAt),
+          ),
+        )
+        .returning({ id: goatChatSessions.id });
+      return Boolean(session);
+    },
   };
 }
 
@@ -412,6 +462,7 @@ function toChatSummaryView(
     codexComposerSettings,
     preview: previewFromMessages(messages),
     updatedAt: session.updatedAt.toISOString(),
+    pinnedAt: session.pinnedAt?.toISOString() ?? null,
   };
 }
 

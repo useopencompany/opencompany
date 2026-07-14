@@ -890,6 +890,13 @@
       "when": 1784021119000,
       "tag": "0126_goat_brain_company_import",
       "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1784021219000,
+      "tag": "0127_goat_chat_session_pin",
+      "breakpoints": true
     }
   ]
 }

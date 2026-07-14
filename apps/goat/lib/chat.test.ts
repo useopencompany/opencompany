@@ -11,6 +11,7 @@ import {
   listRecentGoatChatsForUser,
   loadGoatChatSessionByIdForUser,
   persistGoatChatAssistantMessage,
+  setGoatChatSessionPinnedForUser,
   textFromGoatChatUiMessage,
 } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION } from "@/lib/chat-agent";
@@ -223,7 +224,66 @@ describe("Goat chat history helpers", () => {
         title: "Second chat",
         preview: "second chat",
         updatedAt: "2026-07-04T12:00:00.000Z",
+        pinnedAt: null,
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps pinned chats listed even outside the recency window until unpinned", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-04T12:30:00.000Z"));
+    const { store, sessions } = createInMemoryChatStore();
+    try {
+      const recent = await createGoatChatUserTurn(
+        { userWorkosId: "user_1", prompt: "recent chat", model: DEFAULT_GOAT_MODEL },
+        store,
+      );
+      const old = await createGoatChatUserTurn(
+        { userWorkosId: "user_1", prompt: "old pinned chat", model: DEFAULT_GOAT_MODEL },
+        store,
+      );
+      sessions.find((session) => session.id === old.session.id)!.updatedAt = new Date(
+        "2026-07-01T12:00:00.000Z",
+      );
+
+      await expect(
+        setGoatChatSessionPinnedForUser(
+          { userWorkosId: "user_1", sessionId: old.session.id, pinned: true },
+          store,
+        ),
+      ).resolves.toBe(true);
+
+      const summaries = await listRecentGoatChatsForUser(
+        { userWorkosId: "user_1", limit: 8 },
+        store,
+      );
+      expect(summaries.map((summary) => summary.id)).toEqual([old.session.id, recent.session.id]);
+      expect(summaries[0]).toMatchObject({
+        title: "Old pinned chat",
+        pinnedAt: "2026-07-04T12:30:00.000Z",
+      });
+
+      await expect(
+        setGoatChatSessionPinnedForUser(
+          { userWorkosId: "user_1", sessionId: old.session.id, pinned: false },
+          store,
+        ),
+      ).resolves.toBe(true);
+      const afterUnpin = await listRecentGoatChatsForUser(
+        { userWorkosId: "user_1", limit: 8 },
+        store,
+      );
+      expect(afterUnpin.map((summary) => summary.id)).toEqual([recent.session.id]);
+
+      // Other users' sessions are not pinnable.
+      await expect(
+        setGoatChatSessionPinnedForUser(
+          { userWorkosId: "user_2", sessionId: old.session.id, pinned: true },
+          store,
+        ),
+      ).resolves.toBe(false);
     } finally {
       vi.useRealTimers();
     }
@@ -272,6 +332,7 @@ describe("Goat chat history helpers", () => {
         model: DEFAULT_GOAT_MODEL,
         engine: "codex",
         closedAt: null,
+        pinnedAt: null,
         createdAt: now,
         updatedAt: now,
       });
@@ -335,13 +396,20 @@ function createInMemoryChatStore(
     },
 
     async listOpenSessions(input) {
-      return sessions
-        .filter((session) => session.userWorkosId === input.userWorkosId && !session.closedAt)
+      const open = sessions.filter(
+        (session) => session.userWorkosId === input.userWorkosId && !session.closedAt,
+      );
+      const pinned = open
+        .filter((session) => session.pinnedAt)
+        .toSorted((a, b) => (b.pinnedAt?.getTime() ?? 0) - (a.pinnedAt?.getTime() ?? 0));
+      const recent = open
+        .filter((session) => !session.pinnedAt)
         .filter((session) =>
           input.updatedAfter ? session.updatedAt.getTime() >= input.updatedAfter.getTime() : true,
         )
         .toSorted((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
         .slice(0, input.limit);
+      return [...pinned, ...recent];
     },
 
     async createSession(input) {
@@ -353,6 +421,7 @@ function createInMemoryChatStore(
         model: input.model,
         engine: "opencompany",
         closedAt: null,
+        pinnedAt: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -406,6 +475,16 @@ function createInMemoryChatStore(
       if (!session) return false;
       session.closedAt = input.now;
       session.updatedAt = input.now;
+      return true;
+    },
+
+    async setSessionPinned(input) {
+      const session = sessions.find(
+        (item) =>
+          item.id === input.sessionId && item.userWorkosId === input.userWorkosId && !item.closedAt,
+      );
+      if (!session) return false;
+      session.pinnedAt = input.pinned ? input.now : null;
       return true;
     },
   };

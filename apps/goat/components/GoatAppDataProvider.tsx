@@ -130,22 +130,36 @@ export function GoatAppDataProvider({
   const recentChats = useMemo(() => {
     if (chatsLoading && !chatSessionRows?.length) return initialData.recentChats;
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
-    return ((chatSessionRows ?? []) as GoatChatSessionRow[])
-      .filter((row) => !row.closed_at && isRecentGoatHomeActivity(row.updated_at))
+    const toSummary = (row: GoatChatSessionRow) => {
+      const initial = initialById.get(row.id);
+      return {
+        id: row.id,
+        title: row.title,
+        model: row.model as AgentModelId,
+        engine: row.engine,
+        codexComposerSettings: initial?.codexComposerSettings ?? null,
+        preview: initial?.preview ?? "No messages yet.",
+        updatedAt: row.updated_at,
+        pinnedAt: row.pinned_at,
+      };
+    };
+    const openRows = ((chatSessionRows ?? []) as GoatChatSessionRow[]).filter(
+      (row) => !row.closed_at,
+    );
+    // Pinned chats stay visible regardless of the recency window; the 8-row cap
+    // only bounds the unpinned recents (mirrors listOpenSessions on the server).
+    const pinned = openRows
+      .filter((row) => row.pinned_at)
+      .toSorted(
+        (a, b) => new Date(b.pinned_at ?? 0).getTime() - new Date(a.pinned_at ?? 0).getTime(),
+      )
+      .map(toSummary);
+    const recent = openRows
+      .filter((row) => !row.pinned_at && isRecentGoatHomeActivity(row.updated_at))
       .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
       .slice(0, 8)
-      .map((row) => {
-        const initial = initialById.get(row.id);
-        return {
-          id: row.id,
-          title: row.title,
-          model: row.model as AgentModelId,
-          engine: row.engine,
-          codexComposerSettings: initial?.codexComposerSettings ?? null,
-          preview: initial?.preview ?? "No messages yet.",
-          updatedAt: row.updated_at,
-        };
-      });
+      .map(toSummary);
+    return [...pinned, ...recent];
   }, [chatSessionRows, chatsLoading, initialData.recentChats]);
 
   const integrations = useMemo(() => {

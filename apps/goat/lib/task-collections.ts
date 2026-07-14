@@ -79,6 +79,7 @@ export type GoatChatSessionRow = {
   model: string;
   engine: "opencompany" | "local_codex" | "codex";
   closed_at: string | null;
+  pinned_at: string | null;
   created_at: string;
   updated_at: string;
 };
