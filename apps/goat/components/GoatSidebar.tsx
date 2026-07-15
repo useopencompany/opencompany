@@ -96,9 +96,10 @@ export function GoatSidebar({
 }) {
   const { mcpSetup, user } = useGoatAppData();
   const pathname = usePathname();
-  const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
+  const mcpSetupActive = !mcpSetup.completedAt && pathname === "/settings/mcp";
+  const settingsActive =
+    (pathname === "/settings" || pathname.startsWith("/settings/")) && !mcpSetupActive;
   const homeActive = pathname === "/";
-  const mcpSetupActive = pathname === "/settings/mcp";
 
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
