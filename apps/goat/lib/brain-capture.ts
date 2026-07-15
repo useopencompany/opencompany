@@ -31,17 +31,20 @@ export type GoatBrainCaptureResult =
       error: string;
     };
 
-// Chat saves are capture-first: persist a draft page in inbox/ immediately so
-// nothing is lost, then enqueue the durable ingestion agent to curate it
-// (type, title, folder, links, promotion) in the background.
+export type GoatBrainCaptureSource =
+  | { kind: "chat"; connectionId: string; itemId: string }
+  | { kind: "mcp"; connectionId: string; itemId: string };
+
+// Explicit saves from Goat chat or MCP are capture-first: persist a draft page
+// in inbox/ immediately so nothing is lost, then enqueue the durable ingestion
+// agent to curate it (type, title, folder, links, promotion) in the background.
 export async function captureToGoatBrainInbox(input: {
   brainRef: string;
   userWorkosId: string;
   text: string;
   title?: string;
   intent?: string;
-  chatSessionId: string;
-  userMessageId: string;
+  source: GoatBrainCaptureSource;
 }): Promise<GoatBrainCaptureResult> {
   const text = input.text.trim();
   if (!text) return { ok: false, error: "Capture content must not be empty." };
@@ -55,7 +58,7 @@ export async function captureToGoatBrainInbox(input: {
   const capturedAt = nowIso();
   const title = input.title?.trim() || deriveCaptureTitle(text);
   const draftBrainId = await nextAvailableGoatBrainId(input.brainRef, normalizeGoatBrainId(title));
-  const sourceRef = `goat-chat:${input.userMessageId}`;
+  const sourceRef = `${input.source.kind === "mcp" ? "mcp" : "goat-chat"}:${input.source.itemId}`;
   const path = goatBrainFilePathFor(GOAT_BRAIN_CAPTURE_FOLDER, draftBrainId);
   await upsertGoatBrainFile({
     brainRef: input.brainRef,
@@ -68,7 +71,13 @@ export async function captureToGoatBrainInbox(input: {
       type: "note",
       status: "draft",
       compiledTruth: text,
-      sources: [{ ref: sourceRef, title: "Chat capture", capturedAt }],
+      sources: [
+        {
+          ref: sourceRef,
+          title: input.source.kind === "mcp" ? "MCP capture" : "Chat capture",
+          capturedAt,
+        },
+      ],
     }),
   });
 
@@ -76,15 +85,16 @@ export async function captureToGoatBrainInbox(input: {
     text,
     title,
     ...(input.intent?.trim() ? { intent: input.intent.trim() } : {}),
-    chatSessionId: input.chatSessionId,
-    userMessageId: input.userMessageId,
+    chatSessionId: input.source.connectionId,
+    userMessageId: input.source.itemId,
     draftBrainId,
     draftFolder: GOAT_BRAIN_CAPTURE_FOLDER,
     capturedAt,
+    sourceRef,
   });
   const result = await upsertGoatBrainSourceItemAndEnqueue({
     userWorkosId: input.userWorkosId,
-    sourceConnectionId: input.chatSessionId,
+    sourceConnectionId: input.source.connectionId,
     item,
     rawPayload: item.content,
     kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,

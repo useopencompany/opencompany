@@ -104,7 +104,7 @@ merge) against a materialized copy of the brain. The system prompt embeds
   so they snapshot per the [pointer/copy contract](./pointer-copy-contract.md)),
 - typed relations linking the meeting to participant/company pages, creating them if needed.
 
-### 2. Chat captures (agentic)
+### 2. Explicit captures from chat or MCP (agentic)
 
 Chat's `save_to_brain` tool (`apps/goat/lib/brain-capture.ts`) is capture-first: it immediately
 writes a **draft page in `inbox/`** (status `draft`) so the user sees the save instantly, then
@@ -112,6 +112,10 @@ records a source item and enqueues a `brain_agent_ingest` job. `runGoatChatCaptu
 later curates the draft: better title, entity type, target folder, links, promotion out of the
 inbox, and merging with duplicate drafts. The draft's minted `brain_id` doubles as the source
 item's `externalId` for dedupe.
+
+The user-level MCP server exposes the same capture path as `save_to_brain` for workspace admins.
+MCP captures use an `mcp:` source ref so provenance and ingestion traces identify their origin;
+they otherwise share the immediate-draft and background-curation behavior above.
 
 ### 3. Jamie meetings (legacy deterministic template — draining)
 
