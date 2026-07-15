@@ -1,5 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderGoatBrainToolCommand, runGoatBrainToolForUser } from "@/lib/brain-cli";
+
+const dbMocks = vi.hoisted(() => {
+  const insertQuery = { kind: "insert" };
+  const updateQuery = { kind: "update" };
+  const insertValues = vi.fn(() => insertQuery);
+  const updateWhere = vi.fn(() => updateQuery);
+  const updateSet = vi.fn(() => ({ where: updateWhere }));
+  const insert = vi.fn(() => ({ values: insertValues }));
+  const update = vi.fn(() => ({ set: updateSet }));
+  const batch = vi.fn(async () => []);
+
+  return {
+    batch,
+    db: { batch, insert, update },
+    insert,
+    insertQuery,
+    insertValues,
+    update,
+    updateQuery,
+    updateSet,
+    updateWhere,
+  };
+});
+
+vi.mock("@opencompany/db/client", () => ({
+  getDb: () => dbMocks.db,
+}));
 
 vi.mock("@opencompany/db/goat-brain-read", () => ({
   searchGoatBrain: vi.fn(),
@@ -14,6 +40,8 @@ import {
   listGoatBrainDocuments,
   searchGoatBrain,
 } from "@opencompany/db/goat-brain-read";
+import { goatBrainToolRuns, goatUsers } from "@opencompany/db/goat-schema";
+import { renderGoatBrainToolCommand, runGoatBrainToolForUser } from "@/lib/brain-cli";
 
 const BASE_INPUT = {
   brainRef: "goat_brain_user_1",
@@ -267,6 +295,12 @@ describe("runGoatBrainToolForUser", () => {
 
 describe("read plane commands", () => {
   beforeEach(() => {
+    dbMocks.batch.mockClear();
+    dbMocks.insert.mockClear();
+    dbMocks.insertValues.mockClear();
+    dbMocks.update.mockClear();
+    dbMocks.updateSet.mockClear();
+    dbMocks.updateWhere.mockClear();
     vi.mocked(searchGoatBrain).mockReset();
     vi.mocked(getGoatBrainDocuments).mockReset();
     vi.mocked(getGoatBrainTimeline).mockReset();
@@ -349,6 +383,43 @@ describe("read plane commands", () => {
     expect(output.stdout).toContain("Next: get ada");
     expect(output.parsed).toEqual({ hits: [HIT] });
     expect(output.traceId).toMatch(/^goat_brain_run_/);
+    expect(dbMocks.insert).toHaveBeenCalledWith(goatBrainToolRuns);
+    expect(dbMocks.insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brainRef: "goat_brain_user_1",
+        sourceRef: "goat-chat:user_message_1",
+        action: "query",
+        ok: true,
+      }),
+    );
+    expect(dbMocks.batch).not.toHaveBeenCalled();
+    expect(dbMocks.update).not.toHaveBeenCalled();
+  });
+
+  it("records MCP queries and setup completion in a non-interactive transaction", async () => {
+    vi.mocked(searchGoatBrain).mockResolvedValue([HIT as never]);
+
+    const output = await runGoatBrainToolForUser({
+      ...BASE_INPUT,
+      sourceRef: "mcp:chatgpt",
+      toolInput: { command: "query", flags: { text: "who runs gtm" } },
+    });
+
+    expect(output.ok).toBe(true);
+    expect(dbMocks.batch).toHaveBeenCalledWith([dbMocks.insertQuery, dbMocks.updateQuery]);
+    expect(dbMocks.insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brainRef: "goat_brain_user_1",
+        sourceRef: "mcp:chatgpt",
+        action: "query",
+        ok: true,
+      }),
+    );
+    expect(dbMocks.update).toHaveBeenCalledWith(goatUsers);
+    expect(dbMocks.updateSet).toHaveBeenCalledWith({
+      mcpSetupCompletedAt: expect.any(Date),
+      updatedAt: expect.any(Date),
+    });
   });
 
   it("serves get for multiple ids and reports missing ones", async () => {
