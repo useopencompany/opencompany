@@ -1,14 +1,20 @@
+import { randomUUID } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { GoatBrainWithWorkspace } from "@opencompany/db/goat-workspaces";
-import { listAccessibleGoatBrainsForUser } from "@opencompany/db/goat-workspaces";
+import {
+  getGoatBrainAccess,
+  listAccessibleGoatBrainsForUser,
+} from "@opencompany/db/goat-workspaces";
 import * as z from "zod/v4-mini";
+import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import { GOAT_BRAIN_READ_COMMANDS, normalizeGoatBrainReadToolInput } from "@/lib/brain-surface";
 import { GOAT_BRAIN_TOOL_NAME, type GoatBrainToolInput } from "@/lib/chat-ui";
 
-// Tool registration for the user-level Goat MCP connector: one read-only
-// surface spanning every brain the token's user can access, addressed via an
-// optional `brain` argument plus a `list_brains` tool.
+// Tool registration for the user-level Goat MCP connector: one surface spanning
+// every brain the token's user can access, addressed via an optional `brain`
+// argument plus a `list_brains` tool. Reads are available to every brain member;
+// captures preserve the same workspace-admin boundary as Goat chat writes.
 export type GoatMcpToolContext = {
   userWorkosId: string;
   gatewayApiKey: string;
@@ -49,6 +55,54 @@ const brainArgSchema = {
   brain: z.optional(z.string().check(z.minLength(1))),
 };
 
+const saveToBrainInputSchema = {
+  content: z.string().check(z.minLength(1)),
+  title: z.optional(z.string().check(z.minLength(1), z.maxLength(200))),
+  intent: z.optional(z.string().check(z.minLength(1), z.maxLength(1_000))),
+  ...brainArgSchema,
+};
+
+const listBrainsOutputSchema = {
+  workspaces: z.array(
+    z.object({
+      name: z.string(),
+      brains: z.array(
+        z.object({
+          id: z.string(),
+          slug: z.string(),
+          name: z.string(),
+          canSave: z.boolean(),
+          description: z.optional(z.string()),
+        }),
+      ),
+    }),
+  ),
+};
+
+const saveToBrainOutputSchema = {
+  ok: z.literal(true),
+  status: z.literal("captured"),
+  brainId: z.string(),
+  draftId: z.string(),
+  path: z.string(),
+  title: z.string(),
+  curation: z.enum(["queued", "paused_by_plan", "already_queued_or_completed"]),
+};
+
+const READ_TOOL_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
+const CAPTURE_TOOL_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+} as const;
+
 export function mcpTextToolResult(output: {
   ok: boolean;
   stdout: string;
@@ -56,14 +110,22 @@ export function mcpTextToolResult(output: {
   parsed?: unknown;
   error?: string;
 }) {
-  const body = output.parsed ? JSON.stringify(output.parsed, null, 2) : output.stdout;
+  const errorText = output.error || output.stderr || output.stdout || "Unknown error.";
+  const body = output.parsed !== undefined ? JSON.stringify(output.parsed, null, 2) : output.stdout;
+  const structuredContent =
+    output.parsed && typeof output.parsed === "object" && !Array.isArray(output.parsed)
+      ? (output.parsed as Record<string, unknown>)
+      : !output.ok
+        ? { ok: false, error: errorText }
+        : undefined;
   return {
     content: [
       {
         type: "text" as const,
-        text: output.ok ? body : output.error || output.stderr || output.stdout || "Unknown error.",
+        text: output.ok ? body : errorText,
       },
     ],
+    ...(structuredContent ? { structuredContent } : {}),
     isError: !output.ok,
   };
 }
@@ -154,7 +216,12 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
     const accessible = await listAccessibleGoatBrainsForUser(ctx.userWorkosId);
     const resolved = resolveGoatMcpBrain(accessible, brainParam);
     if (!resolved.ok) {
-      return mcpTextToolResult({ ok: false, stdout: "", stderr: "", error: resolved.error });
+      return mcpTextToolResult({
+        ok: false,
+        stdout: "",
+        stderr: "",
+        error: resolved.error,
+      });
     }
     const output = await runGoatBrainToolForUser({
       brainRef: resolved.brain.id,
@@ -173,6 +240,7 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
       title: "Goat brain",
       description: `Read your Goat knowledge brains using the same read-only goat_brain command surface as OpenCompany chat. Use query for recall/search, list for inventory, get for known ids, timeline for dated evidence, doctor for validation, and help for usage. ${brainArgHint} Query/timeline since accepts relative windows like 6h, 2d, 1w or an ISO-8601 timestamp.`,
       inputSchema: { ...goatBrainInputSchema, ...brainArgSchema },
+      annotations: READ_TOOL_ANNOTATIONS,
     },
     async (args) => {
       try {
@@ -194,6 +262,7 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
       title: "Query brain",
       description: `Compatibility wrapper over goat_brain query for your Goat knowledge brains. Prefer goat_brain for the full shared read surface. ${brainArgHint}`,
       inputSchema: { ...queryBrainInputSchema, ...brainArgSchema },
+      annotations: READ_TOOL_ANNOTATIONS,
     },
     async ({ brain, ...args }) => run(brain, queryToolInput(args)),
   );
@@ -204,6 +273,7 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
       title: "Get brain document",
       description: `Compatibility wrapper over goat_brain get for your Goat knowledge brains. Prefer goat_brain for the full shared read surface. ${brainArgHint}`,
       inputSchema: { ...getDocumentInputSchema, ...brainArgSchema },
+      annotations: READ_TOOL_ANNOTATIONS,
     },
     async ({ brain, ids }) => run(brain, { command: "get", flags: { id: ids, json: true } }),
   );
@@ -213,30 +283,120 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
     {
       title: "List brains",
       description:
-        'List every Goat brain you can access, grouped by workspace. Use a returned id as the "brain" argument for goat_brain, query_brain, and get_document.',
+        'List every Goat brain you can access, grouped by workspace. Each brain reports whether you can save to it. Use a returned id as the "brain" argument for other tools.',
       inputSchema: {},
+      outputSchema: listBrainsOutputSchema,
+      annotations: READ_TOOL_ANNOTATIONS,
     },
     async () => {
       const accessible = await listAccessibleGoatBrainsForUser(ctx.userWorkosId);
       const workspaces = new Map<string, { name: string; brains: unknown[] }>();
-      for (const { brain, workspace } of accessible) {
-        const entry = workspaces.get(workspace.id) ?? { name: workspace.name, brains: [] };
+      for (const { brain, workspace, workspaceRole } of accessible) {
+        const entry = workspaces.get(workspace.id) ?? {
+          name: workspace.name,
+          brains: [],
+        };
         entry.brains.push({
           id: brain.id,
           slug: brain.slug,
           name: brain.name,
+          canSave: workspaceRole === "admin",
           ...(brain.description ? { description: brain.description } : {}),
         });
         workspaces.set(workspace.id, entry);
       }
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({ workspaces: [...workspaces.values()] }, null, 2),
+      return mcpTextToolResult({
+        ok: true,
+        stdout: "",
+        stderr: "",
+        parsed: { workspaces: [...workspaces.values()] },
+      });
+    },
+  );
+
+  server.registerTool(
+    "save_to_brain",
+    {
+      title: "Save to Goat brain",
+      description: `Capture content the user explicitly wants remembered. This immediately creates a draft in the selected brain's inbox, then queues background curation to title, link, merge, and file it. Preserve the user's content faithfully; do not use this as a scratchpad or save without clear user intent. Requires workspace-admin access. ${brainArgHint}`,
+      inputSchema: saveToBrainInputSchema,
+      outputSchema: saveToBrainOutputSchema,
+      annotations: CAPTURE_TOOL_ANNOTATIONS,
+    },
+    async ({ brain, content, title, intent }) => {
+      try {
+        const accessible = await listAccessibleGoatBrainsForUser(ctx.userWorkosId);
+        const resolved = resolveGoatMcpBrain(accessible, brain);
+        if (!resolved.ok) {
+          return mcpTextToolResult({
+            ok: false,
+            stdout: "",
+            stderr: "",
+            error: resolved.error,
+          });
+        }
+
+        const access = await getGoatBrainAccess({
+          userWorkosId: ctx.userWorkosId,
+          brainRef: resolved.brain.id,
+        });
+        if (access?.workspaceRole !== "admin") {
+          return mcpTextToolResult({
+            ok: false,
+            stdout: "",
+            stderr: "",
+            error: "Only workspace admins can save content to this brain.",
+          });
+        }
+
+        const itemId = `capture_${randomUUID()}`;
+        const captured = await captureToGoatBrainInbox({
+          brainRef: resolved.brain.id,
+          userWorkosId: ctx.userWorkosId,
+          text: content,
+          ...(title ? { title } : {}),
+          ...(intent ? { intent } : {}),
+          source: {
+            kind: "mcp",
+            connectionId: `mcp:${resolved.brain.id}`,
+            itemId,
           },
-        ],
-      };
+        });
+        if (!captured.ok) {
+          return mcpTextToolResult({
+            ok: false,
+            stdout: "",
+            stderr: "",
+            error: captured.error,
+          });
+        }
+
+        return mcpTextToolResult({
+          ok: true,
+          stdout: "",
+          stderr: "",
+          parsed: {
+            ok: true,
+            status: "captured",
+            brainId: resolved.brain.id,
+            draftId: captured.draftBrainId,
+            path: captured.path,
+            title: captured.title,
+            curation: captured.quotaPaused
+              ? "paused_by_plan"
+              : captured.enqueued
+                ? "queued"
+                : "already_queued_or_completed",
+          },
+        });
+      } catch (error) {
+        return mcpTextToolResult({
+          ok: false,
+          stdout: "",
+          stderr: "",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     },
   );
 }
