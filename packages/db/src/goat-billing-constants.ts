@@ -37,3 +37,12 @@ export function goatMonthlyIngestionLimit(plan: GoatWorkspacePlan, seatQuantity:
 export function goatIngestionOverageUsdMicros(rawEventCount: number) {
   return Math.max(0, rawEventCount) * GOAT_INGESTION_OVERAGE_USD_MICROS_PER_RAW_EVENT;
 }
+
+export function goatIngestionOverageRawEventCount(input: {
+  consumedUnits: number;
+  rawEventCount: number;
+  limit: number;
+}) {
+  const includedRemaining = Math.max(0, input.limit - Math.max(0, input.consumedUnits));
+  return Math.max(0, Math.max(0, input.rawEventCount) - includedRemaining);
+}

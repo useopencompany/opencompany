@@ -3,6 +3,7 @@ import {
   GOAT_FREE_MONTHLY_INGESTION_LIMIT,
   GOAT_PRO_MONTHLY_INGESTIONS_PER_SEAT,
   goatCalendarMonthWindow,
+  goatIngestionOverageRawEventCount,
   goatIngestionOverageUsdMicros,
   goatIngestionWindow,
   goatMonthlyIngestionLimit,
@@ -90,6 +91,51 @@ describe("Goat billing entitlements", () => {
     expect(goatIngestionOverageUsdMicros(100)).toBe(2_000_000);
     expect(goatIngestionOverageUsdMicros(0)).toBe(0);
     expect(goatIngestionOverageUsdMicros(-5)).toBe(0);
+  });
+
+  it("charges only the portion of a reservation beyond the allowance", () => {
+    expect(
+      goatIngestionOverageRawEventCount({
+        consumedUnits: 250,
+        rawEventCount: 100,
+        limit: 300,
+      }),
+    ).toBe(50);
+    expect(
+      goatIngestionOverageRawEventCount({
+        consumedUnits: 300,
+        rawEventCount: 100,
+        limit: 300,
+      }),
+    ).toBe(100);
+    expect(
+      goatIngestionOverageRawEventCount({
+        consumedUnits: 100,
+        rawEventCount: 100,
+        limit: 300,
+      }),
+    ).toBe(0);
+    expect(
+      goatIngestionOverageRawEventCount({
+        consumedUnits: 301,
+        rawEventCount: 100,
+        limit: 300,
+      }),
+    ).toBe(100);
+    expect(
+      goatIngestionOverageRawEventCount({
+        consumedUnits: -1,
+        rawEventCount: 100,
+        limit: 300,
+      }),
+    ).toBe(0);
+    expect(
+      goatIngestionOverageRawEventCount({
+        consumedUnits: 0,
+        rawEventCount: -1,
+        limit: 300,
+      }),
+    ).toBe(0);
   });
 
   it("pauses a whole raw-event batch when it cannot fit", () => {

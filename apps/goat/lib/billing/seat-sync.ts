@@ -1,24 +1,31 @@
 import { listGoatSeatSyncCandidates, loadGoatBillingOverview } from "@opencompany/db/goat-billing";
 import { countGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import { createLogger } from "@opencompany/observability";
-import { getGoatStripe } from "@/lib/billing/stripe";
+import { getGoatProPriceId, getGoatStripe } from "@/lib/billing/stripe";
 
 const logger = createLogger({ service: "opencompany-goat", runtime: "goat-seat-sync" });
 
-// Stateless seat sync: push the live member count to the Stripe subscription
-// item; the resulting customer.subscription.updated webhook is the single
-// writer of workspace_billing.seat_quantity. Callers fire-and-forget —
-// membership changes must never fail on Stripe — and the hourly reconcile
-// cron repairs anything a missed call or webhook left drifted.
+// Stateless billing sync: push the live member count and current Pro price to
+// the Stripe subscription item. The resulting customer.subscription.updated
+// webhook remains the single writer of projected billing state. Callers
+// fire-and-forget, and the hourly reconcile repairs missed calls or webhooks.
 export async function syncGoatWorkspaceSeatQuantity(workspaceId: string): Promise<void> {
   try {
     const overview = await loadGoatBillingOverview(workspaceId);
     if (overview.plan !== "pro" || !overview.billing.stripeSubscriptionItemId) return;
     const memberCount = Math.max(1, await countGoatWorkspaceMembers(workspaceId));
-    if (memberCount === overview.billing.seatQuantity) return;
-    await pushSeatQuantity({
+    const targetPriceId = getGoatProPriceId();
+    if (
+      memberCount === overview.billing.seatQuantity &&
+      overview.billing.stripePriceId === targetPriceId
+    ) {
+      return;
+    }
+    await pushSubscriptionTerms({
       workspaceId,
       stripeSubscriptionItemId: overview.billing.stripeSubscriptionItemId,
+      fromPriceId: overview.billing.stripePriceId,
+      toPriceId: targetPriceId,
       fromSeatQuantity: overview.billing.seatQuantity,
       toSeatQuantity: memberCount,
     });
@@ -31,16 +38,19 @@ export async function syncGoatWorkspaceSeatQuantity(workspaceId: string): Promis
   }
 }
 
-// Hourly backstop for missed fire-and-forget syncs and webhooks.
+// Hourly backstop also migrates subscriptions that still use an old Pro price.
 export async function reconcileGoatSeatQuantities(limit = 50) {
-  const candidates = await listGoatSeatSyncCandidates({ limit });
+  const targetPriceId = getGoatProPriceId();
+  const candidates = await listGoatSeatSyncCandidates({ limit, targetPriceId });
   let synced = 0;
   let failed = 0;
   for (const candidate of candidates) {
     try {
-      await pushSeatQuantity({
+      await pushSubscriptionTerms({
         workspaceId: candidate.workspaceId,
         stripeSubscriptionItemId: candidate.stripeSubscriptionItemId,
+        fromPriceId: candidate.stripePriceId,
+        toPriceId: targetPriceId,
         fromSeatQuantity: candidate.seatQuantity,
         toSeatQuantity: candidate.memberCount,
       });
@@ -57,19 +67,23 @@ export async function reconcileGoatSeatQuantities(limit = 50) {
   return { candidates: candidates.length, synced, failed };
 }
 
-async function pushSeatQuantity(input: {
+async function pushSubscriptionTerms(input: {
   workspaceId: string;
   stripeSubscriptionItemId: string;
+  fromPriceId: string | null;
+  toPriceId: string;
   fromSeatQuantity: number;
   toSeatQuantity: number;
 }) {
   await getGoatStripe().subscriptionItems.update(input.stripeSubscriptionItemId, {
+    price: input.toPriceId,
     quantity: input.toSeatQuantity,
     proration_behavior: "create_prorations",
   });
-  logger.info("Goat seat quantity pushed to Stripe", {
-    event: "goat.seat_quantity_pushed",
+  logger.info("Goat subscription terms pushed to Stripe", {
+    event: "goat.subscription_terms_pushed",
     workspace_id: input.workspaceId,
+    price_changed: input.fromPriceId !== input.toPriceId,
     from_seat_quantity: input.fromSeatQuantity,
     to_seat_quantity: input.toSeatQuantity,
   });

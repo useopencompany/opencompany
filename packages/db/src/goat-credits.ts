@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import type { GoatCreditLedgerSource } from "./goat-schema";
 import { goatCreditLedger, goatStripeCheckoutSessions } from "./goat-schema";
@@ -234,12 +234,17 @@ export async function markGoatCheckoutRecordFailed(input: {
   await db
     .update(goatStripeCheckoutSessions)
     .set({ status: "failed", metadata: { error: input.error }, updatedAt: new Date() })
-    .where(eq(goatStripeCheckoutSessions.id, input.id));
+    .where(
+      and(
+        eq(goatStripeCheckoutSessions.id, input.id),
+        isNull(goatStripeCheckoutSessions.fulfilledAt),
+      ),
+    );
 }
 
-// Called from the shared Stripe webhook for checkout.session.completed events
-// with metadata.billingProduct === 'goat_topup'. The `fulfilled_at IS NULL`
-// guard is the idempotency: Stripe retries and duplicate events no-op.
+// Called from the shared Stripe webhook for immediate or delayed successful
+// Goat top-up Checkout events. The `fulfilled_at IS NULL` guard is the
+// idempotency: overlapping event types and Stripe retries no-op.
 export async function fulfillGoatTopUpCheckoutSession(
   session: {
     id: string;

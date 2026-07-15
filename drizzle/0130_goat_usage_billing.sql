@@ -16,9 +16,16 @@ ALTER TABLE "goat"."workspace_billing" ADD COLUMN IF NOT EXISTS "seat_quantity" 
 ALTER TABLE "goat"."workspace_billing" DROP CONSTRAINT IF EXISTS "goat_workspace_billing_seat_quantity_check";--> statement-breakpoint
 ALTER TABLE "goat"."workspace_billing" ADD CONSTRAINT "goat_workspace_billing_seat_quantity_check" CHECK ("seat_quantity" >= 1);
 --> statement-breakpoint
--- Overage marker: > 0 on reservations that were admitted by debiting credits
--- instead of fitting the monthly allowance. Doubles as the usage report line.
+-- Overage markers: > 0 on reservations that were partly or fully admitted by
+-- debiting credits beyond the monthly allowance. They also drive usage reports.
+ALTER TABLE "goat"."workspace_ingestion_reservations" ADD COLUMN IF NOT EXISTS "billed_overage_raw_event_count" integer NOT NULL DEFAULT 0;--> statement-breakpoint
 ALTER TABLE "goat"."workspace_ingestion_reservations" ADD COLUMN IF NOT EXISTS "billed_overage_usd_micros" bigint NOT NULL DEFAULT 0;
+--> statement-breakpoint
+ALTER TABLE "goat"."workspace_ingestion_reservations" DROP CONSTRAINT IF EXISTS "goat_ingestion_reservations_billed_overage_units_check";--> statement-breakpoint
+ALTER TABLE "goat"."workspace_ingestion_reservations" ADD CONSTRAINT "goat_ingestion_reservations_billed_overage_units_check" CHECK ("billed_overage_raw_event_count" >= 0 AND "billed_overage_raw_event_count" <= "raw_event_count");
+--> statement-breakpoint
+ALTER TABLE "goat"."workspace_ingestion_reservations" DROP CONSTRAINT IF EXISTS "goat_ingestion_reservations_billed_overage_usd_check";--> statement-breakpoint
+ALTER TABLE "goat"."workspace_ingestion_reservations" ADD CONSTRAINT "goat_ingestion_reservations_billed_overage_usd_check" CHECK ("billed_overage_usd_micros" >= 0);
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "goat"."credit_balances" (
 	"workspace_id" text PRIMARY KEY REFERENCES "goat"."workspaces"("id") ON DELETE CASCADE,

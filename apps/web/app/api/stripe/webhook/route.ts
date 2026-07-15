@@ -5,7 +5,10 @@ import {
   findGoatWorkspaceIdForStripeSubscription,
   GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
 } from "@opencompany/db/goat-billing";
-import { fulfillGoatTopUpCheckoutSession } from "@opencompany/db/goat-credits";
+import {
+  fulfillGoatTopUpCheckoutSession,
+  markGoatCheckoutRecordFailed,
+} from "@opencompany/db/goat-credits";
 import type { GoatStripeSubscriptionStatus } from "@opencompany/db/goat-schema";
 import { after, NextResponse } from "next/server";
 import Stripe from "stripe";
@@ -37,17 +40,28 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
-  if (event.type === "checkout.session.completed") {
+  if (
+    event.type === "checkout.session.completed" ||
+    event.type === "checkout.session.async_payment_succeeded" ||
+    event.type === "checkout.session.async_payment_failed"
+  ) {
     const session = event.data.object;
-    if (session.mode === "subscription" && session.metadata?.billingProduct === "goat") {
-      // The subscription lifecycle events carry the complete item/status data
-      // and project the entitlement. Checkout completion is intentionally a
-      // no-op here so event ordering cannot grant access from partial data.
+    const isGoatTopUp =
+      session.mode === "payment" && session.metadata?.billingProduct === "goat_topup";
+    if (isGoatTopUp && event.type === "checkout.session.async_payment_failed") {
+      const checkoutRecordId = session.metadata?.checkoutRecordId;
+      if (checkoutRecordId) {
+        await markGoatCheckoutRecordFailed({
+          id: checkoutRecordId,
+          error: "Stripe reported that the delayed Checkout payment failed.",
+        });
+      }
       return NextResponse.json({ received: true });
     }
-    // Goat credit top-ups: one-time payment-mode checkouts fulfilled into the
-    // goat-scoped credit tables (goat.credit_balances / goat.credit_ledger).
-    if (session.mode === "payment" && session.metadata?.billingProduct === "goat_topup") {
+    // Goat credit top-ups can complete immediately or after a delayed payment
+    // method succeeds. Fulfillment itself verifies payment_status and is
+    // idempotent across both webhook events and Stripe retries.
+    if (isGoatTopUp) {
       const result = await fulfillGoatTopUpCheckoutSession(session, { eventId: event.id });
       if (result.ok) {
         const workspaceId = session.metadata?.goatWorkspaceId ?? "";
@@ -60,6 +74,17 @@ export async function POST(request: Request) {
           }),
         );
       }
+      return NextResponse.json({ received: true });
+    }
+    // Async Checkout outcomes are only enabled for Goat top-ups here. Legacy
+    // credit fulfillment retains its existing completed-event contract.
+    if (event.type !== "checkout.session.completed") {
+      return NextResponse.json({ received: true });
+    }
+    if (session.mode === "subscription" && session.metadata?.billingProduct === "goat") {
+      // The subscription lifecycle events carry the complete item/status data
+      // and project the entitlement. Checkout completion is intentionally a
+      // no-op here so event ordering cannot grant access from partial data.
       return NextResponse.json({ received: true });
     }
     // Setup-mode checkouts save a card for auto-refill; payment-mode checkouts are

@@ -1517,8 +1517,9 @@ export const goatWorkspaceIngestionReservations = goat.table(
     rawEventCount: integer("raw_event_count").notNull(),
     status: text("status").$type<GoatIngestionReservationStatus>().notNull().default("pending"),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
-    // > 0 when the reservation was admitted by debiting credits (Pro overage,
-    // $2 per 100 raw events) instead of fitting the monthly allowance.
+    // > 0 when part or all of the reservation was admitted by debiting credits
+    // (Pro overage, $2 per 100 raw events) beyond the monthly allowance.
+    billedOverageRawEventCount: integer("billed_overage_raw_event_count").notNull().default(0),
     billedOverageUsdMicros: bigint("billed_overage_usd_micros", { mode: "number" })
       .notNull()
       .default(0),
@@ -1551,6 +1552,14 @@ export const goatWorkspaceIngestionReservations = goat.table(
     rawEventCountCheck: check(
       "goat_ingestion_reservations_raw_event_count_check",
       sql`${table.rawEventCount} > 0 AND ${table.rawEventCount} <= 200`,
+    ),
+    billedOverageRawEventCountCheck: check(
+      "goat_ingestion_reservations_billed_overage_units_check",
+      sql`${table.billedOverageRawEventCount} >= 0 AND ${table.billedOverageRawEventCount} <= ${table.rawEventCount}`,
+    ),
+    billedOverageUsdMicrosCheck: check(
+      "goat_ingestion_reservations_billed_overage_usd_check",
+      sql`${table.billedOverageUsdMicros} >= 0`,
     ),
     sourceProviderCheck: check(
       "goat_ingestion_reservations_source_provider_check",
