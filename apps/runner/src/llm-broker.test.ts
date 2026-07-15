@@ -541,7 +541,11 @@ describe("LLM broker proxying", () => {
 });
 
 describe("server integration", () => {
-  it("keeps default JSON parsing on /internal/* routes (broker parser is encapsulated)", async () => {
+  // The full server module graph can take longer than the default 5s test
+  // timeout to import on loaded CI runners.
+  it("keeps default JSON parsing on /internal/* routes (broker parser is encapsulated)", {
+    timeout: 30_000,
+  }, async () => {
     const { createServer } = await import("./server");
     const { store } = createFakeStore(defaultTokens());
     const server = createServer(env, { llmBroker: { store } });
