@@ -293,36 +293,77 @@ jobs:
             "WORKOS_CLIENT_ID",
             "WORKOS_API_KEY",
             "WORKOS_COOKIE_PASSWORD",
+            "GOAT_NEXT_PUBLIC_APP_URL",
+            "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
             "VERCEL_AI_GATEWAY_API_KEY",
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
             "ELECTRIC_URL",
           ];
 
-          async function main() {
-            const projectId = process.env.GOAT_VERCEL_PROJECT_ID;
-            const teamId = process.env.VERCEL_ORG_ID;
-            const token = process.env.VERCEL_TOKEN;
-
-            if (!projectId || !teamId || !token) {
-              throw new Error("GOAT_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
-            }
-
+          async function listProductionEnv(projectId, label, teamId, token) {
             const response = await fetch(
               `https://api.vercel.com/v10/projects/${projectId}/env?teamId=${teamId}&target=production`,
               { headers: { Authorization: `Bearer ${token}` } },
             );
 
             if (!response.ok) {
-              throw new Error(`Could not fetch Goat Vercel env metadata: ${response.status} ${response.statusText}`);
+              throw new Error(`Could not fetch ${label} Vercel env metadata: ${response.status} ${response.statusText}`);
             }
 
             const { envs } = await response.json();
-            const productionKeys = new Set(
-              envs
-                .filter((env) => Array.isArray(env.target) && env.target.includes("production"))
-                .map((env) => env.key),
+            return envs.filter(
+              (env) =>
+                Array.isArray(env.target) &&
+                env.target.includes("production") &&
+                !env.gitBranch,
             );
+          }
+
+          async function readEnvValue(projectId, envs, key, label, teamId, token) {
+            const matches = envs.filter((env) => env.key === key);
+
+            if (matches.length !== 1) {
+              throw new Error(`${label} must have exactly one production ${key}; found ${matches.length}.`);
+            }
+
+            const response = await fetch(
+              `https://api.vercel.com/v1/projects/${projectId}/env/${matches[0].id}?teamId=${teamId}`,
+              { headers: { Authorization: `Bearer ${token}` } },
+            );
+
+            if (!response.ok) {
+              throw new Error(`Could not read ${label} ${key}: ${response.status} ${response.statusText}`);
+            }
+
+            const env = await response.json();
+
+            if (env.decrypted !== true || typeof env.value !== "string" || env.value.length === 0) {
+              throw new Error(`${label} ${key} could not be decrypted.`);
+            }
+
+            return env.value;
+          }
+
+          async function main() {
+            const goatProjectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const webProjectId = process.env.VERCEL_PROJECT_ID;
+            const teamId = process.env.VERCEL_ORG_ID;
+            const token = process.env.VERCEL_TOKEN;
+
+            if (!goatProjectId || !webProjectId || !teamId || !token) {
+              throw new Error("GOAT_VERCEL_PROJECT_ID, VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.");
+            }
+
+            if (goatProjectId === webProjectId) {
+              throw new Error("Goat and web must use separate Vercel projects.");
+            }
+
+            const [goatEnv, webEnv] = await Promise.all([
+              listProductionEnv(goatProjectId, "Goat", teamId, token),
+              listProductionEnv(webProjectId, "web", teamId, token),
+            ]);
+            const productionKeys = new Set(goatEnv.map((env) => env.key));
             const missing = required.filter((key) => !productionKeys.has(key));
 
             console.log(`Vercel Goat production env keys: ${required.length - missing.length}/${required.length} required present.`);
@@ -330,6 +371,44 @@ jobs:
             if (missing.length > 0) {
               throw new Error(`Missing Goat Vercel production env keys: ${missing.join(", ")}`);
             }
+
+            const expectedGoatOrigin = new URL(process.env.PRODUCTION_GOAT_URL).origin;
+            const expectedValues = new Map([
+              ["GOAT_NEXT_PUBLIC_APP_URL", expectedGoatOrigin],
+              ["GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedGoatOrigin}/auth/callback`],
+            ]);
+            const configuredGoatUrls = await Promise.all(
+              Array.from(expectedValues.keys(), (key) =>
+                readEnvValue(goatProjectId, goatEnv, key, "Goat", teamId, token),
+              ),
+            );
+            const mismatched = Array.from(expectedValues.entries())
+              .filter(([, expected], index) => configuredGoatUrls[index].trim() !== expected)
+              .map(([key]) => key);
+
+            if (mismatched.length > 0) {
+              throw new Error(
+                `Goat Vercel production envs do not match PRODUCTION_GOAT_URL: ${mismatched.join(", ")}`,
+              );
+            }
+
+            const credentialKeys = ["WORKOS_CLIENT_ID", "WORKOS_API_KEY"];
+            const [goatCredentials, webCredentials] = await Promise.all([
+              Promise.all(
+                credentialKeys.map((key) => readEnvValue(goatProjectId, goatEnv, key, "Goat", teamId, token)),
+              ),
+              Promise.all(
+                credentialKeys.map((key) => readEnvValue(webProjectId, webEnv, key, "web", teamId, token)),
+              ),
+            ]);
+
+            if (credentialKeys.some((_, index) => goatCredentials[index] === webCredentials[index])) {
+              throw new Error(
+                "Goat must use a separate WorkOS Application client id and API key from the legacy web app.",
+              );
+            }
+
+            console.log("Verified that Goat and web use separate WorkOS Application credentials.");
           }
 
           main().catch((error) => {
