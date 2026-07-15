@@ -1,0 +1,40 @@
+/*
+ * The marketing site's only stylesheet. It re-exports the shared
+ * @opencompany/ui styles, which pull in Tailwind, the design tokens, and a
+ * @source directive that scans the ui package. Tailwind auto-detects this app's
+ * own source files from the build root.
+ */
+@import "@opencompany/ui/globals.css";
+
+/* Route the `font-mono` utility to Geist Mono (loaded via next/font in layout). */
+@theme {
+  --font-mono:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/*
+ * Playful easter egg: the header mark sits still, then does a single quick
+ * 3D coin-flip (spins left-to-right around its vertical axis) once every 5s.
+ * The flip lives in the last ~16% of the cycle so it reads as an occasional
+ * flourish rather than constant motion.
+ */
+@keyframes goat-mark-spin {
+  0%,
+  84% {
+    transform: perspective(200px) rotateY(0);
+  }
+  100% {
+    transform: perspective(200px) rotateY(360deg);
+  }
+}
+
+.animate-goat-mark-spin {
+  transform-origin: 50% 50%;
+  animation: goat-mark-spin 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-goat-mark-spin {
+    animation: none;
+  }
+}
