@@ -24,6 +24,7 @@ Use secret paths by deployment surface:
 | Path | Used by | Purpose |
 |---|---|---|
 | `/web` | Vercel web, local web | Next.js app, WorkOS, Inngest, GitHub App, analytics, feedback, runner client config. |
+| `/goat` | Vercel Goat | Complete Goat runtime set, including the Goat-specific WorkOS Application credentials. |
 | `/runner` | Render runner, local runner | Fastify runner, E2B, AI Gateway, runner auth, GitHub App Brain sync. |
 | `/release` | GitHub Actions release workflow | Production migration/deploy orchestration. |
 
@@ -157,8 +158,14 @@ In Infisical:
 
 Repeat for:
 
+- `prod` + `/goat` -> Goat Vercel Production
 - `dev` + `/web` -> Vercel Development
 - `staging` + `/web` -> Vercel Preview
+
+Keep `prod` + `/goat` self-contained. It intentionally duplicates shared runtime values from
+`/web` so its Vercel sync has one unambiguous source, while its `WORKOS_CLIENT_ID` and
+`WORKOS_API_KEY` belong to the separate Goat WorkOS Application. When a shared production value
+changes, update both paths if both apps consume it.
 
 ## Render Sync
 
