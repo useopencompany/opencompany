@@ -249,11 +249,17 @@ export async function fulfillGoatTopUpCheckoutSession(
   session: {
     id: string;
     payment_status: string | null;
+    status?: string | null;
+    amount_total?: number | null;
     metadata?: Record<string, string> | null;
   },
-  options: { eventId?: string } = {},
+  options: { eventId?: string; db?: DbLike } = {},
 ) {
-  if (session.payment_status !== "paid") {
+  const isCompletedNoCostOrder =
+    session.payment_status === "no_payment_required" &&
+    session.status === "complete" &&
+    session.amount_total === 0;
+  if (session.payment_status !== "paid" && !isCompletedNoCostOrder) {
     return { ok: false as const, reason: "not_paid" as const };
   }
   const checkoutRecordId = session.metadata?.checkoutRecordId;
@@ -264,7 +270,7 @@ export async function fulfillGoatTopUpCheckoutSession(
     return { ok: false as const, reason: "missing_metadata" as const };
   }
 
-  const db = getDb();
+  const db = options.db ?? getDb();
   const result = await db.execute(sql`
     WITH fulfilled_session AS (
       UPDATE goat.stripe_checkout_sessions

@@ -112,11 +112,13 @@ describe("Goat billing actions", () => {
     const [params] = checkoutCreate.mock.calls[0] as [
       {
         mode: string;
+        allow_promotion_codes: boolean;
         line_items: Array<{ price_data: { currency: string; unit_amount: number } }>;
         metadata: Record<string, string>;
       },
     ];
     expect(params.mode).toBe("payment");
+    expect(params.allow_promotion_codes).toBe(true);
     expect(params.line_items[0]?.price_data).toMatchObject({
       currency: "usd",
       unit_amount: 1_000,
