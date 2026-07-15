@@ -1,11 +1,6 @@
 "use client";
 
 import {
-  GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS,
-  GOAT_SOURCE_BONUS_MONTHLY_ITEMS,
-  goatSourceBonusItems,
-} from "@opencompany/db/goat-billing-constants";
-import {
   ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
   HARD_DEFAULT_GOAT_BRAIN_FOLDERS,
   normalizeGoatBrainFolder,
@@ -119,10 +114,9 @@ const MEMBER_STEPS: StepDef[] = [
   { key: "finish", label: "You're all set" },
 ];
 
-// Each connected source adds monthly ingestion allowance, capped at four
-// sources — the same constants the server enforces.
-const ITEMS_PER_SOURCE = GOAT_SOURCE_BONUS_MONTHLY_ITEMS;
-const ITEMS_BONUS_MAX = GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS;
+// Nudge toward a strong starting set of connected sources; purely a UI goal,
+// connecting sources no longer changes the ingestion allowance.
+const SOURCE_GOAL = 4;
 
 // Role presets — the first onboarding step. Picking one seeds the adjustable
 // brain folders with a set that matches how that person actually works (the
@@ -994,7 +988,6 @@ function NewFolderControl({ onAdd }: { onAdd: (value: string) => boolean }) {
 // Step — Sources
 // ---------------------------------------------------------------------------
 
-const SOURCE_GOAL = ITEMS_BONUS_MAX / ITEMS_PER_SOURCE;
 const POPUP_WIDTH = 560;
 const POPUP_HEIGHT = 760;
 
@@ -1138,7 +1131,7 @@ function SourcesStep({
     <div>
       <StepHeader
         title="Connect your sources"
-        subtitle={`Authorize an account, then choose exactly what should flow into this Brain. Each connected source adds +${ITEMS_PER_SOURCE} items/month to your ingestion allowance, up to +${ITEMS_BONUS_MAX}.`}
+        subtitle="Authorize an account, then choose exactly what should flow into this Brain."
       />
 
       {connectionError ? (
@@ -1160,7 +1153,7 @@ function SourcesStep({
               : `Configure ${SOURCE_GOAL - count} more to get the most out of your Brain`}
           </span>
           <span className="font-medium text-success">
-            +{goatSourceBonusItems(count)} items/month
+            {count} source{count === 1 ? "" : "s"} connected
           </span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-subtle">

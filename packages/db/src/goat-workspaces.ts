@@ -2,9 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { normalizeGoatBrainId } from "../../goat-brain/src/index";
 import { getDb } from "./client";
+import { GOAT_STARTER_CREDIT_USD_CENTS } from "./goat-billing-constants";
 import { seedDefaultGoatBrainFolders } from "./goat-brain-files";
+import { grantGoatStarterCredit } from "./goat-credits";
 import {
   type GoatBrain,
+  type GoatBrainIntelligence,
   type GoatBrainVisibility,
   type GoatOnboarding,
   type GoatUser,
@@ -244,6 +247,22 @@ export async function createDefaultGoatWorkspaceForUser(
     },
     { db },
   );
+  // Starter credit so usage-based chat works before the first top-up. The
+  // starter_grant partial unique index makes concurrent bootstraps converge;
+  // a grant failure must never fail workspace creation.
+  try {
+    await grantGoatStarterCredit({
+      workspaceId: `goat_ws_${input.userWorkosId}`,
+      userWorkosId: input.userWorkosId,
+      amountCents: GOAT_STARTER_CREDIT_USD_CENTS,
+      db,
+    });
+  } catch (error) {
+    console.warn(
+      `Failed to grant the starter credit for Goat workspace goat_ws_${input.userWorkosId}.`,
+      error,
+    );
+  }
 }
 
 // Adopts local memberships for WorkOS organizations the user already belongs
@@ -389,6 +408,33 @@ export async function updateGoatBrainEnrichmentEnabled(
   if (rows.length === 0) throw new Error("Brain not found.");
 }
 
+// Read live at ingest time (like enrichment) so switching a brain's tier
+// applies to already-queued jobs. Missing rows fail to the included tier.
+export async function getGoatBrainIntelligence(
+  brainRef: string,
+  db: DbClient = getDb(),
+): Promise<GoatBrainIntelligence> {
+  const rows = await db
+    .select({ intelligence: goatBrains.intelligence })
+    .from(goatBrains)
+    .where(eq(goatBrains.id, brainRef))
+    .limit(1);
+  return rows[0]?.intelligence ?? "basic";
+}
+
+export async function updateGoatBrainIntelligence(
+  input: { brainRef: string; intelligence: GoatBrainIntelligence },
+  options: { db?: DbClient } = {},
+): Promise<void> {
+  const db = options.db ?? getDb();
+  const rows = await db
+    .update(goatBrains)
+    .set({ intelligence: input.intelligence, updatedAt: new Date() })
+    .where(eq(goatBrains.id, input.brainRef))
+    .returning({ id: goatBrains.id });
+  if (rows.length === 0) throw new Error("Brain not found.");
+}
+
 export async function replaceGoatBrainMembers(
   input: { brainRef: string; userWorkosIds: string[]; addedByWorkosId: string },
   options: { db?: DbClient } = {},
@@ -450,6 +496,18 @@ export async function listGoatWorkspaceMembers(
     .where(eq(goatWorkspaceMembers.workspaceId, workspaceId))
     .orderBy(asc(goatWorkspaceMembers.createdAt));
   return rows;
+}
+
+export async function countGoatWorkspaceMembers(
+  workspaceId: string,
+  options: { db?: DbClient } = {},
+): Promise<number> {
+  const db = options.db ?? getDb();
+  const rows = await db
+    .select({ total: sql<number>`count(*)::integer` })
+    .from(goatWorkspaceMembers)
+    .where(eq(goatWorkspaceMembers.workspaceId, workspaceId));
+  return Number(rows[0]?.total ?? 0);
 }
 
 export async function removeGoatWorkspaceMember(

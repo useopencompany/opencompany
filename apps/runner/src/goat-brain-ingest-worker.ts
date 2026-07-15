@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { calculateModelUsageCost } from "@opencompany/billing";
+import { calculateModelUsageCost, calculatePlatformFeeUsdMicros } from "@opencompany/billing";
 import { releasePendingGoatIngestionReservations } from "@opencompany/db/goat-billing";
+import { GOAT_FRONTIER_INGEST_MODEL } from "@opencompany/db/goat-billing-constants";
 import {
   goatBrainFilePathFor,
   listGoatBrainFiles,
   upsertGoatBrainFile,
 } from "@opencompany/db/goat-brain-files";
 import { normalizeGoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
+import { recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import {
   type GoatBrainIngestJob,
   type GoatBrainIngestJobKind,
@@ -698,6 +700,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
       ),
     );
     recordBrainIngestModelCost(result);
+    await debitFrontierIngestCost(input.job, result);
     if (!leaseActive) {
       finishTelemetry("aborted", {
         "goat.status": "running",
@@ -760,6 +763,9 @@ export async function runClaimedGoatBrainIngestJob(input: {
   } catch (error) {
     if (error instanceof GoatBrainIngestBudgetError) {
       recordBrainIngestModelCost(error.result);
+      // The agent ran and spent real provider money before the budget error;
+      // frontier pass-through still charges it.
+      await debitFrontierIngestCost(input.job, error.result);
     }
     const message = errorMessage(error);
     const maxAttempts =
@@ -807,6 +813,58 @@ export async function runClaimedGoatBrainIngestJob(input: {
     // Flush the job's spans promptly; the runner is long-lived and may not shut
     // down (its only other flush point) for a long time. No-ops when disabled.
     await flushBraintrust();
+  }
+}
+
+// Frontier-tier pass-through: debit the attempt's tracked provider model cost
+// (plus the standard platform fee) from the workspace's credits. Priced from
+// the recorded trace model, so a mid-queue tier toggle can never bill the
+// wrong tier; basic-tier attempts debit nothing. Charged per attempt — the
+// budget counters reset each attempt, so charging only completed jobs would
+// eat retried attempts' real spend — with `frontier:{jobId}:{attempt}` as the
+// replay guard. The brain-query and web-search costs are NOT passed through:
+// both exist for basic-tier ingests too and stay absorbed in the plan.
+async function debitFrontierIngestCost(
+  job: GoatBrainIngestJobWithSource,
+  result: Record<string, unknown>,
+) {
+  try {
+    if (!job.workspaceId) return;
+    const trace = normalizeGoatBrainIngestTrace(result.trace);
+    if (!trace || trace.model !== GOAT_FRONTIER_INGEST_MODEL) return;
+    const providerCostUsdMicros = trace.budget?.modelCostUsdMicros;
+    if (
+      typeof providerCostUsdMicros !== "number" ||
+      !Number.isFinite(providerCostUsdMicros) ||
+      providerCostUsdMicros <= 0
+    ) {
+      return;
+    }
+    const platformFeeUsdMicros = calculatePlatformFeeUsdMicros(providerCostUsdMicros);
+    await recordGoatCreditDebit({
+      workspaceId: job.workspaceId,
+      userWorkosId: job.userWorkosId,
+      source: "frontier_ingest",
+      idempotencyKey: `frontier:${job.id}:${job.attempts}`,
+      ingestJobId: job.id,
+      providerCostUsdMicros,
+      platformFeeUsdMicros,
+      totalCostUsdMicros: providerCostUsdMicros + platformFeeUsdMicros,
+      costBasis: {
+        kind: "frontier_ingest",
+        model: trace.model,
+        attempt: job.attempts,
+        usage: trace.usage,
+      },
+    });
+  } catch (error) {
+    // A debit failure must never fail (or retry) the ingest job itself.
+    logger.warn("Goat Brain frontier ingest debit failed", {
+      event: "opencompany.goat_brain_frontier_debit_failed",
+      job_id: job.id,
+      workspace_id: job.workspaceId,
+      error,
+    });
   }
 }
 

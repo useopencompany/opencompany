@@ -911,6 +911,13 @@
       "when": 1784033826873,
       "tag": "0129_goat_billing_monthly_pooled",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1784552400000,
+      "tag": "0130_goat_usage_billing",
+      "breakpoints": true
     }
   ]
 }

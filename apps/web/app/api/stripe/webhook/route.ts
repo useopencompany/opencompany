@@ -3,8 +3,9 @@ import {
   applyGoatStripeInvoicePaymentState,
   applyGoatStripeSubscriptionProjection,
   findGoatWorkspaceIdForStripeSubscription,
-  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
 } from "@opencompany/db/goat-billing";
+import { fulfillGoatTopUpCheckoutSession } from "@opencompany/db/goat-credits";
 import type { GoatStripeSubscriptionStatus } from "@opencompany/db/goat-schema";
 import { after, NextResponse } from "next/server";
 import Stripe from "stripe";
@@ -42,6 +43,23 @@ export async function POST(request: Request) {
       // The subscription lifecycle events carry the complete item/status data
       // and project the entitlement. Checkout completion is intentionally a
       // no-op here so event ordering cannot grant access from partial data.
+      return NextResponse.json({ received: true });
+    }
+    // Goat credit top-ups: one-time payment-mode checkouts fulfilled into the
+    // goat-scoped credit tables (goat.credit_balances / goat.credit_ledger).
+    if (session.mode === "payment" && session.metadata?.billingProduct === "goat_topup") {
+      const result = await fulfillGoatTopUpCheckoutSession(session, { eventId: event.id });
+      if (result.ok) {
+        const workspaceId = session.metadata?.goatWorkspaceId ?? "";
+        after(() =>
+          captureServerEvent("goat_billing_topup_completed", workspaceId, {
+            workspace_id: workspaceId,
+            checkout_record_id: result.checkoutRecordId,
+            amount_cents: result.amountCents,
+            balance_cents: result.balanceCents,
+          }),
+        );
+      }
       return NextResponse.json({ received: true });
     }
     // Setup-mode checkouts save a card for auto-refill; payment-mode checkouts are
@@ -107,6 +125,7 @@ async function handleGoatSubscriptionEvent(
     subscriptionId: subscription.id,
     subscriptionItemId: item?.id ?? null,
     priceId: item ? stripeObjectId(item.price) : null,
+    seatQuantity: item?.quantity ?? null,
     status: subscription.status as GoatStripeSubscriptionStatus,
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
     currentPeriodEnd: item?.current_period_end ? new Date(item.current_period_end * 1_000) : null,
@@ -121,7 +140,8 @@ async function handleGoatSubscriptionEvent(
     if (projection.plan === "pro") {
       await captureServerEvent("goat_billing_checkout_completed", workspaceId, {
         workspace_id: workspaceId,
-        monthly_price_usd_cents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+        seat_quantity: item?.quantity ?? 1,
+        seat_monthly_price_usd_cents: GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
       });
     }
   }
