@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   type GoatBrainSourceConfigProvider,
@@ -21,11 +21,14 @@ export type GoatBrainSourceWithIntegration = {
   config: Record<string, unknown>;
   integrationStatus: GoatIntegrationStatus;
   integrationAccountName: string | null;
+  integrationAccountEmail: string | null;
+  integrationConnectionLabel: string | null;
   // Set when the backing integration is workspace-owned (github, jamie); null
   // for personal connections.
   integrationWorkspaceId: string | null;
   ownerName: string | null;
   ownerEmail: string | null;
+  ownerAvatarUrl: string | null;
 };
 
 export async function listGoatBrainSourcesForBrain(
@@ -43,10 +46,13 @@ export async function listGoatBrainSourcesForBrain(
       config: goatBrainSources.config,
       integrationStatus: goatIntegrations.status,
       integrationAccountName: goatIntegrations.accountName,
+      integrationAccountEmail: goatIntegrations.accountEmail,
+      integrationConnectionLabel: goatIntegrations.connectionLabel,
       integrationWorkspaceId: goatIntegrations.workspaceId,
       ownerFirstName: goatUsers.firstName,
       ownerLastName: goatUsers.lastName,
       ownerEmail: goatUsers.email,
+      ownerAvatarUrl: goatUsers.avatarUrl,
     })
     .from(goatBrainSources)
     .innerJoin(goatIntegrations, eq(goatBrainSources.integrationId, goatIntegrations.id))
@@ -63,9 +69,12 @@ export async function listGoatBrainSourcesForBrain(
     config: row.config,
     integrationStatus: row.integrationStatus,
     integrationAccountName: row.integrationAccountName,
+    integrationAccountEmail: row.integrationAccountEmail,
+    integrationConnectionLabel: row.integrationConnectionLabel,
     integrationWorkspaceId: row.integrationWorkspaceId,
     ownerName: [row.ownerFirstName, row.ownerLastName].filter(Boolean).join(" ").trim() || null,
     ownerEmail: row.ownerEmail,
+    ownerAvatarUrl: row.ownerAvatarUrl,
   }));
 }
 
@@ -136,6 +145,66 @@ export async function upsertGoatBrainSource(input: {
 
   if (!row) throw new Error("Could not persist Goat Brain source.");
   return { id: row.id };
+}
+
+export async function deleteGoatBrainSource(input: {
+  brainRef: string;
+  sourceId: string;
+  db?: DbLike;
+}): Promise<boolean> {
+  const db = input.db ?? getDb();
+  const rows = await db
+    .delete(goatBrainSources)
+    .where(
+      and(eq(goatBrainSources.id, input.sourceId), eq(goatBrainSources.brainId, input.brainRef)),
+    )
+    .returning({ id: goatBrainSources.id });
+  return rows.length > 0;
+}
+
+// The actor's personal (workspace_id IS NULL) connections for one provider —
+// the pool of accounts they can attach to a brain. Excludes disconnected rows
+// and the Linear MCP connector row (provider "linear" is shared with MCP; only
+// the ingest connection keyed on the organization id can feed brains).
+export async function listGoatPersonalIntegrationAccounts(input: {
+  userWorkosId: string;
+  provider: GoatBrainSourceConfigProvider;
+  excludeExternalId?: string;
+  db?: DbLike;
+}): Promise<
+  Array<{
+    integrationId: string;
+    status: GoatIntegrationStatus;
+    accountEmail: string | null;
+    accountName: string | null;
+    connectionLabel: string | null;
+    externalId: string;
+  }>
+> {
+  const db = input.db ?? getDb();
+  const rows = await db
+    .select({
+      integrationId: goatIntegrations.id,
+      status: goatIntegrations.status,
+      accountEmail: goatIntegrations.accountEmail,
+      accountName: goatIntegrations.accountName,
+      connectionLabel: goatIntegrations.connectionLabel,
+      externalId: goatIntegrations.externalId,
+    })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.userWorkosId, input.userWorkosId),
+        eq(goatIntegrations.provider, input.provider),
+        isNull(goatIntegrations.workspaceId),
+        ne(goatIntegrations.status, "disconnected"),
+        ...(input.excludeExternalId
+          ? [ne(goatIntegrations.externalId, input.excludeExternalId)]
+          : []),
+      ),
+    )
+    .orderBy(goatIntegrations.createdAt);
+  return rows;
 }
 
 export function newGoatBrainSourceId() {

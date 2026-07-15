@@ -395,28 +395,50 @@ export async function replaceGoatBrainMembers(
 ): Promise<void> {
   const db = options.db ?? getDb();
   const desired = new Set(input.userWorkosIds);
-  const existing = await db
-    .select({ id: goatBrainMembers.id, userWorkosId: goatBrainMembers.userWorkosId })
-    .from(goatBrainMembers)
-    .where(eq(goatBrainMembers.brainId, input.brainRef));
-  for (const row of existing) {
-    if (!desired.has(row.userWorkosId)) {
-      await db.delete(goatBrainMembers).where(eq(goatBrainMembers.id, row.id));
-    }
-  }
-  const present = new Set(existing.map((row: { userWorkosId: string }) => row.userWorkosId));
-  for (const userWorkosId of desired) {
-    if (present.has(userWorkosId)) continue;
-    await db
-      .insert(goatBrainMembers)
-      .values({
-        id: `goat_brm_${randomUUID()}`,
-        brainId: input.brainRef,
-        userWorkosId,
-        addedByWorkosId: input.addedByWorkosId,
-      })
-      .onConflictDoNothing();
-  }
+  const desiredRows = [...desired].map((userWorkosId) => ({
+    id: `goat_brm_${randomUUID()}`,
+    userWorkosId,
+  }));
+  const desiredMembers =
+    desiredRows.length > 0
+      ? sql`SELECT * FROM (VALUES ${sql.join(
+          desiredRows.map((row) => sql`(${row.userWorkosId}, ${row.id})`),
+          sql`, `,
+        )}) AS desired(user_workos_id, id)`
+      : sql`SELECT NULL::text AS user_workos_id, NULL::text AS id WHERE false`;
+
+  // One statement keeps access changes and personal-source cleanup atomic on
+  // both pooled Postgres and the neon-http web client. A member who is removed
+  // from a restricted brain must not keep feeding it through a personal
+  // integration they attached while they still had access.
+  await db.execute(sql`
+    WITH desired_members AS (${desiredMembers}),
+    deleted_members AS (
+      DELETE FROM goat.brain_members bm
+      WHERE bm.brain_id = ${input.brainRef}
+        AND NOT EXISTS (
+          SELECT 1 FROM desired_members desired
+          WHERE desired.user_workos_id = bm.user_workos_id
+        )
+      RETURNING bm.id
+    ),
+    inserted_members AS (
+      INSERT INTO goat.brain_members (id, brain_id, user_workos_id, added_by_workos_id)
+      SELECT desired.id, ${input.brainRef}, desired.user_workos_id, ${input.addedByWorkosId}
+      FROM desired_members desired
+      ON CONFLICT DO NOTHING
+      RETURNING id
+    )
+    DELETE FROM goat.brain_sources bs
+    USING goat.integrations integration
+    WHERE bs.brain_id = ${input.brainRef}
+      AND bs.integration_id = integration.id
+      AND integration.workspace_id IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM desired_members desired
+        WHERE desired.user_workos_id = bs.user_workos_id
+      )
+  `);
 }
 
 export async function listGoatBrainMemberIds(
@@ -472,6 +494,20 @@ export async function removeGoatWorkspaceMember(
         ),
       );
   }
+  // Detach the member's personal-integration brain sources in this workspace:
+  // new content stops flowing, already-ingested brain content stays (the
+  // pointer/copy rule). Workspace-owned integrations (github, jamie) keep the
+  // leaving member as user_workos_id attribution and must NOT be touched —
+  // the workspace_id IS NULL filter guarantees that.
+  await db.execute(sql`
+    DELETE FROM goat.brain_sources bs
+    USING goat.brains b, goat.integrations i
+    WHERE bs.brain_id = b.id
+      AND b.workspace_id = ${input.workspaceId}
+      AND bs.integration_id = i.id
+      AND i.user_workos_id = ${input.userWorkosId}
+      AND i.workspace_id IS NULL
+  `);
   await db
     .delete(goatWorkspaceMembers)
     .where(

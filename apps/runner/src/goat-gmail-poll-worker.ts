@@ -147,6 +147,7 @@ export async function pollGoatGmailIntegration(input: {
       userWorkosId: candidate.userWorkosId,
       threadId: metadata.threadId || discovered.threadId,
       messageId: metadata.id,
+      rfc822MessageId: metadata.rfc822MessageId,
       direction: labelIds.includes("SENT") ? "sent" : "received",
       subject: metadata.subject,
       fromHeader: metadata.from,

@@ -63,6 +63,11 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   // brain-scoped activity and audit trails can show the decision.
   skipReason?: string | null;
   rawEventCount?: number;
+  // Optional provider-native event identities newly claimed per target brain.
+  // Billing unions these keys per workspace so partially overlapping windows
+  // consume only genuinely new events, while preserving one source item for
+  // multi-brain fan-out.
+  rawEventKeysByBrainRef?: ReadonlyMap<string, readonly string[]>;
   now?: Date;
   db?: DbLike;
 }): Promise<UpsertGoatBrainSourceItemResult> {
@@ -210,12 +215,19 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
     // sequential; Neon transactions do not support concurrent queries on the
     // same connection.
     for (const workspaceId of workspaceIds) {
+      const workspaceRawEventCount = input.rawEventKeysByBrainRef
+        ? rawEventCountForWorkspace({
+            workspaceId,
+            brainRows,
+            rawEventKeysByBrainRef: input.rawEventKeysByBrainRef,
+          })
+        : rawEventCount;
       reservations.push(
         await reserveGoatWorkspaceIngestion({
           workspaceId,
           sourceItemId: sourceItem.id,
           sourceProvider: input.item.sourceProvider,
-          rawEventCount,
+          rawEventCount: workspaceRawEventCount,
           now,
           db,
         }),
@@ -378,6 +390,29 @@ function uniqueBrainRefs(brainRefs: (string | null)[]) {
     unique.push(brainRef);
   }
   return unique;
+}
+
+function rawEventCountForWorkspace(input: {
+  workspaceId: string;
+  brainRows: Array<{ id: string; workspaceId: string }>;
+  rawEventKeysByBrainRef: ReadonlyMap<string, readonly string[]>;
+}) {
+  const keys = new Set<string>();
+  for (const brain of input.brainRows) {
+    if (brain.workspaceId !== input.workspaceId) continue;
+    const brainKeys = input.rawEventKeysByBrainRef.get(brain.id);
+    if (!brainKeys) {
+      throw new Error(`Missing claimed event keys for Goat Brain ${brain.id}.`);
+    }
+    for (const key of brainKeys) {
+      const normalized = key.trim();
+      if (normalized) keys.add(normalized);
+    }
+  }
+  if (keys.size < 1 || keys.size > 200) {
+    throw new Error("Goat ingestion workspace event count must be between 1 and 200.");
+  }
+  return keys.size;
 }
 
 function orderJobsByBrainRefs(rows: PersistedGoatBrainIngestJob[], brainRefs: (string | null)[]) {

@@ -41,6 +41,9 @@ export type GoatGmailMessageEventInsert = {
   userWorkosId: string;
   threadId: string;
   messageId: string;
+  // RFC822 Message-ID header — the cross-mailbox identity used for
+  // cross-member brain dedup; null when the header is absent.
+  rfc822MessageId?: string | null;
   direction: GoatGmailMessageDirection;
   subject?: string | null;
   fromHeader?: string | null;
@@ -158,6 +161,7 @@ export async function insertGoatGmailMessageEvents(
         userWorkosId: event.userWorkosId,
         threadId: event.threadId,
         messageId: event.messageId,
+        rfc822MessageId: event.rfc822MessageId ?? null,
         direction: event.direction,
         subject: event.subject ?? null,
         fromHeader: event.fromHeader ?? null,
@@ -231,6 +235,27 @@ export async function updateGoatGmailSyncCursor(
       updatedAt: sql`now()`,
     })
     .where(eq(goatGmailSyncState.integrationId, input.integrationId));
+}
+
+// Cross-member dedup key for one email. The RFC822 Message-ID header is the
+// only identity shared by every mailbox that holds a copy of the message;
+// Gmail's own message ids are per-mailbox. When the header is missing (rare),
+// fall back to a per-mailbox key so dedup degrades to at-most-once per
+// integration instead of colliding.
+export function goatGmailEventClaimKey(input: {
+  rfc822MessageId: string | null | undefined;
+  integrationId: string;
+  gmailMessageId: string;
+}): string {
+  const normalized = normalizeRfc822MessageId(input.rfc822MessageId);
+  if (normalized) return normalized;
+  return `mailbox:${input.integrationId}:${input.gmailMessageId}`;
+}
+
+export function normalizeRfc822MessageId(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/^<|>$/g, "").trim().toLowerCase();
+  return trimmed || null;
 }
 
 export function newGoatGmailMessageEventId() {
