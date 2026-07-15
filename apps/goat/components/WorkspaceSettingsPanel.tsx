@@ -17,6 +17,8 @@ import {
 type WorkspaceSettings = {
   workspace: { id: string; name: string };
   role: "admin" | "member";
+  plan: "free" | "pro";
+  memberCap: number;
   members: GoatWorkspaceMemberView[];
   invitations: GoatWorkspaceInvitationView[];
 };
@@ -24,6 +26,9 @@ type WorkspaceSettings = {
 export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings }) {
   const router = useRouter();
   const isAdmin = initial.role === "admin";
+  const seatsUsed = initial.members.length + initial.invitations.length;
+  const overCap = initial.members.length > initial.memberCap;
+  const atCap = !overCap && seatsUsed >= initial.memberCap;
   const [name, setName] = useState(initial.workspace.name);
   const [inviteEmail, setInviteEmail] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -85,6 +90,29 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
       title="Members"
       description="Manage the people who share this workspace and its brains."
     >
+      <div
+        className={`rounded-lg border px-3 py-2 text-[12.5px] leading-5 ${
+          overCap
+            ? "border-amber-500/30 bg-amber-500/10 text-ink"
+            : "border-border bg-surface-muted/40 text-ink-subtle"
+        }`}
+      >
+        {overCap ? (
+          <>
+            This workspace has {initial.members.length} members, over the{" "}
+            {initial.plan === "pro" ? "Pro" : "Free"} plan&apos;s limit of {initial.memberCap}.
+            Inviting is disabled until you are under the limit
+            {initial.plan === "free" ? " — or upgrade to Pro" : ""}.
+          </>
+        ) : (
+          <>
+            {seatsUsed} of {initial.memberCap} seats used (members plus pending invites) on the{" "}
+            {initial.plan === "pro" ? "Pro" : "Free"} plan.
+            {atCap && initial.plan === "free" ? " Upgrade to Pro to invite more people." : ""}
+          </>
+        )}
+      </div>
+
       <section className="flex flex-col gap-2">
         <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Name

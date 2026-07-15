@@ -1,7 +1,16 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import { type GoatBrainVisibility, goatWorkspaces } from "@opencompany/db/goat-schema";
+import {
+  GOAT_FREE_MAX_MEMBERS,
+  GOAT_PRO_MAX_MEMBERS,
+  loadGoatBillingOverview,
+} from "@opencompany/db/goat-billing";
+import {
+  type GoatBrainIntelligence,
+  type GoatBrainVisibility,
+  goatWorkspaces,
+} from "@opencompany/db/goat-schema";
 import {
   createGoatBrain,
   DEFAULT_GOAT_BRAIN_SLUG,
@@ -13,6 +22,7 @@ import {
   removeGoatWorkspaceMember,
   replaceGoatBrainMembers,
   updateGoatBrainEnrichmentEnabled,
+  updateGoatBrainIntelligence,
   updateGoatBrainVisibility,
   updateGoatWorkspaceName,
 } from "@opencompany/db/goat-workspaces";
@@ -24,6 +34,7 @@ import {
   GOAT_ACTIVE_BRAIN_COOKIE,
   GOAT_ACTIVE_WORKSPACE_COOKIE,
 } from "@/lib/auth";
+import { syncGoatWorkspaceSeatQuantity } from "@/lib/billing/seat-sync";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
 
@@ -242,6 +253,49 @@ export async function setGoatBrainEnrichmentAction(input: {
   }
 }
 
+export async function getGoatBrainIntelligenceAction(
+  brainRef: string,
+): Promise<{ intelligence: GoatBrainIntelligence } | null> {
+  const context = await currentGoatUser();
+  if (context.role !== "admin") return null;
+  const access = await getGoatBrainAccess({
+    userWorkosId: context.user.workosUserId,
+    brainRef,
+  });
+  if (!access || access.brain.workspaceId !== context.workspace.id) return null;
+  return { intelligence: access.brain.intelligence };
+}
+
+export async function setGoatBrainIntelligenceAction(input: {
+  brainRef: string;
+  intelligence: GoatBrainIntelligence;
+}): Promise<GoatWorkspaceActionResult> {
+  const context = await currentGoatUser();
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can change intelligence." };
+  }
+  if (input.intelligence !== "basic" && input.intelligence !== "frontier") {
+    return { ok: false, error: "Unknown intelligence tier." };
+  }
+  const access = await getGoatBrainAccess({
+    userWorkosId: context.user.workosUserId,
+    brainRef: input.brainRef,
+  });
+  if (!access || access.brain.workspaceId !== context.workspace.id) {
+    return { ok: false, error: "Brain not found in this workspace." };
+  }
+  try {
+    await updateGoatBrainIntelligence({
+      brainRef: input.brainRef,
+      intelligence: input.intelligence,
+    });
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return errorResult(error, "Could not update intelligence.");
+  }
+}
+
 export async function listGoatWorkspaceMembersAction(): Promise<GoatWorkspaceMemberView[]> {
   const context = await currentGoatUser();
   const members = await listGoatWorkspaceMembers(context.workspace.id);
@@ -269,6 +323,25 @@ export async function inviteToGoatWorkspaceAction(
   }
 
   try {
+    // Seat cap: members plus pending invites must stay under the plan's
+    // limit. Acceptance races can still overshoot by one or two — the
+    // adoption path deliberately never blocks a sign-in on billing — so this
+    // check plus the members-panel over-cap banner is the enforcement.
+    const [overview, members, invitations] = await Promise.all([
+      loadGoatBillingOverview(context.workspace.id),
+      listGoatWorkspaceMembers(context.workspace.id),
+      listGoatWorkspaceInvitationsAction(),
+    ]);
+    const memberCap = overview.plan === "pro" ? GOAT_PRO_MAX_MEMBERS : GOAT_FREE_MAX_MEMBERS;
+    if (members.length + invitations.length >= memberCap) {
+      return {
+        ok: false,
+        error:
+          overview.plan === "pro"
+            ? `Your plan allows up to ${GOAT_PRO_MAX_MEMBERS} members (including pending invites). Remove a member or revoke an invite first.`
+            : `The Free plan allows up to ${GOAT_FREE_MAX_MEMBERS} members (including pending invites). Upgrade to Pro for up to ${GOAT_PRO_MAX_MEMBERS}.`,
+      };
+    }
     const organizationId = await ensureGoatWorkspaceOrganization(context.workspace);
     await getWorkOSClient().userManagement.sendInvitation({
       email: trimmed,
@@ -348,6 +421,9 @@ export async function removeGoatWorkspaceMemberAction(
       workspaceId: context.workspace.id,
       userWorkosId,
     });
+    // Fire-and-forget: the seat count changed, push it to Stripe. Failures
+    // are repaired by the hourly reconcile; removal itself must succeed.
+    void syncGoatWorkspaceSeatQuantity(context.workspace.id);
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -384,6 +460,8 @@ export async function updateGoatWorkspaceNameAction(
 export async function getGoatWorkspaceSettingsAction(): Promise<{
   workspace: { id: string; name: string };
   role: "admin" | "member";
+  plan: "free" | "pro";
+  memberCap: number;
   members: GoatWorkspaceMemberView[];
   invitations: GoatWorkspaceInvitationView[];
 }> {
@@ -394,9 +472,10 @@ export async function getGoatWorkspaceSettingsAction(): Promise<{
     .from(goatWorkspaces)
     .where(eq(goatWorkspaces.id, context.workspace.id))
     .limit(1);
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, overview] = await Promise.all([
     listGoatWorkspaceMembersAction(),
     listGoatWorkspaceInvitationsAction(),
+    loadGoatBillingOverview(context.workspace.id),
   ]);
   return {
     workspace: {
@@ -404,6 +483,8 @@ export async function getGoatWorkspaceSettingsAction(): Promise<{
       name: workspaceRow?.name ?? context.workspace.name,
     },
     role: context.role,
+    plan: overview.plan,
+    memberCap: overview.plan === "pro" ? GOAT_PRO_MAX_MEMBERS : GOAT_FREE_MAX_MEMBERS,
     members,
     invitations,
   };

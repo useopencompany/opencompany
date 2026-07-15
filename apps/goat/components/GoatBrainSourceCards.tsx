@@ -8,7 +8,9 @@ import {
   ChevronRight,
   ExternalLink,
   LoaderCircle,
+  Plus,
   Search,
+  UserRound,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
@@ -17,12 +19,14 @@ import {
   type GoatGitHubRepositoryListResult,
   type GoatGoogleDriveResourceListResult,
   type GoatLinearTeamListResult,
+  type GoatOwnSourceAccount,
   type GoatSlackConversationListResult,
   getGoatBrainSourcesAction,
   listGoatGitHubRepositoriesAction,
   listGoatGoogleDriveResourcesAction,
   listGoatLinearTeamsAction,
   listGoatSlackConversationsAction,
+  removeGoatBrainSourceAction,
   setGoatBrainGitHubSourceAction,
   setGoatBrainGmailSourceAction,
   setGoatBrainGoogleDriveSourceAction,
@@ -47,7 +51,12 @@ export function resolveGoatBrainSourceState(
   providerId: GoatBrainSourceProviderDef["id"],
   details: GoatBrainSourcesDetails | null,
 ): GoatBrainSourceState {
-  const source = details?.sources.find((entry) => entry.provider === providerId) ?? null;
+  // A provider can now hold several sources (multiple members / multiple
+  // accounts). This single-source view prefers the viewer's own row —
+  // onboarding and the overview reason about "my connection" — and reports
+  // enabled when ANY source of the provider feeds the brain.
+  const providerSources = details?.sources.filter((entry) => entry.provider === providerId) ?? [];
+  const source = providerSources.find((entry) => entry.isOwn) ?? providerSources[0] ?? null;
   const integration =
     providerId === "jamie"
       ? details?.jamie.integration
@@ -77,7 +86,8 @@ export function resolveGoatBrainSourceState(
     source,
     connected,
     legacyEnabled,
-    enabled: source ? source.enabled : legacyEnabled,
+    enabled:
+      providerSources.length > 0 ? providerSources.some((entry) => entry.enabled) : legacyEnabled,
     integrationId: source?.integrationId ?? integration?.integrationId ?? null,
   };
 }
@@ -148,6 +158,60 @@ export function SourceProviderCard({
   const state = resolveGoatBrainSourceState(provider.id, details);
   const { source, connected, legacyEnabled, enabled } = state;
 
+  // Personal providers render one row per attached source (multiple members
+  // and multiple accounts per member), each with its own toggle, editor, and
+  // remove. Workspace-owned providers and empty personal cards keep the
+  // classic single-state card below.
+  const personalProvider = isPersonalSourceProvider(provider.id);
+  const providerSources = (details?.sources ?? [])
+    .filter((entry) => entry.provider === provider.id)
+    .sort((a, b) => Number(b.isOwn) - Number(a.isOwn));
+  if (personalProvider && providerSources.length > 0) {
+    const anyEnabled = providerSources.some((entry) => entry.enabled);
+    return (
+      <div className="flex flex-col gap-1.5 rounded-md border border-ink/10 p-2.5">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-muted text-ink">
+            <Icon size={15} strokeWidth={1.8} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] font-medium text-ink">{provider.name}</span>
+              <span className="rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.05em] text-ink-subtle">
+                {providerSources.length === 1
+                  ? anyEnabled
+                    ? "Feeding Brain"
+                    : "Paused"
+                  : `${providerSources.length} sources · ${providerSources.filter((entry) => entry.enabled).length} ingesting`}
+              </span>
+            </div>
+            <p className="truncate text-[11.5px] leading-4 text-ink-subtle">
+              {provider.description}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          {providerSources.map((entry) => (
+            <SourceRow
+              key={entry.sourceId}
+              brainRef={brainRef}
+              provider={provider}
+              source={entry}
+              onChanged={onChanged}
+            />
+          ))}
+        </div>
+        <AddOwnAccountSection
+          brainRef={brainRef}
+          provider={provider}
+          details={details}
+          attachedIntegrationIds={new Set(providerSources.map((entry) => entry.integrationId))}
+          onChanged={onChanged}
+        />
+      </div>
+    );
+  }
+
   const slack = provider.id === "slack" ? details?.slack : undefined;
   const linear = provider.id === "linear" ? details?.linear : undefined;
   const github = provider.id === "github" ? details?.github : undefined;
@@ -155,7 +219,7 @@ export function SourceProviderCard({
   const googleDrive = provider.id === "google_drive" ? details?.googleDrive : undefined;
   const canToggle =
     provider.available &&
-    (source ? source.canManage : connected) &&
+    (source ? source.canToggle : connected) &&
     (provider.id !== "google_drive" || Boolean(source)) &&
     !isPending;
   const sourceNeedsSetup = Boolean(
@@ -277,7 +341,7 @@ export function SourceProviderCard({
           The connection behind this source is gone; ingestion is paused until it is reconnected.
         </p>
       ) : null}
-      {source && !source.canManage ? (
+      {source && !source.canConfigure ? (
         <p className="text-[11.5px] leading-4 text-ink-subtle">
           Connected by {source.connectedByName}. Only they can change this source.
         </p>
@@ -295,7 +359,7 @@ export function SourceProviderCard({
       {provider.id === "slack" &&
       slack?.integration.integrationId &&
       (connected || source) &&
-      (source ? source.canManage : true) ? (
+      (source ? source.canConfigure : true) ? (
         <SlackChannelPicker
           brainRef={brainRef}
           integrationId={source?.integrationId ?? slack.integration.integrationId}
@@ -306,7 +370,7 @@ export function SourceProviderCard({
       {provider.id === "linear" &&
       linear?.integration.integrationId &&
       (connected || source) &&
-      (source ? source.canManage : true) ? (
+      (source ? source.canConfigure : true) ? (
         <LinearTeamPicker
           brainRef={brainRef}
           integrationId={source?.integrationId ?? linear.integration.integrationId}
@@ -317,7 +381,7 @@ export function SourceProviderCard({
       {provider.id === "github" &&
       github?.integration.integrationId &&
       (connected || source) &&
-      (source ? source.canManage : true) ? (
+      (source ? source.canConfigure : true) ? (
         <GitHubRepoPicker
           brainRef={brainRef}
           integrationId={source?.integrationId ?? github.integration.integrationId}
@@ -328,7 +392,7 @@ export function SourceProviderCard({
       {provider.id === "gmail" &&
       gmail?.integration.integrationId &&
       (connected || source) &&
-      (source ? source.canManage : true) ? (
+      (source ? source.canConfigure : true) ? (
         <GmailSourceEditor
           brainRef={brainRef}
           integrationId={source?.integrationId ?? gmail.integration.integrationId}
@@ -339,7 +403,7 @@ export function SourceProviderCard({
       {provider.id === "google_drive" &&
       googleDrive?.integration.integrationId &&
       (connected || source) &&
-      (source ? source.canManage : true) ? (
+      (source ? source.canConfigure : true) ? (
         <GoogleDriveSourceEditor
           brainRef={brainRef}
           integrationId={source?.integrationId ?? googleDrive.integration.integrationId}
@@ -347,6 +411,338 @@ export function SourceProviderCard({
           onChanged={onChanged}
         />
       ) : null}
+      {personalProvider ? (
+        <AddOwnAccountSection
+          brainRef={brainRef}
+          provider={provider}
+          details={details}
+          // The zero state's inline editor already targets the primary own
+          // account; only offer genuinely additional accounts here.
+          attachedIntegrationIds={new Set([...(state.integrationId ? [state.integrationId] : [])])}
+          onChanged={onChanged}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+type GoatPersonalBrainSourceProvider = "slack" | "linear" | "gmail" | "google_drive";
+
+function isPersonalSourceProvider(
+  providerId: GoatBrainSourceProviderDef["id"],
+): providerId is GoatPersonalBrainSourceProvider {
+  return (
+    providerId === "slack" ||
+    providerId === "linear" ||
+    providerId === "gmail" ||
+    providerId === "google_drive"
+  );
+}
+
+// Wording shown before a member publishes one of their accounts into a shared
+// brain — the consent moment.
+const ADD_SOURCE_CONSENT_COPY: Record<GoatPersonalBrainSourceProvider, string> = {
+  gmail:
+    "Emails matching your filters — including what other people write to you — will be summarized into this brain. Everyone with access to this brain, now and in the future, can see what's captured.",
+  slack:
+    "Messages from the channels and DMs you select — including what other people write — will be summarized into this brain and visible to everyone with access to it.",
+  google_drive:
+    "Changes to the files and folders you select will be summarized into this brain and visible to everyone with access to it.",
+  linear:
+    "Issue and comment activity from the teams you select will be summarized into this brain and visible to everyone with access to it.",
+};
+
+const ADD_SOURCE_CONSENT_FOOTER =
+  "Only you can change what's ingested. You or a workspace admin can pause or remove this source at any time.";
+
+function sourceAccountLabel(source: GoatBrainSourceView): string | null {
+  if (source.provider === "slack") {
+    return (
+      [source.connectionLabel, source.accountName].filter(Boolean).join(" · ") ||
+      source.accountEmail
+    );
+  }
+  if (source.provider === "linear") return source.connectionLabel ?? source.accountName;
+  return source.accountEmail ?? source.accountName;
+}
+
+function ownAccountLabel(account: GoatOwnSourceAccount, provider: string): string {
+  if (provider === "slack") {
+    return (
+      [account.connectionLabel, account.accountName].filter(Boolean).join(" · ") ||
+      account.accountEmail ||
+      account.integrationId
+    );
+  }
+  if (provider === "linear") {
+    return account.connectionLabel || account.accountName || account.integrationId;
+  }
+  return account.accountEmail || account.accountName || account.integrationId;
+}
+
+// One attached source of a personal provider: owner identity, the specific
+// account, per-row toggle/remove, and — for the owner — the inline config
+// editor. Admins see toggle/remove on other members' rows but never the
+// editor; other members see a read-only row.
+function SourceRow({
+  brainRef,
+  provider,
+  source,
+  onChanged,
+}: {
+  brainRef: string;
+  provider: GoatBrainSourceProviderDef;
+  source: GoatBrainSourceView;
+  onChanged: () => Promise<void>;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const accountLabel = sourceAccountLabel(source);
+  const statusBadge =
+    source.integrationStatus !== "connected"
+      ? source.integrationStatus === "disconnected"
+        ? "Connection lost"
+        : source.integrationStatus === "needs_reauth"
+          ? "Needs setup"
+          : "Sync issue"
+      : null;
+
+  const toggle = () => {
+    startTransition(async () => {
+      const result = await setGoatBrainSourceEnabledAction({
+        brainRef,
+        provider: provider.id,
+        integrationId: source.integrationId,
+        enabled: !source.enabled,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      await onChanged();
+    });
+  };
+
+  const remove = () => {
+    startTransition(async () => {
+      const result = await removeGoatBrainSourceAction({
+        brainRef,
+        integrationId: source.integrationId,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setConfirmingRemove(false);
+      await onChanged();
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-ink/10 p-2">
+      <div className="flex items-center gap-2">
+        {source.ownerAvatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={source.ownerAvatarUrl}
+            alt=""
+            className="h-5 w-5 shrink-0 rounded-full object-cover"
+          />
+        ) : (
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-muted text-ink-subtle">
+            <UserRound size={11} strokeWidth={2} />
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-[12.5px] font-medium text-ink">
+              {source.isOwn ? "You" : source.connectedByName}
+            </span>
+            {accountLabel ? (
+              <span className="truncate text-[11.5px] text-ink-subtle">· {accountLabel}</span>
+            ) : null}
+            {statusBadge ? (
+              <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.05em] text-ink-subtle">
+                {statusBadge}
+              </span>
+            ) : null}
+          </div>
+          <p className="truncate text-[11px] leading-4 text-ink-subtle">
+            {source.isOwn
+              ? "Connected by you"
+              : source.canToggle
+                ? `Managed by ${source.connectedByName} · only they can change what's ingested. You can pause or remove it.`
+                : `Managed by ${source.connectedByName}`}
+          </p>
+        </div>
+        {source.canRemove ? (
+          <button
+            type="button"
+            onClick={() => setConfirmingRemove(true)}
+            disabled={isPending}
+            className="shrink-0 rounded-md px-1.5 py-1 text-[11.5px] text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+          >
+            Remove
+          </button>
+        ) : null}
+        <SourceToggle
+          enabled={source.enabled}
+          disabled={!source.canToggle || isPending}
+          onToggle={toggle}
+          label={`${provider.name} source`}
+        />
+      </div>
+      {confirmingRemove ? (
+        <div className="rounded-md border border-ink/10 bg-surface-muted px-2.5 py-2 text-[11.5px] leading-4 text-ink-muted">
+          <span>
+            Remove {source.isOwn ? "your" : `${source.connectedByName}'s`} {provider.name}
+            {accountLabel ? ` (${accountLabel})` : ""} from this brain? Content already captured
+            stays in the brain; new content stops flowing.
+          </span>
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={remove}
+              disabled={isPending}
+              className="rounded-md border border-ink/15 px-2 py-0.5 text-[11.5px] font-medium text-warning transition-colors hover:bg-surface-hover disabled:opacity-60"
+            >
+              Remove source
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingRemove(false)}
+              disabled={isPending}
+              className="rounded-md px-2 py-0.5 text-[11.5px] text-ink-subtle transition-colors hover:bg-surface-hover"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {source.canConfigure && provider.id === "slack" ? (
+        <SlackChannelPicker
+          brainRef={brainRef}
+          integrationId={source.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
+      {source.canConfigure && provider.id === "linear" ? (
+        <LinearTeamPicker
+          brainRef={brainRef}
+          integrationId={source.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
+      {source.canConfigure && provider.id === "gmail" ? (
+        <GmailSourceEditor
+          brainRef={brainRef}
+          integrationId={source.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
+      {source.canConfigure && provider.id === "google_drive" ? (
+        <GoogleDriveSourceEditor
+          brainRef={brainRef}
+          integrationId={source.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+// "Add your account as a source" — lists the viewer's connected accounts of
+// this provider that aren't feeding the brain yet, with the consent framing
+// shown before anything is attached.
+function AddOwnAccountSection({
+  brainRef,
+  provider,
+  details,
+  attachedIntegrationIds,
+  onChanged,
+}: {
+  brainRef: string;
+  provider: GoatBrainSourceProviderDef;
+  details: GoatBrainSourcesDetails | null;
+  attachedIntegrationIds: Set<string>;
+  onChanged: () => Promise<void>;
+}) {
+  const [pendingAccount, setPendingAccount] = useState<GoatOwnSourceAccount | null>(null);
+  const [isPending, startTransition] = useTransition();
+  if (!details || !isPersonalSourceProvider(provider.id)) return null;
+  const addable = details.ownAccounts[provider.id].filter(
+    (account) =>
+      !attachedIntegrationIds.has(account.integrationId) && account.status === "connected",
+  );
+  if (addable.length === 0) return null;
+
+  const add = (account: GoatOwnSourceAccount) => {
+    startTransition(async () => {
+      const result = await setGoatBrainSourceEnabledAction({
+        brainRef,
+        provider: provider.id,
+        integrationId: account.integrationId,
+        enabled: true,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setPendingAccount(null);
+      toast.success(`${provider.name} added to this brain.`);
+      await onChanged();
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-ink/10 pt-2">
+      {pendingAccount ? (
+        <div className="flex flex-col gap-1.5 rounded-md border border-ink/10 bg-surface-muted px-2.5 py-2">
+          <span className="text-[12px] font-medium text-ink">
+            Adding {ownAccountLabel(pendingAccount, provider.id)} to this brain
+          </span>
+          <p className="text-[11.5px] leading-4 text-ink-muted">
+            {ADD_SOURCE_CONSENT_COPY[provider.id]}
+          </p>
+          <p className="text-[11.5px] leading-4 text-ink-subtle">{ADD_SOURCE_CONSENT_FOOTER}</p>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => add(pendingAccount)}
+              disabled={isPending}
+              className="rounded-md bg-ink px-2.5 py-1 text-[12px] font-medium text-canvas transition-opacity disabled:opacity-60"
+            >
+              {isPending ? "Adding…" : "Add to brain"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingAccount(null)}
+              disabled={isPending}
+              className="rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-hover"
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {addable.map((account) => (
+            <button
+              key={account.integrationId}
+              type="button"
+              onClick={() => setPendingAccount(account)}
+              className="inline-flex items-center gap-1 rounded-md border border-ink/15 px-2 py-1 text-[11.5px] font-medium text-ink transition-colors hover:bg-surface-hover"
+            >
+              <Plus size={11} strokeWidth={2} />
+              Add {ownAccountLabel(account, provider.id)}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

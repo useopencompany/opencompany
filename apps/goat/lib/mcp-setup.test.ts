@@ -30,25 +30,24 @@ describe("Goat MCP setup", () => {
     const prompt = buildGoatMcpFirstPrompt({
       displayName: "Ada Lovelace",
       workspaceName: "Analytical Engines",
-      brainName: "Company Brain",
     });
 
-    expect(prompt).toContain('query the brain for "Ada Lovelace"');
+    expect(prompt).toContain('query for "Ada Lovelace"');
     expect(prompt).toContain("at Analytical Engines");
-    expect(prompt).toContain('connector for "Company Brain"');
+    expect(prompt).toContain("list my brains");
     expect(prompt).toContain("Cite the brain pages");
     expect(prompt).not.toContain("@");
   });
 
   it("builds Cursor config and an install deeplink for the remote URL", () => {
     const input = {
-      name: "goat-company-brain",
-      url: "https://goat.example/api/mcp/goat_brain_1/mcp",
+      name: "goat",
+      url: "https://goat.example/mcp",
     };
 
     expect(buildCursorMcpConfig(input)).toEqual({
       mcpServers: {
-        "goat-company-brain": { url: input.url },
+        goat: { url: input.url },
       },
     });
 

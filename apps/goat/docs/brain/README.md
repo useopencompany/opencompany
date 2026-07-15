@@ -52,7 +52,7 @@ see `apps/goat/research/goat-brain-v1.md` and issue #597.
 | Chat tools | `apps/goat/lib/brain-cli.ts` (`goat_brain`), `apps/goat/lib/brain-capture.ts` (`save_to_brain`) |
 | Ingestion worker + handlers | `apps/runner/src/goat-brain-ingest-worker.ts`, `goat-brain-agent-ingest.ts`, `goat-brain-jamie-writes.ts` |
 | Source item normalization | `packages/goat-brain/src/source-items.ts` |
-| Per-brain MCP connector | `apps/goat/app/api/mcp/[brainRef]/[transport]/route.ts` |
+| User-level MCP connector | `apps/goat/app/mcp/route.ts`, `apps/goat/lib/mcp-server.ts` |
 
 ## Invariants worth memorizing
 

@@ -31,6 +31,7 @@ const brainFilesMock = vi.hoisted(() => ({
 const workspacesMock = vi.hoisted(() => ({
   getDefaultGoatBrainForUser: vi.fn(async () => ({ id: "gbrain_default" })),
   getGoatBrainEnrichmentEnabled: vi.fn(async () => true),
+  getGoatBrainIntelligence: vi.fn(async () => "basic" as "basic" | "frontier"),
   getGoatUserDisplayName: vi.fn(async () => null as string | null),
 }));
 const localBrainMock = vi.hoisted(() => ({
@@ -61,6 +62,7 @@ vi.mock("@opencompany/db/goat-brain-files", async (importOriginal) => ({
 vi.mock("@opencompany/db/goat-workspaces", () => ({
   getDefaultGoatBrainForUser: workspacesMock.getDefaultGoatBrainForUser,
   getGoatBrainEnrichmentEnabled: workspacesMock.getGoatBrainEnrichmentEnabled,
+  getGoatBrainIntelligence: workspacesMock.getGoatBrainIntelligence,
   getGoatUserDisplayName: workspacesMock.getGoatUserDisplayName,
 }));
 vi.mock("@opencompany/goat-brain/cli-bundle", () => ({
@@ -270,6 +272,7 @@ beforeEach(() => {
   });
   workspacesMock.getDefaultGoatBrainForUser.mockResolvedValue({ id: "gbrain_default" });
   workspacesMock.getGoatBrainEnrichmentEnabled.mockResolvedValue(true);
+  workspacesMock.getGoatBrainIntelligence.mockResolvedValue("basic");
   workspacesMock.getGoatUserDisplayName.mockResolvedValue(null);
   agentRuntimeMock.executeExaSearchRequest.mockReset();
 });
@@ -829,6 +832,8 @@ describe("runGoatChatCaptureAgentIngest", () => {
   });
 
   it("runs the capture curation loop and syncs the brain", async () => {
+    // Frontier tier keeps this test on the historical Sonnet model + pricing.
+    workspacesMock.getGoatBrainIntelligence.mockResolvedValue("frontier");
     mockAgentRun({
       finalText: "Promoted the capture into concepts/usage-based-pricing.",
       toolInvocations: [
@@ -919,7 +924,36 @@ describe("runGoatChatCaptureAgentIngest", () => {
     );
   });
 
+  it("runs basic-tier brains on the open-source model", async () => {
+    workspacesMock.getGoatBrainIntelligence.mockResolvedValue("basic");
+    mockAgentRun({
+      finalText: "Filed the capture.",
+      toolInvocations: [
+        {
+          command: "set",
+          args: ["pricing-teardown-reference", "--type", "concept", "--status", "active"],
+        },
+      ],
+    });
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      model: "moonshotai/kimi-k2.6",
+      trace: expect.objectContaining({ model: "moonshotai/kimi-k2.6" }),
+    });
+  });
+
   it("records model and Brain query provider spend in the durable result", async () => {
+    workspacesMock.getGoatBrainIntelligence.mockResolvedValue("frontier");
     vi.mocked(okCli).mockResolvedValueOnce({
       ok: true,
       exitCode: 0,
@@ -970,6 +1004,7 @@ describe("runGoatChatCaptureAgentIngest", () => {
   });
 
   it("stops the loop at the spend threshold and preserves valid mutations", async () => {
+    workspacesMock.getGoatBrainIntelligence.mockResolvedValue("frontier");
     aiMock.generateText.mockImplementationOnce(
       async (options: {
         tools: Record<string, CapturedTool>;
@@ -1016,6 +1051,7 @@ describe("runGoatChatCaptureAgentIngest", () => {
   });
 
   it("stops after in-flight tool spend overshoots the soft limit", async () => {
+    workspacesMock.getGoatBrainIntelligence.mockResolvedValue("frontier");
     agentRuntimeMock.executeExaSearchRequest.mockResolvedValueOnce({
       output: { searchType: "fast", costDollars: 0.2, results: [] },
       usage: {
@@ -1105,6 +1141,7 @@ describe("runGoatChatCaptureAgentIngest", () => {
   });
 
   it("fails without retryable partial state when the budget is exhausted before a mutation", async () => {
+    workspacesMock.getGoatBrainIntelligence.mockResolvedValue("frontier");
     aiMock.generateText.mockImplementationOnce(
       async (options: { onStepFinish: (event: { usage: Record<string, unknown> }) => void }) => {
         options.onStepFinish({

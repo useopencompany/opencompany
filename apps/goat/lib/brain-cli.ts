@@ -248,6 +248,7 @@ async function runResolvedGoatBrainCliForUser(
   };
   await recordGoatBrainToolRun({
     traceId,
+    brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
     command,
     resolved,
@@ -325,6 +326,7 @@ async function runGoatBrainReadCommandForUser(
   output = { ...output, traceId, durationMs };
   await recordGoatBrainToolRun({
     traceId,
+    brainRef: input.brainRef,
     userWorkosId: input.userWorkosId,
     command: input.toolInput.command,
     resolved,
@@ -1076,6 +1078,7 @@ function readParsedCliError(parsed: unknown): string | null {
 
 async function recordGoatBrainToolRun(input: {
   traceId: string;
+  brainRef: string;
   userWorkosId: string;
   command: GoatBrainCliCommand | null;
   resolved: ResolvedGoatBrainCliArgs;
@@ -1091,6 +1094,7 @@ async function recordGoatBrainToolRun(input: {
     await getDb().transaction(async (tx) => {
       await tx.insert(goatBrainToolRuns).values({
         id: input.traceId,
+        brainRef: input.brainRef,
         userWorkosId: input.userWorkosId,
         chatSessionId: input.traceContext?.chatSessionId ?? null,
         userMessageId: input.traceContext?.userMessageId ?? null,

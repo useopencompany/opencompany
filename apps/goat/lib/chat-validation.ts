@@ -3,6 +3,11 @@ import { normalizeGoatModel } from "@/lib/model-options";
 
 export const GOAT_CHAT_PROMPT_MAX_LENGTH = 10_000;
 
+// Shared between the chat route's 402 response and the client's error
+// handler, which matches on it to render the add-credits action.
+export const GOAT_CHAT_OUT_OF_CREDITS_MESSAGE =
+  "Your workspace is out of credits. Add credits in Settings → Billing to keep chatting.";
+
 export type GoatChatInput = {
   prompt: string;
   model: AgentModelId;

@@ -911,6 +911,27 @@
       "when": 1784033826873,
       "tag": "0129_goat_billing_monthly_pooled",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1784110000000,
+      "tag": "0130_goat_brain_overview_stats",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1784110001000,
+      "tag": "0131_goat_brain_source_event_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1784552400000,
+      "tag": "0132_goat_usage_billing",
+      "breakpoints": true
     }
   ]
 }

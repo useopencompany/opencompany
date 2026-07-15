@@ -82,6 +82,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
 describe("GoatSidebar", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    pathnameMock.value = "/";
     workspaceRoleMock.value = "admin";
     mcpSetupMock.completedAt = null;
     recentChatsMock.value = [];
@@ -122,19 +123,25 @@ describe("GoatSidebar", () => {
   });
 
   it("shows MCP setup until the first successful query is verified", () => {
-    pathnameMock.value = "/setup/mcp";
+    pathnameMock.value = "/settings/mcp";
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const setup = screen.getByRole("link", { name: "Connect your brain" });
-    expect(setup).toHaveAttribute("href", "/setup/mcp");
+    expect(setup).toHaveAttribute("href", "/settings/mcp");
     expect(setup).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /Ada Lovelace/ })).not.toHaveAttribute("aria-current");
   });
 
   it("hides MCP setup after completion", () => {
+    pathnameMock.value = "/settings/mcp";
     mcpSetupMock.completedAt = "2026-07-13T09:00:00.000Z";
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(screen.queryByRole("link", { name: "Connect your brain" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Ada Lovelace/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("does not mark home active on chat subroutes", () => {

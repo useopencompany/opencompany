@@ -12,6 +12,7 @@ import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
+import { getGoatPersonalAccounts } from "@/lib/integrations/personal-accounts";
 import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
 import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
 import { listCurrentUserGoatTasks } from "@/lib/tasks";
@@ -31,6 +32,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     slack,
     codex,
     workspaceMembers,
+    personalAccounts,
   ] = await Promise.all([
     featureFlags.taskSpawning ? listCurrentUserGoatTasks() : Promise.resolve([]),
     featureFlags.taskSpawning ? listCurrentUserGoatTaskSchedules() : Promise.resolve([]),
@@ -42,6 +44,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatSlackIntegrationState(user.workosUserId),
     loadCurrentGoatCodexAuthSettings(),
     listGoatWorkspaceMembers(workspace.id),
+    getGoatPersonalAccounts(user.workosUserId),
   ]);
 
   const initialData: GoatAppInitialData = {
@@ -95,6 +98,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       github,
       jamie,
       slack,
+      personalAccounts,
       codex: {
         provider: "codex",
         connected: codex.status === "connected",
@@ -137,14 +141,18 @@ function buildIntegrationState(input: {
   github: GoatIntegrationState["github"];
   jamie: GoatIntegrationState["jamie"];
   slack: GoatIntegrationState["slack"];
+  personalAccounts: GoatIntegrationState["personalAccounts"];
   codex: GoatCodexProviderState;
 }): GoatIntegrationState {
   return {
-    ...input.googleIntegrations,
+    gmail: input.googleIntegrations.gmail,
+    google_calendar: input.googleIntegrations.google_calendar,
+    google_drive: input.googleIntegrations.google_drive,
     linear: input.linear,
     github: input.github,
     jamie: input.jamie,
     slack: input.slack,
     codex: input.codex,
+    personalAccounts: input.personalAccounts,
   };
 }

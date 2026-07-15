@@ -18,6 +18,15 @@ vi.mock("@/lib/codex-auth", () => ({
   startGoatCodexDeviceAuth: vi.fn(),
 }));
 
+// Pulls in @/lib/auth (authkit), which vitest cannot resolve.
+vi.mock("@/lib/integration-account-actions", () => ({
+  disconnectGoatIntegrationAccountAction: vi.fn(async () => ({ ok: true })),
+  getGoatIntegrationAccountUsageAction: vi.fn(async () => ({
+    ok: true,
+    affectedBrainSourceCount: 0,
+  })),
+}));
+
 describe("SettingsIntegrationsPanel", () => {
   it("always exposes the permanent Goat Brain MCP entry", () => {
     render(
@@ -28,8 +37,8 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    const entry = screen.getByRole("link", { name: /Goat Brain MCP/ });
-    expect(entry).toHaveAttribute("href", "/setup/mcp");
+    const entry = screen.getByRole("link", { name: /Goat MCP/ });
+    expect(entry).toHaveAttribute("href", "/settings/mcp");
     expect(entry).toHaveTextContent("Set up");
     expect(entry).toHaveTextContent("Claude, ChatGPT, or Cursor");
   });
@@ -46,7 +55,7 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    const entry = screen.getByRole("link", { name: /Goat Brain MCP/ });
+    const entry = screen.getByRole("link", { name: /Goat MCP/ });
     expect(entry).toHaveTextContent("Connected with Cursor");
     expect(entry).toHaveTextContent("Connected");
   });
