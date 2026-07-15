@@ -17,7 +17,7 @@ export function TopNav() {
             docs
           </a>
           <a
-            href="#"
+            href="https://my.opencompany.chat/changelog"
             className="font-mono text-[13px] text-ink-muted transition-colors hover:text-ink"
           >
             changelog
