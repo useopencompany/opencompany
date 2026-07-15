@@ -34,6 +34,7 @@ import {
   FolderPlus,
   History,
   Inbox,
+  LayoutDashboard,
   Lightbulb,
   Loader2,
   PanelRight,
@@ -59,6 +60,7 @@ import {
 import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainActivity } from "@/components/GoatBrainActivity";
 import { GoatBrainImport } from "@/components/GoatBrainImport";
+import { GoatBrainOverview } from "@/components/GoatBrainOverview";
 import { useGoatNavInset } from "@/components/GoatNavInset";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { useHydrated } from "@/components/useHydrated";
@@ -83,6 +85,7 @@ import {
   uploadBrainAssetBlob,
   validateBrainAssetFile,
 } from "@/lib/brain-asset-upload";
+import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
 import { isExternalHref, sourceHrefForRef } from "@/lib/brain-source-links";
 import {
   createGoatCollections,
@@ -102,6 +105,8 @@ type Props = {
   initialFolderPath: string | null;
   initialBrainId: string | null;
   routeBrainId?: string | null;
+  initialOverview?: boolean;
+  overviewStats?: GoatBrainOverviewStats | null;
 };
 
 type BrainTreeNode = {
@@ -145,6 +150,11 @@ type BrainContextMenuState = {
 const HIDDEN_EMPTY_ROOT_FOLDERS = new Set<string>();
 const AUTOSAVE_DELAY_MS = 1200;
 const EMPTY_DRAFT_INGEST_STATES: ReadonlyMap<string, GoatBrainDraftIngestState> = new Map();
+const EMPTY_OVERVIEW_STATS: GoatBrainOverviewStats = {
+  windowStartedAt: "9999-12-31T23:59:59.999Z",
+  retrievalsLast7Days: 0,
+  activeSources: 0,
+};
 
 export function GoatBrainView({
   brainRef,
@@ -154,6 +164,8 @@ export function GoatBrainView({
   initialFolderPath,
   initialBrainId,
   routeBrainId,
+  initialOverview = false,
+  overviewStats = null,
 }: Props) {
   const hydrated = useHydrated();
   if (!hydrated) {
@@ -166,6 +178,8 @@ export function GoatBrainView({
         initialFolderPath={initialFolderPath}
         initialBrainId={initialBrainId}
         routeBrainId={routeBrainId ?? null}
+        initialOverview={initialOverview}
+        overviewStats={overviewStats}
       />
     );
   }
@@ -178,6 +192,8 @@ export function GoatBrainView({
       initialFolderPath={initialFolderPath}
       initialBrainId={initialBrainId}
       routeBrainId={routeBrainId ?? null}
+      initialOverview={initialOverview}
+      overviewStats={overviewStats}
     />
   );
 }
@@ -190,6 +206,8 @@ function LiveGoatBrainView({
   initialFolderPath,
   initialBrainId,
   routeBrainId,
+  initialOverview = false,
+  overviewStats = null,
 }: Props) {
   const collections = useMemo(() => createGoatCollections(), []);
   const brainCollections = useMemo(
@@ -258,6 +276,8 @@ function LiveGoatBrainView({
       initialFolderPath={initialFolderPath}
       initialBrainId={initialBrainId}
       routeBrainId={routeBrainId ?? null}
+      initialOverview={initialOverview}
+      overviewStats={overviewStats}
     />
   );
 }
@@ -272,6 +292,8 @@ function GoatBrainEditor({
   initialFolderPath,
   initialBrainId,
   routeBrainId,
+  initialOverview = false,
+  overviewStats = null,
 }: Props & {
   edgeRows?: GoatBrainEdgeRow[];
   draftIngestStatesByBrainId?: ReadonlyMap<string, GoatBrainDraftIngestState>;
@@ -282,12 +304,14 @@ function GoatBrainEditor({
   const canEditBrain = workspace.role === "admin";
   const selectedBrainId = routeBrainId ?? null;
   const initialDocument = useMemo(
-    () => resolveInitialDocument(documents, initialFolderPath, initialBrainId),
-    [documents, initialBrainId, initialFolderPath],
+    () =>
+      initialOverview ? null : resolveInitialDocument(documents, initialFolderPath, initialBrainId),
+    [documents, initialBrainId, initialFolderPath, initialOverview],
   );
   const initialSelectedFolder = initialFolderPath ?? initialDocument?.folderPath ?? "inbox";
-  const routeSelectionKey = `${brainRef ?? ""}:${initialFolderPath ?? ""}:${initialBrainId ?? ""}`;
+  const routeSelectionKey = `${brainRef ?? ""}:${initialFolderPath ?? ""}:${initialBrainId ?? ""}:${initialOverview ? "overview" : "browser"}`;
   const [selectionKey, setSelectionKey] = useState(routeSelectionKey);
+  const [overviewSelected, setOverviewSelected] = useState(initialOverview);
   const [selectedFolder, setSelectedFolder] = useState(initialSelectedFolder);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
     initialDocument?.id ?? null,
@@ -346,6 +370,7 @@ function GoatBrainEditor({
   }, []);
   if (selectionKey !== routeSelectionKey) {
     setSelectionKey(routeSelectionKey);
+    setOverviewSelected(initialOverview);
     setSelectedFolder(initialSelectedFolder);
     setSelectedDocumentId(initialDocument?.id ?? null);
     setExpandedPaths(
@@ -373,7 +398,11 @@ function GoatBrainEditor({
   const selectedBody = documentEditorBody(selectedDocument);
   const dirty = Boolean(selectedDocument && editorValue !== selectedBody);
   const activeFolder = selectedDocument?.folderPath ?? selectedFolder;
-  const activePath = selectedDocument ? brainDocumentTreePath(selectedDocument) : activeFolder;
+  const activePath = overviewSelected
+    ? ""
+    : selectedDocument
+      ? brainDocumentTreePath(selectedDocument)
+      : activeFolder;
   const activeFolderView = folders.find((folder) => folder.path === activeFolder) ?? null;
   const activeFolderEditable = activeFolderView?.source === "custom";
   const tree = useMemo(
@@ -461,6 +490,7 @@ function GoatBrainEditor({
 
   const selectDocument = (document: GoatBrainDocumentView) => {
     if (canEditBrain) saveRef.current(); // flush pending edits on the outgoing document
+    setOverviewSelected(false);
     setSelectedFolder(document.folderPath);
     setSelectedDocumentId(document.id);
     setExpandedPaths((current) => withAncestorFolders(current, document.folderPath));
@@ -484,6 +514,7 @@ function GoatBrainEditor({
     );
     if (folder) {
       if (canEditBrain) saveRef.current();
+      setOverviewSelected(false);
       setSelectedFolder(folder.path);
       setSelectedDocumentId(null);
       setExpandedPaths((current) => withAncestorFolders(current, folder.path));
@@ -494,6 +525,8 @@ function GoatBrainEditor({
   };
 
   const toggleFolder = (path: string) => {
+    if (overviewSelected) replaceCurrentUrl(brainFolderUrl(path, selectedBrainId));
+    setOverviewSelected(false);
     setSelectedFolder(path);
     setExpandedPaths((current) => {
       const next = new Set(current);
@@ -544,6 +577,13 @@ function GoatBrainEditor({
   useEffect(() => {
     saveRef.current = saveDocument;
   });
+
+  const selectOverview = () => {
+    if (canEditBrain) saveRef.current();
+    setOverviewSelected(true);
+    setSelectedDocumentId(null);
+    replaceCurrentUrl(brainOverviewUrl(selectedBrainId));
+  };
 
   // Debounced autosave: fires once typing pauses; when an in-flight save finishes
   // (isDocPending flips), the effect re-arms so newer edits get their own save.
@@ -660,6 +700,7 @@ function GoatBrainEditor({
       }
       const nextPath = result.path ?? trimmed;
       setFolderDialog(null);
+      setOverviewSelected(false);
       setSelectedDocumentId(null);
       setSelectedFolder(nextPath);
       setExpandedPaths((current) => withAncestorFolders(current, nextPath, true));
@@ -690,6 +731,7 @@ function GoatBrainEditor({
   };
 
   const selectUploadedDocument = (document: GoatBrainDocumentView) => {
+    setOverviewSelected(false);
     setSelectedFolder(document.folderPath);
     setSelectedDocumentId(document.id);
     setExpandedPaths((current) => withAncestorFolders(current, document.folderPath, true));
@@ -813,6 +855,22 @@ function GoatBrainEditor({
           </div>
         </div>
 
+        <div className="px-2 pb-1 pt-1">
+          <button
+            type="button"
+            aria-current={overviewSelected ? "page" : undefined}
+            onClick={selectOverview}
+            className={`flex h-7 w-full items-center gap-1.5 rounded-[5px] px-2 text-left text-[13px] leading-5 transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+              overviewSelected
+                ? "bg-surface-active text-ink"
+                : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+            }`}
+          >
+            <LayoutDashboard size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
+            <span>Overview</span>
+          </button>
+        </div>
+
         <div className="px-3 pb-1 pt-1">
           <label className="flex h-7 items-center gap-2 rounded-md border border-border bg-surface px-2 text-ink-muted transition-colors duration-150 focus-within:border-border-strong">
             <Search size={13} strokeWidth={1.8} className="shrink-0" />
@@ -928,7 +986,14 @@ function GoatBrainEditor({
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="flex h-14 shrink-0 items-center border-b border-border-subtle">
           <div className="flex min-w-0 flex-1 items-center gap-2 pl-5">
-            {selectedDocument ? (
+            {overviewSelected ? (
+              <>
+                <LayoutDashboard size={13} strokeWidth={1.75} className="shrink-0 text-ink-muted" />
+                <span className="min-w-0 truncate text-[12.5px] font-medium text-ink">
+                  Overview
+                </span>
+              </>
+            ) : selectedDocument ? (
               <>
                 <FileText size={13} strokeWidth={1.75} className="shrink-0 text-ink-muted" />
                 <span
@@ -1096,7 +1161,14 @@ function GoatBrainEditor({
           </div>
         </header>
 
-        {!selectedDocument && documents.length === 0 && brainRef && canEditBrain ? (
+        {overviewSelected && brainRef && brain ? (
+          <GoatBrainOverview
+            brainName={brain.name}
+            brainRef={brainRef}
+            documents={documents}
+            stats={overviewStats ?? EMPTY_OVERVIEW_STATS}
+          />
+        ) : !selectedDocument && documents.length === 0 && brainRef && canEditBrain ? (
           <section className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-y-auto bg-canvas px-6 py-10">
             <GoatBrainImport brainRef={brainRef} />
           </section>
@@ -2280,6 +2352,10 @@ function brainDocumentUrl(document: GoatBrainDocumentView, routeBrainId?: string
 
 function brainFolderUrl(folderPath: string, routeBrainId?: string | null) {
   return brainPathUrl(folderPathSegments(folderPath), routeBrainId);
+}
+
+function brainOverviewUrl(routeBrainId?: string | null) {
+  return routeBrainId ? `/brain/${encodeURIComponent(routeBrainId)}` : "/brain";
 }
 
 function replaceCurrentUrl(href: string) {

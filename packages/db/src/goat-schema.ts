@@ -2520,6 +2520,9 @@ export const goatBrainToolRuns = goat.table(
   "brain_tool_runs",
   {
     id: text("id").primaryKey(),
+    brainRef: text("brain_ref").references(() => goatBrains.id, {
+      onDelete: "set null",
+    }),
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
@@ -2543,6 +2546,10 @@ export const goatBrainToolRuns = goat.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
+    brainCreatedAtIdx: index("goat_brain_tool_runs_brain_created_at_idx").on(
+      table.brainRef,
+      table.createdAt,
+    ),
     userCreatedAtIdx: index("goat_brain_tool_runs_user_created_at_idx").on(
       table.userWorkosId,
       table.createdAt,

@@ -67,14 +67,28 @@ export function GoatBrainActivity({ brainRef }: { brainRef: string }) {
   );
 }
 
-// Only mounted while the popover is open, so the ingest-job and source-item
-// shapes start syncing on first use instead of on page load.
+export function GoatBrainRecentActivity({
+  brainRef,
+  limit = 6,
+}: {
+  brainRef: string;
+  limit?: number;
+}) {
+  return <GoatBrainActivityFeed brainRef={brainRef} limit={limit} variant="overview" />;
+}
+
+// Mounted eagerly by the Overview page and lazily by the activity popover; the
+// ingest-job and source-item shapes start syncing as soon as either consumer mounts.
 function GoatBrainActivityFeed({
   brainRef,
   onOpenTrace,
+  limit,
+  variant = "popover",
 }: {
   brainRef: string;
-  onOpenTrace: (trace: SelectedBrainIngestTrace) => void;
+  onOpenTrace?: (trace: SelectedBrainIngestTrace) => void;
+  limit?: number;
+  variant?: "popover" | "overview";
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
   const brainCollections = useMemo(
@@ -139,49 +153,107 @@ function GoatBrainActivityFeed({
     () => buildGoatBrainActivityEvents((jobRows ?? []) as GoatBrainIngestJobRow[], sourceItems),
     [jobRows, sourceItems],
   );
+  const visibleEvents = limit ? events.slice(0, limit) : events;
   const loading = (jobsLoading || itemsLoading) && events.length === 0;
+  const overview = variant === "overview";
 
   return (
     <div className="flex flex-col">
-      <div className="border-b border-border-subtle px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
-        Activity
-      </div>
-      <div className="max-h-[360px] overflow-y-auto p-1">
+      {!overview ? (
+        <div className="border-b border-border-subtle px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
+          Activity
+        </div>
+      ) : null}
+      <div
+        className={overview ? "divide-y divide-border-subtle" : "max-h-[360px] overflow-y-auto p-1"}
+      >
         {loading ? (
-          <div className="px-2 py-3 text-[12px] text-ink-subtle">Loading activity…</div>
+          <div
+            className={
+              overview
+                ? "py-5 text-[12.5px] text-ink-subtle"
+                : "px-2 py-3 text-[12px] text-ink-subtle"
+            }
+          >
+            Loading activity…
+          </div>
         ) : events.length === 0 ? (
-          <div className="px-2 py-3 text-[12px] text-ink-subtle">
+          <div
+            className={
+              overview
+                ? "py-5 text-[12.5px] leading-5 text-ink-subtle"
+                : "px-2 py-3 text-[12px] text-ink-subtle"
+            }
+          >
             No activity yet. Chat captures and meeting ingestions show up here as they are filed
             into this brain.
           </div>
         ) : (
-          events.map((event) => {
+          visibleEvents.map((event) => {
             const icon = ACTIVITY_ICONS[event.kind];
             const Icon = icon.component;
             const trace = event.trace;
             return (
-              <div key={event.id} className="flex items-start gap-2.5 rounded-[5px] px-2 py-1.5">
-                <Icon size={14} strokeWidth={1.9} className={`mt-0.5 shrink-0 ${icon.className}`} />
+              <div
+                key={event.id}
+                className={
+                  overview
+                    ? "flex items-start gap-3 py-3.5 first:pt-0 last:pb-0"
+                    : "flex items-start gap-2.5 rounded-[5px] px-2 py-1.5"
+                }
+              >
+                {overview ? (
+                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-surface-muted">
+                    <Icon size={14} strokeWidth={1.9} className={`shrink-0 ${icon.className}`} />
+                  </span>
+                ) : (
+                  <Icon
+                    size={14}
+                    strokeWidth={1.9}
+                    className={`mt-0.5 shrink-0 ${icon.className}`}
+                  />
+                )}
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-[12.5px] font-medium text-ink">{event.title}</span>
-                    <span className="shrink-0 text-[11px] text-ink-subtle">
+                    <span
+                      className={
+                        overview
+                          ? "text-[13px] font-medium text-ink"
+                          : "text-[12.5px] font-medium text-ink"
+                      }
+                    >
+                      {event.title}
+                    </span>
+                    <span
+                      className={
+                        overview
+                          ? "shrink-0 text-[11.5px] text-ink-subtle"
+                          : "shrink-0 text-[11px] text-ink-subtle"
+                      }
+                    >
                       {formatRelativeTime(event.at)}
                     </span>
                   </div>
-                  <span className="truncate text-[12px] text-ink-muted" title={event.sourceTitle}>
+                  <span
+                    className={
+                      overview
+                        ? "truncate text-[12.5px] text-ink-muted"
+                        : "truncate text-[12px] text-ink-muted"
+                    }
+                    title={event.sourceTitle}
+                  >
                     {event.sourceTitle}
                   </span>
-                  {event.detail ? (
+                  {event.detail && !overview ? (
                     <span className="text-[11.5px] leading-snug text-ink-subtle">
                       {event.detail}
                     </span>
                   ) : null}
-                  <TraceIdLine traceId={event.traceId} />
+                  {!overview ? <TraceIdLine traceId={event.traceId} /> : null}
                   {event.kind === "filed" && event.pages.length > 0 ? (
                     <ActivityPageLinks brainRef={brainRef} pages={event.pages} />
                   ) : null}
-                  {trace ? (
+                  {trace && onOpenTrace && !overview ? (
                     <button
                       type="button"
                       onClick={() =>
