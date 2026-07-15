@@ -124,7 +124,7 @@ export function workosOrganizationIdFromMcpAuth(auth: AuthInfo | undefined) {
   return null;
 }
 
-function jwksForAuthKitDomain(authKitDomain: string) {
+export function jwksForAuthKitDomain(authKitDomain: string) {
   if (jwksCache?.authKitDomain === authKitDomain) return jwksCache.jwks;
 
   jwksCache = {

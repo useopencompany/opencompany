@@ -190,7 +190,8 @@ Set these in the separate Vercel project for Goat:
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls for the default Goat chat agent. Same key the runner uses for Goat tasks. |
 | `GOAT_NEXT_PUBLIC_APP_URL` | Yes | Goat domain origin, for example `https://goat.example.com`. |
 | `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Yes | Goat callback URL, for example `https://goat.example.com/auth/callback`. |
-| `GOAT_AUTHKIT_DOMAIN` | MCP only | AuthKit issuer origin used to verify Goat MCP connector bearer tokens, for example `https://example.authkit.app`. The WorkOS environment also needs Client ID Metadata Documents and Dynamic Client Registration enabled. |
+| `GOAT_AUTHKIT_DOMAIN` | MCP + mobile | AuthKit issuer origin used to verify Goat MCP connector bearer tokens and Goat mobile app (apps/mobile) access tokens, for example `https://example.authkit.app`. The WorkOS environment also needs Client ID Metadata Documents and Dynamic Client Registration enabled. |
+| `GOAT_MOBILE_DEV_TOKEN` / `GOAT_MOBILE_DEV_USER_EMAIL` | No (local dev only) | Static bearer token + goat user email pair that lets the Goat mobile app authenticate against a local dev server before the WorkOS native OAuth client exists. Ignored when `NODE_ENV=production`. Pair with `EXPO_PUBLIC_GOAT_DEV_TOKEN` in `apps/mobile/.env`. |
 | `GOAT_SLACK_CLIENT_ID` / `GOAT_SLACK_CLIENT_SECRET` | Slack only | Goat Slack ingestion app OAuth credentials (user-token app, `user_scope` only — no bot token). Distinct from `SLACK_MCP_*` and `SLACK_SUPPORT_*`. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack/callback`. |
 | `GOAT_SLACK_SIGNING_SECRET` | Slack only | Slack app signing secret used to verify Events API deliveries at `/api/webhooks/slack/events`. |
 | `GOAT_SLACK_STATE_SECRET` | Slack only | Dedicated secret used to sign Goat Slack OAuth setup state. Generate with `openssl rand -base64 32`. |

@@ -21,6 +21,7 @@ import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { resolveGoatBearerUserWorkosId } from "@/lib/mobile-auth";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
 
@@ -124,19 +125,68 @@ async function ensureGoatWorkspaces(
   return ensureGoatWorkspaceOrganizationsForEntries(workspaces);
 }
 
-const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> => {
+// Native clients authenticate with an AuthKit bearer token instead of the
+// sealed session cookie. When the goat user already exists we synthesize the
+// WorkOS user view from our own row to avoid a WorkOS API call per request;
+// only a first-ever sign-in fetches from WorkOS.
+async function resolveGoatAuthUser(): Promise<{
+  authUser: WorkOSUser;
+  user: typeof goatUsers.$inferSelect;
+} | null> {
+  const db = getDb();
+
+  const bearerUserWorkosId = await resolveGoatBearerUserWorkosId();
+  if (bearerUserWorkosId) {
+    const [existingUser] = await db
+      .select()
+      .from(goatUsers)
+      .where(eq(goatUsers.workosUserId, bearerUserWorkosId))
+      .limit(1);
+    if (existingUser) {
+      return { authUser: workosUserFromGoatUser(existingUser), user: existingUser };
+    }
+    try {
+      const authUser = await getWorkOSClient().userManagement.getUser(bearerUserWorkosId);
+      return { authUser, user: await syncGoatUser(authUser) };
+    } catch (error) {
+      console.error("[goat] Failed to resolve the bearer-authenticated user", error);
+      return null;
+    }
+  }
+
   const session = await withAuth();
   if (!session.user) return null;
-
-  const db = getDb();
   const [existingUser] = await db
     .select()
     .from(goatUsers)
     .where(eq(goatUsers.workosUserId, session.user.id))
     .limit(1);
-  const user = existingUser ?? (await syncGoatUser(session.user));
+  return { authUser: session.user, user: existingUser ?? (await syncGoatUser(session.user)) };
+}
 
-  const workspaces = await ensureGoatWorkspaces(session.user, user);
+function workosUserFromGoatUser(user: typeof goatUsers.$inferSelect): WorkOSUser {
+  return {
+    object: "user",
+    id: user.workosUserId,
+    email: user.email,
+    emailVerified: true,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    profilePictureUrl: user.avatarUrl,
+    lastSignInAt: null,
+    createdAt: user.createdAt.toISOString(),
+    updatedAt: user.updatedAt.toISOString(),
+    externalId: null,
+    metadata: {},
+  } as WorkOSUser;
+}
+
+const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> => {
+  const resolved = await resolveGoatAuthUser();
+  if (!resolved) return null;
+  const { authUser, user } = resolved;
+
+  const workspaces = await ensureGoatWorkspaces(authUser, user);
   const first = workspaces[0];
   if (!first) return null;
 
@@ -156,7 +206,7 @@ const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> =
     null;
 
   return {
-    authUser: session.user,
+    authUser,
     user,
     workspace: active.workspace,
     role: active.role,
