@@ -39,7 +39,7 @@ export function Hero() {
               MCP.
             </p>
             <div className="mt-9 flex items-center gap-2">
-              <Cta>Signup</Cta>
+              <Cta>Join early beta</Cta>
               <Cta href="#how-it-works" variant="secondary">
                 See how it works
               </Cta>

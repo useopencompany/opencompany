@@ -22,7 +22,7 @@ export function TopNav() {
           >
             changelog
           </a>
-          <Cta className="px-3.5 py-2">Signup</Cta>
+          <Cta className="px-3.5 py-2">Join early beta</Cta>
         </nav>
       </div>
     </header>
