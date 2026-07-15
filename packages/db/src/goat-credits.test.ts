@@ -91,11 +91,55 @@ describe("goat credits", () => {
   });
 
   it("rejects top-up fulfillment for unpaid or malformed sessions", async () => {
+    const db = fakeDb([]);
     await expect(
       fulfillGoatTopUpCheckoutSession({ id: "cs_1", payment_status: "unpaid", metadata: {} }),
     ).resolves.toEqual({ ok: false, reason: "not_paid" });
     await expect(
+      fulfillGoatTopUpCheckoutSession(
+        {
+          id: "cs_1",
+          payment_status: "no_payment_required",
+          status: "complete",
+          amount_total: 1,
+          metadata: {},
+        },
+        { db },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "not_paid" });
+    expect(db.execute).not.toHaveBeenCalled();
+    await expect(
       fulfillGoatTopUpCheckoutSession({ id: "cs_1", payment_status: "paid", metadata: {} }),
     ).resolves.toEqual({ ok: false, reason: "missing_metadata" });
+  });
+
+  it("fulfills a completed top-up discounted to zero", async () => {
+    const db = fakeDb([
+      { checkoutRecordId: "goat_chk_1", amountCents: 1_000, balanceCents: 1_500 },
+    ]);
+
+    await expect(
+      fulfillGoatTopUpCheckoutSession(
+        {
+          id: "cs_free_1",
+          payment_status: "no_payment_required",
+          status: "complete",
+          amount_total: 0,
+          metadata: {
+            checkoutRecordId: "goat_chk_1",
+            goatWorkspaceId: "goat_ws_1",
+            userWorkosId: "user_1",
+            amountCents: "1000",
+          },
+        },
+        { eventId: "evt_free_1", db },
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      checkoutRecordId: "goat_chk_1",
+      amountCents: 1_000,
+      balanceCents: 1_500,
+    });
+    expect(db.execute).toHaveBeenCalledTimes(1);
   });
 });

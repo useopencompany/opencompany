@@ -244,6 +244,11 @@ Subscription read, and Subscription Item write permissions.
 Hosted live Checkout also requires `GOAT_STRIPE_CHECKOUT_ENABLED=true`; keep it false until the
 business's Stripe Tax registrations are configured.
 
+Goat credit top-ups accept promotion codes in Stripe Checkout. For internal no-cost top-up tests,
+create a 100%-off, once-duration coupon and a customer-facing promotion code in Stripe test mode.
+Use an expiry, redemption limit, or customer restriction as appropriate; create live-mode codes
+separately and keep them tightly restricted.
+
 Then pull them locally:
 
 ```bash
