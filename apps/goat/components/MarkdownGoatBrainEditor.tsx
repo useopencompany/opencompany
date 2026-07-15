@@ -39,6 +39,14 @@ export function MarkdownGoatBrainEditor({
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+  // Callers routinely pass a fresh navigation closure on every render; route it
+  // through a ref with a stable wrapper so it never invalidates the plugin-state
+  // effect below (re-dispatching per render loops onUpdate → parent setState).
+  const navigateRef = useRef(onNavigateInternal);
+  useEffect(() => {
+    navigateRef.current = onNavigateInternal;
+  }, [onNavigateInternal]);
+  const [navigateInternal] = useState(() => (href: string) => navigateRef.current?.(href) ?? false);
   const editor = useEditor(
     {
       immediatelyRender: false,
@@ -51,7 +59,7 @@ export function MarkdownGoatBrainEditor({
         WikiLinkDecoration.configure({
           brainLinks,
           editingEnabled: !readOnly,
-          onNavigateInternal,
+          onNavigateInternal: navigateInternal,
         }),
       ],
       content: initialContent,
@@ -82,15 +90,21 @@ export function MarkdownGoatBrainEditor({
   useEffect(() => {
     readOnlyRef.current = readOnly;
     if (!editor) return;
-    editor.setEditable(!readOnly);
+    // Never emit "update" here: tiptap's setEditable emits unconditionally, which
+    // would fire onUpdate → onChange without a real edit (phantom dirty/autosave).
+    if (editor.isEditable !== !readOnly) editor.setEditable(!readOnly, false);
+    const current = WIKI_LINK_PLUGIN_KEY.getState(editor.state);
+    if (current && current.brainLinks === brainLinks && current.editingEnabled === !readOnly) {
+      return;
+    }
     editor.view.dispatch(
       editor.state.tr.setMeta(WIKI_LINK_PLUGIN_KEY, {
         brainLinks,
         editingEnabled: !readOnly,
-        onNavigateInternal,
+        onNavigateInternal: navigateInternal,
       } satisfies WikiLinkPluginState),
     );
-  }, [brainLinks, editor, onNavigateInternal, readOnly]);
+  }, [brainLinks, editor, navigateInternal, readOnly]);
 
   return (
     <div className="relative">

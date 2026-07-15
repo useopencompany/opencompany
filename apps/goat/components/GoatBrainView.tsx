@@ -1113,7 +1113,9 @@ function GoatBrainEditor({
             timelineOpen={docPanelState.timelineOpen}
             isDocPending={isDocPending}
             readOnly={!canEditBrain}
-            onEditorChange={(value) => setDocPanelState((state) => ({ ...state, value }))}
+            onEditorChange={(value) =>
+              setDocPanelState((state) => (state.value === value ? state : { ...state, value }))
+            }
             onRenameTitle={renameDocument}
             onNavigateInternal={navigateToBrainHref}
           />

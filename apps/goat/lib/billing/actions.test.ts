@@ -10,7 +10,7 @@ vi.mock("@opencompany/analytics/server", () => ({
 }));
 
 vi.mock("@opencompany/db/goat-billing", () => ({
-  GOAT_PRO_MONTHLY_SEAT_PRICE_EUR_CENTS: 1_500,
+  GOAT_PRO_MONTHLY_PRICE_USD_CENTS: 9_900,
   loadGoatBillingOverview: vi.fn(),
   setGoatStripeCustomerId: vi.fn(),
 }));
@@ -41,7 +41,6 @@ describe("Goat billing actions", () => {
     } as Awaited<ReturnType<typeof currentGoatUser>>);
     vi.mocked(loadGoatBillingOverview).mockResolvedValue({
       plan: "free",
-      seatCount: 3,
       billing: { stripeCustomerId: "cus_goat_1" },
     } as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
     checkoutCreate.mockResolvedValue({ url: "https://checkout.stripe.test/session" });
@@ -50,7 +49,7 @@ describe("Goat billing actions", () => {
     } as never);
   });
 
-  it("creates tax-aware licensed-seat Checkout without fixed payment methods", async () => {
+  it("creates tax-aware flat-price Checkout without fixed payment methods", async () => {
     await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
 
     expect(getGoatProPriceId).toHaveBeenCalled();
@@ -62,7 +61,7 @@ describe("Goat billing actions", () => {
         subscription_data: { metadata: Record<string, string> };
       },
     ];
-    expect(params.line_items).toEqual([{ price: "price_goat_pro", quantity: 3 }]);
+    expect(params.line_items).toEqual([{ price: "price_goat_pro", quantity: 1 }]);
     expect(params.automatic_tax).toEqual({ enabled: true });
     expect(params.payment_method_types).toBeUndefined();
     expect(params.subscription_data.metadata.goatWorkspaceId).toBe("goat_ws_1");

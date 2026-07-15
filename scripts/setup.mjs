@@ -124,7 +124,10 @@ const GOAT_BILLING_LOCAL_ENV_KEYS = [
   "GOAT_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
 ];
-const GOAT_PRO_PRICE_LOOKUP_KEY = "goat_pro_monthly_eur";
+// Bumped from "goat_pro_monthly_eur" (EUR 15 per seat) when Pro moved to a
+// flat USD 99 subscription; a fresh key avoids tripping the terms-mismatch
+// guard on Stripe accounts that still hold the old test Price.
+const GOAT_PRO_PRICE_LOOKUP_KEY = "goat_pro_monthly_usd";
 const OBSERVABILITY_ENV_KEYS = [
   "BETTER_STACK_ERRORS_DSN",
   "OBSERVABILITY_ENABLED",
@@ -528,8 +531,8 @@ function runStripeCliJson(args) {
 function isExpectedGoatProPrice(price) {
   return (
     price?.active === true &&
-    price.currency === "eur" &&
-    price.unit_amount === 1_500 &&
+    price.currency === "usd" &&
+    price.unit_amount === 9_900 &&
     price.tax_behavior === "exclusive" &&
     price.recurring?.interval === "month" &&
     price.recurring?.interval_count === 1 &&
@@ -569,7 +572,7 @@ function ensureGoatProTestPrice() {
     "--name",
     "OpenCompany Pro",
     "--description",
-    "200 workspace ingestions per UTC day; billed per active workspace member.",
+    "1,500 ingested items per calendar month (plus connected-source bonuses); flat monthly workspace subscription.",
     "-d",
     "metadata[billingProduct]=goat",
     "-d",
@@ -582,13 +585,13 @@ function ensureGoatProTestPrice() {
     "prices",
     "create",
     "--currency",
-    "eur",
+    "usd",
     "--unit-amount",
-    "1500",
+    "9900",
     "--product",
     product.value.id,
     "--nickname",
-    "OpenCompany Pro monthly per seat",
+    "OpenCompany Pro monthly",
     "--tax-behavior",
     "exclusive",
     "--lookup-key",

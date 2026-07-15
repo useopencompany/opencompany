@@ -14,6 +14,7 @@ vi.mock("@opencompany/analytics/server", () => ({
 }));
 
 vi.mock("@opencompany/db/goat-billing", () => ({
+  GOAT_PRO_MONTHLY_PRICE_USD_CENTS: 9_900,
   applyGoatStripeInvoicePaymentState: vi.fn(),
   applyGoatStripeSubscriptionProjection: vi.fn(),
   findGoatWorkspaceIdForStripeSubscription: vi.fn(),
@@ -187,7 +188,6 @@ describe("Stripe webhook route", () => {
         workspaceId: "goat_ws_1",
         subscriptionId: "sub_goat_1",
         status: "active",
-        seatQuantity: 3,
       }),
     );
     expect(fulfillCheckoutSessionMock).not.toHaveBeenCalled();

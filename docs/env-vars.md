@@ -99,10 +99,10 @@ Set these in Vercel Production.
 | `WORKOS_REDIRECT_URI` | No | Server-only fallback. Usually leave unset. |
 | `GOAT_NEXT_PUBLIC_APP_URL` | Goat only | Canonical Goat app origin. Local default is `https://localhost:3443` through Caddy; hosted value is the separate Goat domain. |
 | `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Goat only | Goat AuthKit callback URL. Must be registered in the same WorkOS environment as the core app. |
-| `GOAT_STRIPE_API_KEY` | Goat only | Dedicated restricted Stripe key for Goat customers, subscription Checkout, portal sessions, and licensed seat quantity updates. Store separate test/live values in Infisical `dev`/`prod` + `/web`; the Goat Vercel project receives them through the corresponding Infisical sync. |
-| `GOAT_STRIPE_PRO_PRICE_ID` | Goat only | Environment-specific Stripe Price id for OpenCompany Pro: EUR 15 per licensed seat per month, tax-exclusive. Store it beside the Goat Stripe key in Infisical `dev`/`prod` + `/web` for Vercel sync. |
+| `GOAT_STRIPE_API_KEY` | Goat only | Dedicated restricted Stripe key for Goat customers, subscription Checkout, and portal sessions. Store separate test/live values in Infisical `dev`/`prod` + `/web`; the Goat Vercel project receives them through the corresponding Infisical sync. |
+| `GOAT_STRIPE_PRO_PRICE_ID` | Goat only | Environment-specific Stripe Price id for OpenCompany Pro: flat USD 99 per workspace per month, tax-exclusive, monthly billing only (no annual Price). Store it beside the Goat Stripe key in Infisical `dev`/`prod` + `/web` for Vercel sync. |
 | `GOAT_STRIPE_CHECKOUT_ENABLED` | Goat hosted only | Production live-Checkout gate. Keep false until the business has configured its actual Stripe Tax registrations, then set true in Infisical `prod` + `/web` and sync it to Goat Vercel. Test/local Checkout is not gated. |
-| `CRON_SECRET` | Goat hosted only | Bearer secret protecting the hourly Goat seat reconciliation route. Store it in Infisical `dev`/`prod` + `/web`; sync it to the Goat Vercel project, which sends it as the cron Authorization bearer token. |
+| `CRON_SECRET` | Goat hosted only | Bearer secret protecting the hourly Goat billing reconciliation route (releases paused ingestion backlogs). Store it in Infisical `dev`/`prod` + `/web`; sync it to the Goat Vercel project, which sends it as the cron Authorization bearer token. |
 | `GOAT_PORT` | Local Goat only | Internal Next.js port for `bun run dev:goat`; defaults to `3002`. |
 | `GOAT_HTTPS_PORT` | Local Goat only | Browser-facing Caddy HTTPS port for `bun run dev:goat`; defaults to `3443`. |
 | `OPENCOMPANY_GITHUB_ORG` | Yes | GitHub org where workspace repos are created. |

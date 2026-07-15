@@ -80,6 +80,10 @@
       "types": "./src/goat-billing.ts",
       "default": "./src/goat-billing.ts"
     },
+    "./goat-billing-constants": {
+      "types": "./src/goat-billing-constants.ts",
+      "default": "./src/goat-billing-constants.ts"
+    },
     "./schema": {
       "types": "./src/schema.ts",
       "default": "./src/schema.ts"
