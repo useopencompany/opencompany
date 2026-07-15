@@ -164,14 +164,19 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
     // ingested via another member's window) is skipped — no job, no billing.
     const eventKeys = claimed.map((row) => `${window.teamId}:${window.channelId}:${row.messageTs}`);
     const brainRefs: string[] = [];
+    const claimedEventKeysByBrainRef = new Map<string, string[]>();
+    const newlyClaimedEventKeys = new Set<string>();
     for (const brainRef of new Set(candidateBrainRefs)) {
-      const { claimedCount } = await claimGoatBrainSourceEvents({
+      const { claimedEventKeys } = await claimGoatBrainSourceEvents({
         brainRef,
         sourceProvider: "slack",
         eventKeys,
         db: tx,
       });
-      if (claimedCount > 0) brainRefs.push(brainRef);
+      if (claimedEventKeys.length === 0) continue;
+      brainRefs.push(brainRef);
+      claimedEventKeysByBrainRef.set(brainRef, claimedEventKeys);
+      for (const eventKey of claimedEventKeys) newlyClaimedEventKeys.add(eventKey);
     }
 
     const upserted = await upsertGoatBrainSourceItemAndEnqueue({
@@ -180,7 +185,8 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
       integrationId: window.integrationId,
       item,
       rawPayload: { eventIds: claimed.map((row) => row.id) },
-      rawEventCount: claimed.length,
+      rawEventCount: brainRefs.length > 0 ? newlyClaimedEventKeys.size : claimed.length,
+      rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
       kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       now: flushedAt,
@@ -199,7 +205,7 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
       await attributeGoatBrainSourceEventClaims({
         brainRef,
         sourceProvider: "slack",
-        eventKeys,
+        eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
         sourceItemId: upserted.sourceItemId,
         db: tx,
       });

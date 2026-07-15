@@ -175,14 +175,19 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       (row) => `${window.organizationId}:${window.issueId}:${row.deliveryId}`,
     );
     const brainRefs: string[] = [];
+    const claimedEventKeysByBrainRef = new Map<string, string[]>();
+    const newlyClaimedEventKeys = new Set<string>();
     for (const brainRef of new Set(candidateBrainRefs)) {
-      const { claimedCount } = await claimGoatBrainSourceEvents({
+      const { claimedEventKeys } = await claimGoatBrainSourceEvents({
         brainRef,
         sourceProvider: "linear",
         eventKeys,
         db: tx,
       });
-      if (claimedCount > 0) brainRefs.push(brainRef);
+      if (claimedEventKeys.length === 0) continue;
+      brainRefs.push(brainRef);
+      claimedEventKeysByBrainRef.set(brainRef, claimedEventKeys);
+      for (const eventKey of claimedEventKeys) newlyClaimedEventKeys.add(eventKey);
     }
 
     const upserted = await upsertGoatBrainSourceItemAndEnqueue({
@@ -191,7 +196,8 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       integrationId: window.integrationId,
       item,
       rawPayload: { eventIds: claimed.map((row) => row.id) },
-      rawEventCount: claimed.length,
+      rawEventCount: brainRefs.length > 0 ? newlyClaimedEventKeys.size : claimed.length,
+      rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
       kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       skipReason: ingestDecision.action === "skip" ? ingestDecision.reason : null,
@@ -211,7 +217,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       await attributeGoatBrainSourceEventClaims({
         brainRef,
         sourceProvider: "linear",
-        eventKeys,
+        eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
         sourceItemId: upserted.sourceItemId,
         db: tx,
       });

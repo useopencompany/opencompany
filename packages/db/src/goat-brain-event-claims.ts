@@ -19,9 +19,9 @@ export async function claimGoatBrainSourceEvents(input: {
   eventKeys: string[];
   sourceItemId?: string;
   db?: DbLike;
-}): Promise<{ claimedCount: number }> {
+}): Promise<{ claimedCount: number; claimedEventKeys: string[] }> {
   const keys = [...new Set(input.eventKeys.map((key) => key.trim()).filter(Boolean))];
-  if (keys.length === 0) return { claimedCount: 0 };
+  if (keys.length === 0) return { claimedCount: 0, claimedEventKeys: [] };
   const db = input.db ?? getDb();
 
   const inserted = await db
@@ -42,9 +42,12 @@ export async function claimGoatBrainSourceEvents(input: {
         goatBrainSourceEventClaims.eventKey,
       ],
     })
-    .returning({ id: goatBrainSourceEventClaims.id });
+    .returning({ eventKey: goatBrainSourceEventClaims.eventKey });
 
-  return { claimedCount: inserted.length };
+  return {
+    claimedCount: inserted.length,
+    claimedEventKeys: inserted.map((row: { eventKey: string }) => row.eventKey),
+  };
 }
 
 // Attributes freshly inserted claims (source_item_id still NULL) for a window

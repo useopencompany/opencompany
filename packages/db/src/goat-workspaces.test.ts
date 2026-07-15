@@ -1,10 +1,15 @@
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import {
   defaultGoatBrainIdForUser,
   getGoatBrainEnrichmentEnabled,
   newGoatBrainId,
+  replaceGoatBrainMembers,
   updateGoatBrainEnrichmentEnabled,
 } from "./goat-workspaces";
+
+const pgDialect = new PgDialect();
 
 describe("Goat brain ids", () => {
   it("generates readable default brain ids without embedding the WorkOS user id", () => {
@@ -48,6 +53,37 @@ describe("Goat brain enrichment flag", () => {
     await expect(
       updateGoatBrainEnrichmentEnabled({ brainRef: "gbrain_missing", enabled: true }, { db }),
     ).rejects.toThrow("Brain not found.");
+  });
+});
+
+describe("Goat brain access membership", () => {
+  it("removes personal sources for users excluded from the desired member set", async () => {
+    let executedQuery: unknown;
+    const execute = vi.fn(async (query: unknown) => {
+      executedQuery = query;
+      return [];
+    });
+
+    await replaceGoatBrainMembers(
+      {
+        brainRef: "brain_restricted",
+        userWorkosIds: ["user_admin", "user_retained"],
+        addedByWorkosId: "user_admin",
+      },
+      { db: { execute } },
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    const query = pgDialect.sqlToQuery(executedQuery as SQL);
+    const normalizedSql = query.sql.toLowerCase();
+    expect(normalizedSql).toContain("delete from goat.brain_members");
+    expect(normalizedSql).toContain("insert into goat.brain_members");
+    expect(normalizedSql).toContain("delete from goat.brain_sources");
+    expect(normalizedSql).toContain("integration.workspace_id is null");
+    expect(normalizedSql).toContain("desired.user_workos_id = bs.user_workos_id");
+    expect(query.params).toEqual(
+      expect.arrayContaining(["brain_restricted", "user_admin", "user_retained"]),
+    );
   });
 });
 
