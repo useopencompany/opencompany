@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-15
+
+Goat is a company brain — it turns your team's tools and conversations into a
+shared, structured knowledge base and brings it to any agent over MCP. This is
+its first release at [my.opencompany.chat](https://my.opencompany.chat).
+
+### Added
+- Goat is here: a company brain that files what matters from your team's tools and conversations, links it to what you already know, and serves it to any agent over MCP (#554) — @louis.
+- Goat Brain is a typed, folder-organized knowledge base with an evidence taxonomy, wiki-style links rendered as chips, and first-class binary documents including PDFs (#558, #607, #611, #615, #620, #613) — @louis.
+- Brains ingest from your sources automatically — Jamie meeting notes, GitHub (PRs, issues, comments), Gmail, Linear, Google Drive, X, and chat captures — filing and linking what matters (#575, #652, #659, #641, #715, #573, #631) — @louis.
+- Ingestion can enrich entries with web search, respects per-brain spend budgets, and imports company context during onboarding (#691, #725, #724, #728) — @louis.
+- Goat chat streams live with disconnect-safe, resumable sessions, file attachments that flow end-to-end into the brain, chat pinning, background chats, and Cmd+K to start a new one (#633, #700, #731, #577, #627) — @louis.
+- Codex-backed sessions run in Goat across cloud and local sandboxes, with in-chat controls, sandbox status, and per-task engine selection (#555, #649, #624, #662, #661) — @louis.
+- Tasks can run on a schedule, notify their originating chat on completion, expose their harness config, and sit behind a background-task preference (#560, #557, #559, #717) — @louis.
+- A single user-level MCP endpoint at `/mcp` exposes every brain you can access, with a personal MCP settings tab and member onboarding (#739, #600, #714) — @louis.
+- Workspaces gate brain access with member-level permissions, member-contributed sources, multi-account connections, and cross-member deduplication (#596, #656, #740) — @louis.
+- Workspace billing ships with pooled monthly allowances, per-seat pricing, USD credits, per-brain intelligence tiers, credit top-up promotion codes, and a spend overview with charts (#718, #732, #742, #745, #648, #651) — @louis.
+- A brain overview dashboard, activity feed, and settings overview give each brain a home, alongside a model picker, Fumadocs-powered docs, browser research tools, an onboarding flow, and new app icons (#741, #625, #669, #594, #572, #576, #710, #727) — @louis.
+- Codex chats get auto-generated titles, and Goat gained an appearance theme toggle and a quicker new-brain action in the sidebar (#668, #703, #702) — @opencompany-bot.
+
+### Changed
+- Brain retrieval was rebuilt on a Postgres-native read plane and unified into a single surface; chat and MCP now read the brain read-only, with all writes flowing through ingestion (#621, #695, #690) — @louis.
+- Navigation across the brain and app is now client-first for instant transitions (#591, #635) — @louis.
+- The sidebar gained a workspace switcher in its header, recent-chat history, archive-on-hover, and a per-brain context menu (#667, #696, #698, #712) — @louis.
+- The ingestion model was updated, the per-event ingestion budget was raised to one dollar, and the browser tab now reads "OpenCompany" (#655, #734, #747) — @louis.
+
+### Fixed
+- Brain ingestion no longer suffers retry storms or conflict-page pollution, and retrieval tracking is accurate (#707, #743) — @louis.
+- Fixed an infinite render loop that froze brain navigation and a composer freeze when input scrolled past its max height (#736, #730) — @louis.
+- Goat chat session continuity and post-completion navigation are reliable, and chat pin transactions are consistent (#590, #706, #737) — @louis.
+- Jamie webhook API-key handling and setup were corrected (#580, #654) — @louis.
+
 ## [0.18.0] - 2026-06-25
 
 ### Added

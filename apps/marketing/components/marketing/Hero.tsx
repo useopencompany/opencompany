@@ -24,10 +24,10 @@ export function Hero() {
         <div className="relative grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-12">
           <div>
             <a
-              href="#"
+              href="https://my.opencompany.chat/changelog#release-1.0.0"
               className="mb-5 inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/5 px-3 py-1 font-mono text-[12px] text-violet-600 transition-colors hover:border-violet-500/50 hover:bg-violet-500/10 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
             >
-              See what's new in 3.0.2
+              See what's new in 1.0.0
               <span aria-hidden="true">→</span>
             </a>
             <h1 className="max-w-3xl text-balance font-medium font-mono text-3xl text-ink leading-[1.1] tracking-tight sm:text-4xl">
