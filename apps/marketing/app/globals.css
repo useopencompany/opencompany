@@ -1,0 +1,13 @@
+/*
+ * The marketing site's only stylesheet. It re-exports the shared
+ * @opencompany/ui styles, which pull in Tailwind, the design tokens, and a
+ * @source directive that scans the ui package. Tailwind auto-detects this app's
+ * own source files from the build root.
+ */
+@import "@opencompany/ui/globals.css";
+
+/* Route the `font-mono` utility to Geist Mono (loaded via next/font in layout). */
+@theme {
+  --font-mono:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
