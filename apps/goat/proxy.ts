@@ -3,8 +3,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { isInitialDocumentRequest, localGoatHttpsRedirectUrl } from "@/lib/local-https-redirect";
 import { getGoatWorkOSRedirectUri } from "@/lib/workos";
 
-const UNAUTHENTICATED_PATHS = new Set(["/auth/callback", "/auth/sign-in", "/api/healthz"]);
-const UNAUTHENTICATED_PREFIXES = ["/.well-known/oauth-", "/api/mcp/"];
+const UNAUTHENTICATED_PATHS = new Set(["/auth/callback", "/auth/sign-in", "/api/healthz", "/mcp"]);
+const UNAUTHENTICATED_PREFIXES = ["/.well-known/oauth-"];
 
 export default async function proxy(request: NextRequest) {
   const localHttpsRedirect = localGoatHttpsRedirectUrl(request);

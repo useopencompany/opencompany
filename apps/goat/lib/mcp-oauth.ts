@@ -1,6 +1,7 @@
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { generateProtectedResourceMetadata, getPublicUrl } from "mcp-handler";
+import { GOAT_USER_MCP_ENDPOINT_PATH } from "@/lib/mcp-setup";
 
 export const GOAT_AUTHKIT_DOMAIN_ENV = "GOAT_AUTHKIT_DOMAIN";
 
@@ -37,12 +38,8 @@ export function resolveGoatAuthKitDomain(
   }
 }
 
-export function buildGoatMcpEndpointPath(brainRef: string) {
-  return `/api/mcp/${encodeURIComponent(brainRef)}/mcp`;
-}
-
-export function buildGoatMcpResourceMetadataPath(brainRef: string) {
-  return `/.well-known/oauth-protected-resource${buildGoatMcpEndpointPath(brainRef)}`;
+export function buildGoatUserMcpResourceMetadataPath() {
+  return `/.well-known/oauth-protected-resource${GOAT_USER_MCP_ENDPOINT_PATH}`;
 }
 
 export function goatMcpResourceUrlFromMetadataRequest(request: Request) {
@@ -59,7 +56,7 @@ export function goatMcpResourceUrlFromMetadataRequest(request: Request) {
 
 export function goatMcpResourceIndicatorUrlFromRequest(request: Request) {
   const publicUrl = getPublicUrl(request);
-  publicUrl.pathname = "/api/mcp";
+  publicUrl.pathname = GOAT_USER_MCP_ENDPOINT_PATH;
   publicUrl.search = "";
   publicUrl.hash = "";
   return publicUrl.toString();
@@ -93,7 +90,6 @@ export async function verifyGoatMcpBearerToken(
     });
     const userWorkosId = workosUserIdFromPayload(payload);
     if (!userWorkosId) return undefined;
-    const workosOrganizationId = workosOrganizationIdFromPayload(payload);
 
     return {
       token: bearerToken,
@@ -102,7 +98,6 @@ export async function verifyGoatMcpBearerToken(
       ...(typeof payload.exp === "number" ? { expiresAt: payload.exp } : {}),
       extra: {
         userWorkosId,
-        workosOrganizationId,
       },
     };
   } catch {
@@ -114,14 +109,6 @@ export function userWorkosIdFromMcpAuth(auth: AuthInfo | undefined) {
   const extraUserId = auth?.extra?.userWorkosId;
   if (typeof extraUserId === "string" && extraUserId.trim()) return extraUserId;
   return auth?.clientId || null;
-}
-
-export function workosOrganizationIdFromMcpAuth(auth: AuthInfo | undefined) {
-  const extraOrganizationId = auth?.extra?.workosOrganizationId;
-  if (typeof extraOrganizationId === "string" && extraOrganizationId.trim()) {
-    return extraOrganizationId;
-  }
-  return null;
 }
 
 function jwksForAuthKitDomain(authKitDomain: string) {
@@ -136,11 +123,6 @@ function jwksForAuthKitDomain(authKitDomain: string) {
 
 function workosUserIdFromPayload(payload: JWTPayload) {
   return typeof payload.sub === "string" && payload.sub.trim() ? payload.sub : null;
-}
-
-function workosOrganizationIdFromPayload(payload: JWTPayload) {
-  const organizationId = payload.org_id;
-  return typeof organizationId === "string" && organizationId.trim() ? organizationId : null;
 }
 
 function scopesFromPayload(payload: JWTPayload) {

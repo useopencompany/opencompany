@@ -7,6 +7,7 @@ import {
   CircleDollarSign,
   CreditCard,
   PanelLeft,
+  PlugZap,
   SlidersHorizontal,
   UserRound,
   Users,
@@ -43,6 +44,12 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         label: "Integrations",
         isActive: (pathname) =>
           pathname === "/settings/integrations" || pathname.startsWith("/settings/jamie"),
+      },
+      {
+        href: "/settings/mcp",
+        icon: PlugZap,
+        label: "MCP",
+        isActive: (pathname) => pathname === "/settings/mcp",
       },
       {
         href: "/settings/preferences",
