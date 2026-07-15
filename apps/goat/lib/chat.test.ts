@@ -3,9 +3,11 @@ import type {
   GoatCodexChatTurnSettings,
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
+import { drizzle } from "drizzle-orm/neon-http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeGoatChatSessionForUser,
+  createDbGoatChatStore,
   createGoatChatUserTurn,
   type GoatChatStore,
   listRecentGoatChatsForUser,
@@ -27,6 +29,62 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 type StoredChatMessage = Awaited<ReturnType<GoatChatStore["listMessages"]>>[number];
+
+describe("createDbGoatChatStore", () => {
+  it.each([
+    { pinned: true, expectedPinnedAt: "2026-07-14T17:15:00.000Z", checksCapacity: true },
+    { pinned: false, expectedPinnedAt: null, checksCapacity: false },
+  ])("persists pinned=$pinned through a neon-http transactional batch", async ({
+    pinned,
+    expectedPinnedAt,
+    checksCapacity,
+  }) => {
+    const transaction = vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries));
+    const query = vi.fn(async (...[statement]: [string, unknown[], object]) => ({
+      rows: statement.startsWith("select") ? [["user_1"]] : [["chat_1"]],
+    }));
+    const client = Object.assign(query, { transaction });
+    const db = drizzle(client as never);
+    const store = createDbGoatChatStore(db as never);
+
+    await expect(
+      store.setSessionPinned({
+        userWorkosId: "user_1",
+        sessionId: "chat_1",
+        pinned,
+        now: new Date("2026-07-14T17:15:00.000Z"),
+      }),
+    ).resolves.toBe(true);
+
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(query).toHaveBeenCalledTimes(2);
+    const [lockStatement] = query.mock.calls[0]!;
+    const [updateStatement, updateParams] = query.mock.calls[1]!;
+    expect(lockStatement).toContain('from "goat"."users"');
+    expect(lockStatement).toContain("for update");
+    expect(updateStatement).toContain('update "goat"."chat_sessions"');
+    expect(updateStatement.includes("count(*)::integer")).toBe(checksCapacity);
+    expect(updateParams).toEqual(expect.arrayContaining([expectedPinnedAt, "chat_1", "user_1"]));
+  });
+
+  it("returns false when the batch does not update the requested chat", async () => {
+    const transaction = vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries));
+    const query = vi.fn(async (...[statement]: [string, unknown[], object]) => ({
+      rows: statement.startsWith("select") ? [["user_1"]] : [],
+    }));
+    const client = Object.assign(query, { transaction });
+    const store = createDbGoatChatStore(drizzle(client as never) as never);
+
+    await expect(
+      store.setSessionPinned({
+        userWorkosId: "user_1",
+        sessionId: "missing_chat",
+        pinned: true,
+        now: new Date("2026-07-14T17:15:00.000Z"),
+      }),
+    ).resolves.toBe(false);
+  });
+});
 
 describe("createGoatChatUserTurn", () => {
   beforeEach(() => {
