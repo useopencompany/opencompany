@@ -26,7 +26,12 @@ The underlying session/workspace lookup is React-`cache()`'d, so calling `curren
 
 In the WorkOS dashboard:
 
-- **Redirects** must include `http://localhost:3000/auth/callback` for local dev and the production callback URL for deploys.
+- Keep the legacy web app and Goat as separate WorkOS Applications in the same WorkOS environment.
+  They share users and Organizations, but each Application owns its client id, API key, and redirect
+  URIs. This is required because invitations created through the WorkOS API preserve the Application
+  context of the API key that created them.
+- **Legacy web redirects** must include `http://localhost:3000/auth/callback` for local dev and its production callback URL.
+- **Goat redirects** must include its local callback and the production `.chat` callback URL.
 - If local development can run on different ports, add `http://localhost:*/auth/callback` as an allowed redirect URI too. Keep a concrete URI as the default.
 - AuthKit's hosted sign-in screen is enabled by default — no extra config needed.
 
@@ -38,8 +43,8 @@ Neon branch connection string.
 
 | Var | Purpose |
 |---|---|
-| `WORKOS_CLIENT_ID` | Public client identifier. |
-| `WORKOS_API_KEY` | Secret server-side key. Never expose to the browser. |
+| `WORKOS_CLIENT_ID` | Public client identifier for the current app's WorkOS Application. |
+| `WORKOS_API_KEY` | Secret server-side key for the current app's WorkOS Application. Never expose to the browser. |
 | `WORKOS_COOKIE_PASSWORD` | Encrypts the session cookie. Must be 32+ chars. Rotate by changing this — invalidates all sessions. |
 | `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Callback URL. Must match WorkOS dashboard exactly. |
 
