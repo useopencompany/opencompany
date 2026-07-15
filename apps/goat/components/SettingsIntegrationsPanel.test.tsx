@@ -18,6 +18,15 @@ vi.mock("@/lib/codex-auth", () => ({
   startGoatCodexDeviceAuth: vi.fn(),
 }));
 
+// Pulls in @/lib/auth (authkit), which vitest cannot resolve.
+vi.mock("@/lib/integration-account-actions", () => ({
+  disconnectGoatIntegrationAccountAction: vi.fn(async () => ({ ok: true })),
+  getGoatIntegrationAccountUsageAction: vi.fn(async () => ({
+    ok: true,
+    affectedBrainSourceCount: 0,
+  })),
+}));
+
 describe("SettingsIntegrationsPanel", () => {
   it("always exposes the permanent Goat Brain MCP entry", () => {
     render(

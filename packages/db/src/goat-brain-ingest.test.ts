@@ -148,6 +148,85 @@ describe("upsertGoatBrainSourceItemAndEnqueue", () => {
     });
   });
 
+  it("bills only the union of newly claimed events in each workspace", async () => {
+    reserveGoatWorkspaceIngestionMock.mockClear();
+    const brains = [
+      { id: "brain_a", workspaceId: "workspace_one" },
+      { id: "brain_b", workspaceId: "workspace_one" },
+      { id: "brain_c", workspaceId: "workspace_two" },
+    ];
+    const db = {
+      insert: (table: unknown) => ({
+        values: (values: Record<string, unknown> | Array<Record<string, unknown>>) => ({
+          onConflictDoUpdate: () => ({
+            returning: async () => {
+              if (table !== goatBrainSourceItems)
+                throw new Error("Unexpected source insert table.");
+              return [{ id: "gbsrc_claimed_window" }];
+            },
+          }),
+          onConflictDoNothing: () => ({
+            returning: async () => {
+              if (table !== goatBrainIngestJobs) throw new Error("Unexpected job insert table.");
+              const rows = Array.isArray(values) ? values : [values];
+              return rows.map((row, index) => ({
+                id: `job_${index}`,
+                brainRef: row.brainRef,
+                status: "queued",
+                completedAt: null,
+                lastError: null,
+              }));
+            },
+          }),
+        }),
+      }),
+      select: () => ({
+        from: (table: unknown) => ({
+          where: async () => {
+            if (table !== goatBrains) throw new Error("Unexpected select table.");
+            return brains;
+          },
+        }),
+      }),
+      update: () => ({ set: () => ({ where: async () => undefined }) }),
+    };
+
+    await upsertGoatBrainSourceItemAndEnqueue({
+      userWorkosId: "user_123",
+      sourceConnectionId: "slack_connection_123",
+      integrationId: "integration_123",
+      item: {
+        sourceProvider: "slack",
+        sourceType: "conversation",
+        externalId: "window_123",
+        sourceRef: "slack:window_123",
+        title: "Slack window",
+        occurredAt: "2026-07-15T10:00:00.000Z",
+        capturedAt: "2026-07-15T10:01:00.000Z",
+        contentHash: "hash_claimed_window",
+        contentHashInput: {},
+        content: {},
+      },
+      rawPayload: {},
+      brainRefs: brains.map((brain) => brain.id),
+      rawEventCount: 2,
+      rawEventKeysByBrainRef: new Map([
+        ["brain_a", ["message_1"]],
+        ["brain_b", ["message_1", "message_2"]],
+        ["brain_c", ["message_2"]],
+      ]),
+      db,
+    });
+
+    expect(reserveGoatWorkspaceIngestionMock).toHaveBeenCalledTimes(2);
+    expect(reserveGoatWorkspaceIngestionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "workspace_one", rawEventCount: 2 }),
+    );
+    expect(reserveGoatWorkspaceIngestionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "workspace_two", rawEventCount: 1 }),
+    );
+  });
+
   it("transitions duplicate queued jobs to skipped on repeated skip delivery", async () => {
     const now = new Date("2026-07-10T10:15:00.000Z");
     const sourceItem = { id: "gbsrc_existing" };

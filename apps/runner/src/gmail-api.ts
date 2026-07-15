@@ -37,6 +37,9 @@ export type GmailMessageMetadata = {
   from: string | null;
   to: string | null;
   cc: string | null;
+  // RFC822 Message-ID header — the cross-mailbox identity used for
+  // cross-member brain dedup.
+  rfc822MessageId: string | null;
   snippet: string | null;
   internalDate: Date | null;
 };
@@ -114,7 +117,7 @@ export async function fetchGmailMessageMetadata(
 ): Promise<GmailMessageMetadata | null> {
   const url = new URL(`${GMAIL_BASE}/messages/${encodeURIComponent(messageId)}`);
   url.searchParams.set("format", "metadata");
-  for (const header of ["From", "To", "Cc", "Subject", "Date"]) {
+  for (const header of ["From", "To", "Cc", "Subject", "Date", "Message-ID"]) {
     url.searchParams.append("metadataHeaders", header);
   }
 
@@ -136,6 +139,7 @@ export async function fetchGmailMessageMetadata(
     from: headers.from ?? null,
     to: headers.to ?? null,
     cc: headers.cc ?? null,
+    rfc822MessageId: headers.messageId ?? null,
     snippet: readString(message, "snippet") ?? null,
     internalDate: readInternalDate(message),
   };
@@ -199,7 +203,8 @@ export function stripQuotedReply(body: string): string {
 }
 
 function readHeaders(payload: Record<string, unknown>) {
-  const headers: { from?: string; to?: string; cc?: string; subject?: string } = {};
+  const headers: { from?: string; to?: string; cc?: string; subject?: string; messageId?: string } =
+    {};
   for (const entry of asArray(payload.headers)) {
     const record = asRecord(entry);
     const name = readString(record, "name")?.toLowerCase();
@@ -207,6 +212,8 @@ function readHeaders(payload: Record<string, unknown>) {
     if (!name || !value) continue;
     if (name === "from" || name === "to" || name === "cc" || name === "subject") {
       headers[name] = value;
+    } else if (name === "message-id") {
+      headers.messageId = value;
     }
   }
   return headers;

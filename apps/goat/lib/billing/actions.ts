@@ -1,11 +1,22 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
-  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
   loadGoatBillingOverview,
   setGoatStripeCustomerId,
 } from "@opencompany/db/goat-billing";
+import {
+  GOAT_MAX_TOP_UP_USD_CENTS,
+  GOAT_MIN_TOP_UP_USD_CENTS,
+} from "@opencompany/db/goat-billing-constants";
+import {
+  createGoatPendingCheckoutRecord,
+  markGoatCheckoutRecordFailed,
+  markGoatCheckoutRecordOpen,
+} from "@opencompany/db/goat-credits";
+import { countGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import { redirect } from "next/navigation";
 import { currentGoatUser } from "@/lib/auth";
 import {
@@ -22,6 +33,26 @@ function billingError(error: unknown, fallback: string): GoatBillingActionResult
     ok: false,
     error: error instanceof Error ? error.message : fallback,
   };
+}
+
+async function ensureGoatStripeCustomerId(context: {
+  workspaceId: string;
+  workspaceName: string;
+  email: string;
+  existingCustomerId: string | null;
+}) {
+  if (context.existingCustomerId) return context.existingCustomerId;
+  const customer = await getGoatStripe().customers.create({
+    email: context.email,
+    name: context.workspaceName,
+    metadata: { goatWorkspaceId: context.workspaceId },
+  });
+  return (
+    (await setGoatStripeCustomerId({
+      workspaceId: context.workspaceId,
+      stripeCustomerId: customer.id,
+    })) ?? customer.id
+  );
 }
 
 export async function createGoatProCheckoutAction(): Promise<GoatBillingActionResult> {
@@ -50,19 +81,15 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
       };
     }
     const stripe = getGoatStripe();
-    let customerId = overview.billing.stripeCustomerId;
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: context.authUser.email,
-        name: context.workspace.name,
-        metadata: { goatWorkspaceId: context.workspace.id },
-      });
-      customerId =
-        (await setGoatStripeCustomerId({
-          workspaceId: context.workspace.id,
-          stripeCustomerId: customer.id,
-        })) ?? customer.id;
-    }
+    const customerId = await ensureGoatStripeCustomerId({
+      workspaceId: context.workspace.id,
+      workspaceName: context.workspace.name,
+      email: context.authUser.email,
+      existingCustomerId: overview.billing.stripeCustomerId,
+    });
+    // Pro is seat-priced: every current member is a paid seat. Later member
+    // changes flow through the seat sync + hourly reconcile.
+    const seatQuantity = Math.max(1, await countGoatWorkspaceMembers(context.workspace.id));
     const appUrl = getGoatAppUrl();
     const session = await stripe.checkout.sessions.create(
       {
@@ -74,7 +101,7 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
         billing_address_collection: "required",
         tax_id_collection: { enabled: true },
         customer_update: { address: "auto", name: "auto" },
-        line_items: [{ price: getGoatProPriceId(), quantity: 1 }],
+        line_items: [{ price: getGoatProPriceId(), quantity: seatQuantity }],
         metadata: {
           billingProduct: "goat",
           goatWorkspaceId: context.workspace.id,
@@ -94,11 +121,110 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
     await captureServerEvent("goat_billing_checkout_started", context.user.workosUserId, {
       user_id: context.user.workosUserId,
       workspace_id: context.workspace.id,
-      monthly_price_usd_cents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+      seat_quantity: seatQuantity,
+      seat_monthly_price_usd_cents: GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
     });
     checkoutUrl = session.url;
   } catch (error) {
     return billingError(error, "Could not start OpenCompany Pro checkout.");
+  }
+  redirect(checkoutUrl);
+}
+
+export async function createGoatCreditTopUpAction(
+  amountCents: number,
+): Promise<GoatBillingActionResult> {
+  const context = await currentGoatUser();
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can add credits." };
+  }
+  if (
+    !Number.isSafeInteger(amountCents) ||
+    amountCents < GOAT_MIN_TOP_UP_USD_CENTS ||
+    amountCents > GOAT_MAX_TOP_UP_USD_CENTS
+  ) {
+    return {
+      ok: false,
+      error: `Credit top-ups must be between $${GOAT_MIN_TOP_UP_USD_CENTS / 100} and $${GOAT_MAX_TOP_UP_USD_CENTS / 100}.`,
+    };
+  }
+  let checkoutUrl: string;
+  const checkoutRecordId = `goat_chk_${randomUUID().replace(/-/g, "")}`;
+  try {
+    assertGoatCheckoutEnabled();
+    const overview = await loadGoatBillingOverview(context.workspace.id);
+    const customerId = await ensureGoatStripeCustomerId({
+      workspaceId: context.workspace.id,
+      workspaceName: context.workspace.name,
+      email: context.authUser.email,
+      existingCustomerId: overview.billing.stripeCustomerId,
+    });
+    await createGoatPendingCheckoutRecord({
+      id: checkoutRecordId,
+      workspaceId: context.workspace.id,
+      userWorkosId: context.user.workosUserId,
+      amountCents,
+    });
+    const appUrl = getGoatAppUrl();
+    const session = await getGoatStripe().checkout.sessions.create({
+      mode: "payment",
+      customer: customerId,
+      success_url: `${appUrl}/settings/workspace/billing?topup=success`,
+      cancel_url: `${appUrl}/settings/workspace/billing?topup=cancelled`,
+      automatic_tax: { enabled: true },
+      billing_address_collection: "required",
+      customer_update: { address: "auto", name: "auto" },
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            unit_amount: amountCents,
+            tax_behavior: "exclusive",
+            product_data: {
+              name: "OpenCompany credits",
+              description: "Usage credits for chat and brain ingestion",
+            },
+          },
+          quantity: 1,
+        },
+      ],
+      metadata: {
+        billingProduct: "goat_topup",
+        goatWorkspaceId: context.workspace.id,
+        userWorkosId: context.user.workosUserId,
+        checkoutRecordId,
+        amountCents: String(amountCents),
+      },
+    });
+    if (!session.url) {
+      await markGoatCheckoutRecordFailed({
+        id: checkoutRecordId,
+        error: "Stripe did not return a Checkout URL.",
+      });
+      return { ok: false, error: "Stripe did not return a Checkout URL." };
+    }
+    await markGoatCheckoutRecordOpen({
+      id: checkoutRecordId,
+      stripeCheckoutSessionId: session.id,
+      metadata: {
+        goatWorkspaceId: context.workspace.id,
+        userWorkosId: context.user.workosUserId,
+        checkoutRecordId,
+        amountCents: String(amountCents),
+      },
+    });
+    await captureServerEvent("goat_billing_topup_started", context.user.workosUserId, {
+      user_id: context.user.workosUserId,
+      workspace_id: context.workspace.id,
+      amount_cents: amountCents,
+    });
+    checkoutUrl = session.url;
+  } catch (error) {
+    await markGoatCheckoutRecordFailed({
+      id: checkoutRecordId,
+      error: error instanceof Error ? error.message : "Top-up checkout failed to start.",
+    }).catch(() => undefined);
+    return billingError(error, "Could not start the credit top-up checkout.");
   }
   redirect(checkoutUrl);
 }

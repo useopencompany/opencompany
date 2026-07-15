@@ -2,8 +2,10 @@
 
 import { getDb } from "@opencompany/db/client";
 import {
+  deleteGoatBrainSource,
   hasAnyBrainSourceForIntegration,
   listGoatBrainSourcesForBrain,
+  listGoatPersonalIntegrationAccounts,
   upsertGoatBrainSource,
 } from "@opencompany/db/goat-brain-sources";
 import {
@@ -82,21 +84,52 @@ import { getGoatAppUrl } from "@/lib/workos";
 import type { GoatWorkspaceActionResult } from "@/lib/workspace-actions";
 
 export type GoatBrainSourceView = {
+  sourceId: string;
   provider: GoatBrainSourceConfigProvider;
   integrationId: string;
   enabled: boolean;
   connectedByName: string;
+  ownerEmail: string | null;
+  ownerAvatarUrl: string | null;
+  // The specific account behind this source (a member can connect several
+  // accounts of one provider).
+  accountEmail: string | null;
+  accountName: string | null;
+  connectionLabel: string | null;
   // "workspace" = installation-bound connection owned by the workspace (any
   // admin manages it); "user" = a member's personal connection (only they can
   // change or rewire it).
   ownerKind: "workspace" | "user";
-  canManage: boolean;
+  // The viewer owns the backing personal integration.
+  isOwn: boolean;
+  // Config edits (pickers, filters, instructions) are owner-only for personal
+  // sources; toggling/removing is owner-or-admin.
+  canConfigure: boolean;
+  canToggle: boolean;
+  canRemove: boolean;
   integrationStatus: GoatIntegrationStatus;
   config: Record<string, unknown>;
 };
 
+export type GoatOwnSourceAccount = {
+  integrationId: string;
+  status: GoatIntegrationStatus;
+  accountEmail: string | null;
+  accountName: string | null;
+  connectionLabel: string | null;
+};
+
 export type GoatBrainSourcesDetails = {
+  viewer: { workosUserId: string; isAdmin: boolean };
   sources: GoatBrainSourceView[];
+  // The viewer's connected personal accounts per provider — the pool the
+  // add-source flow offers (the UI filters out accounts already on the brain).
+  ownAccounts: {
+    slack: GoatOwnSourceAccount[];
+    linear: GoatOwnSourceAccount[];
+    gmail: GoatOwnSourceAccount[];
+    google_drive: GoatOwnSourceAccount[];
+  };
   jamie: {
     integration: GoatJamieProviderState;
     // No explicit per-brain rows exist yet for the user's Jamie integration, so
@@ -138,14 +171,24 @@ function integrationProviderFor(
   }
 }
 
-async function requireAdminBrainContext(brainRef: string) {
+// Tier-1 gate: any workspace member with access to the brain. Source rows are
+// then authorized per capability — owners configure their own personal
+// sources; admins can additionally toggle/remove any source (but never edit a
+// member-owned config).
+async function requireBrainSourceContext(brainRef: string) {
   const context = await currentGoatUser();
-  if (context.role !== "admin") return null;
   const access = await getGoatBrainAccess({
     userWorkosId: context.user.workosUserId,
     brainRef,
   });
   if (!access || access.brain.workspaceId !== context.workspace.id) return null;
+  return context;
+}
+
+// Workspace-owned providers (github, jamie) stay admin-managed end to end.
+async function requireAdminBrainContext(brainRef: string) {
+  const context = await requireBrainSourceContext(brainRef);
+  if (!context || context.role !== "admin") return null;
   return context;
 }
 
@@ -198,22 +241,121 @@ async function loadSourceIntegrationForContext(input: {
   return integration ?? null;
 }
 
+type ExistingBrainSourceRow = {
+  id: string;
+  userWorkosId: string;
+  integrationWorkspaceId: string | null;
+};
+
+async function loadExistingBrainSource(
+  brainRef: string,
+  integrationId: string,
+): Promise<ExistingBrainSourceRow | null> {
+  const [row] = await getDb()
+    .select({
+      id: goatBrainSources.id,
+      userWorkosId: goatBrainSources.userWorkosId,
+      integrationWorkspaceId: goatIntegrations.workspaceId,
+    })
+    .from(goatBrainSources)
+    .innerJoin(goatIntegrations, eq(goatBrainSources.integrationId, goatIntegrations.id))
+    .where(
+      and(
+        eq(goatBrainSources.brainId, brainRef),
+        eq(goatBrainSources.integrationId, integrationId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+// Per-source capability tiers: personal sources are configured by their owner
+// only, while toggling/removing extends to admins (their veto over what feeds
+// a shared brain). Workspace-owned sources (github, jamie) stay admin-only.
+function brainSourceCapabilities(
+  source: ExistingBrainSourceRow,
+  context: Pick<AdminBrainContext, "user" | "workspace" | "role">,
+) {
+  const isAdmin = context.role === "admin";
+  if (source.integrationWorkspaceId) {
+    const managed = source.integrationWorkspaceId === context.workspace.id && isAdmin;
+    return { canConfigure: managed, canToggle: managed, canRemove: managed };
+  }
+  const isOwn = source.userWorkosId === context.user.workosUserId;
+  return { canConfigure: isOwn, canToggle: isOwn || isAdmin, canRemove: isOwn || isAdmin };
+}
+
+export async function removeGoatBrainSourceAction(input: {
+  brainRef: string;
+  integrationId: string;
+}): Promise<GoatWorkspaceActionResult> {
+  const context = await requireBrainSourceContext(input.brainRef);
+  if (!context) {
+    return { ok: false, error: "You don't have access to this brain." };
+  }
+  const existing = await loadExistingBrainSource(input.brainRef, input.integrationId);
+  if (!existing) return { ok: true };
+  const capabilities = brainSourceCapabilities(existing, context);
+  if (!capabilities.canRemove) {
+    return { ok: false, error: "Only the source owner or a workspace admin can remove this." };
+  }
+  try {
+    await deleteGoatBrainSource({ brainRef: input.brainRef, sourceId: existing.id });
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not remove the brain source.",
+    };
+  }
+}
+
 export async function getGoatBrainSourcesAction(
   brainRef: string,
 ): Promise<GoatBrainSourcesDetails | null> {
-  const context = await requireAdminBrainContext(brainRef);
+  const context = await requireBrainSourceContext(brainRef);
   if (!context) return null;
+  const isAdmin = context.role === "admin";
 
-  const [sources, jamieState, slackState, linearState, githubState, gmailState, googleDriveState] =
-    await Promise.all([
-      listGoatBrainSourcesForBrain(brainRef),
-      getGoatJamieIntegrationState(context.workspace.id),
-      getGoatSlackIntegrationState(context.user.workosUserId),
-      getGoatLinearSourceIntegrationState(context.user.workosUserId),
-      getGoatGitHubIntegrationState(context.workspace.id),
-      getGoatGmailSourceIntegrationState(context.user.workosUserId),
-      getGoatGoogleDriveSourceIntegrationState(context.user.workosUserId),
-    ]);
+  const [
+    sources,
+    jamieState,
+    slackState,
+    linearState,
+    githubState,
+    gmailState,
+    googleDriveState,
+    ownSlackAccounts,
+    ownLinearAccounts,
+    ownGmailAccounts,
+    ownGoogleDriveAccounts,
+  ] = await Promise.all([
+    listGoatBrainSourcesForBrain(brainRef),
+    getGoatJamieIntegrationState(context.workspace.id),
+    getGoatSlackIntegrationState(context.user.workosUserId),
+    getGoatLinearSourceIntegrationState(context.user.workosUserId),
+    getGoatGitHubIntegrationState(context.workspace.id),
+    getGoatGmailSourceIntegrationState(context.user.workosUserId),
+    getGoatGoogleDriveSourceIntegrationState(context.user.workosUserId),
+    listGoatPersonalIntegrationAccounts({
+      userWorkosId: context.user.workosUserId,
+      provider: "slack",
+    }),
+    listGoatPersonalIntegrationAccounts({
+      userWorkosId: context.user.workosUserId,
+      provider: "linear",
+      excludeExternalId: GOAT_LINEAR_MCP_EXTERNAL_ID,
+    }),
+    listGoatPersonalIntegrationAccounts({
+      userWorkosId: context.user.workosUserId,
+      provider: "gmail",
+    }),
+    listGoatPersonalIntegrationAccounts({
+      userWorkosId: context.user.workosUserId,
+      provider: "google_drive",
+    }),
+  ]);
 
   const jamieConfigured = jamieState.integrationId
     ? await hasAnyBrainSourceForIntegration(jamieState.integrationId)
@@ -225,18 +367,38 @@ export async function getGoatBrainSourcesAction(
     : null;
 
   return {
-    sources: sources.map((source) => ({
-      provider: source.provider,
-      integrationId: source.integrationId,
-      enabled: source.enabled,
-      connectedByName: source.ownerName ?? source.ownerEmail ?? "Unknown",
-      ownerKind: source.integrationWorkspaceId ? ("workspace" as const) : ("user" as const),
-      canManage: source.integrationWorkspaceId
-        ? source.integrationWorkspaceId === context.workspace.id
-        : source.userWorkosId === context.user.workosUserId,
-      integrationStatus: source.integrationStatus,
-      config: source.config,
-    })),
+    viewer: { workosUserId: context.user.workosUserId, isAdmin },
+    sources: sources.map((source) => {
+      const workspaceOwned = Boolean(source.integrationWorkspaceId);
+      const ownWorkspaceSource =
+        workspaceOwned && source.integrationWorkspaceId === context.workspace.id;
+      const isOwn = !workspaceOwned && source.userWorkosId === context.user.workosUserId;
+      return {
+        sourceId: source.id,
+        provider: source.provider,
+        integrationId: source.integrationId,
+        enabled: source.enabled,
+        connectedByName: source.ownerName ?? source.ownerEmail ?? "Unknown",
+        ownerEmail: source.ownerEmail,
+        ownerAvatarUrl: source.ownerAvatarUrl,
+        accountEmail: source.integrationAccountEmail,
+        accountName: source.integrationAccountName,
+        connectionLabel: source.integrationConnectionLabel,
+        ownerKind: workspaceOwned ? ("workspace" as const) : ("user" as const),
+        isOwn,
+        canConfigure: workspaceOwned ? ownWorkspaceSource && isAdmin : isOwn,
+        canToggle: workspaceOwned ? ownWorkspaceSource && isAdmin : isOwn || isAdmin,
+        canRemove: workspaceOwned ? ownWorkspaceSource && isAdmin : isOwn || isAdmin,
+        integrationStatus: source.integrationStatus,
+        config: source.config,
+      };
+    }),
+    ownAccounts: {
+      slack: ownSlackAccounts,
+      linear: ownLinearAccounts,
+      gmail: ownGmailAccounts,
+      google_drive: ownGoogleDriveAccounts,
+    },
     jamie: {
       integration: jamieState,
       legacyDefaultDelivery: jamieState.apiKeyConfigured && !jamieConfigured,
@@ -266,9 +428,9 @@ export async function setGoatBrainSourceEnabledAction(input: {
   integrationId: string;
   enabled: boolean;
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await requireAdminBrainContext(input.brainRef);
+  const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
-    return { ok: false, error: "Only workspace admins can configure brain sources." };
+    return { ok: false, error: "You don't have access to this brain." };
   }
 
   // Source providers without a matching integration provider cannot be
@@ -278,6 +440,34 @@ export async function setGoatBrainSourceEnabledAction(input: {
     return { ok: false, error: "This source is not available yet." };
   }
 
+  // Toggling an existing row is owner-or-admin and must not require the actor
+  // to own the integration — an admin pausing a member's source lands here.
+  const existing = await loadExistingBrainSource(input.brainRef, input.integrationId);
+  if (existing) {
+    const capabilities = brainSourceCapabilities(existing, context);
+    if (!capabilities.canToggle) {
+      return { ok: false, error: "Only the source owner or a workspace admin can change this." };
+    }
+    try {
+      await getDb()
+        .update(goatBrainSources)
+        .set({ enabled: input.enabled, updatedAt: new Date() })
+        .where(eq(goatBrainSources.id, existing.id));
+      revalidatePath("/", "layout");
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not update the brain source.",
+      };
+    }
+  }
+
+  // Creating a row: members attach their own personal connections; the
+  // workspace-owned providers (github, jamie) stay admin-only.
+  if (isWorkspaceOwnedGoatIntegrationProvider(integrationProvider) && context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can configure this source." };
+  }
   const integration = await loadSourceIntegrationForContext({
     integrationId: input.integrationId,
     provider: integrationProvider,
@@ -439,11 +629,13 @@ export async function setGoatBrainSlackSourceAction(input: {
   channels: GoatSlackConversationRef[];
   dms: GoatSlackConversationRef[];
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await requireAdminBrainContext(input.brainRef);
+  const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
-    return { ok: false, error: "Only workspace admins can configure brain sources." };
+    return { ok: false, error: "You don't have access to this brain." };
   }
 
+  // Personal-provider config is owner-only: the where clause below resolves
+  // the integration only when the actor owns it.
   const integration = await loadSourceIntegrationForContext({
     integrationId: input.integrationId,
     provider: "slack",
@@ -540,9 +732,9 @@ export async function setGoatBrainLinearSourceAction(input: {
   teams: GoatLinearTeamRef[];
   events: GoatLinearEventRef[];
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await requireAdminBrainContext(input.brainRef);
+  const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
-    return { ok: false, error: "Only workspace admins can configure brain sources." };
+    return { ok: false, error: "You don't have access to this brain." };
   }
 
   const integration = await loadSourceIntegrationForContext({
@@ -656,9 +848,9 @@ export async function setGoatBrainGmailSourceAction(input: {
   events: GoatGmailEventRef[];
   instructions: string;
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await requireAdminBrainContext(input.brainRef);
+  const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
-    return { ok: false, error: "Only workspace admins can configure brain sources." };
+    return { ok: false, error: "You don't have access to this brain." };
   }
 
   const integration = await loadSourceIntegrationForContext({
@@ -780,9 +972,9 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
   enabled: boolean;
   resourceIds: string[];
 }): Promise<GoatWorkspaceActionResult> {
-  const context = await requireAdminBrainContext(input.brainRef);
+  const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
-    return { ok: false, error: "Only workspace admins can configure brain sources." };
+    return { ok: false, error: "You don't have access to this brain." };
   }
   const integration = await loadSourceIntegrationForContext({
     integrationId: input.integrationId,

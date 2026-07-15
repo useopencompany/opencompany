@@ -180,11 +180,24 @@ export type AnalyticsEventPropertiesByName = {
   goat_billing_checkout_started: {
     user_id: string;
     workspace_id: string;
-    monthly_price_usd_cents: number;
+    seat_quantity: number;
+    seat_monthly_price_usd_cents: number;
   };
   goat_billing_checkout_completed: {
     workspace_id: string;
-    monthly_price_usd_cents: number;
+    seat_quantity: number;
+    seat_monthly_price_usd_cents: number;
+  };
+  goat_billing_topup_started: {
+    user_id: string;
+    workspace_id: string;
+    amount_cents: number;
+  };
+  goat_billing_topup_completed: {
+    workspace_id: string;
+    checkout_record_id: string;
+    amount_cents: number;
+    balance_cents: number;
   };
   goat_billing_plan_changed: {
     workspace_id: string;
@@ -444,12 +457,22 @@ export const analyticsEvents = {
   goat_billing_checkout_started: {
     name: "goat_billing_checkout_started",
     description: "A Goat workspace admin opened Pro subscription Checkout.",
-    safeProperties: ["user_id", "workspace_id", "monthly_price_usd_cents"],
+    safeProperties: ["user_id", "workspace_id", "seat_quantity", "seat_monthly_price_usd_cents"],
   },
   goat_billing_checkout_completed: {
     name: "goat_billing_checkout_completed",
     description: "Stripe activated an OpenCompany Pro subscription after Checkout.",
-    safeProperties: ["workspace_id", "monthly_price_usd_cents"],
+    safeProperties: ["workspace_id", "seat_quantity", "seat_monthly_price_usd_cents"],
+  },
+  goat_billing_topup_started: {
+    name: "goat_billing_topup_started",
+    description: "A Goat workspace admin opened a credit top-up Checkout.",
+    safeProperties: ["user_id", "workspace_id", "amount_cents"],
+  },
+  goat_billing_topup_completed: {
+    name: "goat_billing_topup_completed",
+    description: "Stripe fulfilled a Goat credit top-up into the workspace balance.",
+    safeProperties: ["workspace_id", "checkout_record_id", "amount_cents", "balance_cents"],
   },
   goat_billing_plan_changed: {
     name: "goat_billing_plan_changed",

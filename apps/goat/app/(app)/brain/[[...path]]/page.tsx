@@ -1,6 +1,7 @@
 import { GoatBrainRoute } from "@/components/GoatRoutes";
 import { currentGoatUser } from "@/lib/auth";
 import { listGoatBrainForBrain } from "@/lib/brain";
+import { getGoatBrainOverviewStats } from "@/lib/brain-overview";
 
 type PageProps = {
   params: Promise<{ path?: string[] }>;
@@ -15,8 +16,13 @@ export default async function GoatBrainPage({ params }: PageProps) {
   const routeBrainId = explicitBrain?.id ?? null;
   const brainPath = routeBrainId ? segments.slice(1) : segments;
   const isSettingsRoute = Boolean(explicitBrain && brainPath[0] === "settings");
-  const brain =
-    selectedBrain && !isSettingsRoute ? await listGoatBrainForBrain(selectedBrain.id) : null;
+  const [brain, overviewStats] =
+    selectedBrain && !isSettingsRoute
+      ? await Promise.all([
+          listGoatBrainForBrain(selectedBrain.id),
+          getGoatBrainOverviewStats(selectedBrain.id),
+        ])
+      : [null, null];
 
   return (
     <GoatBrainRoute
@@ -24,6 +30,7 @@ export default async function GoatBrainPage({ params }: PageProps) {
       routeBrainId={routeBrainId}
       selectedBrain={selectedBrain ? brainSummaryView(selectedBrain) : null}
       initialBrainSnapshot={brain}
+      initialOverviewStats={overviewStats}
     />
   );
 }

@@ -88,6 +88,28 @@ export type GoatCodexProviderState = {
   lastValidatedAt: string | null;
 };
 
+// One connected account of a personal provider. A user can hold several
+// accounts per provider (two Gmails, two Slack workspaces) — uniqueness in the
+// DB is (user, provider, external_id), so a second OAuth pass creates a
+// second row rather than replacing the first.
+export type GoatIntegrationAccountView = {
+  integrationId: string;
+  provider: GoatPersonalAccountProvider;
+  status: GoatIntegrationStatus;
+  connected: boolean;
+  accountEmail: string | null;
+  accountName: string | null;
+  connectionLabel: string | null;
+  statusReason: string | null;
+};
+
+export type GoatPersonalAccountProvider =
+  | "gmail"
+  | "google_calendar"
+  | "google_drive"
+  | "linear"
+  | "slack";
+
 export type GoatIntegrationState = {
   gmail: GoatGoogleProviderState;
   google_calendar: GoatGoogleProviderState;
@@ -97,6 +119,10 @@ export type GoatIntegrationState = {
   jamie: GoatJamieProviderState;
   slack: GoatSlackProviderState;
   codex: GoatCodexProviderState;
+  // All of the user's connected accounts per personal provider. The
+  // single-account states above remain the "primary connection" view used by
+  // onboarding and zero states; multi-account UI reads this instead.
+  personalAccounts: Record<GoatPersonalAccountProvider, GoatIntegrationAccountView[]>;
 };
 
 type IntegrationStateRow = {
@@ -119,6 +145,40 @@ type IntegrationStateRow = {
 
 const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
 
+// Collects every personal (non-workspace) account row per provider. The
+// Linear ingest connections count as accounts; the MCP connector row
+// (external_id "linear_mcp") never does.
+export function goatPersonalAccountsFromRows(
+  rows: readonly IntegrationStateRow[],
+): Record<GoatPersonalAccountProvider, GoatIntegrationAccountView[]> {
+  const personalAccounts: Record<GoatPersonalAccountProvider, GoatIntegrationAccountView[]> = {
+    gmail: [],
+    google_calendar: [],
+    google_drive: [],
+    linear: [],
+    slack: [],
+  };
+  for (const row of rows) {
+    if (row.status === "disconnected") continue;
+    if (!row.id || (row.workspaceId ?? row.workspace_id)) continue;
+    if (row.provider === "linear") {
+      if ((row.externalId ?? row.external_id) !== "linear_mcp") {
+        personalAccounts.linear.push(accountViewFromRow("linear", row));
+      }
+      continue;
+    }
+    if (
+      row.provider === "gmail" ||
+      row.provider === "google_calendar" ||
+      row.provider === "google_drive" ||
+      row.provider === "slack"
+    ) {
+      personalAccounts[row.provider].push(accountViewFromRow(row.provider, row));
+    }
+  }
+  return personalAccounts;
+}
+
 export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[]) {
   const byProvider = new Map<GoatIntegrationProvider, IntegrationStateRow>();
   for (const row of rows) {
@@ -139,6 +199,7 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     }
     byProvider.set(row.provider, row);
   }
+  const personalAccounts = goatPersonalAccountsFromRows(rows);
 
   return {
     gmail: googleProviderState("gmail", byProvider.get("gmail")),
@@ -155,6 +216,23 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
       statusReason: null,
       lastValidatedAt: null,
     },
+    personalAccounts,
+  };
+}
+
+function accountViewFromRow(
+  provider: GoatPersonalAccountProvider,
+  row: IntegrationStateRow,
+): GoatIntegrationAccountView {
+  return {
+    integrationId: row.id ?? "",
+    provider,
+    status: row.status,
+    connected: row.status === "connected",
+    accountEmail: row.accountEmail ?? row.account_email ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
+    connectionLabel: row.connectionLabel ?? row.connection_label ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
   };
 }
 

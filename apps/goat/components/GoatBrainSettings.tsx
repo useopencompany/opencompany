@@ -13,8 +13,10 @@ import {
   type GoatWorkspaceMemberView,
   getGoatBrainAccessDetailsAction,
   getGoatBrainEnrichmentEnabledAction,
+  getGoatBrainIntelligenceAction,
   setGoatBrainAccessAction,
   setGoatBrainEnrichmentAction,
+  setGoatBrainIntelligenceAction,
 } from "@/lib/workspace-actions";
 
 export function GoatBrainSettings({
@@ -59,6 +61,10 @@ export function GoatBrainSettings({
         <div className="flex w-full max-w-[640px] flex-col gap-8">
           <SettingsSection title="Access">
             <BrainAccessSection brain={brain} workspace={workspace} />
+          </SettingsSection>
+
+          <SettingsSection title="Intelligence">
+            <IntelligenceSection brainRef={brain.id} />
           </SettingsSection>
 
           <SettingsSection title="Enrichment">
@@ -229,6 +235,95 @@ function BrainAccessSection({
           </button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function IntelligenceSection({ brainRef }: { brainRef: string }) {
+  const [state, setState] = useState<{
+    brainRef: string;
+    intelligence: "basic" | "frontier" | null;
+  }>(() => ({ brainRef, intelligence: null }));
+  const [isPending, startTransition] = useTransition();
+  const intelligence = state.brainRef === brainRef ? state.intelligence : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    void getGoatBrainIntelligenceAction(brainRef)
+      .then((details) => {
+        if (cancelled) return;
+        if (!details) {
+          setState({ brainRef, intelligence: "basic" });
+          toast.error("Could not load the intelligence setting.");
+          return;
+        }
+        setState({ brainRef, intelligence: details.intelligence });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setState({ brainRef, intelligence: "basic" });
+        toast.error("Could not load the intelligence setting.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [brainRef]);
+
+  const select = (next: "basic" | "frontier") => {
+    if (intelligence === null || intelligence === next) return;
+    const previous = intelligence;
+    setState({ brainRef, intelligence: next });
+    startTransition(async () => {
+      const result = await setGoatBrainIntelligenceAction({ brainRef, intelligence: next });
+      if (!result.ok) {
+        setState((current) =>
+          current.brainRef === brainRef ? { brainRef, intelligence: previous } : current,
+        );
+        toast.error(result.error);
+        return;
+      }
+      toast.success(
+        next === "frontier" ? "Frontier intelligence enabled." : "Basic intelligence enabled.",
+      );
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="flex cursor-pointer items-start gap-3 rounded-md border border-ink/10 p-3">
+        <input
+          type="radio"
+          name={`goat-brain-intelligence-${brainRef}`}
+          checked={intelligence === "basic"}
+          disabled={intelligence === null || isPending}
+          onChange={() => select("basic")}
+          className="mt-0.5 accent-ink"
+        />
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-[13px] font-medium text-ink">Basic intelligence</span>
+          <span className="text-[12px] leading-5 text-ink-subtle">
+            Ingestion runs on an open-source model, included in your plan&apos;s monthly allowance
+            at no extra cost.
+          </span>
+        </span>
+      </label>
+      <label className="flex cursor-pointer items-start gap-3 rounded-md border border-ink/10 p-3">
+        <input
+          type="radio"
+          name={`goat-brain-intelligence-${brainRef}`}
+          checked={intelligence === "frontier"}
+          disabled={intelligence === null || isPending}
+          onChange={() => select("frontier")}
+          className="mt-0.5 accent-ink"
+        />
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-[13px] font-medium text-ink">Frontier intelligence</span>
+          <span className="text-[12px] leading-5 text-ink-subtle">
+            Ingestion for this brain runs on Claude Sonnet for higher-quality extraction. The model
+            cost of each ingestion is billed to your workspace credits.
+          </span>
+        </span>
+      </label>
     </div>
   );
 }
