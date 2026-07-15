@@ -118,6 +118,27 @@ describe("MarkdownGoatBrainEditor", () => {
     expect(onNavigateInternal).toHaveBeenCalledOnce();
   });
 
+  it("does not fire onChange when props change identity without an edit", async () => {
+    const onChange = vi.fn();
+    const props = {
+      content: "See [[page:acme|Acme]].",
+      onChange,
+      brainLinks: { "page:acme": "/brain/companies/acme" },
+      readOnly: false,
+    } as const;
+    const { rerender } = render(
+      <MarkdownGoatBrainEditor {...props} onNavigateInternal={() => true} />,
+    );
+
+    await screen.findByText("Acme");
+    // Parents pass a fresh navigation closure every render; if that emitted a
+    // phantom onChange, the resulting setState → re-render → new closure cycle
+    // would loop forever and mark clean documents dirty.
+    rerender(<MarkdownGoatBrainEditor {...props} onNavigateInternal={() => true} />);
+    rerender(<MarkdownGoatBrainEditor {...props} onNavigateInternal={() => true} />);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("uses the latest internal navigation handler after a prop update", async () => {
     const firstHandler = vi.fn(() => true);
     const secondHandler = vi.fn(() => true);
