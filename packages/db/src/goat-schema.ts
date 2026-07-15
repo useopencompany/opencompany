@@ -3,6 +3,7 @@ import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, type SQL, sql } from "drizzle-orm";
 import {
   bigint,
+  bigserial,
   boolean,
   check,
   customType,
@@ -231,6 +232,15 @@ export type GoatStripeSubscriptionStatus =
   | "unpaid"
   | "paused";
 export type GoatIngestionReservationStatus = "pending" | "consumed";
+export type GoatBrainIntelligence = "basic" | "frontier";
+export type GoatCreditLedgerSource =
+  | "starter_grant"
+  | "stripe_topup"
+  | "chat_model_usage"
+  | "frontier_ingest"
+  | "ingest_overage"
+  | "adjustment";
+export type GoatCheckoutSessionStatus = "pending" | "open" | "fulfilled" | "failed";
 export type GoatBrainVisibility = "workspace" | "restricted";
 export type GoatBrainFolderSource = "system" | "custom";
 export type GoatBrainEntityType =
@@ -519,6 +529,9 @@ export const goatWorkspaceBilling = goat.table(
     stripeSubscriptionItemId: text("stripe_subscription_item_id"),
     stripePriceId: text("stripe_price_id"),
     subscriptionStatus: text("subscription_status").$type<GoatStripeSubscriptionStatus>(),
+    // Projected from the Stripe subscription item quantity ($18/seat). The
+    // pooled Pro ingestion allowance is 300 x seat_quantity per month.
+    seatQuantity: integer("seat_quantity").notNull().default(1),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     paymentNeedsAttention: boolean("payment_needs_attention").notNull().default(false),
@@ -532,6 +545,10 @@ export const goatWorkspaceBilling = goat.table(
       table.stripeSubscriptionId,
     ),
     planCheck: check("goat_workspace_billing_plan_check", sql`${table.plan} IN ('free', 'pro')`),
+    seatQuantityCheck: check(
+      "goat_workspace_billing_seat_quantity_check",
+      sql`${table.seatQuantity} >= 1`,
+    ),
     subscriptionStatusCheck: check(
       "goat_workspace_billing_subscription_status_check",
       sql`${table.subscriptionStatus} IS NULL OR ${table.subscriptionStatus} IN ('incomplete', 'incomplete_expired', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused')`,
@@ -545,6 +562,118 @@ export const goatStripeWebhookEvents = goat.table("stripe_webhook_events", {
   eventCreatedAt: timestamp("event_created_at", { withTimezone: true }).notNull(),
   processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// USD credit balance per workspace. Funds usage-based chat, frontier-ingest
+// cost pass-through, and Pro ingestion overage. Mirrors the web app's
+// workspace_credit_balances, scoped to goat workspaces.
+export const goatCreditBalances = goat.table("credit_balances", {
+  workspaceId: text("workspace_id")
+    .primaryKey()
+    .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+  balanceCents: integer("balance_cents").notNull().default(0),
+  balanceUsdMicros: bigint("balance_usd_micros", { mode: "number" }).notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// One-time credit top-up Checkout sessions. `fulfilled_at IS NULL` is the
+// webhook-fulfillment idempotency guard.
+export const goatStripeCheckoutSessions = goat.table(
+  "stripe_checkout_sessions",
+  {
+    id: text("id").primaryKey(),
+    stripeCheckoutSessionId: text("stripe_checkout_session_id"),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    amountCents: integer("amount_cents").notNull(),
+    status: text("status").$type<GoatCheckoutSessionStatus>().notNull().default("pending"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    fulfilledAt: timestamp("fulfilled_at", { withTimezone: true }),
+  },
+  (table) => ({
+    stripeIdIdx: uniqueIndex("goat_stripe_checkout_sessions_stripe_id_idx").on(
+      table.stripeCheckoutSessionId,
+    ),
+    workspaceIdx: index("goat_stripe_checkout_sessions_workspace_idx").on(table.workspaceId),
+    statusCheck: check(
+      "goat_stripe_checkout_sessions_status_check",
+      sql`${table.status} IN ('pending', 'open', 'fulfilled', 'failed')`,
+    ),
+  }),
+);
+
+// Signed credit movements (positive = top-up/grant, negative = usage debit).
+// One generic idempotency_key dedupes every surface (chat turn, frontier
+// ingest attempt, overage reservation, top-up fulfillment); the typed
+// reference columns exist for reporting only.
+export const goatCreditLedger = goat.table(
+  "credit_ledger",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    amountCents: integer("amount_cents").notNull(),
+    amountUsdMicros: bigint("amount_usd_micros", { mode: "number" }).notNull().default(0),
+    source: text("source").$type<GoatCreditLedgerSource>().notNull(),
+    idempotencyKey: text("idempotency_key"),
+    checkoutSessionId: text("checkout_session_id").references(() => goatStripeCheckoutSessions.id, {
+      onDelete: "set null",
+    }),
+    chatSessionId: text("chat_session_id").references(() => goatChatSessions.id, {
+      onDelete: "set null",
+    }),
+    ingestJobId: text("ingest_job_id").references(() => goatBrainIngestJobs.id, {
+      onDelete: "set null",
+    }),
+    reservationId: text("reservation_id").references(() => goatWorkspaceIngestionReservations.id, {
+      onDelete: "set null",
+    }),
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    costBasis: jsonb("cost_basis")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceCreatedIdx: index("goat_credit_ledger_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    idempotencyIdx: uniqueIndex("goat_credit_ledger_idempotency_idx")
+      .on(table.idempotencyKey)
+      .where(sql`${table.idempotencyKey} IS NOT NULL`),
+    starterGrantIdx: uniqueIndex("goat_credit_ledger_starter_grant_idx")
+      .on(table.workspaceId)
+      .where(sql`${table.source} = 'starter_grant'`),
+    sourceCheck: check(
+      "goat_credit_ledger_source_check",
+      sql`${table.source} IN ('starter_grant', 'stripe_topup', 'chat_model_usage', 'frontier_ingest', 'ingest_overage', 'adjustment')`,
+    ),
+  }),
+);
 
 // Naming convention: on the brain content tables below, `brain_id` is the
 // DOCUMENT slug (legacy name, e.g. "alice-smith"), while `brain_ref` is the
@@ -564,6 +693,10 @@ export const goatBrains = goat.table(
     // identified people, companies, and projects. Owner escape-hatch; the real
     // safety is the identity gate + per-ingest search cap in the runner.
     enrichmentEnabled: boolean("enrichment_enabled").notNull().default(true),
+    // Which model tier the ingestion agent runs for this brain. "basic"
+    // (open-source model) is included in the plan; "frontier" (Claude Sonnet)
+    // passes model cost through to the workspace's credit balance.
+    intelligence: text("intelligence").$type<GoatBrainIntelligence>().notNull().default("basic"),
     createdByWorkosId: text("created_by_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "restrict" }),
@@ -579,6 +712,10 @@ export const goatBrains = goat.table(
     visibilityCheck: check(
       "goat_brains_visibility_check",
       sql`${table.visibility} IN ('workspace', 'restricted')`,
+    ),
+    intelligenceCheck: check(
+      "goat_brains_intelligence_check",
+      sql`${table.intelligence} IN ('basic', 'frontier')`,
     ),
   }),
 );
@@ -1412,6 +1549,12 @@ export const goatWorkspaceIngestionReservations = goat.table(
     rawEventCount: integer("raw_event_count").notNull(),
     status: text("status").$type<GoatIngestionReservationStatus>().notNull().default("pending"),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    // > 0 when part or all of the reservation was admitted by debiting credits
+    // (Pro overage, $2 per 100 raw events) beyond the monthly allowance.
+    billedOverageRawEventCount: integer("billed_overage_raw_event_count").notNull().default(0),
+    billedOverageUsdMicros: bigint("billed_overage_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1441,6 +1584,14 @@ export const goatWorkspaceIngestionReservations = goat.table(
     rawEventCountCheck: check(
       "goat_ingestion_reservations_raw_event_count_check",
       sql`${table.rawEventCount} > 0 AND ${table.rawEventCount} <= 200`,
+    ),
+    billedOverageRawEventCountCheck: check(
+      "goat_ingestion_reservations_billed_overage_units_check",
+      sql`${table.billedOverageRawEventCount} >= 0 AND ${table.billedOverageRawEventCount} <= ${table.rawEventCount}`,
+    ),
+    billedOverageUsdMicrosCheck: check(
+      "goat_ingestion_reservations_billed_overage_usd_check",
+      sql`${table.billedOverageUsdMicros} >= 0`,
     ),
     sourceProviderCheck: check(
       "goat_ingestion_reservations_source_provider_check",

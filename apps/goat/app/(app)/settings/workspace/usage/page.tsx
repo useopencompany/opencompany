@@ -1,4 +1,7 @@
-import { loadGoatBillingOverview } from "@opencompany/db/goat-billing";
+import {
+  GOAT_PRO_MONTHLY_INGESTIONS_PER_SEAT,
+  loadGoatBillingOverview,
+} from "@opencompany/db/goat-billing";
 import {
   type GoatIngestionUsageData,
   GoatIngestionUsagePanel,
@@ -14,8 +17,10 @@ export default async function WorkspaceUsageSettingsPage() {
         plan: overview.plan,
         used: overview.used,
         limit: overview.window.limit,
-        baseLimit: overview.window.baseLimit,
-        sourceBonus: overview.window.sourceBonus,
+        seatQuantity: overview.seatQuantity,
+        perSeatAllowance: GOAT_PRO_MONTHLY_INGESTIONS_PER_SEAT,
+        overageUnits: overview.overageUnitsThisWindow,
+        overageUsdMicros: overview.overageUsdMicrosThisWindow,
         pending: overview.pending,
         resetAt: overview.window.resetAt.toISOString(),
         providers: overview.providers,

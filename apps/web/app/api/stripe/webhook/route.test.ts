@@ -4,6 +4,10 @@ import {
   applyGoatStripeSubscriptionProjection,
   findGoatWorkspaceIdForStripeSubscription,
 } from "@opencompany/db/goat-billing";
+import {
+  fulfillGoatTopUpCheckoutSession,
+  markGoatCheckoutRecordFailed,
+} from "@opencompany/db/goat-credits";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fulfillCheckoutSession } from "@/lib/billing/service";
 import { getStripe, getStripeWebhookSecret } from "@/lib/billing/stripe";
@@ -14,10 +18,15 @@ vi.mock("@opencompany/analytics/server", () => ({
 }));
 
 vi.mock("@opencompany/db/goat-billing", () => ({
-  GOAT_PRO_MONTHLY_PRICE_USD_CENTS: 9_900,
+  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS: 1_800,
   applyGoatStripeInvoicePaymentState: vi.fn(),
   applyGoatStripeSubscriptionProjection: vi.fn(),
   findGoatWorkspaceIdForStripeSubscription: vi.fn(),
+}));
+
+vi.mock("@opencompany/db/goat-credits", () => ({
+  fulfillGoatTopUpCheckoutSession: vi.fn(),
+  markGoatCheckoutRecordFailed: vi.fn(),
 }));
 
 vi.mock("@/lib/billing/service", () => ({
@@ -41,6 +50,8 @@ vi.mock("next/server", async (importOriginal) => {
 
 const captureServerEventMock = vi.mocked(captureServerEvent);
 const fulfillCheckoutSessionMock = vi.mocked(fulfillCheckoutSession);
+const fulfillGoatTopUpCheckoutSessionMock = vi.mocked(fulfillGoatTopUpCheckoutSession);
+const markGoatCheckoutRecordFailedMock = vi.mocked(markGoatCheckoutRecordFailed);
 const getStripeMock = vi.mocked(getStripe);
 const getStripeWebhookSecretMock = vi.mocked(getStripeWebhookSecret);
 const applyGoatStripeInvoicePaymentStateMock = vi.mocked(applyGoatStripeInvoicePaymentState);
@@ -148,6 +159,79 @@ describe("Stripe webhook route", () => {
     expect(response.status).toBe(200);
     expect(fulfillCheckoutSessionMock).toHaveBeenCalledWith(session, { eventId: "evt_123" });
     expect(captureServerEventMock).not.toHaveBeenCalled();
+  });
+
+  it("fulfills a Goat top-up after a delayed payment succeeds", async () => {
+    const session = {
+      id: "cs_goat_delayed",
+      mode: "payment",
+      payment_status: "paid",
+      metadata: {
+        billingProduct: "goat_topup",
+        checkoutRecordId: "gcs_123",
+        goatWorkspaceId: "goat_ws_1",
+        userWorkosId: "user_1",
+        amountCents: "1000",
+      },
+    };
+    fulfillGoatTopUpCheckoutSessionMock.mockResolvedValue({
+      ok: true,
+      checkoutRecordId: "gcs_123",
+      amountCents: 1_000,
+      balanceCents: 1_500,
+    });
+    getStripeMock.mockReturnValue({
+      webhooks: {
+        constructEvent: vi.fn(() => ({
+          id: "evt_goat_delayed",
+          type: "checkout.session.async_payment_succeeded",
+          data: { object: session },
+        })),
+      },
+    } as never);
+
+    const response = await POST(request("sig_ok"));
+
+    expect(response.status).toBe(200);
+    expect(fulfillGoatTopUpCheckoutSessionMock).toHaveBeenCalledWith(session, {
+      eventId: "evt_goat_delayed",
+    });
+    expect(captureServerEventMock).toHaveBeenCalledWith(
+      "goat_billing_topup_completed",
+      "goat_ws_1",
+      expect.objectContaining({ checkout_record_id: "gcs_123", amount_cents: 1_000 }),
+    );
+  });
+
+  it("marks the Goat checkout record failed after a delayed payment fails", async () => {
+    getStripeMock.mockReturnValue({
+      webhooks: {
+        constructEvent: vi.fn(() => ({
+          id: "evt_goat_failed",
+          type: "checkout.session.async_payment_failed",
+          data: {
+            object: {
+              id: "cs_goat_delayed",
+              mode: "payment",
+              payment_status: "unpaid",
+              metadata: {
+                billingProduct: "goat_topup",
+                checkoutRecordId: "gcs_123",
+              },
+            },
+          },
+        })),
+      },
+    } as never);
+
+    const response = await POST(request("sig_ok"));
+
+    expect(response.status).toBe(200);
+    expect(markGoatCheckoutRecordFailedMock).toHaveBeenCalledWith({
+      id: "gcs_123",
+      error: "Stripe reported that the delayed Checkout payment failed.",
+    });
+    expect(fulfillGoatTopUpCheckoutSessionMock).not.toHaveBeenCalled();
   });
 
   it("projects Goat subscription events without entering the credit checkout flow", async () => {

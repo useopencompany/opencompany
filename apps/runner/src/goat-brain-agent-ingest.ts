@@ -6,6 +6,10 @@ import path from "node:path";
 import { type ExaSearchResult, executeExaSearchRequest } from "@opencompany/agent-runtime";
 import { AUX_GATEWAY_MODEL_PRICING, calculateModelUsageCost } from "@opencompany/billing";
 import {
+  GOAT_BASIC_INGEST_MODEL,
+  GOAT_FRONTIER_INGEST_MODEL,
+} from "@opencompany/db/goat-billing-constants";
+import {
   type GoatBrainSyncPage,
   getGoatBrainFile,
   materializeGoatBrainFilesToRoot,
@@ -27,9 +31,11 @@ import {
   sanitizeGoatBrainIngestTraceArgs,
 } from "@opencompany/db/goat-brain-ingest-trace";
 import { getGoatGmailBrainSourceInstructions } from "@opencompany/db/goat-gmail";
+import type { GoatBrainIntelligence } from "@opencompany/db/goat-schema";
 import {
   getDefaultGoatBrainForUser,
   getGoatBrainEnrichmentEnabled,
+  getGoatBrainIntelligence,
   getGoatUserDisplayName,
 } from "@opencompany/db/goat-workspaces";
 import {
@@ -81,7 +87,17 @@ const logger = createLogger({
   runtime: "goat-brain-agent-ingest",
 });
 
-export const GOAT_BRAIN_AGENT_INGEST_MODEL = "anthropic/claude-sonnet-5";
+// Model tier per brain: "basic" (open-source, included in the plan) vs
+// "frontier" (cost passed through to workspace credits). Read live at ingest
+// time via goat.brains.intelligence.
+export const GOAT_BRAIN_AGENT_INGEST_BASIC_MODEL = GOAT_BASIC_INGEST_MODEL;
+export const GOAT_BRAIN_AGENT_INGEST_FRONTIER_MODEL = GOAT_FRONTIER_INGEST_MODEL;
+
+export function goatBrainIngestModelForIntelligence(intelligence: GoatBrainIntelligence) {
+  return intelligence === "frontier"
+    ? GOAT_BRAIN_AGENT_INGEST_FRONTIER_MODEL
+    : GOAT_BRAIN_AGENT_INGEST_BASIC_MODEL;
+}
 export const GOAT_BRAIN_AGENT_INGEST_MAX_STEPS = 32;
 export const GOAT_BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS = 4_000;
 export const GOAT_BRAIN_AGENT_INGEST_TIMEOUT_MS = 10 * 60 * 1000;
@@ -755,6 +771,7 @@ export function buildUploadAssetAgentIngestPrompt(
 
 type BrainAgentIngestSessionResult = {
   brainRef: string;
+  model: string;
   skipped: boolean;
   reason?: string;
   skipMode?: BrainAgentIngestSkipMode;
@@ -838,6 +855,19 @@ async function runBrainAgentIngestSession(input: {
     await input.prepareRoot?.(root);
     const folderPrompt = await buildGoatBrainFolderInventoryPrompt(root);
 
+    // Live read (not snapshotted at enqueue) so switching a brain's tier
+    // applies to already-queued jobs. The debit prices from the recorded
+    // trace model, so a mid-queue toggle can never bill the wrong tier.
+    const intelligence = await getGoatBrainIntelligence(brainRef, db).catch((error) => {
+      logger.warn("Goat Brain intelligence lookup failed", {
+        event: "opencompany.goat_brain_intelligence_lookup_failed",
+        brain_ref: brainRef,
+        error,
+      });
+      return "basic" as const;
+    });
+    const model = goatBrainIngestModelForIntelligence(intelligence);
+
     // Live read (not snapshotted at enqueue) so an owner toggling enrichment off
     // applies to already-queued jobs. The Exa key gates whether it can run at all.
     const exaApiKey = input.env.exaApiKey?.trim() || null;
@@ -859,6 +889,7 @@ async function runBrainAgentIngestSession(input: {
       gatewayApiKey: input.env.vercelAiGatewayApiKey,
       userWorkosId: input.userWorkosId,
       brainRef,
+      model,
       ingestJobId: input.jobId,
       system: input.system,
       prompt: appendGoatBrainFolderInventory(input.buildPrompt(), folderPrompt),
@@ -937,6 +968,7 @@ async function runBrainAgentIngestSession(input: {
 
     return {
       brainRef,
+      model,
       skipped: outcome.skipped,
       ...(outcome.reason ? { reason: outcome.reason } : {}),
       ...(outcome.skipMode ? { skipMode: outcome.skipMode } : {}),
@@ -1087,7 +1119,6 @@ export async function runGoatImportAgentIngest(
   });
   return {
     ...session,
-    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
     phase: content.phase,
   };
 }
@@ -1126,7 +1157,6 @@ export async function runJamieMeetingAgentIngest(
 
   return {
     ...session,
-    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
     evidenceBrainId: evidence.evidenceBrainId,
     meetingBrainId: evidence.meetingBrainId,
     truncatedTranscript: evidence.truncatedTranscript,
@@ -1173,7 +1203,6 @@ export async function runGoatChatCaptureAgentIngest(
 
   return {
     ...session,
-    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
     draftBrainId: input.item.content.capture.draftBrainId,
   };
 }
@@ -1208,7 +1237,6 @@ export async function runSlackConversationAgentIngest(
 
   return {
     ...session,
-    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
     channelId: conversation.channelId,
     channelType: conversation.channelType,
     messageCount: conversation.messages.length,
@@ -1249,7 +1277,6 @@ export async function runLinearIssueAgentIngest(
 
   return {
     ...session,
-    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
     issueId: issue.issueId,
     issueIdentifier: issue.identifier ?? null,
     activityCount: issue.activity.length,
@@ -1324,7 +1351,6 @@ export async function runGmailThreadAgentIngest(
 
   return {
     ...session,
-    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
     threadId: thread.threadId,
     evidenceBrainId: evidence.evidenceBrainId,
     truncatedBodies: evidence.truncatedBodies,
@@ -1365,7 +1391,6 @@ export async function runGoogleDriveDocumentAgentIngest(
 
   return {
     ...session,
-    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
     fileId: document.fileId,
     mimeType: document.mimeType,
     version: document.version,
@@ -1404,7 +1429,6 @@ export async function runGitHubActivityAgentIngest(
 
   return {
     ...session,
-    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
     activityKind: activity.kind,
     activityState: activity.state,
     repository: activity.repository.fullName,
@@ -1488,7 +1512,6 @@ export async function runUploadAssetAgentIngest(
 
   return {
     ...session,
-    model: GOAT_BRAIN_AGENT_INGEST_MODEL,
     documentId: row.id,
     assetBrainId: row.brainId,
     extractedTextBytes: Buffer.byteLength(extractedText, "utf8"),
@@ -1602,6 +1625,10 @@ async function runIngestAgentLoop(input: {
   gatewayApiKey: string;
   userWorkosId: string;
   brainRef: string;
+  // Gateway model id resolved from the brain's intelligence tier. Also the
+  // pricing key: mispricing basic-tier steps at frontier rates would inflate
+  // the budget and the credit debit.
+  model: string;
   ingestJobId: string;
   system: string;
   prompt: string;
@@ -1687,7 +1714,7 @@ async function runIngestAgentLoop(input: {
       costUsdMicros: cost,
       source,
       attributes: {
-        "goat.model": source === "model" ? GOAT_BRAIN_AGENT_INGEST_MODEL : undefined,
+        "goat.model": source === "model" ? input.model : undefined,
       },
     });
     if (
@@ -1984,7 +2011,7 @@ async function runIngestAgentLoop(input: {
 
   try {
     const result = await generateText({
-      model: gateway(GOAT_BRAIN_AGENT_INGEST_MODEL),
+      model: gateway(input.model),
       maxOutputTokens: GOAT_BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS,
       // The system prompt rides in messages (not the system param) so it can
       // carry its own cache breakpoint; it is byte-stable for the whole job.
@@ -2020,7 +2047,7 @@ async function runIngestAgentLoop(input: {
         messages: placeMovingAnthropicCacheBreakpoint(messages),
       }),
       onStepFinish: ({ usage }) => {
-        recordSpend("model", priceModelUsage(usage));
+        recordSpend("model", priceModelUsage(usage, input.model));
       },
     });
     const usage = result.totalUsage;
@@ -2035,7 +2062,7 @@ async function runIngestAgentLoop(input: {
     const budget = budgetSnapshot();
     const trace: GoatBrainIngestTrace = {
       schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
-      model: GOAT_BRAIN_AGENT_INGEST_MODEL,
+      model: input.model,
       steps: result.steps.length,
       toolCallCount: toolCalls,
       mutations,
@@ -2097,7 +2124,7 @@ function goatBrainBudgetLogFields(budget: GoatBrainIngestBudget) {
   };
 }
 
-function priceModelUsage(usage: ai.LanguageModelUsage): number {
+function priceModelUsage(usage: ai.LanguageModelUsage, modelName: string): number {
   const inputTokens = positiveUsageNumber(usage.inputTokens);
   const inputCacheReadTokens = positiveUsageNumber(usage.inputTokenDetails?.cacheReadTokens);
   const inputCacheWriteTokens = positiveUsageNumber(usage.inputTokenDetails?.cacheWriteTokens);
@@ -2107,7 +2134,7 @@ function priceModelUsage(usage: ai.LanguageModelUsage): number {
       ? Math.max(0, Math.round(reportedNoCacheTokens))
       : Math.max(0, inputTokens - inputCacheReadTokens - inputCacheWriteTokens);
   return calculateModelUsageCost({
-    modelName: GOAT_BRAIN_AGENT_INGEST_MODEL,
+    modelName,
     inputTokens,
     inputNoCacheTokens,
     inputCacheReadTokens,

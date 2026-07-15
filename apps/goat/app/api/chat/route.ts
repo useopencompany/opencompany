@@ -1,5 +1,7 @@
 import { executeExaSearchRequest, modelSupportsAttachments } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
+import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
+import { hasPositiveGoatCreditBalance, recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
@@ -64,7 +66,7 @@ import {
   type WebSearchToolInput,
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
-import { validateGoatChatInput } from "@/lib/chat-validation";
+import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, validateGoatChatInput } from "@/lib/chat-validation";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
   createGoatTaskScheduleForUser,
@@ -137,6 +139,23 @@ export async function POST(request: Request): Promise<Response> {
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!gatewayApiKey) {
     return new Response("Goat chat is not configured.", { status: 503 });
+  }
+  // Chat is usage-based on both plans: each turn debits the workspace's USD
+  // credits, and a turn cannot start on an empty balance. Codex-engine turns
+  // are exempt (the user's own Codex auth pays for those, not the gateway).
+  if (!requestedEngine && isGoatCreditsEnforcementEnabled()) {
+    const hasCredits = await hasPositiveGoatCreditBalance(context.workspace.id).catch((error) => {
+      logger.warn("Goat chat credit balance check failed", {
+        event: "goat.chat_credit_balance_check_failed",
+        workspace_id: context.workspace.id,
+        error,
+      });
+      // Fail open: a transient balance-read failure must not block chat.
+      return true;
+    });
+    if (!hasCredits) {
+      return new Response(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, { status: 402 });
+    }
   }
   const exaApiKey = process.env.EXA_API_KEY?.trim();
   const canManageWorkspaceBrain = context.role === "admin";
@@ -567,11 +586,15 @@ export async function POST(request: Request): Promise<Response> {
     abortSignal: generationSignal,
     tools: toolContext.tools,
     providerOptions: goatGatewayProviderOptions(gatewayAttribution),
-    onFinish(event) {
+    async onFinish(event) {
       const finishReason = stringifyFinishReason(event.finishReason);
-      recordChatModelCost({
+      await recordChatModelCost({
         model: turn.session.model,
         usage: event.totalUsage,
+        workspaceId: context.workspace.id,
+        userWorkosId: context.user.workosUserId,
+        chatSessionId: turn.session.id,
+        userMessageId: turn.userMessage.id,
       });
       debugTrace = createOpenCompanyChatDebugTrace({
         model: turn.session.model,
@@ -799,7 +822,14 @@ function recencyStartPublishedDate(recencyDays: WebSearchToolInput["recencyDays"
   return new Date(now.getTime() - recencyDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function recordChatModelCost(input: { model: string; usage?: LanguageModelUsage }) {
+async function recordChatModelCost(input: {
+  model: string;
+  usage?: LanguageModelUsage;
+  workspaceId: string;
+  userWorkosId: string;
+  chatSessionId: string;
+  userMessageId: string;
+}) {
   if (!input.usage) return;
   const cost = calculateModelUsageCost({
     modelName: input.model,
@@ -816,6 +846,31 @@ function recordChatModelCost(input: { model: string; usage?: LanguageModelUsage 
       "goat.surface": "chat",
     },
   });
+  // Usage-based chat: debit the turn's total cost (provider + platform fee)
+  // from the workspace credits. Unknown/variable-priced models compute to
+  // billable=false and debit nothing. The user-message id dedupes stream
+  // resume/replay paths. A debit failure must never fail the turn.
+  if (!cost.billable) return;
+  try {
+    await recordGoatCreditDebit({
+      workspaceId: input.workspaceId,
+      userWorkosId: input.userWorkosId,
+      source: "chat_model_usage",
+      idempotencyKey: `chat:${input.userMessageId}`,
+      chatSessionId: input.chatSessionId,
+      providerCostUsdMicros: cost.providerCostUsdMicros,
+      platformFeeUsdMicros: cost.platformFeeUsdMicros,
+      totalCostUsdMicros: cost.totalCostUsdMicros,
+      costBasis: cost.costBasis,
+    });
+  } catch (error) {
+    logger.warn("Goat chat credit debit failed", {
+      event: "goat.chat_credit_debit_failed",
+      workspace_id: input.workspaceId,
+      chat_session_id: input.chatSessionId,
+      error,
+    });
+  }
 }
 
 function readUsageNumber(value: number | undefined) {

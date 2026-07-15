@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { getDb } from "./client";
 import {
@@ -7,30 +7,33 @@ import {
   type GoatStripeSubscriptionStatus,
   type GoatWorkspacePlan,
   goatBrainIngestJobs,
-  goatBrainSources,
-  goatBrains,
-  goatIntegrations,
   goatStripeWebhookEvents,
   goatWorkspaceBilling,
   goatWorkspaceIngestionReservations,
+  goatWorkspaceMembers,
 } from "./goat-schema";
 
 type DbLike = any;
 
 export {
+  GOAT_FREE_MAX_MEMBERS,
   GOAT_FREE_MONTHLY_INGESTION_LIMIT,
-  GOAT_PRO_MONTHLY_INGESTION_LIMIT,
-  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
-  GOAT_SOURCE_BONUS_MAX_MONTHLY_ITEMS,
-  GOAT_SOURCE_BONUS_MONTHLY_ITEMS,
-  goatSourceBonusItems,
+  GOAT_INGESTION_OVERAGE_USD_MICROS_PER_RAW_EVENT,
+  GOAT_PRO_MAX_MEMBERS,
+  GOAT_PRO_MONTHLY_INGESTIONS_PER_SEAT,
+  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
+  goatIngestionOverageRawEventCount,
+  goatIngestionOverageUsdMicros,
+  goatMonthlyIngestionLimit,
 } from "./goat-billing-constants";
 
 import {
-  GOAT_FREE_MONTHLY_INGESTION_LIMIT,
-  GOAT_PRO_MONTHLY_INGESTION_LIMIT,
-  goatSourceBonusItems,
+  GOAT_INGESTION_OVERAGE_USD_MICROS_PER_RAW_EVENT,
+  goatIngestionOverageRawEventCount,
+  goatIngestionOverageUsdMicros,
+  goatMonthlyIngestionLimit,
 } from "./goat-billing-constants";
+import { GOAT_USD_MICROS_PER_CENT, getGoatCreditBalanceUsdMicros } from "./goat-credits";
 
 const PRO_STATUSES = new Set<GoatStripeSubscriptionStatus>(["active", "trialing", "past_due"]);
 
@@ -47,11 +50,17 @@ function runAtomically<T>(db: DbLike, fn: (tx: DbLike) => Promise<T>): Promise<T
 export type GoatIngestionWindow = {
   plan: GoatWorkspacePlan;
   limit: number;
-  baseLimit: number;
-  sourceBonus: number;
+  seatQuantity: number;
   start: Date;
   resetAt: Date;
 };
+
+// The chat 402 gate and the Pro ingestion-overage debit stay dormant until
+// this flag is on, so prod cannot hard-stop users before credit top-ups are
+// purchasable (GOAT_STRIPE_CHECKOUT_ENABLED). Usage debits always record.
+export function isGoatCreditsEnforcementEnabled() {
+  return process.env.GOAT_CREDITS_ENFORCEMENT_ENABLED === "true";
+}
 
 export function goatCalendarMonthWindow(now: Date) {
   const start = new Date(now);
@@ -75,45 +84,17 @@ export function goatIngestionWindow(input: {
   plan: GoatWorkspacePlan;
   planStartedAt: Date;
   now: Date;
-  connectedSourceCount?: number;
+  seatQuantity?: number;
 }): GoatIngestionWindow {
   const { start: calendarStart, resetAt } = goatCalendarMonthWindow(input.now);
-  const baseLimit =
-    input.plan === "pro" ? GOAT_PRO_MONTHLY_INGESTION_LIMIT : GOAT_FREE_MONTHLY_INGESTION_LIMIT;
-  const sourceBonus = goatSourceBonusItems(input.connectedSourceCount ?? 0);
+  const seatQuantity = Math.max(1, input.seatQuantity ?? 1);
   return {
     plan: input.plan,
-    limit: baseLimit + sourceBonus,
-    baseLimit,
-    sourceBonus,
+    limit: goatMonthlyIngestionLimit(input.plan, seatQuantity),
+    seatQuantity,
     start: input.planStartedAt > calendarStart ? input.planStartedAt : calendarStart,
     resetAt,
   };
-}
-
-// A "connected source" is a distinct provider that feeds any of the
-// workspace's brains through an integration that has not been disconnected.
-// The bonus is recomputed from live rows on every allowance check, so
-// disconnecting an integration (or disabling its brain sources) drops the
-// bonus with it — connect → bonus → disconnect cannot bank allowance.
-// Transient failures (needs_reauth, sync_failed) keep the bonus; only a
-// deliberate disconnect or removal loses it.
-export async function countGoatConnectedWorkspaceSources(workspaceId: string, db?: DbLike) {
-  const [row] = await (db ?? getDb())
-    .select({
-      count: sql<number>`count(distinct ${goatBrainSources.provider})::integer`,
-    })
-    .from(goatBrainSources)
-    .innerJoin(goatBrains, eq(goatBrainSources.brainId, goatBrains.id))
-    .innerJoin(goatIntegrations, eq(goatBrainSources.integrationId, goatIntegrations.id))
-    .where(
-      and(
-        eq(goatBrains.workspaceId, workspaceId),
-        eq(goatBrainSources.enabled, true),
-        ne(goatIntegrations.status, "disconnected"),
-      ),
-    );
-  return Number(row?.count ?? 0);
 }
 
 export function goatReservationFitsAllowance(input: {
@@ -149,6 +130,95 @@ async function lockWorkspace(workspaceId: string, db: DbLike) {
   await db.execute(sql`SELECT id FROM goat.workspaces WHERE id = ${workspaceId} FOR UPDATE`);
 }
 
+// Pro overage: admit a pending reservation by debiting credits ($0.02 per raw
+// event). Ledger insert, balance update, and the pending → consumed flip run
+// in ONE statement, so money only ever moves together with the admission —
+// a crash can only leave the safe paused state. Locking the balance row makes
+// concurrent reservations re-check the latest balance before admission; a
+// missing or insufficient balance admits nothing.
+async function tryConsumeGoatIngestionOverage(
+  input: {
+    reservationId: string;
+    workspaceId: string;
+    rawEventCount: number;
+    overageRawEventCount: number;
+    now: Date;
+  },
+  db: DbLike,
+) {
+  const costUsdMicros = goatIngestionOverageUsdMicros(input.overageRawEventCount);
+  if (costUsdMicros <= 0) return false;
+  const costCents = Math.round(costUsdMicros / GOAT_USD_MICROS_PER_CENT);
+  const costBasis = {
+    kind: "ingest_overage",
+    reservationRawEventCount: input.rawEventCount,
+    overageRawEventCount: input.overageRawEventCount,
+    usdMicrosPerRawEvent: GOAT_INGESTION_OVERAGE_USD_MICROS_PER_RAW_EVENT,
+  };
+  const result = await db.execute(sql`
+    WITH locked_balance AS MATERIALIZED (
+      SELECT workspace_id
+      FROM goat.credit_balances
+      WHERE workspace_id = ${input.workspaceId}
+        AND balance_usd_micros >= ${costUsdMicros}
+      FOR UPDATE
+    ),
+    flipped AS (
+      UPDATE goat.workspace_ingestion_reservations AS reservation
+      SET status = 'consumed',
+          consumed_at = ${input.now.toISOString()},
+          billed_overage_raw_event_count = ${input.overageRawEventCount},
+          billed_overage_usd_micros = ${costUsdMicros},
+          updated_at = ${input.now.toISOString()}
+      FROM locked_balance
+      WHERE reservation.id = ${input.reservationId}
+        AND reservation.workspace_id = ${input.workspaceId}
+        AND reservation.workspace_id = locked_balance.workspace_id
+        AND reservation.status = 'pending'
+      RETURNING reservation.id, reservation.workspace_id
+    ),
+    debit AS (
+      INSERT INTO goat.credit_ledger (
+        workspace_id,
+        amount_cents,
+        amount_usd_micros,
+        source,
+        idempotency_key,
+        reservation_id,
+        provider_cost_usd_micros,
+        platform_fee_usd_micros,
+        cost_basis
+      )
+      SELECT
+        workspace_id,
+        ${-costCents},
+        ${-costUsdMicros},
+        'ingest_overage',
+        ${`overage:${input.reservationId}`},
+        id,
+        0,
+        0,
+        ${JSON.stringify(costBasis)}::jsonb
+      FROM flipped
+      RETURNING workspace_id, amount_usd_micros
+    ),
+    balance AS (
+      UPDATE goat.credit_balances
+      SET balance_usd_micros = goat.credit_balances.balance_usd_micros + debit.amount_usd_micros,
+          balance_cents = ROUND((goat.credit_balances.balance_usd_micros + debit.amount_usd_micros)::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
+          updated_at = ${input.now.toISOString()}
+      FROM debit
+      WHERE goat.credit_balances.workspace_id = debit.workspace_id
+      RETURNING goat.credit_balances.workspace_id
+    )
+    SELECT flipped.id AS "reservationId"
+    FROM flipped
+    JOIN balance ON balance.workspace_id = flipped.workspace_id
+  `);
+  const rows = Array.isArray(result) ? result : ((result as { rows?: unknown[] })?.rows ?? []);
+  return rows.length > 0;
+}
+
 export async function reserveGoatWorkspaceIngestion(input: {
   workspaceId: string;
   sourceItemId: string;
@@ -167,16 +237,13 @@ export async function reserveGoatWorkspaceIngestion(input: {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
   const run = async (tx: DbLike) => {
-    // The bonus is eventually consistent by design, so count sources before
-    // taking the workspace row lock instead of lengthening the lock window.
-    const connectedSourceCount = await countGoatConnectedWorkspaceSources(input.workspaceId, tx);
     await lockWorkspace(input.workspaceId, tx);
     const billing = await ensureBillingRow(input.workspaceId, tx);
     const window = goatIngestionWindow({
       plan: billing.plan,
       planStartedAt: billing.planStartedAt,
       now,
-      connectedSourceCount,
+      seatQuantity: billing.seatQuantity,
     });
     const [usage] = await tx
       .select({
@@ -227,13 +294,39 @@ export async function reserveGoatWorkspaceIngestion(input: {
       .onConflictDoNothing()
       .returning();
     if (inserted) {
+      let admitted = canConsume;
+      // Pro overage: an over-allowance reservation can still be admitted by
+      // debiting credits — but never ahead of an existing backlog (FIFO); the
+      // paused backlog is drained by releasePendingForWorkspace instead.
+      if (
+        !admitted &&
+        billing.plan === "pro" &&
+        pendingBefore === 0 &&
+        isGoatCreditsEnforcementEnabled()
+      ) {
+        const overageRawEventCount = goatIngestionOverageRawEventCount({
+          consumedUnits: consumed,
+          rawEventCount: input.rawEventCount,
+          limit: window.limit,
+        });
+        admitted = await tryConsumeGoatIngestionOverage(
+          {
+            reservationId: inserted.id,
+            workspaceId: input.workspaceId,
+            rawEventCount: input.rawEventCount,
+            overageRawEventCount,
+            now,
+          },
+          tx,
+        );
+      }
       return {
         reservation: inserted,
         window,
         consumedBefore: consumed,
-        usedAfter: consumed + (canConsume ? input.rawEventCount : 0),
-        pendingUnits: pendingBefore + (canConsume ? 0 : input.rawEventCount),
-        paused: !canConsume,
+        usedAfter: consumed + (admitted ? input.rawEventCount : 0),
+        pendingUnits: pendingBefore + (admitted ? 0 : input.rawEventCount),
+        paused: !admitted,
         created: true as const,
       };
     }
@@ -263,14 +356,13 @@ export async function reserveGoatWorkspaceIngestion(input: {
 
 async function releasePendingForWorkspace(workspaceId: string, now: Date, db: DbLike) {
   return runAtomically(db, async (tx: DbLike) => {
-    const connectedSourceCount = await countGoatConnectedWorkspaceSources(workspaceId, tx);
     await lockWorkspace(workspaceId, tx);
     const billing = await ensureBillingRow(workspaceId, tx);
     const window = goatIngestionWindow({
       plan: billing.plan,
       planStartedAt: billing.planStartedAt,
       now,
-      connectedSourceCount,
+      seatQuantity: billing.seatQuantity,
     });
     const [usage] = await tx
       .select({
@@ -286,7 +378,8 @@ async function releasePendingForWorkspace(workspaceId: string, now: Date, db: Db
       );
     let consumed = Number(usage?.total ?? 0);
     let available = window.limit - consumed;
-    if (available <= 0) return 0;
+    const canOverage = billing.plan === "pro" && isGoatCreditsEnforcementEnabled();
+    if (available <= 0 && !canOverage) return 0;
     const pending = await tx
       .select()
       .from(goatWorkspaceIngestionReservations)
@@ -301,7 +394,10 @@ async function releasePendingForWorkspace(workspaceId: string, now: Date, db: Db
         asc(goatWorkspaceIngestionReservations.id),
       );
     const releasable: typeof pending = [];
-    for (const reservation of pending) {
+    let index = 0;
+    for (; index < pending.length; index += 1) {
+      const reservation = pending[index];
+      if (available <= 0) break;
       // Same progress guarantee as goatReservationFitsAllowance: a batch
       // larger than the whole allowance is admitted while the window is
       // untouched, so it cannot wedge the FIFO backlog behind it forever.
@@ -310,19 +406,50 @@ async function releasePendingForWorkspace(workspaceId: string, now: Date, db: Db
       consumed += reservation.rawEventCount;
       available -= reservation.rawEventCount;
     }
-    if (releasable.length === 0) return 0;
-    await tx
-      .update(goatWorkspaceIngestionReservations)
-      .set({ status: "consumed", consumedAt: now, updatedAt: now })
-      .where(
-        and(
-          inArray(
-            goatWorkspaceIngestionReservations.id,
-            releasable.map((reservation: { id: string }) => reservation.id),
+    // Pro overage: drain whatever the allowance could not cover, still in FIFO
+    // order, debiting credits per reservation. Stop at the first reservation
+    // the balance cannot cover — releasing anything behind it would jump the
+    // queue.
+    const overageReleased: typeof pending = [];
+    if (canOverage) {
+      for (; index < pending.length; index += 1) {
+        const reservation = pending[index];
+        const overageRawEventCount = goatIngestionOverageRawEventCount({
+          consumedUnits: consumed,
+          rawEventCount: reservation.rawEventCount,
+          limit: window.limit,
+        });
+        const admitted = await tryConsumeGoatIngestionOverage(
+          {
+            reservationId: reservation.id,
+            workspaceId,
+            rawEventCount: reservation.rawEventCount,
+            overageRawEventCount,
+            now,
+          },
+          tx,
+        );
+        if (!admitted) break;
+        overageReleased.push(reservation);
+        consumed += reservation.rawEventCount;
+      }
+    }
+    const released = [...releasable, ...overageReleased];
+    if (released.length === 0) return 0;
+    if (releasable.length > 0) {
+      await tx
+        .update(goatWorkspaceIngestionReservations)
+        .set({ status: "consumed", consumedAt: now, updatedAt: now })
+        .where(
+          and(
+            inArray(
+              goatWorkspaceIngestionReservations.id,
+              releasable.map((reservation: { id: string }) => reservation.id),
+            ),
+            eq(goatWorkspaceIngestionReservations.status, "pending"),
           ),
-          eq(goatWorkspaceIngestionReservations.status, "pending"),
-        ),
-      );
+        );
+    }
     await tx
       .update(goatBrainIngestJobs)
       .set({ planPaused: false, updatedAt: now })
@@ -331,12 +458,12 @@ async function releasePendingForWorkspace(workspaceId: string, now: Date, db: Db
           eq(goatBrainIngestJobs.workspaceId, workspaceId),
           inArray(
             goatBrainIngestJobs.sourceItemId,
-            releasable.map((reservation: { sourceItemId: string }) => reservation.sourceItemId),
+            released.map((reservation: { sourceItemId: string }) => reservation.sourceItemId),
           ),
           eq(goatBrainIngestJobs.planPaused, true),
         ),
       );
-    return releasable.length;
+    return released.length;
   });
 }
 
@@ -377,80 +504,95 @@ export async function loadGoatBillingOverview(workspaceId: string, options: { db
   const db = options.db ?? getDb();
   const now = new Date();
   const billing = await ensureBillingRow(workspaceId, db);
-  // The window start only depends on the plan row; the connected-source count
-  // only affects the limit, so it can run inside the parallel batch below and
-  // the final window (with the bonus folded in) is computed afterwards.
-  const { start: windowStart } = goatIngestionWindow({
-    plan: billing.plan,
-    planStartedAt: billing.planStartedAt,
-    now,
-  });
-  const [connectedSourceCount, usage, pending, providerRows, recentRows] = await Promise.all([
-    countGoatConnectedWorkspaceSources(workspaceId, db),
-    db
-      .select({
-        total: sql<number>`coalesce(sum(${goatWorkspaceIngestionReservations.rawEventCount}), 0)::integer`,
-      })
-      .from(goatWorkspaceIngestionReservations)
-      .where(
-        and(
-          eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId),
-          eq(goatWorkspaceIngestionReservations.status, "consumed"),
-          gte(goatWorkspaceIngestionReservations.consumedAt, windowStart),
-        ),
-      ),
-    db
-      .select({
-        total: sql<number>`coalesce(sum(${goatWorkspaceIngestionReservations.rawEventCount}), 0)::integer`,
-      })
-      .from(goatWorkspaceIngestionReservations)
-      .where(
-        and(
-          eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId),
-          eq(goatWorkspaceIngestionReservations.status, "pending"),
-        ),
-      ),
-    db
-      .select({
-        provider: goatWorkspaceIngestionReservations.sourceProvider,
-        total: sql<number>`sum(${goatWorkspaceIngestionReservations.rawEventCount})::integer`,
-      })
-      .from(goatWorkspaceIngestionReservations)
-      .where(
-        and(
-          eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId),
-          eq(goatWorkspaceIngestionReservations.status, "consumed"),
-          gte(goatWorkspaceIngestionReservations.consumedAt, windowStart),
-        ),
-      )
-      .groupBy(goatWorkspaceIngestionReservations.sourceProvider),
-    db
-      .select({
-        id: goatWorkspaceIngestionReservations.id,
-        provider: goatWorkspaceIngestionReservations.sourceProvider,
-        rawEventCount: goatWorkspaceIngestionReservations.rawEventCount,
-        status: goatWorkspaceIngestionReservations.status,
-        createdAt: goatWorkspaceIngestionReservations.createdAt,
-        consumedAt: goatWorkspaceIngestionReservations.consumedAt,
-      })
-      .from(goatWorkspaceIngestionReservations)
-      .where(eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId))
-      .orderBy(desc(goatWorkspaceIngestionReservations.createdAt))
-      .limit(20),
-  ]);
   const window = goatIngestionWindow({
     plan: billing.plan,
     planStartedAt: billing.planStartedAt,
     now,
-    connectedSourceCount,
+    seatQuantity: billing.seatQuantity,
   });
+  const [usage, pending, overage, providerRows, recentRows, memberCountRows, creditBalance] =
+    await Promise.all([
+      db
+        .select({
+          total: sql<number>`coalesce(sum(${goatWorkspaceIngestionReservations.rawEventCount}), 0)::integer`,
+        })
+        .from(goatWorkspaceIngestionReservations)
+        .where(
+          and(
+            eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId),
+            eq(goatWorkspaceIngestionReservations.status, "consumed"),
+            gte(goatWorkspaceIngestionReservations.consumedAt, window.start),
+          ),
+        ),
+      db
+        .select({
+          total: sql<number>`coalesce(sum(${goatWorkspaceIngestionReservations.rawEventCount}), 0)::integer`,
+        })
+        .from(goatWorkspaceIngestionReservations)
+        .where(
+          and(
+            eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId),
+            eq(goatWorkspaceIngestionReservations.status, "pending"),
+          ),
+        ),
+      db
+        .select({
+          units: sql<number>`coalesce(sum(${goatWorkspaceIngestionReservations.billedOverageRawEventCount}), 0)::integer`,
+          usdMicros: sql<number>`coalesce(sum(${goatWorkspaceIngestionReservations.billedOverageUsdMicros}), 0)::bigint`,
+        })
+        .from(goatWorkspaceIngestionReservations)
+        .where(
+          and(
+            eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId),
+            eq(goatWorkspaceIngestionReservations.status, "consumed"),
+            gte(goatWorkspaceIngestionReservations.consumedAt, window.start),
+            sql`${goatWorkspaceIngestionReservations.billedOverageUsdMicros} > 0`,
+          ),
+        ),
+      db
+        .select({
+          provider: goatWorkspaceIngestionReservations.sourceProvider,
+          total: sql<number>`sum(${goatWorkspaceIngestionReservations.rawEventCount})::integer`,
+        })
+        .from(goatWorkspaceIngestionReservations)
+        .where(
+          and(
+            eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId),
+            eq(goatWorkspaceIngestionReservations.status, "consumed"),
+            gte(goatWorkspaceIngestionReservations.consumedAt, window.start),
+          ),
+        )
+        .groupBy(goatWorkspaceIngestionReservations.sourceProvider),
+      db
+        .select({
+          id: goatWorkspaceIngestionReservations.id,
+          provider: goatWorkspaceIngestionReservations.sourceProvider,
+          rawEventCount: goatWorkspaceIngestionReservations.rawEventCount,
+          status: goatWorkspaceIngestionReservations.status,
+          createdAt: goatWorkspaceIngestionReservations.createdAt,
+          consumedAt: goatWorkspaceIngestionReservations.consumedAt,
+        })
+        .from(goatWorkspaceIngestionReservations)
+        .where(eq(goatWorkspaceIngestionReservations.workspaceId, workspaceId))
+        .orderBy(desc(goatWorkspaceIngestionReservations.createdAt))
+        .limit(20),
+      db
+        .select({ total: sql<number>`count(*)::integer` })
+        .from(goatWorkspaceMembers)
+        .where(eq(goatWorkspaceMembers.workspaceId, workspaceId)),
+      getGoatCreditBalanceUsdMicros(workspaceId, db),
+    ]);
   return {
     billing,
     plan: billing.plan,
     window,
     used: Number(usage[0]?.total ?? 0),
     pending: Number(pending[0]?.total ?? 0),
-    connectedSourceCount,
+    seatQuantity: billing.seatQuantity,
+    memberCount: Number(memberCountRows[0]?.total ?? 0),
+    creditBalanceUsdMicros: creditBalance,
+    overageUnitsThisWindow: Number(overage[0]?.units ?? 0),
+    overageUsdMicrosThisWindow: Number(overage[0]?.usdMicros ?? 0),
     providers: providerRows.map((row: { provider: GoatBrainSourceProvider; total: number }) => ({
       provider: row.provider,
       count: Number(row.total),
@@ -493,6 +635,9 @@ export type GoatStripeSubscriptionProjection = {
   subscriptionId: string;
   subscriptionItemId: string | null;
   priceId: string | null;
+  // Stripe subscription item quantity = paid seats. Null when the event does
+  // not carry an item (projection keeps 1).
+  seatQuantity: number | null;
   status: GoatStripeSubscriptionStatus;
   cancelAtPeriodEnd: boolean;
   currentPeriodEnd: Date | null;
@@ -531,6 +676,7 @@ export async function applyGoatStripeSubscriptionProjection(
         stripeSubscriptionId: input.subscriptionId,
         stripeSubscriptionItemId: input.subscriptionItemId,
         stripePriceId: input.priceId,
+        seatQuantity: Math.max(1, input.seatQuantity ?? 1),
         subscriptionStatus: input.status,
         cancelAtPeriodEnd: input.cancelAtPeriodEnd,
         currentPeriodEnd: input.currentPeriodEnd,
@@ -554,6 +700,53 @@ export async function findGoatWorkspaceIdForStripeSubscription(
     .where(eq(goatWorkspaceBilling.stripeSubscriptionId, subscriptionId))
     .limit(1);
   return row?.workspaceId ?? null;
+}
+
+// Pro workspaces whose projected seat quantity or Stripe price has drifted
+// from the live billing terms. The hourly reconcile cron pushes both back to
+// Stripe; the resulting subscription webhook re-projects the billing state.
+export async function listGoatSeatSyncCandidates(options: {
+  targetPriceId: string;
+  limit?: number;
+  db?: DbLike;
+}) {
+  const db = options.db ?? getDb();
+  const memberCount = sql<number>`(
+    SELECT count(*)::integer FROM goat.workspace_members m
+    WHERE m.workspace_id = ${goatWorkspaceBilling.workspaceId}
+  )`;
+  const rows = await db
+    .select({
+      workspaceId: goatWorkspaceBilling.workspaceId,
+      stripeSubscriptionItemId: goatWorkspaceBilling.stripeSubscriptionItemId,
+      stripePriceId: goatWorkspaceBilling.stripePriceId,
+      seatQuantity: goatWorkspaceBilling.seatQuantity,
+      memberCount,
+    })
+    .from(goatWorkspaceBilling)
+    .where(
+      and(
+        eq(goatWorkspaceBilling.plan, "pro"),
+        sql`${goatWorkspaceBilling.stripeSubscriptionItemId} IS NOT NULL`,
+        sql`(${goatWorkspaceBilling.seatQuantity} <> ${memberCount} OR ${goatWorkspaceBilling.stripePriceId} IS DISTINCT FROM ${options.targetPriceId})`,
+      ),
+    )
+    .limit(options.limit ?? 50);
+  return rows.map(
+    (row: {
+      workspaceId: string;
+      stripeSubscriptionItemId: string | null;
+      stripePriceId: string | null;
+      seatQuantity: number;
+      memberCount: number;
+    }) => ({
+      workspaceId: row.workspaceId,
+      stripeSubscriptionItemId: row.stripeSubscriptionItemId as string,
+      stripePriceId: row.stripePriceId,
+      seatQuantity: Number(row.seatQuantity),
+      memberCount: Math.max(1, Number(row.memberCount)),
+    }),
+  );
 }
 
 export async function applyGoatStripeInvoicePaymentState(

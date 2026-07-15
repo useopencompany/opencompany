@@ -5,8 +5,10 @@ export type GoatIngestionUsageData = {
   plan: "free" | "pro";
   used: number;
   limit: number;
-  baseLimit: number;
-  sourceBonus: number;
+  seatQuantity: number;
+  perSeatAllowance: number;
+  overageUnits: number;
+  overageUsdMicros: number;
   pending: number;
   resetAt: string;
   providers: Array<{ provider: string; count: number }>;
@@ -34,8 +36,8 @@ export function GoatIngestionUsagePanel({ data }: { data: GoatIngestionUsageData
             {data.pending === 1 ? " is" : "s are"} paused. They resume oldest-first when the
             allowance resets {formatReset(data.resetAt)}
             {data.plan === "free"
-              ? " — or sooner if the workspace upgrades to Pro or connects more sources."
-              : " — or sooner if the workspace connects more sources."}
+              ? " — or sooner if the workspace upgrades to Pro."
+              : " — or sooner once the workspace has credits to cover the overage."}
           </span>
         </div>
       ) : null}
@@ -52,10 +54,17 @@ export function GoatIngestionUsagePanel({ data }: { data: GoatIngestionUsageData
                 of {data.limit.toLocaleString()}
               </span>
             </div>
-            {data.sourceBonus > 0 ? (
+            {data.plan === "pro" ? (
               <div className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
-                {data.baseLimit.toLocaleString()} plan allowance + {data.sourceBonus} connected
-                source bonus
+                {data.perSeatAllowance.toLocaleString()} items × {data.seatQuantity} seat
+                {data.seatQuantity === 1 ? "" : "s"}, pooled across the workspace
+              </div>
+            ) : null}
+            {data.overageUnits > 0 ? (
+              <div className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
+                Plus {data.overageUnits.toLocaleString()} overage item
+                {data.overageUnits === 1 ? "" : "s"} ({formatUsdMicros(data.overageUsdMicros)} from
+                credits)
               </div>
             ) : null}
           </div>
@@ -122,6 +131,15 @@ export function GoatIngestionUsagePanel({ data }: { data: GoatIngestionUsageData
       </section>
     </GoatSettingsContent>
   );
+}
+
+function formatUsdMicros(usdMicros: number) {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(usdMicros / 1_000_000);
 }
 
 function formatReset(value: string) {

@@ -81,6 +81,7 @@ import {
   textFromGoatChatUiMessage,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
+import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
 import { CODEX_PICKER_VALUE, type CodexPickerValue } from "@/lib/codex-chat-constants";
 import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
@@ -410,6 +411,15 @@ export function GoatSurface({
       router.refresh();
     },
     onError: (error) => {
+      if (error.message?.includes(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE)) {
+        toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
+          action: {
+            label: "Add credits",
+            onClick: () => router.push("/settings/workspace/billing"),
+          },
+        });
+        return;
+      }
       toast.error(error.message || "Goat could not answer that right now.");
     },
   });
