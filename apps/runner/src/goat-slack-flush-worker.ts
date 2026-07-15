@@ -1,5 +1,9 @@
 import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
+  attributeGoatBrainSourceEventClaims,
+  claimGoatBrainSourceEvents,
+} from "@opencompany/db/goat-brain-event-claims";
+import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
 } from "@opencompany/db/goat-brain-ingest";
@@ -150,9 +154,25 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
       integration.status === "connected"
         ? await listEnabledGoatSlackBrainSourceRoutes([window.integrationId], tx)
         : [];
-    const brainRefs = routes
+    const candidateBrainRefs = routes
       .filter((route) => goatSlackSelectedConversationIds(route.config).has(window.channelId))
       .map((route) => route.brainRef);
+
+    // Cross-member dedup: several members' integrations can watch the same
+    // team channel for the same brain. Each message claims its provider-native
+    // identity per brain; a brain whose claims all lose (every message already
+    // ingested via another member's window) is skipped — no job, no billing.
+    const eventKeys = claimed.map((row) => `${window.teamId}:${window.channelId}:${row.messageTs}`);
+    const brainRefs: string[] = [];
+    for (const brainRef of new Set(candidateBrainRefs)) {
+      const { claimedCount } = await claimGoatBrainSourceEvents({
+        brainRef,
+        sourceProvider: "slack",
+        eventKeys,
+        db: tx,
+      });
+      if (claimedCount > 0) brainRefs.push(brainRef);
+    }
 
     const upserted = await upsertGoatBrainSourceItemAndEnqueue({
       userWorkosId: window.userWorkosId,
@@ -175,6 +195,15 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
         sql`, `,
       )})
     `);
+    for (const brainRef of brainRefs) {
+      await attributeGoatBrainSourceEventClaims({
+        brainRef,
+        sourceProvider: "slack",
+        eventKeys,
+        sourceItemId: upserted.sourceItemId,
+        db: tx,
+      });
+    }
 
     return {
       sourceItemId: upserted.sourceItemId,

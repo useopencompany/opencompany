@@ -472,6 +472,20 @@ export async function removeGoatWorkspaceMember(
         ),
       );
   }
+  // Detach the member's personal-integration brain sources in this workspace:
+  // new content stops flowing, already-ingested brain content stays (the
+  // pointer/copy rule). Workspace-owned integrations (github, jamie) keep the
+  // leaving member as user_workos_id attribution and must NOT be touched —
+  // the workspace_id IS NULL filter guarantees that.
+  await db.execute(sql`
+    DELETE FROM goat.brain_sources bs
+    USING goat.brains b, goat.integrations i
+    WHERE bs.brain_id = b.id
+      AND b.workspace_id = ${input.workspaceId}
+      AND bs.integration_id = i.id
+      AND i.user_workos_id = ${input.userWorkosId}
+      AND i.workspace_id IS NULL
+  `);
   await db
     .delete(goatWorkspaceMembers)
     .where(

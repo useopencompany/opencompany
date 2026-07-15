@@ -1,9 +1,14 @@
 import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
+  attributeGoatBrainSourceEventClaims,
+  claimGoatBrainSourceEvents,
+} from "@opencompany/db/goat-brain-event-claims";
+import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
 } from "@opencompany/db/goat-brain-ingest";
 import {
+  goatGmailEventClaimKey,
   goatGmailEventTypeForDirection,
   goatGmailRouteMatchesEvent,
   listEnabledGoatGmailBrainSourceRoutes,
@@ -43,6 +48,7 @@ export type GoatGmailDueWindow = {
 type BufferedGmailMessageRow = {
   id: string;
   messageId: string;
+  rfc822MessageId: string | null;
   direction: GoatGmailMessageDirection;
   subject: string | null;
   fromHeader: string | null;
@@ -123,6 +129,7 @@ export async function flushGoatGmailThreadWindow(
         SELECT
           id,
           message_id AS "messageId",
+          rfc822_message_id AS "rfc822MessageId",
           direction,
           subject,
           from_header AS "fromHeader",
@@ -160,13 +167,35 @@ export async function flushGoatGmailThreadWindow(
         ? await listEnabledGoatGmailBrainSourceRoutes([window.integrationId], tx)
         : [];
     const directions = new Set(claimed.map((row) => row.direction));
-    const brainRefs = routes
+    const candidateBrainRefs = routes
       .filter((route) =>
         [...directions].some((direction) =>
           goatGmailRouteMatchesEvent(route.config, goatGmailEventTypeForDirection(direction)),
         ),
       )
       .map((route) => route.brainRef);
+
+    // Cross-member dedup: two members on the same thread each buffer their
+    // mailbox's copy of every email. The RFC822 Message-ID is the identity
+    // shared across mailboxes; a brain whose claims all lose (thread already
+    // ingested via another member's window) is skipped — no job, no billing.
+    const eventKeys = claimed.map((row) =>
+      goatGmailEventClaimKey({
+        rfc822MessageId: row.rfc822MessageId,
+        integrationId: window.integrationId,
+        gmailMessageId: row.messageId,
+      }),
+    );
+    const brainRefs: string[] = [];
+    for (const brainRef of new Set(candidateBrainRefs)) {
+      const { claimedCount } = await claimGoatBrainSourceEvents({
+        brainRef,
+        sourceProvider: "gmail",
+        eventKeys,
+        db: tx,
+      });
+      if (claimedCount > 0) brainRefs.push(brainRef);
+    }
 
     const upserted = await upsertGoatBrainSourceItemAndEnqueue({
       userWorkosId: window.userWorkosId,
@@ -189,6 +218,15 @@ export async function flushGoatGmailThreadWindow(
         sql`, `,
       )})
     `);
+    for (const brainRef of brainRefs) {
+      await attributeGoatBrainSourceEventClaims({
+        brainRef,
+        sourceProvider: "gmail",
+        eventKeys,
+        sourceItemId: upserted.sourceItemId,
+        db: tx,
+      });
+    }
 
     return {
       sourceItemId: upserted.sourceItemId,
@@ -352,6 +390,7 @@ async function previewBufferedGmailMessages(window: GoatGmailDueWindow) {
       SELECT
         id,
         message_id AS "messageId",
+        rfc822_message_id AS "rfc822MessageId",
         direction,
         subject,
         from_header AS "fromHeader",

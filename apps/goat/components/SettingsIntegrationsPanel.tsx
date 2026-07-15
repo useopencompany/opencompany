@@ -24,12 +24,18 @@ import {
   startGoatCodexDeviceAuth,
 } from "@/lib/codex-auth";
 import {
+  disconnectGoatIntegrationAccountAction,
+  getGoatIntegrationAccountUsageAction,
+} from "@/lib/integration-account-actions";
+import {
   type GoatCodexProviderState,
   type GoatGitHubProviderState,
   type GoatGoogleProviderState,
+  type GoatIntegrationAccountView,
   type GoatIntegrationState,
   type GoatJamieProviderState,
   type GoatLinearProviderState,
+  type GoatPersonalAccountProvider,
   type GoatSlackProviderState,
   goatIntegrationStateFromRows,
 } from "@/lib/integration-state";
@@ -139,15 +145,36 @@ function IntegrationRows({
         <p className="mb-1 px-2 text-[12px] leading-5 text-ink-subtle">
           Connections that act as you. Only you can manage them or wire them into brains.
         </p>
-        <IntegrationRow icon={Mail} label="Gmail" integration={integrations.gmail} />
-        <IntegrationRow
+        <IntegrationProviderGroup
+          icon={Mail}
+          label="Gmail"
+          provider="gmail"
+          accounts={integrations.personalAccounts.gmail}
+        />
+        <IntegrationProviderGroup
           icon={CalendarDays}
           label="Google Calendar"
-          integration={integrations.google_calendar}
+          provider="google_calendar"
+          accounts={integrations.personalAccounts.google_calendar}
         />
-        <IntegrationRow icon={Files} label="Google Drive" integration={integrations.google_drive} />
-        <IntegrationRow icon={ListTodo} label="Linear" integration={integrations.linear} />
-        <IntegrationRow icon={SlackIcon} label="Slack" integration={integrations.slack} />
+        <IntegrationProviderGroup
+          icon={Files}
+          label="Google Drive"
+          provider="google_drive"
+          accounts={integrations.personalAccounts.google_drive}
+        />
+        <IntegrationProviderGroup
+          icon={ListTodo}
+          label="Linear"
+          provider="linear"
+          accounts={integrations.personalAccounts.linear}
+        />
+        <IntegrationProviderGroup
+          icon={SlackIcon}
+          label="Slack"
+          provider="slack"
+          accounts={integrations.personalAccounts.slack}
+        />
         <McpIntegrationRow setup={mcpSetup} />
         <CodexIntegrationRow integration={integrations.codex} />
       </section>
@@ -255,6 +282,166 @@ function IntegrationRow({
           </a>
         )}
       </div>
+    </div>
+  );
+}
+
+// A personal provider with any number of connected accounts. Zero accounts
+// renders exactly like the classic single row; with accounts, each connection
+// gets its own row (identity + status + disconnect) plus an "Add account"
+// affordance — a second OAuth pass creates a second integration row.
+function IntegrationProviderGroup({
+  icon: Icon,
+  label,
+  provider,
+  accounts,
+}: {
+  icon: IconComponent;
+  label: string;
+  provider: GoatPersonalAccountProvider;
+  accounts: GoatIntegrationAccountView[];
+}) {
+  const connectHref = integrationConnectHref(provider);
+  if (accounts.length === 0) {
+    return (
+      <div className="flex items-center gap-3 rounded-lg px-2 py-2">
+        <Icon size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <span className="block truncate text-[14px] font-medium leading-tight text-ink">
+            {label}
+          </span>
+          <a
+            href={connectHref}
+            className="ml-auto shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            Connect
+          </a>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col rounded-lg px-2 py-2">
+      <div className="flex items-center gap-3">
+        <Icon size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+        <span className="block truncate text-[14px] font-medium leading-tight text-ink">
+          {label}
+        </span>
+        <a
+          href={connectHref}
+          className="ml-auto shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          Add account
+        </a>
+      </div>
+      <div className="mt-1 flex flex-col gap-0.5 pl-7">
+        {accounts.map((account) => (
+          <IntegrationAccountRow key={account.integrationId} account={account} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountView }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [confirming, setConfirming] = useState<{ affectedBrainSourceCount: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const identity =
+    account.provider === "slack"
+      ? [account.connectionLabel, account.accountName].filter(Boolean).join(" · ") ||
+        account.accountEmail ||
+        account.integrationId
+      : account.provider === "linear"
+        ? account.connectionLabel || account.accountName || account.integrationId
+        : account.accountEmail || account.accountName || account.integrationId;
+
+  const beginDisconnect = () => {
+    setError(null);
+    startTransition(async () => {
+      const usage = await getGoatIntegrationAccountUsageAction(account.integrationId);
+      if (!usage.ok) {
+        setError(usage.error);
+        return;
+      }
+      if (usage.affectedBrainSourceCount > 0) {
+        setConfirming({ affectedBrainSourceCount: usage.affectedBrainSourceCount });
+        return;
+      }
+      const result = await disconnectGoatIntegrationAccountAction(account.integrationId);
+      if (!result.ok) setError(result.error);
+      else router.refresh();
+    });
+  };
+
+  const confirmDisconnect = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await disconnectGoatIntegrationAccountAction(account.integrationId);
+      if (!result.ok) setError(result.error);
+      else {
+        setConfirming(null);
+        router.refresh();
+      }
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-1 py-1">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="block truncate text-[12px] leading-4 text-ink-subtle">{identity}</span>
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {account.connected ? (
+            <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+              Connected
+            </span>
+          ) : (
+            <a
+              href={integrationConnectHref(account.provider)}
+              className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
+            >
+              Reconnect
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={beginDisconnect}
+            disabled={isPending}
+            className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+          >
+            Disconnect
+          </button>
+        </div>
+      </div>
+      {confirming ? (
+        <div className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
+          <span>
+            Disconnect {identity}? {confirming.affectedBrainSourceCount} brain source
+            {confirming.affectedBrainSourceCount === 1 ? "" : "s"} fed by this account will stop
+            ingesting.
+          </span>
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={confirmDisconnect}
+              disabled={isPending}
+              className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-warning transition-colors duration-150 hover:bg-surface-hover disabled:opacity-60"
+            >
+              Disconnect account
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(null)}
+              disabled={isPending}
+              className="rounded-full px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
     </div>
   );
 }

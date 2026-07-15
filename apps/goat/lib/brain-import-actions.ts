@@ -146,7 +146,7 @@ async function validateImportSourceSelection(
       (source) =>
         source.provider === provider &&
         source.integrationId === requested.integrationId &&
-        source.canManage,
+        source.canConfigure,
     );
     const connectedIntegrationId = integrationIdFor(details, provider);
     if (
