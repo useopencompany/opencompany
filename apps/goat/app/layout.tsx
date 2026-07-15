@@ -7,7 +7,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Goat",
+  title: "OpenCompany",
   description: "Experimental just-in-time agent harness.",
   icons: {
     icon: [
