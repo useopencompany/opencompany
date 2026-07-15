@@ -76,11 +76,6 @@ export default async function OnboardingPage({
       initialReferral={onboarding?.referralSource ?? null}
       initialSourceDetails={sourceDetails}
       initialConnectionResult={connectionResult}
-      mcpBrains={context.brains.map((brain) => ({
-        id: brain.id,
-        name: brain.name,
-        slug: brain.slug,
-      }))}
       initialMcpClient={context.user.preferredMcpClient}
       initialMcpCompletedAt={context.user.mcpSetupCompletedAt?.toISOString() ?? null}
     />

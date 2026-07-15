@@ -37,8 +37,8 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    const entry = screen.getByRole("link", { name: /Goat Brain MCP/ });
-    expect(entry).toHaveAttribute("href", "/setup/mcp");
+    const entry = screen.getByRole("link", { name: /Goat MCP/ });
+    expect(entry).toHaveAttribute("href", "/settings/mcp");
     expect(entry).toHaveTextContent("Set up");
     expect(entry).toHaveTextContent("Claude, ChatGPT, or Cursor");
   });
@@ -55,7 +55,7 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    const entry = screen.getByRole("link", { name: /Goat Brain MCP/ });
+    const entry = screen.getByRole("link", { name: /Goat MCP/ });
     expect(entry).toHaveTextContent("Connected with Cursor");
     expect(entry).toHaveTextContent("Connected");
   });

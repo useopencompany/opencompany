@@ -1,5 +1,9 @@
 import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 
+// One connector per user: this endpoint spans every brain the signed-in user
+// can access. Kept here (client-safe) and reused by lib/mcp-oauth.ts.
+export const GOAT_USER_MCP_ENDPOINT_PATH = "/mcp";
+
 export const GOAT_MCP_CLIENTS = [
   "claude",
   "chatgpt",
@@ -18,14 +22,10 @@ export function isGoatMcpSetupCompletionRun(input: {
   return input.ok && input.command === "query" && Boolean(input.sourceRef?.startsWith("mcp:"));
 }
 
-export function buildGoatMcpFirstPrompt(input: {
-  displayName: string;
-  workspaceName: string;
-  brainName: string;
-}) {
+export function buildGoatMcpFirstPrompt(input: { displayName: string; workspaceName: string }) {
   return [
-    `Use the Goat Brain connector for "${input.brainName}" for this entire answer.`,
-    `First query the brain for "${input.displayName}".`,
+    "Use the Goat connector for this entire answer.",
+    `First list my brains, then query for "${input.displayName}".`,
     `Then brief me on the active projects, recent decisions, and people most relevant to my work at ${input.workspaceName}.`,
     "Cite the brain pages you used.",
     "If the brain has little about me, say so and give me the most important recent workspace brief instead.",
