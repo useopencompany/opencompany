@@ -1091,62 +1091,70 @@ async function recordGoatBrainToolRun(input: {
   syncResult: { ok: true } | { ok: false; error: string } | null;
 }) {
   try {
-    await getDb().transaction(async (tx) => {
-      await tx.insert(goatBrainToolRuns).values({
-        id: input.traceId,
-        brainRef: input.brainRef,
-        userWorkosId: input.userWorkosId,
-        chatSessionId: input.traceContext?.chatSessionId ?? null,
-        userMessageId: input.traceContext?.userMessageId ?? null,
-        assistantMessageId: input.traceContext?.assistantMessageId ?? null,
-        toolCallId: input.traceContext?.toolCallId ?? null,
-        sourceRef: input.traceContext?.sourceRef ?? null,
-        action: input.command,
-        ok: input.output.ok,
-        exitCode: input.output.exitCode,
-        durationMs: input.durationMs,
-        tracePath: null,
-        trace: {
-          schemaVersion: GOAT_BRAIN_TRACE_SCHEMA_VERSION,
-          startedAt: input.startedAt.toISOString(),
-          argv: input.resolved.argv,
-          command: input.resolved.display,
-          materialized: input.materialized,
-          process: input.processResult
-            ? {
-                ok: input.processResult.ok,
-                exitCode: input.processResult.exitCode,
-                timedOut: input.processResult.timedOut === true,
-                aborted: input.processResult.aborted === true,
-              }
-            : null,
-          sync: input.syncResult,
-          output: {
-            ok: input.output.ok,
-            exitCode: input.output.exitCode,
-            error: input.output.error,
-          },
-          toolInput: input.traceContext?.toolInput ?? null,
-        },
-      });
-      if (
-        isGoatMcpSetupCompletionRun({
-          sourceRef: input.traceContext?.sourceRef,
-          command: input.command,
+    const db = getDb();
+    const insertToolRun = db.insert(goatBrainToolRuns).values({
+      id: input.traceId,
+      brainRef: input.brainRef,
+      userWorkosId: input.userWorkosId,
+      chatSessionId: input.traceContext?.chatSessionId ?? null,
+      userMessageId: input.traceContext?.userMessageId ?? null,
+      assistantMessageId: input.traceContext?.assistantMessageId ?? null,
+      toolCallId: input.traceContext?.toolCallId ?? null,
+      sourceRef: input.traceContext?.sourceRef ?? null,
+      action: input.command,
+      ok: input.output.ok,
+      exitCode: input.output.exitCode,
+      durationMs: input.durationMs,
+      tracePath: null,
+      trace: {
+        schemaVersion: GOAT_BRAIN_TRACE_SCHEMA_VERSION,
+        startedAt: input.startedAt.toISOString(),
+        argv: input.resolved.argv,
+        command: input.resolved.display,
+        materialized: input.materialized,
+        process: input.processResult
+          ? {
+              ok: input.processResult.ok,
+              exitCode: input.processResult.exitCode,
+              timedOut: input.processResult.timedOut === true,
+              aborted: input.processResult.aborted === true,
+            }
+          : null,
+        sync: input.syncResult,
+        output: {
           ok: input.output.ok,
-        })
-      ) {
-        await tx
-          .update(goatUsers)
-          .set({ mcpSetupCompletedAt: input.startedAt, updatedAt: new Date() })
-          .where(
-            and(
-              eq(goatUsers.workosUserId, input.userWorkosId),
-              isNull(goatUsers.mcpSetupCompletedAt),
-            ),
-          );
-      }
+          exitCode: input.output.exitCode,
+          error: input.output.error,
+        },
+        toolInput: input.traceContext?.toolInput ?? null,
+      },
     });
+    const completesMcpSetup = isGoatMcpSetupCompletionRun({
+      sourceRef: input.traceContext?.sourceRef,
+      command: input.command,
+      ok: input.output.ok,
+    });
+
+    if (!completesMcpSetup) {
+      await insertToolRun;
+      return;
+    }
+
+    // neon-http cannot open an interactive transaction. Its batch API sends both statements
+    // through Neon's non-interactive transactional HTTP endpoint, keeping MCP setup completion
+    // atomic with the audit row without opening a pooled connection from the web app.
+    await db.batch([
+      insertToolRun,
+      db
+        .update(goatUsers)
+        .set({ mcpSetupCompletedAt: input.startedAt, updatedAt: new Date() })
+        .where(
+          and(
+            eq(goatUsers.workosUserId, input.userWorkosId),
+            isNull(goatUsers.mcpSetupCompletedAt),
+          ),
+        ),
+    ] as const);
   } catch (error) {
     if (process.env.NODE_ENV !== "test") {
       console.error("[goat] Failed to persist Brain tool run", {
