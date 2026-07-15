@@ -1343,6 +1343,38 @@ export const goatBrainSources = goat.table(
   }),
 );
 
+// Cross-member ingest dedup: a claim records that a brain has already ingested
+// a provider-native event (Slack team:channel:ts, Gmail RFC822 Message-ID,
+// Linear org:issue:delivery), regardless of which member's integration
+// delivered it. Flush workers only enqueue an ingest job for a brain when at
+// least one event in the window is newly claimed. source_item_id is SET NULL
+// so the dedup guarantee outlives the raw evidence row.
+export const goatBrainSourceEventClaims = goat.table(
+  "brain_source_event_claims",
+  {
+    id: text("id").primaryKey(),
+    brainId: text("brain_id")
+      .notNull()
+      .references(() => goatBrains.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    sourceProvider: text("source_provider").notNull(),
+    eventKey: text("event_key").notNull(),
+    sourceItemId: text("source_item_id").references(() => goatBrainSourceItems.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    brainProviderKeyIdx: uniqueIndex("goat_brain_source_event_claims_brain_provider_key_idx").on(
+      table.brainId,
+      table.sourceProvider,
+      table.eventKey,
+    ),
+  }),
+);
+
 export const goatBrainSourceItems = goat.table(
   "brain_source_items",
   {
@@ -1727,6 +1759,10 @@ export const goatGmailMessageEvents = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     threadId: text("thread_id").notNull(),
     messageId: text("message_id").notNull(),
+    // RFC822 Message-ID header — the only cross-mailbox identity for an email
+    // (Gmail message ids are per-mailbox). Used for cross-member brain dedup;
+    // NULL for rows buffered before capture shipped or when the header is absent.
+    rfc822MessageId: text("rfc822_message_id"),
     // Classified at poll time from labelIds (SENT label); flush routing matches
     // brain-source event filters against this without re-parsing labels.
     direction: text("direction").$type<GoatGmailMessageDirection>().notNull(),
@@ -2671,6 +2707,9 @@ export const goatBrainToolRuns = goat.table(
   "brain_tool_runs",
   {
     id: text("id").primaryKey(),
+    brainRef: text("brain_ref").references(() => goatBrains.id, {
+      onDelete: "set null",
+    }),
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
@@ -2694,6 +2733,10 @@ export const goatBrainToolRuns = goat.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
+    brainCreatedAtIdx: index("goat_brain_tool_runs_brain_created_at_idx").on(
+      table.brainRef,
+      table.createdAt,
+    ),
     userCreatedAtIdx: index("goat_brain_tool_runs_user_created_at_idx").on(
       table.userWorkosId,
       table.createdAt,

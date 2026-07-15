@@ -48,6 +48,10 @@
       "types": "./src/goat-brain-sources.ts",
       "default": "./src/goat-brain-sources.ts"
     },
+    "./goat-brain-event-claims": {
+      "types": "./src/goat-brain-event-claims.ts",
+      "default": "./src/goat-brain-event-claims.ts"
+    },
     "./goat-github": {
       "types": "./src/goat-github.ts",
       "default": "./src/goat-github.ts"

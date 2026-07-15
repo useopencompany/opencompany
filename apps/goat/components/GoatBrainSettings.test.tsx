@@ -87,12 +87,21 @@ describe("GoatBrainSourceCards", () => {
       brainSourceDetails({
         sources: [
           {
+            sourceId: "gbscfg_jamie_1",
             provider: "jamie",
             integrationId: "gint_jamie_1",
             enabled: true,
             connectedByName: "Ada Lovelace",
+            ownerEmail: "ada@example.com",
+            ownerAvatarUrl: null,
+            accountEmail: null,
+            accountName: "Jamie",
+            connectionLabel: null,
             ownerKind: "workspace" as const,
-            canManage: true,
+            isOwn: false,
+            canConfigure: true,
+            canToggle: true,
+            canRemove: true,
             integrationStatus: "needs_reauth",
             config: {},
           },
@@ -149,6 +158,143 @@ describe("GoatBrainSourceCards", () => {
     );
   });
 
+  it("renders one row per source with owner-only config and admin veto affordances", async () => {
+    const user = userEvent.setup();
+    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "gmail");
+    if (!provider) throw new Error("Gmail source provider is not registered.");
+    render(
+      <SourceProviderCard
+        brainRef="goat_brain_1"
+        provider={provider}
+        details={brainSourceDetails({
+          sources: [
+            gmailSource({
+              sourceId: "gbscfg_own",
+              integrationId: "gint_gmail_own",
+              connectedByName: "Admin Ada",
+              accountEmail: "ada@example.com",
+              isOwn: true,
+              canConfigure: true,
+              canToggle: true,
+              canRemove: true,
+            }),
+            gmailSource({
+              sourceId: "gbscfg_member",
+              integrationId: "gint_gmail_member",
+              connectedByName: "Maya Chen",
+              accountEmail: "maya@example.com",
+              isOwn: false,
+              canConfigure: false,
+              canToggle: true,
+              canRemove: true,
+            }),
+          ],
+        })}
+        onChanged={async () => {}}
+      />,
+    );
+
+    expect(screen.getByText("You")).toBeInTheDocument();
+    expect(screen.getByText("Maya Chen")).toBeInTheDocument();
+    expect(screen.getByText(/2 sources · 2 ingesting/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Managed by Maya Chen · only they can change what's ingested/),
+    ).toBeInTheDocument();
+    // Both rows can be toggled (owner + admin veto), and removed.
+    expect(screen.getAllByRole("switch", { name: "Gmail source" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Remove" })).toHaveLength(2);
+
+    await user.click(screen.getAllByRole("button", { name: "Remove" })[1]!);
+    expect(screen.getByText(/Remove Maya Chen's Gmail \(maya@example.com\)/)).toBeInTheDocument();
+  });
+
+  it("renders another member's source read-only for non-admin members", () => {
+    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "gmail");
+    if (!provider) throw new Error("Gmail source provider is not registered.");
+    render(
+      <SourceProviderCard
+        brainRef="goat_brain_1"
+        provider={provider}
+        details={brainSourceDetails({
+          viewer: { workosUserId: "user_member_2", isAdmin: false },
+          sources: [
+            gmailSource({
+              sourceId: "gbscfg_member",
+              integrationId: "gint_gmail_member",
+              connectedByName: "Maya Chen",
+              accountEmail: "maya@example.com",
+              isOwn: false,
+              canConfigure: false,
+              canToggle: false,
+              canRemove: false,
+            }),
+          ],
+        })}
+        onChanged={async () => {}}
+      />,
+    );
+
+    expect(screen.getByText("Managed by Maya Chen")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Gmail source" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+  });
+
+  it("adds one of the member's own accounts after the consent step", async () => {
+    const user = userEvent.setup();
+    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "gmail");
+    if (!provider) throw new Error("Gmail source provider is not registered.");
+    render(
+      <SourceProviderCard
+        brainRef="goat_brain_1"
+        provider={provider}
+        details={brainSourceDetails({
+          sources: [
+            gmailSource({
+              sourceId: "gbscfg_own",
+              integrationId: "gint_gmail_own",
+              connectedByName: "Admin Ada",
+              accountEmail: "ada@example.com",
+              isOwn: true,
+              canConfigure: true,
+              canToggle: true,
+              canRemove: true,
+            }),
+          ],
+          ownAccounts: {
+            slack: [],
+            linear: [],
+            gmail: [
+              {
+                integrationId: "gint_gmail_second",
+                status: "connected",
+                accountEmail: "ada.second@example.com",
+                accountName: null,
+                connectionLabel: null,
+              },
+            ],
+            google_drive: [],
+          },
+        })}
+        onChanged={async () => {}}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Add ada.second@example.com/ }));
+    expect(
+      screen.getByText(/Everyone with access to this brain, now and in the future/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add to brain" }));
+
+    await waitFor(() =>
+      expect(brainSourceActionsMock.setGoatBrainSourceEnabledAction).toHaveBeenCalledWith({
+        brainRef: "goat_brain_1",
+        provider: "gmail",
+        integrationId: "gint_gmail_second",
+        enabled: true,
+      }),
+    );
+  });
+
   it("supports onboarding-owned setup actions and links to the manual guide", async () => {
     const user = userEvent.setup();
     const onConnect = vi.fn();
@@ -201,7 +347,14 @@ function brainSourceDetails(
   overrides: Partial<GoatBrainSourcesDetails> & { sources?: GoatBrainSourceView[] } = {},
 ): GoatBrainSourcesDetails {
   return {
+    viewer: { workosUserId: "user_admin_1", isAdmin: true },
     sources: [],
+    ownAccounts: {
+      slack: [],
+      linear: [],
+      gmail: [],
+      google_drive: [],
+    },
     jamie: {
       integration: jamieState({
         connected: false,
@@ -263,6 +416,29 @@ function brainSourceDetails(
         statusReason: null,
       },
     },
+    ...overrides,
+  };
+}
+
+function gmailSource(overrides: Partial<GoatBrainSourceView> = {}): GoatBrainSourceView {
+  return {
+    sourceId: "gbscfg_gmail_1",
+    provider: "gmail",
+    integrationId: "gint_gmail_1",
+    enabled: true,
+    connectedByName: "Ada Lovelace",
+    ownerEmail: "ada@example.com",
+    ownerAvatarUrl: null,
+    accountEmail: "ada@example.com",
+    accountName: null,
+    connectionLabel: null,
+    ownerKind: "user",
+    isOwn: false,
+    canConfigure: false,
+    canToggle: false,
+    canRemove: false,
+    integrationStatus: "connected",
+    config: {},
     ...overrides,
   };
 }

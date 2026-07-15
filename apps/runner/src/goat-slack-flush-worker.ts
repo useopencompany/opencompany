@@ -1,5 +1,9 @@
 import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
+  attributeGoatBrainSourceEventClaims,
+  claimGoatBrainSourceEvents,
+} from "@opencompany/db/goat-brain-event-claims";
+import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
 } from "@opencompany/db/goat-brain-ingest";
@@ -150,9 +154,30 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
       integration.status === "connected"
         ? await listEnabledGoatSlackBrainSourceRoutes([window.integrationId], tx)
         : [];
-    const brainRefs = routes
+    const candidateBrainRefs = routes
       .filter((route) => goatSlackSelectedConversationIds(route.config).has(window.channelId))
       .map((route) => route.brainRef);
+
+    // Cross-member dedup: several members' integrations can watch the same
+    // team channel for the same brain. Each message claims its provider-native
+    // identity per brain; a brain whose claims all lose (every message already
+    // ingested via another member's window) is skipped — no job, no billing.
+    const eventKeys = claimed.map((row) => `${window.teamId}:${window.channelId}:${row.messageTs}`);
+    const brainRefs: string[] = [];
+    const claimedEventKeysByBrainRef = new Map<string, string[]>();
+    const newlyClaimedEventKeys = new Set<string>();
+    for (const brainRef of new Set(candidateBrainRefs)) {
+      const { claimedEventKeys } = await claimGoatBrainSourceEvents({
+        brainRef,
+        sourceProvider: "slack",
+        eventKeys,
+        db: tx,
+      });
+      if (claimedEventKeys.length === 0) continue;
+      brainRefs.push(brainRef);
+      claimedEventKeysByBrainRef.set(brainRef, claimedEventKeys);
+      for (const eventKey of claimedEventKeys) newlyClaimedEventKeys.add(eventKey);
+    }
 
     const upserted = await upsertGoatBrainSourceItemAndEnqueue({
       userWorkosId: window.userWorkosId,
@@ -160,7 +185,8 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
       integrationId: window.integrationId,
       item,
       rawPayload: { eventIds: claimed.map((row) => row.id) },
-      rawEventCount: claimed.length,
+      rawEventCount: brainRefs.length > 0 ? newlyClaimedEventKeys.size : claimed.length,
+      rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
       kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       now: flushedAt,
@@ -175,6 +201,15 @@ export async function flushGoatSlackConversationWindow(window: GoatSlackDueWindo
         sql`, `,
       )})
     `);
+    for (const brainRef of brainRefs) {
+      await attributeGoatBrainSourceEventClaims({
+        brainRef,
+        sourceProvider: "slack",
+        eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
+        sourceItemId: upserted.sourceItemId,
+        db: tx,
+      });
+    }
 
     return {
       sourceItemId: upserted.sourceItemId,

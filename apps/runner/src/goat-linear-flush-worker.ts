@@ -1,5 +1,9 @@
 import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
+  attributeGoatBrainSourceEventClaims,
+  claimGoatBrainSourceEvents,
+} from "@opencompany/db/goat-brain-event-claims";
+import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
 } from "@opencompany/db/goat-brain-ingest";
@@ -49,6 +53,7 @@ export type GoatLinearDueWindow = {
 
 type BufferedLinearEventRow = {
   id: string;
+  deliveryId: string;
   teamId: string | null;
   entityType: GoatLinearEventEntityType;
   action: GoatLinearEventAction;
@@ -109,6 +114,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       await tx.execute(sql`
         SELECT
           id,
+          delivery_id AS "deliveryId",
           team_id AS "teamId",
           entity_type AS "entityType",
           action,
@@ -149,7 +155,7 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
         ? await listEnabledGoatLinearBrainSourceRoutes([window.integrationId], tx)
         : [];
     const teamId = snapshot?.teamId ?? claimed.find((row) => row.teamId)?.teamId ?? null;
-    const brainRefs = routes
+    const candidateBrainRefs = routes
       .filter((route) => {
         const selected = goatLinearSelectedTeamIds(route.config);
         if (selected.size === 0) return false;
@@ -161,13 +167,37 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
       })
       .map((route) => route.brainRef);
 
+    // Cross-member dedup: one webhook delivery buffers once per integration of
+    // the same Linear organization, so the delivery id is the identity shared
+    // across members. A brain whose claims all lose (issue window already
+    // ingested via another member's integration) is skipped — no job, no billing.
+    const eventKeys = claimed.map(
+      (row) => `${window.organizationId}:${window.issueId}:${row.deliveryId}`,
+    );
+    const brainRefs: string[] = [];
+    const claimedEventKeysByBrainRef = new Map<string, string[]>();
+    const newlyClaimedEventKeys = new Set<string>();
+    for (const brainRef of new Set(candidateBrainRefs)) {
+      const { claimedEventKeys } = await claimGoatBrainSourceEvents({
+        brainRef,
+        sourceProvider: "linear",
+        eventKeys,
+        db: tx,
+      });
+      if (claimedEventKeys.length === 0) continue;
+      brainRefs.push(brainRef);
+      claimedEventKeysByBrainRef.set(brainRef, claimedEventKeys);
+      for (const eventKey of claimedEventKeys) newlyClaimedEventKeys.add(eventKey);
+    }
+
     const upserted = await upsertGoatBrainSourceItemAndEnqueue({
       userWorkosId: window.userWorkosId,
       sourceConnectionId: window.integrationId,
       integrationId: window.integrationId,
       item,
       rawPayload: { eventIds: claimed.map((row) => row.id) },
-      rawEventCount: claimed.length,
+      rawEventCount: brainRefs.length > 0 ? newlyClaimedEventKeys.size : claimed.length,
+      rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
       kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
       brainRefs,
       skipReason: ingestDecision.action === "skip" ? ingestDecision.reason : null,
@@ -183,6 +213,15 @@ export async function flushGoatLinearIssueWindow(window: GoatLinearDueWindow): P
         sql`, `,
       )})
     `);
+    for (const brainRef of brainRefs) {
+      await attributeGoatBrainSourceEventClaims({
+        brainRef,
+        sourceProvider: "linear",
+        eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
+        sourceItemId: upserted.sourceItemId,
+        db: tx,
+      });
+    }
 
     return {
       sourceItemId: upserted.sourceItemId,
