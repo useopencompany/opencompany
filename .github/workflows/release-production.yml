@@ -293,6 +293,8 @@ jobs:
             "WORKOS_CLIENT_ID",
             "WORKOS_API_KEY",
             "WORKOS_COOKIE_PASSWORD",
+            "GOAT_NEXT_PUBLIC_APP_URL",
+            "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
             "VERCEL_AI_GATEWAY_API_KEY",
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
@@ -318,17 +320,52 @@ jobs:
             }
 
             const { envs } = await response.json();
-            const productionKeys = new Set(
-              envs
-                .filter((env) => Array.isArray(env.target) && env.target.includes("production"))
-                .map((env) => env.key),
+            const productionEnvs = envs.filter(
+              (env) =>
+                Array.isArray(env.target) &&
+                env.target.includes("production") &&
+                !env.gitBranch,
             );
+            const productionKeys = new Set(productionEnvs.map((env) => env.key));
             const missing = required.filter((key) => !productionKeys.has(key));
 
             console.log(`Vercel Goat production env keys: ${required.length - missing.length}/${required.length} required present.`);
 
             if (missing.length > 0) {
               throw new Error(`Missing Goat Vercel production env keys: ${missing.join(", ")}`);
+            }
+
+            const expectedGoatOrigin = new URL(process.env.PRODUCTION_GOAT_URL).origin;
+            const expectedValues = new Map([
+              ["GOAT_NEXT_PUBLIC_APP_URL", expectedGoatOrigin],
+              ["GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedGoatOrigin}/auth/callback`],
+            ]);
+            const mismatched = [];
+
+            for (const [key, expected] of expectedValues) {
+              const env = productionEnvs.find((candidate) => candidate.key === key);
+              if (!env?.id) {
+                mismatched.push(key);
+                continue;
+              }
+
+              const valueResponse = await fetch(
+                `https://api.vercel.com/v1/projects/${projectId}/env/${env.id}?teamId=${teamId}`,
+                { headers: { Authorization: `Bearer ${token}` } },
+              );
+              if (!valueResponse.ok) {
+                throw new Error(
+                  `Could not verify Goat Vercel env ${key}: ${valueResponse.status} ${valueResponse.statusText}`,
+                );
+              }
+              const configured = await valueResponse.json();
+              if (configured.value?.trim() !== expected) mismatched.push(key);
+            }
+
+            if (mismatched.length > 0) {
+              throw new Error(
+                `Goat Vercel production envs do not match PRODUCTION_GOAT_URL: ${mismatched.join(", ")}`,
+              );
             }
           }
 

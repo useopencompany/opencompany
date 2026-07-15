@@ -1,3 +1,4 @@
+import { createHmac, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createGoogleIntegrationState } from "@/lib/integrations/google-oauth";
 import { GET } from "./route";
@@ -20,6 +21,25 @@ function state(targetOrigin?: string) {
     returnTo: "/company/integrations",
     ...(targetOrigin ? { targetOrigin } : {}),
   });
+}
+
+function goatState(targetOrigin: string) {
+  const body = Buffer.from(
+    JSON.stringify({
+      provider: "gmail",
+      userWorkosId: "user_123",
+      returnTo: "/settings",
+      oauthRedirectUri: "https://oauth.opencompany.cloud/api/google/callback",
+      targetOrigin,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      nonce: randomUUID(),
+    }),
+    "utf8",
+  ).toString("base64url");
+  const signature = createHmac("sha256", "state-secret-with-enough-length")
+    .update(body)
+    .digest("base64url");
+  return `${body}.${signature}`;
 }
 
 describe("Google OAuth broker callback", () => {
@@ -47,6 +67,35 @@ describe("Google OAuth broker callback", () => {
     expect(location.pathname).toBe("/api/integrations/gmail/callback");
     expect(location.searchParams.get("code")).toBe("auth-code");
     expect(location.searchParams.get("state")).toBe(signedState);
+  });
+
+  it("routes Goat preview state without requiring the legacy web state fields", async () => {
+    const signedState = goatState("https://pr-42.preview.opencompany.cloud");
+    const response = await GET(
+      new Request(
+        `https://oauth.opencompany.cloud/api/google/callback?code=auth-code&state=${encodeURIComponent(signedState)}`,
+      ),
+    );
+
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.origin).toBe("https://pr-42.preview.opencompany.cloud");
+    expect(location.pathname).toBe("/api/integrations/gmail/callback");
+    expect(location.searchParams.get("state")).toBe(signedState);
+  });
+
+  it("rejects a signed Goat state with a malformed target origin", async () => {
+    const signedState = goatState("not-a-url");
+    const response = await GET(
+      new Request(
+        `https://oauth.opencompany.cloud/api/google/callback?code=must-not-forward&state=${encodeURIComponent(signedState)}`,
+      ),
+    );
+
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.origin).toBe("https://app.opencompany.cloud");
+    expect(location.pathname).toBe("/company/integrations");
+    expect(location.searchParams.get("setup")).toBe("error");
+    expect(location.searchParams.has("code")).toBe(false);
   });
 
   it("redirects states without target origin to the current app callback", async () => {
