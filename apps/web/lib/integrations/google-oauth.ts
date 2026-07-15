@@ -153,6 +153,33 @@ export function verifyGoogleIntegrationState(state: string): GoogleIntegrationSt
   };
 }
 
+export function verifyGoogleOAuthBrokerState(state: string) {
+  const [body, signature] = state.split(".");
+  if (!body || !signature || !safeEqual(signature, signStateBody(body))) {
+    throw new Error("Invalid Google integration state.");
+  }
+
+  const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown;
+  if (!isGoogleOAuthBrokerStatePayload(payload)) {
+    throw new Error("Invalid Google integration broker state payload.");
+  }
+  if (payload.expiresAt < Date.now()) {
+    throw new Error("Google integration state expired.");
+  }
+
+  const targetOrigin =
+    payload.targetOrigin === undefined ? undefined : sanitizeTargetOrigin(payload.targetOrigin);
+  if (payload.targetOrigin !== undefined && !targetOrigin) {
+    throw new Error("Invalid Google integration broker target origin.");
+  }
+
+  return {
+    provider: payload.provider,
+    returnTo: sanitizeReturnTo(payload.returnTo ?? "/company/integrations"),
+    ...(targetOrigin ? { targetOrigin } : {}),
+  };
+}
+
 // --- Authorization + token endpoints --------------------------------------
 
 export function buildGoogleAuthorizationUrl(
@@ -343,6 +370,25 @@ function isGoogleIntegrationStatePayload(value: unknown): value is GoogleIntegra
     typeof record.userId === "string" &&
     typeof record.returnTo === "string" &&
     (record.oauthRedirectUri === undefined || typeof record.oauthRedirectUri === "string") &&
+    (record.targetOrigin === undefined || typeof record.targetOrigin === "string") &&
+    typeof record.expiresAt === "number" &&
+    typeof record.nonce === "string"
+  );
+}
+
+function isGoogleOAuthBrokerStatePayload(
+  value: unknown,
+): value is Pick<
+  GoogleIntegrationStatePayload,
+  "provider" | "targetOrigin" | "expiresAt" | "nonce"
+> & { returnTo?: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    (record.provider === "gmail" ||
+      record.provider === "google_calendar" ||
+      record.provider === "google_drive") &&
+    (record.returnTo === undefined || typeof record.returnTo === "string") &&
     (record.targetOrigin === undefined || typeof record.targetOrigin === "string") &&
     typeof record.expiresAt === "number" &&
     typeof record.nonce === "string"

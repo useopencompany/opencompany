@@ -10,6 +10,7 @@ import {
   GOAT_GOOGLE_PROVIDER_CONFIG,
   type GoatGoogleIntegrationProvider,
   goatGoogleOAuthRedirectUri,
+  goatGoogleOAuthTargetOriginForState,
   isGoatGoogleIntegrationConfigured,
   verifyGoatGoogleIntegrationState,
 } from "@/lib/integrations/google-oauth";
@@ -23,6 +24,7 @@ export async function handleGoatGoogleOAuthStart(
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
   const config = GOAT_GOOGLE_PROVIDER_CONFIG[provider];
   const oauthRedirectUri = goatGoogleOAuthRedirectUri(config);
+  const targetOrigin = goatGoogleOAuthTargetOriginForState();
 
   if (!isGoatGoogleIntegrationConfigured()) {
     return NextResponse.redirect(
@@ -35,6 +37,7 @@ export async function handleGoatGoogleOAuthStart(
     userWorkosId: user.workosUserId,
     returnTo,
     oauthRedirectUri,
+    ...(targetOrigin ? { targetOrigin } : {}),
   });
 
   return NextResponse.redirect(buildGoatGoogleAuthorizationUrl(config, state, oauthRedirectUri));
