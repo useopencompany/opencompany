@@ -5,7 +5,7 @@ import { Extension } from "@tiptap/core";
 import { Markdown } from "@tiptap/markdown";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
@@ -51,7 +51,12 @@ export function MarkdownGoatBrainEditor({
     {
       immediatelyRender: false,
       extensions: [
-        StarterKit,
+        // Regular markdown links default to target="_blank" + a window.open click
+        // handler in tiptap's Link extension; disable both so the wiki plugin's
+        // handleClick can route internal hrefs same-tab like wiki chips.
+        StarterKit.configure({
+          link: { openOnClick: false, HTMLAttributes: { target: null } },
+        }),
         Markdown.configure({
           indentation: { style: "space", size: 2 },
           markedOptions: { gfm: true, breaks: false },
@@ -304,6 +309,15 @@ const WikiLinkDecoration = Extension.create<WikiLinkPluginState>({
             openDecoratedHref(href, pluginState.onNavigateInternal);
             return true;
           },
+          handleDOMEvents: {
+            click(view, event) {
+              const target = event.target instanceof Element ? event.target : null;
+              // Decorated wiki links are handled above (and chips carry their own
+              // click listener); this only covers regular tiptap Link marks.
+              if (target?.closest("[data-brain-href]")) return false;
+              return handlePlainLinkClick(view, event, target, initialState);
+            },
+          },
         },
       }),
     ];
@@ -392,6 +406,28 @@ function linkTitle(
 
 function unresolvedLinkTitle(kind: ReturnType<typeof parseGoatBrainInlineLinks>[number]["kind"]) {
   return kind === "source" ? "Unresolved source link" : "Unresolved brain link";
+}
+
+// Regular markdown links (tiptap Link marks) have no wiki decoration. Plain
+// left-clicks navigate internal hrefs same-tab (client-side when possible) and
+// external hrefs in a new tab; modifier clicks keep native browser behavior.
+function handlePlainLinkClick(
+  view: EditorView,
+  event: MouseEvent,
+  target: Element | null,
+  initialState: WikiLinkPluginState,
+): boolean {
+  const anchor = target?.closest("a[href]");
+  if (!(anchor instanceof HTMLAnchorElement) || !view.dom.contains(anchor)) return false;
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+    return false;
+  }
+  const href = anchor.getAttribute("href");
+  if (!href) return false;
+  event.preventDefault();
+  const pluginState = WIKI_LINK_PLUGIN_KEY.getState(view.state) ?? initialState;
+  openDecoratedHref(href, pluginState.onNavigateInternal);
+  return true;
 }
 
 function openDecoratedHref(href: string, onNavigate?: (href: string) => boolean) {
