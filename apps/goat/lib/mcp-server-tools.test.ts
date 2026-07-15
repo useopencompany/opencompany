@@ -21,7 +21,11 @@ import { registerGoatBrainTools } from "./mcp-server";
 
 type RegisteredTool = {
   config: Record<string, unknown>;
-  callback: (...args: any[]) => Promise<any>;
+  callback: (...args: unknown[]) => Promise<{
+    content: Array<{ text?: string }>;
+    isError?: boolean;
+    structuredContent?: Record<string, unknown>;
+  }>;
 };
 
 const general = {
