@@ -120,8 +120,8 @@ not in git.
 
 ### Vercel Goat
 
-`apps/goat` deploys as a separate manual Vercel project/domain for the experiment. Keep the project
-root at the repo root and override the project build command:
+`apps/goat` deploys as a separate Vercel project/domain for the experiment. Set the Vercel project
+root to `apps/goat`:
 
 - Install command: `bun install --frozen-lockfile`
 - Build command: `bun run vercel-build:goat`
@@ -130,8 +130,9 @@ root at the repo root and override the project build command:
 - Automatic Git deploys: off for v1; deploy manually after migrations and runner compatibility are
   confirmed.
 
-Set the Goat project envs from [env-vars.md → Vercel Goat](./env-vars.md#vercel-goat). Register the
-Goat redirect URI in the same WorkOS environment as the core app:
+Set the Goat project envs in Infisical `prod` + `/goat` and sync that path into the Goat Vercel
+Production environment. Create a separate Goat WorkOS Application in the same WorkOS environment as
+the core app, then register the Goat redirect URI on that Application:
 
 ```text
 https://<goat-domain>/auth/callback
@@ -217,8 +218,12 @@ definitions Inngest Cloud uses to invoke production jobs.
 
 Create or switch to the production WorkOS environment.
 
-- Add the production redirect URI:
+- Create separate Applications for legacy web and Goat so they can share users and Organizations
+  without sharing application-level redirect and invitation context.
+- Add the legacy web production redirect URI:
   `https://<production-web-domain>/auth/callback`
+- Add the Goat production redirect URI to the Goat Application:
+  `https://<production-goat-domain>/auth/callback`
 - Set `NEXT_PUBLIC_WORKOS_REDIRECT_URI` to the same value in Vercel.
 - Generate a 32+ character `WORKOS_COOKIE_PASSWORD`.
 
@@ -282,10 +287,10 @@ bun run release:smoke
 ## First release checklist
 
 - CI is green on `main`.
-- Infisical `prod` + `/web`, `/runner`, and `/release` are populated.
+- Infisical `prod` + `/web`, `/goat`, `/runner`, and `/release` are populated.
 - Infisical syncs to Vercel and Render are enabled.
 - GitHub Actions production vars for Infisical OIDC are set.
-- WorkOS production callback works.
+- Legacy web and Goat use separate WorkOS Application credentials, and both production callbacks work.
 - Inngest production app can sync functions from `/api/inngest`.
 - Neon backups/PITR are enabled.
 - Render API deploy works for the runner service.

@@ -14,7 +14,7 @@ view.
 | Vercel Development | Optional Vercel dev/preview runtime target | Infisical `dev` + `/web` sync |
 | Vercel Preview | Per-PR preview web base env | Infisical `dev` + `/web` sync; per-PR dynamic values injected at deploy time by `pr-preview.yml` |
 | Vercel Production | Production web app and Inngest endpoint | Infisical `prod` + `/web` sync |
-| Vercel Goat | Experimental `apps/goat` project/domain | Manual Vercel project using the shared prod/dev infra envs plus Goat-specific app URL and redirect URI |
+| Vercel Goat | Experimental `apps/goat` project/domain | Infisical `prod` + `/goat` sync, with a separate WorkOS Application and Goat-specific app URL |
 | Render Production | Production runner service | Infisical `prod` + `/runner` sync |
 | Render Preview (per-PR) | Ephemeral per-PR runner / Electric / Durable Streams | Created by `scripts/preview-provision.mjs`; env minted by the orchestrator (not a static sync) |
 | GitHub Actions `production` | Release workflow migrations/deploy orchestration | Infisical OIDC fetch from `prod` + `/release` |
@@ -99,11 +99,11 @@ Set these in Vercel Production.
 | `WORKOS_REDIRECT_URI` | No | Server-only fallback. Usually leave unset. |
 | `GOAT_NEXT_PUBLIC_APP_URL` | Goat only | Canonical Goat app origin. Local default is `https://localhost:3443` through Caddy; hosted value is the separate Goat domain. |
 | `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Goat only | Goat AuthKit callback URL. Must be registered in the same WorkOS environment as the core app. |
-| `GOAT_STRIPE_API_KEY` | Goat only | Dedicated restricted Stripe key for Goat customers, subscription Checkout, credit top-up Checkout, and portal sessions. Store separate test/live values in Infisical `dev`/`prod` + `/web`; the Goat Vercel project receives them through the corresponding Infisical sync. |
-| `GOAT_STRIPE_PRO_PRICE_ID` | Goat only | Environment-specific Stripe Price id for OpenCompany Pro: USD 18 per seat per month (subscription quantity = member count), tax-exclusive, monthly billing only (no annual Price). Lookup key `goat_pro_seat_monthly_usd`. Store it beside the Goat Stripe key in Infisical `dev`/`prod` + `/web` for Vercel sync. |
-| `GOAT_STRIPE_CHECKOUT_ENABLED` | Goat hosted only | Production live-Checkout gate for both Pro subscriptions and credit top-ups. Keep false until the business has configured its actual Stripe Tax registrations, then set true in Infisical `prod` + `/web` and sync it to Goat Vercel. Test/local Checkout is not gated. The Goat Stripe account's webhook endpoint (the shared web `/api/stripe/webhook` route) must be subscribed to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, and `checkout.session.async_payment_failed`; its signing secret must match `STRIPE_WEBHOOK_SECRET` before enabling top-ups. |
+| `GOAT_STRIPE_API_KEY` | Goat only | Dedicated restricted Stripe key for Goat customers, subscription Checkout, credit top-up Checkout, and portal sessions. Store the live value in Infisical `prod` + `/goat`; use the corresponding development source for test mode. |
+| `GOAT_STRIPE_PRO_PRICE_ID` | Goat only | Environment-specific Stripe Price id for OpenCompany Pro: USD 18 per seat per month (subscription quantity = member count), tax-exclusive, monthly billing only (no annual Price). Lookup key `goat_pro_seat_monthly_usd`. Store it beside the Goat Stripe key in Infisical `prod` + `/goat`. |
+| `GOAT_STRIPE_CHECKOUT_ENABLED` | Goat hosted only | Production live-Checkout gate for both Pro subscriptions and credit top-ups. Keep false until the business has configured its actual Stripe Tax registrations, then set true in Infisical `prod` + `/goat` and sync it to Goat Vercel. Test/local Checkout is not gated. The Goat Stripe account's webhook endpoint (the shared web `/api/stripe/webhook` route) must be subscribed to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, and `checkout.session.async_payment_failed`; its signing secret must match `STRIPE_WEBHOOK_SECRET` before enabling top-ups. |
 | `GOAT_CREDITS_ENFORCEMENT_ENABLED` | Goat only | Set `true` to enforce usage credits: chat turns hard-stop with 402 on an empty balance and Pro ingestion overage requires credits (otherwise over-quota work just pauses, as before). Usage debits and the ledger record regardless of this flag. Keep false in prod until `GOAT_STRIPE_CHECKOUT_ENABLED` is true — enforcement without purchasable top-ups locks users out of chat. Needed by the Goat web app and the runner. |
-| `CRON_SECRET` | Goat hosted only | Bearer secret protecting the hourly Goat billing reconciliation route (releases paused ingestion backlogs and repairs drifted Stripe seat quantities). Store it in Infisical `dev`/`prod` + `/web`; sync it to the Goat Vercel project, which sends it as the cron Authorization bearer token. |
+| `CRON_SECRET` | Goat hosted only | Bearer secret protecting the hourly Goat billing reconciliation route (releases paused ingestion backlogs and repairs drifted Stripe seat quantities). Store it in Infisical `prod` + `/goat`; sync it to the Goat Vercel project, which sends it as the cron Authorization bearer token. |
 | `GOAT_PORT` | Local Goat only | Internal Next.js port for `bun run dev:goat`; defaults to `3002`. |
 | `GOAT_HTTPS_PORT` | Local Goat only | Browser-facing Caddy HTTPS port for `bun run dev:goat`; defaults to `3443`. |
 | `OPENCOMPANY_GITHUB_ORG` | Yes | GitHub org where workspace repos are created. |
@@ -173,16 +173,18 @@ Set these in Vercel Production.
 
 ## Vercel Goat
 
-`apps/goat` is an isolated experimental Next.js app. It reuses the same WorkOS AuthKit client,
-Neon database, Electric service, and runner, but stores product state in the `goat` Postgres schema.
+`apps/goat` is an isolated experimental Next.js app. It uses a separate WorkOS AuthKit Application
+in the same WorkOS environment as the core app, so users and Organizations remain shared while
+redirects and API-created invitations stay on the Goat domain. It reuses the Neon database,
+Electric service, and runner, but stores product state in the `goat` Postgres schema.
 
 Set these in the separate Vercel project for Goat:
 
 | Var | Required | Purpose |
 |---|---:|---|
 | `DATABASE_URL` | Hosted only | Same hosted Neon database as web/runner. Goat tables live under the `goat` schema. |
-| `WORKOS_CLIENT_ID` | Yes | Same WorkOS AuthKit client id as the core app. |
-| `WORKOS_API_KEY` | Yes | Same WorkOS server API key as the core app. |
+| `WORKOS_CLIENT_ID` | Yes | Goat WorkOS Application client id. Must differ from the core app. |
+| `WORKOS_API_KEY` | Yes | Goat WorkOS Application API key. Must differ from the core app so API-created invitations preserve Goat application context. |
 | `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. Use the same value only when the cookie domain setup intentionally allows it. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Google only | Same base64-encoded 32-byte key used by web and runner. Required when Goat Gmail/Calendar/Drive connections are enabled. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Google OAuth app used by Goat Gmail, Google Calendar, and Drive connect flows. Must match the runner values so refresh works. Drive also requires the Drive API and restricted-scope verification. |
