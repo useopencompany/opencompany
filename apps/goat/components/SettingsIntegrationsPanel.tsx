@@ -178,14 +178,14 @@ function McpIntegrationRow({ setup }: { setup: GoatMcpSetupView }) {
 
   return (
     <Link
-      href="/setup/mcp"
+      href="/settings/mcp"
       className="flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       <PlugZap size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <div className="min-w-0">
           <span className="block truncate text-[14px] font-medium leading-tight text-ink">
-            Goat Brain MCP
+            Goat MCP
           </span>
           <span className="block truncate text-[12px] leading-4 text-ink-subtle">{detail}</span>
         </div>

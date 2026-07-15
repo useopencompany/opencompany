@@ -48,7 +48,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
 import { GoatBrainImport } from "@/components/GoatBrainImport";
 import { resolveGoatBrainSourceState, SourceProviderCard } from "@/components/GoatBrainSourceCards";
-import { type GoatMcpBrainOption, McpSetupGuide } from "@/components/McpSetupGuide";
+import { McpSetupGuide } from "@/components/McpSetupGuide";
 import {
   type GoatBrainSourcesDetails,
   getGoatBrainSourcesAction,
@@ -209,7 +209,6 @@ export function OnboardingWizard({
   initialReferral,
   initialSourceDetails,
   initialConnectionResult,
-  mcpBrains,
   initialMcpClient,
   initialMcpCompletedAt,
 }: {
@@ -225,7 +224,6 @@ export function OnboardingWizard({
   initialReferral: string | null;
   initialSourceDetails: GoatBrainSourcesDetails | null;
   initialConnectionResult: GoatOnboardingConnectionResult | null;
-  mcpBrains: GoatMcpBrainOption[];
   initialMcpClient: "claude" | "chatgpt" | "cursor" | null;
   initialMcpCompletedAt: string | null;
 }) {
@@ -394,8 +392,6 @@ export function OnboardingWizard({
                   ? currentWorkspaceName
                   : workspaceName.trim() || currentWorkspaceName
               }
-              brains={mcpBrains}
-              initialBrainRef={brainRef}
               initialClient={initialMcpClient}
               initialCompletedAt={initialMcpCompletedAt}
             />

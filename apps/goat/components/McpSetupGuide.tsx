@@ -3,7 +3,7 @@
 import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 import { toast } from "@opencompany/ui/components/sonner";
 import { AnthropicIcon, type LucideIcon as IconComponent, OpenAIIcon } from "@opencompany/ui/icons";
-import { Check, CheckCircle2, Code2, Copy, ExternalLink, Loader2, PlugZap } from "lucide-react";
+import { Check, CheckCircle2, Code2, Copy, ExternalLink, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useHydrated } from "@/components/useHydrated";
@@ -11,17 +11,12 @@ import {
   buildCursorMcpConfig,
   buildCursorMcpDeeplink,
   buildGoatMcpFirstPrompt,
+  GOAT_USER_MCP_ENDPOINT_PATH,
 } from "@/lib/mcp-setup";
 import {
   checkGoatMcpSetupStatusAction,
   savePreferredGoatMcpClientAction,
 } from "@/lib/mcp-setup-actions";
-
-export type GoatMcpBrainOption = {
-  id: string;
-  name: string;
-  slug: string;
-};
 
 type ClientDefinition = {
   id: GoatMcpClient;
@@ -45,7 +40,7 @@ const CLIENTS: ClientDefinition[] = [
       "Open Customize → Connectors.",
       "Choose + → Add custom connector and paste the connector URL below.",
       "Add the connector, click Connect, and sign in with your OpenCompany account.",
-      "In a new chat, use + → Connectors to enable Goat Brain.",
+      "In a new chat, use + → Connectors to enable Goat.",
     ],
     note: "On Claude Team and Enterprise, an owner must add the connector to the organization before members can connect it.",
   },
@@ -71,9 +66,9 @@ const CLIENTS: ClientDefinition[] = [
     icon: Code2,
     steps: [
       "Use Add to Cursor below and approve the server configuration.",
-      "Open Cursor Settings → MCP and connect the new Goat Brain server.",
+      "Open Cursor Settings → MCP and connect the new Goat server.",
       "Complete the OpenCompany sign-in prompt in your browser.",
-      "Open Agent and make sure the Goat Brain tools are enabled.",
+      "Open Agent and make sure the Goat tools are enabled.",
     ],
   },
 ];
@@ -83,52 +78,40 @@ type CopiedValue = "url" | "config" | "prompt" | null;
 export function McpSetupGuide({
   displayName,
   workspaceName,
-  brains,
-  initialBrainRef,
   initialClient,
   initialCompletedAt,
+  hideHeader = false,
 }: {
   displayName: string;
   workspaceName: string;
-  brains: GoatMcpBrainOption[];
-  initialBrainRef: string | null;
   initialClient: GoatMcpClient | null;
   initialCompletedAt: string | null;
+  hideHeader?: boolean;
 }) {
   const router = useRouter();
   const hydrated = useHydrated();
   const [client, setClient] = useState<GoatMcpClient | null>(initialClient);
-  const [brainRef, setBrainRef] = useState(
-    () => brains.find((brain) => brain.id === initialBrainRef)?.id ?? brains[0]?.id ?? "",
-  );
   const [copied, setCopied] = useState<CopiedValue>(null);
   const [waiting, setWaiting] = useState(false);
   const [completedAt, setCompletedAt] = useState(initialCompletedAt);
   const [pollError, setPollError] = useState(false);
   const [isSavingClient, startSavingClient] = useTransition();
 
-  const selectedBrain = brains.find((brain) => brain.id === brainRef) ?? brains[0] ?? null;
   const selectedClient = CLIENTS.find((definition) => definition.id === client) ?? null;
   const origin = hydrated ? window.location.origin.replace(/\/+$/, "") : "";
-  const connectorPath = selectedBrain ? `/api/mcp/${encodeURIComponent(selectedBrain.id)}/mcp` : "";
-  const connectorUrl = origin && connectorPath ? `${origin}${connectorPath}` : connectorPath;
-  const cursorServerName = selectedBrain ? `goat-${selectedBrain.slug}` : "goat-brain";
+  const connectorUrl = origin
+    ? `${origin}${GOAT_USER_MCP_ENDPOINT_PATH}`
+    : GOAT_USER_MCP_ENDPOINT_PATH;
+  const cursorServerName = "goat";
   const cursorConfig = useMemo(
     () =>
       JSON.stringify(buildCursorMcpConfig({ name: cursorServerName, url: connectorUrl }), null, 2),
-    [connectorUrl, cursorServerName],
+    [connectorUrl],
   );
-  const cursorDeeplink =
-    hydrated && connectorUrl
-      ? buildCursorMcpDeeplink({ name: cursorServerName, url: connectorUrl })
-      : "";
-  const firstPrompt = selectedBrain
-    ? buildGoatMcpFirstPrompt({
-        displayName,
-        workspaceName,
-        brainName: selectedBrain.name,
-      })
+  const cursorDeeplink = hydrated
+    ? buildCursorMcpDeeplink({ name: cursorServerName, url: connectorUrl })
     : "";
+  const firstPrompt = buildGoatMcpFirstPrompt({ displayName, workspaceName });
 
   useEffect(() => {
     if (!waiting || completedAt) return;
@@ -189,31 +172,9 @@ export function McpSetupGuide({
     }
   };
 
-  if (brains.length === 0) {
-    return (
-      <div>
-        <GuideHeader />
-        <div className="rounded-xl border border-border bg-surface px-5 py-5">
-          <div className="flex items-start gap-3">
-            <PlugZap size={17} strokeWidth={1.9} className="mt-0.5 shrink-0 text-ink-subtle" />
-            <div>
-              <h2 className="text-[14px] font-semibold text-ink">
-                A brain needs to be shared first
-              </h2>
-              <p className="mt-1 text-[13px] leading-5 text-ink-muted">
-                Ask a workspace admin to give you access to a brain. This setup guide will be ready
-                as soon as one is available.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div>
-      <GuideHeader />
+      {hideHeader ? null : <GuideHeader />}
 
       <section aria-labelledby="mcp-client-heading">
         <div className="mb-2 flex items-center justify-between gap-3">
@@ -262,7 +223,7 @@ export function McpSetupGuide({
           <section className="mt-6" aria-labelledby="mcp-connect-heading">
             <div className="mb-2 flex items-center justify-between gap-3">
               <h2 id="mcp-connect-heading" className="text-[12px] font-medium text-ink">
-                2. Connect a brain
+                2. Connect Goat
               </h2>
               <a
                 href={selectedClient.docsUrl}
@@ -275,23 +236,6 @@ export function McpSetupGuide({
             </div>
 
             <div className="rounded-xl border border-border bg-surface p-4">
-              {brains.length > 1 ? (
-                <label className="mb-4 flex flex-col gap-1.5 text-[12px] font-medium text-ink">
-                  Brain
-                  <select
-                    value={selectedBrain?.id ?? ""}
-                    onChange={(event) => setBrainRef(event.target.value)}
-                    className="h-9 rounded-lg border border-border bg-canvas px-3 text-[13px] font-normal text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/15"
-                  >
-                    {brains.map((brain) => (
-                      <option key={brain.id} value={brain.id}>
-                        {brain.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-
               <div className="flex flex-col gap-1.5">
                 <span className="text-[12px] font-medium text-ink">Connector URL</span>
                 <CopyRow
@@ -437,7 +381,7 @@ function SetupStatus({
       <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-success-border bg-success-bg px-4 py-3">
         <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-success" />
         <div>
-          <p className="text-[12.5px] font-semibold text-ink">Goat Brain is connected</p>
+          <p className="text-[12.5px] font-semibold text-ink">Goat is connected</p>
           <p className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
             Your first MCP query reached Goat successfully.
           </p>

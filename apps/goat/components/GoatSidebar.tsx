@@ -98,7 +98,7 @@ export function GoatSidebar({
   const pathname = usePathname();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const homeActive = pathname === "/";
-  const mcpSetupActive = pathname === "/setup/mcp";
+  const mcpSetupActive = pathname === "/settings/mcp";
 
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
@@ -133,7 +133,7 @@ export function GoatSidebar({
           <SidebarNavRow href="/" icon={House} label="Home" active={homeActive} />
           {!mcpSetup.completedAt ? (
             <SidebarNavRow
-              href="/setup/mcp"
+              href="/settings/mcp"
               icon={PlugZap}
               label="Connect your brain"
               active={mcpSetupActive}

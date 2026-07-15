@@ -307,14 +307,15 @@ function EnrichmentSection({ brainRef }: { brainRef: string }) {
 function McpSetupLink() {
   return (
     <Link
-      href="/setup/mcp"
+      href="/settings/mcp"
       className="flex items-center gap-3 rounded-md border border-ink/10 p-3 transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       <PlugZap size={16} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
       <div className="min-w-0 flex-1">
-        <span className="block text-[13px] font-medium text-ink">Connect Goat Brain</span>
+        <span className="block text-[13px] font-medium text-ink">Connect Goat</span>
         <span className="block text-[12px] leading-5 text-ink-subtle">
-          Set up Claude, ChatGPT, or Cursor and verify your first Brain query.
+          Set up Claude, ChatGPT, or Cursor and verify your first Brain query. One connector covers
+          every brain you can access.
         </span>
       </div>
     </Link>

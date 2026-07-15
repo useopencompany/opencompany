@@ -55,13 +55,16 @@ System prompts embed `GOAT_BRAIN_POINTER_COPY_RULE`. Dispatch and leasing live i
 
 ## MCP connector (external agents)
 
-`apps/goat/app/api/mcp/[brainRef]/[transport]/route.ts` exposes a per-brain MCP server,
-OAuth-authenticated via WorkOS AuthKit — the token's grant *is* the brain, so a token for brain A
-cannot address brain B. Current canonical tool surface: `goat_brain`, the same read-only command
-surface used by main chat (`query`, `list`, `get`, `timeline`, `help`, `doctor`). Compatibility
-wrappers `query_brain` and `get_document` remain available for older clients and delegate through
-the same tool runner. Reads are served by the read plane. External consumers never get write tools;
-external content enters via ingestion jobs only.
+`apps/goat/app/mcp/route.ts` exposes one user-level MCP server at `/mcp`, OAuth-authenticated via
+WorkOS AuthKit. The token identifies the user; every tool call authorizes the addressed brain by
+workspace/brain membership, so one connector spans all brains the user can access. Tool
+registration lives in `apps/goat/lib/mcp-server.ts`. Current canonical tool surface: `goat_brain`,
+the same read-only command surface used by main chat (`query`, `list`, `get`, `timeline`, `help`,
+`doctor`), plus `list_brains` and an optional `brain` argument (id, or slug when unique; auto-
+selected when the user has exactly one brain). Compatibility wrappers `query_brain` and
+`get_document` remain available for older clients and delegate through the same tool runner. Reads
+are served by the read plane. External consumers never get write tools; external content enters via
+ingestion jobs only.
 
 ### Member MCP setup and completion
 

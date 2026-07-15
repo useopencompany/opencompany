@@ -32,11 +32,6 @@ vi.mock("@opencompany/ui/components/sonner", () => ({
   toast: { error: vi.fn() },
 }));
 
-const brains = [
-  { id: "goat_brain_1", name: "Company Brain", slug: "company-brain" },
-  { id: "goat_brain_2", name: "Design Brain", slug: "design-brain" },
-];
-
 describe("McpSetupGuide", () => {
   const clipboardWrite = vi.fn(async () => undefined);
 
@@ -70,20 +65,19 @@ describe("McpSetupGuide", () => {
     expect(screen.getByText(/plan and workspace permissions/)).toBeInTheDocument();
   });
 
-  it("switches brains and creates a name-only first question", async () => {
-    const user = userEvent.setup();
+  it("shows the single user-level connector URL and a name-only first question", () => {
     renderGuide({ initialClient: "claude" });
 
-    await user.selectOptions(screen.getByRole("combobox", { name: "Brain" }), "goat_brain_2");
-
-    expect(screen.getByText(/query the brain for "Ada Lovelace"/)).toHaveTextContent(
-      /at Analytical Engines/,
-    );
-    expect(screen.getByText(/query the brain for "Ada Lovelace"/)).toHaveTextContent(
-      /"Design Brain"/,
-    );
+    expect(screen.getByText(/\/mcp$/)).toBeInTheDocument();
+    expect(screen.getByText(/query for "Ada Lovelace"/)).toHaveTextContent(/at Analytical Engines/);
     expect(screen.queryByText(/ada@example\.com/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/api\/mcp\/goat_brain_2\/mcp/)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Brain" })).not.toBeInTheDocument();
+  });
+
+  it("hides the guide header when embedded under a page-level header", () => {
+    renderGuide({ initialClient: "claude", hideHeader: true });
+
+    expect(screen.queryByText("Use your brain where you already work")).not.toBeInTheDocument();
   });
 
   it("starts waiting after copying the first question and refreshes after verification", async () => {
@@ -96,7 +90,7 @@ describe("McpSetupGuide", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy first question" }));
 
     await waitFor(() => expect(actionsMock.checkStatus).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("Goat Brain is connected")).toBeInTheDocument();
+    expect(await screen.findByText("Goat is connected")).toBeInTheDocument();
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
     expect(clipboardWrite).toHaveBeenCalledWith(expect.stringContaining("Ada Lovelace"));
   });
@@ -141,31 +135,22 @@ describe("McpSetupGuide", () => {
     });
     expect(actionsMock.checkStatus).toHaveBeenCalledTimes(1);
   });
-
-  it("shows an admin-contact state when the user cannot access a brain", () => {
-    renderGuide({ brains: [], initialClient: null });
-
-    expect(screen.getByText("A brain needs to be shared first")).toBeInTheDocument();
-    expect(screen.getByText(/Ask a workspace admin/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Claude/ })).not.toBeInTheDocument();
-  });
 });
 
 function renderGuide({
   initialClient,
-  brains: brainOptions = brains,
+  hideHeader,
 }: {
   initialClient: "claude" | "chatgpt" | "cursor" | null;
-  brains?: typeof brains;
+  hideHeader?: boolean;
 }) {
   return render(
     <McpSetupGuide
       displayName="Ada Lovelace"
       workspaceName="Analytical Engines"
-      brains={brainOptions}
-      initialBrainRef="goat_brain_1"
       initialClient={initialClient}
       initialCompletedAt={null}
+      {...(hideHeader !== undefined ? { hideHeader } : {})}
     />,
   );
 }

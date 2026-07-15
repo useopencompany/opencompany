@@ -122,11 +122,11 @@ describe("GoatSidebar", () => {
   });
 
   it("shows MCP setup until the first successful query is verified", () => {
-    pathnameMock.value = "/setup/mcp";
+    pathnameMock.value = "/settings/mcp";
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const setup = screen.getByRole("link", { name: "Connect your brain" });
-    expect(setup).toHaveAttribute("href", "/setup/mcp");
+    expect(setup).toHaveAttribute("href", "/settings/mcp");
     expect(setup).toHaveAttribute("aria-current", "page");
   });
 

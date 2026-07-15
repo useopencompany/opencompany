@@ -153,30 +153,24 @@ export function GoatIntegrationsSettingsRoute() {
   );
 }
 
-export function GoatMcpSetupRoute() {
-  const { activeBrain, brains, mcpSetup, user, workspace } = useGoatAppData();
+export function GoatMcpSettingsRoute() {
+  const { mcpSetup, user, workspace } = useGoatAppData();
   const displayName =
     [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || "Teammate";
 
   return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[760px] flex-col pb-24 pt-16 sm:pt-24">
-          <McpSetupGuide
-            displayName={displayName}
-            workspaceName={workspace.name}
-            brains={brains.map((brain) => ({
-              id: brain.id,
-              name: brain.name,
-              slug: brain.slug,
-            }))}
-            initialBrainRef={activeBrain?.id ?? null}
-            initialClient={mcpSetup.preferredClient}
-            initialCompletedAt={mcpSetup.completedAt}
-          />
-        </div>
-      </div>
-    </main>
+    <GoatSettingsContent
+      title="MCP"
+      description="Connect Claude, ChatGPT, or Cursor to everything you can access in Goat."
+    >
+      <McpSetupGuide
+        displayName={displayName}
+        workspaceName={workspace.name}
+        initialClient={mcpSetup.preferredClient}
+        initialCompletedAt={mcpSetup.completedAt}
+        hideHeader
+      />
+    </GoatSettingsContent>
   );
 }
 

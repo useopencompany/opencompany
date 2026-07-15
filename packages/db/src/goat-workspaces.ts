@@ -109,6 +109,33 @@ export async function listAccessibleGoatBrains(
     .orderBy(asc(goatBrains.createdAt));
 }
 
+export type GoatBrainWithWorkspace = {
+  brain: GoatBrain;
+  workspace: { id: string; name: string; workosOrganizationId: string | null };
+};
+
+// Every brain the user can read, across all their workspaces. Used by the
+// user-level MCP connector to enumerate and resolve brains for one token.
+export async function listAccessibleGoatBrainsForUser(
+  userWorkosId: string,
+  options: { db?: DbClient } = {},
+): Promise<GoatBrainWithWorkspace[]> {
+  const db = options.db ?? getDb();
+  return db
+    .select({
+      brain: goatBrains,
+      workspace: {
+        id: goatWorkspaces.id,
+        name: goatWorkspaces.name,
+        workosOrganizationId: goatWorkspaces.workosOrganizationId,
+      },
+    })
+    .from(goatBrains)
+    .innerJoin(goatWorkspaces, eq(goatWorkspaces.id, goatBrains.workspaceId))
+    .where(brainAccessCondition(userWorkosId))
+    .orderBy(asc(goatWorkspaces.createdAt), asc(goatBrains.createdAt));
+}
+
 export async function getGoatBrainAccess(
   input: { userWorkosId: string; brainRef: string },
   options: { db?: DbClient } = {},
