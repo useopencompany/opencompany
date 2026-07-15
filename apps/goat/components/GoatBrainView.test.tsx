@@ -51,6 +51,13 @@ vi.mock("@/components/GoatBrainActivity", () => ({
   GoatBrainActivity: ({ brainRef }: { brainRef: string }) => (
     <span data-testid="brain-activity">{brainRef}</span>
   ),
+  GoatBrainRecentActivity: () => null,
+}));
+
+vi.mock("@/components/GoatBrainOverview", () => ({
+  GoatBrainOverview: ({ brainName }: { brainName: string }) => (
+    <div data-testid="brain-overview">{brainName}</div>
+  ),
 }));
 
 vi.mock("@/components/GoatBrainImport", () => ({
@@ -116,6 +123,36 @@ const defaultBrain = {
 };
 
 describe("GoatBrainView", () => {
+  it("opens on Overview and returns to the folder browser when a folder is selected", async () => {
+    const user = userEvent.setup();
+    window.history.pushState(null, "", "/brain/goat_brain_1");
+    const replaceState = vi.spyOn(window.history, "replaceState");
+
+    render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={folders}
+        documents={[documentWithTimeline]}
+        initialFolderPath={null}
+        initialBrainId={null}
+        initialOverview
+      />,
+    );
+
+    expect(screen.getByTestId("brain-overview")).toHaveTextContent("General");
+    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    await user.click(screen.getByRole("treeitem", { name: /people/i }));
+
+    expect(screen.queryByTestId("brain-overview")).not.toBeInTheDocument();
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/brain/people");
+    replaceState.mockRestore();
+  });
+
   it("shows an entry timeline from the selected document toolbar", async () => {
     const user = userEvent.setup();
 

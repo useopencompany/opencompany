@@ -259,7 +259,9 @@ export async function setGoatChatSessionPinnedForUser(
   });
 }
 
-export function createDbGoatChatStore(): GoatChatStore {
+type GoatChatDb = ReturnType<typeof getDb>;
+
+export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
   return {
     async findOpenSession(input) {
       const where = input.sessionId?.trim()
@@ -273,7 +275,7 @@ export function createDbGoatChatStore(): GoatChatStore {
             isNull(goatChatSessions.closedAt),
           );
 
-      const [session] = await getDb()
+      const [session] = await db
         .select()
         .from(goatChatSessions)
         .where(where)
@@ -287,7 +289,7 @@ export function createDbGoatChatStore(): GoatChatStore {
       // Pinned sessions surface regardless of the recency window, with separate
       // caps for pinned and unpinned hydration.
       const [pinned, recent] = await Promise.all([
-        getDb()
+        db
           .select()
           .from(goatChatSessions)
           .where(
@@ -299,7 +301,7 @@ export function createDbGoatChatStore(): GoatChatStore {
           )
           .orderBy(desc(goatChatSessions.pinnedAt))
           .limit(GOAT_PINNED_CHAT_LIMIT),
-        getDb()
+        db
           .select()
           .from(goatChatSessions)
           .where(
@@ -318,7 +320,7 @@ export function createDbGoatChatStore(): GoatChatStore {
 
     async createSession(input) {
       const now = new Date();
-      const [session] = await getDb()
+      const [session] = await db
         .insert(goatChatSessions)
         .values({
           id: newGoatChatSessionId(),
@@ -334,7 +336,7 @@ export function createDbGoatChatStore(): GoatChatStore {
     },
 
     async loadLatestCodexTurnSettings(input) {
-      const [turn] = await getDb()
+      const [turn] = await db
         .select({ settings: goatCodexChatTurns.settings })
         .from(goatCodexChatTurns)
         .where(
@@ -349,7 +351,7 @@ export function createDbGoatChatStore(): GoatChatStore {
     },
 
     async listMessages(sessionId) {
-      const messages = await getDb()
+      const messages = await db
         .select({
           id: goatChatMessages.id,
           sessionId: goatChatMessages.sessionId,
@@ -375,7 +377,7 @@ export function createDbGoatChatStore(): GoatChatStore {
 
     async insertMessage(input) {
       const now = new Date();
-      const [message] = await getDb()
+      const [message] = await db
         .insert(goatChatMessages)
         .values({
           id: input.id ?? newGoatChatMessageId(),
@@ -395,14 +397,14 @@ export function createDbGoatChatStore(): GoatChatStore {
     },
 
     async touchSession(input) {
-      await getDb()
+      await db
         .update(goatChatSessions)
         .set({ updatedAt: input.now })
         .where(eq(goatChatSessions.id, input.sessionId));
     },
 
     async closeSession(input) {
-      const [session] = await getDb()
+      const [session] = await db
         .update(goatChatSessions)
         .set({ closedAt: input.now, updatedAt: input.now })
         .where(
@@ -417,32 +419,30 @@ export function createDbGoatChatStore(): GoatChatStore {
     },
 
     async setSessionPinned(input) {
-      return getDb().transaction(async (tx) => {
-        // Serialize pin changes for this user so concurrent requests cannot both
-        // pass the cap check. Every chat session owner has a goat.users row.
-        const [owner] = await tx
+      const pinCount = db
+        .select({ count: sql<number>`count(*)::integer` })
+        .from(goatChatSessions)
+        .where(
+          and(
+            eq(goatChatSessions.userWorkosId, input.userWorkosId),
+            ne(goatChatSessions.id, input.sessionId),
+            isNull(goatChatSessions.closedAt),
+            isNotNull(goatChatSessions.pinnedAt),
+          ),
+        );
+      const pinCapacity = sql`(${pinCount}) < ${GOAT_PINNED_CHAT_LIMIT}`;
+
+      // The web app uses neon-http, which cannot hold an interactive transaction
+      // open across a callback. Its batch API still executes these statements in
+      // one transaction. Locking the owner serializes concurrent cap checks.
+      const [owners, sessions] = await db.batch([
+        db
           .select({ workosUserId: goatUsers.workosUserId })
           .from(goatUsers)
           .where(eq(goatUsers.workosUserId, input.userWorkosId))
           .limit(1)
-          .for("update");
-        if (!owner) return false;
-
-        if (input.pinned) {
-          const [result] = await tx
-            .select({ count: sql<number>`count(*)::integer` })
-            .from(goatChatSessions)
-            .where(
-              and(
-                eq(goatChatSessions.userWorkosId, input.userWorkosId),
-                ne(goatChatSessions.id, input.sessionId),
-                isNull(goatChatSessions.closedAt),
-                isNotNull(goatChatSessions.pinnedAt),
-              ),
-            );
-          if ((result?.count ?? 0) >= GOAT_PINNED_CHAT_LIMIT) return false;
-        }
-        const [session] = await tx
+          .for("update"),
+        db
           .update(goatChatSessions)
           .set({ pinnedAt: input.pinned ? input.now : null })
           .where(
@@ -450,11 +450,13 @@ export function createDbGoatChatStore(): GoatChatStore {
               eq(goatChatSessions.id, input.sessionId),
               eq(goatChatSessions.userWorkosId, input.userWorkosId),
               isNull(goatChatSessions.closedAt),
+              ...(input.pinned ? [pinCapacity] : []),
             ),
           )
-          .returning({ id: goatChatSessions.id });
-        return Boolean(session);
-      });
+          .returning({ id: goatChatSessions.id }),
+      ] as const);
+
+      return Boolean(owners[0] && sessions[0]);
     },
   };
 }

@@ -266,6 +266,36 @@ describe("GoatBrainRoute", () => {
       undefined,
     );
   });
+
+  it.each([
+    { label: "the root", path: [] },
+    { label: "the named route", path: ["overview"] },
+  ])("uses Overview for $label", ({ path }) => {
+    const overviewStats = {
+      windowStartedAt: "2026-07-08T09:00:00.000Z",
+      retrievalsLast7Days: 12,
+      activeSources: 3,
+    };
+    render(
+      <GoatBrainRoute
+        path={path}
+        routeBrainId="goat_brain_team"
+        selectedBrain={teamBrain}
+        initialBrainSnapshot={brainSnapshot}
+        initialOverviewStats={overviewStats}
+      />,
+    );
+
+    expect(vi.mocked(GoatBrainView)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialOverview: true,
+        initialFolderPath: null,
+        initialBrainId: null,
+        overviewStats,
+      }),
+      undefined,
+    );
+  });
 });
 
 const defaultBrain = {
