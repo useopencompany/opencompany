@@ -169,6 +169,7 @@ export async function createGoatCreditTopUpAction(
     const session = await getGoatStripe().checkout.sessions.create({
       mode: "payment",
       customer: customerId,
+      allow_promotion_codes: true,
       success_url: `${appUrl}/settings/workspace/billing?topup=success`,
       cancel_url: `${appUrl}/settings/workspace/billing?topup=cancelled`,
       automatic_tax: { enabled: true },
