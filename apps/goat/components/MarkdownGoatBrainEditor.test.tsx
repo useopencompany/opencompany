@@ -118,6 +118,39 @@ describe("MarkdownGoatBrainEditor", () => {
     expect(onNavigateInternal).toHaveBeenCalledOnce();
   });
 
+  it("navigates regular markdown links to brain pages in the same tab", async () => {
+    const onNavigateInternal = vi.fn(() => true);
+    render(
+      <MarkdownGoatBrainEditor
+        content="See [Acme](/brain/companies/acme)."
+        onChange={vi.fn()}
+        readOnly
+        onNavigateInternal={onNavigateInternal}
+      />,
+    );
+
+    const link = await screen.findByRole("link", { name: "Acme" });
+    expect(link.getAttribute("target")).toBeNull();
+    expect(fireEvent.click(link)).toBe(false);
+    expect(onNavigateInternal).toHaveBeenCalledWith("/brain/companies/acme");
+  });
+
+  it("opens regular external markdown links in a new tab", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    render(
+      <MarkdownGoatBrainEditor
+        content="See [Docs](https://example.com/docs)."
+        onChange={vi.fn()}
+        readOnly
+      />,
+    );
+
+    const link = await screen.findByRole("link", { name: "Docs" });
+    expect(fireEvent.click(link)).toBe(false);
+    expect(open).toHaveBeenCalledWith("https://example.com/docs", "_blank", "noopener,noreferrer");
+    open.mockRestore();
+  });
+
   it("does not fire onChange when props change identity without an edit", async () => {
     const onChange = vi.fn();
     const props = {
