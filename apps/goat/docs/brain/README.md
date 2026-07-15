@@ -60,7 +60,8 @@ see `apps/goat/research/goat-brain-v1.md` and issue #597.
   content enters through ingestion jobs or chat capture, both of which run a brain agent. Workspace
   admins can manually create and edit draft Markdown notes in the Brain UI. Main chat reads through
   `goat_brain`, captures new content through `save_to_brain`, and cannot create canonical Brain
-  entities directly.
+  entities directly. Authorized MCP clients have the same capture-only path; they do not receive
+  raw document mutation tools.
 - **Everything is scoped to one `brain_ref`.** No query, job, or tool call joins across brains.
 - **Evidence is immutable and zoned.** Evidence records live under `evidence/`, get `ev-*` ids,
   and pages link to them rather than inlining content.

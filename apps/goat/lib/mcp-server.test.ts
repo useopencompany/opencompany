@@ -1,5 +1,8 @@
 import type { GoatBrainWithWorkspace } from "@opencompany/db/goat-workspaces";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/brain-capture", () => ({ captureToGoatBrainInbox: vi.fn() }));
+
 import { resolveGoatMcpBrain } from "./mcp-server";
 
 function brainWithWorkspace(input: {
@@ -20,6 +23,7 @@ function brainWithWorkspace(input: {
       name: input.workspaceName ?? "Acme",
       workosOrganizationId: null,
     },
+    workspaceRole: "member",
   };
 }
 

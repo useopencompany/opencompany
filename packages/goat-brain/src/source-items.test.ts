@@ -374,6 +374,13 @@ describe("Goat chat capture normalization", () => {
     expect(item.content.capture.intent).toBeUndefined();
   });
 
+  it("preserves an explicit MCP source ref for the shared capture pipeline", () => {
+    const item = normalizeGoatChatCapture(captureInput({ sourceRef: "mcp:capture_123" }));
+
+    expect(item.sourceRef).toBe("mcp:capture_123");
+    expect(isNormalizedGoatChatCaptureSourceItem(item)).toBe(true);
+  });
+
   it.each([
     ["text", { text: "  " }],
     ["title", { title: "" }],
@@ -381,6 +388,7 @@ describe("Goat chat capture normalization", () => {
     ["message", { userMessageId: "" }],
     ["draft id", { draftBrainId: "" }],
     ["timestamp", { capturedAt: "not-a-date" }],
+    ["source ref", { sourceRef: "not a source ref" }],
   ])("rejects an invalid %s", (_field, override) => {
     expect(() => normalizeGoatChatCapture(captureInput(override))).toThrow(
       BrainSourceNormalizationError,

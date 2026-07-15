@@ -335,8 +335,11 @@ export async function POST(request: Request): Promise<Response> {
               text: content,
               ...(toolInput.title ? { title: toolInput.title } : {}),
               ...(toolInput.intent ? { intent: toolInput.intent } : {}),
-              chatSessionId: turn.session.id,
-              userMessageId: turn.userMessage.id,
+              source: {
+                kind: "chat",
+                connectionId: turn.session.id,
+                itemId: turn.userMessage.id,
+              },
             });
             if (!captured.ok) return captured;
             return {

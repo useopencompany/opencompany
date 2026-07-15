@@ -20,4 +20,15 @@ describe("Goat WorkOS URL helpers", () => {
 
     expect(getGoatWorkOSRedirectUri()).toBe("https://my.opencompany.chat/auth/callback");
   });
+
+  it("does not use the legacy web callback in production when Goat is misconfigured", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", "");
+    vi.stubEnv("NEXT_PUBLIC_WORKOS_REDIRECT_URI", "https://my.opencompany.cloud/auth/callback");
+
+    expect(() => getGoatWorkOSRedirectUri()).toThrow(
+      "GOAT_NEXT_PUBLIC_APP_URL is required for Goat in production.",
+    );
+  });
 });

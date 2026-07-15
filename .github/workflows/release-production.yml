@@ -293,6 +293,8 @@ jobs:
             "WORKOS_CLIENT_ID",
             "WORKOS_API_KEY",
             "WORKOS_COOKIE_PASSWORD",
+            "GOAT_NEXT_PUBLIC_APP_URL",
+            "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
             "VERCEL_AI_GATEWAY_API_KEY",
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
@@ -310,7 +312,12 @@ jobs:
             }
 
             const { envs } = await response.json();
-            return envs.filter((env) => Array.isArray(env.target) && env.target.includes("production"));
+            return envs.filter(
+              (env) =>
+                Array.isArray(env.target) &&
+                env.target.includes("production") &&
+                !env.gitBranch,
+            );
           }
 
           async function readEnvValue(projectId, envs, key, label, teamId, token) {
@@ -363,6 +370,26 @@ jobs:
 
             if (missing.length > 0) {
               throw new Error(`Missing Goat Vercel production env keys: ${missing.join(", ")}`);
+            }
+
+            const expectedGoatOrigin = new URL(process.env.PRODUCTION_GOAT_URL).origin;
+            const expectedValues = new Map([
+              ["GOAT_NEXT_PUBLIC_APP_URL", expectedGoatOrigin],
+              ["GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI", `${expectedGoatOrigin}/auth/callback`],
+            ]);
+            const configuredGoatUrls = await Promise.all(
+              Array.from(expectedValues.keys(), (key) =>
+                readEnvValue(goatProjectId, goatEnv, key, "Goat", teamId, token),
+              ),
+            );
+            const mismatched = Array.from(expectedValues.entries())
+              .filter(([, expected], index) => configuredGoatUrls[index].trim() !== expected)
+              .map(([key]) => key);
+
+            if (mismatched.length > 0) {
+              throw new Error(
+                `Goat Vercel production envs do not match PRODUCTION_GOAT_URL: ${mismatched.join(", ")}`,
+              );
             }
 
             const credentialKeys = ["WORKOS_CLIENT_ID", "WORKOS_API_KEY"];
