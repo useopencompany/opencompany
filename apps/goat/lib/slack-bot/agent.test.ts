@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA } from "@/lib/brain-surface";
-import { buildGoatSlackBotToolSchema } from "./agent";
+import { buildGoatSlackBotToolSchema, GOAT_SLACK_BOT_MODEL } from "./agent";
 
 const BRAIN_A = { brainRef: "brain_a", brainName: "Product" };
 const BRAIN_B = { brainRef: "brain_b", brainName: "Customers" };
+
+it("uses the cost-efficient Kimi model", () => {
+  expect(GOAT_SLACK_BOT_MODEL).toBe("moonshotai/kimi-k2.6");
+});
 
 describe("buildGoatSlackBotToolSchema", () => {
   it("uses the shared read-tool schema unchanged for a single brain", () => {
