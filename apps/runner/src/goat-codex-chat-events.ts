@@ -29,6 +29,12 @@ const PERSISTED_EVENT_TYPES = new Set<GoatCodexChatEventType>([
   "command.started",
   "command.completed",
   "command.failed",
+  "file_change.started",
+  "file_change.completed",
+  "mcp_tool.started",
+  "mcp_tool.completed",
+  "web_search.started",
+  "web_search.completed",
   "plan.updated",
   "goal.updated",
   "question.requested",
@@ -279,6 +285,8 @@ export function createGoatCodexChatProjector(input: {
         if (!parts.some((part) => part.type === "text" && part.text.trim()) && summary.result) {
           parts = [...parts, { type: "text", text: summary.result }];
         }
+        // Settle any still-waiting question/approval/status parts; the turn is over.
+        parts = finalizeCodexUiMessageParts(parts, "completed").parts;
         await writeAssistantMessage({
           error: null,
           usage,

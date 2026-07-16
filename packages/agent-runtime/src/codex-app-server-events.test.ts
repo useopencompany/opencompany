@@ -147,6 +147,92 @@ describe("normalizeCodexAppServerEvent", () => {
     });
   });
 
+  it("maps file changes, MCP tool calls, and web searches", () => {
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "item/started",
+        params: {
+          item: {
+            id: "file_1",
+            type: "fileChange",
+            changes: [{ path: "src/index.ts", kind: "edit" }],
+          },
+        },
+      })[0],
+    ).toMatchObject({
+      type: "file_change.started",
+      payload: { itemId: "file_1", changes: [{ path: "src/index.ts", kind: "edit" }] },
+    });
+
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "item/completed",
+        params: {
+          item: {
+            id: "file_1",
+            type: "fileChange",
+            status: "completed",
+            changes: [{ path: "src/index.ts", kind: "edit" }, { path: "README.md" }],
+          },
+        },
+      })[0],
+    ).toMatchObject({
+      type: "file_change.completed",
+      payload: {
+        itemId: "file_1",
+        status: "completed",
+        changes: [{ path: "src/index.ts", kind: "edit" }, { path: "README.md" }],
+      },
+    });
+
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "item/started",
+        params: {
+          item: { id: "mcp_1", type: "mcpToolCall", server: "linear", tool: "create_issue" },
+        },
+      })[0],
+    ).toMatchObject({
+      type: "mcp_tool.started",
+      payload: { itemId: "mcp_1", server: "linear", tool: "create_issue" },
+    });
+
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "item/completed",
+        params: {
+          item: {
+            id: "mcp_1",
+            type: "mcpToolCall",
+            server: "linear",
+            tool: "create_issue",
+            status: "failed",
+            error: { message: "auth expired" },
+          },
+        },
+      })[0],
+    ).toMatchObject({
+      type: "mcp_tool.completed",
+      payload: {
+        itemId: "mcp_1",
+        server: "linear",
+        tool: "create_issue",
+        status: "failed",
+        error: "auth expired",
+      },
+    });
+
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "item/completed",
+        params: { item: { id: "search_1", type: "webSearch", query: "vitest mock modules" } },
+      })[0],
+    ).toMatchObject({
+      type: "web_search.completed",
+      payload: { itemId: "search_1", query: "vitest mock modules", status: "completed" },
+    });
+  });
+
   it("maps user questions and approval requests", () => {
     expect(
       normalizeCodexAppServerEvent({
