@@ -57,6 +57,7 @@ import { currentGoatUser } from "@/lib/auth";
 import type {
   GoatGmailSourceProviderState,
   GoatGoogleDriveSourceProviderState,
+  GoatGranolaProviderState,
   GoatHubspotSourceProviderState,
   GoatJamieProviderState,
   GoatLinearSourceProviderState,
@@ -78,6 +79,7 @@ import {
   listGoatGoogleSharedDrives,
   loadOwnGoatGoogleDriveAccount,
 } from "@/lib/integrations/google-drive";
+import { getGoatGranolaIntegrationState } from "@/lib/integrations/granola";
 import { getGoatHubspotSourceIntegrationState } from "@/lib/integrations/hubspot-ingest";
 import {
   getGoatJamieIntegrationState,
@@ -139,6 +141,7 @@ export type GoatBrainSourcesDetails = {
     gmail: GoatOwnSourceAccount[];
     google_drive: GoatOwnSourceAccount[];
     hubspot: GoatOwnSourceAccount[];
+    granola: GoatOwnSourceAccount[];
   };
   jamie: {
     integration: GoatJamieProviderState;
@@ -166,6 +169,9 @@ export type GoatBrainSourcesDetails = {
   hubspot: {
     integration: GoatHubspotSourceProviderState;
   };
+  granola: {
+    integration: GoatGranolaProviderState;
+  };
 };
 
 function integrationProviderFor(
@@ -179,6 +185,7 @@ function integrationProviderFor(
     case "slack":
     case "linear":
     case "hubspot":
+    case "granola":
       return provider;
     default:
       return null;
@@ -341,11 +348,13 @@ export async function getGoatBrainSourcesAction(
     gmailState,
     googleDriveState,
     hubspotState,
+    granolaState,
     ownSlackAccounts,
     ownLinearAccounts,
     ownGmailAccounts,
     ownGoogleDriveAccounts,
     ownHubspotAccounts,
+    ownGranolaAccounts,
   ] = await Promise.all([
     listGoatBrainSourcesForBrain(brainRef),
     getGoatJamieIntegrationState(context.workspace.id),
@@ -355,6 +364,7 @@ export async function getGoatBrainSourcesAction(
     getGoatGmailSourceIntegrationState(context.user.workosUserId),
     getGoatGoogleDriveSourceIntegrationState(context.user.workosUserId),
     getGoatHubspotSourceIntegrationState(context.user.workosUserId),
+    getGoatGranolaIntegrationState(context.user.workosUserId),
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "slack",
@@ -375,6 +385,10 @@ export async function getGoatBrainSourcesAction(
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "hubspot",
+    }),
+    listGoatPersonalIntegrationAccounts({
+      userWorkosId: context.user.workosUserId,
+      provider: "granola",
     }),
   ]);
 
@@ -420,6 +434,7 @@ export async function getGoatBrainSourcesAction(
       gmail: ownGmailAccounts,
       google_drive: ownGoogleDriveAccounts,
       hubspot: ownHubspotAccounts,
+      granola: ownGranolaAccounts,
     },
     jamie: {
       integration: jamieState,
@@ -443,6 +458,9 @@ export async function getGoatBrainSourcesAction(
     },
     hubspot: {
       integration: hubspotState,
+    },
+    granola: {
+      integration: granolaState,
     },
   };
 }

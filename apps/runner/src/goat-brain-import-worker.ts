@@ -8,6 +8,8 @@ import {
   getGoatBrainImportJobProgress,
 } from "@opencompany/db/goat-brain-import";
 import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
+import { GOAT_GRANOLA_CREDENTIAL_KIND, GOAT_GRANOLA_PROVIDER } from "@opencompany/db/goat-granola";
+import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
 import {
   type GoatBrainImportDiscoverySummary,
   type GoatBrainImportProvider,
@@ -17,15 +19,24 @@ import {
   goatBrainSourceItems,
 } from "@opencompany/db/goat-schema";
 import {
+  BrainSourceNormalizationError,
   type GoatImportResearchResult,
   type NormalizedBrainSourceItem,
   normalizeGoatImportRun,
+  normalizeGranolaMeetingNote,
 } from "@opencompany/goat-brain";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, eq, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
+import {
+  fetchGranolaNote,
+  GranolaApiError,
+  type GranolaNoteSummary,
+  isGranolaAuthError,
+  listGranolaNotes,
+} from "./granola-api";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -34,10 +45,13 @@ const logger = createLogger({
 const POLL_INTERVAL_MS = 5_000;
 const LEASE_TTL_MS = 3 * 60_000;
 const ACTIVE_WORKER_STATUSES = ["discovering", "ingesting", "finalizing"] as const;
+const GRANOLA_IMPORT_MAX_LIST_PAGES = 5;
+const GRANOLA_IMPORT_MAX_NOTES = 20;
 const PROVIDERS: GoatBrainImportProvider[] = [
   "public_web",
   "github",
   "jamie",
+  "granola",
   "gmail",
   "slack",
   "linear",
@@ -130,6 +144,7 @@ async function discoverImport(run: GoatBrainImportRun, env: RunnerEnv) {
       if (provider === "public_web") {
         summary[provider] = await discoverPublicResearch(run, env);
       } else {
+        if (provider === "granola") await hydrateGranolaImportSourceItems(run);
         const counts = await discoverStoredGoatBrainImportCandidates({
           run,
           provider,
@@ -157,6 +172,107 @@ async function discoverImport(run: GoatBrainImportRun, env: RunnerEnv) {
     discoverySummary: summary,
     db,
   });
+}
+
+async function hydrateGranolaImportSourceItems(run: GoatBrainImportRun) {
+  const selection = run.sourceSelection.granola;
+  if (!selection?.enabled || !selection.integrationId) return;
+  const credential = await loadGoatIntegrationCredential({
+    userWorkosId: run.userWorkosId,
+    integrationId: selection.integrationId,
+    provider: GOAT_GRANOLA_PROVIDER,
+    kind: GOAT_GRANOLA_CREDENTIAL_KIND,
+  });
+  const apiKey =
+    credential && typeof credential.payload.apiKey === "string" ? credential.payload.apiKey : null;
+  if (!apiKey) throw new Error("The saved Granola API key could not be loaded.");
+
+  const notes: GranolaNoteSummary[] = [];
+  let cursor: string | undefined;
+  let truncated = false;
+  const seenCursors = new Set<string>();
+  for (let page = 0; page < GRANOLA_IMPORT_MAX_LIST_PAGES; page += 1) {
+    if (!(await renewImportLease(run, "discovering"))) {
+      throw new Error("Import discovery lease was lost.");
+    }
+    const result = await listGranolaNotes({
+      apiKey,
+      createdAfter: run.historyStartAt.toISOString(),
+      createdBefore: run.historyEndAt.toISOString(),
+      ...(cursor ? { cursor } : {}),
+    });
+    notes.push(...result.notes);
+    if (!result.hasMore) break;
+    if (!result.cursor || seenCursors.has(result.cursor)) {
+      throw new Error("Granola returned an invalid pagination cursor during context import.");
+    }
+    seenCursors.add(result.cursor);
+    cursor = result.cursor;
+    truncated = page === GRANOLA_IMPORT_MAX_LIST_PAGES - 1;
+  }
+  if (truncated) {
+    logger.info("Granola context import reached its bounded note-list limit", {
+      event: "opencompany.goat_brain_import_granola_list_limited",
+      import_run_id: run.id,
+      listed_note_count: notes.length,
+    });
+  }
+
+  const candidates = selectGranolaImportNotes(notes);
+  for (const note of candidates) {
+    if (!(await renewImportLease(run, "discovering"))) {
+      throw new Error("Import discovery lease was lost.");
+    }
+    try {
+      const payload = await fetchGranolaNote({ apiKey, noteId: note.id });
+      const item = normalizeGranolaMeetingNote(payload, { capturedAt: new Date().toISOString() });
+      await upsertGoatBrainSourceItemAndEnqueue({
+        userWorkosId: run.userWorkosId,
+        sourceConnectionId: selection.integrationId,
+        integrationId: selection.integrationId,
+        item,
+        rawPayload: payload,
+        brainRefs: [],
+      });
+    } catch (error) {
+      if (isGranolaAuthError(error)) throw error;
+      if (error instanceof GranolaApiError && error.status !== 404) throw error;
+      if (
+        !(error instanceof GranolaApiError) &&
+        !(error instanceof BrainSourceNormalizationError)
+      ) {
+        throw error;
+      }
+      logger.warn("Skipped unavailable Granola note during context import", {
+        event: "opencompany.goat_brain_import_granola_note_skipped",
+        import_run_id: run.id,
+        note_id: note.id,
+        reason: error instanceof GranolaApiError ? "not_found" : "invalid_payload",
+      });
+    }
+  }
+}
+
+export function selectGranolaImportNotes(
+  notes: readonly GranolaNoteSummary[],
+  limit = GRANOLA_IMPORT_MAX_NOTES,
+) {
+  const byId = new Map<string, GranolaNoteSummary>();
+  for (const note of notes) {
+    const existing = byId.get(note.id);
+    if (!existing || timestamp(note.updatedAt) > timestamp(existing.updatedAt)) {
+      byId.set(note.id, note);
+    }
+  }
+  return [...byId.values()]
+    .sort((left, right) => timestamp(right.updatedAt) - timestamp(left.updatedAt))
+    .slice(0, limit);
+}
+
+function timestamp(value: string | null) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 async function discoverPublicResearch(run: GoatBrainImportRun, env: RunnerEnv) {

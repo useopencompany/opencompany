@@ -57,7 +57,8 @@ export type GoatIntegrationProvider =
   | "github"
   | "jamie"
   | "slack"
-  | "hubspot";
+  | "hubspot"
+  | "granola";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear) are always personal. Installation-bound
@@ -74,7 +75,7 @@ export function isWorkspaceOwnedGoatIntegrationProvider(provider: GoatIntegratio
   ).includes(provider);
 }
 export type GoatIntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
-export type GoatIntegrationCredentialKind = "oauth_token" | "webhook_secret";
+export type GoatIntegrationCredentialKind = "oauth_token" | "webhook_secret" | "api_key";
 export type GoatIntegrationCredentialEncryptedPayload = EncryptedPayload;
 export type GoatCodexCredentialStatus = "connected" | "needs_reauth";
 export type GoatCodexDeviceAuthFlowStatus =
@@ -98,7 +99,8 @@ export type GoatBrainSourceProvider =
   | "github"
   | "gmail"
   | "google_drive"
-  | "hubspot";
+  | "hubspot"
+  | "granola";
 export type GoatBrainSourceConfigProvider =
   | "jamie"
   | "gmail"
@@ -106,7 +108,8 @@ export type GoatBrainSourceConfigProvider =
   | "github"
   | "slack"
   | "linear"
-  | "hubspot";
+  | "hubspot"
+  | "granola";
 export type GoatBrainSourceType =
   | "meeting"
   | "run"
@@ -140,6 +143,7 @@ export type GoatBrainImportProvider =
   | "public_web"
   | "github"
   | "jamie"
+  | "granola"
   | "gmail"
   | "slack"
   | "linear";
@@ -1188,7 +1192,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1237,11 +1241,11 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
-      sql`${table.kind} IN ('oauth_token', 'webhook_secret')`,
+      sql`${table.kind} IN ('oauth_token', 'webhook_secret', 'api_key')`,
     ),
   }),
 );
@@ -1291,7 +1295,7 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -1343,7 +1347,7 @@ export const goatBrainSources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_brain_sources_provider_check",
-      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear', 'hubspot')`,
+      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear', 'hubspot', 'granola')`,
     ),
   }),
 );
@@ -1445,7 +1449,7 @@ export const goatBrainSourceItems = goat.table(
     }).onDelete("cascade"),
     sourceProviderCheck: check(
       "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
@@ -1525,7 +1529,7 @@ export const goatBrainIngestJobs = goat.table(
     importRunIdx: index("goat_brain_ingest_jobs_import_run_idx").on(table.importRunId),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
@@ -1600,7 +1604,7 @@ export const goatWorkspaceIngestionReservations = goat.table(
     ),
     sourceProviderCheck: check(
       "goat_ingestion_reservations_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola')`,
     ),
     consumptionStateCheck: check(
       "goat_ingestion_reservations_consumption_state_check",
@@ -1641,7 +1645,7 @@ export const goatBrainImportCandidates = goat.table(
     ),
     providerCheck: check(
       "goat_brain_import_candidates_provider_check",
-      sql`${table.provider} IN ('public_web', 'github', 'jamie', 'gmail', 'slack', 'linear')`,
+      sql`${table.provider} IN ('public_web', 'github', 'jamie', 'granola', 'gmail', 'slack', 'linear')`,
     ),
   }),
 );
@@ -1865,6 +1869,26 @@ export const goatGmailSyncState = goat.table("gmail_sync_state", {
   historyId: text("history_id"),
   lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
   lastResetAt: timestamp("last_reset_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Per-integration Granola poll cursor. Granola has no webhooks, so the runner
+// polls GET /v1/notes with updated_after (notes surface in the API only once
+// their AI summary and transcript are generated, which can be long after
+// created_at). updated_after_cursor NULL = first poll pending; ingestion starts
+// from the moment of connection, no backfill.
+export const goatGranolaSyncState = goat.table("granola_sync_state", {
+  integrationId: text("integration_id")
+    .primaryKey()
+    .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+  userWorkosId: text("user_workos_id")
+    .notNull()
+    .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+  updatedAfterCursor: timestamp("updated_after_cursor", { withTimezone: true }),
+  pageCursor: text("page_cursor"),
+  pendingUpdatedAfterCursor: timestamp("pending_updated_after_cursor", { withTimezone: true }),
+  lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -46,6 +46,8 @@ async function handleMcpRequest(request: Request) {
             name: "goat",
             version: "0.1.0",
           },
+          instructions:
+            "Use list_brains before the first brain operation when the user may have more than one brain. Use goat_brain for retrieval and follow returned page ids with get. When the user explicitly asks to save or remember content, call save_to_brain once with the faithful source content; it creates an inbox draft and queues background curation. Never save inferred preferences or conversational scratchpad content without clear user intent.",
         },
         {
           // Empty base path serves the streamable-HTTP transport at /mcp.

@@ -3,6 +3,8 @@ import {
   buildGoatGoogleAuthorizationUrl,
   createGoatGoogleIntegrationState,
   GOAT_GOOGLE_PROVIDER_CONFIG,
+  goatGoogleOAuthRedirectUri,
+  goatGoogleOAuthTargetOriginForState,
   verifyGoatGoogleIntegrationState,
 } from "./google-oauth";
 
@@ -58,5 +60,44 @@ describe("Goat Google OAuth", () => {
     );
     expect(driveUrl.searchParams.get("scope")).not.toContain("gmail.readonly");
     expect(driveUrl.searchParams.get("scope")).not.toContain("calendar.readonly");
+  });
+
+  it("uses direct Goat callbacks in production even when the preview broker is configured", () => {
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://opencompany.chat");
+    vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
+
+    expect(
+      Object.values(GOAT_GOOGLE_PROVIDER_CONFIG).map((config) =>
+        goatGoogleOAuthRedirectUri(config),
+      ),
+    ).toEqual([
+      "https://opencompany.chat/api/integrations/gmail/callback",
+      "https://opencompany.chat/api/integrations/google-calendar/callback",
+      "https://opencompany.chat/api/integrations/google-drive/callback",
+    ]);
+    expect(goatGoogleOAuthTargetOriginForState()).toBeUndefined();
+  });
+
+  it("keeps the stable broker for hosted previews and signs the preview target", () => {
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://pr-42.preview.opencompany.cloud/");
+    vi.stubEnv("GOOGLE_OAUTH_CALLBACK_URL", "https://oauth.opencompany.cloud/api/google/callback");
+
+    expect(goatGoogleOAuthRedirectUri(GOAT_GOOGLE_PROVIDER_CONFIG.gmail)).toBe(
+      "https://oauth.opencompany.cloud/api/google/callback",
+    );
+    const targetOrigin = goatGoogleOAuthTargetOriginForState();
+    expect(targetOrigin).toBe("https://pr-42.preview.opencompany.cloud");
+    if (!targetOrigin) throw new Error("Expected a preview target origin.");
+
+    const state = createGoatGoogleIntegrationState({
+      provider: "gmail",
+      userWorkosId: "user_123",
+      returnTo: "/settings",
+      oauthRedirectUri: "https://oauth.opencompany.cloud/api/google/callback",
+      targetOrigin,
+    });
+    expect(verifyGoatGoogleIntegrationState(state).targetOrigin).toBe(
+      "https://pr-42.preview.opencompany.cloud",
+    );
   });
 });

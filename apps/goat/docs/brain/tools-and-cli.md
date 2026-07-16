@@ -60,11 +60,12 @@ WorkOS AuthKit. The token identifies the user; every tool call authorizes the ad
 workspace/brain membership, so one connector spans all brains the user can access. Tool
 registration lives in `apps/goat/lib/mcp-server.ts`. Current canonical tool surface: `goat_brain`,
 the same read-only command surface used by main chat (`query`, `list`, `get`, `timeline`, `help`,
-`doctor`), plus `list_brains` and an optional `brain` argument (id, or slug when unique; auto-
-selected when the user has exactly one brain). Compatibility wrappers `query_brain` and
-`get_document` remain available for older clients and delegate through the same tool runner. Reads
-are served by the read plane. External consumers never get write tools; external content enters via
-ingestion jobs only.
+`doctor`); `save_to_brain`, the capture-only write path; plus `list_brains` and an optional `brain`
+argument (id, or slug when unique; auto-selected when the user has exactly one brain). Compatibility
+wrappers `query_brain` and `get_document` remain available for older clients and delegate through
+the same tool runner. Reads are served by the read plane. `save_to_brain` requires workspace-admin
+access and immediately creates a draft in `inbox/`, then queues the same durable curation pipeline
+used by Goat chat. MCP clients do not receive raw document mutation tools.
 
 ### Member MCP setup and completion
 
@@ -93,4 +94,4 @@ signal from the earliest qualifying historical tool run.
 | Runner ingestion agents | ✓ (CLI — needs read-your-writes against its job root) | ✓ (CLI, allow-listed) |
 | Goat chat `goat_brain` | ✓ (read plane) | never |
 | Goat chat `save_to_brain` | — | capture → curation job only |
-| External agents (MCP) | ✓ (read plane: `goat_brain`, plus compatibility `query_brain`/`get_document`) | never |
+| External agents (MCP) | ✓ (read plane: `goat_brain`, plus compatibility `query_brain`/`get_document`) | capture → curation job only (`save_to_brain`, workspace admins) |

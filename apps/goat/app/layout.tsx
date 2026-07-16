@@ -7,7 +7,10 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OpenCompany",
+  title: {
+    default: "opencompany",
+    template: "%s - opencompany",
+  },
   description: "Experimental just-in-time agent harness.",
   icons: {
     icon: [

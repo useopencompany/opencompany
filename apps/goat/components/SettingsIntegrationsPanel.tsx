@@ -12,6 +12,7 @@ import {
   Handshake,
   ListTodo,
   Mail,
+  NotebookPen,
   PlugZap,
 } from "lucide-react";
 import Link from "next/link";
@@ -181,6 +182,12 @@ function IntegrationRows({
           label="HubSpot"
           provider="hubspot"
           accounts={integrations.personalAccounts.hubspot}
+        />
+        <IntegrationProviderGroup
+          icon={NotebookPen}
+          label="Granola"
+          provider="granola"
+          accounts={integrations.personalAccounts.granola}
         />
         <McpIntegrationRow setup={mcpSetup} />
         <CodexIntegrationRow integration={integrations.codex} />
@@ -627,7 +634,8 @@ function integrationConnectHref(
     | "github"
     | "jamie"
     | "slack"
-    | "hubspot",
+    | "hubspot"
+    | "granola",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -639,6 +647,7 @@ function integrationConnectHref(
   if (provider === "github")
     return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "jamie") return "/settings/jamie";
+  if (provider === "granola") return "/settings/granola";
   if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";

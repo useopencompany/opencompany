@@ -73,7 +73,9 @@ export function resolveGoatBrainSourceState(
                 ? details?.googleDrive.integration
                 : providerId === "hubspot"
                   ? details?.hubspot.integration
-                  : undefined;
+                  : providerId === "granola"
+                    ? details?.granola.integration
+                    : undefined;
   const jamieReady =
     providerId === "jamie" ? Boolean(details?.jamie.integration.apiKeyConfigured) : false;
   const connected = providerId === "jamie" ? jamieReady : Boolean(integration?.connected);
@@ -441,7 +443,13 @@ export function SourceProviderCard({
   );
 }
 
-type GoatPersonalBrainSourceProvider = "slack" | "linear" | "gmail" | "google_drive" | "hubspot";
+type GoatPersonalBrainSourceProvider =
+  | "slack"
+  | "linear"
+  | "gmail"
+  | "google_drive"
+  | "hubspot"
+  | "granola";
 
 function isPersonalSourceProvider(
   providerId: GoatBrainSourceProviderDef["id"],
@@ -451,7 +459,8 @@ function isPersonalSourceProvider(
     providerId === "linear" ||
     providerId === "gmail" ||
     providerId === "google_drive" ||
-    providerId === "hubspot"
+    providerId === "hubspot" ||
+    providerId === "granola"
   );
 }
 
@@ -468,6 +477,8 @@ const ADD_SOURCE_CONSENT_COPY: Record<GoatPersonalBrainSourceProvider, string> =
     "Issue and comment activity from the teams you select will be summarized into this brain and visible to everyone with access to it.",
   hubspot:
     "CRM activity on the record types you select will be summarized into this brain and visible to everyone with access to it.",
+  granola:
+    "Your Granola meeting notes — including what other participants said — will be summarized into this brain and visible to everyone with access to it.",
 };
 
 const ADD_SOURCE_CONSENT_FOOTER =

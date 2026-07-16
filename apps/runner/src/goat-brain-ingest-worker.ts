@@ -22,6 +22,7 @@ import {
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedGoatImportSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
+  isNormalizedGranolaMeetingSourceItem,
   isNormalizedHubspotObjectSourceItem,
   isNormalizedJamieMeetingSourceItem,
   isNormalizedLinearIssueSourceItem,
@@ -55,6 +56,7 @@ import {
   runGoatChatCaptureAgentIngest,
   runGoatImportAgentIngest,
   runGoogleDriveDocumentAgentIngest,
+  runGranolaMeetingAgentIngest,
   runHubspotObjectAgentIngest,
   runJamieMeetingAgentIngest,
   runLinearIssueAgentIngest,
@@ -149,6 +151,12 @@ const JAMIE_MEETING_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "meeting",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "granola",
+  sourceType: "meeting",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "goat-chat",
@@ -213,6 +221,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: JAMIE_MEETING_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedJamieMeetingSourceItem,
     run: runTypedGoatBrainIngestHandler(runJamieMeetingAgentIngest),
+  },
+  {
+    descriptor: GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedGranolaMeetingSourceItem,
+    run: runTypedGoatBrainIngestHandler(runGranolaMeetingAgentIngest),
   },
   {
     descriptor: GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR,

@@ -18,7 +18,14 @@ import {
 } from "./brain-source-actions";
 import { triggerGoatBrainImportWake, triggerGoatBrainIngestWake } from "./task-runner";
 
-const IMPORT_INTEGRATION_PROVIDERS = ["github", "jamie", "gmail", "slack", "linear"] as const;
+const IMPORT_INTEGRATION_PROVIDERS = [
+  "github",
+  "jamie",
+  "granola",
+  "gmail",
+  "slack",
+  "linear",
+] as const;
 const IMPORT_PROVIDERS = ["public_web", ...IMPORT_INTEGRATION_PROVIDERS] as const;
 
 export type GoatBrainImportActionResult =
