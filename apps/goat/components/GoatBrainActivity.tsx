@@ -28,6 +28,7 @@ type SelectedBrainIngestTrace = {
   trace: GoatBrainIngestTrace;
   traceId: string;
   sourceTitle: string;
+  durationMs: number | null;
 };
 
 type BrainActivitySourceItemsResponse = {
@@ -58,6 +59,7 @@ export function GoatBrainActivity({ brainRef }: { brainRef: string }) {
         trace={selectedTrace?.trace ?? null}
         traceId={selectedTrace?.traceId ?? ""}
         sourceTitle={selectedTrace?.sourceTitle ?? ""}
+        durationMs={selectedTrace?.durationMs ?? null}
         open={Boolean(selectedTrace)}
         onOpenChange={(dialogOpen) => {
           if (!dialogOpen) setSelectedTrace(null);
@@ -261,6 +263,7 @@ function GoatBrainActivityFeed({
                           trace,
                           traceId: event.traceId,
                           sourceTitle: event.sourceTitle,
+                          durationMs: event.durationMs,
                         })
                       }
                       className="mt-1 inline-flex w-fit items-center gap-1 rounded-[4px] border border-border-subtle bg-surface px-1.5 py-0.5 text-[11px] leading-4 text-ink-muted transition-colors duration-150 hover:border-border hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"

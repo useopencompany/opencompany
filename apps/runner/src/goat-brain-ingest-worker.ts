@@ -725,6 +725,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
           }),
       ),
     );
+    const resultWithDuration = withGoatBrainIngestRunDuration(result, runStartedAt);
     recordBrainIngestModelCost(result);
     await debitFrontierIngestCost(input.job, result);
     if (!leaseActive) {
@@ -734,7 +735,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
       });
       return;
     }
-    if (isSkippedIngestResult(result)) {
+    if (isSkippedIngestResult(resultWithDuration)) {
       const skipped = await runSpan.runInContext(() =>
         withGoatSpan(GOAT_SPANS.brainIngestComplete, baseAttributes, () =>
           store.skip({
@@ -743,8 +744,8 @@ export async function runClaimedGoatBrainIngestJob(input: {
             leaseId,
             leaseOwner,
             now: new Date(),
-            result,
-            reason: skippedIngestReason(result),
+            result: resultWithDuration,
+            reason: skippedIngestReason(resultWithDuration),
           }),
         ),
       );
@@ -770,7 +771,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
           leaseId,
           leaseOwner,
           now: new Date(),
-          result,
+          result: resultWithDuration,
         }),
       ),
     );
@@ -801,6 +802,10 @@ export async function runClaimedGoatBrainIngestJob(input: {
           ? GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS
           : GOAT_BRAIN_INGEST_MAX_ATTEMPTS;
     const terminal = input.job.attempts >= maxAttempts;
+    const failureResult =
+      error instanceof GoatBrainIngestBudgetError
+        ? withGoatBrainIngestRunDuration({ ...error.result }, runStartedAt)
+        : undefined;
     const active = await runSpan.runInContext(() =>
       withGoatSpan(GOAT_SPANS.brainIngestFail, baseAttributes, () =>
         store.fail({
@@ -812,7 +817,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
           attempts: input.job.attempts,
           error: message,
           maxAttempts,
-          ...(error instanceof GoatBrainIngestBudgetError ? { result: error.result } : {}),
+          ...(failureResult ? { result: failureResult } : {}),
         }),
       ),
     );
@@ -840,6 +845,16 @@ export async function runClaimedGoatBrainIngestJob(input: {
     // down (its only other flush point) for a long time. No-ops when disabled.
     await flushBraintrust();
   }
+}
+
+function withGoatBrainIngestRunDuration<T extends Record<string, unknown>>(
+  result: T,
+  runStartedAt: number,
+) {
+  return {
+    ...result,
+    durationMs: Math.max(0, Math.round(performance.now() - runStartedAt)),
+  };
 }
 
 // Frontier-tier pass-through: debit the attempt's tracked provider model cost
