@@ -1919,9 +1919,10 @@ export function isNormalizedGranolaMeetingSourceItem(
 
 // Normalizes one meeting from the Fathom public API (GET /external/v1/meetings
 // with include_transcript, include_summary, and include_action_items). The
-// poll worker only lists meetings older than a processing lag, so summary and
-// transcript are normally present; both still degrade to empty rather than
-// throwing because Fathom omits them when generation failed or was disabled.
+// live poll worker only normalizes meetings once the summary and transcript
+// responses are ready. Both fields still degrade to empty because history import
+// and stored payload validation must tolerate generation failures or disabled
+// content.
 export function normalizeFathomMeeting(
   payload: unknown,
   options: { capturedAt?: string } = {},

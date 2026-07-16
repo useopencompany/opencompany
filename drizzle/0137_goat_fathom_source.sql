@@ -1,7 +1,8 @@
 -- Fathom as a Goat Brain ingestion source: widen provider checks for the new
--- personal API-key integration and add the per-integration Fathom poll cursor
+-- personal API-key integration, the per-integration poll cursor, and durable
+-- pending rows for recordings listed before their generated content is ready
 -- (the runner polls GET /external/v1/meetings with created_after/created_before
--- windows; the upper bound lags "now" so transcripts and summaries are ready).
+-- windows; the upper bound lags "now" to avoid most premature content reads).
 ALTER TABLE "goat"."integrations" DROP CONSTRAINT IF EXISTS "goat_integrations_provider_check";--> statement-breakpoint
 ALTER TABLE "goat"."integrations" ADD CONSTRAINT "goat_integrations_provider_check" CHECK ("goat"."integrations"."provider" IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom'));--> statement-breakpoint
 ALTER TABLE "goat"."integration_credentials" DROP CONSTRAINT IF EXISTS "goat_integration_credentials_provider_check";--> statement-breakpoint
@@ -29,4 +30,19 @@ CREATE TABLE IF NOT EXISTS "goat"."fathom_sync_state" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );--> statement-breakpoint
 ALTER TABLE "goat"."fathom_sync_state" ADD CONSTRAINT "goat_fathom_sync_state_integration_id_integrations_id_fk" FOREIGN KEY ("integration_id") REFERENCES "goat"."integrations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "goat"."fathom_sync_state" ADD CONSTRAINT "goat_fathom_sync_state_user_workos_id_users_workos_user_id_fk" FOREIGN KEY ("user_workos_id") REFERENCES "goat"."users"("workos_user_id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "goat"."fathom_sync_state" ADD CONSTRAINT "goat_fathom_sync_state_user_workos_id_users_workos_user_id_fk" FOREIGN KEY ("user_workos_id") REFERENCES "goat"."users"("workos_user_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "goat"."fathom_pending_meetings" (
+	"integration_id" text NOT NULL,
+	"recording_id" text NOT NULL,
+	"user_workos_id" text NOT NULL,
+	"meeting_created_at" timestamp with time zone NOT NULL,
+	"raw_payload" jsonb NOT NULL,
+	"attempt_count" integer DEFAULT 0 NOT NULL,
+	"last_attempted_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "goat_fathom_pending_meetings_pk" PRIMARY KEY("integration_id","recording_id")
+);--> statement-breakpoint
+ALTER TABLE "goat"."fathom_pending_meetings" ADD CONSTRAINT "goat_fathom_pending_meetings_integration_id_integrations_id_fk" FOREIGN KEY ("integration_id") REFERENCES "goat"."integrations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "goat"."fathom_pending_meetings" ADD CONSTRAINT "goat_fathom_pending_meetings_user_workos_id_users_workos_user_id_fk" FOREIGN KEY ("user_workos_id") REFERENCES "goat"."users"("workos_user_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "goat_fathom_pending_meetings_retry_idx" ON "goat"."fathom_pending_meetings" USING btree ("integration_id","last_attempted_at" ASC NULLS FIRST,"created_at");

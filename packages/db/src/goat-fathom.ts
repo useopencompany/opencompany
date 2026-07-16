@@ -1,6 +1,6 @@
-import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
-import { goatBrainSources, goatFathomSyncState } from "./goat-schema";
+import { goatBrainSources, goatFathomPendingMeetings, goatFathomSyncState } from "./goat-schema";
 
 type DbLike = any;
 
@@ -18,6 +18,15 @@ export type GoatFathomSyncStateRow = {
   createdAfterCursor: Date | null;
   pageCursor: string | null;
   pendingCreatedBeforeCursor: Date | null;
+};
+
+export type GoatFathomPendingMeetingRow = {
+  integrationId: string;
+  recordingId: string;
+  userWorkosId: string;
+  meetingCreatedAt: Date;
+  rawPayload: Record<string, unknown>;
+  attemptCount: number;
 };
 
 export async function listEnabledGoatFathomBrainSourceRoutes(
@@ -42,13 +51,106 @@ export async function listEnabledGoatFathomBrainSourceRoutes(
 }
 
 export async function ensureGoatFathomSyncState(
-  input: { integrationId: string; userWorkosId: string },
+  input: { integrationId: string; userWorkosId: string; createdAfterCursor?: Date },
   db: DbLike = getDb(),
 ): Promise<void> {
   await db
     .insert(goatFathomSyncState)
-    .values({ integrationId: input.integrationId, userWorkosId: input.userWorkosId })
+    .values({
+      integrationId: input.integrationId,
+      userWorkosId: input.userWorkosId,
+      ...(input.createdAfterCursor ? { createdAfterCursor: input.createdAfterCursor } : {}),
+    })
     .onConflictDoNothing();
+}
+
+export async function upsertGoatFathomPendingMeeting(
+  input: {
+    integrationId: string;
+    recordingId: string;
+    userWorkosId: string;
+    meetingCreatedAt: Date;
+    rawPayload: Record<string, unknown>;
+  },
+  db: DbLike = getDb(),
+): Promise<void> {
+  await db
+    .insert(goatFathomPendingMeetings)
+    .values(input)
+    .onConflictDoUpdate({
+      target: [goatFathomPendingMeetings.integrationId, goatFathomPendingMeetings.recordingId],
+      set: {
+        userWorkosId: input.userWorkosId,
+        meetingCreatedAt: input.meetingCreatedAt,
+        rawPayload: input.rawPayload,
+        updatedAt: sql`now()`,
+      },
+    });
+}
+
+export async function listGoatFathomPendingMeetings(
+  input: { integrationId: string; limit?: number },
+  db: DbLike = getDb(),
+): Promise<GoatFathomPendingMeetingRow[]> {
+  return (
+    db
+      .select({
+        integrationId: goatFathomPendingMeetings.integrationId,
+        recordingId: goatFathomPendingMeetings.recordingId,
+        userWorkosId: goatFathomPendingMeetings.userWorkosId,
+        meetingCreatedAt: goatFathomPendingMeetings.meetingCreatedAt,
+        rawPayload: goatFathomPendingMeetings.rawPayload,
+        attemptCount: goatFathomPendingMeetings.attemptCount,
+      })
+      .from(goatFathomPendingMeetings)
+      .where(eq(goatFathomPendingMeetings.integrationId, input.integrationId))
+      // Explicit NULLS FIRST attempts newly pending meetings before the oldest
+      // retry timestamp. Persisted failures then rotate fairly instead of
+      // starving newer recordings behind a stuck row.
+      .orderBy(
+        sql`${goatFathomPendingMeetings.lastAttemptedAt} ASC NULLS FIRST`,
+        asc(goatFathomPendingMeetings.createdAt),
+      )
+      .limit(Math.max(1, input.limit ?? 20))
+  );
+}
+
+export async function recordGoatFathomPendingMeetingAttempt(
+  input: {
+    integrationId: string;
+    recordingId: string;
+    rawPayload: Record<string, unknown>;
+  },
+  db: DbLike = getDb(),
+): Promise<void> {
+  await db
+    .update(goatFathomPendingMeetings)
+    .set({
+      rawPayload: input.rawPayload,
+      attemptCount: sql`${goatFathomPendingMeetings.attemptCount} + 1`,
+      lastAttemptedAt: sql`now()`,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(goatFathomPendingMeetings.integrationId, input.integrationId),
+        eq(goatFathomPendingMeetings.recordingId, input.recordingId),
+      ),
+    );
+}
+
+export async function deleteGoatFathomPendingMeeting(
+  input: { integrationId: string; recordingId: string },
+  db: DbLike = getDb(),
+): Promise<void> {
+  await db
+    .delete(goatFathomPendingMeetings)
+    .where(
+      and(
+        eq(goatFathomPendingMeetings.integrationId, input.integrationId),
+        eq(goatFathomPendingMeetings.recordingId, input.recordingId),
+      ),
+    );
 }
 
 // Claims one integration's poll slot: stamps last_polled_at only when the row

@@ -38,11 +38,16 @@ export type FathomMeetingsPage = {
   nextCursor: string | null;
 };
 
-// Lists meetings with their transcript, summary, and action items inline —
-// Fathom has no cheap per-meeting detail endpoint for API keys, so the list
-// call is the payload fetch. Filters must stay identical across pages of one
-// pass; the continuation cursor is only valid for the filters it was minted
-// with.
+export type FathomRecordingContent = {
+  summary: Record<string, unknown> | null;
+  transcript: unknown[] | null;
+};
+
+// Lists meetings with their transcript, summary, and action items inline.
+// Filters must stay identical across pages of one pass; the continuation
+// cursor is only valid for the filters it was minted with. The recording
+// endpoints below are reserved for retrying the small set whose generated
+// content is not ready on the list response.
 export async function listFathomMeetings(input: {
   apiKey: string;
   createdAfter?: string;
@@ -103,6 +108,80 @@ export async function listFathomMeetings(input: {
   };
 }
 
+export async function getFathomRecordingSummary(input: {
+  apiKey: string;
+  recordingId: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<Record<string, unknown> | null> {
+  const body = await fathomApiCall<{ summary?: unknown }>({
+    apiKey: input.apiKey,
+    path: `/recordings/${encodeURIComponent(input.recordingId)}/summary`,
+    ...(input.signal ? { signal: input.signal } : {}),
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+  });
+  return asRecord(body.summary);
+}
+
+export async function getFathomRecordingTranscript(input: {
+  apiKey: string;
+  recordingId: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<unknown[] | null> {
+  const body = await fathomApiCall<{ transcript?: unknown }>({
+    apiKey: input.apiKey,
+    path: `/recordings/${encodeURIComponent(input.recordingId)}/transcript`,
+    ...(input.signal ? { signal: input.signal } : {}),
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+  });
+  return Array.isArray(body.transcript) ? body.transcript : null;
+}
+
+export async function getFathomRecordingContent(input: {
+  apiKey: string;
+  recordingId: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<FathomRecordingContent> {
+  const request = {
+    apiKey: input.apiKey,
+    recordingId: input.recordingId,
+    ...(input.signal ? { signal: input.signal } : {}),
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+  };
+  const [summaryResult, transcriptResult] = await Promise.allSettled([
+    getFathomRecordingSummary(request),
+    getFathomRecordingTranscript(request),
+  ]);
+  return {
+    summary: settledFathomContent(summaryResult),
+    transcript: settledFathomContent(transcriptResult),
+  };
+}
+
+export function mergeFathomRecordingContent(
+  rawPayload: Record<string, unknown>,
+  content: FathomRecordingContent,
+): Record<string, unknown> {
+  const existingTranscript = Array.isArray(rawPayload.transcript) ? rawPayload.transcript : null;
+  const shouldMergeTranscript =
+    content.transcript !== null &&
+    (hasUsableFathomTranscript(content.transcript) ||
+      !hasUsableFathomTranscript(existingTranscript));
+  return {
+    ...rawPayload,
+    ...(hasUsableFathomSummary(content.summary) ? { default_summary: content.summary } : {}),
+    ...(shouldMergeTranscript ? { transcript: content.transcript } : {}),
+  };
+}
+
+export function hasFathomMeetingContent(payload: Record<string, unknown>): boolean {
+  return (
+    hasUsableFathomSummary(asRecord(payload.default_summary)) && Array.isArray(payload.transcript)
+  );
+}
+
 async function fathomApiCall<T>(input: {
   apiKey: string;
   path: string;
@@ -138,4 +217,36 @@ async function fathomApiCall<T>(input: {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function hasUsableFathomSummary(summary: Record<string, unknown> | null): boolean {
+  return (
+    typeof summary?.markdown_formatted === "string" && summary.markdown_formatted.trim().length > 0
+  );
+}
+
+function hasUsableFathomTranscript(transcript: unknown[] | null): boolean {
+  return Boolean(
+    transcript?.some((entry) => {
+      const record = asRecord(entry);
+      return typeof record?.text === "string" && record.text.trim().length > 0;
+    }),
+  );
+}
+
+function settledFathomContent<T>(result: PromiseSettledResult<T>): T | null {
+  if (result.status === "fulfilled") return result.value;
+  if (
+    result.reason instanceof FathomApiError &&
+    [400, 404, 409, 425].includes(result.reason.status)
+  ) {
+    return null;
+  }
+  throw result.reason;
 }

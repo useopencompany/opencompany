@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { FathomMeetingsPage } from "./fathom-api";
-import { listFathomMeetingsWindow } from "./goat-fathom-poll-worker";
+import {
+  fathomCursorAfterCompletedWindow,
+  listFathomMeetingsWindow,
+} from "./goat-fathom-poll-worker";
 
 describe("Fathom poll pagination", () => {
   it("returns a continuation cursor instead of advancing past unprocessed pages", async () => {
@@ -86,5 +89,11 @@ describe("Fathom poll pagination", () => {
         }),
       }),
     ).rejects.toThrow("did not return a new continuation cursor");
+  });
+
+  it("overlaps adjacent strict timestamp windows by one millisecond", () => {
+    expect(
+      fathomCursorAfterCompletedWindow(new Date("2026-07-16T10:00:00.000Z")).toISOString(),
+    ).toBe("2026-07-16T09:59:59.999Z");
   });
 });

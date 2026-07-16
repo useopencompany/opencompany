@@ -11,13 +11,17 @@ import {
 import {
   claimGoatFathomSyncState,
   completeGoatFathomSyncPages,
+  deleteGoatFathomPendingMeeting,
   ensureGoatFathomSyncState,
   GOAT_FATHOM_CREDENTIAL_KIND,
   GOAT_FATHOM_PROVIDER,
   goatFathomEventClaimKey,
   listEnabledGoatFathomBrainSourceRoutes,
+  listGoatFathomPendingMeetings,
+  recordGoatFathomPendingMeetingAttempt,
   updateGoatFathomSyncCursor,
   updateGoatFathomSyncPage,
+  upsertGoatFathomPendingMeeting,
 } from "@opencompany/db/goat-fathom";
 import {
   loadGoatIntegrationCredential,
@@ -27,18 +31,25 @@ import { normalizeFathomMeeting } from "@opencompany/goat-brain";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
-import { type FathomMeetingSummary, isFathomAuthError, listFathomMeetings } from "./fathom-api";
+import {
+  FathomApiError,
+  type FathomMeetingSummary,
+  type FathomRecordingContent,
+  getFathomRecordingContent,
+  hasFathomMeetingContent,
+  isFathomAuthError,
+  listFathomMeetings,
+  mergeFathomRecordingContent,
+} from "./fathom-api";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-fathom-poll" });
 
-// Fathom has no webhooks for these per-user API keys, so new meetings are
-// discovered by polling GET /external/v1/meetings per connected integration
-// with a created_after cursor. A meeting is listed as soon as the recording
-// exists, potentially before Fathom finishes its transcript and summary, so
-// each pass caps the window at now minus a processing lag and only advances
-// the cursor to that bound — a meeting is never ingested younger than the lag.
+// Goat discovers meetings by polling GET /external/v1/meetings per personal
+// API-key integration. A meeting may be listed before generated content is
+// ready, so the time lag avoids most early reads and a durable pending queue
+// retries the recording endpoints before any cross-brain claim is created.
 export const GOAT_FATHOM_POLL_INTERVAL_MS = 5 * 60_000;
 // A claim stamps last_polled_at; other runner replicas skip integrations
 // claimed within the cooldown. Brain event claims absorb any residual
@@ -51,6 +62,10 @@ export const GOAT_FATHOM_PROCESSING_LAG_MS = 15 * 60_000;
 // low-volume; anything beyond this is drained by later polls because the
 // cursor only advances past processed windows.
 const GOAT_FATHOM_MAX_PAGES_PER_POLL = 5;
+// Each pending meeting costs two recording-content calls. Ten leaves ample
+// headroom beneath Fathom's per-user 60 requests/minute limit for list pages
+// and concurrent user activity.
+const GOAT_FATHOM_MAX_PENDING_MEETINGS_PER_POLL = 10;
 
 type FathomPollCandidate = {
   integrationId: string;
@@ -108,15 +123,6 @@ export async function pollGoatFathomIntegration(input: {
     return { enqueued: 0, seen: 0 };
   }
 
-  // Continuation cursors are only valid for the filters they were minted with,
-  // so a resumed pass reuses the persisted window bound; a fresh pass lags
-  // "now" to give Fathom time to finish transcripts and summaries.
-  const processingLagMs = input.processingLagMs ?? GOAT_FATHOM_PROCESSING_LAG_MS;
-  const createdBefore =
-    (state.pageCursor ? state.pendingCreatedBeforeCursor : null) ??
-    new Date(Date.now() - processingLagMs);
-  if (createdBefore <= state.createdAfterCursor) return { enqueued: 0, seen: 0 };
-
   const credential = await loadGoatIntegrationCredential({
     userWorkosId: candidate.userWorkosId,
     integrationId: candidate.integrationId,
@@ -129,6 +135,34 @@ export async function pollGoatFathomIntegration(input: {
     await markFathomNeedsReauth(candidate, "The saved Fathom API key could not be loaded.");
     return null;
   }
+
+  const routes = await listEnabledGoatFathomBrainSourceRoutes([candidate.integrationId], db);
+  const routedBrainRefs = [...new Set(routes.map((route) => route.brainRef))];
+
+  let pendingResult: { enqueued: number; seen: number };
+  try {
+    pendingResult = await retryPendingFathomMeetings({
+      candidate,
+      apiKey,
+      routedBrainRefs,
+      signal: input.signal,
+    });
+  } catch (error) {
+    if (isFathomAuthError(error)) {
+      await markFathomNeedsReauth(candidate, "Fathom rejected the saved API key.");
+      return null;
+    }
+    throw error;
+  }
+
+  // Continuation cursors are only valid for the filters they were minted with,
+  // so a resumed pass reuses the persisted window bound; a fresh pass lags
+  // "now" to give Fathom time to finish transcripts and summaries.
+  const processingLagMs = input.processingLagMs ?? GOAT_FATHOM_PROCESSING_LAG_MS;
+  const createdBefore =
+    (state.pageCursor ? state.pendingCreatedBeforeCursor : null) ??
+    new Date(Date.now() - processingLagMs);
+  if (createdBefore <= state.createdAfterCursor) return pendingResult;
 
   let batch: FathomMeetingsBatch;
   try {
@@ -148,12 +182,26 @@ export async function pollGoatFathomIntegration(input: {
   }
   const { meetings } = batch;
 
-  const routes = await listEnabledGoatFathomBrainSourceRoutes([candidate.integrationId], db);
-  const routedBrainRefs = [...new Set(routes.map((route) => route.brainRef))];
-
-  let enqueued = 0;
+  let enqueued = pendingResult.enqueued;
   for (const meeting of meetings) {
     if (input.signal.aborted) throw new Error("Fathom poll aborted.");
+    if (!hasFathomMeetingContent(meeting.raw)) {
+      const meetingCreatedAt = meeting.createdAt ? new Date(meeting.createdAt) : null;
+      if (!meetingCreatedAt || !Number.isFinite(meetingCreatedAt.getTime())) {
+        throw new Error(`Fathom meeting ${meeting.recordingId} has no valid created_at timestamp.`);
+      }
+      await upsertGoatFathomPendingMeeting(
+        {
+          integrationId: candidate.integrationId,
+          recordingId: meeting.recordingId,
+          userWorkosId: candidate.userWorkosId,
+          meetingCreatedAt,
+          rawPayload: meeting.raw,
+        },
+        db,
+      );
+      continue;
+    }
     const result = await ingestFathomMeeting({
       candidate,
       meeting,
@@ -178,19 +226,24 @@ export async function pollGoatFathomIntegration(input: {
       db,
     );
   } else {
-    // The whole (created_after, created_before] window was listed, so the
-    // bound is safe to advance to even when the window held no meetings.
+    // Fathom applies both timestamp filters strictly. Leave a 1 ms overlap
+    // between adjacent windows so a meeting exactly on this upper bound is
+    // included next time; event claims make the overlap idempotent.
     await completeGoatFathomSyncPages(
       {
         integrationId: candidate.integrationId,
         expectedCreatedAfterCursor: state.createdAfterCursor,
         expectedPageCursor: state.pageCursor,
-        createdAfterCursor: createdBefore,
+        createdAfterCursor: fathomCursorAfterCompletedWindow(createdBefore),
       },
       db,
     );
   }
-  return { enqueued, seen: meetings.length };
+  return { enqueued, seen: pendingResult.seen + meetings.length };
+}
+
+export function fathomCursorAfterCompletedWindow(createdBefore: Date): Date {
+  return new Date(createdBefore.getTime() - 1);
 }
 
 type FathomMeetingsBatch = {
@@ -255,8 +308,8 @@ async function ingestFathomMeeting(input: {
   );
   if (pendingBrainRefs.length === 0) return { enqueued: false };
 
-  // The list call already carries transcript, summary, and action items —
-  // Fathom needs no per-meeting detail fetch.
+  // The payload carries inline list content or content merged from the
+  // recording endpoints by the durable retry path.
   const payload = meeting.raw;
   const item = normalizeFathomMeeting(payload, { capturedAt: new Date().toISOString() });
 
@@ -302,6 +355,94 @@ async function ingestFathomMeeting(input: {
   captureGoatIngestionQuotaAnalytics(result?.quotaUpdates);
   if (result?.enqueued) wakeGoatBrainIngestWorker();
   return { enqueued: Boolean(result?.enqueued) };
+}
+
+async function retryPendingFathomMeetings(input: {
+  candidate: FathomPollCandidate;
+  apiKey: string;
+  routedBrainRefs: readonly string[];
+  signal: AbortSignal;
+}): Promise<{ enqueued: number; seen: number }> {
+  if (input.routedBrainRefs.length === 0) return { enqueued: 0, seen: 0 };
+  const db = getDb();
+  const pending = await listGoatFathomPendingMeetings(
+    {
+      integrationId: input.candidate.integrationId,
+      limit: GOAT_FATHOM_MAX_PENDING_MEETINGS_PER_POLL,
+    },
+    db,
+  );
+  let enqueued = 0;
+  for (const meeting of pending) {
+    if (input.signal.aborted) throw new Error("Fathom poll aborted.");
+    let content: FathomRecordingContent;
+    try {
+      content = await getFathomRecordingContent({
+        apiKey: input.apiKey,
+        recordingId: meeting.recordingId,
+        signal: input.signal,
+      });
+    } catch (error) {
+      if (input.signal.aborted) throw error;
+      if (isFathomAuthError(error) || (error instanceof FathomApiError && error.status === 429)) {
+        throw error;
+      }
+      captureException(error, {
+        event: "opencompany.goat_fathom_pending_retry_failed",
+        integration_id: meeting.integrationId,
+        recording_id: meeting.recordingId,
+      });
+      logger.warn("Goat Fathom pending meeting retry failed", {
+        event: "opencompany.goat_fathom_pending_retry_failed",
+        integration_id: meeting.integrationId,
+        recording_id: meeting.recordingId,
+        attempt_count: meeting.attemptCount + 1,
+        error,
+      });
+      await recordGoatFathomPendingMeetingAttempt(
+        {
+          integrationId: meeting.integrationId,
+          recordingId: meeting.recordingId,
+          rawPayload: meeting.rawPayload,
+        },
+        db,
+      );
+      break;
+    }
+    const rawPayload = mergeFathomRecordingContent(meeting.rawPayload, content);
+    if (!hasFathomMeetingContent(rawPayload)) {
+      await recordGoatFathomPendingMeetingAttempt(
+        {
+          integrationId: meeting.integrationId,
+          recordingId: meeting.recordingId,
+          rawPayload,
+        },
+        db,
+      );
+      continue;
+    }
+    const result = await ingestFathomMeeting({
+      candidate: input.candidate,
+      meeting: {
+        recordingId: meeting.recordingId,
+        title: meetingTitle(rawPayload),
+        createdAt: meeting.meetingCreatedAt.toISOString(),
+        raw: rawPayload,
+      },
+      routedBrainRefs: input.routedBrainRefs,
+    });
+    await deleteGoatFathomPendingMeeting(
+      { integrationId: meeting.integrationId, recordingId: meeting.recordingId },
+      db,
+    );
+    if (result.enqueued) enqueued += 1;
+  }
+  return { enqueued, seen: pending.length };
+}
+
+function meetingTitle(rawPayload: Record<string, unknown>): string | null {
+  if (typeof rawPayload.meeting_title === "string") return rawPayload.meeting_title;
+  return typeof rawPayload.title === "string" ? rawPayload.title : null;
 }
 
 async function markFathomNeedsReauth(candidate: FathomPollCandidate, reason: string) {

@@ -165,9 +165,10 @@ export function FathomIntegrationSetup({
           <li>Enable Fathom from a brain&apos;s Sources settings to route new meetings.</li>
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
-          New meetings are picked up within about 20 minutes of ending, once Fathom finishes their
-          summary and transcript. Live polling does not automatically import older meetings; use
-          Import company context when you want to scan recent history.
+          New meetings are usually picked up within about 20 minutes of ending. If Fathom is still
+          generating a summary or transcript, Goat keeps retrying until content is ready. Live
+          polling does not automatically import older meetings; use Import company context when you
+          want to scan recent history.
         </p>
       </section>
     </div>

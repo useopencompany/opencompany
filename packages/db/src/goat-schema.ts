@@ -12,6 +12,7 @@ import {
   integer,
   jsonb,
   pgSchema,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -1928,15 +1929,11 @@ export const goatGranolaSyncState = goat.table("granola_sync_state", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Per-integration Fathom poll cursor. Fathom's public API has no webhooks for
-// third-party keys here, so the runner polls GET /external/v1/meetings with
-// created_after/created_before windows. Each pass lists meetings created in
-// (created_after_cursor, now - processing lag]; the lag gives Fathom time to
-// finish transcript and summary generation before a meeting is ingested.
-// created_after_cursor NULL = first poll pending; ingestion starts from the
-// moment of connection, no backfill. pending_created_before_cursor pins the
-// window's upper bound while an opaque page_cursor continuation is in flight,
-// so a resumed pass keeps the exact filters Fathom's cursor was minted for.
+// Per-integration Fathom poll cursor. Goat uses bounded created_after /
+// created_before windows for personal API-key connections. The initial cursor
+// is written when the connection is created, so live ingestion never backfills
+// implicitly. pending_created_before_cursor pins the upper bound while an
+// opaque page_cursor continuation is in flight.
 export const goatFathomSyncState = goat.table("fathom_sync_state", {
   integrationId: text("integration_id")
     .primaryKey()
@@ -1951,6 +1948,40 @@ export const goatFathomSyncState = goat.table("fathom_sync_state", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Fathom can list a recording before its generated summary or transcript is
+// available. Keep those recordings durable while the timestamp cursor moves
+// forward; the runner retries the recording content endpoints and only creates
+// the cross-brain event claim once usable content exists.
+export const goatFathomPendingMeetings = goat.table(
+  "fathom_pending_meetings",
+  {
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    recordingId: text("recording_id").notNull(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    meetingCreatedAt: timestamp("meeting_created_at", { withTimezone: true }).notNull(),
+    rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastAttemptedAt: timestamp("last_attempted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      name: "goat_fathom_pending_meetings_pk",
+      columns: [table.integrationId, table.recordingId],
+    }),
+    retryIdx: index("goat_fathom_pending_meetings_retry_idx").on(
+      table.integrationId,
+      table.lastAttemptedAt.asc().nullsFirst(),
+      table.createdAt,
+    ),
+  }),
+);
 
 // One durable Drive change-feed cursor per connected account/corpus. My Drive
 // and directly shared files use corpus_key "user"; selected Shared Drives use

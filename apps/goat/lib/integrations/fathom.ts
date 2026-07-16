@@ -139,7 +139,11 @@ export async function connectGoatFathomIntegration(input: {
   // Anchor the poll cursor row now so the first runner poll starts from the
   // moment of connection (no backfill) without racing the credential write.
   await ensureGoatFathomSyncState(
-    { integrationId: integration.id, userWorkosId: input.userWorkosId },
+    {
+      integrationId: integration.id,
+      userWorkosId: input.userWorkosId,
+      createdAfterCursor: now,
+    },
     db,
   );
 
