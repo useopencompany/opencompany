@@ -56,7 +56,8 @@ export type GoatIntegrationProvider =
   | "linear"
   | "github"
   | "jamie"
-  | "slack";
+  | "slack"
+  | "hubspot";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear) are always personal. Installation-bound
@@ -96,14 +97,16 @@ export type GoatBrainSourceProvider =
   | "linear"
   | "github"
   | "gmail"
-  | "google_drive";
+  | "google_drive"
+  | "hubspot";
 export type GoatBrainSourceConfigProvider =
   | "jamie"
   | "gmail"
   | "google_drive"
   | "github"
   | "slack"
-  | "linear";
+  | "linear"
+  | "hubspot";
 export type GoatBrainSourceType =
   | "meeting"
   | "run"
@@ -119,6 +122,8 @@ export type GoatGmailMessageDirection = "sent" | "received";
 export type GoatSlackChannelType = "channel" | "group" | "im" | "mpim";
 export type GoatLinearEventEntityType = "issue" | "comment";
 export type GoatLinearEventAction = "create" | "update" | "remove";
+export type GoatHubspotObjectType = "contact" | "company" | "deal";
+export type GoatHubspotEventAction = "create" | "update";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
 export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
 export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
@@ -1183,7 +1188,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1232,7 +1237,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1286,7 +1291,7 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -1338,7 +1343,7 @@ export const goatBrainSources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_brain_sources_provider_check",
-      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear')`,
+      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear', 'hubspot')`,
     ),
   }),
 );
@@ -1440,7 +1445,7 @@ export const goatBrainSourceItems = goat.table(
     }).onDelete("cascade"),
     sourceProviderCheck: check(
       "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
@@ -1520,7 +1525,7 @@ export const goatBrainIngestJobs = goat.table(
     importRunIdx: index("goat_brain_ingest_jobs_import_run_idx").on(table.importRunId),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
@@ -1595,7 +1600,7 @@ export const goatWorkspaceIngestionReservations = goat.table(
     ),
     sourceProviderCheck: check(
       "goat_ingestion_reservations_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot')`,
     ),
     consumptionStateCheck: check(
       "goat_ingestion_reservations_consumption_state_check",
@@ -1739,6 +1744,58 @@ export const goatLinearIssueEvents = goat.table(
     actionCheck: check(
       "goat_linear_issue_events_action_check",
       sql`${table.action} IN ('create', 'update', 'remove')`,
+    ),
+  }),
+);
+
+// Raw HubSpot CRM activity buffer: the webhook inserts one row per relevant
+// object event (creation or property change); the runner's flush sweeper
+// batches unflushed rows per CRM object into an object-window source item
+// after a quiet period (source_item_id NULL = unflushed).
+export const goatHubspotObjectEvents = goat.table(
+  "hubspot_object_events",
+  {
+    id: text("id").primaryKey(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    portalId: text("portal_id").notNull(),
+    objectType: text("object_type").$type<GoatHubspotObjectType>().notNull(),
+    objectId: text("object_id").notNull(),
+    // One webhook delivery may buffer for several integrations of the same
+    // HubSpot portal; the event id makes redeliveries per-integration no-ops.
+    deliveryId: text("delivery_id").notNull(),
+    action: text("action").$type<GoatHubspotEventAction>().notNull(),
+    // Set for property-change events; flush classification reads it without
+    // re-parsing the payload.
+    propertyName: text("property_name"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    sourceItemId: text("source_item_id").references(() => goatBrainSourceItems.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    integrationDeliveryIdx: uniqueIndex("goat_hubspot_object_events_integration_delivery_idx").on(
+      table.integrationId,
+      table.deliveryId,
+    ),
+    pendingIdx: index("goat_hubspot_object_events_pending_idx")
+      .on(table.integrationId, table.objectType, table.objectId, table.receivedAt)
+      .where(sql`${table.sourceItemId} IS NULL`),
+    sourceItemIdx: index("goat_hubspot_object_events_source_item_idx").on(table.sourceItemId),
+    objectTypeCheck: check(
+      "goat_hubspot_object_events_object_type_check",
+      sql`${table.objectType} IN ('contact', 'company', 'deal')`,
+    ),
+    actionCheck: check(
+      "goat_hubspot_object_events_action_check",
+      sql`${table.action} IN ('create', 'update')`,
     ),
   }),
 );

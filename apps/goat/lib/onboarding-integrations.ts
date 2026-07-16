@@ -30,6 +30,7 @@ export function goatOnboardingConnectionError(provider: string | null, reason: s
     case "gmail_denied":
     case "slack_denied":
     case "linear_denied":
+    case "hubspot_denied":
       return `${name} authorization was cancelled.`;
     case "missing_code":
     case "missing_installation_id":
@@ -52,6 +53,8 @@ function providerName(provider: string | null) {
       return "Slack";
     case "jamie":
       return "Jamie";
+    case "hubspot":
+      return "HubSpot";
     default:
       return "This source";
   }

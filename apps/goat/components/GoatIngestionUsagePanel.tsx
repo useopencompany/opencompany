@@ -158,6 +158,7 @@ function formatProvider(provider: string) {
     google_drive: "Google Drive",
     github: "GitHub",
     gmail: "Gmail",
+    hubspot: "HubSpot",
     jamie: "Jamie",
     linear: "Linear",
     slack: "Slack",

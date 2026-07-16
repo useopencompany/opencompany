@@ -22,6 +22,7 @@ import {
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedGoatImportSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
+  isNormalizedHubspotObjectSourceItem,
   isNormalizedJamieMeetingSourceItem,
   isNormalizedLinearIssueSourceItem,
   isNormalizedSlackConversationSourceItem,
@@ -54,6 +55,7 @@ import {
   runGoatChatCaptureAgentIngest,
   runGoatImportAgentIngest,
   runGoogleDriveDocumentAgentIngest,
+  runHubspotObjectAgentIngest,
   runJamieMeetingAgentIngest,
   runLinearIssueAgentIngest,
   runSlackConversationAgentIngest,
@@ -177,6 +179,12 @@ const GITHUB_ACTIVITY_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "activity",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const HUBSPOT_OBJECT_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "hubspot",
+  sourceType: "activity",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GMAIL_THREAD_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "gmail",
@@ -230,6 +238,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: GITHUB_ACTIVITY_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGitHubActivitySourceItem,
     run: runTypedGoatBrainIngestHandler(runGitHubActivityAgentIngest),
+  },
+  {
+    descriptor: HUBSPOT_OBJECT_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedHubspotObjectSourceItem,
+    run: runTypedGoatBrainIngestHandler(runHubspotObjectAgentIngest),
   },
   {
     descriptor: GMAIL_THREAD_AGENT_INGEST_DESCRIPTOR,

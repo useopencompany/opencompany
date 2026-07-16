@@ -9,7 +9,8 @@ export type BrainSourceProvider =
   | "linear"
   | "github"
   | "gmail"
-  | "google_drive";
+  | "google_drive"
+  | "hubspot";
 export type BrainSourceType =
   | "meeting"
   | "run"
@@ -818,6 +819,195 @@ export function isNormalizedLinearIssueSourceItem(
     Array.isArray(issue.activity) &&
     issue.activity.length > 0 &&
     Array.isArray(issue.comments)
+  );
+}
+
+export type NormalizedHubspotObjectType = "contact" | "company" | "deal";
+
+export type NormalizedHubspotObjectActivity = {
+  occurredAt: string;
+  action: "create" | "update";
+  propertyName?: string;
+  propertyValue?: string;
+  changeSource?: string;
+};
+
+export type NormalizedHubspotObjectContent = {
+  object: {
+    portalId: string;
+    objectType: NormalizedHubspotObjectType;
+    objectId: string;
+    /** Display name: deal name, company name, or contact full name. */
+    name: string;
+    url?: string;
+    lifecycleStage?: string;
+    ownerName?: string;
+    stage?: string;
+    pipeline?: string;
+    amount?: string;
+    closeDate?: string;
+    /** Selected CRM properties from the live snapshot, keyed by property name. */
+    properties?: Record<string, string>;
+    associatedCompanies?: string[];
+    associatedContacts?: string[];
+    createdAt?: string;
+    updatedAt?: string;
+    /** True when the live object snapshot could not be fetched (deleted object,
+     * revoked token); fields above then reflect the buffered events only. */
+    snapshotStale?: boolean;
+    windowStart: string;
+    windowEnd: string;
+    activity: NormalizedHubspotObjectActivity[];
+  };
+};
+
+export type NormalizedHubspotObjectSourceItem =
+  NormalizedBrainSourceItem<NormalizedHubspotObjectContent> & {
+    sourceProvider: "hubspot";
+    sourceType: "activity";
+  };
+
+export function normalizeHubspotObjectWindow(input: {
+  // Minted per flush, so it doubles as the stable external id for dedupe.
+  windowId: string;
+  portalId: string;
+  objectType: NormalizedHubspotObjectType;
+  objectId: string;
+  name: string;
+  activity: NormalizedHubspotObjectActivity[];
+  flushedAt: string;
+  url?: string;
+  lifecycleStage?: string;
+  ownerName?: string;
+  stage?: string;
+  pipeline?: string;
+  amount?: string;
+  closeDate?: string;
+  properties?: Record<string, string>;
+  associatedCompanies?: string[];
+  associatedContacts?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+  snapshotStale?: boolean;
+}): NormalizedHubspotObjectSourceItem {
+  const windowId = input.windowId.trim();
+  if (!windowId) throw invalid("object windowId must not be empty", "invalid_object");
+  const portalId = input.portalId.trim();
+  if (!portalId) throw invalid("object portalId must not be empty", "invalid_object");
+  const objectId = input.objectId.trim();
+  if (!objectId) throw invalid("object objectId must not be empty", "invalid_object");
+  if (input.activity.length === 0) {
+    throw invalid("object activity must not be empty", "invalid_object");
+  }
+  const flushedAt = optionalIsoString(input.flushedAt);
+  if (!flushedAt) throw invalid("object flushedAt must be a timestamp", "invalid_object");
+  const name = optionalString(input.name) ?? objectId;
+
+  const activity = [...input.activity].sort(
+    (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime(),
+  );
+  const windowStart = activity[0]!.occurredAt;
+  const windowEnd = activity[activity.length - 1]!.occurredAt;
+  const url = optionalString(input.url);
+  const lifecycleStage = optionalString(input.lifecycleStage);
+  const ownerName = optionalString(input.ownerName);
+  const stage = optionalString(input.stage);
+  const pipeline = optionalString(input.pipeline);
+  const amount = optionalString(input.amount);
+  const closeDate = optionalString(input.closeDate);
+  const createdAt = optionalIsoString(input.createdAt);
+  const updatedAt = optionalIsoString(input.updatedAt);
+  const properties =
+    input.properties && Object.keys(input.properties).length > 0 ? input.properties : undefined;
+  const associatedCompanies =
+    input.associatedCompanies && input.associatedCompanies.length > 0
+      ? input.associatedCompanies
+      : undefined;
+  const associatedContacts =
+    input.associatedContacts && input.associatedContacts.length > 0
+      ? input.associatedContacts
+      : undefined;
+
+  const object = {
+    portalId,
+    objectType: input.objectType,
+    objectId,
+    name,
+    ...(url ? { url } : {}),
+    ...(lifecycleStage ? { lifecycleStage } : {}),
+    ...(ownerName ? { ownerName } : {}),
+    ...(stage ? { stage } : {}),
+    ...(pipeline ? { pipeline } : {}),
+    ...(amount ? { amount } : {}),
+    ...(closeDate ? { closeDate } : {}),
+    ...(properties ? { properties } : {}),
+    ...(associatedCompanies ? { associatedCompanies } : {}),
+    ...(associatedContacts ? { associatedContacts } : {}),
+    ...(createdAt ? { createdAt } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
+    ...(input.snapshotStale ? { snapshotStale: true } : {}),
+    windowStart,
+    windowEnd,
+    activity,
+  };
+  const contentHashInput = {
+    sourceProvider: "hubspot",
+    sourceType: "activity",
+    portalId,
+    objectType: input.objectType,
+    objectId,
+    activity: activity.map((entry) => ({
+      occurredAt: entry.occurredAt,
+      action: entry.action,
+      ...(entry.propertyName ? { propertyName: entry.propertyName } : {}),
+    })),
+    name,
+    ...(stage ? { stage } : {}),
+  };
+
+  return {
+    sourceProvider: "hubspot",
+    sourceType: "activity",
+    externalId: windowId,
+    sourceRef: `hubspot:${input.objectType}:${objectId}`,
+    title: name,
+    occurredAt: windowStart,
+    capturedAt: flushedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: { object },
+  };
+}
+
+export function isNormalizedHubspotObjectSourceItem(
+  value: unknown,
+): value is NormalizedHubspotObjectSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedHubspotObjectSourceItem>;
+  if (
+    item.sourceProvider !== "hubspot" ||
+    item.sourceType !== "activity" ||
+    typeof item.externalId !== "string" ||
+    typeof item.sourceRef !== "string" ||
+    typeof item.title !== "string" ||
+    typeof item.occurredAt !== "string" ||
+    typeof item.capturedAt !== "string" ||
+    typeof item.contentHash !== "string" ||
+    !item.content ||
+    typeof item.content !== "object"
+  ) {
+    return false;
+  }
+  const object = (item.content as Partial<NormalizedHubspotObjectContent>).object;
+  return (
+    !!object &&
+    typeof object === "object" &&
+    typeof object.portalId === "string" &&
+    typeof object.objectType === "string" &&
+    typeof object.objectId === "string" &&
+    typeof object.name === "string" &&
+    Array.isArray(object.activity) &&
+    object.activity.length > 0
   );
 }
 

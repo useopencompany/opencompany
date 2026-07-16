@@ -9,6 +9,7 @@ import {
   Files,
   FileText,
   GitBranch,
+  Handshake,
   ListTodo,
   Mail,
   PlugZap,
@@ -174,6 +175,12 @@ function IntegrationRows({
           label="Slack"
           provider="slack"
           accounts={integrations.personalAccounts.slack}
+        />
+        <IntegrationProviderGroup
+          icon={Handshake}
+          label="HubSpot"
+          provider="hubspot"
+          accounts={integrations.personalAccounts.hubspot}
         />
         <McpIntegrationRow setup={mcpSetup} />
         <CodexIntegrationRow integration={integrations.codex} />
@@ -353,8 +360,11 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
       ? [account.connectionLabel, account.accountName].filter(Boolean).join(" · ") ||
         account.accountEmail ||
         account.integrationId
-      : account.provider === "linear"
-        ? account.connectionLabel || account.accountName || account.integrationId
+      : account.provider === "linear" || account.provider === "hubspot"
+        ? account.connectionLabel ||
+          account.accountName ||
+          account.accountEmail ||
+          account.integrationId
         : account.accountEmail || account.accountName || account.integrationId;
 
   const beginDisconnect = () => {
@@ -611,7 +621,13 @@ function integrationStatus(
 }
 
 function integrationConnectHref(
-  provider: GoatGoogleProviderState["provider"] | "linear" | "github" | "jamie" | "slack",
+  provider:
+    | GoatGoogleProviderState["provider"]
+    | "linear"
+    | "github"
+    | "jamie"
+    | "slack"
+    | "hubspot",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -624,6 +640,8 @@ function integrationConnectHref(
     return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "jamie") return "/settings/jamie";
   if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
+  if (provider === "hubspot")
+    return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";
 }
 

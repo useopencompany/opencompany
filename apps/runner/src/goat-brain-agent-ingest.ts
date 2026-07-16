@@ -48,6 +48,8 @@ import {
   type NormalizedGoatChatCaptureSourceItem,
   type NormalizedGoatImportSourceItem,
   type NormalizedGoogleDriveDocumentSourceItem,
+  type NormalizedHubspotObjectContent,
+  type NormalizedHubspotObjectSourceItem,
   type NormalizedJamieMeetingSourceItem,
   type NormalizedLinearIssueContent,
   type NormalizedLinearIssueSourceItem,
@@ -138,6 +140,8 @@ const PROMPT_SLACK_TRANSCRIPT_BYTES = 80_000;
 const PROMPT_SLACK_CONTEXT_BYTES = 40_000;
 const PROMPT_LINEAR_DESCRIPTION_BYTES = 24_000;
 const PROMPT_LINEAR_ACTIVITY_BYTES = 80_000;
+const PROMPT_HUBSPOT_ACTIVITY_BYTES = 60_000;
+const PROMPT_HUBSPOT_PROPERTIES_BYTES = 24_000;
 const PROMPT_GMAIL_MESSAGES_BYTES = 80_000;
 const PROMPT_GOOGLE_DRIVE_DOCUMENT_BYTES = 100_000;
 const RESULT_SUMMARY_LIMIT = 2_000;
@@ -281,6 +285,93 @@ export const LINEAR_ISSUE_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPromp
     "folds one window of Linear issue activity into a single brain of Markdown knowledge documents.",
   skipRule: `Linear is mostly routine task churn: status moves, assignment shuffles, estimate tweaks, and short logistics comments carry no durable knowledge. If nothing in the window is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only decisions, scope changes, root causes, substantive discussion, and facts about people, companies, or projects belong in the brain.`,
 });
+
+export const HUBSPOT_OBJECT_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission:
+    "folds one window of HubSpot CRM activity — changes to a contact, company, or deal record — into a single brain of Markdown knowledge documents.",
+  skipRule: `CRM activity is mostly routine data entry: field touch-ups, list churn, and bookkeeping edits carry no durable knowledge. If nothing in the window is brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Skipping is the common, correct outcome — only meaningful relationship changes (a deal advancing or closing, a new company or contact that matters, substantive notes about people, companies, or negotiations) belong in the brain.`,
+});
+
+export function buildHubspotObjectAgentIngestPrompt(item: NormalizedHubspotObjectSourceItem) {
+  const object = item.content.object;
+  const label = `${object.objectType} "${object.name}"`;
+  const activityText = truncateByBytes(
+    formatHubspotObjectActivity(object),
+    PROMPT_HUBSPOT_ACTIVITY_BYTES,
+  );
+  const propertiesText = object.properties
+    ? truncateByBytes(
+        formatHubspotObjectProperties(object.properties),
+        PROMPT_HUBSPOT_PROPERTIES_BYTES,
+      )
+    : "";
+  return [
+    `Ingest this batch of HubSpot CRM activity on the ${label} into the brain. It is one activity window: everything that changed on the record since the last ingested batch.`,
+    "The record snapshot reflects the record's current state and is interpretive context; the activity window is the primary ingest target.",
+    "",
+    "Required outcome, all scoped to this brain:",
+    "1. Query the brain first for likely existing pages and facts before writing, so you update existing knowledge instead of duplicating it.",
+    "2. Judge the window first: extract only durable knowledge — deals advancing or closing, new relationships that matter, and facts about people, companies, or negotiations. Ignore routine data-entry churn around it.",
+    `3. Fold each durable point into the page where it belongs (rewrite compiled truth when the state of play changes, timeline-add for dated evidence). Cite the record with --source-ref ${item.sourceRef}.`,
+    "4. CRM records follow the pointer rule: the record's canonical home is HubSpot, so write a pointer plus a one-line current-state summary, never a copy of the record's fields. Do not create a page per record — fold the knowledge into the company, person, or project pages it belongs to; create a dedicated page only when the relationship clearly warrants one (an active deal or key account).",
+    "5. Create or update person or company pages for entities central to the activity, with backlinks per the iron law. Do not create pages for records that merely got a field touched.",
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Window: ${object.windowStart} to ${object.windowEnd}`,
+    object.url ? `Record URL: ${object.url}` : null,
+    object.snapshotStale
+      ? "The live record snapshot could not be fetched (the record may have been deleted); only the buffered activity below is available."
+      : null,
+    "",
+    `## Record snapshot\n${formatHubspotObjectSnapshot(object)}`,
+    propertiesText ? `## Record properties\n${propertiesText}` : null,
+    `## Activity window\n${activityText}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
+function formatHubspotObjectSnapshot(object: NormalizedHubspotObjectContent["object"]) {
+  const lines = [
+    `- Record: ${object.objectType} — ${object.name}`,
+    object.lifecycleStage ? `- Lifecycle stage: ${object.lifecycleStage}` : null,
+    object.stage
+      ? `- Deal stage: ${object.stage}${object.pipeline ? ` (pipeline ${object.pipeline})` : ""}`
+      : null,
+    object.amount ? `- Amount: ${object.amount}` : null,
+    object.closeDate ? `- Close date: ${object.closeDate}` : null,
+    object.ownerName ? `- Owner: ${object.ownerName}` : null,
+    object.associatedCompanies && object.associatedCompanies.length > 0
+      ? `- Associated companies: ${object.associatedCompanies.join(", ")}`
+      : null,
+    object.associatedContacts && object.associatedContacts.length > 0
+      ? `- Associated contacts: ${object.associatedContacts.join(", ")}`
+      : null,
+    object.createdAt ? `- Created: ${object.createdAt}` : null,
+  ];
+  return lines.filter((line): line is string => line !== null).join("\n");
+}
+
+function formatHubspotObjectProperties(properties: Record<string, string>) {
+  return Object.entries(properties)
+    .map(([key, value]) => `- ${key}: ${value.replaceAll("\n", "\n  ")}`)
+    .join("\n");
+}
+
+function formatHubspotObjectActivity(object: NormalizedHubspotObjectContent["object"]) {
+  return object.activity
+    .map((entry) => {
+      const time = entry.occurredAt.slice(0, 16).replace("T", " ");
+      const source = entry.changeSource ? ` via ${entry.changeSource}` : "";
+      if (entry.action === "create") {
+        return `[${time}] The ${object.objectType} was created${source}`;
+      }
+      const property = entry.propertyName ?? "a property";
+      const value = entry.propertyValue ? ` to "${entry.propertyValue}"` : "";
+      return `[${time}] ${property} changed${value}${source}`;
+    })
+    .join("\n");
+}
 
 export const GMAIL_THREAD_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
   mission:
@@ -1282,6 +1373,46 @@ export async function runLinearIssueAgentIngest(
     activityCount: issue.activity.length,
     windowStart: issue.windowStart,
     windowEnd: issue.windowEnd,
+  };
+}
+
+export async function runHubspotObjectAgentIngest(
+  input: {
+    jobId?: string;
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedHubspotObjectSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    importRunId?: string | null;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  const object = input.item.content.object;
+  const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: HUBSPOT_OBJECT_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () => buildHubspotObjectAgentIngestPrompt(input.item),
+    // CRM activity is authored by whoever worked the record, not the
+    // integration owner.
+    createdByWorkosId: null,
+    noMutationOutcome: "skip",
+    ...(input.importRunId ? { importRunId: input.importRunId } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    objectType: object.objectType,
+    objectId: object.objectId,
+    activityCount: object.activity.length,
+    windowStart: object.windowStart,
+    windowEnd: object.windowEnd,
   };
 }
 
