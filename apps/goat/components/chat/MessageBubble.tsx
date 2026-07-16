@@ -50,6 +50,9 @@ function AssistantTurn({
     taskLookup,
     stopped || message.metadata?.aborted === true,
   );
+  // Failed turns often end without any text part (sandbox start failure, disconnected auth);
+  // the error must still get a bubble or the turn renders as nothing.
+  const showStandaloneError = Boolean(error) && !items.some((item) => item.type === "text");
 
   return (
     <div className="flex flex-col gap-2">
@@ -63,6 +66,7 @@ function AssistantTurn({
         if (item.type === "task") return <TaskCard key={item.key} task={item.task} />;
         return <ToolCallItem key={item.key} tool={item.tool} />;
       })}
+      {showStandaloneError && error ? <AssistantTextBubble text={error} error={error} /> : null}
       {typeof durationMs === "number" ? <TurnDuration durationMs={durationMs} /> : null}
     </div>
   );

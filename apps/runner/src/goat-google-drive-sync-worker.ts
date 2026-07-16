@@ -12,6 +12,7 @@ import {
   completeGoatGoogleDriveFile,
   createGoatGoogleDriveWatchChannel,
   failGoatGoogleDriveFile,
+  type GoatGoogleDriveAllFilesRef,
   type GoatGoogleDriveResourceRef,
   listActiveGoatGoogleDriveWatchChannels,
   listEnabledGoatGoogleDriveSources,
@@ -80,6 +81,7 @@ type ClaimedFile = {
 
 type DriveRoute = {
   brainRef: string;
+  allFiles: GoatGoogleDriveAllFilesRef | null;
   resources: GoatGoogleDriveResourceRef[];
 };
 
@@ -296,7 +298,12 @@ async function handleDriveChange(
   const directlySelected = matching.some((route) =>
     route.resources.some((resource) => resource.kind === "folder" && resource.id === file!.id),
   );
-  if (!directlySelected) {
+  const matchedFolderSelection = matching.some((route) =>
+    route.resources.some(
+      (resource) => resource.kind === "folder" && selectedBefore(resource, observedAt),
+    ),
+  );
+  if (!directlySelected && matchedFolderSelection) {
     await discoverMovedFolderDescendants(context, integrationId, routes, file, observedAt);
   }
 }
@@ -357,8 +364,10 @@ async function processClaimedFile(env: RunnerEnv, state: ClaimedFile) {
           state.integrationId,
           getDb(),
         );
-        const eligibleRoutes = routes.filter((route) =>
-          route.resources.some((resource) => selectedBefore(resource, state.lastObservedAt)),
+        const eligibleRoutes = routes.filter(
+          (route) =>
+            isAllFilesSelectedBefore(route.allFiles, state.lastObservedAt) ||
+            route.resources.some((resource) => selectedBefore(resource, state.lastObservedAt)),
         );
         const cached = cachedDriveMetadata(state);
         const skipped = normalizeGoogleDriveDocument({
@@ -484,10 +493,13 @@ async function matchingDriveRoutes(
   file: GoogleDriveFileMetadata,
   observedAt: Date,
 ) {
-  const eligible = routes.filter((route) =>
-    route.resources.some(
-      (resource) => resource.id === file.id && selectedBefore(resource, observedAt),
-    ),
+  const eligible = routes.filter(
+    (route) =>
+      (file.mimeType !== GOOGLE_DRIVE_FOLDER_MIME_TYPE &&
+        isAllFilesSelectedBefore(route.allFiles, observedAt)) ||
+      route.resources.some(
+        (resource) => resource.id === file.id && selectedBefore(resource, observedAt),
+      ),
   );
   const folderResources = routes.flatMap((route) =>
     route.resources
@@ -613,6 +625,10 @@ async function loadDriveContext(
 
 function selectedBefore(resource: GoatGoogleDriveResourceRef, observedAt: Date) {
   return new Date(resource.selectedAt).getTime() <= observedAt.getTime();
+}
+
+function isAllFilesSelectedBefore(allFiles: GoatGoogleDriveAllFilesRef | null, observedAt: Date) {
+  return Boolean(allFiles && new Date(allFiles.selectedAt).getTime() <= observedAt.getTime());
 }
 
 function cachedDriveMetadata(state: ClaimedFile): GoogleDriveFileMetadata | null {

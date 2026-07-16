@@ -20,8 +20,10 @@ import {
 } from "@opencompany/db/goat-gmail";
 import {
   GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE,
+  type GoatGoogleDriveAllFilesRef,
   type GoatGoogleDriveCorpusKey,
   type GoatGoogleDriveResourceRef,
+  readGoatGoogleDriveAllFiles,
   readGoatGoogleDriveResources,
   upsertGoatGoogleDriveSyncCursor,
 } from "@opencompany/db/goat-google-drive";
@@ -1058,6 +1060,7 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
   brainRef: string;
   integrationId: string;
   enabled: boolean;
+  allFiles?: boolean;
   resourceIds: string[];
 }): Promise<GoatWorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
@@ -1075,8 +1078,8 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
   if (resourceIds.some((id) => id.length > 512)) {
     return { ok: false, error: "Invalid Google Drive resource id." };
   }
-  if (input.enabled && resourceIds.length === 0) {
-    return { ok: false, error: "Select at least one Drive file or folder." };
+  if (input.enabled && !input.allFiles && resourceIds.length === 0) {
+    return { ok: false, error: "Select at least one Drive file or folder, or choose all files." };
   }
   if (resourceIds.length > 100) {
     return { ok: false, error: "Select at most 100 Drive files or folders per brain." };
@@ -1096,12 +1099,14 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
     const existingResources = new Map(
       readGoatGoogleDriveResources(existing?.config).map((resource) => [resource.id, resource]),
     );
+    const existingAllFiles = readGoatGoogleDriveAllFiles(existing?.config);
 
     // Disabling must remain possible after token revocation or access loss.
     // Retain only server-known resources; the editor passes an empty list when
     // the user intentionally clears the selection.
     if (!input.enabled) {
       const resources = resourceIds.flatMap((id) => existingResources.get(id) ?? []);
+      const allFiles = input.allFiles ? existingAllFiles : null;
       await upsertGoatBrainSource({
         brainRef: input.brainRef,
         provider: "google_drive",
@@ -1109,7 +1114,7 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
         userWorkosId: integration.userWorkosId,
         createdByWorkosId: context.user.workosUserId,
         enabled: false,
-        config: { resources },
+        config: { ...(allFiles ? { allFiles } : {}), resources },
       });
       revalidatePath("/", "layout");
       return { ok: true };
@@ -1125,15 +1130,21 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
     if (!account) {
       return { ok: false, error: "Only the connection owner can configure this source." };
     }
-    const files = await Promise.all(
-      resourceIds.map((fileId) => getGoatGoogleDriveFile({ account, fileId })),
-    );
+    const files = input.allFiles
+      ? []
+      : await Promise.all(resourceIds.map((fileId) => getGoatGoogleDriveFile({ account, fileId })));
     if (files.some((file) => file.trashed)) {
       return { ok: false, error: "Remove trashed Drive items before saving." };
     }
 
     const resetSelectionTimes = Boolean(existing && !existing.enabled && input.enabled);
-    const driveIds = [...new Set(files.flatMap((file) => (file.driveId ? [file.driveId] : [])))];
+    const sharedDrives = input.allFiles ? await listGoatGoogleSharedDrives({ account }) : [];
+    const driveIds = [
+      ...new Set([
+        ...files.flatMap((file) => (file.driveId ? [file.driveId] : [])),
+        ...sharedDrives.map((drive) => drive.id),
+      ]),
+    ];
     const sharedTokens = new Map<string, string>();
     await Promise.all(
       driveIds.map(async (driveId) => {
@@ -1178,6 +1189,12 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
     // token acquisition is either before selection (filtered) or after it
     // (present in the durable feed), so the no-backfill boundary has no gap.
     const selectedAt = new Date().toISOString();
+    const allFiles: GoatGoogleDriveAllFilesRef | null = input.allFiles
+      ? {
+          selectedAt:
+            !resetSelectionTimes && existingAllFiles ? existingAllFiles.selectedAt : selectedAt,
+        }
+      : null;
     const resources: GoatGoogleDriveResourceRef[] = files.map((file) => {
       const corpusKey: GoatGoogleDriveCorpusKey =
         file.driveId && sharedTokens.has(file.driveId) ? `drive:${file.driveId}` : "user";
@@ -1201,7 +1218,7 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
       userWorkosId: integration.userWorkosId,
       createdByWorkosId: context.user.workosUserId,
       enabled: true,
-      config: { resources },
+      config: { ...(allFiles ? { allFiles } : {}), resources },
     });
     triggerGoatGoogleDriveSyncWake().catch((error) => {
       console.warn("Could not wake Goat Google Drive sync worker.", {
