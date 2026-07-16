@@ -54,7 +54,7 @@ import {
 } from "./sandbox";
 
 const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
-export const CODEX_FALLBACK_NPM_PACKAGE = "@openai/codex@0.132.0";
+export const CODEX_FALLBACK_NPM_PACKAGE = "@openai/codex@0.144.5";
 const CODEX_PROVIDER_ID = "opencompany";
 const CODEX_PROVIDER_NAME = "OpenCompany";
 const CODEX_DIRECT_BASE_URL = "https://api.openai.com/v1";

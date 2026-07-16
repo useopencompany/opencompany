@@ -128,7 +128,7 @@ traffic, Postgres remains the accounting source of truth.**
 - [x] Write `${CODEX_HOME}/config.toml` custom provider:
       `model_provider = "opencompany"`, `base_url = <publicUrl>/broker/openai/v1`,
       `env_key = "OPENCOMPANY_LLM_BROKER_TOKEN"`, `wire_api = "responses"` — schema verified
-      against pinned `@openai/codex@0.132.0` with `--strict-config`
+      against pinned `@openai/codex@0.144.5` with `--strict-config`
 - [x] `OPENCOMPANY_LLM_BROKER_TOKEN` env carries the broker token; relax the key-required guard to
       "broker active OR raw key present"
 - [x] `codexHostedToolUsage` → display-only (cost 0, `broker_metered`) when brokered
@@ -161,7 +161,7 @@ Run an opencode delegation + a memory query on a PR preview (preview runner gets
 ## Open risks / watch items
 
 - **Codex live smoke** still required against the pinned CLI version. The config schema was
-  verified with `@openai/codex@0.132.0 --strict-config`
+  verified with `@openai/codex@0.144.5 --strict-config`
   (`model_providers`, `base_url`, `env_key`, `wire_api = "responses"`), but only a live
   brokered `codex exec` proves streaming + usage shape end-to-end.
 - **Render proxy + long SSE**: model streams emit continuously so idle timeouts should
