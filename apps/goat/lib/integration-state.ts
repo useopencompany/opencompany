@@ -70,6 +70,19 @@ export type GoatJamieProviderState = {
   apiKeyConfigured: boolean;
 };
 
+// Granola connects with a personal API key minted in the Granola app; the
+// integration id is what the brain-source picker and save action key config
+// rows on.
+export type GoatGranolaProviderState = {
+  provider: "granola";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountEmail: string | null;
+  accountName: string | null;
+  statusReason: string | null;
+};
+
 export type GoatSlackProviderState = {
   provider: "slack";
   connected: boolean;
@@ -108,7 +121,8 @@ export type GoatPersonalAccountProvider =
   | "google_calendar"
   | "google_drive"
   | "linear"
-  | "slack";
+  | "slack"
+  | "granola";
 
 export type GoatIntegrationState = {
   gmail: GoatGoogleProviderState;
@@ -118,6 +132,7 @@ export type GoatIntegrationState = {
   github: GoatGitHubProviderState;
   jamie: GoatJamieProviderState;
   slack: GoatSlackProviderState;
+  granola: GoatGranolaProviderState;
   codex: GoatCodexProviderState;
   // All of the user's connected accounts per personal provider. The
   // single-account states above remain the "primary connection" view used by
@@ -157,6 +172,7 @@ export function goatPersonalAccountsFromRows(
     google_drive: [],
     linear: [],
     slack: [],
+    granola: [],
   };
   for (const row of rows) {
     if (row.status === "disconnected") continue;
@@ -171,7 +187,8 @@ export function goatPersonalAccountsFromRows(
       row.provider === "gmail" ||
       row.provider === "google_calendar" ||
       row.provider === "google_drive" ||
-      row.provider === "slack"
+      row.provider === "slack" ||
+      row.provider === "granola"
     ) {
       personalAccounts[row.provider].push(accountViewFromRow(row.provider, row));
     }
@@ -209,6 +226,7 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     github: githubProviderState(byProvider.get("github")),
     jamie: jamieProviderState(byProvider.get("jamie")),
     slack: slackProviderState(byProvider.get("slack")),
+    granola: granolaProviderState(byProvider.get("granola")),
     codex: {
       provider: "codex",
       connected: false,
@@ -321,6 +339,30 @@ function slackProviderState(row: IntegrationStateRow | undefined): GoatSlackProv
     integrationId: row.id ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     teamName: row.connectionLabel ?? row.connection_label ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+  };
+}
+
+function granolaProviderState(row: IntegrationStateRow | undefined): GoatGranolaProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "granola",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountEmail: null,
+      accountName: null,
+      statusReason: null,
+    };
+  }
+
+  return {
+    provider: "granola",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    accountEmail: row.accountEmail ?? row.account_email ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
   };
 }

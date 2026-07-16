@@ -28,6 +28,7 @@ import { GoatBrainView } from "@/components/GoatBrainView";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import { GoatSpendOverview } from "@/components/GoatSpendOverview";
 import { GoatSurface } from "@/components/GoatSurface";
+import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
@@ -307,6 +308,26 @@ export function GoatJamieSettingsRoute() {
         initialState={integrations.jamie}
         brainSourcesHref={brainSourcesHref}
         canManage={workspace.role === "admin"}
+      />
+    </GoatSettingsContent>
+  );
+}
+
+export function GoatGranolaSettingsRoute() {
+  const { activeBrain, integrations } = useGoatAppData();
+  const brainSourcesHref = activeBrain
+    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+    : null;
+
+  return (
+    <GoatSettingsContent
+      title="Granola"
+      description="Meeting notes for Goat Brain"
+      backLink={{ href: "/settings/integrations", label: "Integrations" }}
+    >
+      <GranolaIntegrationSetup
+        initialState={integrations.granola}
+        brainSourcesHref={brainSourcesHref}
       />
     </GoatSettingsContent>
   );
