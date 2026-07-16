@@ -124,6 +124,7 @@ describe("buildGoatBrainActivityEvents", () => {
       at: "2026-07-09T10:01:20.000Z",
       detail: "Promoted the capture into concepts.",
       brainId: "pricing-teardown-reference",
+      durationMs: 80_000,
       pages: [
         {
           brainId: "pricing-teardown",
@@ -168,6 +169,7 @@ describe("buildGoatBrainActivityEvents", () => {
           result: {
             skipped: true,
             summary: "No durable brain material.",
+            durationMs: 72_000,
             trace: trace(),
           },
         }),
@@ -193,6 +195,7 @@ describe("buildGoatBrainActivityEvents", () => {
         schemaVersion: "goat.brain_ingest_trace.v1",
         toolCallCount: 1,
       },
+      durationMs: 72_000,
     });
     expect(legacy).toMatchObject({ trace: null });
   });

@@ -965,7 +965,14 @@
       "idx": 137,
       "version": "7",
       "when": 1784652403000,
-      "tag": "0137_goat_codex_event_type_coverage",
+      "tag": "0137_goat_fathom_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1784652404000,
+      "tag": "0138_goat_codex_event_type_coverage",
       "breakpoints": true
     }
   ]

@@ -17,6 +17,7 @@ import {
 } from "@opencompany/db/goat-schema";
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
+  isNormalizedFathomMeetingSourceItem,
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
@@ -51,6 +52,7 @@ import {
   type GoatBrainAgentIngestEnv,
   GoatBrainAgentOutcomeError,
   GoatBrainIngestBudgetError,
+  runFathomMeetingAgentIngest,
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
@@ -157,6 +159,12 @@ const GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "meeting",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const FATHOM_MEETING_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "fathom",
+  sourceType: "meeting",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "goat-chat",
@@ -226,6 +234,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGranolaMeetingSourceItem,
     run: runTypedGoatBrainIngestHandler(runGranolaMeetingAgentIngest),
+  },
+  {
+    descriptor: FATHOM_MEETING_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedFathomMeetingSourceItem,
+    run: runTypedGoatBrainIngestHandler(runFathomMeetingAgentIngest),
   },
   {
     descriptor: GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR,
@@ -545,11 +558,15 @@ export async function claimNextGoatBrainIngestJob(input: {
   supportedJobs: readonly GoatBrainIngestJobDescriptor[];
   store?: GoatBrainIngestStore;
   leaseTtlMs?: number;
+  releasePendingReservations?: boolean;
 }) {
   const now = new Date();
   const leaseId = newGoatBrainIngestLeaseId();
   const store = input.store ?? createDbGoatBrainIngestStore();
-  if (!input.store) {
+  // The long-running worker creates one DB store and passes it into every
+  // claim. Keep backlog release explicit so that test-store injection does not
+  // accidentally disable the production sweep.
+  if (input.releasePendingReservations ?? !input.store) {
     await releasePendingGoatIngestionReservations({ now, maxWorkspaces: 50 });
   }
   return store.claimNext({
@@ -725,6 +742,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
           }),
       ),
     );
+    const resultWithDuration = withGoatBrainIngestRunDuration(result, runStartedAt);
     recordBrainIngestModelCost(result);
     await debitFrontierIngestCost(input.job, result);
     if (!leaseActive) {
@@ -734,7 +752,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
       });
       return;
     }
-    if (isSkippedIngestResult(result)) {
+    if (isSkippedIngestResult(resultWithDuration)) {
       const skipped = await runSpan.runInContext(() =>
         withGoatSpan(GOAT_SPANS.brainIngestComplete, baseAttributes, () =>
           store.skip({
@@ -743,8 +761,8 @@ export async function runClaimedGoatBrainIngestJob(input: {
             leaseId,
             leaseOwner,
             now: new Date(),
-            result,
-            reason: skippedIngestReason(result),
+            result: resultWithDuration,
+            reason: skippedIngestReason(resultWithDuration),
           }),
         ),
       );
@@ -770,7 +788,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
           leaseId,
           leaseOwner,
           now: new Date(),
-          result,
+          result: resultWithDuration,
         }),
       ),
     );
@@ -801,6 +819,10 @@ export async function runClaimedGoatBrainIngestJob(input: {
           ? GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS
           : GOAT_BRAIN_INGEST_MAX_ATTEMPTS;
     const terminal = input.job.attempts >= maxAttempts;
+    const failureResult =
+      error instanceof GoatBrainIngestBudgetError
+        ? withGoatBrainIngestRunDuration({ ...error.result }, runStartedAt)
+        : undefined;
     const active = await runSpan.runInContext(() =>
       withGoatSpan(GOAT_SPANS.brainIngestFail, baseAttributes, () =>
         store.fail({
@@ -812,7 +834,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
           attempts: input.job.attempts,
           error: message,
           maxAttempts,
-          ...(error instanceof GoatBrainIngestBudgetError ? { result: error.result } : {}),
+          ...(failureResult ? { result: failureResult } : {}),
         }),
       ),
     );
@@ -840,6 +862,16 @@ export async function runClaimedGoatBrainIngestJob(input: {
     // down (its only other flush point) for a long time. No-ops when disabled.
     await flushBraintrust();
   }
+}
+
+function withGoatBrainIngestRunDuration<T extends Record<string, unknown>>(
+  result: T,
+  runStartedAt: number,
+) {
+  return {
+    ...result,
+    durationMs: Math.max(0, Math.round(performance.now() - runStartedAt)),
+  };
 }
 
 // Frontier-tier pass-through: debit the attempt's tracked provider model cost
@@ -972,6 +1004,7 @@ export function startGoatBrainIngestWorker(
             supportedJobs,
             store,
             leaseTtlMs: GOAT_BRAIN_INGEST_LEASE_TTL_MS,
+            releasePendingReservations: true,
           });
           if (!job) break;
           const running = runClaimedGoatBrainIngestJob({

@@ -33,6 +33,7 @@ export type GoatBrainActivityEvent = {
   brainId: string | null;
   pages: GoatBrainActivityPage[];
   trace: GoatBrainIngestTrace | null;
+  durationMs: number | null;
 };
 
 export type GoatBrainDraftIngestStateKind = "queued" | "paused" | "running" | "retrying" | "failed";
@@ -76,6 +77,7 @@ export function buildGoatBrainActivityEvents(
       brainId: null,
       pages: [],
       trace: null,
+      durationMs: null,
     });
 
     if (job.status === "running") {
@@ -90,6 +92,7 @@ export function buildGoatBrainActivityEvents(
         brainId: null,
         pages: [],
         trace: null,
+        durationMs: null,
       });
     } else if (job.status === "succeeded" || job.status === "skipped") {
       const skipped = jobResultSkipped(job);
@@ -104,6 +107,7 @@ export function buildGoatBrainActivityEvents(
         brainId,
         pages: jobResultPages(job),
         trace: jobResultTrace(job),
+        durationMs: jobRunDurationMs(job),
       });
     } else if (job.status === "failed") {
       events.push({
@@ -117,6 +121,7 @@ export function buildGoatBrainActivityEvents(
         brainId: null,
         pages: [],
         trace: null,
+        durationMs: jobRunDurationMs(job),
       });
     } else if (job.status === "queued" && job.plan_paused) {
       events.push({
@@ -130,6 +135,7 @@ export function buildGoatBrainActivityEvents(
         brainId: null,
         pages: [],
         trace: null,
+        durationMs: null,
       });
     } else if (job.status === "queued" && job.attempts > 0) {
       events.push({
@@ -143,6 +149,7 @@ export function buildGoatBrainActivityEvents(
         brainId: null,
         pages: [],
         trace: null,
+        durationMs: null,
       });
     }
   }
@@ -252,6 +259,19 @@ function jobResultTrace(job: GoatBrainIngestJobRow): GoatBrainIngestTrace | null
   return normalizeGoatBrainIngestTrace(job.result?.trace);
 }
 
+function jobRunDurationMs(job: GoatBrainIngestJobRow): number | null {
+  const durationMs = finiteNonNegativeNumber(job.result?.durationMs);
+  if (durationMs !== null) return Math.round(durationMs);
+
+  if (!job.completed_at) return null;
+  const startedAt = new Date(job.created_at).getTime();
+  const completedAt = new Date(job.completed_at).getTime();
+  if (!Number.isFinite(startedAt) || !Number.isFinite(completedAt) || completedAt < startedAt) {
+    return null;
+  }
+  return Math.round(completedAt - startedAt);
+}
+
 function jobResultPages(job: GoatBrainIngestJobRow): GoatBrainActivityPage[] {
   const value = job.result?.pages;
   if (!Array.isArray(value)) return [];
@@ -292,6 +312,13 @@ function normalizedActivityPageAction(value: unknown): GoatBrainActivityPageActi
 
 function normalizedText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function finiteNonNegativeNumber(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function firstLine(value: string | null): string | null {

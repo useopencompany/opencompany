@@ -179,6 +179,7 @@ describe("GoatBrainActivity", () => {
         completed_at: "2026-07-09T10:01:00.000Z",
         result: {
           summary: "Filed one page.",
+          durationMs: 80_000,
           trace: trace(),
         },
       }),
@@ -200,6 +201,7 @@ describe("GoatBrainActivity", () => {
     expect(within(dialog).getByText("Pricing teardown reference")).toBeInTheDocument();
     expect(within(dialog).getByText("Trace ID")).toBeInTheDocument();
     expect(within(dialog).getByText("gbjob_1")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Run 1m, 20\.0s/)).toBeInTheDocument();
     const toolRow = screen.getByTestId("brain-ingest-trace-tool-goat_brain_call_1");
     expect(within(toolRow).queryByText("Stdout")).not.toBeInTheDocument();
     expect(screen.queryByText(/"schemaVersion"/)).not.toBeInTheDocument();

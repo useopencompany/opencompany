@@ -9,6 +9,7 @@ import {
   Mail,
   MessageSquare,
   NotebookPen,
+  Video,
 } from "lucide-react";
 
 export const GOAT_JAMIE_DOCS_HREF = "/docs/integrations/jamie";
@@ -51,6 +52,16 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     available: true,
     connectHref: "/settings/granola",
     docsHref: "/docs/integrations/granola",
+  },
+  {
+    id: "fathom",
+    name: "Fathom",
+    description: "Meeting recordings flow into this brain once Fathom finishes each summary.",
+    icon: Video,
+    connectionKind: "api_key",
+    available: true,
+    connectHref: "/settings/fathom",
+    docsHref: "/docs/integrations/fathom",
   },
   {
     id: "gmail",
