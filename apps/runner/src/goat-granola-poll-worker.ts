@@ -10,12 +10,14 @@ import {
 } from "@opencompany/db/goat-brain-ingest";
 import {
   claimGoatGranolaSyncState,
+  completeGoatGranolaSyncPages,
   ensureGoatGranolaSyncState,
   GOAT_GRANOLA_CREDENTIAL_KIND,
   GOAT_GRANOLA_PROVIDER,
   goatGranolaEventClaimKey,
   listEnabledGoatGranolaBrainSourceRoutes,
   updateGoatGranolaSyncCursor,
+  updateGoatGranolaSyncPage,
 } from "@opencompany/db/goat-granola";
 import {
   loadGoatIntegrationCredential,
@@ -119,11 +121,12 @@ export async function pollGoatGranolaIntegration(input: {
     return null;
   }
 
-  let notes: GranolaNoteSummary[];
+  let batch: GranolaNotesBatch;
   try {
-    notes = await listGranolaNotesSince({
+    batch = await listGranolaNotesSince({
       apiKey,
       updatedAfter: state.updatedAfterCursor.toISOString(),
+      ...(state.pageCursor ? { cursor: state.pageCursor } : {}),
       signal: input.signal,
     });
   } catch (error) {
@@ -133,7 +136,7 @@ export async function pollGoatGranolaIntegration(input: {
     }
     throw error;
   }
-  if (notes.length === 0) return { enqueued: 0, seen: 0 };
+  const { notes } = batch;
 
   const routes = await listEnabledGoatGranolaBrainSourceRoutes([candidate.integrationId], db);
   const routedBrainRefs = [...new Set(routes.map((route) => route.brainRef))];
@@ -151,47 +154,84 @@ export async function pollGoatGranolaIntegration(input: {
     if (result.enqueued) enqueued += 1;
   }
 
-  // The cursor only advances once every listed note was processed (ingested or
-  // skipped as already claimed); a failed note aborts above and the next poll
-  // re-lists from the same watermark.
-  const maxUpdatedAt = notes.reduce<Date | null>((max, note) => {
+  // The timestamp watermark only advances after the final page. When a pass
+  // reaches its page cap, persist Granola's opaque continuation cursor and the
+  // highest timestamp seen so far; a later poll resumes without skipping the
+  // pages that have not been processed yet.
+  const batchMaxUpdatedAt = notes.reduce<Date | null>((max, note) => {
     if (!note.updatedAt) return max;
     const updatedAt = new Date(note.updatedAt);
     if (Number.isNaN(updatedAt.getTime())) return max;
     return !max || updatedAt > max ? updatedAt : max;
   }, null);
-  if (maxUpdatedAt) {
-    await updateGoatGranolaSyncCursor(
-      { integrationId: candidate.integrationId, updatedAfterCursor: maxUpdatedAt },
+  const pendingUpdatedAfterCursor = latestDate(state.pendingUpdatedAfterCursor, batchMaxUpdatedAt);
+  if (batch.nextCursor) {
+    await updateGoatGranolaSyncPage(
+      {
+        integrationId: candidate.integrationId,
+        expectedUpdatedAfterCursor: state.updatedAfterCursor,
+        expectedPageCursor: state.pageCursor,
+        pageCursor: batch.nextCursor,
+        pendingUpdatedAfterCursor,
+      },
+      db,
+    );
+  } else {
+    await completeGoatGranolaSyncPages(
+      {
+        integrationId: candidate.integrationId,
+        expectedUpdatedAfterCursor: state.updatedAfterCursor,
+        expectedPageCursor: state.pageCursor,
+        updatedAfterCursor: pendingUpdatedAfterCursor ?? state.updatedAfterCursor,
+      },
       db,
     );
   }
   return { enqueued, seen: notes.length };
 }
 
-async function listGranolaNotesSince(input: {
+type GranolaNotesBatch = {
+  notes: GranolaNoteSummary[];
+  nextCursor: string | null;
+};
+
+export async function listGranolaNotesSince(input: {
   apiKey: string;
   updatedAfter: string;
+  cursor?: string;
   signal: AbortSignal;
-}): Promise<GranolaNoteSummary[]> {
+  listNotes?: typeof listGranolaNotes;
+}): Promise<GranolaNotesBatch> {
   const notes: GranolaNoteSummary[] = [];
-  let cursor: string | undefined;
+  const callListNotes = input.listNotes ?? listGranolaNotes;
+  let cursor = input.cursor;
+  const seenCursors = new Set(cursor ? [cursor] : []);
   for (let page = 0; page < GOAT_GRANOLA_MAX_PAGES_PER_POLL; page += 1) {
-    const result = await listGranolaNotes({
+    const result = await callListNotes({
       apiKey: input.apiKey,
       updatedAfter: input.updatedAfter,
       ...(cursor ? { cursor } : {}),
       signal: input.signal,
     });
     notes.push(...result.notes);
-    if (!result.hasMore || !result.cursor) return notes;
+    if (!result.hasMore) return { notes, nextCursor: null };
+    if (!result.cursor || seenCursors.has(result.cursor)) {
+      throw new Error("Granola pagination did not return a new continuation cursor.");
+    }
+    seenCursors.add(result.cursor);
     cursor = result.cursor;
   }
-  logger.warn("Goat Granola poll hit the page cap; remaining notes drain next poll", {
+  logger.info("Goat Granola poll hit the page cap; saved continuation for next poll", {
     event: "opencompany.goat_granola_poll_page_cap",
     note_count: notes.length,
   });
-  return notes;
+  return { notes, nextCursor: cursor ?? null };
+}
+
+function latestDate(left: Date | null, right: Date | null) {
+  if (!left) return right;
+  if (!right) return left;
+  return left > right ? left : right;
 }
 
 async function ingestGranolaNote(input: {

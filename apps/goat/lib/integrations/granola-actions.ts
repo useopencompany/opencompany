@@ -35,7 +35,7 @@ export async function saveGranolaApiKeyAction(apiKey: string): Promise<GranolaCo
     console.error("[goat-granola] Failed to save Granola API key", error);
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "Could not save the Granola API key.",
+      error: "Could not save the Granola API key.",
     };
   }
 }

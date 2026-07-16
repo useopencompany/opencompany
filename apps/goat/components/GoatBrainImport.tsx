@@ -20,6 +20,7 @@ const PROVIDERS = [
   ["public_web", "Public web"],
   ["github", "GitHub"],
   ["jamie", "Jamie"],
+  ["granola", "Granola"],
   ["gmail", "Gmail"],
   ["slack", "Slack"],
   ["linear", "Linear"],
@@ -157,7 +158,7 @@ export function GoatBrainImport({
         brainRef,
         importRunId: run.id,
         enabledProviders: Array.from(enabledAtConfirm) as Array<
-          "public_web" | "github" | "jamie" | "gmail" | "slack" | "linear"
+          "public_web" | "github" | "jamie" | "granola" | "gmail" | "slack" | "linear"
         >,
       });
       if (!result.ok) toast.error(result.message);
@@ -405,6 +406,8 @@ function integrationFor(
       return details.github.integration;
     case "jamie":
       return details.jamie.integration;
+    case "granola":
+      return details.granola.integration;
     case "gmail":
       return details.gmail.integration;
     case "slack":

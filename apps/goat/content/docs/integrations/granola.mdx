@@ -7,7 +7,7 @@ description: Connect Granola meeting notes to Goat Brain ingestion with a person
 
 Granola has no webhooks, so Goat polls the Granola API every few minutes for notes updated since the last poll. A note becomes visible in the API once Granola finishes its AI summary and transcript; Goat then normalizes it into a Brain source item and enqueues the durable Brain ingestion agent, which writes a meeting page plus a raw evidence snapshot of the summary and transcript.
 
-The connection is personal: the API key is minted for your Granola account and only you can manage it or wire it into brains. Notes from before you connected are not imported.
+The connection is personal: the API key is minted for your Granola account and only you can manage it or wire it into brains. Live polling does not automatically import notes from before you connected. To seed a brain with recent history, run **Import company context** and select Granola; the scan considers a bounded 30-day window and imports only after you confirm the planned workload.
 
 ## Setup steps
 
@@ -28,6 +28,6 @@ If meetings are not appearing in the brain, check these in order:
 - The Granola source is enabled on the target brain.
 - The connection status in **Settings → Granola** is Connected. A revoked or expired key flips it to "Needs a new API key" — paste a fresh key.
 - The meeting finished recently: notes are only visible to the API once Granola generates their summary and transcript, and Goat polls every few minutes after that.
-- The meeting happened after you connected. Goat starts ingesting from the moment of connection and does not backfill.
+- The meeting happened after live polling started. Automatic ingestion does not backfill; use **Import company context** with Granola selected to scan recent history explicitly.
 
 The Granola API is documented at [docs.granola.ai](https://docs.granola.ai).

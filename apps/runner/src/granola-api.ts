@@ -4,6 +4,7 @@
 
 export const GRANOLA_API_BASE_URL = "https://public-api.granola.ai/v1";
 export const GRANOLA_NOTES_PAGE_SIZE = 30;
+export const GRANOLA_API_REQUEST_TIMEOUT_MS = 20_000;
 
 export class GranolaApiError extends Error {
   readonly status: number;
@@ -12,6 +13,13 @@ export class GranolaApiError extends Error {
     super(message);
     this.name = "GranolaApiError";
     this.status = status;
+  }
+}
+
+export class GranolaApiTimeoutError extends Error {
+  constructor(message = "Granola API request timed out.") {
+    super(message);
+    this.name = "GranolaApiTimeoutError";
   }
 }
 
@@ -34,13 +42,18 @@ export type GranolaNotesPage = {
 
 export async function listGranolaNotes(input: {
   apiKey: string;
+  createdAfter?: string;
+  createdBefore?: string;
   updatedAfter?: string;
   cursor?: string;
   pageSize?: number;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<GranolaNotesPage> {
   const params = new URLSearchParams();
   params.set("page_size", String(input.pageSize ?? GRANOLA_NOTES_PAGE_SIZE));
+  if (input.createdAfter) params.set("created_after", input.createdAfter);
+  if (input.createdBefore) params.set("created_before", input.createdBefore);
   if (input.updatedAfter) params.set("updated_after", input.updatedAfter);
   if (input.cursor) params.set("cursor", input.cursor);
   const body = await granolaApiCall<{
@@ -51,6 +64,7 @@ export async function listGranolaNotes(input: {
     apiKey: input.apiKey,
     path: `/notes?${params.toString()}`,
     ...(input.signal ? { signal: input.signal } : {}),
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
   });
   const notes = (Array.isArray(body.notes) ? body.notes : []).flatMap(
     (note): GranolaNoteSummary[] => {
@@ -78,11 +92,13 @@ export async function fetchGranolaNote(input: {
   apiKey: string;
   noteId: string;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<Record<string, unknown>> {
   return granolaApiCall<Record<string, unknown>>({
     apiKey: input.apiKey,
     path: `/notes/${encodeURIComponent(input.noteId)}?include=transcript`,
     ...(input.signal ? { signal: input.signal } : {}),
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
   });
 }
 
@@ -90,16 +106,35 @@ async function granolaApiCall<T>(input: {
   apiKey: string;
   path: string;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<T> {
-  const response = await fetch(`${GRANOLA_API_BASE_URL}${input.path}`, {
-    headers: { Authorization: `Bearer ${input.apiKey}` },
-    ...(input.signal ? { signal: input.signal } : {}),
-  });
-  if (!response.ok) {
-    throw new GranolaApiError(
-      `Granola API request failed (${response.status}) for ${input.path.split("?")[0]}`,
-      response.status,
-    );
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(
+    () => timeoutController.abort(),
+    input.timeoutMs ?? GRANOLA_API_REQUEST_TIMEOUT_MS,
+  );
+  timeout.unref?.();
+  const signal = input.signal
+    ? AbortSignal.any([input.signal, timeoutController.signal])
+    : timeoutController.signal;
+  try {
+    const response = await fetch(`${GRANOLA_API_BASE_URL}${input.path}`, {
+      headers: { Authorization: `Bearer ${input.apiKey}` },
+      signal,
+    });
+    if (!response.ok) {
+      throw new GranolaApiError(
+        `Granola API request failed (${response.status}) for ${input.path.split("?")[0]}`,
+        response.status,
+      );
+    }
+    return (await response.json()) as T;
+  } catch (error) {
+    if (!input.signal?.aborted && timeoutController.signal.aborted) {
+      throw new GranolaApiTimeoutError();
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  return (await response.json()) as T;
 }

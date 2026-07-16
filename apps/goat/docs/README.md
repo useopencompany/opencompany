@@ -439,9 +439,10 @@ rows are the source of truth for persisted Goat state.
 Brain bootstrap imports deliberately separate discovery from model ingestion:
 
 1. An admin supplies the public company origin, optional focus, and source scopes. The runner
-   scans a fixed 30-day window, reuses normalized source items, and performs a bounded public
-   search (at most eight searches and 40 canonical results). Discovery persists candidates with
-   no target brain, so it cannot enqueue an ingestion model.
+   scans a fixed 30-day window, reuses normalized source items, hydrates up to 20 recent Granola
+   notes when that source is selected, and performs a bounded public search (at most eight searches
+   and 40 canonical results). Discovery persists candidates with no target brain, so it cannot
+   enqueue an ingestion model.
 2. The UI displays provider totals, already-known entries, selected windows, and the exact number
    of planned ingestion runs. The count includes one cached public-research bundle when present
    and one final organization pass. Only explicit confirmation creates child jobs.

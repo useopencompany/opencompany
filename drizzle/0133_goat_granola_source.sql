@@ -18,10 +18,14 @@ ALTER TABLE "goat"."brain_ingest_jobs" DROP CONSTRAINT IF EXISTS "goat_brain_ing
 ALTER TABLE "goat"."brain_ingest_jobs" ADD CONSTRAINT "goat_brain_ingest_jobs_source_provider_check" CHECK ("goat"."brain_ingest_jobs"."source_provider" IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'granola'));--> statement-breakpoint
 ALTER TABLE "goat"."workspace_ingestion_reservations" DROP CONSTRAINT IF EXISTS "goat_ingestion_reservations_source_provider_check";--> statement-breakpoint
 ALTER TABLE "goat"."workspace_ingestion_reservations" ADD CONSTRAINT "goat_ingestion_reservations_source_provider_check" CHECK ("goat"."workspace_ingestion_reservations"."source_provider" IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'granola'));--> statement-breakpoint
+ALTER TABLE "goat"."brain_import_candidates" DROP CONSTRAINT IF EXISTS "goat_brain_import_candidates_provider_check";--> statement-breakpoint
+ALTER TABLE "goat"."brain_import_candidates" ADD CONSTRAINT "goat_brain_import_candidates_provider_check" CHECK ("goat"."brain_import_candidates"."provider" IN ('public_web', 'github', 'jamie', 'granola', 'gmail', 'slack', 'linear'));--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "goat"."granola_sync_state" (
 	"integration_id" text PRIMARY KEY NOT NULL,
 	"user_workos_id" text NOT NULL,
 	"updated_after_cursor" timestamp with time zone,
+	"page_cursor" text,
+	"pending_updated_after_cursor" timestamp with time zone,
 	"last_polled_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL

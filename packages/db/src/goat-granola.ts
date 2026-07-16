@@ -16,6 +16,8 @@ export type GoatGranolaSyncStateRow = {
   integrationId: string;
   userWorkosId: string;
   updatedAfterCursor: Date | null;
+  pageCursor: string | null;
+  pendingUpdatedAfterCursor: Date | null;
 };
 
 export async function listEnabledGoatGranolaBrainSourceRoutes(
@@ -77,8 +79,70 @@ export async function claimGoatGranolaSyncState(
       integrationId: goatGranolaSyncState.integrationId,
       userWorkosId: goatGranolaSyncState.userWorkosId,
       updatedAfterCursor: goatGranolaSyncState.updatedAfterCursor,
+      pageCursor: goatGranolaSyncState.pageCursor,
+      pendingUpdatedAfterCursor: goatGranolaSyncState.pendingUpdatedAfterCursor,
     });
   return rows[0] ?? null;
+}
+
+export async function updateGoatGranolaSyncPage(
+  input: {
+    integrationId: string;
+    expectedUpdatedAfterCursor: Date;
+    expectedPageCursor: string | null;
+    pageCursor: string;
+    pendingUpdatedAfterCursor: Date | null;
+  },
+  db: DbLike = getDb(),
+): Promise<boolean> {
+  const rows = await db
+    .update(goatGranolaSyncState)
+    .set({
+      pageCursor: input.pageCursor,
+      pendingUpdatedAfterCursor: input.pendingUpdatedAfterCursor,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(goatGranolaSyncState.integrationId, input.integrationId),
+        eq(goatGranolaSyncState.updatedAfterCursor, input.expectedUpdatedAfterCursor),
+        input.expectedPageCursor
+          ? eq(goatGranolaSyncState.pageCursor, input.expectedPageCursor)
+          : isNull(goatGranolaSyncState.pageCursor),
+      ),
+    )
+    .returning({ integrationId: goatGranolaSyncState.integrationId });
+  return rows.length > 0;
+}
+
+export async function completeGoatGranolaSyncPages(
+  input: {
+    integrationId: string;
+    expectedUpdatedAfterCursor: Date;
+    expectedPageCursor: string | null;
+    updatedAfterCursor: Date;
+  },
+  db: DbLike = getDb(),
+): Promise<boolean> {
+  const rows = await db
+    .update(goatGranolaSyncState)
+    .set({
+      updatedAfterCursor: input.updatedAfterCursor,
+      pageCursor: null,
+      pendingUpdatedAfterCursor: null,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(goatGranolaSyncState.integrationId, input.integrationId),
+        eq(goatGranolaSyncState.updatedAfterCursor, input.expectedUpdatedAfterCursor),
+        input.expectedPageCursor
+          ? eq(goatGranolaSyncState.pageCursor, input.expectedPageCursor)
+          : isNull(goatGranolaSyncState.pageCursor),
+      ),
+    )
+    .returning({ integrationId: goatGranolaSyncState.integrationId });
+  return rows.length > 0;
 }
 
 export async function updateGoatGranolaSyncCursor(
@@ -87,7 +151,12 @@ export async function updateGoatGranolaSyncCursor(
 ): Promise<void> {
   await db
     .update(goatGranolaSyncState)
-    .set({ updatedAfterCursor: input.updatedAfterCursor, updatedAt: sql`now()` })
+    .set({
+      updatedAfterCursor: input.updatedAfterCursor,
+      pageCursor: null,
+      pendingUpdatedAfterCursor: null,
+      updatedAt: sql`now()`,
+    })
     .where(eq(goatGranolaSyncState.integrationId, input.integrationId));
 }
 

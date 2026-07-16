@@ -138,6 +138,7 @@ export type GoatBrainImportProvider =
   | "public_web"
   | "github"
   | "jamie"
+  | "granola"
   | "gmail"
   | "slack"
   | "linear";
@@ -1639,7 +1640,7 @@ export const goatBrainImportCandidates = goat.table(
     ),
     providerCheck: check(
       "goat_brain_import_candidates_provider_check",
-      sql`${table.provider} IN ('public_web', 'github', 'jamie', 'gmail', 'slack', 'linear')`,
+      sql`${table.provider} IN ('public_web', 'github', 'jamie', 'granola', 'gmail', 'slack', 'linear')`,
     ),
   }),
 );
@@ -1828,6 +1829,8 @@ export const goatGranolaSyncState = goat.table("granola_sync_state", {
     .notNull()
     .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
   updatedAfterCursor: timestamp("updated_after_cursor", { withTimezone: true }),
+  pageCursor: text("page_cursor"),
+  pendingUpdatedAfterCursor: timestamp("pending_updated_after_cursor", { withTimezone: true }),
   lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

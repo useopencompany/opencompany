@@ -163,7 +163,8 @@ export function GranolaIntegrationSetup({
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
           New notes are picked up within a few minutes of Granola finishing their summary and
-          transcript. Notes from before you connected are not imported.
+          transcript. Live polling does not automatically import older notes; use Import company
+          context when you want to scan recent history.
         </p>
       </section>
     </div>
