@@ -19,6 +19,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
+import { GoatSidebarFeedback } from "@/components/GoatSidebarFeedback";
 import { closeGoatChatSessionAction, setGoatChatPinnedAction } from "@/lib/chat-actions";
 import type { GoatChatSummaryView } from "@/lib/chat-ui";
 import { switchGoatWorkspaceAction } from "@/lib/workspace-actions";
@@ -153,6 +154,7 @@ export function GoatSidebar({
 
         {/* Account / settings footer */}
         <div className="px-2 pb-3 pt-2">
+          <GoatSidebarFeedback />
           <Link
             href="/settings"
             prefetch

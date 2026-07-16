@@ -6,6 +6,12 @@ export type CodexAppServerEventType =
   | "command.output"
   | "command.completed"
   | "command.failed"
+  | "file_change.started"
+  | "file_change.completed"
+  | "mcp_tool.started"
+  | "mcp_tool.completed"
+  | "web_search.started"
+  | "web_search.completed"
   | "plan.updated"
   | "goal.updated"
   | "question.requested"
@@ -76,6 +82,15 @@ export function normalizeCodexAppServerEvent(
         }),
       ];
     }
+    if (item && isFileChangeItem(item)) {
+      return [normalized("file_change.started", event, { ...base, ...fileChangePayload(item) })];
+    }
+    if (item && isMcpToolCallItem(item)) {
+      return [normalized("mcp_tool.started", event, { ...base, ...mcpToolCallPayload(item) })];
+    }
+    if (item && isWebSearchItem(item)) {
+      return [normalized("web_search.started", event, { ...base, ...webSearchPayload(item) })];
+    }
     return [normalized("unknown", event, { ...base, method })];
   }
 
@@ -130,6 +145,36 @@ export function normalizeCodexAppServerEvent(
           ...base,
           command,
           output,
+        }),
+      ];
+    }
+
+    if (isFileChangeItem(item)) {
+      return [
+        normalized("file_change.completed", event, {
+          ...base,
+          ...fileChangePayload(item),
+          status: firstString(item.status) ?? "completed",
+        }),
+      ];
+    }
+
+    if (isMcpToolCallItem(item)) {
+      return [
+        normalized("mcp_tool.completed", event, {
+          ...base,
+          ...mcpToolCallPayload(item),
+          status: firstString(item.status) ?? "completed",
+        }),
+      ];
+    }
+
+    if (isWebSearchItem(item)) {
+      return [
+        normalized("web_search.completed", event, {
+          ...base,
+          ...webSearchPayload(item),
+          status: firstString(item.status) ?? "completed",
         }),
       ];
     }
@@ -258,6 +303,51 @@ function isReasoningItem(item: Record<string, unknown>) {
 
 function isPlanItem(item: Record<string, unknown>) {
   return typeof item.type === "string" && item.type.toLowerCase().includes("plan");
+}
+
+// Item type names have drifted across Codex releases (fileChange vs patchApply, camelCase vs
+// snake_case), so matching strips separators and looks for the stable stem.
+function compactItemType(item: Record<string, unknown>) {
+  return typeof item.type === "string" ? item.type.toLowerCase().replace(/[_-]/g, "") : "";
+}
+
+function isFileChangeItem(item: Record<string, unknown>) {
+  const type = compactItemType(item);
+  return type.includes("filechange") || type.includes("patch");
+}
+
+function isMcpToolCallItem(item: Record<string, unknown>) {
+  return compactItemType(item).includes("mcptool");
+}
+
+function isWebSearchItem(item: Record<string, unknown>) {
+  return compactItemType(item).includes("websearch");
+}
+
+function fileChangePayload(item: Record<string, unknown>) {
+  const raw = Array.isArray(item.changes) ? item.changes : [];
+  const changes: Array<Record<string, unknown>> = [];
+  for (const entry of raw) {
+    const record = readRecord(entry);
+    if (!record) continue;
+    const path = firstString(record.path, record.file, record.filename);
+    if (!path) continue;
+    const kind = firstString(record.kind, record.type);
+    changes.push({ path, ...(kind ? { kind } : {}) });
+  }
+  return { changes };
+}
+
+function mcpToolCallPayload(item: Record<string, unknown>) {
+  return {
+    server: firstString(item.server),
+    tool: firstString(item.tool),
+    error: firstString(stringFromPath(item, ["error", "message"]), item.error),
+  };
+}
+
+function webSearchPayload(item: Record<string, unknown>) {
+  return { query: firstString(item.query) };
 }
 
 function goalPayload(params: Record<string, unknown> | null | undefined) {

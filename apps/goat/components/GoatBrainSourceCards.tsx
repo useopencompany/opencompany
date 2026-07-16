@@ -256,6 +256,7 @@ export function SourceProviderCard({
               brainRef,
               integrationId,
               enabled: !enabled,
+              allFiles: googleDriveAllFilesFromConfig(source?.config),
               resourceIds: googleDriveResourceIds(source?.config),
             })
           : await setGoatBrainSourceEnabledAction({
@@ -2009,6 +2010,11 @@ function googleDriveResourceIds(config: Record<string, unknown> | undefined) {
   return googleDriveSelectionsFromConfig(config).map((resource) => resource.id);
 }
 
+function googleDriveAllFilesFromConfig(config: Record<string, unknown> | undefined) {
+  const allFiles = config?.allFiles;
+  return Boolean(allFiles && typeof allFiles === "object" && !Array.isArray(allFiles));
+}
+
 function GoogleDriveSourceEditor({
   brainRef,
   integrationId,
@@ -2021,7 +2027,9 @@ function GoogleDriveSourceEditor({
   onChanged: () => Promise<void>;
 }) {
   const saved = useMemo(() => googleDriveSelectionsFromConfig(source?.config), [source]);
+  const savedAllFiles = useMemo(() => googleDriveAllFilesFromConfig(source?.config), [source]);
   const [expanded, setExpanded] = useState(false);
+  const [allFiles, setAllFiles] = useState(savedAllFiles);
   const [selection, setSelection] = useState<Map<string, GoogleDriveSelection>>(
     () => new Map(saved.map((resource) => [resource.id, resource])),
   );
@@ -2092,13 +2100,19 @@ function GoogleDriveSourceEditor({
     setDirty(true);
   };
 
+  const toggleAllFiles = () => {
+    setAllFiles((value) => !value);
+    setDirty(true);
+  };
+
   const save = () => {
     startTransition(async () => {
       const result = await setGoatBrainGoogleDriveSourceAction({
         brainRef,
         integrationId,
-        enabled: selection.size > 0,
-        resourceIds: [...selection.keys()],
+        enabled: allFiles || selection.size > 0,
+        allFiles,
+        resourceIds: allFiles ? [] : [...selection.keys()],
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -2112,15 +2126,31 @@ function GoogleDriveSourceEditor({
 
   return (
     <div className="mt-1 flex flex-col gap-2 border-t border-ink/10 pt-2">
+      <label className="flex items-start gap-2 rounded-md border border-ink/10 px-2.5 py-2">
+        <input
+          type="checkbox"
+          checked={allFiles}
+          onChange={toggleAllFiles}
+          className="mt-0.5 h-3.5 w-3.5 accent-ink"
+        />
+        <span className="flex flex-col gap-0.5">
+          <span className="text-[12px] font-medium text-ink">Subscribe to all files</span>
+          <span className="text-[11.5px] leading-4 text-ink-subtle">
+            Ingest every changed file this account can access, including files outside selected
+            folders.
+          </span>
+        </span>
+      </label>
       <button
         type="button"
         onClick={toggleExpanded}
+        disabled={allFiles}
         className="flex items-center gap-1 text-left text-[12px] font-medium text-ink"
       >
         {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        Select files and folders ({selection.size})
+        {allFiles ? "All files selected" : `Select files and folders (${selection.size})`}
       </button>
-      {expanded ? (
+      {expanded && !allFiles ? (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1 text-[11.5px] text-ink-subtle">
             <button type="button" onClick={() => goToBreadcrumb(-1)} className="hover:text-ink">
@@ -2245,8 +2275,9 @@ function GoogleDriveSourceEditor({
         </div>
       ) : null}
       <p className="text-[11.5px] leading-4 text-ink-subtle">
-        Selected Drive content will be summarized into this brain and visible to everyone who can
-        access it. Existing content is not imported until it changes after selection.
+        {allFiles
+          ? "All changed Drive files will be summarized into this brain and visible to everyone who can access it. Existing content is not imported until it changes after selection."
+          : "Selected Drive content will be summarized into this brain and visible to everyone who can access it. Existing content is not imported until it changes after selection."}
       </p>
       {dirty ? (
         <div className="flex justify-end">

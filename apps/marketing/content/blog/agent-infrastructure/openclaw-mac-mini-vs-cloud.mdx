@@ -1,0 +1,251 @@
+---
+title: "OpenClaw: Mac Mini vs Cloud — Which Deployment Is Right for Your Team?"
+description: "Mac Mini at $599 or a $20/mo VPS? We break down the real costs, security tradeoffs, and scaling limits of every OpenClaw deployment option."
+date: "2026-03-20"
+author: "Louis Morgner"
+keywords:
+  - openclaw mac mini vs cloud
+  - openclaw self hosted vs cloud
+  - openclaw hosting options
+  - run openclaw on cloud
+  - openclaw vps setup
+  - openclaw mac mini cost
+  - openclaw team deployment
+  - hosted openclaw
+---
+
+[CNBC reported this week](https://www.cnbc.com/2026/03/19/openclaw-demand-in-china-is-driving-up-the-price-of-secondhand-macbooks.html) that OpenClaw demand in China is driving up secondhand Mac prices. Jeremy Ji, Chief Strategy Officer at ATRenew, said the surge "feels like the pandemic all over again." Between March and May, secondhand prices are holding at fall peak-season levels, and ATRenew had to increase its buyback prices to meet demand for Mac Mini M4 and M5 machines.
+
+Here's the reality check nobody in those CNBC segments mentions: OpenClaw's creator has said the agent needs 2 vCPUs and 4GB of RAM. That's the specs of a 2015 computer. Its GPU sits idle because the framework sends API calls to [Claude](https://www.anthropic.com/pricing) or [OpenAI](https://openai.com/api/pricing/) for inference. Many users prefer a dedicated Mini rather than running it on their main laptop, but the machine is still just a $599 gateway to a $100-200/month API bill.
+
+That doesn't mean buying one is wrong. It means the Mac Mini vs cloud question deserves real math, not hype. The answer depends on what you're using it for, how many people need access, and how much security risk your plan can tolerate.
+
+For an individual user who wants a 24/7 personal agent with Apple ecosystem access, a Mini is the right call. For a team that needs shared agent infrastructure with permissions and audit trails, it's the wrong one.
+
+## The four deployment options for running OpenClaw
+
+Before going deep on each, here's the overview:
+
+| Option | Cost | Best for | Biggest limitation |
+|--------|------|----------|-------------------|
+| Mac Mini (self-hosted) | ~$599 one-time + electricity | Solo developer, Apple ecosystem | Doesn't scale to teams |
+| Cloud VPS | $4-30/month | Remote access, no hardware | Security config burden, no macOS features |
+| Hosted OpenClaw | $2-100/month | Quick setup, no ops | Vendor dependency, limited customization |
+| Agent infrastructure platform | Varies | Teams needing permissions + audit trails | Different paradigm (not just OpenClaw hosting) |
+
+The inference spend is the same across all four options. [Claude Sonnet](https://www.anthropic.com/pricing) runs $3 per million input tokens and $15 per million output tokens. A Claude Max or Claude Pro subscription is $20-200/month. These ongoing monthly fees dwarf the hosting decision. Keep that in mind as we break down the numbers.
+
+## Security first, regardless of where you deploy
+
+I've seen enough exposed instances to say this plainly: most people get security wrong because they treat it as a later step. It isn't. Whether you self-host or use a cloud provider, the first thing you should do is lock down your API keys. If those leak, someone else runs up your bill or worse, uses your agent to do things you didn't authorize.
+
+On a personal machine like a Mac Mini, the danger is that the agent sits right next to your local files, your browser sessions, your credentials. You need to isolate them. Create a separate macOS user account for the agent. Review the code for any third-party skills before you install them. ClawHub has had malicious packages, and blindly installing skills is how you end up in an incident report.
+
+A virtual private server (VPS) gives you better isolation by default, since the agent is separated from your main laptop and personal data. That reduces the risk of accidentally giving it access to things it shouldn't touch. But a VPS is only as secure as your configuration. Pick a reputable provider, keep your software current, and restrict connections to trusted IPs. Don't leave port 18789 open to the web, which is what happens by default.
+
+The Mac Mini vs VPS security tradeoff is real: the Mac Mini is riskier because it's near your personal data, but the VPS is riskier because it's on the open web. Either way, audit your configuration regularly, watch for unusual activity, and treat your credentials and local files like the sensitive assets they are.
+
+## Planning your infrastructure before you spend
+
+Before you buy a [Mac Mini](https://www.apple.com/shop/buy-mac/mac-mini) or spin up a VPS, figure out what you actually need. I've talked to teams who bought five Minis and realized a month later they needed centralized management. And I've talked to solo developers who spent months on a cloud instance when a $599 Mini would have been fine.
+
+For an individual user who wants a dedicated AI assistant with Apple ecosystem integration, a Mac Mini is usually the most practical choice. It keeps your agent close to your workflow, which is a feature if you want tight integration and a liability if you're not careful about isolation.
+
+Teams and businesses typically choose VPS solutions for their easy scaling, reliability, and separation from personal hardware. A cloud instance lets you spin up new capacity in a few clicks when you need to expand. But keep in mind the recurring costs add up, especially if you're running multiple agents or high-usage workflows.
+
+Factor in the total cost of ownership: compute, recurring subscription costs, and the API spend that will almost certainly be your biggest line item. For those using Claude Pro or similar subscriptions, inference costs can quickly outpace infrastructure spend. The reality check: if you haven't budgeted for the API bill, you haven't budgeted.
+
+## Mac Mini vs VPS: the real math on local hardware
+
+### What the Mac Mini M4 actually costs
+
+The [Mac Mini M4](https://www.apple.com/shop/buy-mac/mac-mini) with 16GB unified memory starts at $599. Sale prices have been spotted as low as $499. The 24GB RAM model at $799 is worth considering if you want lower latency on automation tasks, since the unified memory architecture benefits from the extra headroom.
+
+The Mac Mini's power consumption is under 20W, making 24/7 operation economical compared to the ongoing costs of a cloud VPS. [Jeff Geerling measured 3-4W at idle](https://www.jeffgeerling.com/blog/2024/m4-mac-minis-efficiency-incredible), comparable to a Raspberry Pi. Under sustained load, expect around 40W, which costs roughly $2-3/month in electricity at US average rates.
+
+Add it up for year one:
+
+- Hardware: $599
+- Electricity: $24-36/year
+- Inference tokens: $1,200-2,400/year (this is where the money goes)
+- **Year 1 total: $1,823-3,035**
+
+The Mini itself is less than a third of the total cost. The rest is inference fees that you'd pay regardless of where you run OpenClaw. OpenClaw requires dedicated hardware and ongoing api costs, which can lead to significant expenses if not managed properly. Users have reported api costs exceeding $3,600 in a single month due to unmanaged agent usage. Setting spending limits before deploying is crucial to prevent unexpected charges. Tracking usage daily is recommended to catch unexpected spikes early.
+
+### What the Mac Mini is genuinely good for
+
+The Mac Mini M4 is often recommended for OpenClaw due to its performance and energy efficiency, and has become the reference hardware for running OpenClaw due to its M-series architecture. As a dedicated machine for one person's always-on assistant, it is hard to beat. [Jeff Geerling called the M4](https://www.jeffgeerling.com/blog/2024/m4-mac-minis-efficiency-incredible) "the most efficient CPU" he's ever tested. At 5 dBA idle, it's effectively silent. It runs cooler than most laptops under sustained load. It is often considered the best choice for individual users running OpenClaw due to its one-time cost and superior privacy.
+
+The real advantage is native macOS integration. If your agent workflows touch messaging apps like iMessage, Calendar, Contacts, [Shortcuts](https://support.apple.com/guide/shortcuts-mac/intro-to-shortcuts-apdf22b0444c/mac), or Apple Remote Desktop, macOS is your only option. No cloud VPS gives you that. The agent on a Mac Mini can also connect to browser sessions, manage local files and personal files on disk, and run commands against your personal computer with persistent memory across sessions. Users who prefer the Mini over a VPS do so because they want this level of integration with their Apple ecosystem and local devices. Rather than running tasks on a remote instance, everything happens on a dedicated machine you can see and touch.
+
+There's also the privacy angle. Your data stays on local hardware you own, in a room you control. Conversation history stays on the machine. For developers handling sensitive codebases or client work, keeping everything off your main laptop and onto a separate machine you own matters more than the hosting price comparison.
+
+### Where the Mac Mini breaks down
+
+**Scaling.** The official documentation explicitly says running one gateway for multiple untrusted operators is not recommended. One machine equals one individual user's agent. A team of five needs five of them, five sets of credentials, five separate configurations. There is no easy scaling path.
+
+**Remote connectivity.** You need [Tailscale](https://tailscale.com/), [ngrok](https://ngrok.com/), or [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) to reach the Mini from outside your home network. Each adds security surface area. Tailscale is the safest option (peer-to-peer, no public internet addresses), but it's still another layer to configure and maintain.
+
+**Headless gotchas.** FileVault is enabled by default on new Macs. After a reboot, it requires physical password entry before the OS loads, so remote connectivity remains unavailable until someone unlocks the machine. Treat that as a limitation of secure headless operation and plan for trusted physical access after restarts; disabling FileVault or enabling automatic login would weaken the protection around the agent and its API keys.
+
+**Apple ID and personal data exposure.** Running OpenClaw on a Mac Mini ties it to the user's Apple ID and personal files, increasing the attack surface. The agent has broad system permissions, which can lead to accidental exposure if misconfigured. Create separate credentials for OpenClaw to contain potential security incidents, and avoid using your primary Apple account. Use sandboxing features where available to isolate command execution.
+
+**Physical security.** A Mini under a desk is accessible to anyone who walks by, and accidentally giving someone physical access to an agent with live API keys is a risk most teams don't account for.
+
+**Reliability and maintenance.** Running OpenClaw on a Mac Mini requires ongoing maintenance and management, including updates and troubleshooting. Power outage means downtime. No redundancy, no failover. A UPS helps but doesn't fix the single-point-of-failure problem. Regularly updating the agent is your responsibility, and skipping updates means missing security patches. The upfront cost can be a barrier, while VPS options often have lower initial costs. Avoid installing unvetted skills from ClawHub, where security researchers have found malicious packages designed to exfiltrate credentials.
+
+## Cloud VPS setup: the real math
+
+### What a VPS actually costs
+
+A VPS from any cloud provider gives you comparable specs. Here's what 2 vCPU and 4GB RAM costs across major providers:
+
+| Cloud provider | Monthly cost |
+|----------|-------------|
+| [Hetzner](https://www.hetzner.com/cloud/) (ARM VPS) | $4-7 |
+| [Linode](https://www.linode.com/pricing/) (shared VPS) | $20 |
+| [DigitalOcean](https://www.digitalocean.com/pricing) (VPS) | $24 |
+| [AWS EC2](https://aws.amazon.com/ec2/pricing/on-demand/) (t3.medium) | $30 |
+
+Add inference spend and year one looks like this:
+
+- VPS: $48-360/year
+- Inference tokens: $1,200-2,400/year (same as the Mini)
+- **Year 1 total: $1,248-2,760**
+
+On a Hetzner ARM instance, the cloud option is cheaper from day one. On AWS, it's roughly equivalent. The breakeven point for Mac Mini vs a $24/month DigitalOcean droplet is about 25 months. If you can destroy and recreate an hourly billed $24/month instance so it exists for only six hours per day, compute falls to roughly $6/month and the base Mini's compute-only breakeven stretches to about eight years. Simply powering a VPS off often does not stop billing for the allocated instance, and storage still costs money, so check the provider's policy before relying on reduced-usage savings.
+
+### When a VPS makes sense
+
+Cloud hosting is preferred for professional automation workflows and multi-user setups due to its reliability and scalability. VPS providers offer various plans with easy scaling and 24/7 uptime, making them a flexible option for running OpenClaw. A VPS eliminates upfront hardware costs and provides internet accessibility by default. The provider secures the underlying infrastructure, but you remain responsible for the guest OS, firewall rules, OpenClaw configuration, credentials, and patching. You can spin up a new instance in a few clicks if something breaks. OpenClaw can run continuously on a VPS without interruptions from local updates or power issues, unlike a Mac Mini.
+
+Linux instances are lighter and have more secure defaults than macOS for this kind of workload. The package ecosystem is broader, and you can install [Homebrew](https://brew.sh/) or use apt to set up your environment in minutes. Configuration management tools ([Ansible](https://www.ansible.com/), [Terraform](https://www.terraform.io/)) work better on Linux. If you don't need Apple ecosystem features, many developers prefer VPS because Linux is objectively easier to operate for workloads like this.
+
+A VPS in a data center also gives you better uptime than a personal machine on your local network. Cloud providers typically offer SLA-backed uptime, ensuring continuous operation without home power outage concerns. Cloud environments allow for easy resource upgrades, facilitating scalability for team collaboration. These environments also allow for quicker recovery from security incidents compared to personal hardware.
+
+### Where the VPS breaks down
+
+**No macOS.** If your agent workflows depend on iMessage, Calendar, browser automation on macOS, or Shortcuts, a VPS can't help. This is a binary constraint that settles the Mac Mini vs VPS debate for some users immediately.
+
+**Security is your responsibility.** OpenClaw binds to `0.0.0.0:18789` by default, listening on all network interfaces. Security researchers have warned about exposed instances of OpenClaw leaking API keys and credentials, with over 135,000 found on the public internet across 82 countries. On a server with a public IP, one misconfigured deployment puts your agent in the open. [Prompt injection](https://owasp.org/www-project-top-10-for-large-language-model-applications/) attacks against exposed instances can exfiltrate tokens, data, and anything else in the agent's context. That said, a dedicated VPS can isolate the agent from personal data, reducing the risk of breaches compared to running it on your main laptop.
+
+**Team scaling.** Running one VPS per developer gets expensive. Ten developers at $24/month is $240/month in hosting alone, plus $100-200/month in inference per developer ($1,000-2,000/month total), plus the engineering time to manage ten separate server instances with no centralized dashboard. You'd also need a separate account for each provider, a separate account for API billing, and keeping configurations in sync requires maintenance work that teams consistently underestimate. Before committing, consider testing a single VPS with one developer for a month to see how much time the ongoing maintenance actually takes.
+
+## Hosted OpenClaw: the emerging middle ground
+
+A new category of managed hosting services has appeared in the last few months. Providers like MyClaw ($9-39/month), OneClaw ($9.99/month), KiwiClaw ($15-39/month), and the official OpenClaw Cloud ($39.90/month) handle setup, security configuration, updates, and uptime for you.
+
+The appeal is straightforward: 60-second setup vs 25+ minutes of self-hosting configuration. For a solo developer who doesn't want to touch infrastructure, these services solve a real problem.
+
+Featherless takes it further with flat-rate managed OpenClaw starting at $100/month, bundling inference into the subscription. No per-token billing, no "token anxiety." That's a meaningfully different pricing model for agent hosting.
+
+But every hosted option runs on the same architecture underneath. No per-action permissions (full access or none). No secrets isolation from the model context. No compliance-grade audit trail. The hosting layer fixes the setup burden but doesn't change the security model. Prompt injection is still a risk because the agent has the same broad permissions and access to your tokens.
+
+For personal use, hosted OpenClaw is a good answer. For teams, the "hosted" part doesn't fix the architectural limitations that matter when you need to manage multiple agents running tasks across an organization.
+
+## What happens when you need to scale
+
+This is where I've seen the most teams get stuck. You start with one developer on one Mac Mini or one server, everything works, and then your CTO asks "can we roll this out to the whole engineering team?"
+
+The answer for a cloud VPS is easy scaling in theory: upgrade to more powerful compute, add storage, or spin up more instances. That flexibility is real. But ten VPS instances is ten separate configurations, ten sets of credentials, ten things to track. There's no dashboard, no centralized policy, no way to see what all your agents did last Tuesday.
+
+With a Mac Mini, scaling means buying more devices and putting them somewhere. That can work for individual users, but try explaining to your office manager why you need ten Minis under ten desks.
+
+Regardless of your deployment, keep a close eye on your api costs. Unexpected spikes happen, especially when agents run complex tasks or when prompt injection vulnerabilities get exploited. Prompt injection attacks can manipulate your ai agent into performing unintended actions, and you won't know until you check the bill. Set usage limits early and monitor your instance.
+
+Plan for where you'll be in six months, not just today. Whether you choose a Mac Mini or a hosted instance, migrating later is painful and time-consuming. If you're already thinking about multi-user deployment, skip the "run OpenClaw somewhere" options and look at purpose-built infrastructure from the start.
+
+## When you need something different entirely
+
+All three options above are variations of "run the agent somewhere." They all inherit the same architectural decisions:
+
+- **Binary permissions.** An OpenClaw agent either has access to a tool or it doesn't. No way to create a rule that allows opening a PR but blocks force-pushing to main.
+- **Secrets in the model context.** API keys sit in environment variables that the model can read. Every context window potentially contains your tokens.
+- **No compliance-grade audit trail.** When something goes wrong, you can't answer: what did the agent do, who approved it, and what data or context led to it?
+- **Single-user by design.** It was built as a personal ai assistant, not for team deployment.
+
+For teams, the question isn't "where do I run OpenClaw?" It's "do I need something designed for team deployment from the ground up?" This is a big difference.
+
+Agent infrastructure built for teams takes a different approach:
+
+```yaml
+runtime: claude-code
+name: pr-reviewer
+model: opus
+
+permissions:
+  github:
+    create_pr: on        # safe, do it automatically
+    review_code: on      # can review code and leave comments
+    delete_branch: ask   # pause for human approval
+    push_to_main: off    # never, under any circumstances
+
+integrations:
+  github:
+    token: vault://github/prod-token
+```
+
+Per-action permissions with three states (off, on, ask) give you control over what each agent can do. Secrets injected at runtime through vault references, never entering the model context. Every action logged with who did what, when, and who approved it. Config-as-code that lives in your repo and goes through review. You can connect agents to different tools and tasks without touching individual instances.
+
+This is what we built at [OpenCompany](https://opencompany.cloud). It works with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), Codex, OpenCode, or any runtime. The point isn't to host OpenClaw better. It's to fix the problems that appear the moment your second developer needs agent access.
+
+## Deployment checklist
+
+Before you launch your agent, run through this list. I've seen every one of these get skipped, and every one of them has caused problems:
+
+1. **Pick your compute.** Either a reputable hosting provider or a dedicated Mac Mini. Don't run OpenClaw on your personal computer. Dedicate a machine to it.
+2. **Install Homebrew and audit dependencies.** Use [Homebrew](https://brew.sh/) to install dependencies. Always audit third-party packages or skills before adding them. ClawHub packages have been compromised before.
+3. **Lock down access.** Set a strong, unique password. Enable two-factor authentication if available. On a VPS, configure your firewall to block port 18789 from the public internet.
+4. **Configure local devices and network.** Make sure your local devices and network settings allow secure communication with your agent, whether it's on a Mac Mini in your home network or an instance in a data center.
+5. **Set API spending limits.** Do this before you deploy, not after your first surprise bill. Check your api costs daily for the first few weeks.
+6. **Stay current.** Regularly update your instance. Security patches ship frequently, and exposed deployments with known vulnerabilities are actively targeted.
+7. **Think ahead.** If you think you'll need more than one agent or more than one user, consider that before you invest in a deployment that doesn't scale.
+
+## Decision framework
+
+There's no clear winner across every scenario. Running OpenClaw on a Mac Mini incurs a one-time cost, while a VPS typically involves ongoing subscription fees. Cloud services can become expensive over time, with costs reaching up to approximately $120 per month for concurrent instances. The Mini is often preferred for personal use due to its one-time cost and native Apple ecosystem integration. The agent can run continuously, which is a significant advantage for both setups.
+
+A hybrid approach using both a Mac Mini and cloud hosting can provide the benefits of both environments, though it may be more expensive. Some teams use a Mini for personal automation and Apple ecosystem tasks while running a separate instance for production workflows that need uptime and isolation. Use this to plan your setup:
+
+| If you are... | Choose | Why |
+|---------------|--------|-----|
+| A solo developer who wants Apple ecosystem access | Mac Mini | Best value, native macOS, 24/7 uptime, near-silent machine |
+| One developer who doesn't need macOS features | Cloud VPS | Cheaper upfront and easier remote access; the Mini becomes cheaper after the breakeven period |
+| One developer who doesn't want to manage anything | Hosted OpenClaw | Quick setup, managed updates, $10-40/month |
+| A team of 3-5 developers testing agent deployment | Evaluate agent infrastructure | Not designed for multi-user; you'll hit limits fast |
+| A team in a regulated industry | Evaluate against your compliance requirements | Compare auditability, access controls, data residency, and the applicable regulatory framework |
+| An organization of 10+ people | Purpose-built agent platform | The cost and security math doesn't work for 10 separate instances |
+
+## FAQ
+
+**Is a Mac Mini cheaper than cloud for running OpenClaw?**
+
+For a single user running OpenClaw 24/7, a Mac Mini pays for itself vs a comparable cloud VPS in about 25 months. On a budget provider like [Hetzner](https://www.hetzner.com/cloud/) at $5/month, it takes over 8 years to break even. But the inference spend is identical either way, and it's the biggest line item by far. The hosting decision is a rounding error compared to your Claude or OpenAI spend.
+
+**Can I run OpenClaw on a Mac Mini for my whole team?**
+
+The documentation explicitly says running one gateway for multiple untrusted operators is not recommended. For teams, you'd need separate Mac Minis or cloud instances per user, or a platform designed for multi-user deployment from the start. Developers in the ai community who have tried running a shared OpenClaw instance for a team report hitting scaling and security problems within weeks. It's worth testing before committing budget for a whole team.
+
+**Do I lose anything by running OpenClaw on Linux instead of macOS?**
+
+You lose native Apple ecosystem access: messaging apps like iMessage, Calendar, Contacts, Shortcuts. You also can't use browser automation tools that depend on macOS. If those integrations matter, macOS is your only option. If not, developers who don't need macOS tend to prefer VPS on Linux, which is lighter, arguably more secure, and easier to maintain remotely. Linux also lets you run local models through tools like [Ollama](https://ollama.com/) if you want to run inference on the machine itself rather than relying purely on cloud APIs.
+
+**What about Raspberry Pi for OpenClaw?**
+
+It works for lightweight personal use, but Node.js performance on ARM Linux lags behind Apple Silicon. The M4 benchmarks close to a top-end M2 Pro in general compute, making it powerful hardware for the price point. If budget is the constraint, a $5/month Hetzner instance outperforms a Raspberry Pi and costs less over two years. The Pi also doesn't simplify ops, since you're still managing your own machine on your own local network.
+
+**Can I use local models instead of paying for API access?**
+
+You can run local models through [Ollama](https://ollama.com/) or [LM Studio](https://lmstudio.ai/) on a Mac Mini, and some people in the ai community do this to avoid ongoing monthly fees. But the quality gap between local models and Claude or [GPT-5](https://openai.com/index/introducing-gpt-5/) is still significant for complex tasks like reviewing code, debugging, and multi-step planning. For most users, the API approach with a dedicated device or cloud instance running OpenClaw remains the practical choice.
+
+---
+
+There's no wrong answer for personal use. Pick what matches your workflow and budget. The trend is real for a reason: it's a silent, always-on machine that runs a personal AI agent well.
+
+But if you're making a decision for a team, the deployment question matters less than the architecture question. Ten Mac Minis or ten cloud instances don't give you permissions, audit trails, or centralized control. They give you ten isolated agents with ten sets of problems to watch and maintain.
+
+For the Mac Mini route, see our [security-first setup guide](/blog/openclaw-mac-mini-secure-setup). For teams evaluating what comes after OpenClaw, see [the alternatives comparison](/blog/openclaw-alternatives-secure-teams) or [how to run AI agents in production](/blog/running-ai-agents-in-production).
+
+---
+
+*We're building [OpenCompany](https://github.com/useopencompany) to fix AI agent deployment for teams: one config file, per-action permissions, every action audited, fully open-source. If you're evaluating options, [talk to us](/talk).*

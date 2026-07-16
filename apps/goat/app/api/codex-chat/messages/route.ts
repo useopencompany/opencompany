@@ -11,6 +11,7 @@ type CodexChatMessageBody = {
   prompt?: unknown;
   message?: unknown;
   settings?: unknown;
+  model?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
     prompt,
     ...(clientMessageId ? { clientMessageId } : {}),
     settings: body.value.settings,
+    ...(body.value.model !== undefined ? { model: body.value.model } : {}),
   });
   if (!result.ok) return new Response(result.error, { status: result.status });
 

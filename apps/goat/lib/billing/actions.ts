@@ -1,6 +1,6 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
   GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
@@ -33,6 +33,15 @@ function billingError(error: unknown, fallback: string): GoatBillingActionResult
     ok: false,
     error: error instanceof Error ? error.message : fallback,
   };
+}
+
+function goatProCheckoutIdempotencyKey(workspaceId: string, params: object): string {
+  const requestFingerprint = createHash("sha256")
+    .update(JSON.stringify(params))
+    .digest("hex")
+    .slice(0, 16);
+  const hour = Math.floor(Date.now() / 3_600_000);
+  return `goat-pro-v2-${workspaceId}-${hour}-${requestFingerprint}`;
 }
 
 async function ensureGoatStripeCustomerId(context: {
@@ -91,33 +100,31 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
     // changes flow through the seat sync + hourly reconcile.
     const seatQuantity = Math.max(1, await countGoatWorkspaceMembers(context.workspace.id));
     const appUrl = getGoatAppUrl();
-    const session = await stripe.checkout.sessions.create(
-      {
-        mode: "subscription",
-        customer: customerId,
-        allow_promotion_codes: true,
-        success_url: `${appUrl}/settings/workspace/billing?checkout=success`,
-        cancel_url: `${appUrl}/settings/workspace/billing?checkout=cancelled`,
-        automatic_tax: { enabled: true },
-        billing_address_collection: "required",
-        tax_id_collection: { enabled: true },
-        customer_update: { address: "auto", name: "auto" },
-        line_items: [{ price: getGoatProPriceId(), quantity: seatQuantity }],
+    const checkoutParams = {
+      mode: "subscription" as const,
+      customer: customerId,
+      allow_promotion_codes: true,
+      success_url: `${appUrl}/settings/workspace/billing?checkout=success`,
+      cancel_url: `${appUrl}/settings/workspace/billing?checkout=cancelled`,
+      automatic_tax: { enabled: true },
+      billing_address_collection: "required" as const,
+      tax_id_collection: { enabled: true },
+      customer_update: { address: "auto" as const, name: "auto" as const },
+      line_items: [{ price: getGoatProPriceId(), quantity: seatQuantity }],
+      metadata: {
+        billingProduct: "goat",
+        goatWorkspaceId: context.workspace.id,
+      },
+      subscription_data: {
         metadata: {
           billingProduct: "goat",
           goatWorkspaceId: context.workspace.id,
         },
-        subscription_data: {
-          metadata: {
-            billingProduct: "goat",
-            goatWorkspaceId: context.workspace.id,
-          },
-        },
       },
-      {
-        idempotencyKey: `goat-pro-${context.workspace.id}-${Math.floor(Date.now() / 3_600_000)}`,
-      },
-    );
+    };
+    const session = await stripe.checkout.sessions.create(checkoutParams, {
+      idempotencyKey: goatProCheckoutIdempotencyKey(context.workspace.id, checkoutParams),
+    });
     if (!session.url) return { ok: false, error: "Stripe did not return a Checkout URL." };
     await captureServerEvent("goat_billing_checkout_started", context.user.workosUserId, {
       user_id: context.user.workosUserId,
