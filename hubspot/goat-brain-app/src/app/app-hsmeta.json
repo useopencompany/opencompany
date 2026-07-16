@@ -1,10 +1,10 @@
 {
-  "uid": "goat_brain_hubspot_app",
+  "uid": "goat_brain_hubspot_public_app",
   "type": "app",
   "config": {
     "description": "Feeds HubSpot CRM activity (contacts, companies, deals) into OpenCompany Goat Brain via read-only OAuth and webhooks.",
     "name": "OpenCompany Goat Brain",
-    "distribution": "private",
+    "distribution": "marketplace",
     "auth": {
       "type": "oauth",
       "redirectUrls": [
