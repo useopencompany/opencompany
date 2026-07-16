@@ -5,7 +5,7 @@ import { goatBrainSourceEventClaims } from "./goat-schema";
 
 type DbLike = any;
 
-export type GoatBrainClaimProvider = "slack" | "gmail" | "linear" | "granola";
+export type GoatBrainClaimProvider = "slack" | "gmail" | "linear" | "hubspot" | "granola";
 
 // Claims provider-native event identities for a brain. Inserts are
 // ON CONFLICT DO NOTHING against the (brain, provider, event_key) unique

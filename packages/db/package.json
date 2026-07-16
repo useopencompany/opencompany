@@ -72,6 +72,10 @@
       "types": "./src/goat-google-drive.ts",
       "default": "./src/goat-google-drive.ts"
     },
+    "./goat-hubspot": {
+      "types": "./src/goat-hubspot.ts",
+      "default": "./src/goat-hubspot.ts"
+    },
     "./goat-linear": {
       "types": "./src/goat-linear.ts",
       "default": "./src/goat-linear.ts"
