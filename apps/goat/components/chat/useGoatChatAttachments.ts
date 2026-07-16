@@ -28,10 +28,15 @@ export function useGoatChatAttachments(opts: {
   // Drives the per-file image/PDF capability gate; read at call time so a model
   // switch applies without re-creating callbacks.
   modelName: string;
-  // Engine chats (codex/local codex) don't support attachments.
+  // Disabled surfaces (currently Local Codex) ignore picker, paste, and drop input.
   enabled?: boolean;
+  // Cloud engines can make uploaded files available through their own filesystem even when
+  // the gateway model catalog does not advertise native PDF/image message parts.
+  capabilities?: { images: boolean; pdf: boolean };
 }) {
   const { userWorkosId, modelName, enabled = true } = opts;
+  const imagesOverride = opts.capabilities?.images;
+  const pdfOverride = opts.capabilities?.pdf;
   const [attachments, setAttachments] = useState<PendingGoatChatAttachment[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const dragCounterRef = useRef(0);
@@ -49,10 +54,17 @@ export function useGoatChatAttachments(opts: {
     };
   }, []);
 
-  const capabilityRef = useRef(modelSupportsAttachments(modelName));
+  const capabilityRef = useRef(
+    imagesOverride === undefined || pdfOverride === undefined
+      ? modelSupportsAttachments(modelName)
+      : { images: imagesOverride, pdf: pdfOverride },
+  );
   useEffect(() => {
-    capabilityRef.current = modelSupportsAttachments(modelName);
-  }, [modelName]);
+    capabilityRef.current =
+      imagesOverride === undefined || pdfOverride === undefined
+        ? modelSupportsAttachments(modelName)
+        : { images: imagesOverride, pdf: pdfOverride };
+  }, [imagesOverride, modelName, pdfOverride]);
   const enabledRef = useRef(enabled);
   useEffect(() => {
     enabledRef.current = enabled;

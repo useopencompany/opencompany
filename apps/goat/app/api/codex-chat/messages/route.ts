@@ -1,5 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import { parseGoatChatAttachmentsInput } from "@/lib/chat-attachments";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import { type GoatChatUiMessage, textFromGoatChatUiMessage } from "@/lib/chat-ui";
 import { createGoatCodexChatMessage } from "@/lib/codex-chat";
@@ -25,7 +26,15 @@ export async function POST(request: Request) {
   }
 
   const prompt = readPrompt(body.value);
-  if (!prompt) return new Response("Invalid Codex chat message.", { status: 400 });
+  const messageMetadata = isUiMessage(body.value.message) ? body.value.message.metadata : undefined;
+  const parsedAttachments = parseGoatChatAttachmentsInput(
+    messageMetadata?.attachments,
+    context.user.workosUserId,
+  );
+  if (!parsedAttachments.ok) return new Response(parsedAttachments.error, { status: 400 });
+  if (!prompt && parsedAttachments.attachments.length === 0) {
+    return new Response("Invalid Codex chat message.", { status: 400 });
+  }
 
   const sessionId = typeof body.value.sessionId === "string" ? body.value.sessionId.trim() : null;
   const clientMessageId =
@@ -37,6 +46,7 @@ export async function POST(request: Request) {
     userWorkosId: context.user.workosUserId,
     ...(sessionId ? { sessionId } : {}),
     prompt,
+    attachments: parsedAttachments.attachments,
     ...(clientMessageId ? { clientMessageId } : {}),
     settings: body.value.settings,
     ...(body.value.model !== undefined ? { model: body.value.model } : {}),
@@ -44,7 +54,7 @@ export async function POST(request: Request) {
   if (!result.ok) return new Response(result.error, { status: result.status });
 
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
-  if (!sessionId) {
+  if (!sessionId && prompt) {
     after(
       generateGoatChatTitleForMessage({
         sessionId: result.sessionId,

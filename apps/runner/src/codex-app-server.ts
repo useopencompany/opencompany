@@ -60,6 +60,11 @@ export type CodexAppServerSummary = {
   goal: CodexAppServerGoalSummary | null;
 };
 
+export type CodexAppServerLocalImage = {
+  path: string;
+  detail?: "high" | "original";
+};
+
 type AppServerState = {
   pid: number;
   socketPath: string;
@@ -136,6 +141,7 @@ export async function runCodexAppServerTurn(input: {
   codexHome: string;
   skillFingerprint: string;
   task: string;
+  localImages?: CodexAppServerLocalImage[];
   model: string;
   reasoningEffort: CodexReasoningEffort;
   planModeReasoningEffort: CodexReasoningEffort | null;
@@ -253,6 +259,7 @@ async function killSocketAppServerProcesses(sandbox: SandboxHandle, socketPath: 
 async function runTurnThroughProxy(input: {
   sandbox: SandboxHandle;
   task: string;
+  localImages?: CodexAppServerLocalImage[];
   model: string;
   reasoningEffort: CodexReasoningEffort;
   planModeReasoningEffort: CodexReasoningEffort | null;
@@ -302,7 +309,14 @@ async function runTurnThroughProxy(input: {
     }
     const turn = await client.request("turn/start", {
       threadId,
-      input: [{ type: "text", text: input.task, text_elements: [] }],
+      input: [
+        { type: "text", text: input.task, text_elements: [] },
+        ...(input.localImages ?? []).map((image) => ({
+          type: "localImage",
+          path: image.path,
+          ...(image.detail ? { detail: image.detail } : {}),
+        })),
+      ],
       cwd: input.plan.codexWorkRoot,
       model: input.model,
       effort: input.reasoningEffort,
