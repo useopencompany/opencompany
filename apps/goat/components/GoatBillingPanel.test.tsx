@@ -15,7 +15,7 @@ const base: GoatBillingPanelData = {
   cancelAtPeriodEnd: false,
   currentPeriodEnd: null,
   paymentNeedsAttention: false,
-  seatMonthlyPriceUsdCents: 1_800,
+  seatMonthlyPriceUsdCents: 1_700,
   seatQuantity: 1,
   memberCount: 1,
   freeMaxMembers: 3,
@@ -79,8 +79,8 @@ describe("GoatBillingPanel", () => {
 
     expect(screen.getByRole("button", { name: "Manage billing" })).toBeEnabled();
     expect(screen.getAllByText("OpenCompany Pro")).toHaveLength(2);
-    expect(screen.getByText(/4 seats × \$18\/month/i)).toBeInTheDocument();
-    expect(screen.getByText(/\$18 per seat\/month/i)).toBeInTheDocument();
+    expect(screen.getByText(/4 seats × \$17\/month/i)).toBeInTheDocument();
+    expect(screen.getByText(/\$17 per seat\/month/i)).toBeInTheDocument();
     expect(screen.getByText(/could not collect the latest payment/i)).toBeInTheDocument();
     expect(screen.getByText("381 ingestions")).toBeInTheDocument();
     expect(

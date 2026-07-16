@@ -15,7 +15,7 @@ vi.mock("@opencompany/analytics/server", () => ({
 }));
 
 vi.mock("@opencompany/db/goat-billing", () => ({
-  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS: 1_800,
+  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS: 1_700,
   loadGoatBillingOverview: vi.fn(),
   setGoatStripeCustomerId: vi.fn(),
 }));
@@ -75,12 +75,14 @@ describe("Goat billing actions", () => {
     const [params] = checkoutCreate.mock.calls[0] as [
       {
         line_items: Array<{ price: string; quantity: number }>;
+        allow_promotion_codes: boolean;
         automatic_tax: { enabled: boolean };
         payment_method_types?: unknown;
         subscription_data: { metadata: Record<string, string> };
       },
     ];
     expect(params.line_items).toEqual([{ price: "price_goat_pro", quantity: 3 }]);
+    expect(params.allow_promotion_codes).toBe(true);
     expect(params.automatic_tax).toEqual({ enabled: true });
     expect(params.payment_method_types).toBeUndefined();
     expect(params.subscription_data.metadata.goatWorkspaceId).toBe("goat_ws_1");
