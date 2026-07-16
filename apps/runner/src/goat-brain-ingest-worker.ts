@@ -17,6 +17,7 @@ import {
 } from "@opencompany/db/goat-schema";
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
+  isNormalizedFathomMeetingSourceItem,
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
@@ -51,6 +52,7 @@ import {
   type GoatBrainAgentIngestEnv,
   GoatBrainAgentOutcomeError,
   GoatBrainIngestBudgetError,
+  runFathomMeetingAgentIngest,
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
@@ -157,6 +159,12 @@ const GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "meeting",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const FATHOM_MEETING_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "fathom",
+  sourceType: "meeting",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "goat-chat",
@@ -226,6 +234,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGranolaMeetingSourceItem,
     run: runTypedGoatBrainIngestHandler(runGranolaMeetingAgentIngest),
+  },
+  {
+    descriptor: FATHOM_MEETING_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedFathomMeetingSourceItem,
+    run: runTypedGoatBrainIngestHandler(runFathomMeetingAgentIngest),
   },
   {
     descriptor: GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR,
@@ -545,11 +558,15 @@ export async function claimNextGoatBrainIngestJob(input: {
   supportedJobs: readonly GoatBrainIngestJobDescriptor[];
   store?: GoatBrainIngestStore;
   leaseTtlMs?: number;
+  releasePendingReservations?: boolean;
 }) {
   const now = new Date();
   const leaseId = newGoatBrainIngestLeaseId();
   const store = input.store ?? createDbGoatBrainIngestStore();
-  if (!input.store) {
+  // The long-running worker creates one DB store and passes it into every
+  // claim. Keep backlog release explicit so that test-store injection does not
+  // accidentally disable the production sweep.
+  if (input.releasePendingReservations ?? !input.store) {
     await releasePendingGoatIngestionReservations({ now, maxWorkspaces: 50 });
   }
   return store.claimNext({
@@ -987,6 +1004,7 @@ export function startGoatBrainIngestWorker(
             supportedJobs,
             store,
             leaseTtlMs: GOAT_BRAIN_INGEST_LEASE_TTL_MS,
+            releasePendingReservations: true,
           });
           if (!job) break;
           const running = runClaimedGoatBrainIngestJob({

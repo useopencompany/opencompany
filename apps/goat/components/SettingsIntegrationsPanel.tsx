@@ -14,6 +14,7 @@ import {
   Mail,
   NotebookPen,
   PlugZap,
+  Video,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -188,6 +189,12 @@ function IntegrationRows({
           label="Granola"
           provider="granola"
           accounts={integrations.personalAccounts.granola}
+        />
+        <IntegrationProviderGroup
+          icon={Video}
+          label="Fathom"
+          provider="fathom"
+          accounts={integrations.personalAccounts.fathom}
         />
         <McpIntegrationRow setup={mcpSetup} />
         <CodexIntegrationRow integration={integrations.codex} />
@@ -635,7 +642,8 @@ function integrationConnectHref(
     | "jamie"
     | "slack"
     | "hubspot"
-    | "granola",
+    | "granola"
+    | "fathom",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -648,6 +656,7 @@ function integrationConnectHref(
     return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "jamie") return "/settings/jamie";
   if (provider === "granola") return "/settings/granola";
+  if (provider === "fathom") return "/settings/fathom";
   if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
