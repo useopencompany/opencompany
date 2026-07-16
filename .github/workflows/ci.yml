@@ -29,6 +29,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Require a migration for schema changes
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          added_migrations="$(git diff --diff-filter=A --name-only "$BASE_SHA" "$HEAD_SHA")"
+          if printf '%s\n' "$changed_files" | rg -q '^packages/db/src/(goat-)?schema\.ts$' && ! printf '%s\n' "$added_migrations" | rg -q '^drizzle/[0-9][^/]*\.sql$'; then
+            echo "A change to packages/db/src/schema.ts or packages/db/src/goat-schema.ts requires a numbered Drizzle migration."
+            exit 1
+          fi
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2

@@ -8,11 +8,13 @@ import {
   parseCodexUiMessageParts,
 } from "@opencompany/agent-runtime";
 import {
+  GOAT_CODEX_CHAT_EVENT_TYPES,
   type GoatChatMessageDebugTrace,
   type GoatCodexChatEventType,
   type GoatCodexChatSessionStatus,
   goatChatMessages,
 } from "@opencompany/db/goat-schema";
+import { captureException } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
 import type { CodexAppServerSummary } from "./codex-app-server";
 import { getDb } from "./db";
@@ -23,27 +25,9 @@ const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1" as const;
 
 // Event types that are persisted to goat.codex_chat_events. Deltas are volume, not chunks:
 // they never land in the audit log or the message row.
-const PERSISTED_EVENT_TYPES = new Set<GoatCodexChatEventType>([
-  "assistant.completed",
-  "reasoning.completed",
-  "command.started",
-  "command.completed",
-  "command.failed",
-  "file_change.started",
-  "file_change.completed",
-  "mcp_tool.started",
-  "mcp_tool.completed",
-  "web_search.started",
-  "web_search.completed",
-  "plan.updated",
-  "goal.updated",
-  "question.requested",
-  "approval.requested",
-  "turn.started",
-  "turn.completed",
-  "usage.updated",
-  "error",
-]);
+const PERSISTED_EVENT_TYPES = new Set<GoatCodexChatEventType>(
+  GOAT_CODEX_CHAT_EVENT_TYPES.filter((eventType) => eventType !== "unknown"),
+);
 
 export type GoatCodexChatProjectorTarget = {
   userWorkosId: string;
@@ -69,6 +53,7 @@ export function createGoatCodexChatProjector(input: {
   const { target, redact } = input;
   let parts: CodexUiMessagePart[] = input.initialParts ?? [];
   let turnError: string | null = null;
+  let auditFailureReported = false;
   const outputAccumulator = createCodexCommandOutputAccumulator();
 
   const writeAssistantMessage = async (
@@ -114,28 +99,43 @@ export function createGoatCodexChatProjector(input: {
 
   const insertEventRow = async (event: CodexAppServerNormalizedEvent) => {
     if (!PERSISTED_EVENT_TYPES.has(event.type as GoatCodexChatEventType)) return;
-    assertRowsChanged(
-      await getDb().execute(sql`
-        INSERT INTO goat.codex_chat_events (
-          user_workos_id,
-          codex_chat_session_id,
-          codex_chat_turn_id,
-          type,
-          payload,
-          raw_event,
-          created_at
-        )
-        SELECT ${target.userWorkosId},
-               ${target.codexChatSessionId},
-               ${target.turnId},
-               ${event.type},
-               ${JSON.stringify(redactJson(event.payload, redact))}::jsonb,
-               ${JSON.stringify(redactJson(event.rawEvent, redact))}::jsonb,
-               ${new Date()}
-        WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
-        RETURNING id
-      `),
-    );
+    try {
+      assertRowsChanged(
+        await getDb().execute(sql`
+          INSERT INTO goat.codex_chat_events (
+            user_workos_id,
+            codex_chat_session_id,
+            codex_chat_turn_id,
+            type,
+            payload,
+            raw_event,
+            created_at
+          )
+          SELECT ${target.userWorkosId},
+                 ${target.codexChatSessionId},
+                 ${target.turnId},
+                 ${event.type},
+                 ${JSON.stringify(redactJson(event.payload, redact))}::jsonb,
+                 ${JSON.stringify(redactJson(event.rawEvent, redact))}::jsonb,
+                 ${new Date()}
+          WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+          RETURNING id
+        `),
+      );
+    } catch (error) {
+      if (error instanceof GoatCodexChatLeaseLostError) throw error;
+      if (auditFailureReported) return;
+      auditFailureReported = true;
+      const persistenceError = new Error("Goat Codex chat audit event persistence failed.");
+      persistenceError.name = "GoatCodexChatEventPersistenceError";
+      captureException(persistenceError, {
+        event: "opencompany.goat_codex_chat_event_persist_failed",
+        turn_id: target.turnId,
+        event_type: event.type,
+        original_error_name: error instanceof Error ? error.name : typeof error,
+        original_error_code: databaseErrorCode(error),
+      });
+    }
   };
 
   const markTurnRunning = async (codexTurnId: string | null) => {
@@ -351,6 +351,17 @@ function assertRowsChanged(result: unknown) {
 function elapsedTurnDurationMs(startedAt: Date | undefined, completedAt: Date) {
   if (!startedAt || Number.isNaN(startedAt.getTime())) return undefined;
   return Math.max(0, completedAt.getTime() - startedAt.getTime());
+}
+
+function databaseErrorCode(error: unknown): string | undefined {
+  const seen = new Set<object>();
+  let current = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if ("code" in current && typeof current.code === "string") return current.code;
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return undefined;
 }
 
 export async function loadCodexChatAssistantMessageParts(assistantMessageId: string) {
