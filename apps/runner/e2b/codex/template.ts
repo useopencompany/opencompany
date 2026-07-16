@@ -3,7 +3,8 @@ import { Template } from "e2b";
 export const CODEX_TOOLBOX_TEMPLATE_ALIAS = "opencompany-codex-toolbox";
 export const CODEX_TOOLBOX_CPU_COUNT = 8;
 export const CODEX_TOOLBOX_MEMORY_MB = 8192;
-export const CODEX_CLI_PACKAGE = "@openai/codex@0.132.0";
+export const CODEX_CLI_VERSION = "0.144.5";
+export const CODEX_CLI_PACKAGE = `@openai/codex@${CODEX_CLI_VERSION}`;
 export const PLAYWRIGHT_PACKAGE = "playwright@1.60.0";
 export const BUN_VERSION = "1.3.2";
 
@@ -78,6 +79,7 @@ export const template = Template()
       "command -v npm",
       "command -v bun",
       "command -v codex",
+      `test "$(codex --version)" = "codex-cli ${CODEX_CLI_VERSION}"`,
       "command -v playwright",
       "playwright --version",
     ].join(" && "),
