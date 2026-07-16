@@ -1,0 +1,80 @@
+{
+  "uid": "goat_brain_hubspot_webhooks",
+  "type": "webhooks",
+  "config": {
+    "settings": {
+      "targetUrl": "https://my.opencompany.chat/api/webhooks/hubspot/events",
+      "maxConcurrentRequests": 10
+    },
+    "subscriptions": {
+      "legacyCrmObjects": [
+        { "subscriptionType": "contact.creation", "active": true },
+        {
+          "subscriptionType": "contact.propertyChange",
+          "propertyName": "firstname",
+          "active": true
+        },
+        {
+          "subscriptionType": "contact.propertyChange",
+          "propertyName": "lastname",
+          "active": true
+        },
+        { "subscriptionType": "contact.propertyChange", "propertyName": "email", "active": true },
+        {
+          "subscriptionType": "contact.propertyChange",
+          "propertyName": "jobtitle",
+          "active": true
+        },
+        { "subscriptionType": "contact.propertyChange", "propertyName": "company", "active": true },
+        { "subscriptionType": "contact.propertyChange", "propertyName": "phone", "active": true },
+        {
+          "subscriptionType": "contact.propertyChange",
+          "propertyName": "lifecyclestage",
+          "active": true
+        },
+        {
+          "subscriptionType": "contact.propertyChange",
+          "propertyName": "hs_lead_status",
+          "active": true
+        },
+        { "subscriptionType": "company.creation", "active": true },
+        { "subscriptionType": "company.propertyChange", "propertyName": "name", "active": true },
+        { "subscriptionType": "company.propertyChange", "propertyName": "domain", "active": true },
+        {
+          "subscriptionType": "company.propertyChange",
+          "propertyName": "industry",
+          "active": true
+        },
+        {
+          "subscriptionType": "company.propertyChange",
+          "propertyName": "description",
+          "active": true
+        },
+        {
+          "subscriptionType": "company.propertyChange",
+          "propertyName": "numberofemployees",
+          "active": true
+        },
+        {
+          "subscriptionType": "company.propertyChange",
+          "propertyName": "annualrevenue",
+          "active": true
+        },
+        {
+          "subscriptionType": "company.propertyChange",
+          "propertyName": "lifecyclestage",
+          "active": true
+        },
+        { "subscriptionType": "company.propertyChange", "propertyName": "type", "active": true },
+        { "subscriptionType": "deal.creation", "active": true },
+        { "subscriptionType": "deal.propertyChange", "propertyName": "dealname", "active": true },
+        { "subscriptionType": "deal.propertyChange", "propertyName": "amount", "active": true },
+        { "subscriptionType": "deal.propertyChange", "propertyName": "dealstage", "active": true },
+        { "subscriptionType": "deal.propertyChange", "propertyName": "pipeline", "active": true },
+        { "subscriptionType": "deal.propertyChange", "propertyName": "closedate", "active": true },
+        { "subscriptionType": "deal.propertyChange", "propertyName": "dealtype", "active": true },
+        { "subscriptionType": "deal.propertyChange", "propertyName": "description", "active": true }
+      ]
+    }
+  }
+}
