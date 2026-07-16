@@ -113,7 +113,7 @@ describe("buildHubspotObjectWindowItem", () => {
 
     expect(item.sourceProvider).toBe("hubspot");
     expect(item.sourceType).toBe("activity");
-    expect(item.sourceRef).toBe("hubspot:deal:9876");
+    expect(item.sourceRef).toBe("hubspot:62515:deal:9876");
     expect(item.title).toBe("Acme renewal");
     expect(item.content.object.stage).toBe("closedwon");
     expect(item.content.object.associatedCompanies).toEqual(["Acme Inc"]);
@@ -151,7 +151,7 @@ describe("buildHubspotObjectWindowItem", () => {
     });
 
     expect(item.title).toBe("Jane Doe");
-    expect(item.sourceRef).toBe("hubspot:contact:555");
+    expect(item.sourceRef).toBe("hubspot:62515:contact:555");
     expect(item.content.object.snapshotStale).toBe(true);
   });
 

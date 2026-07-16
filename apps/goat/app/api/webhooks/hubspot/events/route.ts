@@ -86,9 +86,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  // HubSpot retries deliveries that fail, and repeated failures can pause the
-  // app's subscriptions, so after the signature check every path acks with
-  // 200 — errors are logged, not surfaced.
+  // Delivery ids make retries idempotent. Surface transient routing or storage
+  // failures so HubSpot redelivers instead of silently losing CRM activity.
   try {
     return NextResponse.json(await handleHubspotEvents(events));
   } catch (error) {
@@ -96,9 +95,8 @@ export async function POST(request: Request) {
       eventCount: events.length,
       error: error instanceof Error ? error.message : String(error),
     });
+    return NextResponse.json({ error: "Unable to buffer HubSpot events." }, { status: 503 });
   }
-
-  return NextResponse.json({ ok: true });
 }
 
 async function handleHubspotEvents(events: HubspotWebhookEvent[]) {

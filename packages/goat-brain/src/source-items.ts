@@ -969,7 +969,9 @@ export function normalizeHubspotObjectWindow(input: {
     sourceProvider: "hubspot",
     sourceType: "activity",
     externalId: windowId,
-    sourceRef: `hubspot:${input.objectType}:${objectId}`,
+    // HubSpot object ids are unique only within a portal. Keep the portal in
+    // provenance so records from two connected accounts can never collide.
+    sourceRef: `hubspot:${portalId}:${input.objectType}:${objectId}`,
     title: name,
     occurredAt: windowStart,
     capturedAt: flushedAt,

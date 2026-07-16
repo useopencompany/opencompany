@@ -18,7 +18,7 @@ import type { RunnerEnv } from "./env";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-hubspot-api" });
 
-const TOKEN_ENDPOINT = "https://api.hubapi.com/oauth/v1/token";
+const TOKEN_ENDPOINT = "https://api.hubapi.com/oauth/2026-03/token";
 const HUBSPOT_API_TIMEOUT_MS = 10_000;
 const REFRESH_SKEW_MS = 60_000;
 const SNAPSHOT_ASSOCIATION_LIMIT = 5;
