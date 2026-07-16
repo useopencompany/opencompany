@@ -377,6 +377,8 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Codex model: GPT 5.5" }));
+    await user.click(screen.getByText("GPT 5.6 Sol"));
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Clone my repo");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -396,6 +398,7 @@ describe("GoatSurface chat streaming UI", () => {
         planModeEnabled: false,
         goalMode: null,
       },
+      model: "openai/gpt-5.6-sol",
     });
   });
 

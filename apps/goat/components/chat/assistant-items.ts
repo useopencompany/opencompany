@@ -3,9 +3,12 @@ import type { GoatTaskView } from "@/components/GoatSurface";
 import {
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
+  CODEX_FILE_CHANGE_TOOL_NAME,
   CODEX_GOAL_TOOL_NAME,
+  CODEX_MCP_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
+  CODEX_WEB_SEARCH_TOOL_NAME,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
   GOAT_BRAIN_TOOL_NAME,
@@ -128,17 +131,42 @@ export function toolCallViewFromPart(
     name === GOAT_BRAIN_TOOL_NAME && state === "output-available" && isGoatBrainToolOutput(output)
       ? !goatBrainToolOutputSucceeded(output)
       : false;
-  const status = failedGoatBrain ? "failed" : toolStatusFromState(state, stopped);
+  // Codex item parts (file changes, MCP tools, web searches) carry their outcome in
+  // output.status rather than the part state.
+  const codexItemOutcome =
+    isCodexItemToolName(name) && state === "output-available" && isRecord(output)
+      ? readString(output.status)
+      : null;
+  const status = failedGoatBrain
+    ? "failed"
+    : codexItemOutcome === "failed"
+      ? "failed"
+      : codexItemOutcome === "interrupted"
+        ? "stopped"
+        : toolStatusFromState(state, stopped);
+  // Questions/approvals have no response channel in this chat: a settled part means the
+  // prompt went unanswered, not that it succeeded.
+  const unansweredCodexPrompt =
+    (name === CODEX_QUESTION_TOOL_NAME || name === CODEX_APPROVAL_TOOL_NAME) &&
+    state === "output-available";
   return {
     name,
     label: toolLabel(name),
     status,
-    statusText: toolStatusText(status, state),
+    statusText: unansweredCodexPrompt ? "Unanswered" : toolStatusText(status, state),
     detail: toolDetail(name, part, status),
     input: part.input,
     output: part.output,
     errorText: typeof part.errorText === "string" ? part.errorText : null,
   };
+}
+
+function isCodexItemToolName(name: string) {
+  return (
+    name === CODEX_FILE_CHANGE_TOOL_NAME ||
+    name === CODEX_MCP_TOOL_NAME ||
+    name === CODEX_WEB_SEARCH_TOOL_NAME
+  );
 }
 
 export function isToolPartRecord(
@@ -181,6 +209,9 @@ export function toolLabel(name: string) {
   if (name === CODEX_GOAL_TOOL_NAME) return "Goal";
   if (name === CODEX_QUESTION_TOOL_NAME) return "Question";
   if (name === CODEX_APPROVAL_TOOL_NAME) return "Approval";
+  if (name === CODEX_FILE_CHANGE_TOOL_NAME) return "File change";
+  if (name === CODEX_MCP_TOOL_NAME) return "MCP tool";
+  if (name === CODEX_WEB_SEARCH_TOOL_NAME) return "Web search";
   if (name === START_TASK_TOOL_NAME) return "Task";
   if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
@@ -208,7 +239,8 @@ export function toolDetail(
     name === CODEX_PLAN_TOOL_NAME ||
     name === CODEX_GOAL_TOOL_NAME ||
     name === CODEX_QUESTION_TOOL_NAME ||
-    name === CODEX_APPROVAL_TOOL_NAME
+    name === CODEX_APPROVAL_TOOL_NAME ||
+    isCodexItemToolName(name)
   ) {
     return codexStateToolDetail(name, part);
   }
@@ -322,15 +354,42 @@ function codexStateToolDetail(name: string, part: Record<string, unknown>) {
       [status ? `Status: ${status}` : null, objective].filter(Boolean).join(" - "),
     );
   }
-  if (name === CODEX_QUESTION_TOOL_NAME) {
-    return truncateToolPreview(readString(input.question) ?? "Codex is waiting for input.");
-  }
-  if (name === CODEX_APPROVAL_TOOL_NAME) {
+  if (name === CODEX_QUESTION_TOOL_NAME || name === CODEX_APPROVAL_TOOL_NAME) {
+    const prompt =
+      name === CODEX_QUESTION_TOOL_NAME
+        ? readString(input.question)
+        : (readString(input.title) ?? readString(input.action));
+    // There is no way to reply to Codex prompts in this chat; say so instead of implying
+    // the user should act.
+    const fallback =
+      name === CODEX_QUESTION_TOOL_NAME ? "Codex asked for input" : "Codex asked for approval";
     return truncateToolPreview(
-      readString(input.title) ?? readString(input.action) ?? "Codex is waiting for approval.",
+      `${prompt ?? fallback} (replies can't be sent to Codex in this chat)`,
     );
   }
+  if (name === CODEX_FILE_CHANGE_TOOL_NAME) {
+    const paths = codexFileChangePaths(output.changes) ?? codexFileChangePaths(input.changes);
+    if (!paths || paths.length === 0) return "File changes";
+    if (paths.length === 1) return truncateToolPreview(paths[0]);
+    return truncateToolPreview(`${paths.length} files: ${paths.join(", ")}`);
+  }
+  if (name === CODEX_MCP_TOOL_NAME) {
+    const target = [readString(input.server), readString(input.tool)].filter(Boolean).join(".");
+    const error = readString(output.error);
+    return truncateToolPreview([target || "MCP tool call", error].filter(Boolean).join(" - "));
+  }
+  if (name === CODEX_WEB_SEARCH_TOOL_NAME) {
+    return truncateToolPreview(readString(input.query) ?? "Web search");
+  }
   return null;
+}
+
+function codexFileChangePaths(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const paths = value
+    .map((entry) => (isRecord(entry) && typeof entry.path === "string" ? entry.path : null))
+    .filter((path): path is string => Boolean(path));
+  return paths.length > 0 ? paths : null;
 }
 
 function formatToolInput(value: unknown) {

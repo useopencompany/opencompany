@@ -28,9 +28,22 @@ export type GoatGoogleDriveResourceRef = {
   selectedAt: string;
 };
 
+export type GoatGoogleDriveAllFilesRef = {
+  selectedAt: string;
+};
+
 export type GoatGoogleDriveSourceConfig = {
+  allFiles?: GoatGoogleDriveAllFilesRef;
   resources: GoatGoogleDriveResourceRef[];
 };
+
+export function readGoatGoogleDriveAllFiles(config: unknown): GoatGoogleDriveAllFilesRef | null {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return null;
+  const allFiles = (config as Record<string, unknown>).allFiles;
+  if (!allFiles || typeof allFiles !== "object" || Array.isArray(allFiles)) return null;
+  const selectedAt = readIso((allFiles as Record<string, unknown>).selectedAt);
+  return selectedAt ? { selectedAt } : null;
+}
 
 export function readGoatGoogleDriveResources(config: unknown): GoatGoogleDriveResourceRef[] {
   if (!config || typeof config !== "object" || Array.isArray(config)) return [];
@@ -534,6 +547,7 @@ export async function listEnabledGoatGoogleDriveSources(
     );
   return rows.map((row: { brainRef: string; config: unknown }) => ({
     brainRef: row.brainRef,
+    allFiles: readGoatGoogleDriveAllFiles(row.config),
     resources: readGoatGoogleDriveResources(row.config),
   }));
 }

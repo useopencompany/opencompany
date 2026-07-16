@@ -13,6 +13,9 @@ export const CODEX_PLAN_TOOL_NAME = "codex_plan";
 export const CODEX_GOAL_TOOL_NAME = "codex_goal";
 export const CODEX_QUESTION_TOOL_NAME = "codex_question";
 export const CODEX_APPROVAL_TOOL_NAME = "codex_approval";
+export const CODEX_FILE_CHANGE_TOOL_NAME = "codex_file_change";
+export const CODEX_MCP_TOOL_NAME = "codex_mcp_tool";
+export const CODEX_WEB_SEARCH_TOOL_NAME = "codex_web_search";
 
 export type CodexCommandToolInput = { command: string };
 export type CodexCommandToolOutput = {
@@ -38,7 +41,10 @@ export type CodexUiStatusPart = {
     | typeof CODEX_PLAN_TOOL_NAME
     | typeof CODEX_GOAL_TOOL_NAME
     | typeof CODEX_QUESTION_TOOL_NAME
-    | typeof CODEX_APPROVAL_TOOL_NAME;
+    | typeof CODEX_APPROVAL_TOOL_NAME
+    | typeof CODEX_FILE_CHANGE_TOOL_NAME
+    | typeof CODEX_MCP_TOOL_NAME
+    | typeof CODEX_WEB_SEARCH_TOOL_NAME;
   toolCallId: string;
   input: Record<string, unknown>;
 } & (
@@ -135,6 +141,22 @@ export function applyCodexEventToUiMessageParts(
         })),
       );
     }
+    case "file_change.started":
+    case "file_change.completed": {
+      return changed(
+        upsertStatusPart(parts, event, CODEX_FILE_CHANGE_TOOL_NAME, fileChangeStatusPart(event)),
+      );
+    }
+    case "mcp_tool.started":
+    case "mcp_tool.completed": {
+      return changed(upsertStatusPart(parts, event, CODEX_MCP_TOOL_NAME, mcpToolStatusPart(event)));
+    }
+    case "web_search.started":
+    case "web_search.completed": {
+      return changed(
+        upsertStatusPart(parts, event, CODEX_WEB_SEARCH_TOOL_NAME, webSearchStatusPart(event)),
+      );
+    }
     case "plan.updated": {
       return changed(upsertStatusPart(parts, event, CODEX_PLAN_TOOL_NAME, planStatusPart(event)));
     }
@@ -160,33 +182,51 @@ export function applyCodexEventToUiMessageParts(
   }
 }
 
-// Marks dangling in-flight command parts terminal when a turn ends abnormally, so a
-// reloaded chat never shows an eternal spinner for a dead turn.
+// Settles non-terminal parts when a turn ends, so a reloaded chat never shows an eternal
+// spinner (dangling commands) or an eternal "Waiting" (questions/approvals nobody can answer)
+// for a turn that is over. Commands are only touched on abnormal outcomes; status parts are
+// settled on every outcome.
 export function finalizeCodexUiMessageParts(
   parts: readonly CodexUiMessagePart[],
-  outcome: "interrupted" | "failed",
+  outcome: "completed" | "interrupted" | "failed",
   error?: string | null,
 ): CodexUiMessageProjection {
   let didChange = false;
   const next = parts.map((part): CodexUiMessagePart => {
-    if (!isCommandPart(part) || part.state !== "input-available") return part;
-    didChange = true;
-    if (outcome === "interrupted") {
+    if (isCommandPart(part) && part.state === "input-available" && outcome !== "completed") {
+      didChange = true;
+      if (outcome === "interrupted") {
+        return {
+          type: CODEX_COMMAND_TOOL_PART_TYPE,
+          toolCallId: part.toolCallId,
+          state: "output-available",
+          input: part.input,
+          output: { status: "interrupted", exitCode: null },
+        };
+      }
       return {
         type: CODEX_COMMAND_TOOL_PART_TYPE,
         toolCallId: part.toolCallId,
-        state: "output-available",
+        state: "output-error",
         input: part.input,
-        output: { status: "interrupted", exitCode: null },
+        errorText: error?.trim() || "Codex turn failed.",
       };
     }
-    return {
-      type: CODEX_COMMAND_TOOL_PART_TYPE,
-      toolCallId: part.toolCallId,
-      state: "output-error",
-      input: part.input,
-      errorText: error?.trim() || "Codex turn failed.",
-    };
+    if (part.type === "dynamic-tool" && part.state !== "output-available") {
+      didChange = true;
+      // Questions/approvals have no response channel in this chat, so they end unanswered
+      // whatever the turn outcome; other in-flight status parts inherit the turn outcome.
+      const status = part.state === "approval-requested" ? "unanswered" : outcome;
+      return {
+        type: "dynamic-tool",
+        toolName: part.toolName,
+        toolCallId: part.toolCallId,
+        state: "output-available",
+        input: part.input,
+        output: { ...part.input, status },
+      };
+    }
+    return part;
   });
   return didChange ? changed(next) : unchanged(parts);
 }
@@ -414,6 +454,48 @@ function appendPlanDelta(
   };
 }
 
+function fileChangeStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+  const changes = Array.isArray(event.payload.changes) ? event.payload.changes : [];
+  const input = { label: "File change", changes };
+  if (event.type === "file_change.started") return { state: "input-available", input };
+  return {
+    state: "output-available",
+    input,
+    output: { status: readString(event.payload.status) ?? "completed", changes },
+  };
+}
+
+function mcpToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+  const input = {
+    label: "MCP tool",
+    ...(readString(event.payload.server) ? { server: event.payload.server } : {}),
+    ...(readString(event.payload.tool) ? { tool: event.payload.tool } : {}),
+  };
+  if (event.type === "mcp_tool.started") return { state: "input-available", input };
+  const error = readString(event.payload.error);
+  return {
+    state: "output-available",
+    input,
+    output: {
+      status: readString(event.payload.status) ?? "completed",
+      ...(error ? { error } : {}),
+    },
+  };
+}
+
+function webSearchStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+  const input = {
+    label: "Web search",
+    ...(readString(event.payload.query) ? { query: event.payload.query } : {}),
+  };
+  if (event.type === "web_search.started") return { state: "input-available", input };
+  return {
+    state: "output-available",
+    input,
+    output: { status: readString(event.payload.status) ?? "completed" },
+  };
+}
+
 function planStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
   const text = readString(event.payload.text) ?? "";
   const completed = readString(event.payload.status) === "completed";
@@ -486,7 +568,10 @@ function isCodexStatusToolName(value: string): value is CodexUiStatusPart["toolN
     value === CODEX_PLAN_TOOL_NAME ||
     value === CODEX_GOAL_TOOL_NAME ||
     value === CODEX_QUESTION_TOOL_NAME ||
-    value === CODEX_APPROVAL_TOOL_NAME
+    value === CODEX_APPROVAL_TOOL_NAME ||
+    value === CODEX_FILE_CHANGE_TOOL_NAME ||
+    value === CODEX_MCP_TOOL_NAME ||
+    value === CODEX_WEB_SEARCH_TOOL_NAME
   );
 }
 
