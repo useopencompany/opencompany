@@ -9,7 +9,12 @@ type CtaProps = {
 
 // Squared, monospace call-to-action — primary is a solid ink block, secondary is
 // a muted mono link (see the reference: "Book an onboarding call · Join Waitlist").
-export function Cta({ href = "#", variant = "primary", className, children }: CtaProps) {
+export function Cta({
+  href = "https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding",
+  variant = "primary",
+  className,
+  children,
+}: CtaProps) {
   return (
     <a
       href={href}

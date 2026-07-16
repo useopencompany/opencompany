@@ -26,6 +26,7 @@ import {
   setGoatGoogleDriveSyncWakeup,
   startGoatGoogleDriveSyncWorker,
 } from "./goat-google-drive-sync-worker";
+import { startGoatGranolaPollWorker } from "./goat-granola-poll-worker";
 import { startGoatLinearFlushWorker } from "./goat-linear-flush-worker";
 import { startGoatTaskScheduleWorker } from "./goat-scheduler";
 import { startGoatSlackFlushWorker } from "./goat-slack-flush-worker";
@@ -109,6 +110,7 @@ const goatSlackFlushWorker = env.goatTaskWorkerEnabled ? startGoatSlackFlushWork
 const goatLinearFlushWorker = env.goatTaskWorkerEnabled ? startGoatLinearFlushWorker() : null;
 const goatGmailPollWorker = env.goatTaskWorkerEnabled ? startGoatGmailPollWorker(env) : null;
 const goatGmailFlushWorker = env.goatTaskWorkerEnabled ? startGoatGmailFlushWorker(env) : null;
+const goatGranolaPollWorker = env.goatTaskWorkerEnabled ? startGoatGranolaPollWorker() : null;
 const goatGoogleDriveSyncWorker = env.goatTaskWorkerEnabled
   ? startGoatGoogleDriveSyncWorker(env)
   : null;
@@ -184,6 +186,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatLinearFlushWorker?.stop() ?? Promise.resolve(),
       goatGmailPollWorker?.stop() ?? Promise.resolve(),
       goatGmailFlushWorker?.stop() ?? Promise.resolve(),
+      goatGranolaPollWorker?.stop() ?? Promise.resolve(),
       goatGoogleDriveSyncWorker?.stop() ?? Promise.resolve(),
       server.close(),
     ])

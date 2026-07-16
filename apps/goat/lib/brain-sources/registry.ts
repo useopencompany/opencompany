@@ -1,6 +1,14 @@
 import type { GoatBrainSourceConfigProvider } from "@opencompany/db/goat-schema";
 import type { LucideIcon } from "lucide-react";
-import { Files, FileText, GitBranch, ListTodo, Mail, MessageSquare } from "lucide-react";
+import {
+  Files,
+  FileText,
+  GitBranch,
+  ListTodo,
+  Mail,
+  MessageSquare,
+  NotebookPen,
+} from "lucide-react";
 
 export const GOAT_JAMIE_DOCS_HREF = "/docs/integrations/jamie";
 
@@ -9,7 +17,7 @@ export type GoatBrainSourceProviderDef = {
   name: string;
   description: string;
   icon: LucideIcon;
-  connectionKind: "webhook" | "oauth";
+  connectionKind: "webhook" | "oauth" | "api_key";
   // Unavailable providers render as "Coming soon" cards; making one available
   // means shipping its connector and flipping this flag.
   available: boolean;
@@ -29,6 +37,16 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     connectHref: "/settings/jamie",
     onboardingConnectHref: "/onboarding/jamie",
     docsHref: GOAT_JAMIE_DOCS_HREF,
+  },
+  {
+    id: "granola",
+    name: "Granola",
+    description: "Meeting notes flow into this brain once Granola finishes each summary.",
+    icon: NotebookPen,
+    connectionKind: "api_key",
+    available: true,
+    connectHref: "/settings/granola",
+    docsHref: "/docs/integrations/granola",
   },
   {
     id: "gmail",

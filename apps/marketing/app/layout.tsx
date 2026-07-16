@@ -10,9 +10,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OpenCompany — Give your company a brain",
-  description:
-    "Point it at your GitHub, Gmail, Linear, Slack, and meetings. It figures out what matters, files it, and links it to what you already know — so every model you talk to actually knows your company.",
+  metadataBase: new URL("https://www.opencompany.cloud"),
   icons: {
     icon: [{ url: "/icon/oc-icon-v3.svg", type: "image/svg+xml" }],
     shortcut: [{ url: "/icon/oc-icon-v3.svg", type: "image/svg+xml" }],
