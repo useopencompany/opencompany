@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readGoatGoogleDriveResources } from "./goat-google-drive";
+import { readGoatGoogleDriveAllFiles, readGoatGoogleDriveResources } from "./goat-google-drive";
 
 describe("Google Drive source configuration", () => {
   it("sanitizes resources, timestamps, corpus keys, and duplicate ids", () => {
@@ -47,5 +47,15 @@ describe("Google Drive source configuration", () => {
         selectedAt: "2026-07-13T08:00:00.000Z",
       },
     ]);
+  });
+
+  it("sanitizes all-files source timestamps", () => {
+    expect(
+      readGoatGoogleDriveAllFiles({
+        allFiles: { selectedAt: "2026-07-13T08:00:00Z" },
+      }),
+    ).toEqual({ selectedAt: "2026-07-13T08:00:00.000Z" });
+
+    expect(readGoatGoogleDriveAllFiles({ allFiles: { selectedAt: "not-a-date" } })).toBeNull();
   });
 });
