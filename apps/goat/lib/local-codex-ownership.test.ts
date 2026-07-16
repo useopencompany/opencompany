@@ -14,6 +14,7 @@ import {
 } from "@/lib/local-codex";
 
 const mocks = vi.hoisted(() => ({
+  captureException: vi.fn(),
   execute: vi.fn(),
   insert: vi.fn(),
   insertBuilders: [] as ReturnType<typeof createInsertBuilder>[],
@@ -23,6 +24,10 @@ const mocks = vi.hoisted(() => ({
   selectResults: [] as unknown[][],
   update: vi.fn(),
   updateBuilders: [] as ReturnType<typeof createUpdateBuilder>[],
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  captureException: mocks.captureException,
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -162,6 +167,53 @@ describe("local Codex bridge ownership", () => {
       localCodexTurnId: "goat_local_codex_turn_1",
       bridgeId: "goat_local_bridge_1",
     });
+  });
+
+  it("keeps projecting bridge events when their auxiliary audit insert fails", async () => {
+    const databaseError = Object.assign(new Error("query details must not be reported"), {
+      code: "23514",
+    });
+    mocks.selectResults.push(
+      [localSessionFixture()],
+      [localTurnFixture()],
+      [{ content: "", debugTrace: null }],
+    );
+    mocks.insert.mockImplementationOnce(() => ({
+      values: vi.fn().mockRejectedValue(databaseError),
+    }));
+
+    await expect(
+      recordLocalCodexBridgeEvents({
+        bridge: bridgeFixture(),
+        localCodexSessionId: "goat_local_codex_1",
+        events: [
+          {
+            method: "item/started",
+            params: {
+              item: {
+                id: "file_change_1",
+                type: "fileChange",
+                changes: [{ path: "src/index.ts", kind: "edit" }],
+              },
+            },
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(mocks.update).toHaveBeenCalledWith(expect.anything());
+    expect(mocks.captureException).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "LocalCodexEventPersistenceError",
+        message: "Local Codex audit event persistence failed.",
+      }),
+      expect.objectContaining({
+        event: "opencompany.goat_local_codex_event_persist_failed",
+        event_type: "file_change.started",
+        original_error_code: "23514",
+      }),
+    );
+    expect(mocks.captureException.mock.calls[0]?.[0]).not.toBe(databaseError);
   });
 });
 

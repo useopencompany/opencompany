@@ -76,6 +76,7 @@ import {
   type GoatChatMessageMetadata,
   type GoatChatSessionView,
   type GoatChatSummaryView,
+  type GoatChatUiAttachment,
   type GoatChatUiMessage,
   type GoatStoredChatMessage,
   textFromGoatChatUiMessage,
@@ -126,6 +127,7 @@ const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
 const CODEX_SANDBOX_STATUS_POLL_INTERVAL_MS = 30_000;
 const CODEX_MENTION: GoatChatMention = { kind: "engine", id: "codex" };
+const CLOUD_CODEX_ATTACHMENT_CAPABILITIES = { images: true, pdf: true } as const;
 
 type ActiveMentionToken = {
   start: number;
@@ -239,6 +241,8 @@ export function GoatSurface({
   const activeTurnStartedAtRef = useRef<number | null>(null);
   const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
   const wasAgentWorkingRef = useRef(false);
+  const optimisticAttachmentPreviewUrlsRef = useRef<ReadonlyMap<string, string[]>>(new Map());
+  const persistedMessageIdsRef = useRef<ReadonlySet<string>>(new Set());
   const [input, setInput] = useState("");
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
@@ -357,6 +361,39 @@ export function GoatSurface({
     [],
   );
 
+  const releaseOptimisticAttachmentPreviews = useCallback((messageId: string) => {
+    const urls = optimisticAttachmentPreviewUrlsRef.current.get(messageId);
+    if (!urls) return;
+    for (const url of urls) URL.revokeObjectURL(url);
+    const next = new Map(optimisticAttachmentPreviewUrlsRef.current);
+    next.delete(messageId);
+    optimisticAttachmentPreviewUrlsRef.current = next;
+  }, []);
+
+  const releaseAllOptimisticAttachmentPreviews = useCallback(() => {
+    for (const urls of optimisticAttachmentPreviewUrlsRef.current.values()) {
+      for (const url of urls) URL.revokeObjectURL(url);
+    }
+    optimisticAttachmentPreviewUrlsRef.current = new Map();
+  }, []);
+
+  const trackOptimisticAttachmentPreviews = useCallback(
+    (messageId: string, attachments: readonly GoatChatUiAttachment[]) => {
+      const urls = attachments.flatMap((attachment) =>
+        attachment.previewUrl ? [attachment.previewUrl] : [],
+      );
+      if (urls.length === 0) return;
+      if (persistedMessageIdsRef.current.has(messageId)) {
+        for (const url of urls) URL.revokeObjectURL(url);
+        return;
+      }
+      const next = new Map(optimisticAttachmentPreviewUrlsRef.current);
+      next.set(messageId, urls);
+      optimisticAttachmentPreviewUrlsRef.current = next;
+    },
+    [],
+  );
+
   const prepareSendMessagesRequest = useCallback(
     ({
       body,
@@ -460,11 +497,12 @@ export function GoatSurface({
       initialChat.engine === "local_codex",
   );
   const attachmentsEnabled =
-    Boolean(userWorkosId) && !isEngineChat && !localCodexFeatureDisabledForChat;
+    Boolean(userWorkosId) && activeEngine !== "local_codex" && !localCodexFeatureDisabledForChat;
   const composerAttachments = useGoatChatAttachments({
     userWorkosId,
     modelName: String(chatModel),
-    enabled: attachmentsEnabled,
+    enabled: attachmentsEnabled && !engineSubmitting,
+    ...(activeEngine === "codex" ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES } : {}),
   });
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   // Render list: Electric-synced rows are the source of truth for persisted
@@ -476,6 +514,12 @@ export function GoatSurface({
     if (initialChat && initialChat.id === chatSessionId) return initialChat.messages;
     return [];
   }, [chatSessionId, initialChat, liveChat]);
+  useEffect(() => {
+    persistedMessageIdsRef.current = new Set(persistedMessages.map((message) => message.id));
+    for (const message of persistedMessages) {
+      releaseOptimisticAttachmentPreviews(message.id);
+    }
+  }, [persistedMessages, releaseOptimisticAttachmentPreviews]);
   const chatMessages = useMemo(() => {
     if (persistedMessages.length === 0) return messages;
     const persistedIds = new Set(persistedMessages.map((message) => message.id));
@@ -500,8 +544,9 @@ export function GoatSurface({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      releaseAllOptimisticAttachmentPreviews();
     };
-  }, []);
+  }, [releaseAllOptimisticAttachmentPreviews]);
 
   useLayoutEffect(() => {
     pathnameRef.current = pathname;
@@ -602,6 +647,7 @@ export function GoatSurface({
 
       const engineTarget = engineChatKindFromChat(chat, localCodexBetaEnabled);
       const nextCodexComposerState = codexComposerUiStateForChat(chat, codexComposerStateByChatId);
+      releaseAllOptimisticAttachmentPreviews();
       setChatSessionId(chat?.id ?? null);
       setChatInstanceKey(chat?.id ?? "goat-chat-main");
       setChatModel(
@@ -640,6 +686,7 @@ export function GoatSurface({
       isEngineChat,
       localCodexBetaEnabled,
       localCodexFeatureDisabledForChat,
+      releaseAllOptimisticAttachmentPreviews,
       setMessages,
     ],
   );
@@ -826,8 +873,8 @@ export function GoatSurface({
       toast.error(LOCAL_CODEX_BETA_DISABLED_MESSAGE);
       return;
     }
-    if (pendingAttachments.length > 0 && activeEngine) {
-      toast.error("Attachments are not supported in engine chats yet.");
+    if (pendingAttachments.length > 0 && activeEngine === "local_codex") {
+      toast.error("Attachments are not supported in Local Codex chats yet.");
       return;
     }
     if (composerAttachments.isUploading) {
@@ -842,6 +889,20 @@ export function GoatSurface({
       activeSelectedMentions.length > 0 && hasCodexMentionToken(prompt)
         ? activeSelectedMentions
         : [];
+    // previewUrl rides along for the optimistic bubble render; the server ignores it and
+    // re-mints attachment ids on persist.
+    const attachmentsMetadata = readyAttachments.map((attachment) => ({
+      id: attachment.id,
+      kind: attachment.kind,
+      mediaType: attachment.mediaType,
+      filename: attachment.filename,
+      sizeBytes: attachment.sizeBytes,
+      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
+      blobUrl: attachment.blobUrl!,
+      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
+      blobPathname: attachment.blobPathname!,
+      ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
+    }));
 
     clearError();
     setMode("chat");
@@ -871,6 +932,8 @@ export function GoatSurface({
       const existingEngineSessionId = activeEngineChat?.chatSessionId ?? null;
       beginActiveTurn();
       setEngineSubmitting(true);
+      // Keep the object URLs alive for the optimistic user bubble.
+      composerAttachments.setAttachments([]);
       void sendEngineChatMessage({
         endpoint: config.messagesEndpoint,
         errorLabel: config.label,
@@ -878,9 +941,11 @@ export function GoatSurface({
         sessionId: existingEngineSessionId,
         settings: settings.settings,
         userMessageId,
+        attachments: attachmentsMetadata,
         ...(engine === "codex" && !existingEngineSessionId ? { model: codexModel } : {}),
       })
         .then((result) => {
+          trackOptimisticAttachmentPreviews(result.userMessageId, attachmentsMetadata);
           setChatSessionId(result.sessionId);
           setEngineChatSession({ engine, chatSessionId: result.sessionId });
           activeTurnAssistantMessageIdRef.current = result.assistantMessageId;
@@ -900,6 +965,7 @@ export function GoatSurface({
               userMessageId: result.userMessageId,
               assistantMessageId: result.assistantMessageId,
               prompt,
+              attachments: attachmentsMetadata,
             }),
           );
           if (isGoatChatSurfacePath(pathnameRef.current)) {
@@ -910,6 +976,7 @@ export function GoatSurface({
         .catch((error) => {
           clearActiveTurn();
           setInput(prompt);
+          composerAttachments.setAttachments(pendingAttachments);
           toast.error(
             error instanceof Error ? error.message : `${config.label} could not start that turn.`,
           );
@@ -921,20 +988,6 @@ export function GoatSurface({
       return;
     }
 
-    // previewUrl rides along for the optimistic bubble render; the server
-    // ignores it and re-mints attachment ids on persist.
-    const attachmentsMetadata = readyAttachments.map((attachment) => ({
-      id: attachment.id,
-      kind: attachment.kind,
-      mediaType: attachment.mediaType,
-      filename: attachment.filename,
-      sizeBytes: attachment.sizeBytes,
-      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
-      blobUrl: attachment.blobUrl!,
-      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
-      blobPathname: attachment.blobPathname!,
-      ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
-    }));
     const metadata: GoatChatMessageMetadata = {
       ...(mentions.length > 0 ? { mentions } : {}),
       ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
@@ -1383,7 +1436,7 @@ export function GoatSurface({
                   <button
                     type="button"
                     aria-label="Attach files"
-                    disabled={isGenerating}
+                    disabled={isGenerating || engineSubmitting}
                     onClick={() => attachmentFileInputRef.current?.click()}
                     className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
                   >
@@ -1521,6 +1574,7 @@ async function sendEngineChatMessage(input: {
   sessionId: string | null;
   settings: CodexComposerSettings;
   userMessageId: string;
+  attachments: GoatChatUiAttachment[];
   model?: CodexChatModelId;
 }): Promise<EngineChatMessageResponse> {
   const response = await fetch(input.endpoint, {
@@ -1532,6 +1586,7 @@ async function sendEngineChatMessage(input: {
         id: input.userMessageId,
         role: "user",
         parts: [{ type: "text", text: input.prompt }],
+        ...(input.attachments.length > 0 ? { metadata: { attachments: input.attachments } } : {}),
       },
       settings: input.settings,
       ...(input.model ? { model: input.model } : {}),
@@ -1551,6 +1606,7 @@ function appendEngineOptimisticMessages(
     userMessageId: string;
     assistantMessageId: string | null;
     prompt: string;
+    attachments: GoatChatUiAttachment[];
   },
 ): GoatChatUiMessage[] {
   const byId = new Set(current.map((message) => message.id));
@@ -1559,7 +1615,10 @@ function appendEngineOptimisticMessages(
     next.push({
       id: input.userMessageId,
       role: "user",
-      metadata: { sessionId: input.sessionId },
+      metadata: {
+        sessionId: input.sessionId,
+        ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
+      },
       parts: [{ type: "text", text: input.prompt }],
     });
   }

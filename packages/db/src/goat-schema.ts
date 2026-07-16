@@ -12,6 +12,7 @@ import {
   integer,
   jsonb,
   pgSchema,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -59,7 +60,8 @@ export type GoatIntegrationProvider =
   | "slack"
   | "slack_bot"
   | "hubspot"
-  | "granola";
+  | "granola"
+  | "fathom";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear) are always personal. Installation-bound
@@ -103,7 +105,8 @@ export type GoatBrainSourceProvider =
   | "gmail"
   | "google_drive"
   | "hubspot"
-  | "granola";
+  | "granola"
+  | "fathom";
 // "slack_bot" rows are answer *destinations* (which channels a brain answers
 // in via the Slack bot), not ingestion sources; no ingestion path reads them.
 export type GoatBrainSourceConfigProvider =
@@ -115,7 +118,8 @@ export type GoatBrainSourceConfigProvider =
   | "linear"
   | "slack_bot"
   | "hubspot"
-  | "granola";
+  | "granola"
+  | "fathom";
 export type GoatBrainSourceType =
   | "meeting"
   | "run"
@@ -150,6 +154,7 @@ export type GoatBrainImportProvider =
   | "github"
   | "jamie"
   | "granola"
+  | "fathom"
   | "gmail"
   | "slack"
   | "linear";
@@ -370,29 +375,31 @@ export type GoatLocalCodexTurnStatus =
   | "interrupted";
 export type GoatLocalCodexCommandKind = "start_turn" | "steer" | "interrupt" | "close";
 export type GoatLocalCodexCommandStatus = "queued" | "claimed" | "succeeded" | "failed";
-export type GoatLocalCodexEventType =
-  | "assistant.delta"
-  | "assistant.completed"
-  | "reasoning.completed"
-  | "command.started"
-  | "command.output"
-  | "command.completed"
-  | "command.failed"
-  | "file_change.started"
-  | "file_change.completed"
-  | "mcp_tool.started"
-  | "mcp_tool.completed"
-  | "web_search.started"
-  | "web_search.completed"
-  | "plan.updated"
-  | "goal.updated"
-  | "question.requested"
-  | "approval.requested"
-  | "turn.started"
-  | "turn.completed"
-  | "usage.updated"
-  | "error"
-  | "unknown";
+export const GOAT_LOCAL_CODEX_EVENT_TYPES = [
+  "assistant.delta",
+  "assistant.completed",
+  "reasoning.completed",
+  "command.started",
+  "command.output",
+  "command.completed",
+  "command.failed",
+  "file_change.started",
+  "file_change.completed",
+  "mcp_tool.started",
+  "mcp_tool.completed",
+  "web_search.started",
+  "web_search.completed",
+  "plan.updated",
+  "goal.updated",
+  "question.requested",
+  "approval.requested",
+  "turn.started",
+  "turn.completed",
+  "usage.updated",
+  "error",
+  "unknown",
+] as const;
+export type GoatLocalCodexEventType = (typeof GOAT_LOCAL_CODEX_EVENT_TYPES)[number];
 
 export type GoatCodexChatSessionStatus = GoatLocalCodexSessionStatus;
 export type GoatCodexChatTurnStatus = GoatLocalCodexTurnStatus;
@@ -400,6 +407,11 @@ export type GoatCodexChatEventType = Exclude<
   GoatLocalCodexEventType,
   "assistant.delta" | "command.output"
 >;
+export const GOAT_CODEX_CHAT_EVENT_TYPES: readonly GoatCodexChatEventType[] =
+  GOAT_LOCAL_CODEX_EVENT_TYPES.filter(
+    (eventType): eventType is GoatCodexChatEventType =>
+      eventType !== "assistant.delta" && eventType !== "command.output",
+  );
 
 export type GoatCodexChatTurnSettings = {
   reasoningEffort?: CodexReasoningEffort;
@@ -1210,7 +1222,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1259,7 +1271,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1313,7 +1325,7 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -1365,7 +1377,7 @@ export const goatBrainSources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_brain_sources_provider_check",
-      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear', 'slack_bot', 'hubspot', 'granola')`,
+      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear', 'slack_bot', 'hubspot', 'granola', 'fathom')`,
     ),
   }),
 );
@@ -1467,7 +1479,7 @@ export const goatBrainSourceItems = goat.table(
     }).onDelete("cascade"),
     sourceProviderCheck: check(
       "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola', 'fathom')`,
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
@@ -1547,7 +1559,7 @@ export const goatBrainIngestJobs = goat.table(
     importRunIdx: index("goat_brain_ingest_jobs_import_run_idx").on(table.importRunId),
     sourceProviderCheck: check(
       "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola', 'fathom')`,
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
@@ -1622,7 +1634,7 @@ export const goatWorkspaceIngestionReservations = goat.table(
     ),
     sourceProviderCheck: check(
       "goat_ingestion_reservations_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola')`,
+      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola', 'fathom')`,
     ),
     consumptionStateCheck: check(
       "goat_ingestion_reservations_consumption_state_check",
@@ -1663,7 +1675,7 @@ export const goatBrainImportCandidates = goat.table(
     ),
     providerCheck: check(
       "goat_brain_import_candidates_provider_check",
-      sql`${table.provider} IN ('public_web', 'github', 'jamie', 'granola', 'gmail', 'slack', 'linear')`,
+      sql`${table.provider} IN ('public_web', 'github', 'jamie', 'granola', 'fathom', 'gmail', 'slack', 'linear')`,
     ),
   }),
 );
@@ -1923,6 +1935,60 @@ export const goatGranolaSyncState = goat.table("granola_sync_state", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Per-integration Fathom poll cursor. Goat uses bounded created_after /
+// created_before windows for personal API-key connections. The initial cursor
+// is written when the connection is created, so live ingestion never backfills
+// implicitly. pending_created_before_cursor pins the upper bound while an
+// opaque page_cursor continuation is in flight.
+export const goatFathomSyncState = goat.table("fathom_sync_state", {
+  integrationId: text("integration_id")
+    .primaryKey()
+    .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+  userWorkosId: text("user_workos_id")
+    .notNull()
+    .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+  createdAfterCursor: timestamp("created_after_cursor", { withTimezone: true }),
+  pageCursor: text("page_cursor"),
+  pendingCreatedBeforeCursor: timestamp("pending_created_before_cursor", { withTimezone: true }),
+  lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Fathom can list a recording before its generated summary or transcript is
+// available. Keep those recordings durable while the timestamp cursor moves
+// forward; the runner retries the recording content endpoints and only creates
+// the cross-brain event claim once usable content exists.
+export const goatFathomPendingMeetings = goat.table(
+  "fathom_pending_meetings",
+  {
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    recordingId: text("recording_id").notNull(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    meetingCreatedAt: timestamp("meeting_created_at", { withTimezone: true }).notNull(),
+    rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastAttemptedAt: timestamp("last_attempted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      name: "goat_fathom_pending_meetings_pk",
+      columns: [table.integrationId, table.recordingId],
+    }),
+    retryIdx: index("goat_fathom_pending_meetings_retry_idx").on(
+      table.integrationId,
+      table.lastAttemptedAt.asc().nullsFirst(),
+      table.createdAt,
+    ),
+  }),
+);
 
 // One durable Drive change-feed cursor per connected account/corpus. My Drive
 // and directly shared files use corpus_key "user"; selected Shared Drives use
@@ -2688,7 +2754,10 @@ export const goatLocalCodexEvents = goat.table(
     ),
     typeCheck: check(
       "goat_local_codex_events_type_check",
-      sql`${table.type} IN ('assistant.delta', 'assistant.completed', 'reasoning.completed', 'command.started', 'command.output', 'command.completed', 'command.failed', 'plan.updated', 'goal.updated', 'question.requested', 'approval.requested', 'turn.started', 'turn.completed', 'usage.updated', 'error', 'unknown')`,
+      sql`${table.type} IN (${sql.join(
+        GOAT_LOCAL_CODEX_EVENT_TYPES.map((eventType) => sql`${eventType}`),
+        sql`, `,
+      )})`,
     ),
   }),
 );
@@ -2810,7 +2879,10 @@ export const goatCodexChatEvents = goat.table(
     ),
     typeCheck: check(
       "goat_codex_chat_events_type_check",
-      sql`${table.type} IN ('assistant.completed', 'reasoning.completed', 'command.started', 'command.completed', 'command.failed', 'plan.updated', 'goal.updated', 'question.requested', 'approval.requested', 'turn.started', 'turn.completed', 'usage.updated', 'error', 'unknown')`,
+      sql`${table.type} IN (${sql.join(
+        GOAT_CODEX_CHAT_EVENT_TYPES.map((eventType) => sql`${eventType}`),
+        sql`, `,
+      )})`,
     ),
   }),
 );

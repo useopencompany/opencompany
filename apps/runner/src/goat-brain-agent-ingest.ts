@@ -42,6 +42,7 @@ import {
   GOAT_BRAIN_POINTER_COPY_RULE,
   type GoatBrainFolderManifestEntry,
   type GoatBrainUsageEntry,
+  type NormalizedFathomMeetingSourceItem,
   type NormalizedGitHubActivitySourceItem,
   type NormalizedGmailThreadContent,
   type NormalizedGmailThreadSourceItem,
@@ -74,6 +75,13 @@ import * as ai from "ai";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { writeLocalBrainFile } from "./goat-brain";
+import {
+  buildFathomMeetingEvidenceWrite,
+  FATHOM_MEETING_FOLDER,
+  formatFathomParticipants,
+  formatFathomTranscript,
+  formatFathomTranscriptExcerpt,
+} from "./goat-brain-fathom-writes";
 import { buildGmailThreadEvidenceWrite } from "./goat-brain-gmail-writes";
 import {
   buildGranolaMeetingEvidenceWrite,
@@ -277,6 +285,11 @@ export const JAMIE_MEETING_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemProm
 });
 
 export const GRANOLA_MEETING_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission: "folds one source item into a single brain of Markdown knowledge documents.",
+  skipRule: `If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}.`,
+});
+
+export const FATHOM_MEETING_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
   mission: "folds one source item into a single brain of Markdown knowledge documents.",
   skipRule: `If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}.`,
 });
@@ -860,6 +873,71 @@ function boundedGranolaTranscriptMarkdown(item: NormalizedGranolaMeetingSourceIt
   return formatGranolaTranscriptExcerpt(segments, PROMPT_TRANSCRIPT_BYTES);
 }
 
+export function buildFathomMeetingAgentIngestPrompt(
+  item: NormalizedFathomMeetingSourceItem,
+  context: {
+    meetingBrainId: string;
+    evidenceBrainId: string;
+    truncatedTranscript: boolean;
+  },
+) {
+  const meeting = item.content.meeting;
+  const recording = item.content.recording;
+  const transcript = boundedFathomTranscriptMarkdown(item);
+  return [
+    "Ingest this completed meeting from Fathom (an AI meeting notetaker) into the brain.",
+    "",
+    "A raw evidence snapshot of these notes already exists in this brain:",
+    `- Evidence record: [[evidence:${context.evidenceBrainId}|Fathom meeting notes]] (id: ${context.evidenceBrainId})`,
+    context.truncatedTranscript
+      ? "- The evidence transcript was truncated to fit the file size limit."
+      : null,
+    "",
+    "Required outcome, all scoped to this brain:",
+    `1. A meeting page with id "${context.meetingBrainId}" in the "${FATHOM_MEETING_FOLDER}" folder (type: meeting) whose compiled truth synthesizes the meeting: what it was, decisions, action items, and [[page:...]] links to every attendee and company page. If the folder is missing, run folder create first. Link the evidence record. Do not paste the transcript.`,
+    "2. A person page per human attendee (skip notetaker bots), created or updated, with the meeting on their timeline (use --evidence-id and --source-ref). Update their compiled truth only when the meeting changes their state of play (role, company, plans).",
+    "3. Company pages for organizations that are clearly central to the meeting, with the meeting on their timelines. Do not create company pages from a bare email domain alone.",
+    "4. Backlinks between all of these pages per the iron law.",
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Occurred at: ${item.occurredAt}`,
+    `Captured at: ${item.capturedAt}`,
+    recording.shareUrl ? `Fathom recording URL: ${recording.shareUrl}` : null,
+    "",
+    `## Meeting title\n${meeting.title}`,
+    `## Meeting metadata\n- Started: ${meeting.startTime}${meeting.endTime ? `\n- Ended: ${meeting.endTime}` : ""}`,
+    `## Participants\n${formatFathomParticipants(item)}`,
+    `## Summary (from Fathom)\n${truncateByBytes(meeting.summaryMarkdown, PROMPT_SUMMARY_BYTES) || "No summary provided by Fathom."}`,
+    `## Action items (from Fathom)\n${formatFathomActionItemsForPrompt(item)}`,
+    `## Transcript\n${transcript}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
+function formatFathomActionItemsForPrompt(item: NormalizedFathomMeetingSourceItem) {
+  const actionItems = item.content.meeting.actionItems;
+  if (actionItems.length === 0) return "No action items listed by Fathom.";
+  return actionItems
+    .map((actionItem) => {
+      const parts = [
+        actionItem.completed ? "[done]" : null,
+        actionItem.description,
+        actionItem.assignee ? `— ${actionItem.assignee}` : null,
+      ].filter(Boolean);
+      return `- ${parts.join(" ")}`;
+    })
+    .join("\n");
+}
+
+function boundedFathomTranscriptMarkdown(item: NormalizedFathomMeetingSourceItem) {
+  const segments = item.content.meeting.transcript;
+  if (segments.length === 0) return "No transcript provided by Fathom.";
+  const full = formatFathomTranscript(segments);
+  if (Buffer.byteLength(full, "utf8") <= PROMPT_TRANSCRIPT_BYTES) return full;
+  return formatFathomTranscriptExcerpt(segments, PROMPT_TRANSCRIPT_BYTES);
+}
+
 export function buildGoatChatCaptureAgentIngestPrompt(
   item: NormalizedGoatChatCaptureSourceItem,
   context: { capturedByName?: string | null } = {},
@@ -1351,6 +1429,46 @@ export async function runGranolaMeetingAgentIngest(
     env: input.env,
     system: GRANOLA_MEETING_INGEST_SYSTEM_PROMPT,
     buildPrompt: () => buildGranolaMeetingAgentIngestPrompt(input.item, evidence),
+    prepareRoot: (root) =>
+      writeLocalBrainFile(root, evidence.evidencePath, evidence.evidenceContent),
+    noMutationOutcome: "skip",
+    ...(input.importRunId ? { importRunId: input.importRunId } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    evidenceBrainId: evidence.evidenceBrainId,
+    meetingBrainId: evidence.meetingBrainId,
+    truncatedTranscript: evidence.truncatedTranscript,
+  };
+}
+
+export async function runFathomMeetingAgentIngest(
+  input: {
+    jobId?: string;
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedFathomMeetingSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    importRunId?: string | null;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  // The transcript snapshot is written deterministically before the agent
+  // runs: evidence is the dump, and a 400KB transcript should not round-trip
+  // through model tool calls.
+  const evidence = buildFathomMeetingEvidenceWrite(input.item);
+  const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: FATHOM_MEETING_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () => buildFathomMeetingAgentIngestPrompt(input.item, evidence),
     prepareRoot: (root) =>
       writeLocalBrainFile(root, evidence.evidencePath, evidence.evidenceContent),
     noMutationOutcome: "skip",

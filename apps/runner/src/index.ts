@@ -20,6 +20,7 @@ import { loadEnv } from "./env";
 import { setGoatBrainImportWakeup, startGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { setGoatCodexChatWakeup, startGoatCodexChatWorker } from "./goat-codex-chat-worker";
+import { startGoatFathomPollWorker } from "./goat-fathom-poll-worker";
 import { startGoatGmailFlushWorker } from "./goat-gmail-flush-worker";
 import { startGoatGmailPollWorker } from "./goat-gmail-poll-worker";
 import {
@@ -113,6 +114,7 @@ const goatHubspotFlushWorker = env.goatTaskWorkerEnabled ? startGoatHubspotFlush
 const goatGmailPollWorker = env.goatTaskWorkerEnabled ? startGoatGmailPollWorker(env) : null;
 const goatGmailFlushWorker = env.goatTaskWorkerEnabled ? startGoatGmailFlushWorker(env) : null;
 const goatGranolaPollWorker = env.goatTaskWorkerEnabled ? startGoatGranolaPollWorker() : null;
+const goatFathomPollWorker = env.goatTaskWorkerEnabled ? startGoatFathomPollWorker() : null;
 const goatGoogleDriveSyncWorker = env.goatTaskWorkerEnabled
   ? startGoatGoogleDriveSyncWorker(env)
   : null;
@@ -190,6 +192,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatGmailPollWorker?.stop() ?? Promise.resolve(),
       goatGmailFlushWorker?.stop() ?? Promise.resolve(),
       goatGranolaPollWorker?.stop() ?? Promise.resolve(),
+      goatFathomPollWorker?.stop() ?? Promise.resolve(),
       goatGoogleDriveSyncWorker?.stop() ?? Promise.resolve(),
       server.close(),
     ])

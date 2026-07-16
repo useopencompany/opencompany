@@ -6,13 +6,16 @@ import {
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import {
+  type GoatChatMessageAttachment,
   type GoatCodexChatSession,
   type GoatCodexChatTurn,
+  goatChatMessages,
   goatCodexChatTurns,
   goatIntegrations,
 } from "@opencompany/db/goat-schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, desc, eq, type SQL, sql } from "drizzle-orm";
+import { downloadBlobBytes } from "./attachment-hydration";
 import { runCodexAppServerTurn } from "./codex-app-server";
 import { ensureCodexInstalled } from "./codex-tool";
 import { createKnownSecretRedactor, gitAuthHeader } from "./coding-agent-shared";
@@ -25,11 +28,17 @@ import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
-import { armSandboxIdleTimeout, createOrConnectSandbox } from "./sandbox";
+import {
+  armSandboxIdleTimeout,
+  createOrConnectSandbox,
+  type SandboxHandle,
+  writeSandboxTextFiles,
+} from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
 
 const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
 const CODEX_CHAT_WORKDIR = "/home/user/opencompany-goat/codex-chat";
+const CODEX_CHAT_ATTACHMENTS_ROOT = "/home/user/.opencompany-goat/codex-chat-attachments";
 const GOAT_CODEX_CHAT_SKILL_FINGERPRINT = "goat-codex-chat-v1";
 const INTERRUPT_POLL_INTERVAL_MS = 2_000;
 
@@ -138,6 +147,7 @@ export async function runGoatCodexChatTurn(input: {
   });
 
   try {
+    const attachments = await loadGoatCodexChatAttachments(turn);
     await sandbox.commands.run(
       `mkdir -p ${shellQuote(CODEX_CHAT_WORKDIR)} ${shellQuote(CODEX_CHAT_HOME)}`,
       { timeoutMs: 30_000 },
@@ -146,6 +156,12 @@ export async function runGoatCodexChatTurn(input: {
       await sandbox.files.write(`${CODEX_CHAT_HOME}/auth.json`, serializedAuthJson);
     }
     await ensureCodexInstalled(sandbox);
+    const materializedAttachments = await materializeGoatCodexChatAttachments({
+      sandbox,
+      turnId: turn.id,
+      attachments,
+      blobToken: env.blobReadWriteToken,
+    });
 
     const summary = await runCodexAppServerTurn({
       sandbox,
@@ -157,8 +173,14 @@ export async function runGoatCodexChatTurn(input: {
             prompt: turn.prompt,
             githubAvailable: Boolean(github),
             previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
+            attachmentPaths: materializedAttachments.paths,
           })
-        : buildCodexChatTask({ prompt: turn.prompt, githubAvailable: Boolean(github) }),
+        : buildCodexChatTask({
+            prompt: turn.prompt,
+            githubAvailable: Boolean(github),
+            attachmentPaths: materializedAttachments.paths,
+          }),
+      localImages: materializedAttachments.localImages,
       model: session.model || env.codexModel,
       reasoningEffort: settings.reasoningEffort,
       planModeReasoningEffort: settings.planModeReasoningEffort,
@@ -309,7 +331,11 @@ function createTurnAbortCheck(input: {
   };
 }
 
-function buildCodexChatTask(input: { prompt: string; githubAvailable: boolean }) {
+function buildCodexChatTask(input: {
+  prompt: string;
+  githubAvailable: boolean;
+  attachmentPaths: string[];
+}) {
   return [
     "You are Codex running in a persistent cloud sandbox for an ongoing chat with a user.",
     "The sandbox and its files persist across messages in this chat session, so you can build on earlier work.",
@@ -319,8 +345,9 @@ function buildCodexChatTask(input: { prompt: string; githubAvailable: boolean })
     "Answer conversationally. Run commands or edit files only when the message calls for it, and keep replies concise unless the user asks for detail.",
     "",
     "<user_message>",
-    input.prompt,
+    input.prompt || "Review the attached file(s).",
     "</user_message>",
+    ...codexChatAttachmentPromptLines(input.attachmentPaths),
   ]
     .filter((line) => line !== null)
     .join("\n");
@@ -330,6 +357,7 @@ function buildCodexChatRecoveryTask(input: {
   prompt: string;
   githubAvailable: boolean;
   previousProgress: string;
+  attachmentPaths: string[];
 }) {
   return [
     "You are Codex running in a persistent cloud sandbox for an ongoing chat with a user.",
@@ -341,8 +369,9 @@ function buildCodexChatRecoveryTask(input: {
     "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",
     "",
     "<original_user_message>",
-    input.prompt,
+    input.prompt || "Review the attached file(s).",
     "</original_user_message>",
+    ...codexChatAttachmentPromptLines(input.attachmentPaths),
     "",
     "<last_persisted_progress>",
     input.previousProgress || "No persisted assistant progress was available.",
@@ -350,6 +379,87 @@ function buildCodexChatRecoveryTask(input: {
   ]
     .filter((line) => line !== null)
     .join("\n");
+}
+
+async function loadGoatCodexChatAttachments(
+  turn: GoatCodexChatTurn,
+): Promise<GoatChatMessageAttachment[]> {
+  const [message] = await getDb()
+    .select({ attachments: goatChatMessages.attachments })
+    .from(goatChatMessages)
+    .where(
+      and(
+        eq(goatChatMessages.id, turn.userMessageId),
+        eq(goatChatMessages.sessionId, turn.chatSessionId),
+      ),
+    )
+    .limit(1);
+  return message?.attachments ?? [];
+}
+
+async function materializeGoatCodexChatAttachments(input: {
+  sandbox: SandboxHandle;
+  turnId: string;
+  attachments: GoatChatMessageAttachment[];
+  blobToken: string | undefined;
+}) {
+  if (input.attachments.length === 0) {
+    return { paths: [], localImages: [] };
+  }
+
+  const absoluteDirectory = `${CODEX_CHAT_ATTACHMENTS_ROOT}/${safePathSegment(input.turnId)}`;
+  const files = await Promise.all(
+    input.attachments.map(async (attachment) => {
+      try {
+        const content = await downloadBlobBytes(attachment.blobUrl, input.blobToken);
+        const filename = `${safePathSegment(attachment.id)}-${safeAttachmentFilename(attachment.filename)}`;
+        const absolutePath = `${absoluteDirectory}/${filename}`;
+        return {
+          attachment,
+          absolutePath,
+          content,
+        };
+      } catch {
+        throw new Error(`Attachment "${attachment.filename}" could not be loaded.`);
+      }
+    }),
+  );
+
+  await input.sandbox.commands.run(`mkdir -p ${shellQuote(absoluteDirectory)}`, {
+    timeoutMs: 30_000,
+  });
+  await writeSandboxTextFiles({
+    sandbox: input.sandbox,
+    files: files.map((file) => ({ path: file.absolutePath, content: file.content })),
+  });
+
+  return {
+    paths: files.map((file) => file.absolutePath),
+    localImages: files
+      .filter((file) => file.attachment.kind === "image")
+      .map((file) => ({ path: file.absolutePath, detail: "original" as const })),
+  };
+}
+
+function codexChatAttachmentPromptLines(paths: string[]) {
+  if (paths.length === 0) return [];
+  return [
+    "",
+    "<uploaded_files>",
+    "The user uploaded these files with this message. They are available in the persistent sandbox:",
+    ...paths.map((path) => `- ${path}`),
+    "</uploaded_files>",
+  ];
+}
+
+function safeAttachmentFilename(filename: string) {
+  const basename = filename.split(/[\\/]/).pop() || "attachment";
+  const sanitized = basename.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^\.+/, "");
+  return (sanitized || "attachment").slice(0, 160);
+}
+
+function safePathSegment(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 180) || "attachment";
 }
 
 export function summarizeCodexChatRecoveryProgress(parts: readonly CodexUiMessagePart[]) {

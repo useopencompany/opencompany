@@ -33,6 +33,10 @@ const pathnameMock = vi.hoisted(() => ({
   value: "/",
 }));
 
+const attachmentUploadMock = vi.hoisted(() => ({
+  upload: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
   usePathname: () => pathnameMock.value,
@@ -40,6 +44,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/chat-actions", () => ({
   closeGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
+}));
+
+vi.mock("@/lib/chat-attachment-upload", () => ({
+  uploadGoatChatAttachmentBlob: attachmentUploadMock.upload,
 }));
 
 vi.mock("@/lib/tasks", () => ({
@@ -165,6 +173,11 @@ describe("GoatSurface chat streaming UI", () => {
     routerMock.refresh.mockReset();
     routerMock.replace.mockReset();
     vi.mocked(closeGoatChatSessionAction).mockClear();
+    attachmentUploadMock.upload.mockReset();
+    attachmentUploadMock.upload.mockResolvedValue({
+      blobUrl: "https://blob.test/goat-chat/user_1/brief.pdf",
+      blobPathname: "goat-chat/user_1/brief.pdf",
+    });
     vi.stubGlobal(
       "ResizeObserver",
       class ResizeObserver {
@@ -400,6 +413,94 @@ describe("GoatSurface chat streaming UI", () => {
       },
       model: "openai/gpt-5.6-sol",
     });
+  });
+
+  it("uploads files and includes them in cloud Codex message metadata", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            sessionId: "goat_chat_codex_1",
+            userMessageId: "goat_chat_msg_codex_user",
+            assistantMessageId: "goat_chat_msg_codex_assistant",
+            mode: "started",
+          }),
+          { status: 202, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+        userWorkosId="user_1"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+
+    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [new File(["pdf"], "brief.pdf", { type: "application/pdf" })],
+      },
+    });
+    await screen.findByText("PDF");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.message.metadata.attachments).toEqual([
+      expect.objectContaining({
+        kind: "pdf",
+        filename: "brief.pdf",
+        blobUrl: "https://blob.test/goat-chat/user_1/brief.pdf",
+      }),
+    ]);
+  });
+
+  it("restores a cloud Codex attachment when submission fails", async () => {
+    const user = userEvent.setup();
+    let rejectRequest: ((error: Error) => void) | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((_resolve, reject) => {
+            rejectRequest = reject;
+          }),
+      ),
+    );
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+        userWorkosId="user_1"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [new File(["pdf"], "brief.pdf", { type: "application/pdf" })],
+      },
+    });
+    await screen.findByText("PDF");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(screen.queryByText("brief.pdf")).not.toBeInTheDocument());
+    act(() => rejectRequest?.(new Error("network failed")));
+
+    expect(await screen.findByText("brief.pdf")).toBeInTheDocument();
   });
 
   it("submits Codex reasoning, plan, and goal settings", async () => {

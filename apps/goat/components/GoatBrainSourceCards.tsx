@@ -75,7 +75,9 @@ export function resolveGoatBrainSourceState(
                   ? details?.hubspot.integration
                   : providerId === "granola"
                     ? details?.granola.integration
-                    : undefined;
+                    : providerId === "fathom"
+                      ? details?.fathom.integration
+                      : undefined;
   const jamieReady =
     providerId === "jamie" ? Boolean(details?.jamie.integration.apiKeyConfigured) : false;
   const connected = providerId === "jamie" ? jamieReady : Boolean(integration?.connected);
@@ -450,7 +452,8 @@ type GoatPersonalBrainSourceProvider =
   | "gmail"
   | "google_drive"
   | "hubspot"
-  | "granola";
+  | "granola"
+  | "fathom";
 
 function isPersonalSourceProvider(
   providerId: GoatBrainSourceProviderDef["id"],
@@ -461,7 +464,8 @@ function isPersonalSourceProvider(
     providerId === "gmail" ||
     providerId === "google_drive" ||
     providerId === "hubspot" ||
-    providerId === "granola"
+    providerId === "granola" ||
+    providerId === "fathom"
   );
 }
 
@@ -480,6 +484,8 @@ const ADD_SOURCE_CONSENT_COPY: Record<GoatPersonalBrainSourceProvider, string> =
     "CRM activity on the record types you select will be summarized into this brain and visible to everyone with access to it.",
   granola:
     "Your Granola meeting notes — including what other participants said — will be summarized into this brain and visible to everyone with access to it.",
+  fathom:
+    "Your Fathom meeting recordings — including what other participants said — will be summarized into this brain and visible to everyone with access to it.",
 };
 
 const ADD_SOURCE_CONSENT_FOOTER =

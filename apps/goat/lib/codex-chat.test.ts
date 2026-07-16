@@ -129,6 +129,28 @@ describe("createGoatCodexChatMessage", () => {
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
 
+  it("persists attachments and allows an attachment-only first turn", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "",
+      attachments: [
+        {
+          id: "goat_chat_att_1",
+          kind: "image",
+          mediaType: "image/png",
+          filename: "screenshot.png",
+          sizeBytes: 1024,
+          blobPathname: "goat-chat/user_1/screenshot.png",
+          blobUrl: "https://blob.test/goat-chat/user_1/screenshot.png",
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ ok: true, mode: "started" });
+    const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
+    expect(JSON.stringify(statement.queryChunks)).toContain("screenshot.png");
+  });
+
   it("persists the selected Codex model on a new chat and engine session", async () => {
     const result = await createGoatCodexChatMessage({
       userWorkosId: "user_1",

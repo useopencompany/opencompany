@@ -80,9 +80,51 @@ describe("POST /api/codex-chat/messages", () => {
       userWorkosId: "user_1",
       sessionId: "goat_chat_1",
       prompt: "hello",
+      attachments: [],
       clientMessageId: "client_msg_1",
       settings: undefined,
     });
+    expect(mockGenerateGoatChatTitleForMessage()).not.toHaveBeenCalled();
+  });
+
+  it("validates and forwards uploaded files, including attachment-only messages", async () => {
+    const response = await POST(
+      jsonRequest({
+        message: {
+          id: "client_msg_attachment",
+          role: "user",
+          parts: [{ type: "text", text: "" }],
+          metadata: {
+            attachments: [
+              {
+                id: "untrusted-client-id",
+                kind: "image",
+                mediaType: "image/png",
+                filename: "screenshot.png",
+                sizeBytes: 1024,
+                blobUrl: "https://blob.test/goat-chat/user_1/screenshot.png",
+                blobPathname: "ignored/client/path.png",
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "",
+        attachments: [
+          expect.objectContaining({
+            id: expect.stringMatching(/^goat_chat_att_/),
+            kind: "image",
+            filename: "screenshot.png",
+            blobPathname: "goat-chat/user_1/screenshot.png",
+          }),
+        ],
+      }),
+    );
     expect(mockGenerateGoatChatTitleForMessage()).not.toHaveBeenCalled();
   });
 

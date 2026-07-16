@@ -7,6 +7,10 @@ const appServerMocks = vi.hoisted(() => ({
   runCodexAppServerTurn: vi.fn(),
 }));
 
+const attachmentMocks = vi.hoisted(() => ({
+  downloadBlobBytes: vi.fn(),
+}));
+
 const codexAuthMocks = vi.hoisted(() => ({
   loadGoatCodexCliAuth: vi.fn(),
   persistRefreshedGoatCodexAuth: vi.fn(),
@@ -33,6 +37,10 @@ const sandboxMocks = vi.hoisted(() => ({
 
 vi.mock("./codex-app-server", () => ({
   runCodexAppServerTurn: appServerMocks.runCodexAppServerTurn,
+}));
+
+vi.mock("./attachment-hydration", () => ({
+  downloadBlobBytes: attachmentMocks.downloadBlobBytes,
 }));
 
 vi.mock("./codex-tool", () => ({
@@ -65,6 +73,15 @@ vi.mock("./goat-codex-chat-events", () => ({
 vi.mock("./sandbox", () => ({
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
+  writeSandboxTextFiles: vi.fn(
+    async (input: {
+      sandbox: { files: { write: (files: unknown) => Promise<void> } };
+      files: Array<{ path: string; content: unknown }>;
+    }) =>
+      input.sandbox.files.write(
+        input.files.map((file) => ({ path: file.path, data: file.content })),
+      ),
+  ),
 }));
 
 describe("runGoatCodexChatTurn", () => {
@@ -98,6 +115,66 @@ describe("runGoatCodexChatTurn", () => {
       usage: null,
       goal: null,
     });
+    attachmentMocks.downloadBlobBytes.mockResolvedValue(Buffer.from("image bytes"));
+  });
+
+  it("materializes uploaded files and passes screenshots to Codex as local images", async () => {
+    dbMocks.selectRows.push(
+      [],
+      [
+        {
+          attachments: [
+            {
+              id: "goat_chat_att_1",
+              kind: "image",
+              mediaType: "image/png",
+              filename: "../screenshot one.png",
+              sizeBytes: 11,
+              blobPathname: "goat-chat/user_1/screenshot.png",
+              blobUrl: "https://blob.test/goat-chat/user_1/screenshot.png",
+            },
+          ],
+        },
+      ],
+    );
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      env: env({ blobReadWriteToken: "blob-token" }),
+    });
+
+    expect(attachmentMocks.downloadBlobBytes).toHaveBeenCalledWith(
+      "https://blob.test/goat-chat/user_1/screenshot.png",
+      "blob-token",
+    );
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: expect.stringContaining(
+            "/.opencompany-goat/codex-chat-attachments/goat_codex_turn_1/goat_chat_att_1-screenshot_one.png",
+          ),
+          data: Buffer.from("image bytes"),
+        }),
+      ]),
+    );
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.stringContaining(
+          ".opencompany-goat/codex-chat-attachments/goat_codex_turn_1/goat_chat_att_1-screenshot_one.png",
+        ),
+        localImages: [
+          {
+            path: expect.stringContaining(
+              "/.opencompany-goat/codex-chat-attachments/goat_codex_turn_1/goat_chat_att_1-screenshot_one.png",
+            ),
+            detail: "original",
+          },
+        ],
+      }),
+    );
   });
 
   it("reuses a stored sandbox id and rearms the 5 minute idle pause window after the turn", async () => {

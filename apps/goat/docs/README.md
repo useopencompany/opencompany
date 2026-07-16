@@ -8,7 +8,7 @@ For the Brain (Goat's knowledge store — data model, ingestion, tools, contract
 
 ## Current Shape
 
-Goat has three LLM paths:
+Goat has four LLM paths:
 
 1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
    This agent answers directly, calls `goat_brain`, or calls `start_task`.
@@ -17,6 +17,9 @@ Goat has three LLM paths:
 3. **Local Codex chat:** a Goat chat engine mode that queues commands for a user-run local bridge.
    The bridge creates a clean session folder under `~/.opencompany/goat/sessions`, runs
    `codex app-server`, and posts normalized Codex events back into the Goat chat.
+4. **Cloud Codex chat:** a Goat chat engine mode backed by a persistent E2B sandbox and Codex
+   app-server thread. Uploaded images, PDFs, Word files, and Excel files are materialized into that
+   sandbox; images are also sent to Codex as native local-image inputs.
 
 The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
@@ -43,6 +46,10 @@ Browser
     OR Local Codex mode
       POST /api/local-codex/messages
         enqueue local Codex bridge command
+    OR Cloud Codex mode
+      POST /api/codex-chat/messages
+        persist the message and attachment metadata
+        enqueue a turn for the cloud Codex chat worker
 
 Runner
   Goat task worker wakes/polls
@@ -178,6 +185,24 @@ output and running/interrupt state update live.
 
 While a local Codex turn is running, the composer stays enabled. Submitting more text queues
 `turn/steer`; the dedicated stop control queues `turn/interrupt`.
+
+## Cloud Codex Chat
+
+Entry points:
+
+- `apps/goat/components/GoatSurface.tsx`
+- `apps/goat/app/api/codex-chat/*`
+- `apps/goat/lib/codex-chat.ts`
+- `apps/runner/src/goat-codex-chat.ts`
+- `apps/runner/src/codex-app-server.ts`
+
+Cloud Codex uses a persistent sandbox per Goat chat and resumes the same Codex app-server thread on
+follow-up turns. The composer accepts the same private-blob uploads as normal Goat chat. At run
+time, the worker downloads the current turn's files into
+`~/.opencompany-goat/codex-chat-attachments/<turn-id>/` and includes those paths in the user task.
+Image uploads are additionally passed to `turn/start` as `localImage` inputs, so screenshots are
+visible to the model rather than merely path-referenced. Keeping uploads outside the working
+directory prevents them from appearing in repository changes.
 
 ## Task Creation
 
@@ -440,8 +465,8 @@ Brain bootstrap imports deliberately separate discovery from model ingestion:
 
 1. An admin supplies the public company origin, optional focus, and source scopes. The runner
    scans a fixed 30-day window, reuses normalized source items, hydrates up to 20 recent Granola
-   notes when that source is selected, and performs a bounded public search (at most eight searches
-   and 40 canonical results). Discovery persists candidates with no target brain, so it cannot
+   notes or Fathom meetings when those sources are selected, and performs a bounded public search
+   (at most eight searches and 40 canonical results). Discovery persists candidates with no target brain, so it cannot
    enqueue an ingestion model.
 2. The UI displays provider totals, already-known entries, selected windows, and the exact number
    of planned ingestion runs. The count includes one cached public-research bundle when present

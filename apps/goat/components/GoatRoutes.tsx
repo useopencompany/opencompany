@@ -18,6 +18,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useEffect, useMemo, useState, useTransition } from "react";
+import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import {
   type GoatAppInitialData,
   type GoatBrainSummaryView,
@@ -327,6 +328,26 @@ export function GoatGranolaSettingsRoute() {
     >
       <GranolaIntegrationSetup
         initialState={integrations.granola}
+        brainSourcesHref={brainSourcesHref}
+      />
+    </GoatSettingsContent>
+  );
+}
+
+export function GoatFathomSettingsRoute() {
+  const { activeBrain, integrations } = useGoatAppData();
+  const brainSourcesHref = activeBrain
+    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+    : null;
+
+  return (
+    <GoatSettingsContent
+      title="Fathom"
+      description="Meeting recordings for Goat Brain"
+      backLink={{ href: "/settings/integrations", label: "Integrations" }}
+    >
+      <FathomIntegrationSetup
+        initialState={integrations.fathom}
         brainSourcesHref={brainSourcesHref}
       />
     </GoatSettingsContent>

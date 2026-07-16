@@ -11,6 +11,7 @@ import {
   GOAT_BRAIN_INGEST_OUTCOME_MAX_ATTEMPTS,
   type GoatBrainIngestStore,
   runClaimedGoatBrainIngestJob,
+  startGoatBrainIngestWorker,
 } from "./goat-brain-ingest-worker";
 import { buildJamieMeetingBrainWrites } from "./goat-brain-jamie-writes";
 
@@ -27,6 +28,18 @@ const telemetry = vi.hoisted(() => ({
     run(),
   ),
 }));
+
+const billing = vi.hoisted(() => ({
+  releasePendingGoatIngestionReservations: vi.fn(async () => ({ released: 0, failed: 0 })),
+}));
+
+vi.mock("@opencompany/db/goat-billing", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opencompany/db/goat-billing")>();
+  return {
+    ...actual,
+    releasePendingGoatIngestionReservations: billing.releasePendingGoatIngestionReservations,
+  };
+});
 
 vi.mock("@opencompany/goat-observability", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/goat-observability")>();
@@ -70,6 +83,49 @@ function jamieItem(segmentCount = 2) {
 describe("Goat Brain ingest worker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("releases paused reservations before polling with the worker's shared store", async () => {
+    let resolveRelease: (result: { released: number; failed: number }) => void = () => {};
+    billing.releasePendingGoatIngestionReservations.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRelease = resolve;
+      }),
+    );
+    const claimNext = vi.fn(async () => null);
+    const store: GoatBrainIngestStore = {
+      claimNext,
+      heartbeat: vi.fn(async () => true),
+      complete: vi.fn(async () => true),
+      skip: vi.fn(async () => true),
+      fail: vi.fn(async () => true),
+    };
+    const worker = startGoatBrainIngestWorker(
+      {
+        instanceId: "runner_test",
+        workerConcurrency: 1,
+      } as Parameters<typeof startGoatBrainIngestWorker>[0],
+      { store, pollIntervalMs: 60_000 },
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(billing.releasePendingGoatIngestionReservations).toHaveBeenCalledOnce();
+      });
+      expect(claimNext).not.toHaveBeenCalled();
+      resolveRelease({ released: 0, failed: 0 });
+      await vi.waitFor(() => expect(claimNext).toHaveBeenCalledOnce());
+      expect(billing.releasePendingGoatIngestionReservations).toHaveBeenCalledWith({
+        now: expect.any(Date),
+        maxWorkspaces: 50,
+      });
+      expect(
+        billing.releasePendingGoatIngestionReservations.mock.invocationCallOrder[0],
+      ).toBeLessThan(claimNext.mock.invocationCallOrder[0] as number);
+    } finally {
+      resolveRelease({ released: 0, failed: 0 });
+      await worker.stop();
+    }
   });
 
   it("builds deterministic Jamie meeting and evidence documents", () => {
