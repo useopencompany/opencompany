@@ -95,6 +95,7 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
       {
         mode: "subscription",
         customer: customerId,
+        allow_promotion_codes: true,
         success_url: `${appUrl}/settings/workspace/billing?checkout=success`,
         cancel_url: `${appUrl}/settings/workspace/billing?checkout=cancelled`,
         automatic_tax: { enabled: true },
