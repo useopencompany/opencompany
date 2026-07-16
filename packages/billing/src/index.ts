@@ -68,6 +68,30 @@ export type WorkspaceUsageDebitInput = {
 };
 
 const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
+  "openai/gpt-5.6-sol": {
+    model: "openai/gpt-5.6-sol",
+    provider: "openai",
+    inputUsdMicrosPerMillion: 5_000_000,
+    cachedInputUsdMicrosPerMillion: 500_000,
+    cacheWriteUsdMicrosPerMillion: 6_250_000,
+    outputUsdMicrosPerMillion: 30_000_000,
+  },
+  "openai/gpt-5.6-terra": {
+    model: "openai/gpt-5.6-terra",
+    provider: "openai",
+    inputUsdMicrosPerMillion: 2_500_000,
+    cachedInputUsdMicrosPerMillion: 250_000,
+    cacheWriteUsdMicrosPerMillion: 3_125_000,
+    outputUsdMicrosPerMillion: 15_000_000,
+  },
+  "openai/gpt-5.6-luna": {
+    model: "openai/gpt-5.6-luna",
+    provider: "openai",
+    inputUsdMicrosPerMillion: 1_000_000,
+    cachedInputUsdMicrosPerMillion: 100_000,
+    cacheWriteUsdMicrosPerMillion: 1_250_000,
+    outputUsdMicrosPerMillion: 6_000_000,
+  },
   "openai/gpt-5.5": {
     model: "openai/gpt-5.5",
     provider: "openai",

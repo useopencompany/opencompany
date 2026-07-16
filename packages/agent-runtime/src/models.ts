@@ -45,6 +45,9 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
 
 export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.5";
 export const CODEX_AGENT_MODEL_IDS = [
+  "openai/gpt-5.6-sol",
+  "openai/gpt-5.6-terra",
+  "openai/gpt-5.6-luna",
   "openai/gpt-5.5",
   "openai/gpt-5.4",
   "openai/gpt-5.4-mini",
@@ -85,6 +88,69 @@ export function codexCliModelNameForModelId(modelId: string): string | null {
 // judge router and is rated qualitatively from OpenRouter's Fusion defaults
 // rather than a single model benchmark.
 export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
+  {
+    id: "openai/gpt-5.6-sol",
+    type: "model",
+    contextWindowTokens: 1_050_000,
+    label: "GPT 5.6 Sol",
+    description: "Flagship Codex model for complex coding, research, and computer use.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 3, speed: 2, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposure: "summary",
+    },
+  },
+  {
+    id: "openai/gpt-5.6-terra",
+    type: "model",
+    contextWindowTokens: 1_050_000,
+    label: "GPT 5.6 Terra",
+    description: "Balanced Codex model for capable, efficient everyday work.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 3, speed: 3, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposure: "summary",
+    },
+  },
+  {
+    id: "openai/gpt-5.6-luna",
+    type: "model",
+    contextWindowTokens: 1_050_000,
+    label: "GPT 5.6 Luna",
+    description: "Fast, affordable Codex model for clear and repeatable tasks.",
+    category: "Fast",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 2, speed: 3, cost: 2 },
+    reasoning: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposure: "summary",
+    },
+  },
   {
     id: "openai/gpt-5.5",
     type: "model",

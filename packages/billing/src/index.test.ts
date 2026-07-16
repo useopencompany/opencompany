@@ -44,6 +44,9 @@ describe("calculateModelUsageCost", () => {
   });
 
   it.each([
+    ["openai/gpt-5.6-sol", 41_750],
+    ["openai/gpt-5.6-terra", 20_875],
+    ["openai/gpt-5.6-luna", 8_350],
     ["openai/gpt-5.5", 40_500],
     ["openai/gpt-5.2-codex", 17_675],
     ["openai/gpt-5.4-nano", 1_670],

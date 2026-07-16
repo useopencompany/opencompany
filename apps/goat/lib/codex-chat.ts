@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { codexCliModelNameForModelId } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
   type GoatCodexChatTurnSettings,
@@ -10,7 +10,13 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
-import { CODEX_CHAT_DEFAULT_MODEL, CODEX_CHAT_PROMPT_MAX_LENGTH } from "@/lib/codex-chat-constants";
+import {
+  CODEX_CHAT_DEFAULT_MODEL,
+  CODEX_CHAT_DEFAULT_MODEL_ID,
+  CODEX_CHAT_PROMPT_MAX_LENGTH,
+  type CodexChatModelId,
+  parseCodexChatModelId,
+} from "@/lib/codex-chat-constants";
 import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
 import { toGoatTaskTitle } from "@/lib/task-display";
 import {
@@ -21,9 +27,8 @@ import {
 
 export { CODEX_CHAT_DEFAULT_MODEL, CODEX_PICKER_VALUE } from "@/lib/codex-chat-constants";
 
-// Cloud codex chat sessions record the gateway-style model id on the chat session (like every
+// Cloud Codex chat sessions record the gateway-style model id on the chat session (like every
 // other engine) while the codex_chat_sessions row keeps the Codex CLI model name.
-const CODEX_CHAT_SESSION_MODEL: AgentModelId = "openai/gpt-5.5";
 const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1";
 
 export const CODEX_CHAT_DISCONNECTED_MESSAGE =
@@ -45,6 +50,7 @@ export async function createGoatCodexChatMessage(input: {
   prompt: string;
   clientMessageId?: string | null;
   settings?: unknown;
+  model?: unknown;
 }): Promise<CodexChatMessageResult> {
   const prompt = input.prompt.trim();
   if (!prompt) return { ok: false, status: 400, error: "Enter a message before sending." };
@@ -59,6 +65,11 @@ export async function createGoatCodexChatMessage(input: {
   const parsedSettings = parseCodexChatSettings(input.settings);
   if (!parsedSettings.ok) return { ok: false, status: 400, error: parsedSettings.error };
   const settings = parsedSettings.settings;
+  const requestedModelId =
+    input.model === undefined ? CODEX_CHAT_DEFAULT_MODEL_ID : parseCodexChatModelId(input.model);
+  if (!requestedModelId) {
+    return { ok: false, status: 400, error: "Select a supported Codex model." };
+  }
   let result: CodexChatMessageResult;
   if (input.sessionId) {
     const session = await loadCodexChatSessionForChat({
@@ -79,6 +90,7 @@ export async function createGoatCodexChatMessage(input: {
       prompt,
       clientMessageId: input.clientMessageId ?? null,
       settings,
+      modelId: requestedModelId,
     });
   }
 
@@ -187,6 +199,7 @@ async function createFirstCodexChatTurn(input: {
   prompt: string;
   clientMessageId: string | null;
   settings: GoatCodexChatTurnSettings;
+  modelId: CodexChatModelId;
 }): Promise<CodexChatMessageResult> {
   const chatSessionId = `goat_chat_${randomUUID()}`;
   const codexChatSessionId = `goat_codex_chat_${randomUUID()}`;
@@ -196,6 +209,8 @@ async function createFirstCodexChatTurn(input: {
   const now = new Date();
   const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
   const title = toGoatTaskTitle(input.prompt);
+  const codexModel = codexCliModelNameForModelId(input.modelId);
+  if (!codexModel) throw new Error(`Unsupported Codex model: ${input.modelId}`);
 
   await getDb().execute(sql`
     WITH created_chat AS (
@@ -204,7 +219,7 @@ async function createFirstCodexChatTurn(input: {
         ${chatSessionId},
         ${input.userWorkosId},
         ${title},
-        ${CODEX_CHAT_SESSION_MODEL},
+        ${input.modelId},
         'codex',
         ${now},
         ${assistantCreatedAt}
@@ -223,7 +238,7 @@ async function createFirstCodexChatTurn(input: {
         ${chatSessionId},
         'assistant',
         '',
-        ${JSON.stringify(emptyAssistantDebugTrace())}::jsonb,
+        ${JSON.stringify(emptyAssistantDebugTrace(codexModel))}::jsonb,
         ${assistantCreatedAt},
         ${assistantCreatedAt}
       )
@@ -237,7 +252,7 @@ async function createFirstCodexChatTurn(input: {
         ${codexChatSessionId},
         ${input.userWorkosId},
         ${chatSessionId},
-        ${CODEX_CHAT_DEFAULT_MODEL},
+        ${codexModel},
         ${turnId},
         'starting',
         ${now},
@@ -272,7 +287,7 @@ async function enqueueExistingCodexChatMessage(input: {
   prompt: string;
   clientMessageId: string | null;
   settings: GoatCodexChatTurnSettings;
-  session: { id: string; chatSessionId: string; status: string };
+  session: { id: string; chatSessionId: string; status: string; model: string };
 }): Promise<CodexChatMessageResult> {
   const turnId = `goat_codex_chat_turn_${randomUUID()}`;
   const userMessageId = safeClientMessageId(input.clientMessageId) ?? newGoatChatMessageId();
@@ -294,7 +309,7 @@ async function enqueueExistingCodexChatMessage(input: {
         ${input.session.chatSessionId},
         'assistant',
         '',
-        ${JSON.stringify(emptyAssistantDebugTrace())}::jsonb,
+        ${JSON.stringify(emptyAssistantDebugTrace(input.session.model))}::jsonb,
         ${assistantCreatedAt},
         ${assistantCreatedAt}
       )
@@ -335,10 +350,10 @@ async function enqueueExistingCodexChatMessage(input: {
   };
 }
 
-function emptyAssistantDebugTrace() {
+function emptyAssistantDebugTrace(model: string = CODEX_CHAT_DEFAULT_MODEL) {
   return {
     schemaVersion: CODEX_CHAT_DEBUG_SCHEMA_VERSION,
-    model: CODEX_CHAT_DEFAULT_MODEL,
+    model,
     uiMessageParts: [],
   };
 }
