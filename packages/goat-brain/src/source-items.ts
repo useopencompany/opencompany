@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isValidGoatBrainSourceRef } from "./schema";
 
 export type BrainSourceProvider =
   | "jamie"
@@ -276,6 +277,7 @@ export function normalizeGoatChatCapture(input: {
   draftBrainId: string;
   draftFolder: string;
   capturedAt: string;
+  sourceRef?: string;
 }): NormalizedGoatChatCaptureSourceItem {
   const text = input.text.trim();
   if (!text) throw invalid("capture text must not be empty", "invalid_capture");
@@ -290,6 +292,10 @@ export function normalizeGoatChatCapture(input: {
   const capturedAt = optionalIsoString(input.capturedAt);
   if (!capturedAt) throw invalid("capture capturedAt must be a timestamp", "invalid_capture");
   const intent = optionalString(input.intent);
+  const sourceRef = input.sourceRef?.trim() || `goat-chat:${userMessageId}`;
+  if (!isValidGoatBrainSourceRef(sourceRef)) {
+    throw invalid("capture sourceRef must be valid", "invalid_capture");
+  }
 
   const capture = {
     text,
@@ -313,7 +319,7 @@ export function normalizeGoatChatCapture(input: {
     // The inbox draft id is minted per capture, so it doubles as the stable
     // external id for dedupe.
     externalId: draftBrainId,
-    sourceRef: `goat-chat:${userMessageId}`,
+    sourceRef,
     title,
     occurredAt: capturedAt,
     capturedAt,

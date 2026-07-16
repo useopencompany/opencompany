@@ -115,6 +115,7 @@ export async function listAccessibleGoatBrains(
 export type GoatBrainWithWorkspace = {
   brain: GoatBrain;
   workspace: { id: string; name: string; workosOrganizationId: string | null };
+  workspaceRole: GoatWorkspaceRole;
 };
 
 // Every brain the user can read, across all their workspaces. Used by the
@@ -124,7 +125,11 @@ export async function listAccessibleGoatBrainsForUser(
   options: { db?: DbClient } = {},
 ): Promise<GoatBrainWithWorkspace[]> {
   const db = options.db ?? getDb();
-  return db
+  const rows: Array<{
+    brain: GoatBrain;
+    workspace: GoatBrainWithWorkspace["workspace"];
+    workspaceRole: GoatWorkspaceRole | null;
+  }> = await db
     .select({
       brain: goatBrains,
       workspace: {
@@ -132,11 +137,23 @@ export async function listAccessibleGoatBrainsForUser(
         name: goatWorkspaces.name,
         workosOrganizationId: goatWorkspaces.workosOrganizationId,
       },
+      workspaceRole: goatWorkspaceMembers.role,
     })
     .from(goatBrains)
     .innerJoin(goatWorkspaces, eq(goatWorkspaces.id, goatBrains.workspaceId))
+    .leftJoin(
+      goatWorkspaceMembers,
+      and(
+        eq(goatWorkspaceMembers.workspaceId, goatBrains.workspaceId),
+        eq(goatWorkspaceMembers.userWorkosId, userWorkosId),
+      ),
+    )
     .where(brainAccessCondition(userWorkosId))
     .orderBy(asc(goatWorkspaces.createdAt), asc(goatBrains.createdAt));
+  return rows.map((row) => ({
+    ...row,
+    workspaceRole: row.workspaceRole ?? "member",
+  }));
 }
 
 export async function getGoatBrainAccess(

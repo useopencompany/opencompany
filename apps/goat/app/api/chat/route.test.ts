@@ -296,8 +296,11 @@ describe("POST /api/chat", () => {
       text: "Acme is a company building billing tools.",
       title: "Acme",
       intent: "company note from chat",
-      chatSessionId: "session_1",
-      userMessageId: "user_message_1",
+      source: {
+        kind: "chat",
+        connectionId: "session_1",
+        itemId: "user_message_1",
+      },
     });
     expect(runGoatBrainToolForUser).not.toHaveBeenCalled();
   });

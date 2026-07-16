@@ -6,7 +6,7 @@ import {
   GOOGLE_PROVIDER_CONFIG,
   googleDirectCallbackUrl,
   isAllowedGoogleOAuthTargetOrigin,
-  verifyGoogleIntegrationState,
+  verifyGoogleOAuthBrokerState,
 } from "@/lib/integrations/google-oauth";
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
 
   let state;
   try {
-    state = verifyGoogleIntegrationState(url.searchParams.get("state") ?? "");
+    state = verifyGoogleOAuthBrokerState(url.searchParams.get("state") ?? "");
   } catch (error) {
     captureException(error, {
       event: "opencompany.google_oauth_broker_callback_failed",

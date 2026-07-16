@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/brain-capture", () => ({ captureToGoatBrainInbox: vi.fn() }));
+
 import { GET } from "./route";
 
 afterEach(() => {

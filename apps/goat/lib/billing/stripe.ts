@@ -1,5 +1,7 @@
 import Stripe from "stripe";
 
+export { getGoatAppUrl } from "@/lib/app-url";
+
 let stripe: Stripe | undefined;
 
 export function getGoatStripe() {
@@ -25,16 +27,4 @@ export function assertGoatCheckoutEnabled() {
       "OpenCompany Pro Checkout is disabled until Stripe Tax registrations are configured.",
     );
   }
-}
-
-export function getGoatAppUrl() {
-  const appUrl =
-    process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!appUrl) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("GOAT_NEXT_PUBLIC_APP_URL or NEXT_PUBLIC_APP_URL is required.");
-    }
-    return "http://localhost:3002";
-  }
-  return appUrl.replace(/\/+$/, "");
 }
