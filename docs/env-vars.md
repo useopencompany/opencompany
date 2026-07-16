@@ -147,6 +147,9 @@ Set these in Vercel Production.
 | `LINEAR_TEAM_ID` | No | Linear team for feedback. |
 | `LINEAR_FEEDBACK_PROJECT_ID` | No | Optional project routing for feedback. |
 | `LINEAR_FEEDBACK_LABELS` | No | Optional comma-separated labels. |
+| `GOAT_FEEDBACK_LINEAR_TEAM_ID` | Goat only | Target Goat Linear team UUID for the sidebar feedback widget. Reuses the shared `LINEAR_API_KEY`; only the team differs. Enable Triage on this team so reports land in the Triage inbox. |
+| `GOAT_FEEDBACK_LINEAR_PROJECT_ID` | No | Optional project routing for Goat feedback. |
+| `GOAT_FEEDBACK_LINEAR_LABELS` | No | Optional comma-separated labels added to Goat feedback issues. |
 | `RESEND_API_KEY` | No | Enables transactional email through Resend. Missing values disable email sends. |
 | `RESEND_WELCOME_FROM` | No | Sender identity for the signup welcome email. Defaults to `Louis from opencompany <louis@updates.opencompany.cloud>`. |
 | `RESEND_REPLY_TO` | No | Reply-to address for transactional emails. Defaults to `louis@opencompany.cloud`. |
