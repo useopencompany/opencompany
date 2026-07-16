@@ -99,6 +99,14 @@
       "dependsOn": ["^build"],
       "outputs": [".next/**", "!.next/cache/**"]
     },
+    "@opencompany/goat-brain#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["src/generated/cli-bundle.ts"]
+    },
+    "@opencompany/memory#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["src/generated/cli-bundle.ts"]
+    },
     "dev": {
       "cache": false,
       "persistent": true
