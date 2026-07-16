@@ -2,7 +2,7 @@
 
 This template extends E2B's `codex` template and bakes in the runner's repo workflow toolbox:
 `rg`, `fd`, `jq`, `curl`, `git`, `gh`, Node/npm, Bun `1.3.2`,
-`@openai/codex@0.132.0`, Playwright `1.60.0`, and Playwright-managed Chromium.
+`@openai/codex@0.144.5`, Playwright `1.60.0`, and Playwright-managed Chromium.
 
 ## Build
 
