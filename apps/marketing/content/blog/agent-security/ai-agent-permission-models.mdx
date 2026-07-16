@@ -1,0 +1,93 @@
+---
+title: "Permission Models for AI Agents: Off, On, and Ask"
+description: "Giving an AI agent full access is easy. Giving it the right access is the actual problem. Here's how permission models work, why most tools get them wrong, and what a production-grade approach looks like."
+date: "2026-03-19"
+author: "Louis Morgner"
+keywords:
+  - ai agent permissions
+  - ai agent security
+  - ai agent access control
+  - human in the loop ai
+---
+
+The first thing most teams do when they deploy an AI agent is give it access to everything. The second thing they do is regret it.
+
+It's not that agents are malicious. It's that "full access" is a blunt instrument in a world where the consequences of a bad action range from "mildly annoying" (wrong Slack message) to "catastrophic" (deleted production database). The gap between those two outcomes is a permission model — or the lack of one.
+
+## Why "allow all" doesn't scale
+
+When one developer uses an agent locally, trust is implicit. You watch what it does. You ctrl-C when it goes sideways. The feedback loop is tight.
+
+Add a second developer and that model breaks. Add a non-technical user — a support lead using a triage agent, a CEO using an executive assistant — and it breaks completely. They can't evaluate whether `git push --force` is safe. They shouldn't have to.
+
+The question isn't whether to restrict agents. It's how to do it without making them useless.
+
+## Three modes, one decision per action
+
+We designed OpenCompany's permission model around three states for every action an agent can take:
+
+**Off** — the agent cannot perform this action, period. Not even if a human asks it to. This is your hard boundary for destructive or irreversible operations.
+
+**On** — the agent performs this action automatically. No pause, no approval needed. This is for safe, repeatable operations where the cost of a mistake is low.
+
+**Ask** — the agent pauses and requests human approval before executing. This is the middle ground: the agent proposes, a human disposes.
+
+```yaml
+permissions:
+  github:
+    read_repo: on
+    create_pr: on
+    merge_pr: ask
+    delete_branch: ask
+    push_to_main: off
+  slack:
+    read_messages: on
+    send_message: ask
+    delete_message: off
+  database:
+    read: on
+    write: ask
+    drop_table: off
+```
+
+This isn't novel. It's the same read/write/execute model that file systems have used for decades. What's different is applying it to AI agents, where the set of possible actions is large and the consequences are hard to predict in advance.
+
+## The trust gradient
+
+The useful pattern is to start restrictive and widen over time:
+
+**Week 1:** Most actions on `ask`. You're watching, learning what the agent does well.
+
+**Week 4:** Safe, repetitive actions move to `on`. Creating PRs, reading repos, sending routine notifications — the agent has proven it handles these correctly.
+
+**Ongoing:** Destructive actions stay on `ask` or `off` permanently. Deleting branches, modifying production data, sending external communications — these never graduate to automatic.
+
+This mirrors how you'd onboard a new employee. You don't give them production database access on day one. You shouldn't give it to an agent either.
+
+## Where most tools fail
+
+Most AI agent tools today have two modes: "sandboxed demo" and "full access production." There's no middle ground.
+
+The sandboxed demo is safe but useless for real work. Full access is useful but unsafe for team deployment. Teams end up choosing between an agent that can't do anything and one that can do everything — and most pick "everything" because they need to ship.
+
+The missing piece is granular, per-action control that's easy to configure and version-control. Not a 50-page policy document. Not a web UI with 200 checkboxes. A config file that lives in your repo and goes through code review like everything else.
+
+## The human-in-the-loop trap
+
+"Human in the loop" sounds like a safety measure. In practice, it's often a UX disaster.
+
+If every action requires approval, humans start rubber-stamping. The 50th "approve this PR comment?" prompt gets a yes without reading. You've built a system that feels safe but isn't — the human is technically in the loop but not actually making decisions.
+
+The fix is being selective about what triggers `ask`. Only pause for actions where human judgment genuinely matters and where the consequence of a wrong decision is significant. Everything else should be `on` or `off` — no false sense of security.
+
+## Config as the source of truth
+
+Permissions defined in a config file have a crucial advantage over permissions defined in a UI: they're reviewable, diffable, and auditable.
+
+When someone changes an agent's permissions from `ask` to `on` for database writes, that change shows up in a pull request. A teammate can question it. A security engineer can flag it. There's a record of who changed what and when.
+
+Compare that to clicking a toggle in a web dashboard. No review process. No history. No accountability. In a regulated environment, that's not just inconvenient — it's a compliance risk.
+
+---
+
+*Permission models are one piece of the agent infrastructure puzzle. See [Running AI Agents in Production](/blog/running-ai-agents-in-production) for the full picture — secrets management, audit trails, and the config-as-code approach that ties it all together.*

@@ -232,7 +232,11 @@ describe("Goat Brain ingest worker", () => {
       item: normalizedPayload,
       env: { vercelAiGatewayApiKey: "gw_test", blobReadWriteToken: undefined },
     });
-    expect(complete).toHaveBeenCalledWith(expect.objectContaining({ result: { handled: true } }));
+    expect(complete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({ handled: true, durationMs: expect.any(Number) }),
+      }),
+    );
     expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "success",
@@ -435,7 +439,12 @@ describe("Goat Brain ingest worker", () => {
         },
       });
 
-      expect(skip).toHaveBeenCalledWith(expect.objectContaining({ result, reason }));
+      expect(skip).toHaveBeenCalledWith(
+        expect.objectContaining({
+          result: expect.objectContaining({ ...result, durationMs: expect.any(Number) }),
+          reason,
+        }),
+      );
       expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
         expect.objectContaining({
           outcome: "skipped",
@@ -727,7 +736,14 @@ describe("Goat Brain ingest worker", () => {
     ).rejects.toThrow("budget exhausted");
 
     expect(fail).toHaveBeenCalledWith(
-      expect.objectContaining({ attempts: 1, maxAttempts: 1, result: failureResult }),
+      expect.objectContaining({
+        attempts: 1,
+        maxAttempts: 1,
+        result: expect.objectContaining({
+          ...failureResult,
+          durationMs: expect.any(Number),
+        }),
+      }),
     );
     expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
       expect.objectContaining({

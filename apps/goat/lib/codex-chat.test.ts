@@ -34,6 +34,15 @@ vi.mock("@/lib/chat", () => ({
   newGoatChatMessageId: vi.fn(() => "goat_chat_msg_mock"),
 }));
 
+function sqlText(query: unknown) {
+  const chunks =
+    (query as { queryChunks?: Array<string | { value?: string[] }> } | undefined)?.queryChunks ??
+    [];
+  return chunks
+    .map((chunk) => (typeof chunk === "string" ? "?" : ((chunk?.value ?? []) as string[]).join("")))
+    .join("");
+}
+
 function createSelectBuilder(rows: unknown[]) {
   const builder: Record<string, unknown> = {};
   for (const method of ["from", "innerJoin", "where", "orderBy"]) {
@@ -79,6 +88,22 @@ describe("createGoatCodexChatMessage", () => {
     expect(mocks.wake).not.toHaveBeenCalled();
   });
 
+  it("rejects models outside the supported Codex catalog", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "hello",
+      model: "openai/gpt-5.4-nano",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 400,
+      error: "Select a supported Codex model.",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.wake).not.toHaveBeenCalled();
+  });
+
   it("rejects sends while Codex is disconnected", async () => {
     mocks.codexConnected.mockResolvedValue(false);
     const result = await createGoatCodexChatMessage({ userWorkosId: "user_1", prompt: "hello" });
@@ -102,6 +127,19 @@ describe("createGoatCodexChatMessage", () => {
     // The whole send (session + both messages + codex session + turn) is one statement.
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.wake).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists the selected Codex model on a new chat and engine session", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "clone my repo",
+      model: "openai/gpt-5.6-terra",
+    });
+
+    expect(result).toMatchObject({ ok: true, mode: "started" });
+    const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
+    expect(statement.queryChunks).toContain("openai/gpt-5.6-terra");
+    expect(statement.queryChunks).toContain("gpt-5.6-terra");
   });
 
   it("returns 404 for an unknown or foreign session", async () => {
@@ -175,8 +213,31 @@ describe("interruptGoatCodexChatSession", () => {
       chatSessionId: "goat_chat_1",
     });
     expect(result).toMatchObject({ ok: true, status: 202 });
-    // One UPDATE for the running turn's interrupt flag, one CTE for queued-turn cancellation.
-    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    // One UPDATE for the running turn's interrupt flag, one CTE for queued-turn cancellation,
+    // and one session settle for the case where no running turn is left to do it.
+    expect(mocks.execute).toHaveBeenCalledTimes(3);
+  });
+
+  it("settles a starting session so a pre-claim stop cannot wedge the spinner", async () => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          status: "starting",
+        },
+      },
+    ]);
+    const result = await interruptGoatCodexChatSession({
+      userWorkosId: "user_1",
+      chatSessionId: "goat_chat_1",
+    });
+    expect(result).toMatchObject({ ok: true, status: 202 });
+    const settleSql = sqlText(mocks.execute.mock.calls.at(-1)?.[0]);
+    expect(settleSql).toContain("UPDATE goat.codex_chat_sessions");
+    expect(settleSql).toContain("'interrupted'");
+    expect(settleSql).toContain("NOT EXISTS");
+    expect(settleSql).toContain("status IN ('starting', 'running')");
   });
 });
 

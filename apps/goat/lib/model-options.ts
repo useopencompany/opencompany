@@ -1,4 +1,8 @@
-import { AGENT_MODEL_CATALOG, DEFAULT_CONTEXT_WINDOW_TOKENS } from "@opencompany/agent-runtime";
+import {
+  AGENT_MODEL_CATALOG,
+  CODEX_AGENT_MODEL_IDS,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+} from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 
 const GOAT_MODEL_IDS = [
@@ -11,6 +15,10 @@ const GOAT_MODEL_IDS = [
 const GOAT_MODEL_ID_SET = new Set<string>(GOAT_MODEL_IDS);
 
 export const GOAT_MODELS = GOAT_MODEL_IDS.map((id) =>
+  AGENT_MODEL_CATALOG.find((model) => model.id === id),
+).filter((model): model is NonNullable<typeof model> => model !== undefined);
+
+export const CODEX_MODELS = CODEX_AGENT_MODEL_IDS.map((id) =>
   AGENT_MODEL_CATALOG.find((model) => model.id === id),
 ).filter((model): model is NonNullable<typeof model> => model !== undefined);
 

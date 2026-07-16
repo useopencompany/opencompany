@@ -1,0 +1,120 @@
+---
+title: "Running AI Agents in Production: What Changes When It's Not a Demo"
+description: "Most AI agent tutorials skip the hard parts. Here's what actually matters when you move agents from a laptop to a team — permissions, secrets, audit trails, and the infrastructure decisions that shape everything."
+date: "2026-03-20"
+author: "Louis Morgner"
+keywords:
+  - ai agents production
+  - ai agent infrastructure
+  - running ai agents
+  - ai agent security
+  - ai agent permissions
+---
+
+AI agents are easy to demo and hard to deploy. The gap between "it works on my machine" and "the whole team runs this safely" is where most projects stall — not because the models aren't good enough, but because the infrastructure around them doesn't exist yet.
+
+We've been building that infrastructure at OpenCompany. This is what we've learned about what actually matters when you move agents from a prototype to production.
+
+## The demo is not the product
+
+Every AI agent demo follows the same script: install the CLI, point it at a codebase, watch it work. It's impressive. It also sidesteps every question that matters when a second person starts using it.
+
+Who manages the API keys? What happens when an agent tries to push to main? How does your security team audit what an agent did last Tuesday at 3am? Where do the credentials live — in the agent's context, in environment variables, in a vault?
+
+These aren't edge cases. They're the first things that come up when you try to roll out agents to a team of five, let alone fifty.
+
+## Three problems that look small until they aren't
+
+### 1. Secrets management
+
+The default pattern is dangerous: paste your API token into an environment variable and let the agent read it. This means the model has access to your credentials. Every tool call, every context window, every log entry potentially contains secrets.
+
+The alternative is runtime injection — credentials are provided to the tool at execution time, never entering the model's context. The agent says "I need to call the GitHub API," and the runtime handles authentication without the model ever seeing the token.
+
+```yaml
+# Secrets stay in your vault, not in the agent's context
+integrations:
+  github:
+    token: vault://github/prod-token
+  slack:
+    token: vault://slack/bot-token
+```
+
+This is a meaningful architectural decision, not a nice-to-have. Keeping tokens out of the model context reduces credential exposure and makes direct prompt-injection leakage less likely. It does not eliminate risk: a compromised agent may still misuse authenticated tools or exfiltrate data through actions it is allowed to perform.
+
+### 2. Permission models
+
+"Let the agent do everything" is fine when it's your personal coding assistant. It's a non-starter when the agent is running across a team. Different roles need different boundaries.
+
+The pattern we landed on is three modes per action: **off**, **on**, and **ask**. Off means the agent can't do it. On means it proceeds automatically. Ask means it pauses and waits for human approval before executing.
+
+```yaml
+permissions:
+  github:
+    create_pr: on        # safe, do it automatically
+    delete_branch: ask   # pause for human approval
+    push_to_main: off    # never, under any circumstances
+```
+
+This lets you start restrictive and open up as trust builds. A new agent gets mostly `ask` permissions. After a month of clean operation, you move the safe actions to `on`. The destructive ones stay on `ask` or `off` permanently.
+
+### 3. Audit trails
+
+When something goes wrong — and it will — you need to answer: what did the agent do, when, why, and who approved it? Without audit trails, you're flying blind.
+
+Every agent action should produce a log entry with the action taken, the minimum context needed to explain it, the permission check result, and the human who approved it (if applicable). Redact prompts, proprietary code, PII, secrets, and sensitive tool output unless they are strictly required. Restrict access to the logs, set retention limits, and protect them against tampering. This isn't just for debugging. In regulated industries, it may also be a compliance requirement.
+
+## The config-as-code approach
+
+The most important decision we made was: agents are defined in config files, not in a UI.
+
+```yaml
+runtime: claude-code
+name: pr-reviewer
+model: opus
+
+permissions:
+  github:
+    create_pr: on
+    delete_branch: ask
+    push_to_main: off
+
+integrations:
+  github:
+    token: vault://github/prod-token
+```
+
+This means agent definitions live in your repo. They're version-controlled. They go through code review. You can diff what changed between last week's config and this week's. You can roll back. You can have different configs for staging and production.
+
+The alternative — configuring agents through a web UI — creates the same problems that "ClickOps" created for infrastructure. It works for one person. It doesn't scale to a team.
+
+## What to evaluate in any agent platform
+
+If you're evaluating tools for running agents in production, here's the checklist that actually matters:
+
+| Concern | Question to ask |
+|---------|----------------|
+| Secrets | Does the model ever see my credentials? |
+| Permissions | Can I set per-action permissions with human-in-the-loop? |
+| Audit | Can I see every action an agent took and who approved it? |
+| Config | Are agent definitions version-controlled? |
+| Portability | Can I swap the model or runtime without rewriting everything? |
+| Self-hosting | Can I run this on my own infrastructure? |
+
+Most agent tools today answer "no" to at least three of these. That's the gap we're building OpenCompany to fill.
+
+## Start small, stay safe
+
+The best way to roll out agents in production is boring:
+
+1. Pick one workflow (PR reviews, support triage, whatever has the clearest ROI).
+2. Define the agent in config with restrictive permissions — mostly `ask`.
+3. Run it for a week. Read the audit logs.
+4. Loosen permissions for actions that are consistently safe.
+5. Add the next workflow.
+
+This isn't exciting. It's how you build trust — with your team, with your security group, and with the agent itself. The companies that successfully deploy agents at scale all follow this pattern. The ones that try to do everything at once are the ones writing postmortems.
+
+---
+
+*We're building OpenCompany to make this entire process simple: one config file, hard boundaries on what agents can do, every action audited, fully open-source. [Check it out on GitHub](https://github.com/useopencompany).*
