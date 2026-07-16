@@ -12,7 +12,8 @@ export type BrainSourceProvider =
   | "gmail"
   | "google_drive"
   | "hubspot"
-  | "granola";
+  | "granola"
+  | "fathom";
 export type BrainSourceType =
   | "meeting"
   | "run"
@@ -249,6 +250,52 @@ export type NormalizedGranolaMeetingContent = {
 export type NormalizedGranolaMeetingSourceItem =
   NormalizedBrainSourceItem<NormalizedGranolaMeetingContent> & {
     sourceProvider: "granola";
+    sourceType: "meeting";
+  };
+
+export type NormalizedFathomMeetingParticipant = {
+  name?: string;
+  email?: string;
+};
+
+export type NormalizedFathomMeetingTranscriptSegment = {
+  text: string;
+  speaker?: string;
+  // Offset into the recording as Fathom reports it (HH:MM:SS).
+  startedAt?: string;
+};
+
+export type NormalizedFathomMeetingActionItem = {
+  description: string;
+  assignee?: string;
+  completed?: boolean;
+};
+
+export type NormalizedFathomMeetingContent = {
+  recordedBy: {
+    name?: string;
+    email?: string;
+  };
+  recording: {
+    id: string;
+    url?: string;
+    shareUrl?: string;
+    createdAt: string;
+  };
+  meeting: {
+    title: string;
+    startTime: string;
+    endTime?: string;
+    summaryMarkdown: string;
+    actionItems: NormalizedFathomMeetingActionItem[];
+    participants: NormalizedFathomMeetingParticipant[];
+    transcript: NormalizedFathomMeetingTranscriptSegment[];
+  };
+};
+
+export type NormalizedFathomMeetingSourceItem =
+  NormalizedBrainSourceItem<NormalizedFathomMeetingContent> & {
+    sourceProvider: "fathom";
     sourceType: "meeting";
   };
 
@@ -1868,6 +1915,201 @@ export function isNormalizedGranolaMeetingSourceItem(
     !!item.content &&
     typeof item.content === "object"
   );
+}
+
+// Normalizes one meeting from the Fathom public API (GET /external/v1/meetings
+// with include_transcript, include_summary, and include_action_items). The
+// poll worker only lists meetings older than a processing lag, so summary and
+// transcript are normally present; both still degrade to empty rather than
+// throwing because Fathom omits them when generation failed or was disabled.
+export function normalizeFathomMeeting(
+  payload: unknown,
+  options: { capturedAt?: string } = {},
+): NormalizedFathomMeetingSourceItem {
+  const root = readObject(payload, "meeting");
+  const recordingIdValue = root.recording_id;
+  const recordingId =
+    typeof recordingIdValue === "number" && Number.isFinite(recordingIdValue)
+      ? String(recordingIdValue)
+      : typeof recordingIdValue === "string" && recordingIdValue
+        ? recordingIdValue
+        : null;
+  if (!recordingId) {
+    throw invalid("meeting.recording_id is required", "invalid_recording_id");
+  }
+  const title =
+    optionalString(root.meeting_title) ?? optionalString(root.title) ?? "Untitled meeting";
+  const createdAt = readIsoString(root.created_at, "meeting.created_at");
+  const startTime =
+    optionalIsoString(root.recording_start_time) ??
+    optionalIsoString(root.scheduled_start_time) ??
+    createdAt;
+  const endTime =
+    optionalIsoString(root.recording_end_time) ?? optionalIsoString(root.scheduled_end_time);
+  const url = optionalString(root.url);
+  const shareUrl = optionalString(root.share_url);
+  const summaryObject =
+    root.default_summary && typeof root.default_summary === "object"
+      ? readObject(root.default_summary, "meeting.default_summary")
+      : null;
+  const summaryMarkdown = summaryObject
+    ? (optionalString(summaryObject.markdown_formatted) ?? "")
+    : "";
+  const actionItems = normalizeFathomActionItems(root.action_items);
+  const participants = normalizeFathomParticipants(root.calendar_invitees, root.recorded_by);
+  const transcript = normalizeFathomTranscript(root.transcript);
+  const recordedByObject =
+    root.recorded_by && typeof root.recorded_by === "object"
+      ? readObject(root.recorded_by, "meeting.recorded_by")
+      : null;
+  const recordedByName = recordedByObject ? optionalString(recordedByObject.name) : undefined;
+  const recordedByEmail = recordedByObject ? optionalString(recordedByObject.email) : undefined;
+  const capturedAt = optionalIsoString(options.capturedAt) ?? createdAt;
+
+  const contentHashInput = {
+    sourceProvider: "fathom",
+    sourceType: "meeting",
+    externalId: recordingId,
+    title,
+    startTime,
+    ...(endTime ? { endTime } : {}),
+    summaryMarkdown,
+    actionItems,
+    participants,
+    transcript,
+  };
+
+  return {
+    sourceProvider: "fathom",
+    sourceType: "meeting",
+    externalId: recordingId,
+    sourceRef: `fathom:recording:${recordingId}`,
+    title,
+    occurredAt: startTime,
+    capturedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: {
+      recordedBy: {
+        ...(recordedByName ? { name: recordedByName } : {}),
+        ...(recordedByEmail ? { email: recordedByEmail } : {}),
+      },
+      recording: {
+        id: recordingId,
+        ...(url ? { url } : {}),
+        ...(shareUrl ? { shareUrl } : {}),
+        createdAt,
+      },
+      meeting: {
+        title,
+        startTime,
+        ...(endTime ? { endTime } : {}),
+        summaryMarkdown,
+        actionItems,
+        participants,
+        transcript,
+      },
+    },
+  };
+}
+
+export function isNormalizedFathomMeetingSourceItem(
+  value: unknown,
+): value is NormalizedFathomMeetingSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedFathomMeetingSourceItem>;
+  return (
+    item.sourceProvider === "fathom" &&
+    item.sourceType === "meeting" &&
+    typeof item.externalId === "string" &&
+    typeof item.sourceRef === "string" &&
+    typeof item.title === "string" &&
+    typeof item.occurredAt === "string" &&
+    typeof item.capturedAt === "string" &&
+    typeof item.contentHash === "string" &&
+    !!item.content &&
+    typeof item.content === "object"
+  );
+}
+
+function normalizeFathomParticipants(
+  invitees: unknown,
+  recordedBy: unknown,
+): NormalizedFathomMeetingParticipant[] {
+  const participants: NormalizedFathomMeetingParticipant[] = [];
+  const seen = new Set<string>();
+  const push = (name: string | undefined, email: string | undefined) => {
+    if (!name && !email) return;
+    const key = (email ?? name ?? "").toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    participants.push({ ...(name ? { name } : {}), ...(email ? { email } : {}) });
+  };
+  if (Array.isArray(invitees)) {
+    for (const invitee of invitees) {
+      if (!invitee || typeof invitee !== "object" || Array.isArray(invitee)) continue;
+      const record = invitee as Record<string, unknown>;
+      push(optionalString(record.name), optionalString(record.email));
+    }
+  }
+  // Fall back to the recorder when Fathom reports no calendar invitees (e.g.
+  // an ad-hoc recording without a calendar event).
+  if (participants.length === 0 && recordedBy && typeof recordedBy === "object") {
+    const record = recordedBy as Record<string, unknown>;
+    push(optionalString(record.name), optionalString(record.email));
+  }
+  return participants;
+}
+
+function normalizeFathomTranscript(value: unknown): NormalizedFathomMeetingTranscriptSegment[] {
+  // Transcript is optional on the meeting payload (only present with
+  // include_transcript); an empty transcript degrades to summary-only ingest.
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((segment) => {
+    if (!segment || typeof segment !== "object" || Array.isArray(segment)) return [];
+    const record = segment as Record<string, unknown>;
+    const text = optionalString(record.text);
+    if (!text) return [];
+    const speakerRecord =
+      record.speaker && typeof record.speaker === "object" && !Array.isArray(record.speaker)
+        ? (record.speaker as Record<string, unknown>)
+        : null;
+    const speaker = speakerRecord
+      ? optionalString(speakerRecord.display_name)
+      : speakerName(record.speaker);
+    const startedAt = optionalString(record.timestamp);
+    return [
+      {
+        text,
+        ...(speaker ? { speaker } : {}),
+        ...(startedAt ? { startedAt } : {}),
+      },
+    ];
+  });
+}
+
+function normalizeFathomActionItems(value: unknown): NormalizedFathomMeetingActionItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    const description = optionalString(record.description);
+    if (!description) return [];
+    const assigneeRecord =
+      record.assignee && typeof record.assignee === "object" && !Array.isArray(record.assignee)
+        ? (record.assignee as Record<string, unknown>)
+        : null;
+    const assignee = assigneeRecord
+      ? (optionalString(assigneeRecord.name) ?? optionalString(assigneeRecord.email))
+      : optionalString(record.assignee);
+    return [
+      {
+        description,
+        ...(assignee ? { assignee } : {}),
+        ...(typeof record.completed === "boolean" ? { completed: record.completed } : {}),
+      },
+    ];
+  });
 }
 
 function normalizeGranolaParticipants(

@@ -55,6 +55,7 @@ import { and, eq, isNull, ne, type SQL } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import type {
+  GoatFathomProviderState,
   GoatGmailSourceProviderState,
   GoatGoogleDriveSourceProviderState,
   GoatGranolaProviderState,
@@ -63,6 +64,7 @@ import type {
   GoatLinearSourceProviderState,
   GoatSlackProviderState,
 } from "@/lib/integration-state";
+import { getGoatFathomIntegrationState } from "@/lib/integrations/fathom";
 import {
   type GoatGitHubProviderState,
   getGoatGitHubIntegrationState,
@@ -142,6 +144,7 @@ export type GoatBrainSourcesDetails = {
     google_drive: GoatOwnSourceAccount[];
     hubspot: GoatOwnSourceAccount[];
     granola: GoatOwnSourceAccount[];
+    fathom: GoatOwnSourceAccount[];
   };
   jamie: {
     integration: GoatJamieProviderState;
@@ -172,6 +175,9 @@ export type GoatBrainSourcesDetails = {
   granola: {
     integration: GoatGranolaProviderState;
   };
+  fathom: {
+    integration: GoatFathomProviderState;
+  };
 };
 
 function integrationProviderFor(
@@ -186,6 +192,7 @@ function integrationProviderFor(
     case "linear":
     case "hubspot":
     case "granola":
+    case "fathom":
       return provider;
     default:
       return null;
@@ -349,12 +356,14 @@ export async function getGoatBrainSourcesAction(
     googleDriveState,
     hubspotState,
     granolaState,
+    fathomState,
     ownSlackAccounts,
     ownLinearAccounts,
     ownGmailAccounts,
     ownGoogleDriveAccounts,
     ownHubspotAccounts,
     ownGranolaAccounts,
+    ownFathomAccounts,
   ] = await Promise.all([
     listGoatBrainSourcesForBrain(brainRef),
     getGoatJamieIntegrationState(context.workspace.id),
@@ -365,6 +374,7 @@ export async function getGoatBrainSourcesAction(
     getGoatGoogleDriveSourceIntegrationState(context.user.workosUserId),
     getGoatHubspotSourceIntegrationState(context.user.workosUserId),
     getGoatGranolaIntegrationState(context.user.workosUserId),
+    getGoatFathomIntegrationState(context.user.workosUserId),
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "slack",
@@ -389,6 +399,10 @@ export async function getGoatBrainSourcesAction(
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "granola",
+    }),
+    listGoatPersonalIntegrationAccounts({
+      userWorkosId: context.user.workosUserId,
+      provider: "fathom",
     }),
   ]);
 
@@ -435,6 +449,7 @@ export async function getGoatBrainSourcesAction(
       google_drive: ownGoogleDriveAccounts,
       hubspot: ownHubspotAccounts,
       granola: ownGranolaAccounts,
+      fathom: ownFathomAccounts,
     },
     jamie: {
       integration: jamieState,
@@ -461,6 +476,9 @@ export async function getGoatBrainSourcesAction(
     },
     granola: {
       integration: granolaState,
+    },
+    fathom: {
+      integration: fathomState,
     },
   };
 }
