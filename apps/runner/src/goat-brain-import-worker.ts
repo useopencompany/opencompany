@@ -8,6 +8,7 @@ import {
   getGoatBrainImportJobProgress,
 } from "@opencompany/db/goat-brain-import";
 import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
+import { GOAT_FATHOM_CREDENTIAL_KIND, GOAT_FATHOM_PROVIDER } from "@opencompany/db/goat-fathom";
 import { GOAT_GRANOLA_CREDENTIAL_KIND, GOAT_GRANOLA_PROVIDER } from "@opencompany/db/goat-granola";
 import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
 import {
@@ -22,6 +23,7 @@ import {
   BrainSourceNormalizationError,
   type GoatImportResearchResult,
   type NormalizedBrainSourceItem,
+  normalizeFathomMeeting,
   normalizeGoatImportRun,
   normalizeGranolaMeetingNote,
 } from "@opencompany/goat-brain";
@@ -29,6 +31,7 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, eq, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
+import { type FathomMeetingSummary, listFathomMeetings } from "./fathom-api";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import {
   fetchGranolaNote,
@@ -47,11 +50,14 @@ const LEASE_TTL_MS = 3 * 60_000;
 const ACTIVE_WORKER_STATUSES = ["discovering", "ingesting", "finalizing"] as const;
 const GRANOLA_IMPORT_MAX_LIST_PAGES = 5;
 const GRANOLA_IMPORT_MAX_NOTES = 20;
+const FATHOM_IMPORT_MAX_LIST_PAGES = 5;
+const FATHOM_IMPORT_MAX_MEETINGS = 20;
 const PROVIDERS: GoatBrainImportProvider[] = [
   "public_web",
   "github",
   "jamie",
   "granola",
+  "fathom",
   "gmail",
   "slack",
   "linear",
@@ -145,6 +151,7 @@ async function discoverImport(run: GoatBrainImportRun, env: RunnerEnv) {
         summary[provider] = await discoverPublicResearch(run, env);
       } else {
         if (provider === "granola") await hydrateGranolaImportSourceItems(run);
+        if (provider === "fathom") await hydrateFathomImportSourceItems(run);
         const counts = await discoverStoredGoatBrainImportCandidates({
           run,
           provider,
@@ -251,6 +258,97 @@ async function hydrateGranolaImportSourceItems(run: GoatBrainImportRun) {
       });
     }
   }
+}
+
+async function hydrateFathomImportSourceItems(run: GoatBrainImportRun) {
+  const selection = run.sourceSelection.fathom;
+  if (!selection?.enabled || !selection.integrationId) return;
+  const credential = await loadGoatIntegrationCredential({
+    userWorkosId: run.userWorkosId,
+    integrationId: selection.integrationId,
+    provider: GOAT_FATHOM_PROVIDER,
+    kind: GOAT_FATHOM_CREDENTIAL_KIND,
+  });
+  const apiKey =
+    credential && typeof credential.payload.apiKey === "string" ? credential.payload.apiKey : null;
+  if (!apiKey) throw new Error("The saved Fathom API key could not be loaded.");
+
+  // The Fathom list call carries transcript, summary, and action items inline,
+  // so hydration is a single bounded listing pass with no per-item fetch.
+  const meetings: FathomMeetingSummary[] = [];
+  let cursor: string | undefined;
+  let truncated = false;
+  const seenCursors = new Set<string>();
+  for (let page = 0; page < FATHOM_IMPORT_MAX_LIST_PAGES; page += 1) {
+    if (!(await renewImportLease(run, "discovering"))) {
+      throw new Error("Import discovery lease was lost.");
+    }
+    const result = await listFathomMeetings({
+      apiKey,
+      createdAfter: run.historyStartAt.toISOString(),
+      createdBefore: run.historyEndAt.toISOString(),
+      ...(cursor ? { cursor } : {}),
+    });
+    meetings.push(...result.meetings);
+    if (!result.nextCursor) break;
+    if (seenCursors.has(result.nextCursor)) {
+      throw new Error("Fathom returned an invalid pagination cursor during context import.");
+    }
+    seenCursors.add(result.nextCursor);
+    cursor = result.nextCursor;
+    truncated = page === FATHOM_IMPORT_MAX_LIST_PAGES - 1;
+  }
+  if (truncated) {
+    logger.info("Fathom context import reached its bounded meeting-list limit", {
+      event: "opencompany.goat_brain_import_fathom_list_limited",
+      import_run_id: run.id,
+      listed_meeting_count: meetings.length,
+    });
+  }
+
+  const candidates = selectFathomImportMeetings(meetings);
+  for (const meeting of candidates) {
+    if (!(await renewImportLease(run, "discovering"))) {
+      throw new Error("Import discovery lease was lost.");
+    }
+    try {
+      const item = normalizeFathomMeeting(meeting.raw, {
+        capturedAt: new Date().toISOString(),
+      });
+      await upsertGoatBrainSourceItemAndEnqueue({
+        userWorkosId: run.userWorkosId,
+        sourceConnectionId: selection.integrationId,
+        integrationId: selection.integrationId,
+        item,
+        rawPayload: meeting.raw,
+        brainRefs: [],
+      });
+    } catch (error) {
+      if (!(error instanceof BrainSourceNormalizationError)) throw error;
+      logger.warn("Skipped invalid Fathom meeting during context import", {
+        event: "opencompany.goat_brain_import_fathom_meeting_skipped",
+        import_run_id: run.id,
+        recording_id: meeting.recordingId,
+        reason: "invalid_payload",
+      });
+    }
+  }
+}
+
+export function selectFathomImportMeetings(
+  meetings: readonly FathomMeetingSummary[],
+  limit = FATHOM_IMPORT_MAX_MEETINGS,
+) {
+  const byId = new Map<string, FathomMeetingSummary>();
+  for (const meeting of meetings) {
+    const existing = byId.get(meeting.recordingId);
+    if (!existing || timestamp(meeting.createdAt) > timestamp(existing.createdAt)) {
+      byId.set(meeting.recordingId, meeting);
+    }
+  }
+  return [...byId.values()]
+    .sort((left, right) => timestamp(right.createdAt) - timestamp(left.createdAt))
+    .slice(0, limit);
 }
 
 export function selectGranolaImportNotes(

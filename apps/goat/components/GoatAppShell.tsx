@@ -8,6 +8,7 @@ import { isGoatChatResumeEnabled } from "@/lib/chat-streams";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
 import { type GoatCodexProviderState, type GoatIntegrationState } from "@/lib/integration-state";
+import { getGoatFathomIntegrationState } from "@/lib/integrations/fathom";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGoatGranolaIntegrationState } from "@/lib/integrations/granola";
@@ -32,6 +33,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     jamie,
     slack,
     granola,
+    fathom,
     codex,
     workspaceMembers,
     personalAccounts,
@@ -45,6 +47,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatJamieIntegrationState(workspace.id),
     getGoatSlackIntegrationState(user.workosUserId),
     getGoatGranolaIntegrationState(user.workosUserId),
+    getGoatFathomIntegrationState(user.workosUserId),
     loadCurrentGoatCodexAuthSettings(),
     listGoatWorkspaceMembers(workspace.id),
     getGoatPersonalAccounts(user.workosUserId),
@@ -102,6 +105,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       jamie,
       slack,
       granola,
+      fathom,
       personalAccounts,
       codex: {
         provider: "codex",
@@ -146,6 +150,7 @@ function buildIntegrationState(input: {
   jamie: GoatIntegrationState["jamie"];
   slack: GoatIntegrationState["slack"];
   granola: GoatIntegrationState["granola"];
+  fathom: GoatIntegrationState["fathom"];
   personalAccounts: GoatIntegrationState["personalAccounts"];
   codex: GoatCodexProviderState;
 }): GoatIntegrationState {
@@ -158,6 +163,7 @@ function buildIntegrationState(input: {
     jamie: input.jamie,
     slack: input.slack,
     granola: input.granola,
+    fathom: input.fathom,
     codex: input.codex,
     personalAccounts: input.personalAccounts,
   };

@@ -552,6 +552,12 @@ export function rankStoredGoatBrainImportCandidate(
         String(meeting.summaryMarkdown ?? "").length + arrayLength(meeting.transcript);
       return substance > 0 ? 100 + substance : Number.NEGATIVE_INFINITY;
     }
+    case "fathom": {
+      const meeting = asRecord(content.meeting);
+      const substance =
+        String(meeting.summaryMarkdown ?? "").length + arrayLength(meeting.transcript);
+      return substance > 0 ? 100 + substance : Number.NEGATIVE_INFINITY;
+    }
     case "gmail": {
       const thread = asRecord(content.thread);
       const messages = asRecords(thread.messages);
@@ -629,6 +635,7 @@ export function matchesGoatBrainImportSelectedScope(
     }
     case "jamie":
     case "granola":
+    case "fathom":
       return true;
   }
 }

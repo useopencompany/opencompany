@@ -1,0 +1,33 @@
+---
+title: Fathom
+description: Connect Fathom meeting recordings to Goat Brain ingestion with a personal API key.
+---
+
+## What the connection does
+
+Goat polls the Fathom API every few minutes for meetings created since the last poll. Each poll deliberately lags real time by about fifteen minutes so Fathom will usually have finished the meeting's AI summary and transcript before Goat reads it. If generated content is still unavailable, Goat keeps the recording in a durable pending queue and retries Fathom's recording endpoints instead of marking the meeting as ingested. Once content is ready, Goat normalizes the meeting into a Brain source item and enqueues the durable Brain ingestion agent, which writes a meeting page plus a raw evidence snapshot of the summary, action items, and transcript.
+
+The connection is personal: the API key is minted for your Fathom account and only you can manage it or wire it into brains. The key can read meetings you recorded or that were shared with your team. Live polling does not automatically import meetings from before you connected. To seed a brain with recent history, run **Import company context** and select Fathom; the scan considers a bounded window and imports only after you confirm the planned workload.
+
+## Setup steps
+
+1. In Fathom, open **Settings** and find the **API Access** section.
+2. Generate a new API key.
+3. Copy the key Fathom shows once.
+4. In Goat, open **Settings → Fathom** (or choose **Set up** on the Fathom source card).
+5. Paste the key and save it. Goat validates it against the Fathom API before storing it.
+
+## Brain routing
+
+After the key is saved, enable Fathom as a source from any brain's settings page under Sources. Each new meeting fans out to every brain where your Fathom source is enabled. If two members of the same brain both have access to a team-shared meeting, it is ingested once per brain.
+
+## Troubleshooting
+
+If meetings are not appearing in the brain, check these in order:
+
+- The Fathom source is enabled on the target brain.
+- The connection status in **Settings → Fathom** is Connected. A revoked key flips it to "Needs a new API key" — paste a fresh key.
+- The meeting ended at least twenty minutes ago: Goat intentionally waits out most of Fathom's summary and transcript generation. Recordings that still are not ready remain pending and are retried automatically.
+- The meeting happened after live polling started. Automatic ingestion does not backfill; use **Import company context** with Fathom selected to scan recent history explicitly.
+
+The Fathom API is documented at [developers.fathom.ai](https://developers.fathom.ai).

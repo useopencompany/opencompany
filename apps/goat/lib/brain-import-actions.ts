@@ -22,6 +22,7 @@ const IMPORT_INTEGRATION_PROVIDERS = [
   "github",
   "jamie",
   "granola",
+  "fathom",
   "gmail",
   "slack",
   "linear",

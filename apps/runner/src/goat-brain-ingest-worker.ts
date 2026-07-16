@@ -17,6 +17,7 @@ import {
 } from "@opencompany/db/goat-schema";
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
+  isNormalizedFathomMeetingSourceItem,
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
@@ -51,6 +52,7 @@ import {
   type GoatBrainAgentIngestEnv,
   GoatBrainAgentOutcomeError,
   GoatBrainIngestBudgetError,
+  runFathomMeetingAgentIngest,
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
@@ -157,6 +159,12 @@ const GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "meeting",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const FATHOM_MEETING_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "fathom",
+  sourceType: "meeting",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "goat-chat",
@@ -226,6 +234,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: GRANOLA_MEETING_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedGranolaMeetingSourceItem,
     run: runTypedGoatBrainIngestHandler(runGranolaMeetingAgentIngest),
+  },
+  {
+    descriptor: FATHOM_MEETING_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedFathomMeetingSourceItem,
+    run: runTypedGoatBrainIngestHandler(runFathomMeetingAgentIngest),
   },
   {
     descriptor: GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR,
