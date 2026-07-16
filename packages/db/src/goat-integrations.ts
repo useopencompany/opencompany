@@ -34,7 +34,10 @@ type GoatIntegrationDb = Pick<
 type GoatIntegrationTransactionalDb = GoatIntegrationDb & {
   transaction<T>(callback: (tx: GoatIntegrationDb) => Promise<T>): Promise<T>;
 };
-type GoatIntegrationBatchDb = Pick<ReturnType<typeof getDb>, "batch" | "insert" | "update">;
+type GoatIntegrationBatchDb = Pick<
+  ReturnType<typeof getDb>,
+  "batch" | "insert" | "select" | "update"
+>;
 type GoatIntegrationRefreshDb = GoatIntegrationTransactionalDb | GoatIntegrationBatchDb;
 const GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING = {
   id: goatIntegrationCredentials.id,
@@ -252,6 +255,126 @@ export async function connectGoatSlackIntegration(input: {
   return { integrationId: integration.id };
 }
 
+export type GoatSlackBotOAuthCredentialPayload = {
+  access_token: string;
+  bot_user_id: string;
+  team_id: string;
+  team_name?: string;
+  scope?: string;
+};
+
+// The Slack answer-bot install. Workspace-owned (see
+// WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS): the bot token belongs to the
+// Slack workspace install, not to the connecting admin.
+export async function connectGoatSlackBotIntegration(input: {
+  userWorkosId: string;
+  workspaceId: string;
+  teamId: string;
+  teamName: string | null;
+  botUserId: string;
+  accessToken: string;
+  scopes: string[];
+  db?: GoatIntegrationBatchDb;
+  now?: Date;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const connectionLabel = input.teamName?.trim() || "Slack";
+
+  // Neon's HTTP driver makes a batch transactional but cannot feed one
+  // statement's RETURNING values into the next query. Resolve the stable id
+  // and original connector first so the integration and encrypted credential
+  // can still be committed atomically below.
+  const [existing] = await db
+    .select({ id: goatIntegrations.id, userWorkosId: goatIntegrations.userWorkosId })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.workspaceId, input.workspaceId),
+        eq(goatIntegrations.provider, "slack_bot"),
+      ),
+    )
+    .limit(1);
+  const integrationId = existing?.id ?? newGoatIntegrationId();
+  const integrationUserWorkosId = existing?.userWorkosId ?? input.userWorkosId;
+
+  const payload: GoatSlackBotOAuthCredentialPayload = {
+    access_token: input.accessToken,
+    bot_user_id: input.botUserId,
+    team_id: input.teamId,
+    ...(input.teamName ? { team_name: input.teamName } : {}),
+    ...(input.scopes.length > 0 ? { scope: input.scopes.join(",") } : {}),
+  };
+
+  const credentialWrite = prepareGoatIntegrationCredentialWrite(
+    {
+      userWorkosId: integrationUserWorkosId,
+      integrationId,
+      provider: "slack_bot",
+      kind: "oauth_token",
+      payload,
+      // Bot tokens do not expire unless token rotation is opted in.
+      expiresAt: null,
+    },
+    now,
+  );
+
+  const [integrations, credentials] = await db.batch([
+    db
+      .insert(goatIntegrations)
+      .values({
+        id: integrationId,
+        userWorkosId: integrationUserWorkosId,
+        workspaceId: input.workspaceId,
+        provider: "slack_bot",
+        // The Slack team id is the routing key for inbound bot events.
+        externalId: input.teamId,
+        connectionLabel,
+        accountName: input.teamName,
+        accountEmail: null,
+        accountType: "slack_bot",
+        status: "connected",
+        statusReason: null,
+        scopes: input.scopes,
+        lastSyncedAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [goatIntegrations.workspaceId, goatIntegrations.provider],
+        targetWhere: sql`${goatIntegrations.workspaceId} IS NOT NULL AND ${goatIntegrations.provider} = 'slack_bot'`,
+        // On reconnect (possibly by a different admin) user_workos_id stays as
+        // the original connector: credential AAD and brain_sources FKs use it.
+        set: {
+          externalId: input.teamId,
+          connectionLabel,
+          accountName: input.teamName,
+          accountType: "slack_bot",
+          status: "connected",
+          statusReason: null,
+          scopes: input.scopes,
+          lastSyncedAt: now,
+          updatedAt: now,
+        },
+      })
+      .returning({ id: goatIntegrations.id }),
+    db
+      .insert(goatIntegrationCredentials)
+      .values(credentialWrite.values)
+      .onConflictDoUpdate({
+        target: [goatIntegrationCredentials.integrationId, goatIntegrationCredentials.kind],
+        set: credentialWrite.conflictSet,
+      })
+      .returning(GOAT_INTEGRATION_CREDENTIAL_WRITE_RETURNING),
+  ] as const);
+
+  const integration = integrations[0];
+  if (!integration || !credentials[0]) {
+    throw new Error("Could not persist Goat Slack bot integration and credential.");
+  }
+
+  return { integrationId: integration.id };
+}
+
 export type GoatLinearOAuthCredentialPayload = {
   access_token: string;
   organization_id: string;
@@ -356,6 +479,114 @@ export async function connectGoatLinearIngestIntegration(input: {
       provider: "linear",
       status: "sync_failed",
       statusReason: "Failed to persist Linear integration credentials.",
+      db,
+      now: new Date(),
+    });
+    throw error;
+  }
+
+  return { integrationId: integration.id };
+}
+
+export type GoatHubspotOAuthCredentialPayload = {
+  access_token: string;
+  refresh_token: string;
+  portal_id: string;
+  hub_domain?: string;
+  user_email?: string;
+  scope?: string;
+};
+
+// The HubSpot ingestion connection. Rows key external_id on the HubSpot portal
+// (hub) id so inbound webhooks can route by payload portalId. Unlike Linear,
+// HubSpot access tokens are short-lived; the runner refreshes them from the
+// stored refresh token, so expiresAt is always set.
+export async function connectGoatHubspotIntegration(input: {
+  userWorkosId: string;
+  portalId: string;
+  hubDomain: string | null;
+  userEmail: string | null;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: Date | null;
+  scopes: string[];
+  db?: GoatIntegrationDb;
+  now?: Date;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const connectionLabel = input.hubDomain?.trim() || "HubSpot";
+
+  const [integration] = await db
+    .insert(goatIntegrations)
+    .values({
+      id: newGoatIntegrationId(),
+      userWorkosId: input.userWorkosId,
+      provider: "hubspot",
+      // The HubSpot portal id is the routing key for inbound webhooks.
+      externalId: input.portalId,
+      connectionLabel,
+      accountName: null,
+      accountEmail: input.userEmail,
+      accountType: "hubspot_user",
+      status: "connected",
+      statusReason: null,
+      scopes: input.scopes,
+      lastSyncedAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        goatIntegrations.userWorkosId,
+        goatIntegrations.provider,
+        goatIntegrations.externalId,
+      ],
+      // The personal-uniqueness index is partial; the arbiter must match it.
+      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+      set: {
+        connectionLabel,
+        accountEmail: input.userEmail,
+        accountType: "hubspot_user",
+        status: "connected",
+        statusReason: null,
+        scopes: input.scopes,
+        lastSyncedAt: now,
+        updatedAt: now,
+      },
+    })
+    .returning({ id: goatIntegrations.id });
+
+  if (!integration) {
+    throw new Error("Could not persist Goat HubSpot integration.");
+  }
+
+  const payload: GoatHubspotOAuthCredentialPayload = {
+    access_token: input.accessToken,
+    refresh_token: input.refreshToken,
+    portal_id: input.portalId,
+    ...(input.hubDomain ? { hub_domain: input.hubDomain } : {}),
+    ...(input.userEmail ? { user_email: input.userEmail } : {}),
+    ...(input.scopes.length > 0 ? { scope: input.scopes.join(" ") } : {}),
+  };
+
+  try {
+    await saveGoatIntegrationCredential({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "hubspot",
+      kind: "oauth_token",
+      payload,
+      expiresAt: input.expiresAt,
+      db,
+      now,
+    });
+  } catch (error) {
+    await markGoatIntegrationStatus({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "hubspot",
+      status: "sync_failed",
+      statusReason: "Failed to persist HubSpot integration credentials.",
       db,
       now: new Date(),
     });

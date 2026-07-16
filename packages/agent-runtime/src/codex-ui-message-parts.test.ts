@@ -4,9 +4,12 @@ import {
   applyCodexEventToUiMessageParts,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_PART_TYPE,
+  CODEX_FILE_CHANGE_TOOL_NAME,
   CODEX_GOAL_TOOL_NAME,
+  CODEX_MCP_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
+  CODEX_WEB_SEARCH_TOOL_NAME,
   type CodexUiMessagePart,
   codexUiMessagePartsContent,
   createCodexCommandOutputAccumulator,
@@ -265,6 +268,81 @@ describe("applyCodexEventToUiMessageParts", () => {
     ]);
   });
 
+  it("projects file changes, MCP tool calls, and web searches as durable parts", () => {
+    const parts = reduce(
+      [],
+      [
+        {
+          method: "item/started",
+          params: {
+            item: { id: "file_1", type: "fileChange", changes: [{ path: "src/a.ts" }] },
+          },
+        },
+        {
+          method: "item/completed",
+          params: {
+            item: {
+              id: "file_1",
+              type: "fileChange",
+              status: "completed",
+              changes: [{ path: "src/a.ts", kind: "edit" }, { path: "src/b.ts" }],
+            },
+          },
+        },
+        {
+          method: "item/completed",
+          params: {
+            item: {
+              id: "mcp_1",
+              type: "mcpToolCall",
+              server: "linear",
+              tool: "create_issue",
+              status: "failed",
+              error: { message: "auth expired" },
+            },
+          },
+        },
+        {
+          method: "item/completed",
+          params: { item: { id: "search_1", type: "webSearch", query: "drizzle upsert" } },
+        },
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_FILE_CHANGE_TOOL_NAME,
+        toolCallId: "file_1",
+        state: "output-available",
+        input: {
+          label: "File change",
+          changes: [{ path: "src/a.ts", kind: "edit" }, { path: "src/b.ts" }],
+        },
+        output: {
+          status: "completed",
+          changes: [{ path: "src/a.ts", kind: "edit" }, { path: "src/b.ts" }],
+        },
+      },
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_MCP_TOOL_NAME,
+        toolCallId: "mcp_1",
+        state: "output-available",
+        input: { label: "MCP tool", server: "linear", tool: "create_issue" },
+        output: { status: "failed", error: "auth expired" },
+      },
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_WEB_SEARCH_TOOL_NAME,
+        toolCallId: "search_1",
+        state: "output-available",
+        input: { label: "Web search", query: "drizzle upsert" },
+        output: { status: "completed" },
+      },
+    ]);
+  });
+
   it("projects goal, question, and approval request states", () => {
     const parts = reduce(
       [],
@@ -352,6 +430,60 @@ describe("finalizeCodexUiMessageParts", () => {
     const projection = finalizeCodexUiMessageParts([{ type: "text", text: "done" }], "interrupted");
     expect(projection.changed).toBe(false);
   });
+
+  it("settles unanswered questions and approvals on every outcome", () => {
+    const waiting: CodexUiMessagePart[] = [
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_QUESTION_TOOL_NAME,
+        toolCallId: "question_1",
+        state: "approval-requested",
+        input: { label: "Question", question: "Which branch?" },
+      },
+    ];
+
+    for (const outcome of ["completed", "interrupted", "failed"] as const) {
+      const projection = finalizeCodexUiMessageParts(waiting, outcome);
+      expect(projection.changed).toBe(true);
+      expect(projection.parts[0]).toMatchObject({
+        state: "output-available",
+        input: { label: "Question", question: "Which branch?" },
+        output: { status: "unanswered", question: "Which branch?" },
+      });
+    }
+  });
+
+  it("settles in-flight status parts with the turn outcome but leaves commands alone on success", () => {
+    const inFlight: CodexUiMessagePart[] = [
+      {
+        type: CODEX_COMMAND_TOOL_PART_TYPE,
+        toolCallId: "cmd_1",
+        state: "input-available",
+        input: { command: "sleep 100" },
+      },
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_FILE_CHANGE_TOOL_NAME,
+        toolCallId: "file_1",
+        state: "input-available",
+        input: { label: "File change", changes: [{ path: "src/a.ts" }] },
+      },
+    ];
+
+    const failed = finalizeCodexUiMessageParts(inFlight, "failed", "sandbox died");
+    expect(failed.parts[0]).toMatchObject({ state: "output-error", errorText: "sandbox died" });
+    expect(failed.parts[1]).toMatchObject({
+      state: "output-available",
+      output: { status: "failed", changes: [{ path: "src/a.ts" }] },
+    });
+
+    const completed = finalizeCodexUiMessageParts(inFlight, "completed");
+    expect(completed.parts[0]).toEqual(inFlight[0]);
+    expect(completed.parts[1]).toMatchObject({
+      state: "output-available",
+      output: { status: "completed" },
+    });
+  });
 });
 
 describe("parseCodexUiMessageParts", () => {
@@ -379,6 +511,14 @@ describe("parseCodexUiMessageParts", () => {
         toolCallId: "question_1",
         state: "approval-requested",
         input: { label: "Question", question: "Continue?" },
+      },
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_FILE_CHANGE_TOOL_NAME,
+        toolCallId: "file_1",
+        state: "output-available",
+        input: { label: "File change", changes: [{ path: "src/a.ts" }] },
+        output: { status: "completed", changes: [{ path: "src/a.ts" }] },
       },
       { type: "text", text: "hello" },
     ];

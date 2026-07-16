@@ -40,6 +40,11 @@ export type RunnerEnv = {
   // needs it to refresh per-account access tokens against Google's token endpoint.
   googleOAuthClientId?: string | undefined;
   googleOAuthClientSecret?: string | undefined;
+  // HubSpot OAuth client (same app as the goat web OAuth flow). HubSpot access
+  // tokens are short-lived, so the runner refreshes them against HubSpot's
+  // token endpoint before snapshot enrichment.
+  hubspotOAuthClientId?: string | undefined;
+  hubspotOAuthClientSecret?: string | undefined;
   e2bTemplate: string | undefined;
   ampE2bTemplate: string | undefined;
   codexE2bTemplate: string | undefined;
@@ -105,6 +110,8 @@ export function loadEnv(): RunnerEnv {
     ampApiKey: optionalEnv("AMP_API_KEY"),
     googleOAuthClientId: optionalEnv("GOOGLE_OAUTH_CLIENT_ID"),
     googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
+    hubspotOAuthClientId: optionalEnv("GOAT_HUBSPOT_CLIENT_ID"),
+    hubspotOAuthClientSecret: optionalEnv("GOAT_HUBSPOT_CLIENT_SECRET"),
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
     ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     codexE2bTemplate: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE"),

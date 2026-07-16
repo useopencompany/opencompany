@@ -7,6 +7,7 @@ import {
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedGoatImportSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
+  isNormalizedHubspotObjectSourceItem,
   isNormalizedLinearIssueSourceItem,
   isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
@@ -15,6 +16,7 @@ import {
   normalizeGoatChatCapture,
   normalizeGoatImportRun,
   normalizeGoogleDriveDocument,
+  normalizeHubspotObjectWindow,
   normalizeJamieMeetingCompletedWebhook,
   normalizeLinearIssueWindow,
   normalizeSlackConversationWindow,
@@ -679,6 +681,41 @@ describe("Linear issue window normalization", () => {
   it("guards against other item shapes", () => {
     expect(isNormalizedLinearIssueSourceItem({ sourceProvider: "linear" })).toBe(false);
     expect(isNormalizedLinearIssueSourceItem(null)).toBe(false);
+  });
+});
+
+describe("HubSpot object window normalization", () => {
+  const input = {
+    windowId: "ghubwin_abc123",
+    portalId: "62515",
+    objectType: "deal" as const,
+    objectId: "9876",
+    name: "Acme renewal",
+    activity: [
+      {
+        occurredAt: "2026-07-16T10:00:00.000Z",
+        action: "update" as const,
+        propertyName: "dealstage",
+        propertyValue: "closedwon",
+      },
+    ],
+    flushedAt: "2026-07-16T10:30:00.000Z",
+  };
+
+  it("includes the portal id in stable provenance", () => {
+    const item = normalizeHubspotObjectWindow(input);
+
+    expect(item.sourceRef).toBe("hubspot:62515:deal:9876");
+    expect(item.sourceProvider).toBe("hubspot");
+    expect(isNormalizedHubspotObjectSourceItem(item)).toBe(true);
+  });
+
+  it("keeps equal object ids from different portals distinct", () => {
+    const first = normalizeHubspotObjectWindow(input);
+    const second = normalizeHubspotObjectWindow({ ...input, portalId: "99117" });
+
+    expect(second.sourceRef).toBe("hubspot:99117:deal:9876");
+    expect(second.sourceRef).not.toBe(first.sourceRef);
   });
 });
 

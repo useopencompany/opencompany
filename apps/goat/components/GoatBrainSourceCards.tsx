@@ -30,6 +30,7 @@ import {
   setGoatBrainGitHubSourceAction,
   setGoatBrainGmailSourceAction,
   setGoatBrainGoogleDriveSourceAction,
+  setGoatBrainHubspotSourceAction,
   setGoatBrainLinearSourceAction,
   setGoatBrainSlackSourceAction,
   setGoatBrainSourceEnabledAction,
@@ -70,9 +71,11 @@ export function resolveGoatBrainSourceState(
               ? details?.gmail.integration
               : providerId === "google_drive"
                 ? details?.googleDrive.integration
-                : providerId === "granola"
-                  ? details?.granola.integration
-                  : undefined;
+                : providerId === "hubspot"
+                  ? details?.hubspot.integration
+                  : providerId === "granola"
+                    ? details?.granola.integration
+                    : undefined;
   const jamieReady =
     providerId === "jamie" ? Boolean(details?.jamie.integration.apiKeyConfigured) : false;
   const connected = providerId === "jamie" ? jamieReady : Boolean(integration?.connected);
@@ -219,6 +222,7 @@ export function SourceProviderCard({
   const github = provider.id === "github" ? details?.github : undefined;
   const gmail = provider.id === "gmail" ? details?.gmail : undefined;
   const googleDrive = provider.id === "google_drive" ? details?.googleDrive : undefined;
+  const hubspot = provider.id === "hubspot" ? details?.hubspot : undefined;
   const canToggle =
     provider.available &&
     (source ? source.canToggle : connected) &&
@@ -250,6 +254,7 @@ export function SourceProviderCard({
               brainRef,
               integrationId,
               enabled: !enabled,
+              allFiles: googleDriveAllFilesFromConfig(source?.config),
               resourceIds: googleDriveResourceIds(source?.config),
             })
           : await setGoatBrainSourceEnabledAction({
@@ -413,6 +418,17 @@ export function SourceProviderCard({
           onChanged={onChanged}
         />
       ) : null}
+      {provider.id === "hubspot" &&
+      hubspot?.integration.integrationId &&
+      (connected || source) &&
+      (source ? source.canConfigure : true) ? (
+        <HubspotObjectPicker
+          brainRef={brainRef}
+          integrationId={source?.integrationId ?? hubspot.integration.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
       {personalProvider ? (
         <AddOwnAccountSection
           brainRef={brainRef}
@@ -428,7 +444,13 @@ export function SourceProviderCard({
   );
 }
 
-type GoatPersonalBrainSourceProvider = "slack" | "linear" | "gmail" | "google_drive" | "granola";
+type GoatPersonalBrainSourceProvider =
+  | "slack"
+  | "linear"
+  | "gmail"
+  | "google_drive"
+  | "hubspot"
+  | "granola";
 
 function isPersonalSourceProvider(
   providerId: GoatBrainSourceProviderDef["id"],
@@ -438,6 +460,7 @@ function isPersonalSourceProvider(
     providerId === "linear" ||
     providerId === "gmail" ||
     providerId === "google_drive" ||
+    providerId === "hubspot" ||
     providerId === "granola"
   );
 }
@@ -453,6 +476,8 @@ const ADD_SOURCE_CONSENT_COPY: Record<GoatPersonalBrainSourceProvider, string> =
     "Changes to the files and folders you select will be summarized into this brain and visible to everyone with access to it.",
   linear:
     "Issue and comment activity from the teams you select will be summarized into this brain and visible to everyone with access to it.",
+  hubspot:
+    "CRM activity on the record types you select will be summarized into this brain and visible to everyone with access to it.",
   granola:
     "Your Granola meeting notes — including what other participants said — will be summarized into this brain and visible to everyone with access to it.",
 };
@@ -468,6 +493,7 @@ function sourceAccountLabel(source: GoatBrainSourceView): string | null {
     );
   }
   if (source.provider === "linear") return source.connectionLabel ?? source.accountName;
+  if (source.provider === "hubspot") return source.connectionLabel ?? source.accountEmail;
   return source.accountEmail ?? source.accountName;
 }
 
@@ -481,6 +507,9 @@ function ownAccountLabel(account: GoatOwnSourceAccount, provider: string): strin
   }
   if (provider === "linear") {
     return account.connectionLabel || account.accountName || account.integrationId;
+  }
+  if (provider === "hubspot") {
+    return account.connectionLabel || account.accountEmail || account.integrationId;
   }
   return account.accountEmail || account.accountName || account.integrationId;
 }
@@ -650,6 +679,14 @@ function SourceRow({
       ) : null}
       {source.canConfigure && provider.id === "google_drive" ? (
         <GoogleDriveSourceEditor
+          brainRef={brainRef}
+          integrationId={source.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
+      {source.canConfigure && provider.id === "hubspot" ? (
+        <HubspotObjectPicker
           brainRef={brainRef}
           integrationId={source.integrationId}
           source={source}
@@ -1525,6 +1562,220 @@ function LinearTeamPicker({
   );
 }
 
+type HubspotObjectSelection = "contact" | "company" | "deal";
+type HubspotEventSelection = "object_created" | "object_updated" | "object_stage_changed";
+
+const HUBSPOT_OBJECT_OPTIONS: Array<{ id: HubspotObjectSelection; label: string }> = [
+  { id: "contact", label: "Contacts" },
+  { id: "company", label: "Companies" },
+  { id: "deal", label: "Deals" },
+];
+
+const HUBSPOT_EVENT_OPTIONS: Array<{ id: HubspotEventSelection; label: string }> = [
+  { id: "object_created", label: "Record created" },
+  { id: "object_updated", label: "Record updated" },
+  { id: "object_stage_changed", label: "Stage changed" },
+];
+
+function hubspotObjectTypesFromConfig(
+  config: Record<string, unknown> | undefined,
+): HubspotObjectSelection[] {
+  const value = config?.objectTypes;
+  if (!Array.isArray(value)) return [];
+  const allowed = new Set(HUBSPOT_OBJECT_OPTIONS.map((option) => option.id));
+  const seen = new Set<HubspotObjectSelection>();
+  for (const entry of value) {
+    const id =
+      typeof entry === "string"
+        ? entry
+        : entry && typeof entry === "object" && !Array.isArray(entry)
+          ? (entry as Record<string, unknown>).id
+          : null;
+    if (typeof id !== "string" || !allowed.has(id as HubspotObjectSelection)) continue;
+    seen.add(id as HubspotObjectSelection);
+  }
+  return [...seen];
+}
+
+function hubspotEventsFromConfig(
+  config: Record<string, unknown> | undefined,
+): HubspotEventSelection[] {
+  const value = config?.events;
+  if (!Array.isArray(value)) return HUBSPOT_EVENT_OPTIONS.map((option) => option.id);
+  const allowed = new Set(HUBSPOT_EVENT_OPTIONS.map((option) => option.id));
+  const seen = new Set<HubspotEventSelection>();
+  for (const entry of value) {
+    const id =
+      typeof entry === "string"
+        ? entry
+        : entry && typeof entry === "object" && !Array.isArray(entry)
+          ? (entry as Record<string, unknown>).id
+          : null;
+    if (typeof id !== "string" || !allowed.has(id as HubspotEventSelection)) continue;
+    seen.add(id as HubspotEventSelection);
+  }
+  return [...seen];
+}
+
+function HubspotObjectPicker({
+  brainRef,
+  integrationId,
+  source,
+  onChanged,
+}: {
+  brainRef: string;
+  integrationId: string;
+  source: GoatBrainSourceView | null;
+  onChanged: () => Promise<void>;
+}) {
+  const saved = useMemo(() => hubspotObjectTypesFromConfig(source?.config), [source]);
+  const savedEvents = useMemo(() => hubspotEventsFromConfig(source?.config), [source]);
+  const [expanded, setExpanded] = useState(false);
+  const [selection, setSelection] = useState<Set<HubspotObjectSelection>>(() => new Set(saved));
+  const [eventSelection, setEventSelection] = useState<Set<HubspotEventSelection>>(
+    () => new Set(savedEvents),
+  );
+  const [dirty, setDirty] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  const toggleObjectType = (id: HubspotObjectSelection) => {
+    setDirty(true);
+    setSelection((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleEvent = (eventId: HubspotEventSelection) => {
+    setDirty(true);
+    setEventSelection((current) => {
+      const next = new Set(current);
+      if (next.has(eventId)) {
+        next.delete(eventId);
+      } else {
+        next.add(eventId);
+      }
+      return next;
+    });
+  };
+
+  const save = () => {
+    startTransition(async () => {
+      const result = await setGoatBrainHubspotSourceAction({
+        brainRef,
+        integrationId,
+        enabled: source ? source.enabled : true,
+        objectTypes: [...selection].map((id) => ({ id })),
+        events: [...eventSelection].map((id) => ({ id })),
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setDirty(false);
+      toast.success("HubSpot records updated.");
+      await onChanged();
+    });
+  };
+
+  const selectedCount = selection.size;
+  const selectedEventCount = eventSelection.size;
+  const summary =
+    selectedCount === 0
+      ? "No record types selected yet — nothing is ingested until you choose some."
+      : `${selectedCount} record type${selectedCount === 1 ? "" : "s"} and ${selectedEventCount} event${
+          selectedEventCount === 1 ? "" : "s"
+        } selected.`;
+
+  if (!expanded) {
+    return (
+      <div className="flex items-center justify-between gap-2 border-t border-ink/10 pt-2">
+        <p className="text-[11.5px] leading-4 text-ink-subtle">{summary}</p>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="shrink-0 rounded-md border border-ink/15 px-2.5 py-1 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
+        >
+          Choose records and events
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-ink/10 pt-2">
+      <div className="flex items-center justify-end">
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+        >
+          Collapse
+        </button>
+      </div>
+      <div className="flex flex-col gap-1 rounded-md border border-ink/10 p-1">
+        <div className="px-1 py-0.5 text-[12px] font-medium text-ink">Record types</div>
+        <div className="grid grid-cols-1 gap-px sm:grid-cols-2">
+          {HUBSPOT_OBJECT_OPTIONS.map((option) => (
+            <label
+              key={option.id}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+            >
+              <input
+                type="checkbox"
+                checked={selection.has(option.id)}
+                onChange={() => toggleObjectType(option.id)}
+                className="accent-ink"
+              />
+              <span className="min-w-0 flex-1 truncate">{option.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col gap-1 rounded-md border border-ink/10 p-1">
+        <div className="px-1 py-0.5 text-[12px] font-medium text-ink">Events</div>
+        <div className="grid grid-cols-1 gap-px sm:grid-cols-2">
+          {HUBSPOT_EVENT_OPTIONS.map((option) => (
+            <label
+              key={option.id}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+            >
+              <input
+                type="checkbox"
+                checked={eventSelection.has(option.id)}
+                onChange={() => toggleEvent(option.id)}
+                className="accent-ink"
+              />
+              <span className="min-w-0 flex-1 truncate">{option.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <p className="text-[11.5px] leading-4 text-ink-subtle">
+        Selected HubSpot CRM activity is ingested into this brain and visible to everyone with
+        access to it.
+      </p>
+      {dirty ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={save}
+            className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
+          >
+            {isPending ? "Saving…" : "Save HubSpot source"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 type GmailEventSelection = "email_received" | "email_sent";
 
 const GMAIL_EVENT_OPTIONS: Array<{ id: GmailEventSelection; label: string }> = [
@@ -1753,6 +2004,11 @@ function googleDriveResourceIds(config: Record<string, unknown> | undefined) {
   return googleDriveSelectionsFromConfig(config).map((resource) => resource.id);
 }
 
+function googleDriveAllFilesFromConfig(config: Record<string, unknown> | undefined) {
+  const allFiles = config?.allFiles;
+  return Boolean(allFiles && typeof allFiles === "object" && !Array.isArray(allFiles));
+}
+
 function GoogleDriveSourceEditor({
   brainRef,
   integrationId,
@@ -1765,7 +2021,9 @@ function GoogleDriveSourceEditor({
   onChanged: () => Promise<void>;
 }) {
   const saved = useMemo(() => googleDriveSelectionsFromConfig(source?.config), [source]);
+  const savedAllFiles = useMemo(() => googleDriveAllFilesFromConfig(source?.config), [source]);
   const [expanded, setExpanded] = useState(false);
+  const [allFiles, setAllFiles] = useState(savedAllFiles);
   const [selection, setSelection] = useState<Map<string, GoogleDriveSelection>>(
     () => new Map(saved.map((resource) => [resource.id, resource])),
   );
@@ -1836,13 +2094,19 @@ function GoogleDriveSourceEditor({
     setDirty(true);
   };
 
+  const toggleAllFiles = () => {
+    setAllFiles((value) => !value);
+    setDirty(true);
+  };
+
   const save = () => {
     startTransition(async () => {
       const result = await setGoatBrainGoogleDriveSourceAction({
         brainRef,
         integrationId,
-        enabled: selection.size > 0,
-        resourceIds: [...selection.keys()],
+        enabled: allFiles || selection.size > 0,
+        allFiles,
+        resourceIds: allFiles ? [] : [...selection.keys()],
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -1856,15 +2120,31 @@ function GoogleDriveSourceEditor({
 
   return (
     <div className="mt-1 flex flex-col gap-2 border-t border-ink/10 pt-2">
+      <label className="flex items-start gap-2 rounded-md border border-ink/10 px-2.5 py-2">
+        <input
+          type="checkbox"
+          checked={allFiles}
+          onChange={toggleAllFiles}
+          className="mt-0.5 h-3.5 w-3.5 accent-ink"
+        />
+        <span className="flex flex-col gap-0.5">
+          <span className="text-[12px] font-medium text-ink">Subscribe to all files</span>
+          <span className="text-[11.5px] leading-4 text-ink-subtle">
+            Ingest every changed file this account can access, including files outside selected
+            folders.
+          </span>
+        </span>
+      </label>
       <button
         type="button"
         onClick={toggleExpanded}
+        disabled={allFiles}
         className="flex items-center gap-1 text-left text-[12px] font-medium text-ink"
       >
         {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        Select files and folders ({selection.size})
+        {allFiles ? "All files selected" : `Select files and folders (${selection.size})`}
       </button>
-      {expanded ? (
+      {expanded && !allFiles ? (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1 text-[11.5px] text-ink-subtle">
             <button type="button" onClick={() => goToBreadcrumb(-1)} className="hover:text-ink">
@@ -1989,8 +2269,9 @@ function GoogleDriveSourceEditor({
         </div>
       ) : null}
       <p className="text-[11.5px] leading-4 text-ink-subtle">
-        Selected Drive content will be summarized into this brain and visible to everyone who can
-        access it. Existing content is not imported until it changes after selection.
+        {allFiles
+          ? "All changed Drive files will be summarized into this brain and visible to everyone who can access it. Existing content is not imported until it changes after selection."
+          : "Selected Drive content will be summarized into this brain and visible to everyone who can access it. Existing content is not imported until it changes after selection."}
       </p>
       {dirty ? (
         <div className="flex justify-end">

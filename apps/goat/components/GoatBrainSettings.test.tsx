@@ -153,7 +153,46 @@ describe("GoatBrainSourceCards", () => {
         brainRef: "goat_brain_1",
         integrationId: "gint_drive_1",
         enabled: true,
+        allFiles: false,
         resourceIds: ["drive_file_1"],
+      }),
+    );
+  });
+
+  it("saves personal Drive sources in all-files mode", async () => {
+    const user = userEvent.setup();
+    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "google_drive");
+    if (!provider) throw new Error("Google Drive source provider is not registered.");
+    render(
+      <SourceProviderCard
+        brainRef="goat_brain_1"
+        provider={provider}
+        details={brainSourceDetails({
+          googleDrive: {
+            integration: {
+              provider: "google_drive",
+              connected: true,
+              status: "connected",
+              integrationId: "gint_drive_1",
+              accountEmail: "owner@example.com",
+              statusReason: null,
+            },
+          },
+        })}
+        onChanged={async () => {}}
+      />,
+    );
+
+    await user.click(screen.getByRole("checkbox", { name: /Subscribe to all files/ }));
+    await user.click(screen.getByRole("button", { name: "Save Google Drive source" }));
+
+    await waitFor(() =>
+      expect(brainSourceActionsMock.setGoatBrainGoogleDriveSourceAction).toHaveBeenCalledWith({
+        brainRef: "goat_brain_1",
+        integrationId: "gint_drive_1",
+        enabled: true,
+        allFiles: true,
+        resourceIds: [],
       }),
     );
   });
@@ -273,6 +312,7 @@ describe("GoatBrainSourceCards", () => {
               },
             ],
             google_drive: [],
+            hubspot: [],
             granola: [],
           },
         })}
@@ -355,6 +395,7 @@ function brainSourceDetails(
       linear: [],
       gmail: [],
       google_drive: [],
+      hubspot: [],
       granola: [],
     },
     jamie: {
@@ -415,6 +456,17 @@ function brainSourceDetails(
         status: "not_connected",
         integrationId: null,
         accountEmail: null,
+        statusReason: null,
+      },
+    },
+    hubspot: {
+      integration: {
+        provider: "hubspot",
+        connected: false,
+        status: "not_connected",
+        integrationId: null,
+        accountEmail: null,
+        hubDomain: null,
         statusReason: null,
       },
     },

@@ -135,6 +135,24 @@ export async function interruptGoatCodexChatSession(input: {
     WHERE message.id = cancelled.assistant_message_id
       AND message.role = 'assistant'
   `);
+  // Running turns settle the session from the runner, but a stop that only cancelled queued
+  // turns has no runner to do it: without this the session would stay 'starting'/'running'
+  // forever and the UI would show an eternal spinner.
+  await getDb().execute(sql`
+    UPDATE goat.codex_chat_sessions AS session
+    SET status = 'interrupted',
+        active_turn_id = NULL,
+        updated_at = ${now}
+    WHERE session.id = ${session.id}
+      AND session.user_workos_id = ${input.userWorkosId}
+      AND session.status IN ('starting', 'running')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM goat.codex_chat_turns AS turn
+        WHERE turn.codex_chat_session_id = session.id
+          AND turn.status = 'running'
+      )
+  `);
   return { ok: true, status: 202, error: null };
 }
 

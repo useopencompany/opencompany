@@ -20,11 +20,20 @@ import {
 } from "@opencompany/db/goat-gmail";
 import {
   GOAT_GOOGLE_DRIVE_FOLDER_MIME_TYPE,
+  type GoatGoogleDriveAllFilesRef,
   type GoatGoogleDriveCorpusKey,
   type GoatGoogleDriveResourceRef,
+  readGoatGoogleDriveAllFiles,
   readGoatGoogleDriveResources,
   upsertGoatGoogleDriveSyncCursor,
 } from "@opencompany/db/goat-google-drive";
+import {
+  GOAT_HUBSPOT_EVENT_TYPES,
+  type GoatHubspotEventRef,
+  type GoatHubspotEventType,
+  type GoatHubspotObjectTypeRef,
+  isGoatHubspotObjectType,
+} from "@opencompany/db/goat-hubspot";
 import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
 import {
   GOAT_LINEAR_EVENT_TYPES,
@@ -51,6 +60,7 @@ import type {
   GoatGmailSourceProviderState,
   GoatGoogleDriveSourceProviderState,
   GoatGranolaProviderState,
+  GoatHubspotSourceProviderState,
   GoatJamieProviderState,
   GoatLinearSourceProviderState,
   GoatSlackProviderState,
@@ -72,6 +82,7 @@ import {
   loadOwnGoatGoogleDriveAccount,
 } from "@/lib/integrations/google-drive";
 import { getGoatGranolaIntegrationState } from "@/lib/integrations/granola";
+import { getGoatHubspotSourceIntegrationState } from "@/lib/integrations/hubspot-ingest";
 import {
   getGoatJamieIntegrationState,
   isGoatJamieWebhookApiKeyConfigured,
@@ -131,6 +142,7 @@ export type GoatBrainSourcesDetails = {
     linear: GoatOwnSourceAccount[];
     gmail: GoatOwnSourceAccount[];
     google_drive: GoatOwnSourceAccount[];
+    hubspot: GoatOwnSourceAccount[];
     granola: GoatOwnSourceAccount[];
   };
   jamie: {
@@ -156,6 +168,9 @@ export type GoatBrainSourcesDetails = {
   googleDrive: {
     integration: GoatGoogleDriveSourceProviderState;
   };
+  hubspot: {
+    integration: GoatHubspotSourceProviderState;
+  };
   granola: {
     integration: GoatGranolaProviderState;
   };
@@ -171,6 +186,7 @@ function integrationProviderFor(
     case "github":
     case "slack":
     case "linear":
+    case "hubspot":
     case "granola":
       return provider;
     default:
@@ -333,11 +349,13 @@ export async function getGoatBrainSourcesAction(
     githubState,
     gmailState,
     googleDriveState,
+    hubspotState,
     granolaState,
     ownSlackAccounts,
     ownLinearAccounts,
     ownGmailAccounts,
     ownGoogleDriveAccounts,
+    ownHubspotAccounts,
     ownGranolaAccounts,
   ] = await Promise.all([
     listGoatBrainSourcesForBrain(brainRef),
@@ -347,6 +365,7 @@ export async function getGoatBrainSourcesAction(
     getGoatGitHubIntegrationState(context.workspace.id),
     getGoatGmailSourceIntegrationState(context.user.workosUserId),
     getGoatGoogleDriveSourceIntegrationState(context.user.workosUserId),
+    getGoatHubspotSourceIntegrationState(context.user.workosUserId),
     getGoatGranolaIntegrationState(context.user.workosUserId),
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
@@ -364,6 +383,10 @@ export async function getGoatBrainSourcesAction(
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "google_drive",
+    }),
+    listGoatPersonalIntegrationAccounts({
+      userWorkosId: context.user.workosUserId,
+      provider: "hubspot",
     }),
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
@@ -412,6 +435,7 @@ export async function getGoatBrainSourcesAction(
       linear: ownLinearAccounts,
       gmail: ownGmailAccounts,
       google_drive: ownGoogleDriveAccounts,
+      hubspot: ownHubspotAccounts,
       granola: ownGranolaAccounts,
     },
     jamie: {
@@ -433,6 +457,9 @@ export async function getGoatBrainSourcesAction(
     },
     googleDrive: {
       integration: googleDriveState,
+    },
+    hubspot: {
+      integration: hubspotState,
     },
     granola: {
       integration: granolaState,
@@ -788,6 +815,51 @@ export async function setGoatBrainLinearSourceAction(input: {
   }
 }
 
+export async function setGoatBrainHubspotSourceAction(input: {
+  brainRef: string;
+  integrationId: string;
+  enabled: boolean;
+  objectTypes: GoatHubspotObjectTypeRef[];
+  events: GoatHubspotEventRef[];
+}): Promise<GoatWorkspaceActionResult> {
+  const context = await requireBrainSourceContext(input.brainRef);
+  if (!context) {
+    return { ok: false, error: "You don't have access to this brain." };
+  }
+
+  const integration = await loadSourceIntegrationForContext({
+    integrationId: input.integrationId,
+    provider: "hubspot",
+    context,
+  });
+  if (!integration || integration.status === "disconnected") {
+    return { ok: false, error: "Connect HubSpot in your settings first." };
+  }
+
+  try {
+    await upsertGoatBrainSource({
+      brainRef: input.brainRef,
+      provider: "hubspot",
+      integrationId: input.integrationId,
+      userWorkosId: integration.userWorkosId,
+      createdByWorkosId: context.user.workosUserId,
+      enabled: input.enabled,
+      config: {
+        objectTypes: sanitizeHubspotObjectTypeRefs(input.objectTypes),
+        events: sanitizeHubspotEventRefs(input.events),
+      },
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update the HubSpot source.",
+    };
+  }
+}
+
 export type GoatGitHubRepositoryListResult =
   | { ok: true; repos: Array<GoatGitHubRepositoryRef & { private: boolean }> }
   | { ok: false; error: string };
@@ -988,6 +1060,7 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
   brainRef: string;
   integrationId: string;
   enabled: boolean;
+  allFiles?: boolean;
   resourceIds: string[];
 }): Promise<GoatWorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
@@ -1005,8 +1078,8 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
   if (resourceIds.some((id) => id.length > 512)) {
     return { ok: false, error: "Invalid Google Drive resource id." };
   }
-  if (input.enabled && resourceIds.length === 0) {
-    return { ok: false, error: "Select at least one Drive file or folder." };
+  if (input.enabled && !input.allFiles && resourceIds.length === 0) {
+    return { ok: false, error: "Select at least one Drive file or folder, or choose all files." };
   }
   if (resourceIds.length > 100) {
     return { ok: false, error: "Select at most 100 Drive files or folders per brain." };
@@ -1026,12 +1099,14 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
     const existingResources = new Map(
       readGoatGoogleDriveResources(existing?.config).map((resource) => [resource.id, resource]),
     );
+    const existingAllFiles = readGoatGoogleDriveAllFiles(existing?.config);
 
     // Disabling must remain possible after token revocation or access loss.
     // Retain only server-known resources; the editor passes an empty list when
     // the user intentionally clears the selection.
     if (!input.enabled) {
       const resources = resourceIds.flatMap((id) => existingResources.get(id) ?? []);
+      const allFiles = input.allFiles ? existingAllFiles : null;
       await upsertGoatBrainSource({
         brainRef: input.brainRef,
         provider: "google_drive",
@@ -1039,7 +1114,7 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
         userWorkosId: integration.userWorkosId,
         createdByWorkosId: context.user.workosUserId,
         enabled: false,
-        config: { resources },
+        config: { ...(allFiles ? { allFiles } : {}), resources },
       });
       revalidatePath("/", "layout");
       return { ok: true };
@@ -1055,15 +1130,21 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
     if (!account) {
       return { ok: false, error: "Only the connection owner can configure this source." };
     }
-    const files = await Promise.all(
-      resourceIds.map((fileId) => getGoatGoogleDriveFile({ account, fileId })),
-    );
+    const files = input.allFiles
+      ? []
+      : await Promise.all(resourceIds.map((fileId) => getGoatGoogleDriveFile({ account, fileId })));
     if (files.some((file) => file.trashed)) {
       return { ok: false, error: "Remove trashed Drive items before saving." };
     }
 
     const resetSelectionTimes = Boolean(existing && !existing.enabled && input.enabled);
-    const driveIds = [...new Set(files.flatMap((file) => (file.driveId ? [file.driveId] : [])))];
+    const sharedDrives = input.allFiles ? await listGoatGoogleSharedDrives({ account }) : [];
+    const driveIds = [
+      ...new Set([
+        ...files.flatMap((file) => (file.driveId ? [file.driveId] : [])),
+        ...sharedDrives.map((drive) => drive.id),
+      ]),
+    ];
     const sharedTokens = new Map<string, string>();
     await Promise.all(
       driveIds.map(async (driveId) => {
@@ -1108,6 +1189,12 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
     // token acquisition is either before selection (filtered) or after it
     // (present in the durable feed), so the no-backfill boundary has no gap.
     const selectedAt = new Date().toISOString();
+    const allFiles: GoatGoogleDriveAllFilesRef | null = input.allFiles
+      ? {
+          selectedAt:
+            !resetSelectionTimes && existingAllFiles ? existingAllFiles.selectedAt : selectedAt,
+        }
+      : null;
     const resources: GoatGoogleDriveResourceRef[] = files.map((file) => {
       const corpusKey: GoatGoogleDriveCorpusKey =
         file.driveId && sharedTokens.has(file.driveId) ? `drive:${file.driveId}` : "user";
@@ -1131,7 +1218,7 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
       userWorkosId: integration.userWorkosId,
       createdByWorkosId: context.user.workosUserId,
       enabled: true,
-      config: { resources },
+      config: { ...(allFiles ? { allFiles } : {}), resources },
     });
     triggerGoatGoogleDriveSyncWake().catch((error) => {
       console.warn("Could not wake Goat Google Drive sync worker.", {
@@ -1220,6 +1307,32 @@ function sanitizeLinearEventRefs(refs: GoatLinearEventRef[]): GoatLinearEventRef
     if (!allowed.has(id as GoatLinearEventType) || seen.has(id as GoatLinearEventType)) continue;
     seen.add(id as GoatLinearEventType);
     sanitized.push({ id: id as GoatLinearEventType });
+  }
+  return sanitized;
+}
+
+function sanitizeHubspotObjectTypeRefs(
+  refs: GoatHubspotObjectTypeRef[],
+): GoatHubspotObjectTypeRef[] {
+  const seen = new Set<string>();
+  const sanitized: GoatHubspotObjectTypeRef[] = [];
+  for (const ref of refs) {
+    if (!isGoatHubspotObjectType(ref.id) || seen.has(ref.id)) continue;
+    seen.add(ref.id);
+    sanitized.push({ id: ref.id });
+  }
+  return sanitized;
+}
+
+function sanitizeHubspotEventRefs(refs: GoatHubspotEventRef[]): GoatHubspotEventRef[] {
+  const allowed = new Set<GoatHubspotEventType>(GOAT_HUBSPOT_EVENT_TYPES);
+  const seen = new Set<GoatHubspotEventType>();
+  const sanitized: GoatHubspotEventRef[] = [];
+  for (const ref of refs) {
+    const id = typeof ref.id === "string" ? ref.id : "";
+    if (!allowed.has(id as GoatHubspotEventType) || seen.has(id as GoatHubspotEventType)) continue;
+    seen.add(id as GoatHubspotEventType);
+    sanitized.push({ id: id as GoatHubspotEventType });
   }
   return sanitized;
 }

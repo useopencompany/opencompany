@@ -72,6 +72,10 @@
       "types": "./src/goat-google-drive.ts",
       "default": "./src/goat-google-drive.ts"
     },
+    "./goat-hubspot": {
+      "types": "./src/goat-hubspot.ts",
+      "default": "./src/goat-hubspot.ts"
+    },
     "./goat-linear": {
       "types": "./src/goat-linear.ts",
       "default": "./src/goat-linear.ts"
@@ -79,6 +83,10 @@
     "./goat-slack": {
       "types": "./src/goat-slack.ts",
       "default": "./src/goat-slack.ts"
+    },
+    "./goat-slack-bot": {
+      "types": "./src/goat-slack-bot.ts",
+      "default": "./src/goat-slack-bot.ts"
     },
     "./goat-workspaces": {
       "types": "./src/goat-workspaces.ts",
