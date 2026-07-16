@@ -545,11 +545,15 @@ export async function claimNextGoatBrainIngestJob(input: {
   supportedJobs: readonly GoatBrainIngestJobDescriptor[];
   store?: GoatBrainIngestStore;
   leaseTtlMs?: number;
+  releasePendingReservations?: boolean;
 }) {
   const now = new Date();
   const leaseId = newGoatBrainIngestLeaseId();
   const store = input.store ?? createDbGoatBrainIngestStore();
-  if (!input.store) {
+  // The long-running worker creates one DB store and passes it into every
+  // claim. Keep backlog release explicit so that test-store injection does not
+  // accidentally disable the production sweep.
+  if (input.releasePendingReservations ?? !input.store) {
     await releasePendingGoatIngestionReservations({ now, maxWorkspaces: 50 });
   }
   return store.claimNext({
@@ -972,6 +976,7 @@ export function startGoatBrainIngestWorker(
             supportedJobs,
             store,
             leaseTtlMs: GOAT_BRAIN_INGEST_LEASE_TTL_MS,
+            releasePendingReservations: true,
           });
           if (!job) break;
           const running = runClaimedGoatBrainIngestJob({
