@@ -86,6 +86,20 @@ describe("POST /api/codex-chat/messages", () => {
     expect(mockGenerateGoatChatTitleForMessage()).not.toHaveBeenCalled();
   });
 
+  it("forwards the selected model for a new Codex sandbox", async () => {
+    const response = await POST(
+      jsonRequest({
+        prompt: "hello",
+        model: "openai/gpt-5.6-luna",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "openai/gpt-5.6-luna" }),
+    );
+  });
+
   it("schedules LLM title generation for new Codex chats", async () => {
     const response = await POST(
       jsonRequest({

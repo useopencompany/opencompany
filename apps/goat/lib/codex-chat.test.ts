@@ -88,6 +88,22 @@ describe("createGoatCodexChatMessage", () => {
     expect(mocks.wake).not.toHaveBeenCalled();
   });
 
+  it("rejects models outside the supported Codex catalog", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "hello",
+      model: "openai/gpt-5.4-nano",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 400,
+      error: "Select a supported Codex model.",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.wake).not.toHaveBeenCalled();
+  });
+
   it("rejects sends while Codex is disconnected", async () => {
     mocks.codexConnected.mockResolvedValue(false);
     const result = await createGoatCodexChatMessage({ userWorkosId: "user_1", prompt: "hello" });
@@ -111,6 +127,19 @@ describe("createGoatCodexChatMessage", () => {
     // The whole send (session + both messages + codex session + turn) is one statement.
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.wake).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists the selected Codex model on a new chat and engine session", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "clone my repo",
+      model: "openai/gpt-5.6-terra",
+    });
+
+    expect(result).toMatchObject({ ok: true, mode: "started" });
+    const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
+    expect(statement.queryChunks).toContain("openai/gpt-5.6-terra");
+    expect(statement.queryChunks).toContain("gpt-5.6-terra");
   });
 
   it("returns 404 for an unknown or foreign session", async () => {

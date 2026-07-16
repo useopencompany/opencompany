@@ -82,12 +82,19 @@ import {
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
-import { CODEX_PICKER_VALUE, type CodexPickerValue } from "@/lib/codex-chat-constants";
+import {
+  CODEX_CHAT_DEFAULT_MODEL_ID,
+  CODEX_PICKER_VALUE,
+  type CodexChatModelId,
+  type CodexPickerValue,
+  normalizeCodexChatModelId,
+} from "@/lib/codex-chat-constants";
 import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
 import {
+  CODEX_MODELS,
   DEFAULT_GOAT_MODEL,
   GOAT_MODELS,
   goatModelContextWindowTokens,
@@ -252,6 +259,9 @@ export function GoatSurface({
     if (engine === "local_codex") return LOCAL_CODEX_PICKER_VALUE;
     return normalizeGoatModel(initialChat?.model ?? defaultModel);
   });
+  const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
+    normalizeCodexChatModelId(initialChat?.model),
+  );
   const [engineChatSession, setEngineChatSession] = useState<{
     engine: GoatEngineChatKind;
     chatSessionId: string;
@@ -601,6 +611,7 @@ export function GoatSurface({
             ? CODEX_PICKER_VALUE
             : normalizeGoatModel(chat?.model ?? defaultModel),
       );
+      setCodexModel(normalizeCodexChatModelId(chat?.model));
       setEngineChatSession(
         chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
       );
@@ -867,6 +878,7 @@ export function GoatSurface({
         sessionId: existingEngineSessionId,
         settings: settings.settings,
         userMessageId,
+        ...(engine === "codex" && !existingEngineSessionId ? { model: codexModel } : {}),
       })
         .then((result) => {
           setChatSessionId(result.sessionId);
@@ -1396,12 +1408,15 @@ export function GoatSurface({
               />
               {showCodexComposerControls ? (
                 <CodexComposerControls
+                  model={activeEngine === "codex" ? codexModel : null}
                   reasoningEffort={codexReasoningEffort}
                   planModeEnabled={codexPlanModeEnabled}
                   goalModeEnabled={codexGoalModeEnabled}
                   goalObjective={codexGoalObjective}
                   goalTokenBudget={codexGoalTokenBudget}
                   disabled={engineSubmitting}
+                  modelDisabled={engineSubmitting || Boolean(activeEngineChat)}
+                  onModelChange={setCodexModel}
                   onReasoningEffortChange={setCodexReasoningEffort}
                   onPlanModeEnabledChange={setCodexPlanModeEnabled}
                   onGoalModeEnabledChange={setCodexGoalModeEnabled}
@@ -1506,6 +1521,7 @@ async function sendEngineChatMessage(input: {
   sessionId: string | null;
   settings: CodexComposerSettings;
   userMessageId: string;
+  model?: CodexChatModelId;
 }): Promise<EngineChatMessageResponse> {
   const response = await fetch(input.endpoint, {
     method: "POST",
@@ -1518,6 +1534,7 @@ async function sendEngineChatMessage(input: {
         parts: [{ type: "text", text: input.prompt }],
       },
       settings: input.settings,
+      ...(input.model ? { model: input.model } : {}),
     }),
   });
   if (!response.ok) {
@@ -1698,25 +1715,104 @@ function renderComposerInputOverlay(value: string, highlightCodexMention: boolea
   );
 }
 
+function CodexModelPicker({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: CodexChatModelId;
+  disabled: boolean;
+  onChange: (model: CodexChatModelId) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedModel =
+    CODEX_MODELS.find((model) => model.id === value) ??
+    CODEX_MODELS.find((model) => model.id === CODEX_CHAT_DEFAULT_MODEL_ID);
+  const selectedLabel = selectedModel?.label ?? "Codex model";
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        type="button"
+        aria-label={`Codex model: ${selectedLabel}`}
+        title="Codex model"
+        disabled={disabled}
+        className="flex h-7 max-w-[138px] items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
+      >
+        <OpenAIIcon size={12} strokeWidth={1.9} className="shrink-0" />
+        <span className="truncate">{selectedLabel}</span>
+        <ChevronDown size={11} strokeWidth={2} className="shrink-0" />
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={10}
+        className="w-[300px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-0 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+      >
+        <Command className="bg-surface text-ink">
+          <CommandList>
+            <CommandGroup heading="Codex models">
+              {CODEX_MODELS.map((model) => (
+                <CommandItem
+                  key={model.id}
+                  value={model.id}
+                  keywords={[model.label, "Codex", "OpenAI"]}
+                  onSelect={() => {
+                    onChange(normalizeCodexChatModelId(model.id));
+                    setOpen(false);
+                  }}
+                  title={model.description}
+                  className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                >
+                  <Check
+                    size={13}
+                    strokeWidth={2}
+                    className={cn(
+                      "shrink-0 text-ink",
+                      model.id === value ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <OpenAIIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium leading-4">{model.label}</div>
+                    <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                      {model.description}
+                    </div>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function CodexComposerControls({
+  model,
   reasoningEffort,
   planModeEnabled,
   goalModeEnabled,
   goalObjective,
   goalTokenBudget,
   disabled,
+  modelDisabled,
+  onModelChange,
   onReasoningEffortChange,
   onPlanModeEnabledChange,
   onGoalModeEnabledChange,
   onGoalObjectiveChange,
   onGoalTokenBudgetChange,
 }: {
+  model: CodexChatModelId | null;
   reasoningEffort: CodexReasoningEffort;
   planModeEnabled: boolean;
   goalModeEnabled: boolean;
   goalObjective: string;
   goalTokenBudget: string;
   disabled: boolean;
+  modelDisabled: boolean;
+  onModelChange: (model: CodexChatModelId) => void;
   onReasoningEffortChange: (reasoningEffort: CodexReasoningEffort) => void;
   onPlanModeEnabledChange: (enabled: boolean) => void;
   onGoalModeEnabledChange: (enabled: boolean) => void;
@@ -1726,6 +1822,9 @@ function CodexComposerControls({
   const reasoningLabel = codexReasoningLabel(reasoningEffort);
   return (
     <div className="mb-px flex shrink-0 items-center gap-1 border-l border-border pl-2">
+      {model ? (
+        <CodexModelPicker value={model} disabled={modelDisabled} onChange={onModelChange} />
+      ) : null}
       <button
         type="button"
         aria-label={`Codex reasoning effort: ${reasoningLabel} (click to cycle)`}
