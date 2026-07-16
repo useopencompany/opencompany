@@ -1,0 +1,357 @@
+---
+title: "OpenClaw on Mac Mini: The Security-First Setup Guide"
+description: "42,665 OpenClaw instances found exposed online. Here's how to set up OpenClaw on a Mac Mini with security as priority one -- from an agent security team."
+date: "2026-03-20"
+author: "Louis Morgner"
+keywords:
+  - openclaw mac mini setup
+  - openclaw mac mini secure setup
+  - openclaw mac mini security
+  - openclaw mac mini headless
+  - openclaw mac mini always on
+  - is openclaw safe on mac mini
+  - openclaw mac mini server
+  - openclaw mac setup guide
+  - openclaw mac mini 24/7
+  - best mac mini configuration for openclaw
+---
+
+The Mac Mini M4 might be the best hardware you can buy for running a 24/7 AI assistant. Apple Silicon barely sips power, macOS gives you native access to iMessage, Calendar, and other Apple services, and the base machine starts at $499. These computers are selling out worldwide.
+
+But a SecurityScorecard scan found 42,665 instances on the open internet with authentication bypasses. Researcher Jamieson O'Reilly demonstrated accessing Anthropic API keys, Telegram bot tokens, Slack bot accounts, and months of chat histories from exposed machines. Most people are on default configs.
+
+OpenClaw lets you plug in AI models like Claude and OpenAI and run them as a personal chief of staff: summarizing team communications, managing project updates, monitoring competitive intelligence. You customize it with a personality and rules for how it handles tasks. Powerful stuff. No wonder Mac Minis are selling out.
+
+The typical guide gets you running in 15 minutes. This step by step guide takes 25 minutes, with the extra 10 spent on decisions that prevent your local machine from becoming an open door to your files, data, and iMessage history. We build agent security infrastructure at [OpenCompany](https://opencompany.cloud). This is the guide we'd follow ourselves to set up OpenClaw on one machine securely. The default setup exposes your entire computer to the model. Here's how to fix that.
+
+## What you actually need
+
+The Mac Mini M4 with 16GB memory is the sweet spot for running OpenClaw. It's efficient and handles multiple agents without breaking a sweat. Starts at $499 (256GB) or $599 (512GB). The process uses roughly 200-500MB on Apple Silicon, so 16GB covers one main bot plus two or three sub-agents. Go with the 512GB SSD. Transcripts, memory files, cached skills, and agent workspace data add up over months of 24/7 operation.
+
+Running 24/7, the M4 idles at 3-4 watts and pulls 15-25 watts under typical workloads. The total cost in electricity is about $2 per month. The M4 Pro ($1,399) is overkill unless you plan to run local LLMs alongside the agent. Most people are fine with the base model and a cloud provider. You don't need a monitor or keyboard after the initial setup. Enable Remote Login (SSH) and Remote Management in System Settings for headless management.
+
+One point before we start installing: buy your computer from Apple or an authorized retailer, and be careful where you download stuff. In March 2026, a malicious Node.js package called `@openclaw-ai/openclawai` posed as an installer. JFrog tracked it as GhostClaw: a fake CLI that exfiltrated macOS Keychain databases, SSH keys, iMessage history, and cloud credentials. 178 installations before npm pulled it. Only install from official sources.
+
+## Prerequisites: get these done first
+
+Update macOS fully before installing OpenClaw. This patches CVE-2026-25253, a CVSS 8.8 one-click RCE fixed in v2026.1.29, and saves you from update reboots mid-setup. Turn on automatic software updates in System Settings so you don't fall behind on security patches.
+
+Use a clean, dedicated Apple ID for this machine. Don't sign in with your personal iCloud. If the agent gets compromised, your personal photos, contacts, and iMessage history shouldn't be anywhere near this device. Set up a dedicated Gmail account for Google integrations too.
+
+Install Homebrew and Node.js as prerequisites. Run these under the dedicated user account (covered next), not your admin account. Have at least one API key ready from Anthropic Claude, OpenAI, or Google Gemini. Store your keys in a password manager like Bitwarden. I've seen people leave them in plaintext files on their desktop. Don't.
+
+## The 5 security decisions that matter more than the install
+
+Most openclaw setups jump straight to `brew install`. The commands are the easy part. It's the decisions you make before and during installation that determine whether your computer is a secure agent or an open door. These are the five that matter across all openclaw setups.
+
+### 1. Create a dedicated non-admin macOS user
+
+This matters more than people think. Creating a dedicated user account for OpenClaw is how you get real isolation and security. A standard (non-admin) macOS account can't install system software, modify system files, or escalate privileges without an admin password. If the bot gets tricked by a prompt injection or a malicious skill from ClawHub, the blast radius stays inside that account's home directory. Your personal documents, browser passwords, SSH keys, and credentials stay untouched.
+
+```bash
+OPENCLAW_PASSWORD="$(openssl rand -base64 24)"
+printf 'OpenClaw account password: %s\n' "$OPENCLAW_PASSWORD"
+sudo sysadminctl -addUser openclaw \
+  -fullName "OpenClaw Agent" \
+  -password "$OPENCLAW_PASSWORD" \
+  -home /Users/openclaw \
+  -shell /bin/zsh
+unset OPENCLAW_PASSWORD
+```
+
+Omitting `-admin` creates a standard account. Write down the generated password for the initial setup, then manage everything via Screen Sharing.
+
+### 2. Bind to loopback only (127.0.0.1)
+
+This is the one that keeps me up at night. The gateway supports binding modes: `loopback`, `lan`, `tailnet`, and `0.0.0.0`. The default is `loopback`, accepting connections from your own computer only. Many guides tell you to change this for "remote access," but `lan` and `auto` modes behave unpredictably on macOS. Setting `0.0.0.0` accepts connections from your entire network, or the internet if your router forwards the port.
+
+In your `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "gateway": {
+    "bind": "loopback"
+  }
+}
+```
+
+Protect the configuration and token from other local users:
+
+```bash
+chmod 700 ~/.openclaw
+chmod 600 ~/.openclaw/openclaw.json
+```
+
+After starting the agent, verify it's actually bound to loopback and not listening on all interfaces:
+
+```bash
+sudo lsof -i :18789 -n -P | grep LISTEN
+```
+
+You should see `127.0.0.1:18789`. If you see `*:18789`, do an openclaw gateway restart after fixing the config. For remote access, use an SSH tunnel (`ssh -N -L 18789:127.0.0.1:18789 user@mac-mini`) or Tailscale. Both give you secure remote access without exposing ports to the internet.
+
+### 3. Enable token authentication
+
+Even on loopback, authentication prevents local privilege escalation. CVE-2026-25253 (CVSS 8.8, patched in the latest version 2026.1.29) showed why: a crafted link could force the Control UI to transmit the auth token to an attacker's server, enabling remote code execution.
+
+```json
+{
+  "gateway": {
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "replace-with-a-long-random-string"
+    }
+  }
+}
+```
+
+Generate a strong token and store it in your password manager:
+
+```bash
+openssl rand -hex 32
+```
+
+### 4. Set DM policy to pairing mode
+
+OpenClaw supports messaging channels like Telegram, WhatsApp, and Slack. Any of these can become an agent that processes every inbound request and executes tasks on your machine. The default DM policy is `pairing`: unknown senders get a one-time short code and their message is ignored until you approve them. Don't change it to `open`. Without pairing, anyone who knows your WhatsApp number or Telegram handle can talk to your agent directly. A friend, a stranger, or an attacker. For Telegram, get your numeric User ID from @userinfobot for allowlisting.
+
+In your config:
+
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "dmPolicy": "pairing",
+      "allowFrom": ["+15551234567"]
+    }
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  }
+}
+```
+
+The `dmScope: per-channel-peer` setting gives each user their own isolated session, so persistent memory stays separate per conversation and one user's context can't leak into another's.
+
+### 5. Enable FileVault and macOS Firewall
+
+FileVault encrypts the SSD so physical theft doesn't mean data theft. The macOS firewall blocks all incoming connections except necessary services. Both take 30 seconds to turn on in System Settings, yet most guides skip them entirely.
+
+```bash
+# Enable FileVault (will prompt for password, requires reboot)
+sudo fdesetup enable
+
+# Enable Application Firewall
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on
+
+# Enable Stealth Mode (don't respond to ping/port scans)
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setstealthmode on
+```
+
+These are the baseline for every Mac Mini running an agent. Verify both are active:
+
+```bash
+fdesetup status
+/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate --getstealthmode
+```
+
+## Step-by-step installation, the secure way
+
+With those decisions made, here's the full installation. Log in directly for the initial setup, then switch to headless management.
+
+**1. Update macOS** to the latest version. System Settings > General > Software Update, or:
+
+```bash
+softwareupdate --install --all
+```
+
+**2. Create the dedicated account** (from your admin account):
+
+```bash
+OPENCLAW_PASSWORD="$(openssl rand -base64 24)"
+printf 'OpenClaw account password: %s\n' "$OPENCLAW_PASSWORD"
+sudo sysadminctl -addUser openclaw \
+  -fullName "OpenClaw Agent" \
+  -password "$OPENCLAW_PASSWORD" \
+  -home /Users/openclaw -shell /bin/zsh
+unset OPENCLAW_PASSWORD
+```
+
+**3. Enable FileVault and Firewall** (commands from the previous section).
+
+**4. Enable Screen Sharing and SSH.** System Settings > General > Sharing > toggle on Screen Sharing and Remote Login (SSH). Restrict to your admin user.
+
+**5. Switch to the openclaw account** via Screen Sharing. Fastest path is the official one-liner script on the OpenClaw website, but Homebrew works too:
+
+```bash
+# Installing Homebrew (also installs Command Line Tools)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install Node.js (required dependency)
+brew install node
+
+# Install OpenClaw CLI (alternatively: curl -fsSL https://openclaw.ai/install.sh | bash)
+brew install openclaw-cli
+```
+
+**6. Configure the service.** Create `~/.openclaw/openclaw.json`, then keep the directory at permission `0700` and the file at `0600` as shown above so other local users cannot read the gateway token:
+
+```json
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "YOUR_GENERATED_TOKEN_HERE"
+    }
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  },
+  "channels": {
+    "whatsapp": {
+      "dmPolicy": "pairing"
+    }
+  }
+}
+```
+
+**7. Run the onboarding wizard.** The onboarding wizard openclaw provides walks you through selecting your default model, configuring your LLM provider (Anthropic for Claude Code, OpenAI, Google, or others), and setting up credentials via the .env file. During this process, OpenClaw requires you to input your model provider authentication key. You can't access any AI model without one:
+
+```bash
+openclaw onboard --install-daemon
+```
+
+The wizard also installs the gateway as a system service. Connect additional providers later.
+
+**8. Set up Telegram** (if needed). To configure Telegram for OpenClaw, create a new channel via @BotFather and receive an API token. Add this token to your config.
+
+**9. Verify the setup is not exposed.** Confirm openclaw running on loopback, then check the gateway dashboard:
+
+```bash
+# Confirm loopback binding
+sudo lsof -i :18789 -n -P | grep LISTEN
+
+# Open the gateway dashboard to verify status
+openclaw dashboard
+
+# Run the built-in security audit
+openclaw security audit
+
+# Check health
+openclaw health
+```
+
+The security audit checks for insecure bind addresses, missing tokens, and debug switches left on. Check the error logs at `~/Library/Logs/openclaw/` if anything looks off.
+
+**10. Set up auto-start on boot.** Disable sleep in System Settings > Energy. Then create `~/Library/LaunchAgents/com.openclaw.gateway.plist` to ensure the openclaw gateway start fires on boot and auto-restarts on crash:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.openclaw.gateway</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/openclaw</string>
+        <string>gateway</string>
+        <string>start</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/openclaw/Library/Logs/openclaw/gateway.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/openclaw/Library/Logs/openclaw/gateway-error.log</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/openclaw</string>
+</dict>
+</plist>
+```
+
+Load it:
+
+```bash
+mkdir -p ~/Library/Logs/openclaw
+launchctl load -w ~/Library/LaunchAgents/com.openclaw.gateway.plist
+launchctl list | grep openclaw
+```
+
+You can also use a terminal multiplexer like tmux instead. Run `openclaw health` to verify openclaw running properly after installation. At this point: loopback binding, token auth, non-admin user, disk encryption, firewall. All active.
+
+## Adding skills to your setup
+
+Once everything is running, you'll want to install skills. Skills are modular add-ons that let your agent read emails, manage GitHub PRs, monitor competitive intelligence, and pull insights from data sources without you lifting a finger. You can add or modify skills whenever you want.
+
+This is where security gets tricky again. [Snyk found that 1,467 of 3,984 scanned agent skills (36.82%) had at least one security flaw](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/) and confirmed 76 malicious payloads. Skills run with the same permissions as the agent, so a single bad one can read your files, send a message through your Slack or Telegram, and quietly exfiltrate data. Treat skills like stuff you install from npm: read the code, check the author, don't install skills you haven't vetted.
+
+You can run multiple independent agent instances on one machine, each handling different tasks on the same hardware. OpenClaw can also run autonomously, executing tasks on schedules without user input. That's powerful, but it's also the highest-risk configuration. An autonomous agent with broad permissions and no human approval loop is exactly where security misconfigurations cause real damage.
+
+## What OpenClaw on Mac Mini still can't do
+
+You've built the most secure openclaw setup possible. But there are architectural limits no amount of configuration can fix. Most setup guides won't post about these. We'd rather be upfront.
+
+### No per-action permissions
+
+The agent gets full access to a tool or nothing. You can't say "allow file reads, block file deletes, ask before git push." And the idea that every operator should monitor the terminal in real time doesn't scale. A non-technical team member running a content agent can't evaluate whether `rm -rf` is safe. They shouldn't have to.
+
+The dedicated account limits blast radius at the OS level, but within those permissions the agent can execute any tasks it wants and access any files in its home directory. Claude Code follows a similar pattern. See our post on [AI agent permission models](/blog/ai-agent-permission-models). For a solo developer this is fine. For a team of 10, the risk profile changes entirely.
+
+### Secrets live in the model context
+
+Your credentials sit in environment variables, and the model can read them. Any skill that touches agent memory or files makes the exposure worse. The fix is runtime secrets injection: credentials flow to tools at execution time without ever entering the model's context window. Neither OpenClaw nor Claude Code supports this natively yet.
+
+### No compliance-grade audit trail
+
+There's logging, but not who-approved-what-when trails with approval chains. You can monitor tasks after the fact, but you can't prove compliance in real time. The Gravitee 2026 report found 57% of builders cite lack of audit trails as their top obstacle. Under the EU AI Act, logging and oversight obligations depend on the system's risk classification, intended use, the organization's role, and the sector in which it is deployed. Teams should assess those obligations for their specific deployment rather than assume one rule covers every agent. The operational visibility gap is the same whether you're running OpenClaw, Claude Code, or another agent.
+
+If any of this matters for your use case, we wrote a [comparison of secure agent platforms](/blog/openclaw-alternatives-secure-teams) and a deeper post on [the security model](/blog/openclaw-security-team-deployment).
+
+## FAQ
+
+### What Mac Mini specs do I need for OpenClaw?
+
+Mac Mini M4 with 16GB memory, $499. Get the 512GB SSD for transcripts, memory files, and workspace data. The M4 Pro ($1,399) is overkill unless you want to run local models. Most people are fine with the base model and a cloud LLM provider like Claude Code or Google.
+
+### Is it safe to run OpenClaw on Mac Mini 24/7?
+
+Yes, but only if you actually configure it. Dedicated non-admin account, loopback binding, token auth, DM pairing, FileVault, and macOS Firewall. Disable sleep under System Settings > Energy. And keep auditing your security settings and installed skills regularly. Skip this stuff and your machine could end up among the 42,665+ exposed instances SecurityScorecard found.
+
+### Can I run OpenClaw on Mac Mini for my team?
+
+Honestly, no. It was designed as a personal AI agent assistant, not for multi-account team deployments. For teams you need separate setups per person at minimum, or a purpose-built platform with per-action permissions and audit trails.
+
+### Do I need a monitor for the Mac Mini?
+
+Only for the initial setup. After enabling Screen Sharing and Remote Login (SSH), monitor and manage it headlessly. Connect via `vnc://your-mac-mini-ip`.
+
+### How do I access my Mac Mini OpenClaw remotely?
+
+Never expose port 18789 to the internet. Use an SSH tunnel: `ssh -N -L 18789:127.0.0.1:18789 user@mac-mini-ip`. Or use Tailscale with the `tailnet` binding mode. Both keep the service off the public internet. After reconnecting, open the terminal to monitor your agent's skills and activity or check the gateway dashboard.
+
+### How much electricity does a Mac Mini use running OpenClaw 24/7?
+
+3-4 watts idle, 15-25 watts typical. About $2 per month at average US rates. Jeff Geerling's power testing confirms M4 efficiency comparable to a Raspberry Pi at idle. The total cost of running your AI assistant 24/7 is negligible.
+
+### Which AI model should I use with OpenClaw?
+
+Depends on what you're doing. The choice of AI model matters more than people think: some are better for deep research, others for quick responses. OpenClaw supports Claude from Anthropic, OpenAI, and Google. You can switch your default model later without touching the rest of your setup.
+
+### How do I set up Telegram with OpenClaw?
+
+Message @BotFather on Telegram to create a new bot and get an API token. Grab your numeric Telegram ID from @userinfobot for allowlisting. Set the DM policy to "pairing" so only people you've approved can talk to your agent.
+
+---
+
+This is a genuinely good setup for a personal AI assistant. The hardware is right, the price is right, and 10 extra minutes on security configuration is a fine trade. Six decisions keep your machine off the list of exposed instances. That's the whole point.
+
+For limits that configuration can't fix (per-action permissions, secrets isolation, audit trails), see our [security analysis](/blog/openclaw-security-team-deployment) or [comparison of alternatives](/blog/openclaw-alternatives-secure-teams).
+
+We're building [OpenCompany](https://opencompany.cloud) to make secure agent deployment simple: hard boundaries on what agents can do, every action audited, free and open-source. [Talk to us](/talk) or [check it out on GitHub](https://github.com/useopencompany). It's free to get started.

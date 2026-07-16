@@ -1,0 +1,266 @@
+---
+title: "Exploring OpenClaw Alternative for Teams That Need Security Controls"
+description: "OpenClaw is powerful but has 9 CVEs, supply chain attacks, and no permission model. Here are the alternatives that solve security for team deployments."
+date: "2026-03-20"
+author: "Louis Morgner"
+keywords:
+  - openclaw alternative
+  - openclaw alternatives secure
+  - openclaw alternative for teams
+  - openclaw enterprise alternative
+  - secure ai agent framework
+  - ai agent platform for teams
+  - openclaw vs nanoclaw vs ironclaw
+---
+
+OpenClaw has more GitHub stars than React. It also has [9 disclosed CVEs](https://thehackernews.com/2026/03/openclaw-ai-agent-flaws-could-enable.html) — including a CVSS 8.8 one-click RCE — and a skills marketplace where [Snyk found that 36.82% of 3,984 scanned skills had at least one security flaw](https://snyk.io/blog/toxicskills-malicious-ai-agent-skills-clawhub/). In January 2026, the [ClawHavoc supply chain attack](https://www.reversinglabs.com/blog/openclaw-ai-agents-black-hole-risks) hit ClawHub with 1,184 malicious skills and over 9,000 compromised installations. A single audit that same month found 512 vulnerabilities across the codebase. We covered the full risk breakdown in our [OpenClaw security analysis](/blog/openclaw-security-team-deployment).
+
+If you're searching for an OpenClaw alternative, you're not alone. The explosion in AI agents across software development, automation, and enterprise workflows has made thousands of developers ask the same question: what are the real alternatives to OpenClaw that don't sacrifice the execution model but actually solve the data breach scenario waiting to happen?
+
+The core issue isn't OpenClaw's bugs — those get patched. The core issue is architectural: OpenClaw gives autonomous AI agents unrestricted system access by default, with no per-action permission model, no secrets isolation from model context, and no audit trail. These are design decisions, not bugs. They require fundamental changes, not patches.
+
+## **Why developers use OpenClaw as a general purpose assistant for AI agents — and where it stops working**
+
+Before looking at alternatives to OpenClaw, it's worth understanding why so many developers rely on it. OpenClaw is an open-source autonomous AI agent that runs locally on macOS, Windows, Linux, or Raspberry Pi. It connects to any AI model and acts as a "24/7 assistant" via chat apps such as WhatsApp, Telegram, Discord, Slack, and Signal, handling complex workflows, multi step workflows across tools, shell commands, browser control actions, and API calls from a single configuration. As a general purpose assistant for a solo developer, it's powerful. The skill system lets users add capabilities by placing a `SKILL.md` file into a folder, and the skills marketplace lets users share tools and agents. The execution engine handles multi agent orchestration of tasks out of the box.
+
+The problems emerge when you move beyond that single-user, personal AI model. OpenClaw was designed as a personal AI assistant — a general purpose assistant for individual developers, not as enterprise software for production use. Many users encounter friction due to local setup, dependency management, and permission configuration that introduces overhead before meaningful work even begins. In fact, many users encounter friction when using OpenClaw due to local setup and configuration requirements. Scaling beyond individual usage introduces complexity that can hinder the productivity gains that attracted developers in the first place. The AI bot typically sits above 1GB of memory, and its long-running local agent may persist across sessions, accumulating state on the user's machine.
+
+### **No per-action permissions**
+
+OpenClaw is binary. An autonomous agent either has access to a tool or it doesn't. There's no control over individual actions within a tool — no way to say "this AI agent can read repos but can't execute **git push --force**." OpenClaw's architecture allows broad file, shell, and API access, increasing the potential ["blast radius" of mistakes](/blog/openclaw-security-team-deployment#full-system-access-and-the-blast-radius-problem).
+
+For example, when your support lead uses a triage agent, they can't evaluate whether a shell command is safe. They shouldn't have to. But OpenClaw doesn't give you the control to block destructive task execution while allowing safe operations. Every OpenClaw alternative on this list solves this in a different way, but they all solve it. Many users also encounter inconsistency when workflows span multiple tools, changing interfaces, or extended sessions — operational consistency benefits from deterministic workflows with strict guardrails, which OpenClaw lacks.
+
+The real risk isn't a malicious AI agent. It's a non-technical user who approves a destructive action because the system never asked them to think twice. In enterprise environments, this is a data breach scenario that plays out slowly until it plays out all at once. The security model was never designed for the level of autonomy it has achieved, and the community consensus is to run it in a VM on dedicated hardware, treating it as untrusted software.
+
+### **Secrets live in the model context**
+
+OpenClaw's default pattern puts API keys in environment variables that the model can read. Every tool call, every context window potentially contains your credentials. This is dangerous because prompt injection can exfiltrate anything the AI agent can see.
+
+The [Cisco research on ClawHub skills](https://blogs.cisco.com/ai/personal-ai-agents-like-openclaw-are-a-security-nightmare) found that many performed data exfiltration via prompt injection — and credentials are the number one target. The skills marketplace lacks meaningful vetting, raising concerns about community-contributed plugins. When a malicious skill has access to your Stripe API key because it sits in an environment variable, the cost of a single bad package becomes enormous.
+
+[SecurityScorecard found 135,000 OpenClaw instances](https://www.giskard.ai/knowledge/openclaw-security-vulnerabilities-include-data-leakage-and-prompt-injection-risks) exposed to the public internet with insecure defaults. Many had API keys sitting in plaintext, turning each one into an open invitation.
+
+### **No compliance-grade logging**
+
+When something goes wrong, you need to answer: what happened, when, who approved the execution, and what context led to it.
+
+OpenClaw has basic logging, but nothing production ready. There's no record of which user approved which action. For AI systems in regulated industries, this is a non-starter. The [Gravitee 2026 State of AI Agent Security report](https://www.gravitee.io/blog/state-of-ai-agent-security-2026-report-when-adoption-outpaces-control) surveyed 900+ executives and found that only 47.1% of an organization's AI agents are actively monitored. More than half of all agentic systems operate without oversight. Only 14.4% of organizations run AI agents with full approval from their security teams.
+
+88% of organizations reported confirmed or suspected incidents with autonomous AI agents. The gap between teams adopting autonomous agents and teams actually securing those agents is widening.
+
+## **What a production-ready agent platform actually needs**
+
+Before evaluating any OpenClaw alternative, define what "production ready" means for your use case. These are the requirements that separate tools built for developers on laptops from tools built for enterprise deployment:
+
+| Requirement | Why it matters |
+|---|---|
+| Per-action permission model (off/on/ask) | Different tasks and tools have different risk profiles. Reading a repo is not the same as deleting a branch. |
+| Secrets isolation from model context | Credentials should never enter the AI agent's context window. Runtime injection is the pattern that works. |
+| Compliance-grade logging | Every execution logged with who did what, when, and who approved it. |
+| Config-as-code (version-controlled) | Permission changes go through code review as part of the software development process, not UI clicks. |
+| Runtime-agnostic | Don't lock into one LLM vendor. Models change fast. Your tools shouldn't have to. |
+| Self-hostable | Run locally on your own infrastructure. A self hosted agent is ideal for individual developers or small teams seeking control over their infrastructure, offering secure, production-ready deployment options. Some enterprise environments can't send data to a third-party cloud. |
+| Cost transparency | Understand the cost of each agent execution, each tool call, and each automation run. Self hosted alternatives give you full cost visibility. |
+
+This list also happens to describe what we built at OpenCompany — but it should be the baseline for any OpenClaw alternative your team evaluates, not just ours.
+
+## Evaluation Framework for OpenClaw Alternatives
+
+Selecting the right alternative to OpenClaw requires a structured evaluation process that goes beyond feature checklists. Teams and organizations should assess each option through the lens of their unique requirements, balancing the need for autonomy, security, scalability, and integration with existing infrastructure.
+
+**1. Autonomy and Task Execution**The core promise of autonomous AI agents is their ability to independently execute tasks and manage complex workflows. Evaluate whether the alternative supports multi-step workflows, seamless tool integration, and the flexibility to adapt to evolving project needs. Consider how well the agent can handle both routine automation and specialized tasks, and whether it enables users to orchestrate agents for broader, cross-functional workflows.
+
+**2. Security and Privacy**Security is paramount, especially when deploying agents in production environments or handling sensitive data. Assess the alternative's approach to local execution, sandboxing, secrets management, and audit trails. Look for explicit permission models, runtime isolation, and robust access controls that minimize the risk of a data breach scenario. The ability to enforce policy at the task execution level is critical for organizations in regulated industries.
+
+**3. Scalability and Performance**As your use of AI agents grows, so do the demands on your infrastructure. Evaluate how efficiently the alternative utilizes resources, its ability to scale across multiple agents and workflows, and whether it remains extremely fast under load. Consider support for distributed execution, lightweight deployment (such as running on a Mac Mini or Raspberry Pi), and the ability to handle production workloads without bottlenecks.
+
+**4. Integration and Compatibility**A production-ready agent platform should fit seamlessly into your existing software stack. Check for compatibility with your operating systems, support for APIs and industry-standard protocols, and the ability to integrate with your current tools, memory backends, and workflow engines. The best alternatives to OpenClaw offer flexible integration points, making it easy to connect agents to both legacy and modern systems.
+
+**5. Development and Community Support**The long-term viability of any agentic system depends on active development and a supportive community. Look for open source alternatives with frequent updates, comprehensive documentation, and responsive forums. A vibrant ecosystem ensures you can rely on the platform for ongoing automation and evolving security needs.
+
+**6. Cost and Licensing**Total cost of ownership goes beyond licensing fees. Factor in infrastructure costs, maintenance, and the engineering effort required to keep agents running securely. Open source, self hosted options may reduce upfront cost but require more hands-on management, while managed services can simplify operations at a premium. Choose a model that aligns with your team's budget and operational capacity.
+
+**7. User Interface and Experience**Adoption hinges on usability. Evaluate whether the alternative offers an intuitive interface, clear configuration (such as config-as-code), and helpful onboarding resources. The ability for both developers and non-technical users to manage agents, review audit trails, and control task execution is essential for broad organizational adoption.
+
+By systematically evaluating these factors, organizations can confidently select an OpenClaw alternative that delivers secure, efficient, and scalable automation—empowering users to harness the full potential of autonomous AI agents while maintaining control and compliance.
+
+---
+
+## **The alternatives to OpenClaw worth considering**
+
+We've evaluated the major alternatives to OpenClaw available today. We're including OpenCompany because we built it to solve these problems — but we'll be honest about the limitations and where other OpenClaw alternatives are stronger.
+
+### **NanoClaw: AI agents in constrained environments**
+
+NanoClaw isolates each AI agent's filesystem and process execution in a container. Outbound internet access is unrestricted by default. Operators can opt into strict no-egress isolation with `NANOCLAW_EGRESS_LOCKDOWN=true`, which places containers on isolated networking without external access.
+
+With egress lockdown enabled, an autonomous AI agent cannot reach external services from its isolated container network. That makes NanoClaw worth considering for constrained environments, provided the workflows do not require outbound APIs.
+
+The tradeoff is flexibility. Container overhead adds latency to every tool call, and no-egress mode prevents workflows from reaching external services. If your automation workflows rely on many API integrations, you need to leave egress enabled or design a separate controlled integration layer.
+
+**Best for:** Maximum isolation in regulated and constrained environments.
+
+**Limitation:** Container overhead and reduced flexibility for complex workflows spanning many external services.
+
+### **OpenCompany: lightweight OpenClaw alternative with Claude Code support**
+
+We built [OpenCompany](https://opencompany.cloud/product) as an open source alternative to OpenClaw because the existing tools forced a choice: either an AI assistant that can do everything or one that can't do anything useful. Neither works for production use.
+
+Our approach is a per-action permission model with three states — off, on, and ask — defined in YAML code that lives in your repo:
+
+```yaml
+permissions:
+  github:
+    create_pr: on
+    delete_branch: ask
+    push_to_main: off
+integrations:
+  github:
+    token: vault://github/prod-token
+```
+
+Secrets are injected at runtime through vault references. The AI agent never sees your credentials — it requests tool execution and the runtime handles authentication. Every action produces an audit trail entry with the task, the permission check, and which user approved it.
+
+The config-as-code approach means permission changes go through pull requests. When someone changes **delete_branch** from **ask** to **on**, that shows up in a diff. Any developer can question it.
+
+OpenCompany also supports using cron jobs to automate recurring tasks and orchestrate workflows within the platform, enabling scheduled actions such as web browsing, file operations, and integrations.
+
+OpenCompany works with Claude Code, Codex, OpenCode, or any runtime — it's a lightweight OpenClaw alternative that enables users to run AI agents without vendor lock-in. You can self host it, run locally on your own infrastructure, or deploy it as a managed service. Claude Code users in particular find the integration seamless because the execution model maps directly to how Claude Code already handles tool use and task execution.
+
+The open-source core is free. We charge for the managed enterprise version with team security features.
+
+**Best for:** Teams and developers that want a self hosted, runtime-agnostic OpenClaw alternative with granular security controls and MCP support.
+
+**Honest limitation:** We're at v0.1. The software works for production use, but the community is smaller than established alternatives to OpenClaw. If your team needs thousands of pre-built automation integrations, we're not there yet.
+
+### **IronClaw: complex workflows and multi agent orchestration**
+
+IronClaw is an enterprise OpenClaw alternative that uses WebAssembly sandboxing with zero-permissions-by-default for every tool. Every capability an AI agent needs — file system access, network calls, database queries, shell commands — must be explicitly granted. WASM's memory isolation means autonomous agents physically cannot access resources outside their allowlist.
+
+For developers migrating from OpenClaw, IronClaw provides the most compatible path. The skill format is similar, multi agent orchestration patterns translate, and tooling exists to convert existing setups. For example, an OpenClaw skill that handles code review automation can be ported to IronClaw with minimal changes to the execution configuration.
+
+WebAssembly has a real architectural advantage for AI agent design: WASM modules instantiate quickly without container overhead, enabling fast task execution while providing stronger isolation than process-level approaches. IronClaw's trait based architecture lets you compose agent capabilities from reusable building blocks, giving enterprise teams first class support for complex orchestration patterns. The tradeoff is enterprise pricing — IronClaw isn't cheap, and the initial setup requires dedicated engineering time.
+
+**Best for:** Enterprise organizations migrating complex multi agent OpenClaw setups that need strong sandboxing.
+
+**Limitation:** Enterprise cost. Heavier setup than a lightweight OpenClaw alternative.
+
+### **Other OpenClaw alternatives worth knowing**
+
+Beyond the major alternatives above, several focused tools address specific OpenClaw shortcomings:
+
+**ZeroClaw** is a lightweight alternative that uses 99% less memory than OpenClaw's 1GB+ footprint and achieves a startup time of under 10ms — 400x faster. ZeroClaw uses a trait-based architecture that allows for swappable infrastructure without adding runtime overhead. It features a hybrid search engine that combines vector search with keyword search in its local database, enabling efficient, privacy-preserving retrieval of relevant information. It can run on any hardware, making it viable where the resource requirements are prohibitive.
+
+**PicoClaw** is an ultra-lightweight AI assistant that runs on minimal hardware, making it a viable alternative for users with limited resources. It focuses on low-footprint performance and is suitable for embedded systems and edge computing — use cases where typical memory and compute requirements are simply too heavy.
+
+**Nanobot** is a highly lightweight alternative utilizing about 4,000 lines of Python for personal automation. A reduced attack surface due to fewer lines of code makes feasible audits possible — something that's impractical with larger codebases.
+
+**Moltis** is a Rust-based, local-first agent framework built for production environments. As a self-hosted AI assistant, Moltis prioritizes observability and architecture rigor over plugin breadth, making it a strong choice for teams that value auditability over ecosystem size.
+
+**Carapace** is tailored for corporate governance and regulatory compliance in enterprise IT environments. It's purpose-built for organizations where compliance frameworks drive technology decisions.
+
+**Adopt AI** is purpose-built for enterprise environments, offering stronger controls and better support than the default setup for organizations that need managed protection out of the box.
+
+**Claude Code** is Anthropic's command-line tool that acts as an autonomous developer, capable of reading, editing, and debugging codebases in real-time. Designed specifically for development tasks, it integrates deeply with Claude models and provides a more structured execution environment than a general purpose assistant approach.
+
+**ChatGPT Agent** uses a remote browser to autonomously perform web tasks, data analysis, and document creation — a different model entirely from the local execution approach.
+
+The alternatives to OpenClaw are increasingly evaluated based on execution reliability, integration depth, and deployment practicality rather than raw feature count. Many focus on providing a structured approach to automation, reducing the operational overhead associated with local setups. These alternatives often prioritize managed execution environments that isolate agents from the host system, and many are designed to minimize resource consumption, making them suitable for deployment on lower-cost hardware.
+
+### **Hyperscaler AI agents for enterprise environments**
+
+If you're already deep in one cloud ecosystem, the hyperscaler alternatives to OpenClaw — AWS Bedrock AgentCore and Azure Copilot Studio — come with compliance certifications and policy enforcement built-in.
+
+AWS Bedrock AgentCore uses deterministic policy enforcement — policies defined in natural language, converted to Cedar, and enforced at the Gateway level outside the LLM reasoning loop. Cedar creates a deterministic authorization boundary for tool calls, but prompt injection can still induce harmful actions that the policy permits. The execution environment provides microVM session isolation, identity-scoped tokens, and built-in observability for every AI agent action.
+
+Azure Copilot Studio is previewing a similar approach through Microsoft Entra Agent ID, which can automatically assign new autonomous AI agents an identity when the feature is enabled. The preview is not intended for production use, has restricted functionality, and availability may vary by tenant. Integration with Purview and Sentinel supports enterprise governance, while the broader Microsoft 365 fabric lets users embed AI agents into existing workflows, tasks, and automation without managing infrastructure.
+
+**Best for:** Enterprise organizations already invested in AWS, or Azure teams evaluating preview identity controls, that want managed AI agent infrastructure.
+
+**Limitation:** Vendor lock-in. Closed-source code. You can't self host, run locally, or inspect the underlying software. Azure's Agent ID integration is still a tenant-dependent preview. Pricing scales with usage in ways that can surprise teams. If your security requirements include auditability of the platform itself, managed services create a dependency you can't fully control.
+
+### **Running OpenClaw with hardened local execution**
+
+For developers who want to stay on OpenClaw, hardening it is possible — but the cost in engineering time is significant.
+
+[Microsoft published a guide on running OpenClaw safely](https://www.microsoft.com/en-us/security/blog/2026/02/19/running-openclaw-safely-identity-isolation-runtime-risk/). The approach involves network isolation, skill vetting (manually reviewing every package from the skills marketplace before installation), restricting outbound traffic, and running AI agents in containerized production environments with limited system access to shell commands and tools. We cover the [practical hardening steps in detail](/blog/openclaw-security-team-deployment#running-openclaw-safely-practical-hardening-steps).
+
+This can work. But you're building the automation and security layers that every other OpenClaw alternative on this list provides out of the box. Local execution of AI agents in hardened containers requires developers who understand container networking, supply chain attacks on agent infrastructure, and LLM-specific attack surfaces. The expense isn't just the engineering hours — it's the ongoing maintenance as OpenClaw's execution model evolves.
+
+**Best for:** Developers with dedicated engineering resources committed to OpenClaw's ecosystem.
+
+**Honest take:** Possible, but you're building custom software to compensate for architectural gaps. For most teams, the total effort exceeds switching to a purpose-built alternative.
+
+## **How to choose the right OpenClaw alternative**
+
+With this many alternatives available, choosing the right OpenClaw alternative depends on your context. Here's how to evaluate:
+
+| If you... | Consider... |
+|---|---|
+| Need an open source, self hosted OpenClaw alternative to run agents with per-action control | OpenCompany |
+| Need maximum sandbox isolation for enterprise AI agents | NanoClaw |
+| Are migrating a complex, multi agent OpenClaw setup at enterprise scale | IronClaw |
+| Are all-in on AWS or Azure and need managed AI infrastructure | Bedrock AgentCore or Copilot Studio |
+| Want to stay on OpenClaw and have engineering capacity | Hardened OpenClaw |
+| Want a lightweight OpenClaw alternative you can run locally | OpenCompany |
+| Need an ultra-lightweight agent for embedded systems or edge computing | PicoClaw or ZeroClaw |
+| Need corporate governance and regulatory compliance controls | Carapace |
+
+Three factors that don't show up in feature matrices:
+
+**Total cost of ownership.** The sticker price of each alternative matters less than the full picture: setup time, ongoing maintenance, the engineering effort to keep agents running, and the cost when agents go wrong. Open source alternatives like OpenCompany have zero licensing cost but require self hosted infrastructure. Managed enterprise alternatives like Bedrock reduce operational burden but increase vendor dependency and long-term spend.
+
+**Execution model compatibility.** If your existing automation relies on multi agent orchestration, multi step workflows, or specific tool execution patterns, the migration effort varies dramatically between alternatives. IronClaw minimizes this for teams with complex setups. A lightweight OpenClaw alternative like OpenCompany wraps existing tools rather than replacing them. Claude Code and other runtimes each have different integration patterns — test agents against your real tasks before committing.
+
+**Who are your users?** If your agents serve developers who write code, the execution controls matter less — they can evaluate what autonomous AI agents are doing. If your AI assistant serves support agents, executives, or operations managers on a team, the permission model and task controls matter more than any sandbox. You need tools that enable users to work with agents for daily tasks without understanding the underlying architecture.
+
+## **How to migrate away from OpenClaw**
+
+Transitioning from OpenClaw requires a carefully planned, structured roadmap — not a weekend swap. The most effective approach is the "strangler fig" migration pattern, where you incrementally replace the legacy system with a new one by building around it rather than ripping it out all at once.
+
+Start by mapping your current scripts to assess the migration scope. This helps identify higher-risk tasks that should be gated or moved into deterministic scripts, and lower-risk automation that can migrate first. Run both systems in parallel during the transition, routing new workflows to the alternative while existing tasks continue to function.
+
+After switching to a new platform, strengthen your posture by implementing hardening measures: review all inherited permissions, audit credential access, and establish the logging and compliance frameworks that were previously lacking. The goal isn't just feature parity with your old setup — it's closing the gaps that drove you to look for an alternative in the first place.
+
+## Conclusion and Recommendation
+
+The ecosystem of OpenClaw alternatives is richer and more diverse than ever, offering solutions that range from lightweight personal ai assistants to robust, enterprise-grade platforms designed for production environments and regulated industries. Whether your priority is simplicity, security, scalability, or cost control, there is an agentic system tailored to your needs.
+
+For individuals and small teams, tools like Nanobot and PicoClaw provide a streamlined, self hosted experience—ideal for managing daily tasks and automation without the overhead of complex infrastructure. Their minimal resource requirements and straightforward setup make them perfect for personal projects or constrained environments.
+
+Organizations with higher security and compliance demands, especially those operating in regulated industries, should look to enterprise-focused alternatives such as Adopt AI or Carapace. These platforms offer advanced security controls, comprehensive audit trails, and seamless integration with existing enterprise systems, ensuring that every agent action is logged, controlled, and compliant with organizational policies.
+
+Ultimately, the right OpenClaw alternative is the one that aligns with your team's workflow complexity, security requirements, and operational goals. Carefully weigh factors like autonomy, control, integration, and total cost of ownership. By matching your project's needs to the strengths of each alternative, you can transition to a more secure, efficient, and productive AI assistant platform—empowering your organization to automate with confidence and control.
+
+As the landscape of agentic systems continues to evolve, making an informed choice today sets the foundation for long-term success in leveraging autonomous AI agents for your most critical tasks and workflows.
+
+## **FAQ**
+
+**Is OpenClaw safe for production use?**
+
+For individual developers who use OpenClaw as a personal AI assistant and can evaluate agent actions in real-time, the risks are manageable. For enterprise deployments — especially teams with non-technical users running agents in production environments — the lack of per-action control, secrets isolation, and compliance logging creates gaps that no amount of caution can close. Most organizations looking for an OpenClaw alternative for production use start here.
+
+**What is the most production-ready OpenClaw alternative?**
+
+It depends on your threat model. NanoClaw offers the strongest isolation for autonomous AI agents. OpenCompany offers the most granular control with vault-based secrets and the ability to self host agents and run locally. IronClaw offers WebAssembly sandboxing for enterprise execution environments. Among these alternatives, the right OpenClaw alternative depends on which compliance requirements your AI systems need to meet.
+
+**Can I migrate my OpenClaw tools and automation?**
+
+Most alternatives to OpenClaw support similar tools, tasks, and agent concepts but with different configuration code. IronClaw is the most compatible migration path for complex multi agent setups. OpenCompany uses YAML-based definitions that can wrap existing agents, tools, and automation tasks without rewriting your software.
+
+**Are OpenClaw alternatives easier to set up?**
+
+OpenClaw typically requires local environment setup, dependency management, and permission configuration that introduces friction before meaningful work even begins. Many alternatives provide a more user-friendly setup process — tools like Nanobot or PicoClaw have a reduced attack surface due to fewer lines of code, and managed alternatives handle infrastructure entirely. These alternatives often feature built-in compliance and governance frameworks with logging and auditing capabilities essential for enterprise environments.
+
+**Is OpenClaw's approach improving?**
+
+The project is actively patching CVEs, and attention from developers is driving improvements. But the architectural issues — no built-in permission model, credentials exposed in AI agent context, no compliance logging — are decisions about agent design, not bugs. They require fundamental changes to how the execution model and AI systems work, not patches to the existing code. The long term evolution of OpenClaw may address these gaps, but teams that need answers today can't wait for architectural rewrites.
+
+---
+
+The choice between these alternatives to OpenClaw isn't about which one is "best." It's about which OpenClaw alternative matches your team's threat model, your security requirements, and your compliance needs. The worst choice is the default one — deploying autonomous agents with full access to tools, tasks, and execution and hoping nothing goes wrong.
+
+If you're evaluating alternatives to OpenClaw for your team, we're happy to talk through the tradeoffs. [**Talk to our team**](/talk) or [**try OpenCompany on GitHub**](https://github.com/useopencompany).
+
+*For more on the alternatives discussed here, see [**Running AI Agents in Production**](/blog/running-ai-agents-in-production) for the full infrastructure picture and [**Permission Models for AI Agents**](/blog/ai-agent-permission-models) for a deep dive on the off/on/ask approach.*
