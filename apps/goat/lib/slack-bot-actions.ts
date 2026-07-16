@@ -85,6 +85,7 @@ export async function listGoatSlackBotChannelsAction(
   const channels: GoatSlackBotChannel[] = [];
   let cursor: string | undefined;
   let partial = false;
+  let loadedPages = 0;
 
   try {
     do {
@@ -107,6 +108,7 @@ export async function listGoatSlackBotChannelsAction(
           ...(cursor ? { cursor } : {}),
         },
       });
+      loadedPages += 1;
       for (const channel of page.channels ?? []) {
         if (!channel.id || channel.is_archived) continue;
         channels.push({
@@ -119,6 +121,9 @@ export async function listGoatSlackBotChannelsAction(
       cursor = page.response_metadata?.next_cursor || undefined;
     } while (cursor);
   } catch {
+    if (loadedPages === 0) {
+      return { ok: false, error: "Could not load channels from Slack. Please try again." };
+    }
     // Rate limits or transient Slack errors: return what we have so the picker
     // stays usable instead of failing outright.
     partial = true;

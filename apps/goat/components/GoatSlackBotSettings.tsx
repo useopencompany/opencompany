@@ -50,8 +50,8 @@ export function GoatSlackBotSettings({ data }: { data: GoatSlackBotSettingsData 
         </p>
       ) : !data.configured ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
-          The Slack bot isn&apos;t configured on this deployment. Set the GOAT_SLACK_BOT_*
-          environment variables to enable it.
+          The Slack bot isn&apos;t configured on this deployment. Set the Slack bot and
+          credential-encryption environment variables to enable it.
         </p>
       ) : (
         <SlackBotPanel data={data} />
@@ -69,12 +69,16 @@ function SlackBotPanel({ data }: { data: GoatSlackBotSettingsData }) {
   const disconnect = () => {
     setError(null);
     startTransition(async () => {
-      const result = await disconnectGoatSlackBotAction();
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      try {
+        const result = await disconnectGoatSlackBotAction();
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        router.refresh();
+      } catch {
+        setError("Disconnecting the Slack bot failed. Try again.");
       }
-      router.refresh();
     });
   };
 
@@ -162,7 +166,11 @@ function SlackBotPanel({ data }: { data: GoatSlackBotSettingsData }) {
         >
           {pending ? "Disconnecting…" : "Disconnect"}
         </button>
-        {error ? <p className="text-[12px] leading-4 text-red-600">{error}</p> : null}
+        {error ? (
+          <p role="alert" className="text-[12px] leading-4 text-red-600">
+            {error}
+          </p>
+        ) : null}
       </div>
     </section>
   );

@@ -76,6 +76,7 @@ export function GoatSlackBotDestinationCard({ brainRef }: { brainRef: string }) 
           <button
             type="button"
             role="switch"
+            aria-label={enabled ? "Disable Slack bot destination" : "Enable Slack bot destination"}
             aria-checked={enabled}
             disabled={isPending || !view.botConnected}
             onClick={() => setEnabled(!enabled)}
@@ -109,6 +110,14 @@ export function GoatSlackBotDestinationCard({ brainRef }: { brainRef: string }) 
           ) : (
             "Ask a workspace admin to connect the OpenCompany Slack bot in workspace settings."
           )}
+        </p>
+      ) : view.isAdmin && !view.botConnected ? (
+        <p className="border-t border-ink/10 pt-2 text-[12px] leading-4 text-warning">
+          The Slack bot connection needs attention. Reconnect it in{" "}
+          <Link href="/settings/workspace/slack" prefetch className="underline underline-offset-2">
+            workspace settings
+          </Link>
+          .
         </p>
       ) : !view.isAdmin ? (
         <p className="border-t border-ink/10 pt-2 text-[12px] leading-4 text-ink-subtle">

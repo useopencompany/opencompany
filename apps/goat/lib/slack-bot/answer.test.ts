@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { stripSlackBotMention, toSlackMrkdwn, truncateForSlack } from "./answer";
+import {
+  formatSlackThreadContext,
+  formatSlackThreadContextPage,
+  stripSlackBotMention,
+  toSlackMrkdwn,
+  truncateForSlack,
+} from "./answer";
 
 describe("stripSlackBotMention", () => {
   it("strips a leading mention of the bot", () => {
@@ -58,5 +64,47 @@ describe("truncateForSlack", () => {
     const result = truncateForSlack("a".repeat(500), 100);
     expect(result.length).toBeLessThanOrEqual(100);
     expect(result.endsWith("…")).toBe(true);
+  });
+});
+
+describe("formatSlackThreadContext", () => {
+  it("omits an oldest-first page when Slack reports newer replies", () => {
+    expect(
+      formatSlackThreadContextPage({
+        messages: [{ user: "U1", text: "stale context" }],
+        response_metadata: { next_cursor: "next-page" },
+      }),
+    ).toBeNull();
+    expect(
+      formatSlackThreadContextPage({
+        messages: [{ user: "U1", text: "stale context" }],
+        has_more: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps the most recent twenty messages in chronological order", () => {
+    const context = formatSlackThreadContext(
+      Array.from({ length: 25 }, (_, index) => ({ user: `U${index}`, text: `message ${index}` })),
+    );
+
+    expect(context).not.toContain("message 4");
+    expect(context).toContain("U5: message 5");
+    expect(context).toContain("U24: message 24");
+    expect(context?.indexOf("message 5")).toBeLessThan(context?.indexOf("message 24") ?? 0);
+  });
+
+  it("caps individual messages and the total prompt context", () => {
+    const context = formatSlackThreadContext(
+      Array.from({ length: 20 }, (_, index) => ({
+        user: `U${index}`,
+        text: `${index}:${"x".repeat(5000)}`,
+      })),
+    );
+
+    expect(context).not.toBeNull();
+    expect(context?.length).toBeLessThanOrEqual(12_000);
+    expect(context).toContain("U19:");
+    expect(context).not.toContain("U0:");
   });
 });

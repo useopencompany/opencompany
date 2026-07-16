@@ -1,4 +1,5 @@
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, desc, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   type GoatBrainVisibility,
@@ -6,10 +7,18 @@ import {
   goatBrainSources,
   goatBrains,
   goatIntegrations,
+  goatSlackBotEventClaims,
 } from "./goat-schema";
 import { type GoatSlackBrainSourceConfig, parseGoatSlackBrainSourceConfig } from "./goat-slack";
 
 type DbLike = any;
+
+export const GOAT_SLACK_BOT_EVENT_CLAIM_LEASE_MS = 5 * 60 * 1000;
+
+export type GoatSlackBotEventClaim = {
+  eventId: string;
+  claimId: string;
+};
 
 export type GoatSlackBotIntegrationForTeam = {
   id: string;
@@ -143,6 +152,63 @@ export async function markGoatSlackBotIntegrationStatusForTeam(
         eq(goatIntegrations.provider, "slack_bot"),
         eq(goatIntegrations.externalId, input.teamId),
         isNotNull(goatIntegrations.workspaceId),
+      ),
+    );
+}
+
+export async function claimGoatSlackBotEvent(
+  input: { eventId: string; teamId: string; now?: Date },
+  db: DbLike = getDb(),
+): Promise<GoatSlackBotEventClaim | null> {
+  const eventId = input.eventId.trim();
+  const teamId = input.teamId.trim();
+  if (!eventId || !teamId) return null;
+
+  const now = input.now ?? new Date();
+  const staleBefore = new Date(now.getTime() - GOAT_SLACK_BOT_EVENT_CLAIM_LEASE_MS);
+  const claimId = `gsbec_${randomUUID().replace(/-/g, "")}`;
+  const [claimed] = await db
+    .insert(goatSlackBotEventClaims)
+    .values({ eventId, teamId, claimId, claimedAt: now, completedAt: null })
+    .onConflictDoUpdate({
+      target: goatSlackBotEventClaims.eventId,
+      set: { teamId, claimId, claimedAt: now, completedAt: null },
+      setWhere: and(
+        isNull(goatSlackBotEventClaims.completedAt),
+        lt(goatSlackBotEventClaims.claimedAt, staleBefore),
+      ),
+    })
+    .returning({ eventId: goatSlackBotEventClaims.eventId });
+
+  return claimed ? { eventId, claimId } : null;
+}
+
+export async function completeGoatSlackBotEvent(
+  claim: GoatSlackBotEventClaim,
+  db: DbLike = getDb(),
+): Promise<void> {
+  await db
+    .update(goatSlackBotEventClaims)
+    .set({ completedAt: new Date() })
+    .where(
+      and(
+        eq(goatSlackBotEventClaims.eventId, claim.eventId),
+        eq(goatSlackBotEventClaims.claimId, claim.claimId),
+      ),
+    );
+}
+
+export async function releaseGoatSlackBotEvent(
+  claim: GoatSlackBotEventClaim,
+  db: DbLike = getDb(),
+): Promise<void> {
+  await db
+    .delete(goatSlackBotEventClaims)
+    .where(
+      and(
+        eq(goatSlackBotEventClaims.eventId, claim.eventId),
+        eq(goatSlackBotEventClaims.claimId, claim.claimId),
+        isNull(goatSlackBotEventClaims.completedAt),
       ),
     );
 }

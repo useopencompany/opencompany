@@ -1,4 +1,10 @@
-import { markGoatSlackBotIntegrationStatusForTeam } from "@opencompany/db/goat-slack-bot";
+import {
+  claimGoatSlackBotEvent,
+  completeGoatSlackBotEvent,
+  type GoatSlackBotEventClaim,
+  markGoatSlackBotIntegrationStatusForTeam,
+  releaseGoatSlackBotEvent,
+} from "@opencompany/db/goat-slack-bot";
 import { after, NextResponse } from "next/server";
 import { goatSlackBotSigningSecret } from "@/lib/integrations/slack-bot";
 import { verifyGoatSlackEventSignature } from "@/lib/integrations/slack-signature";
@@ -12,6 +18,7 @@ type SlackEnvelope = {
   type?: string;
   challenge?: string;
   team_id?: string;
+  event_id?: string;
   event?: Record<string, unknown>;
 };
 
@@ -42,15 +49,9 @@ export async function POST(request: Request) {
   // signature check every path acks with 200 — errors are logged, not surfaced.
   try {
     if (envelope.type === "event_callback" && envelope.event && envelope.team_id) {
-      // We ack in well under 3s, so a retry means the first delivery already
-      // ran (or died post-ack); re-answering would double-post.
-      if (request.headers.get("x-slack-retry-num")) {
-        return NextResponse.json(
-          { ok: true, skipped: "retry" },
-          { headers: { "X-Slack-No-Retry": "1" } },
-        );
-      }
-      return NextResponse.json(await handleEventCallback(envelope.team_id, envelope.event));
+      return NextResponse.json(
+        await handleEventCallback(envelope.team_id, envelope.event_id, envelope.event),
+      );
     }
   } catch (error) {
     console.error("[goat-slack-bot] Failed to process Slack event", {
@@ -62,7 +63,11 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true });
 }
 
-async function handleEventCallback(teamId: string, event: Record<string, unknown>) {
+async function handleEventCallback(
+  teamId: string,
+  eventId: string | undefined,
+  event: Record<string, unknown>,
+) {
   if (event.type === "tokens_revoked" || event.type === "app_uninstalled") {
     await markGoatSlackBotIntegrationStatusForTeam({
       teamId,
@@ -84,25 +89,60 @@ async function handleEventCallback(teamId: string, event: Record<string, unknown
     if (event.bot_id || event.subtype || !slackUserId || !channelId || !messageTs) {
       return { ok: true, dropped: true };
     }
+    if (!eventId) {
+      console.warn("[goat-slack-bot] Dropping mention without Slack event_id", {
+        teamId,
+        channelId,
+      });
+      return { ok: true, dropped: true };
+    }
+
+    const claim = await claimGoatSlackBotEvent({ eventId, teamId });
+    if (!claim) return { ok: true, skipped: "duplicate" };
 
     after(
-      processGoatSlackBotMention({
+      processClaimedMention(claim, {
         teamId,
         channelId,
         messageTs,
         threadTs: typeof event.thread_ts === "string" ? event.thread_ts : null,
         text,
         slackUserId,
-      }).catch((error) => {
-        console.error("[goat-slack-bot] Mention processing failed", {
-          teamId,
-          channelId,
-          error: error instanceof Error ? error.message : String(error),
-        });
       }),
     );
     return { ok: true };
   }
 
   return { ok: true, ignored: true };
+}
+
+async function processClaimedMention(
+  claim: GoatSlackBotEventClaim,
+  input: Parameters<typeof processGoatSlackBotMention>[0],
+) {
+  try {
+    await processGoatSlackBotMention(input);
+  } catch (error) {
+    await releaseGoatSlackBotEvent(claim).catch((releaseError) => {
+      console.error("[goat-slack-bot] Failed to release Slack event claim", {
+        eventId: claim.eventId,
+        error: releaseError instanceof Error ? releaseError.message : String(releaseError),
+      });
+    });
+    console.error("[goat-slack-bot] Mention processing failed", {
+      teamId: input.teamId,
+      channelId: input.channelId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
+
+  await completeGoatSlackBotEvent(claim).catch((error) => {
+    // Keep the live lease if completion persistence fails. Releasing it after
+    // an answer was posted would let a Slack retry double-post immediately.
+    console.error("[goat-slack-bot] Failed to complete Slack event claim", {
+      eventId: claim.eventId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 }

@@ -187,7 +187,7 @@ Set these in the separate Vercel project for Goat:
 | `WORKOS_CLIENT_ID` | Yes | Goat WorkOS Application client id. Must differ from the core app. |
 | `WORKOS_API_KEY` | Yes | Goat WorkOS Application API key. Must differ from the core app so API-created invitations preserve Goat application context. |
 | `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. Use the same value only when the cookie domain setup intentionally allows it. |
-| `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Google only | Same base64-encoded 32-byte key used by web and runner. Required when Goat Gmail/Calendar/Drive connections are enabled. |
+| `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Google or Slack | Same base64-encoded 32-byte key used by web and runner. Required when Goat Gmail/Calendar/Drive or either Slack connection is enabled. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Google OAuth app used by Goat Gmail, Google Calendar, and Drive connect flows. Must match the runner values so refresh works. Drive also requires the Drive API and restricted-scope verification. |
 | `GOOGLE_OAUTH_CALLBACK_URL` | Google only | Optional stable Google callback broker URL for hosted previews. Leave unset for direct Goat-domain callbacks. |
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Google only | Dedicated secret used to sign Goat Google OAuth setup state. |
@@ -242,9 +242,11 @@ from the ingestion one — this one has a bot user, named e.g. `OpenCompany` / `
 2. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack-bot/callback`.
 3. Event Subscriptions → Request URL `${GOAT_NEXT_PUBLIC_APP_URL}/api/webhooks/slack-bot/events`,
    then under **Subscribe to bot events** add `app_mention`, `app_uninstalled`, `tokens_revoked`.
-4. Copy Client ID/Secret/Signing Secret into `GOAT_SLACK_BOT_*`; the state secret is generated,
-   not from Slack. Workspace admins install it from Settings → Workspace → Slack bot, then enable
-   it per brain under Brain settings → Destinations and invite the bot to the chosen channels.
+4. Add Client ID/Secret/Signing Secret to Infisical under `prod` + `/goat` (and `dev` + `/goat`
+   for shared development), then sync them into the Goat Vercel environments. The
+   state secret is generated, not sourced from Slack; store and sync it through Infisical too.
+   Workspace admins install the bot from Settings → Workspace → Slack bot, then enable it per brain
+   under Brain settings → Destinations and invite it to the chosen channels.
 5. Answers run inline in the goat web app (no runner env needed) and use
    `VERCEL_AI_GATEWAY_API_KEY` plus `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` to read the stored
    bot token.

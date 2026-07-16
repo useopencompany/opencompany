@@ -1,6 +1,11 @@
+import { decryptJson } from "@opencompany/crypto";
 import { drizzle } from "drizzle-orm/neon-http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { refreshGoatIntegrationCredential } from "./goat-integrations";
+import {
+  connectGoatSlackBotIntegration,
+  goatCredentialAad,
+  refreshGoatIntegrationCredential,
+} from "./goat-integrations";
 
 describe("refreshGoatIntegrationCredential", () => {
   afterEach(() => {
@@ -84,5 +89,92 @@ describe("refreshGoatIntegrationCredential", () => {
 
     expect(query).toHaveBeenCalledTimes(2);
     expect(transaction).toHaveBeenCalledOnce();
+  });
+});
+
+describe("connectGoatSlackBotIntegration", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("upserts one bot integration per Goat workspace and updates its Slack team", async () => {
+    const encryptionKey = Buffer.alloc(32, 7);
+    vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", encryptionKey.toString("base64"));
+    const now = new Date("2026-07-16T10:00:00.000Z");
+    const transaction = vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries));
+    const query = vi.fn(async (statement: string, _params: unknown[], _options: object) => ({
+      rows: statement.startsWith('select "id", "user_workos_id" from "goat"."integrations"')
+        ? [["gint_existing", "user_original"]]
+        : statement.startsWith('insert into "goat"."integrations"')
+          ? [["gint_existing"]]
+          : [["gcred_123", null, now.toISOString(), now.toISOString(), 1]],
+    }));
+    const client = Object.assign(query, { transaction });
+    const db = drizzle(client as never);
+
+    await expect(
+      connectGoatSlackBotIntegration({
+        userWorkosId: "user_reconnecting",
+        workspaceId: "workspace_123",
+        teamId: "T_NEW",
+        teamName: "New Slack",
+        botUserId: "B_NEW",
+        accessToken: "xoxb-test",
+        scopes: ["app_mentions:read", "chat:write"],
+        db,
+        now,
+      }),
+    ).resolves.toEqual({ integrationId: "gint_existing" });
+
+    expect(query).toHaveBeenCalledTimes(3);
+    expect(transaction).toHaveBeenCalledOnce();
+    const integrationCall = query.mock.calls.find(([statement]) =>
+      statement.startsWith('insert into "goat"."integrations"'),
+    );
+    const credentialCall = query.mock.calls.find(([statement]) =>
+      statement.startsWith('insert into "goat"."integration_credentials"'),
+    );
+    expect(integrationCall).toBeDefined();
+    expect(credentialCall).toBeDefined();
+
+    const [integrationStatement, integrationParams] = integrationCall!;
+    const normalized = integrationStatement.replace(/\s+/g, " ");
+    expect(normalized).toContain('on conflict ("workspace_id","provider")');
+    expect(normalized).toContain("\"provider\" = 'slack_bot'");
+    expect(normalized).toContain('do update set "external_id" =');
+    expect(integrationParams).toEqual(
+      expect.arrayContaining(["workspace_123", "T_NEW", "New Slack"]),
+    );
+    expect(integrationParams.some((value) => String(value).includes("app_mentions:read"))).toBe(
+      true,
+    );
+
+    const [, credentialParams] = credentialCall!;
+    expect(credentialParams).toEqual(
+      expect.arrayContaining(["user_original", "gint_existing", "slack_bot", "oauth_token"]),
+    );
+    const encryptedParam = credentialParams.find(
+      (value) => typeof value === "string" && value.includes('"ciphertext"'),
+    );
+    expect(encryptedParam).toBeTypeOf("string");
+    expect(encryptedParam).not.toContain("xoxb-test");
+    expect(
+      decryptJson(JSON.parse(encryptedParam as string), {
+        key: encryptionKey,
+        aad: goatCredentialAad({
+          userWorkosId: "user_original",
+          integrationId: "gint_existing",
+          provider: "slack_bot",
+          kind: "oauth_token",
+          keyVersion: 1,
+        }),
+      }),
+    ).toEqual({
+      access_token: "xoxb-test",
+      bot_user_id: "B_NEW",
+      team_id: "T_NEW",
+      team_name: "New Slack",
+      scope: "app_mentions:read,chat:write",
+    });
   });
 });

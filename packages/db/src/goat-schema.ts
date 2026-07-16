@@ -1183,6 +1183,12 @@ export const goatIntegrations = goat.table(
     workspaceProviderExternalIdx: uniqueIndex("goat_integrations_workspace_provider_external_idx")
       .on(table.workspaceId, table.provider, table.externalId)
       .where(sql`${table.workspaceId} IS NOT NULL`),
+    // The answer bot is a single workspace-level destination. Reinstalling it
+    // for another Slack team updates the existing row so its brain routes stay
+    // manageable instead of leaving a hidden installation active.
+    slackBotWorkspaceIdx: uniqueIndex("goat_integrations_slack_bot_workspace_idx")
+      .on(table.workspaceId, table.provider)
+      .where(sql`${table.workspaceId} IS NOT NULL AND ${table.provider} = 'slack_bot'`),
     workspaceProviderIdx: index("goat_integrations_workspace_provider_idx").on(
       table.workspaceId,
       table.provider,
@@ -1646,6 +1652,19 @@ export const goatBrainImportCandidates = goat.table(
     ),
   }),
 );
+
+// Durable delivery lease for Slack answer-bot events. Slack can retry a failed
+// HTTP delivery while the original after() task is still running, so event_id
+// is claimed before scheduling work and can be reclaimed only after the task's
+// maximum runtime has elapsed.
+export const goatSlackBotEventClaims = goat.table("slack_bot_event_claims", {
+  eventId: text("event_id").primaryKey(),
+  teamId: text("team_id").notNull(),
+  claimId: text("claim_id").notNull(),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 // Raw Slack message buffer: the events webhook inserts one row per relevant
 // message; the runner's flush sweeper batches unflushed rows per channel into a

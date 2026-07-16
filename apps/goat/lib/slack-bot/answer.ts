@@ -14,6 +14,22 @@ import { runGoatSlackBotAgent } from "@/lib/slack-bot/agent";
 
 const SLACK_ANSWER_MAX_CHARS = 3000;
 const THREAD_CONTEXT_MESSAGE_LIMIT = 20;
+const THREAD_CONTEXT_PAGE_LIMIT = 200;
+const THREAD_CONTEXT_MESSAGE_MAX_CHARS = 2000;
+const THREAD_CONTEXT_TOTAL_MAX_CHARS = 12_000;
+
+type SlackThreadMessage = {
+  user?: string;
+  bot_id?: string;
+  text?: string;
+  ts?: string;
+};
+
+type SlackThreadPage = {
+  messages?: SlackThreadMessage[];
+  has_more?: boolean;
+  response_metadata?: { next_cursor?: string };
+};
 
 export type GoatSlackBotMentionInput = {
   teamId: string;
@@ -26,8 +42,8 @@ export type GoatSlackBotMentionInput = {
 
 // Runs after the webhook has already acked Slack (via next/server after()):
 // resolve the install → route to brains by channel → answer → post in-thread.
-// Failures reply best-effort and log; there is no retry (Slack retries are
-// deliberately skipped at the webhook).
+// Individual integration failures reply best-effort and are logged so another
+// Goat workspace connected to the same Slack team can still answer.
 export async function processGoatSlackBotMention(input: GoatSlackBotMentionInput) {
   const integrations = await listGoatSlackBotIntegrationsForTeam(input.teamId);
   const active = integrations.filter((integration) => integration.status === "connected");
@@ -95,7 +111,7 @@ async function answerForIntegration(
 
   try {
     const threadContext = input.threadTs
-      ? await fetchThreadContext(botToken, input.channelId, input.threadTs)
+      ? await fetchThreadContext(botToken, input.channelId, input.threadTs, input.messageTs)
       : null;
 
     const answer = await runGoatSlackBotAgent({
@@ -117,7 +133,7 @@ async function answerForIntegration(
       idempotencyKey: `slack_bot:${input.teamId}:${input.channelId}:${input.messageTs}`,
     });
   } catch (error) {
-    console.error("[goat-slack-bot] Answer generation failed", {
+    console.error("[goat-slack-bot] Answer generation or delivery failed", {
       integrationId: integration.id,
       channelId: input.channelId,
       error: error instanceof Error ? error.message : String(error),
@@ -149,30 +165,59 @@ async function fetchThreadContext(
   botToken: string,
   channelId: string,
   threadTs: string,
+  messageTs: string,
 ): Promise<string | null> {
   // Best-effort: missing history scope or membership just degrades to no context.
   try {
-    const result = await slackApiRequest<{
-      messages?: Array<{ user?: string; bot_id?: string; text?: string; ts?: string }>;
-    }>({
+    const result = await slackApiRequest<SlackThreadPage>({
       method: "conversations.replies",
       token: botToken,
       form: {
         channel: channelId,
         ts: threadTs,
-        limit: String(THREAD_CONTEXT_MESSAGE_LIMIT),
+        latest: messageTs,
+        inclusive: "false",
+        limit: String(THREAD_CONTEXT_PAGE_LIMIT),
       },
     });
-    const lines = (result.messages ?? [])
-      .filter((message) => typeof message.text === "string" && message.text.trim())
-      .map((message) => {
-        const author = message.bot_id ? "bot" : (message.user ?? "user");
-        return `${author}: ${message.text}`;
-      });
-    return lines.length > 0 ? lines.join("\n") : null;
+    // conversations.replies returns oldest-first. If Slack paginated the
+    // result, this page is not the recent tail; omitting context is safer than
+    // grounding the answer in stale discussion or making rate-limited followups.
+    return formatSlackThreadContextPage(result);
   } catch {
     return null;
   }
+}
+
+export function formatSlackThreadContextPage(page: SlackThreadPage): string | null {
+  if (page.has_more || page.response_metadata?.next_cursor) return null;
+  return formatSlackThreadContext(page.messages ?? []);
+}
+
+export function formatSlackThreadContext(messages: SlackThreadMessage[]): string | null {
+  const candidates = messages
+    .filter(
+      (message): message is SlackThreadMessage & { text: string } =>
+        typeof message.text === "string" && Boolean(message.text.trim()),
+    )
+    .slice(-THREAD_CONTEXT_MESSAGE_LIMIT)
+    .map((message) => {
+      const author = message.bot_id ? "bot" : (message.user ?? "user");
+      const text = truncateForSlack(message.text.trim(), THREAD_CONTEXT_MESSAGE_MAX_CHARS);
+      return `${author}: ${text}`;
+    });
+
+  const selected: string[] = [];
+  let totalChars = 0;
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const line = candidates[index];
+    if (!line) continue;
+    const nextChars = line.length + (selected.length > 0 ? 1 : 0);
+    if (totalChars + nextChars > THREAD_CONTEXT_TOTAL_MAX_CHARS) break;
+    selected.unshift(line);
+    totalChars += nextChars;
+  }
+  return selected.length > 0 ? selected.join("\n") : null;
 }
 
 async function postSlackBotReply(
@@ -181,24 +226,16 @@ async function postSlackBotReply(
   threadTs: string,
   text: string,
 ) {
-  try {
-    await slackApiRequest({
-      method: "chat.postMessage",
-      token: botToken,
-      form: {
-        channel: channelId,
-        thread_ts: threadTs,
-        text,
-        unfurl_links: "false",
-      },
-    });
-  } catch (error) {
-    // not_in_channel / channel_not_found: nothing actionable from our side.
-    console.error("[goat-slack-bot] chat.postMessage failed", {
-      channelId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  await slackApiRequest({
+    method: "chat.postMessage",
+    token: botToken,
+    form: {
+      channel: channelId,
+      thread_ts: threadTs,
+      text,
+      unfurl_links: "false",
+    },
+  });
 }
 
 async function recordSlackBotUsage(input: {
