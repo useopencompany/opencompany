@@ -6,6 +6,7 @@ import {
   Blocks,
   CircleDollarSign,
   CreditCard,
+  MessageSquare,
   PanelLeft,
   PlugZap,
   SlidersHorizontal,
@@ -15,11 +16,14 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { useGoatAppDataOptional } from "@/components/GoatAppDataProvider";
 
 type SettingsNavItem = {
   href: string;
   icon: LucideIcon;
   label: string;
+  badge?: string;
+  adminOnly?: boolean;
   isActive: (pathname: string) => boolean;
 };
 
@@ -80,6 +84,14 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         label: "Members",
         isActive: (pathname) => pathname === "/settings/workspace",
       },
+      {
+        href: "/settings/workspace/slack",
+        icon: MessageSquare,
+        label: "Slack bot",
+        badge: "Beta",
+        adminOnly: true,
+        isActive: (pathname) => pathname === "/settings/workspace/slack",
+      },
     ],
   },
 ];
@@ -101,6 +113,11 @@ function SettingsNavRow({ item, active }: { item: SettingsNavItem; active: boole
         className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}`}
       />
       <span className="truncate tracking-[-0.005em]">{item.label}</span>
+      {item.badge ? (
+        <span className="ml-auto shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium leading-4 text-ink-subtle">
+          {item.badge}
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -115,6 +132,7 @@ export function GoatSettingsSidebar({
   onToggleCollapsed: () => void;
 }) {
   const pathname = usePathname();
+  const isAdmin = useGoatAppDataOptional()?.workspace.role === "admin";
 
   return (
     <aside
@@ -162,9 +180,11 @@ export function GoatSettingsSidebar({
               <div className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
                 {group.label}
               </div>
-              {group.items.map((item) => (
-                <SettingsNavRow key={item.href} item={item} active={item.isActive(pathname)} />
-              ))}
+              {group.items
+                .filter((item) => !item.adminOnly || isAdmin)
+                .map((item) => (
+                  <SettingsNavRow key={item.href} item={item} active={item.isActive(pathname)} />
+                ))}
             </div>
           ))}
         </nav>

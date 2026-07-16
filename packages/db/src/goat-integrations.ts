@@ -252,6 +252,114 @@ export async function connectGoatSlackIntegration(input: {
   return { integrationId: integration.id };
 }
 
+export type GoatSlackBotOAuthCredentialPayload = {
+  access_token: string;
+  bot_user_id: string;
+  team_id: string;
+  team_name?: string;
+  scope?: string;
+};
+
+// The Slack answer-bot install. Workspace-owned (see
+// WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS): the bot token belongs to the
+// Slack workspace install, not to the connecting admin.
+export async function connectGoatSlackBotIntegration(input: {
+  userWorkosId: string;
+  workspaceId: string;
+  teamId: string;
+  teamName: string | null;
+  botUserId: string;
+  accessToken: string;
+  scopes: string[];
+  db?: GoatIntegrationDb;
+  now?: Date;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const connectionLabel = input.teamName?.trim() || "Slack";
+
+  const [integration] = await db
+    .insert(goatIntegrations)
+    .values({
+      id: newGoatIntegrationId(),
+      userWorkosId: input.userWorkosId,
+      workspaceId: input.workspaceId,
+      provider: "slack_bot",
+      // The Slack team id is the routing key for inbound bot events.
+      externalId: input.teamId,
+      connectionLabel,
+      accountName: input.teamName,
+      accountEmail: null,
+      accountType: "slack_bot",
+      status: "connected",
+      statusReason: null,
+      scopes: input.scopes,
+      lastSyncedAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        goatIntegrations.workspaceId,
+        goatIntegrations.provider,
+        goatIntegrations.externalId,
+      ],
+      targetWhere: sql`${goatIntegrations.workspaceId} IS NOT NULL`,
+      // On reconnect (possibly by a different admin) user_workos_id stays as
+      // the original connector: the credential AAD and brain_sources composite
+      // FK are keyed on it.
+      set: {
+        connectionLabel,
+        accountName: input.teamName,
+        accountType: "slack_bot",
+        status: "connected",
+        statusReason: null,
+        scopes: input.scopes,
+        lastSyncedAt: now,
+        updatedAt: now,
+      },
+    })
+    .returning({ id: goatIntegrations.id, userWorkosId: goatIntegrations.userWorkosId });
+
+  if (!integration) {
+    throw new Error("Could not persist Goat Slack bot integration.");
+  }
+
+  const payload: GoatSlackBotOAuthCredentialPayload = {
+    access_token: input.accessToken,
+    bot_user_id: input.botUserId,
+    team_id: input.teamId,
+    ...(input.teamName ? { team_name: input.teamName } : {}),
+    ...(input.scopes.length > 0 ? { scope: input.scopes.join(",") } : {}),
+  };
+
+  try {
+    await saveGoatIntegrationCredential({
+      userWorkosId: integration.userWorkosId,
+      integrationId: integration.id,
+      provider: "slack_bot",
+      kind: "oauth_token",
+      payload,
+      // Bot tokens do not expire unless token rotation is opted in.
+      expiresAt: null,
+      db,
+      now,
+    });
+  } catch (error) {
+    await markGoatIntegrationStatus({
+      userWorkosId: integration.userWorkosId,
+      integrationId: integration.id,
+      provider: "slack_bot",
+      status: "sync_failed",
+      statusReason: "Failed to persist Slack bot integration credentials.",
+      db,
+      now: new Date(),
+    });
+    throw error;
+  }
+
+  return { integrationId: integration.id };
+}
+
 export type GoatLinearOAuthCredentialPayload = {
   access_token: string;
   organization_id: string;

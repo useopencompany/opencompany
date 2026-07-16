@@ -56,16 +56,19 @@ export type GoatIntegrationProvider =
   | "linear"
   | "github"
   | "jamie"
-  | "slack";
+  | "slack"
+  | "slack_bot";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear) are always personal. Installation-bound
-// connections (GitHub App org installs, Jamie webhook secrets) are workspace
-// plumbing: they carry no human identity, must survive the connecting admin
-// leaving, and are manageable by any workspace admin.
+// connections (GitHub App org installs, Jamie webhook secrets, the Slack
+// answer-bot install) are workspace plumbing: they carry no human identity,
+// must survive the connecting admin leaving, and are manageable by any
+// workspace admin.
 export const WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS = [
   "github",
   "jamie",
+  "slack_bot",
 ] as const satisfies readonly GoatIntegrationProvider[];
 export function isWorkspaceOwnedGoatIntegrationProvider(provider: GoatIntegrationProvider) {
   return (
@@ -97,13 +100,16 @@ export type GoatBrainSourceProvider =
   | "github"
   | "gmail"
   | "google_drive";
+// "slack_bot" rows are answer *destinations* (which channels a brain answers
+// in via the Slack bot), not ingestion sources; no ingestion path reads them.
 export type GoatBrainSourceConfigProvider =
   | "jamie"
   | "gmail"
   | "google_drive"
   | "github"
   | "slack"
-  | "linear";
+  | "linear"
+  | "slack_bot";
 export type GoatBrainSourceType =
   | "meeting"
   | "run"
@@ -1183,7 +1189,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1232,7 +1238,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1338,7 +1344,7 @@ export const goatBrainSources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_brain_sources_provider_check",
-      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear')`,
+      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear', 'slack_bot')`,
     ),
   }),
 );

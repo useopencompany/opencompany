@@ -18,6 +18,9 @@ export type GoatBrainSourceProviderDef = {
   docsHref?: string;
 };
 
+// Deliberately excludes "slack_bot": those brain_sources rows are answer
+// destinations (rendered by the Destinations section in brain settings via
+// GoatSlackBotDestinationCard), not ingestion sources.
 export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
   {
     id: "jamie",

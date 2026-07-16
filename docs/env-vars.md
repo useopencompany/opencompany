@@ -198,6 +198,9 @@ Set these in the separate Vercel project for Goat:
 | `GOAT_SLACK_CLIENT_ID` / `GOAT_SLACK_CLIENT_SECRET` | Slack only | Goat Slack ingestion app OAuth credentials (user-token app, `user_scope` only — no bot token). Distinct from `SLACK_MCP_*` and `SLACK_SUPPORT_*`. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack/callback`. |
 | `GOAT_SLACK_SIGNING_SECRET` | Slack only | Slack app signing secret used to verify Events API deliveries at `/api/webhooks/slack/events`. |
 | `GOAT_SLACK_STATE_SECRET` | Slack only | Dedicated secret used to sign Goat Slack OAuth setup state. Generate with `openssl rand -base64 32`. |
+| `GOAT_SLACK_BOT_CLIENT_ID` / `GOAT_SLACK_BOT_CLIENT_SECRET` | Slack bot only | Goat Slack answer-bot app OAuth credentials (bot-token app, `scope=` — separate Slack app from the ingestion one). Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack-bot/callback`. |
+| `GOAT_SLACK_BOT_SIGNING_SECRET` | Slack bot only | Slack bot app signing secret used to verify Events API deliveries at `/api/webhooks/slack-bot/events`. |
+| `GOAT_SLACK_BOT_STATE_SECRET` | Slack bot only | Dedicated secret used to sign Goat Slack bot install state. Generate with `openssl rand -base64 32`. |
 | `RUNNER_INTERNAL_URL` / `RUNNER_PUBLIC_URL` | Yes | Server-to-server runner URL. `RUNNER_INTERNAL_URL` wins when set. |
 | `RUNNER_INTERNAL_TOKEN` | Yes | Bearer token for the runner wake route. Must match Render. |
 | `ELECTRIC_URL` | Yes | Electric shape service base URL. The Goat proxy exposes only `goat.tasks` scoped to the signed-in WorkOS user. |
@@ -229,6 +232,22 @@ Goat Slack ingestion app setup checklist (api.slack.com/apps → From scratch):
 5. Local dev: the events URL must be public — use a second "dev" Slack app whose Request URL
    points at a tunnel (for example `cloudflared tunnel --url http://localhost:3443`) in front of
    the local Goat app.
+
+Goat Slack answer-bot app setup checklist (api.slack.com/apps → From scratch, a **separate app**
+from the ingestion one — this one has a bot user, named e.g. `OpenCompany` / `@opencompany`):
+
+1. OAuth & Permissions → **Bot Token Scopes** (no user scopes): `app_mentions:read`, `chat:write`,
+   `channels:read`, `groups:read`, `channels:history`, `groups:history`. Do not opt into token
+   rotation.
+2. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack-bot/callback`.
+3. Event Subscriptions → Request URL `${GOAT_NEXT_PUBLIC_APP_URL}/api/webhooks/slack-bot/events`,
+   then under **Subscribe to bot events** add `app_mention`, `app_uninstalled`, `tokens_revoked`.
+4. Copy Client ID/Secret/Signing Secret into `GOAT_SLACK_BOT_*`; the state secret is generated,
+   not from Slack. Workspace admins install it from Settings → Workspace → Slack bot, then enable
+   it per brain under Brain settings → Destinations and invite the bot to the chosen channels.
+5. Answers run inline in the goat web app (no runner env needed) and use
+   `VERCEL_AI_GATEWAY_API_KEY` plus `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` to read the stored
+   bot token.
 
 ## Slack support channel (Slack Connect)
 

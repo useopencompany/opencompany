@@ -201,6 +201,12 @@ export function useGoatAppData() {
   return value;
 }
 
+// For chrome that renders both inside and outside the provider (for example
+// the settings sidebar in isolated component tests).
+export function useGoatAppDataOptional() {
+  return useContext(GoatAppDataContext);
+}
+
 function taskRowToView(row: GoatTaskRow): GoatTaskView {
   return {
     id: row.id,
