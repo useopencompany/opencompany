@@ -24,6 +24,7 @@ import {
   goatLocalCodexSessions,
   goatLocalCodexTurns,
 } from "@opencompany/db/goat-schema";
+import { captureException } from "@opencompany/observability";
 import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
@@ -436,6 +437,7 @@ export async function recordLocalCodexBridgeEvents(input: {
   if (!localTurn.ok) return localTurn;
 
   const normalized = input.events.flatMap(normalizeCodexAppServerEvent);
+  const auditFailureState = { reported: false };
   for (const event of normalized) {
     await persistLocalCodexEvent({
       bridge: input.bridge,
@@ -443,6 +445,7 @@ export async function recordLocalCodexBridgeEvents(input: {
       localTurn: localTurn.turn,
       commandId: command?.id ?? null,
       event,
+      auditFailureState,
     });
   }
   return { ok: true, status: 202, error: null };
@@ -958,21 +961,40 @@ async function persistLocalCodexEvent(input: {
   localTurn?: LocalCodexTurnRow | null;
   commandId?: string | null;
   event: CodexAppServerNormalizedEvent;
+  auditFailureState: { reported: boolean };
 }) {
   const now = new Date();
-  await getDb()
-    .insert(goatLocalCodexEvents)
-    .values({
-      userWorkosId: input.bridge.userWorkosId,
-      localCodexSessionId: input.localSession.id,
-      localCodexTurnId: input.localTurn?.id ?? null,
-      bridgeId: input.bridge.id,
-      commandId: input.commandId ?? null,
-      type: input.event.type,
-      payload: input.event.payload,
-      rawEvent: input.event.rawEvent,
-      createdAt: now,
-    });
+  try {
+    await getDb()
+      .insert(goatLocalCodexEvents)
+      .values({
+        userWorkosId: input.bridge.userWorkosId,
+        localCodexSessionId: input.localSession.id,
+        localCodexTurnId: input.localTurn?.id ?? null,
+        bridgeId: input.bridge.id,
+        commandId: input.commandId ?? null,
+        type: input.event.type,
+        payload: input.event.payload,
+        rawEvent: input.event.rawEvent,
+        createdAt: now,
+      });
+  } catch (error) {
+    // A bridge request can contain thousands of deltas. One sanitized report
+    // is enough to alert us without creating an observability storm.
+    if (!input.auditFailureState.reported) {
+      input.auditFailureState.reported = true;
+      const persistenceError = new Error("Local Codex audit event persistence failed.");
+      persistenceError.name = "LocalCodexEventPersistenceError";
+      captureException(persistenceError, {
+        event: "opencompany.goat_local_codex_event_persist_failed",
+        local_codex_session_id: input.localSession.id,
+        local_codex_turn_id: input.localTurn?.id,
+        event_type: input.event.type,
+        original_error_name: error instanceof Error ? error.name : typeof error,
+        original_error_code: databaseErrorCode(error),
+      });
+    }
+  }
 
   if (input.localTurn) {
     await applyLocalCodexEventToChat({
@@ -1291,4 +1313,15 @@ function rowsFromExecute<T extends ExecuteResultRow>(result: unknown): T[] {
   if (!result || typeof result !== "object") return [];
   const rows = (result as { rows?: unknown }).rows;
   return Array.isArray(rows) ? (rows as T[]) : [];
+}
+
+function databaseErrorCode(error: unknown): string | undefined {
+  const seen = new Set<object>();
+  let current = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if ("code" in current && typeof current.code === "string") return current.code;
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return undefined;
 }
