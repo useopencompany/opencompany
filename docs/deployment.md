@@ -8,6 +8,7 @@ Render for the long-lived agent runner.
 - Infisical stores and syncs runtime/release secrets.
 - Vercel hosts `apps/web`, serves the Next.js UI, WorkOS callback routes, server actions, and the
   Inngest endpoint at `/api/inngest`.
+- Vercel hosts `apps/marketing` as a separate marketing site project.
 - Render hosts `apps/runner`, the Bun/Fastify service that owns live agent runs, E2B sandboxes,
   model/tool streams, abort state, and Durable Stream transcript appends.
 - Neon Postgres is shared by web, Inngest functions, and the runner.
@@ -24,7 +25,8 @@ Production releases are intentionally guarded:
 2. Run Drizzle migrations against production Neon.
 3. Build the Vercel web app for the exact commit.
 4. Re-check that the release is still current.
-5. Trigger the Render runner deploy, then deploy the prebuilt Vercel web app while Render builds.
+5. Trigger the Render runner deploy, then deploy the prebuilt Vercel web, Goat, and marketing apps
+   while Render builds.
 6. Wait for the Render runner deploy for the exact commit.
 7. Smoke check the canonical production web `/api/healthz` and runner `/healthz`.
 
@@ -141,6 +143,22 @@ https://<goat-domain>/auth/callback
 The first Goat release needs the `goat` schema migration applied to the shared Neon database before
 the app is served. Rollback is additive for the MVP: disabling the Goat Vercel project stops new
 task creation without affecting core `public` schema data.
+
+### Vercel Marketing
+
+`apps/marketing` deploys as a separate Vercel project/domain. Set the Vercel project root to
+`apps/marketing`:
+
+- Install command: `bun install --frozen-lockfile`
+- Build command: `bun run vercel-build:marketing`
+- Production branch: `main`
+- Framework preset: Next.js
+- Automatic Git deploys: off. Production deploys are created by the GitHub Actions release workflow
+  with `vercel deploy --prebuilt --prod`.
+
+The marketing app currently has no required runtime secrets. Store `MARKETING_VERCEL_PROJECT_ID` in
+Infisical `prod` + `/release` so the release workflow can build and deploy the correct Vercel
+project.
 
 ### Render
 
@@ -288,6 +306,8 @@ bun run release:smoke
 
 - CI is green on `main`.
 - Infisical `prod` + `/web`, `/goat`, `/runner`, and `/release` are populated.
+- `MARKETING_VERCEL_PROJECT_ID` in `/release` points to a Vercel project rooted at
+  `apps/marketing`.
 - Infisical syncs to Vercel and Render are enabled.
 - GitHub Actions production vars for Infisical OIDC are set.
 - Legacy web and Goat use separate WorkOS Application credentials, and both production callbacks work.

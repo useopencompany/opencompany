@@ -208,6 +208,7 @@ Put these keys in Infisical `prod` + `/release`:
 | `VERCEL_ORG_ID` | Vercel org/team id. |
 | `VERCEL_PROJECT_ID` | Vercel web project id. |
 | `GOAT_VERCEL_PROJECT_ID` | Vercel Goat project id. |
+| `MARKETING_VERCEL_PROJECT_ID` | Vercel marketing project id. |
 | `RENDER_SERVICE_ID` | Render service id for the runner. |
 | `RENDER_API_KEY` | Render API key used to trigger and poll runner deploys. |
 | `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |

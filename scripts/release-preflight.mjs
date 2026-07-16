@@ -124,6 +124,7 @@ const groups = {
       "VERCEL_ORG_ID",
       "VERCEL_PROJECT_ID",
       "GOAT_VERCEL_PROJECT_ID",
+      "MARKETING_VERCEL_PROJECT_ID",
       "RENDER_SERVICE_ID",
       "RENDER_API_KEY",
       "PRODUCTION_WEB_URL",

@@ -15,6 +15,7 @@ view.
 | Vercel Preview | Per-PR preview web base env | Infisical `dev` + `/web` sync; per-PR dynamic values injected at deploy time by `pr-preview.yml` |
 | Vercel Production | Production web app and Inngest endpoint | Infisical `prod` + `/web` sync |
 | Vercel Goat | Experimental `apps/goat` project/domain | Infisical `prod` + `/goat` sync, with a separate WorkOS Application and Goat-specific app URL |
+| Vercel Marketing | Production marketing site | No runtime secrets currently; release uses `MARKETING_VERCEL_PROJECT_ID` from Infisical `prod` + `/release` |
 | Render Production | Production runner service | Infisical `prod` + `/runner` sync |
 | Render Preview (per-PR) | Ephemeral per-PR runner / Electric / Durable Streams | Created by `scripts/preview-provision.mjs`; env minted by the orchestrator (not a static sync) |
 | GitHub Actions `production` | Release workflow migrations/deploy orchestration | Infisical OIDC fetch from `prod` + `/release` |
@@ -363,6 +364,7 @@ Infisical `prod` + `/release` secrets:
 | `VERCEL_ORG_ID` | Vercel team/org id. |
 | `VERCEL_PROJECT_ID` | Vercel web project id. |
 | `GOAT_VERCEL_PROJECT_ID` | Vercel Goat project id. |
+| `MARKETING_VERCEL_PROJECT_ID` | Vercel marketing project id. |
 | `RENDER_SERVICE_ID` | Render service id for `opencompany-runner`. |
 | `RENDER_API_KEY` | Render API key used to trigger and poll runner deploys. |
 | `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |
