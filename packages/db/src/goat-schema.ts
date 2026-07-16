@@ -57,17 +57,20 @@ export type GoatIntegrationProvider =
   | "github"
   | "jamie"
   | "slack"
+  | "slack_bot"
   | "hubspot"
   | "granola";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear) are always personal. Installation-bound
-// connections (GitHub App org installs, Jamie webhook secrets) are workspace
-// plumbing: they carry no human identity, must survive the connecting admin
-// leaving, and are manageable by any workspace admin.
+// connections (GitHub App org installs, Jamie webhook secrets, the Slack
+// answer-bot install) are workspace plumbing: they carry no human identity,
+// must survive the connecting admin leaving, and are manageable by any
+// workspace admin.
 export const WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS = [
   "github",
   "jamie",
+  "slack_bot",
 ] as const satisfies readonly GoatIntegrationProvider[];
 export function isWorkspaceOwnedGoatIntegrationProvider(provider: GoatIntegrationProvider) {
   return (
@@ -101,6 +104,8 @@ export type GoatBrainSourceProvider =
   | "google_drive"
   | "hubspot"
   | "granola";
+// "slack_bot" rows are answer *destinations* (which channels a brain answers
+// in via the Slack bot), not ingestion sources; no ingestion path reads them.
 export type GoatBrainSourceConfigProvider =
   | "jamie"
   | "gmail"
@@ -108,6 +113,7 @@ export type GoatBrainSourceConfigProvider =
   | "github"
   | "slack"
   | "linear"
+  | "slack_bot"
   | "hubspot"
   | "granola";
 export type GoatBrainSourceType =
@@ -1186,13 +1192,19 @@ export const goatIntegrations = goat.table(
     workspaceProviderExternalIdx: uniqueIndex("goat_integrations_workspace_provider_external_idx")
       .on(table.workspaceId, table.provider, table.externalId)
       .where(sql`${table.workspaceId} IS NOT NULL`),
+    // The answer bot is a single workspace-level destination. Reinstalling it
+    // for another Slack team updates the existing row so its brain routes stay
+    // manageable instead of leaving a hidden installation active.
+    slackBotWorkspaceIdx: uniqueIndex("goat_integrations_slack_bot_workspace_idx")
+      .on(table.workspaceId, table.provider)
+      .where(sql`${table.workspaceId} IS NOT NULL AND ${table.provider} = 'slack_bot'`),
     workspaceProviderIdx: index("goat_integrations_workspace_provider_idx").on(
       table.workspaceId,
       table.provider,
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1241,7 +1253,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1347,7 +1359,7 @@ export const goatBrainSources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_brain_sources_provider_check",
-      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear', 'hubspot', 'granola')`,
+      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear', 'slack_bot', 'hubspot', 'granola')`,
     ),
   }),
 );
@@ -1649,6 +1661,19 @@ export const goatBrainImportCandidates = goat.table(
     ),
   }),
 );
+
+// Durable delivery lease for Slack answer-bot events. Slack can retry a failed
+// HTTP delivery while the original after() task is still running, so event_id
+// is claimed before scheduling work and can be reclaimed only after the task's
+// maximum runtime has elapsed.
+export const goatSlackBotEventClaims = goat.table("slack_bot_event_claims", {
+  eventId: text("event_id").primaryKey(),
+  teamId: text("team_id").notNull(),
+  claimId: text("claim_id").notNull(),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 // Raw Slack message buffer: the events webhook inserts one row per relevant
 // message; the runner's flush sweeper batches unflushed rows per channel into a
