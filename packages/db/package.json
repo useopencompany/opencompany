@@ -64,6 +64,10 @@
       "types": "./src/goat-gmail.ts",
       "default": "./src/goat-gmail.ts"
     },
+    "./goat-granola": {
+      "types": "./src/goat-granola.ts",
+      "default": "./src/goat-granola.ts"
+    },
     "./goat-google-drive": {
       "types": "./src/goat-google-drive.ts",
       "default": "./src/goat-google-drive.ts"

@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   cancelGoatBrainImport,
   confirmGoatBrainImport,
+  matchesGoatBrainImportSelectedScope,
   normalizeGoatCompanyUrl,
+  rankStoredGoatBrainImportCandidate,
   retryGoatBrainImportDiscovery,
 } from "./goat-brain-import";
 
@@ -95,5 +97,29 @@ describe("normalizeGoatCompanyUrl", () => {
     "https://user:secret@example.com",
   ])("rejects non-public input %s", (value) => {
     expect(() => normalizeGoatCompanyUrl(value)).toThrow();
+  });
+});
+
+describe("Granola context import", () => {
+  const granolaItem = {
+    content: {
+      meeting: {
+        summaryMarkdown: "Decided to ship the new onboarding flow.",
+        transcript: [{ text: "We should launch on Monday." }],
+      },
+    },
+  };
+
+  it("accepts connected Granola notes without provider-specific scope filters", () => {
+    expect(matchesGoatBrainImportSelectedScope("granola", granolaItem, {})).toBe(true);
+  });
+
+  it("ranks substantive Granola notes as import candidates", () => {
+    expect(rankStoredGoatBrainImportCandidate("granola", granolaItem)).toBeGreaterThan(100);
+    expect(
+      rankStoredGoatBrainImportCandidate("granola", {
+        content: { meeting: { summaryMarkdown: "", transcript: [] } },
+      }),
+    ).toBe(Number.NEGATIVE_INFINITY);
   });
 });

@@ -48,6 +48,7 @@ import {
   type NormalizedGoatChatCaptureSourceItem,
   type NormalizedGoatImportSourceItem,
   type NormalizedGoogleDriveDocumentSourceItem,
+  type NormalizedGranolaMeetingSourceItem,
   type NormalizedJamieMeetingSourceItem,
   type NormalizedLinearIssueContent,
   type NormalizedLinearIssueSourceItem,
@@ -72,6 +73,13 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { writeLocalBrainFile } from "./goat-brain";
 import { buildGmailThreadEvidenceWrite } from "./goat-brain-gmail-writes";
+import {
+  buildGranolaMeetingEvidenceWrite,
+  formatGranolaParticipants,
+  formatGranolaTranscript,
+  formatGranolaTranscriptExcerpt,
+  GRANOLA_MEETING_FOLDER,
+} from "./goat-brain-granola-writes";
 import {
   buildJamieMeetingEvidenceWrite,
   formatActionItems,
@@ -255,6 +263,11 @@ export const GOAT_BRAIN_ENRICHMENT_SYSTEM_ADDENDUM = [
 ].join("\n");
 
 export const JAMIE_MEETING_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
+  mission: "folds one source item into a single brain of Markdown knowledge documents.",
+  skipRule: `If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}.`,
+});
+
+export const GRANOLA_MEETING_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
   mission: "folds one source item into a single brain of Markdown knowledge documents.",
   skipRule: `If the source content is not brain-worthy (spam, empty, pure noise), make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}.`,
 });
@@ -696,6 +709,55 @@ function boundedTranscriptMarkdown(item: NormalizedJamieMeetingSourceItem) {
   const full = formatTranscript(segments);
   if (Buffer.byteLength(full, "utf8") <= PROMPT_TRANSCRIPT_BYTES) return full;
   return formatTranscriptExcerpt(segments, PROMPT_TRANSCRIPT_BYTES);
+}
+
+export function buildGranolaMeetingAgentIngestPrompt(
+  item: NormalizedGranolaMeetingSourceItem,
+  context: {
+    meetingBrainId: string;
+    evidenceBrainId: string;
+    truncatedTranscript: boolean;
+  },
+) {
+  const meeting = item.content.meeting;
+  const note = item.content.note;
+  const transcript = boundedGranolaTranscriptMarkdown(item);
+  return [
+    "Ingest this completed meeting from Granola (an AI meeting notetaker) into the brain.",
+    "",
+    "A raw evidence snapshot of these notes already exists in this brain:",
+    `- Evidence record: [[evidence:${context.evidenceBrainId}|Granola meeting notes]] (id: ${context.evidenceBrainId})`,
+    context.truncatedTranscript
+      ? "- The evidence transcript was truncated to fit the file size limit."
+      : null,
+    "",
+    "Required outcome, all scoped to this brain:",
+    `1. A meeting page with id "${context.meetingBrainId}" in the "${GRANOLA_MEETING_FOLDER}" folder (type: meeting) whose compiled truth synthesizes the meeting: what it was, decisions, action items, and [[page:...]] links to every attendee and company page. If the folder is missing, run folder create first. Link the evidence record. Do not paste the transcript.`,
+    "2. A person page per human attendee (skip notetaker bots), created or updated, with the meeting on their timeline (use --evidence-id and --source-ref). Update their compiled truth only when the meeting changes their state of play (role, company, plans).",
+    "3. Company pages for organizations that are clearly central to the meeting, with the meeting on their timelines. Do not create company pages from a bare email domain alone.",
+    "4. Backlinks between all of these pages per the iron law.",
+    "",
+    `Source ref: ${item.sourceRef}`,
+    `Occurred at: ${item.occurredAt}`,
+    `Captured at: ${item.capturedAt}`,
+    note.webUrl ? `Granola note URL: ${note.webUrl}` : null,
+    "",
+    `## Meeting title\n${meeting.title}`,
+    `## Meeting metadata\n- Started: ${meeting.startTime}${meeting.endTime ? `\n- Ended: ${meeting.endTime}` : ""}`,
+    `## Participants\n${formatGranolaParticipants(item)}`,
+    `## Summary (from Granola)\n${truncateByBytes(meeting.summaryMarkdown, PROMPT_SUMMARY_BYTES)}`,
+    `## Transcript\n${transcript}`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
+function boundedGranolaTranscriptMarkdown(item: NormalizedGranolaMeetingSourceItem) {
+  const segments = item.content.meeting.transcript;
+  if (segments.length === 0) return "No transcript provided by Granola.";
+  const full = formatGranolaTranscript(segments);
+  if (Buffer.byteLength(full, "utf8") <= PROMPT_TRANSCRIPT_BYTES) return full;
+  return formatGranolaTranscriptExcerpt(segments, PROMPT_TRANSCRIPT_BYTES);
 }
 
 export function buildGoatChatCaptureAgentIngestPrompt(
@@ -1149,6 +1211,46 @@ export async function runJamieMeetingAgentIngest(
     env: input.env,
     system: JAMIE_MEETING_INGEST_SYSTEM_PROMPT,
     buildPrompt: () => buildJamieMeetingAgentIngestPrompt(input.item, evidence),
+    prepareRoot: (root) =>
+      writeLocalBrainFile(root, evidence.evidencePath, evidence.evidenceContent),
+    noMutationOutcome: "skip",
+    ...(input.importRunId ? { importRunId: input.importRunId } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+    deps,
+  });
+
+  return {
+    ...session,
+    evidenceBrainId: evidence.evidenceBrainId,
+    meetingBrainId: evidence.meetingBrainId,
+    truncatedTranscript: evidence.truncatedTranscript,
+  };
+}
+
+export async function runGranolaMeetingAgentIngest(
+  input: {
+    jobId?: string;
+    userWorkosId: string;
+    brainRef: string | null;
+    item: NormalizedGranolaMeetingSourceItem;
+    env: GoatBrainAgentIngestEnv;
+    importRunId?: string | null;
+    signal?: AbortSignal;
+  },
+  deps: GoatBrainAgentIngestDeps = {},
+): Promise<Record<string, unknown>> {
+  // The transcript snapshot is written deterministically before the agent
+  // runs: evidence is the dump, and a 400KB transcript should not round-trip
+  // through model tool calls.
+  const evidence = buildGranolaMeetingEvidenceWrite(input.item);
+  const session = await runBrainAgentIngestSession({
+    jobId: input.jobId ?? input.item.sourceRef,
+    userWorkosId: input.userWorkosId,
+    brainRef: input.brainRef,
+    sourceRef: input.item.sourceRef,
+    env: input.env,
+    system: GRANOLA_MEETING_INGEST_SYSTEM_PROMPT,
+    buildPrompt: () => buildGranolaMeetingAgentIngestPrompt(input.item, evidence),
     prepareRoot: (root) =>
       writeLocalBrainFile(root, evidence.evidencePath, evidence.evidenceContent),
     noMutationOutcome: "skip",

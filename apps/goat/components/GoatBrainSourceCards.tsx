@@ -70,7 +70,9 @@ export function resolveGoatBrainSourceState(
               ? details?.gmail.integration
               : providerId === "google_drive"
                 ? details?.googleDrive.integration
-                : undefined;
+                : providerId === "granola"
+                  ? details?.granola.integration
+                  : undefined;
   const jamieReady =
     providerId === "jamie" ? Boolean(details?.jamie.integration.apiKeyConfigured) : false;
   const connected = providerId === "jamie" ? jamieReady : Boolean(integration?.connected);
@@ -426,7 +428,7 @@ export function SourceProviderCard({
   );
 }
 
-type GoatPersonalBrainSourceProvider = "slack" | "linear" | "gmail" | "google_drive";
+type GoatPersonalBrainSourceProvider = "slack" | "linear" | "gmail" | "google_drive" | "granola";
 
 function isPersonalSourceProvider(
   providerId: GoatBrainSourceProviderDef["id"],
@@ -435,7 +437,8 @@ function isPersonalSourceProvider(
     providerId === "slack" ||
     providerId === "linear" ||
     providerId === "gmail" ||
-    providerId === "google_drive"
+    providerId === "google_drive" ||
+    providerId === "granola"
   );
 }
 
@@ -450,6 +453,8 @@ const ADD_SOURCE_CONSENT_COPY: Record<GoatPersonalBrainSourceProvider, string> =
     "Changes to the files and folders you select will be summarized into this brain and visible to everyone with access to it.",
   linear:
     "Issue and comment activity from the teams you select will be summarized into this brain and visible to everyone with access to it.",
+  granola:
+    "Your Granola meeting notes — including what other participants said — will be summarized into this brain and visible to everyone with access to it.",
 };
 
 const ADD_SOURCE_CONSENT_FOOTER =

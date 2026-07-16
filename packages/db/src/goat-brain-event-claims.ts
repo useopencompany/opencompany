@@ -5,7 +5,7 @@ import { goatBrainSourceEventClaims } from "./goat-schema";
 
 type DbLike = any;
 
-export type GoatBrainClaimProvider = "slack" | "gmail" | "linear";
+export type GoatBrainClaimProvider = "slack" | "gmail" | "linear" | "granola";
 
 // Claims provider-native event identities for a brain. Inserts are
 // ON CONFLICT DO NOTHING against the (brain, provider, event_key) unique
@@ -74,6 +74,31 @@ export async function attributeGoatBrainSourceEventClaims(input: {
         inArray(goatBrainSourceEventClaims.eventKey, keys),
       ),
     );
+}
+
+// Read-only claim lookup: which of these brains already ingested this event.
+// Lets a poller skip fetching expensive payloads (e.g. Granola transcripts)
+// for notes every routed brain has seen, without writing a claim it might not
+// be able to honor if the payload fetch fails.
+export async function listGoatBrainSourceEventClaimedBrainRefs(input: {
+  brainRefs: readonly string[];
+  sourceProvider: GoatBrainClaimProvider;
+  eventKey: string;
+  db?: DbLike;
+}): Promise<Set<string>> {
+  if (input.brainRefs.length === 0) return new Set();
+  const db = input.db ?? getDb();
+  const rows = await db
+    .select({ brainId: goatBrainSourceEventClaims.brainId })
+    .from(goatBrainSourceEventClaims)
+    .where(
+      and(
+        inArray(goatBrainSourceEventClaims.brainId, [...input.brainRefs]),
+        eq(goatBrainSourceEventClaims.sourceProvider, input.sourceProvider),
+        eq(goatBrainSourceEventClaims.eventKey, input.eventKey),
+      ),
+    );
+  return new Set(rows.map((row: { brainId: string }) => row.brainId));
 }
 
 export function newGoatBrainSourceEventClaimId() {

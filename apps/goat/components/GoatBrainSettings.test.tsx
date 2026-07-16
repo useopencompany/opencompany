@@ -273,6 +273,7 @@ describe("GoatBrainSourceCards", () => {
               },
             ],
             google_drive: [],
+            granola: [],
           },
         })}
         onChanged={async () => {}}
@@ -354,6 +355,7 @@ function brainSourceDetails(
       linear: [],
       gmail: [],
       google_drive: [],
+      granola: [],
     },
     jamie: {
       integration: jamieState({
@@ -413,6 +415,17 @@ function brainSourceDetails(
         status: "not_connected",
         integrationId: null,
         accountEmail: null,
+        statusReason: null,
+      },
+    },
+    granola: {
+      integration: {
+        provider: "granola",
+        connected: false,
+        status: "not_connected",
+        integrationId: null,
+        accountEmail: null,
+        accountName: null,
         statusReason: null,
       },
     },

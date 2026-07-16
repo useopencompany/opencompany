@@ -171,7 +171,7 @@ export async function discoverStoredGoatBrainImportCandidates(input: {
     .limit(500);
   const rows = discoveredRows
     .filter((row: { normalizedPayload: unknown }) =>
-      matchesSelectedScope(input.provider, row.normalizedPayload, selection.config),
+      matchesGoatBrainImportSelectedScope(input.provider, row.normalizedPayload, selection.config),
     )
     .slice(0, 50);
   if (rows.length === 0)
@@ -199,7 +199,7 @@ export async function discoverStoredGoatBrainImportCandidates(input: {
     .filter((row: { id: string; normalizedPayload: unknown }) => !known.has(row.id))
     .map((row: { id: string; occurredAt: Date; normalizedPayload: unknown }) => ({
       ...row,
-      score: rankStoredCandidate(input.provider, row.normalizedPayload),
+      score: rankStoredGoatBrainImportCandidate(input.provider, row.normalizedPayload),
     }))
     .filter((row: { score: number }) => Number.isFinite(row.score))
     .sort(
@@ -517,7 +517,7 @@ function ipv4FromMappedIpv6(value: string) {
   return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
 }
 
-function rankStoredCandidate(
+export function rankStoredGoatBrainImportCandidate(
   provider: Exclude<GoatBrainImportProvider, "public_web">,
   value: unknown,
 ) {
@@ -541,6 +541,12 @@ function rankStoredCandidate(
       );
     }
     case "jamie": {
+      const meeting = asRecord(content.meeting);
+      const substance =
+        String(meeting.summaryMarkdown ?? "").length + arrayLength(meeting.transcript);
+      return substance > 0 ? 100 + substance : Number.NEGATIVE_INFINITY;
+    }
+    case "granola": {
       const meeting = asRecord(content.meeting);
       const substance =
         String(meeting.summaryMarkdown ?? "").length + arrayLength(meeting.transcript);
@@ -584,7 +590,7 @@ function rankStoredCandidate(
   }
 }
 
-function matchesSelectedScope(
+export function matchesGoatBrainImportSelectedScope(
   provider: Exclude<GoatBrainImportProvider, "public_web">,
   value: unknown,
   config: Record<string, unknown> | undefined,
@@ -622,6 +628,7 @@ function matchesSelectedScope(
       );
     }
     case "jamie":
+    case "granola":
       return true;
   }
 }
