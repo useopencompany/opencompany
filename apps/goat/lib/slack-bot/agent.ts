@@ -18,7 +18,7 @@ import {
 import { GOAT_BRAIN_TOOL_DESCRIPTION } from "@/lib/prompts";
 import { createGoatSlackBotSystemPrompt } from "@/lib/prompts/slack-bot";
 
-export const GOAT_SLACK_BOT_MODEL = "anthropic/claude-sonnet-5";
+export const GOAT_SLACK_BOT_MODEL = "moonshotai/kimi-k2.6";
 const GOAT_SLACK_BOT_MAX_STEPS = 6;
 
 export type GoatSlackBotBrainTarget = {
