@@ -370,29 +370,31 @@ export type GoatLocalCodexTurnStatus =
   | "interrupted";
 export type GoatLocalCodexCommandKind = "start_turn" | "steer" | "interrupt" | "close";
 export type GoatLocalCodexCommandStatus = "queued" | "claimed" | "succeeded" | "failed";
-export type GoatLocalCodexEventType =
-  | "assistant.delta"
-  | "assistant.completed"
-  | "reasoning.completed"
-  | "command.started"
-  | "command.output"
-  | "command.completed"
-  | "command.failed"
-  | "file_change.started"
-  | "file_change.completed"
-  | "mcp_tool.started"
-  | "mcp_tool.completed"
-  | "web_search.started"
-  | "web_search.completed"
-  | "plan.updated"
-  | "goal.updated"
-  | "question.requested"
-  | "approval.requested"
-  | "turn.started"
-  | "turn.completed"
-  | "usage.updated"
-  | "error"
-  | "unknown";
+export const GOAT_LOCAL_CODEX_EVENT_TYPES = [
+  "assistant.delta",
+  "assistant.completed",
+  "reasoning.completed",
+  "command.started",
+  "command.output",
+  "command.completed",
+  "command.failed",
+  "file_change.started",
+  "file_change.completed",
+  "mcp_tool.started",
+  "mcp_tool.completed",
+  "web_search.started",
+  "web_search.completed",
+  "plan.updated",
+  "goal.updated",
+  "question.requested",
+  "approval.requested",
+  "turn.started",
+  "turn.completed",
+  "usage.updated",
+  "error",
+  "unknown",
+] as const;
+export type GoatLocalCodexEventType = (typeof GOAT_LOCAL_CODEX_EVENT_TYPES)[number];
 
 export type GoatCodexChatSessionStatus = GoatLocalCodexSessionStatus;
 export type GoatCodexChatTurnStatus = GoatLocalCodexTurnStatus;
@@ -400,6 +402,11 @@ export type GoatCodexChatEventType = Exclude<
   GoatLocalCodexEventType,
   "assistant.delta" | "command.output"
 >;
+export const GOAT_CODEX_CHAT_EVENT_TYPES: readonly GoatCodexChatEventType[] =
+  GOAT_LOCAL_CODEX_EVENT_TYPES.filter(
+    (eventType): eventType is GoatCodexChatEventType =>
+      eventType !== "assistant.delta" && eventType !== "command.output",
+  );
 
 export type GoatCodexChatTurnSettings = {
   reasoningEffort?: CodexReasoningEffort;
@@ -2688,7 +2695,10 @@ export const goatLocalCodexEvents = goat.table(
     ),
     typeCheck: check(
       "goat_local_codex_events_type_check",
-      sql`${table.type} IN ('assistant.delta', 'assistant.completed', 'reasoning.completed', 'command.started', 'command.output', 'command.completed', 'command.failed', 'plan.updated', 'goal.updated', 'question.requested', 'approval.requested', 'turn.started', 'turn.completed', 'usage.updated', 'error', 'unknown')`,
+      sql`${table.type} IN (${sql.join(
+        GOAT_LOCAL_CODEX_EVENT_TYPES.map((eventType) => sql`${eventType}`),
+        sql`, `,
+      )})`,
     ),
   }),
 );
@@ -2810,7 +2820,10 @@ export const goatCodexChatEvents = goat.table(
     ),
     typeCheck: check(
       "goat_codex_chat_events_type_check",
-      sql`${table.type} IN ('assistant.completed', 'reasoning.completed', 'command.started', 'command.completed', 'command.failed', 'plan.updated', 'goal.updated', 'question.requested', 'approval.requested', 'turn.started', 'turn.completed', 'usage.updated', 'error', 'unknown')`,
+      sql`${table.type} IN (${sql.join(
+        GOAT_CODEX_CHAT_EVENT_TYPES.map((eventType) => sql`${eventType}`),
+        sql`, `,
+      )})`,
     ),
   }),
 );

@@ -40,6 +40,7 @@ Use these when they clarify review risk:
 
 ## Conventions
 
-- Add a Drizzle migration for any change to `packages/db/src/schema.ts`.
+- Add a Drizzle migration for any change to `packages/db/src/schema.ts` or
+  `packages/db/src/goat-schema.ts`. CI enforces this on pull requests.
 - Update `.env.example` and the relevant doc when adding an env var.
 - Prefer unit-testable pure modules (see `apps/web/lib/onboarding/validation.ts`) over deeply mocked server-action tests.
