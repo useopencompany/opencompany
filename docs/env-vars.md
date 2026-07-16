@@ -376,17 +376,18 @@ Render also injects `PORT` and `RENDER_GIT_COMMIT`; do not set them manually unl
 
 ## GitHub Actions CI Cache
 
-PR quality jobs use Vercel Remote Cache when these repository-level GitHub Actions values are set:
+PR quality jobs use Vercel Remote Cache when these repository-level GitHub Actions secrets are set:
 
 | Name | Storage | Purpose |
 |---|---|---|
-| `TURBO_TEAM` | Repository variable | Vercel team slug that owns the shared Turborepo cache. |
-| `TURBO_TOKEN` | Repository secret | Vercel access token allowed to read and write the team's remote cache. |
+| `TURBO_TEAM` | Infisical `prod` + `/ci/turbo` | Vercel team slug that owns the shared Turborepo cache. |
+| `TURBO_TOKEN` | Infisical `prod` + `/ci/turbo` | Vercel access token allowed to read and write the team's remote cache. |
 
-The workflow remains functional without them, but every fresh runner executes all selected Turbo
-tasks locally. Fork pull requests do not receive `TURBO_TOKEN` and therefore fall back to local
-caching. Developers may set the same optional values locally to share cached tasks with CI; never
-commit a real token.
+Infisical is the source of truth; publish both values to GitHub Actions as repository secrets after
+creation or rotation. Do not fetch them through the Preview OIDC identity in this workflow: PR code
+runs inside these jobs, while repository secrets are automatically withheld from fork pull requests.
+The workflow remains functional without them and falls back to local execution. Developers may set
+the same optional values locally to share cached tasks with CI; never commit a real token.
 
 ## GitHub Actions Production
 
