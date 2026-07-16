@@ -125,7 +125,7 @@ const GOAT_BILLING_LOCAL_ENV_KEYS = [
   "CRON_SECRET",
 ];
 // Bumped from "goat_pro_monthly_usd" (flat USD 99) when Pro moved back to
-// per-seat pricing (USD 18/seat/month); a fresh key avoids tripping the
+// per-seat pricing (USD 17/seat/month); a fresh key avoids tripping the
 // terms-mismatch guard on Stripe accounts that still hold the old test Price.
 const GOAT_PRO_PRICE_LOOKUP_KEY = "goat_pro_seat_monthly_usd";
 const OBSERVABILITY_ENV_KEYS = [
@@ -532,7 +532,7 @@ function isExpectedGoatProPrice(price) {
   return (
     price?.active === true &&
     price.currency === "usd" &&
-    price.unit_amount === 1_800 &&
+    price.unit_amount === 1_700 &&
     price.tax_behavior === "exclusive" &&
     price.recurring?.interval === "month" &&
     price.recurring?.interval_count === 1 &&
@@ -587,7 +587,7 @@ function ensureGoatProTestPrice() {
     "--currency",
     "usd",
     "--unit-amount",
-    "1800",
+    "1700",
     "--product",
     product.value.id,
     "--nickname",

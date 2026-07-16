@@ -4,6 +4,7 @@ import {
   Files,
   FileText,
   GitBranch,
+  Handshake,
   ListTodo,
   Mail,
   MessageSquare,
@@ -95,5 +96,14 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     connectionKind: "oauth",
     available: true,
     connectHref: "/api/integrations/linear-ingest/start?returnTo=/settings/integrations",
+  },
+  {
+    id: "hubspot",
+    name: "HubSpot",
+    description: "Ingest CRM activity on contacts, companies, and deals into this brain.",
+    icon: Handshake,
+    connectionKind: "oauth",
+    available: true,
+    connectHref: "/api/integrations/hubspot/start?returnTo=/settings/integrations",
   },
 ];

@@ -51,6 +51,18 @@ export type GoatLinearSourceProviderState = {
   statusReason: string | null;
 };
 
+// The HubSpot brain-source connection (a HubSpot OAuth app with webhooks).
+// Rows key external_id on the HubSpot portal id.
+export type GoatHubspotSourceProviderState = {
+  provider: "hubspot";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountEmail: string | null;
+  hubDomain: string | null;
+  statusReason: string | null;
+};
+
 export type GoatGitHubProviderState = {
   provider: "github";
   connected: boolean;
@@ -122,6 +134,7 @@ export type GoatPersonalAccountProvider =
   | "google_drive"
   | "linear"
   | "slack"
+  | "hubspot"
   | "granola";
 
 export type GoatIntegrationState = {
@@ -172,6 +185,7 @@ export function goatPersonalAccountsFromRows(
     google_drive: [],
     linear: [],
     slack: [],
+    hubspot: [],
     granola: [],
   };
   for (const row of rows) {
@@ -188,6 +202,7 @@ export function goatPersonalAccountsFromRows(
       row.provider === "google_calendar" ||
       row.provider === "google_drive" ||
       row.provider === "slack" ||
+      row.provider === "hubspot" ||
       row.provider === "granola"
     ) {
       personalAccounts[row.provider].push(accountViewFromRow(row.provider, row));
