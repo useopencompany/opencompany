@@ -245,10 +245,11 @@ Hosted live Checkout also requires `GOAT_STRIPE_CHECKOUT_ENABLED=true`; keep it 
 business's Stripe Tax registrations are configured.
 
 Goat subscription and credit top-up Checkouts accept promotion codes. For internal no-cost tests,
-create a 100%-off, once-duration coupon and a customer-facing promotion code in Stripe test mode.
-Scope subscription-only coupons to the OpenCompany Pro product so they cannot discount credit
-top-ups. Use an expiry, redemption limit, or customer restriction as appropriate; create live-mode
-codes separately and keep them tightly restricted.
+create a 100%-off coupon and a customer-facing promotion code in Stripe test mode. Leave the coupon
+unrestricted when it should work for both subscriptions and credit top-ups; scope subscription-only
+coupons to the OpenCompany Pro product. Use `once` duration for one free subscription invoice or
+`forever` for free renewals too. Add an expiry, redemption limit, or customer restriction unless the
+code is deliberately permanent; create live-mode codes separately and keep them private.
 
 Then pull them locally:
 
