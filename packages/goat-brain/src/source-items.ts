@@ -9,7 +9,8 @@ export type BrainSourceProvider =
   | "linear"
   | "github"
   | "gmail"
-  | "google_drive";
+  | "google_drive"
+  | "granola";
 export type BrainSourceType =
   | "meeting"
   | "run"
@@ -207,6 +208,45 @@ export type NormalizedJamieMeetingContent = {
 export type NormalizedJamieMeetingSourceItem =
   NormalizedBrainSourceItem<NormalizedJamieMeetingContent> & {
     sourceProvider: "jamie";
+    sourceType: "meeting";
+  };
+
+export type NormalizedGranolaMeetingParticipant = {
+  name?: string;
+  email?: string;
+};
+
+export type NormalizedGranolaMeetingTranscriptSegment = {
+  text: string;
+  speaker?: string;
+  startedAt?: string;
+  endedAt?: string;
+};
+
+export type NormalizedGranolaMeetingContent = {
+  owner: {
+    name?: string;
+    email?: string;
+  };
+  note: {
+    id: string;
+    webUrl?: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  meeting: {
+    title: string;
+    startTime: string;
+    endTime?: string;
+    summaryMarkdown: string;
+    participants: NormalizedGranolaMeetingParticipant[];
+    transcript: NormalizedGranolaMeetingTranscriptSegment[];
+  };
+};
+
+export type NormalizedGranolaMeetingSourceItem =
+  NormalizedBrainSourceItem<NormalizedGranolaMeetingContent> & {
+    sourceProvider: "granola";
     sourceType: "meeting";
   };
 
@@ -1529,6 +1569,171 @@ export function isNormalizedJamieMeetingSourceItem(
     !!item.content &&
     typeof item.content === "object"
   );
+}
+
+// Normalizes one note from the Granola public API (GET /v1/notes/{id} with
+// include=transcript). Granola only lists notes whose AI summary and
+// transcript are generated, but the guard on the summary stays defensive.
+export function normalizeGranolaMeetingNote(
+  payload: unknown,
+  options: { capturedAt?: string } = {},
+): NormalizedGranolaMeetingSourceItem {
+  const root = readObject(payload, "note");
+  const noteId = readString(root.id, "note.id");
+  const calendarEvent =
+    root.calendar_event && typeof root.calendar_event === "object"
+      ? readObject(root.calendar_event, "note.calendar_event")
+      : null;
+  const title =
+    optionalString(root.title) ??
+    (calendarEvent ? optionalString(calendarEvent.event_title) : undefined) ??
+    "Untitled meeting";
+  const createdAt = readIsoString(root.created_at, "note.created_at");
+  const updatedAt = optionalIsoString(root.updated_at) ?? createdAt;
+  const webUrl = optionalString(root.web_url);
+  const summaryMarkdown =
+    optionalString(root.summary_markdown) ?? optionalString(root.summary_text);
+  if (!summaryMarkdown) {
+    throw invalid("note.summary_markdown or note.summary_text is required", "invalid_summary");
+  }
+  const startTime =
+    (calendarEvent ? optionalIsoString(calendarEvent.scheduled_start_time) : undefined) ??
+    createdAt;
+  const endTime = calendarEvent ? optionalIsoString(calendarEvent.scheduled_end_time) : undefined;
+  const participants = normalizeGranolaParticipants(root.attendees, calendarEvent);
+  const transcript = normalizeGranolaTranscript(root.transcript);
+  const ownerObject =
+    root.owner && typeof root.owner === "object" ? readObject(root.owner, "note.owner") : null;
+  const ownerName = ownerObject ? optionalString(ownerObject.name) : undefined;
+  const ownerEmail = ownerObject ? optionalString(ownerObject.email) : undefined;
+  const capturedAt = optionalIsoString(options.capturedAt) ?? updatedAt;
+
+  const contentHashInput = {
+    sourceProvider: "granola",
+    sourceType: "meeting",
+    externalId: noteId,
+    title,
+    startTime,
+    ...(endTime ? { endTime } : {}),
+    summaryMarkdown,
+    participants,
+    transcript,
+  };
+
+  return {
+    sourceProvider: "granola",
+    sourceType: "meeting",
+    externalId: noteId,
+    sourceRef: `granola:note:${noteId}`,
+    title,
+    occurredAt: startTime,
+    capturedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: {
+      owner: {
+        ...(ownerName ? { name: ownerName } : {}),
+        ...(ownerEmail ? { email: ownerEmail } : {}),
+      },
+      note: {
+        id: noteId,
+        ...(webUrl ? { webUrl } : {}),
+        createdAt,
+        updatedAt,
+      },
+      meeting: {
+        title,
+        startTime,
+        ...(endTime ? { endTime } : {}),
+        summaryMarkdown,
+        participants,
+        transcript,
+      },
+    },
+  };
+}
+
+export function isNormalizedGranolaMeetingSourceItem(
+  value: unknown,
+): value is NormalizedGranolaMeetingSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedGranolaMeetingSourceItem>;
+  return (
+    item.sourceProvider === "granola" &&
+    item.sourceType === "meeting" &&
+    typeof item.externalId === "string" &&
+    typeof item.sourceRef === "string" &&
+    typeof item.title === "string" &&
+    typeof item.occurredAt === "string" &&
+    typeof item.capturedAt === "string" &&
+    typeof item.contentHash === "string" &&
+    !!item.content &&
+    typeof item.content === "object"
+  );
+}
+
+function normalizeGranolaParticipants(
+  attendees: unknown,
+  calendarEvent: Record<string, unknown> | null,
+): NormalizedGranolaMeetingParticipant[] {
+  const participants: NormalizedGranolaMeetingParticipant[] = [];
+  const seen = new Set<string>();
+  const push = (name: string | undefined, email: string | undefined) => {
+    if (!name && !email) return;
+    const key = (email ?? name ?? "").toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    participants.push({ ...(name ? { name } : {}), ...(email ? { email } : {}) });
+  };
+  if (Array.isArray(attendees)) {
+    for (const attendee of attendees) {
+      if (!attendee || typeof attendee !== "object" || Array.isArray(attendee)) continue;
+      const record = attendee as Record<string, unknown>;
+      push(optionalString(record.name), optionalString(record.email));
+    }
+  }
+  // Fall back to the calendar invite list when Granola reports no attendees.
+  if (participants.length === 0 && calendarEvent) {
+    if (Array.isArray(calendarEvent.invitees)) {
+      for (const invitee of calendarEvent.invitees) {
+        if (!invitee || typeof invitee !== "object" || Array.isArray(invitee)) continue;
+        push(undefined, optionalString((invitee as Record<string, unknown>).email));
+      }
+    }
+    push(undefined, optionalString(calendarEvent.organiser));
+  }
+  return participants;
+}
+
+function normalizeGranolaTranscript(value: unknown): NormalizedGranolaMeetingTranscriptSegment[] {
+  // Transcript is optional on the note payload (it is only present with
+  // include=transcript); an empty transcript degrades to summary-only ingest.
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((segment) => {
+    if (!segment || typeof segment !== "object" || Array.isArray(segment)) return [];
+    const record = segment as Record<string, unknown>;
+    const text = optionalString(record.text);
+    if (!text) return [];
+    const speakerRecord =
+      record.speaker && typeof record.speaker === "object" && !Array.isArray(record.speaker)
+        ? (record.speaker as Record<string, unknown>)
+        : null;
+    const speaker = speakerRecord
+      ? (optionalString(speakerRecord.name) ??
+        optionalString(speakerRecord.diarization_label) ??
+        optionalString(speakerRecord.source))
+      : speakerName(record.speaker);
+    const startedAt = optionalTimestampString(record.start_time);
+    const endedAt = optionalTimestampString(record.end_time);
+    return [
+      {
+        text,
+        ...(speaker ? { speaker } : {}),
+        ...(startedAt ? { startedAt } : {}),
+        ...(endedAt ? { endedAt } : {}),
+      },
+    ];
+  });
 }
 
 function normalizeSummary(value: unknown): string {

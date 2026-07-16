@@ -11,6 +11,7 @@ import {
   GitBranch,
   ListTodo,
   Mail,
+  NotebookPen,
   PlugZap,
 } from "lucide-react";
 import Link from "next/link";
@@ -174,6 +175,12 @@ function IntegrationRows({
           label="Slack"
           provider="slack"
           accounts={integrations.personalAccounts.slack}
+        />
+        <IntegrationProviderGroup
+          icon={NotebookPen}
+          label="Granola"
+          provider="granola"
+          accounts={integrations.personalAccounts.granola}
         />
         <McpIntegrationRow setup={mcpSetup} />
         <CodexIntegrationRow integration={integrations.codex} />
@@ -611,7 +618,13 @@ function integrationStatus(
 }
 
 function integrationConnectHref(
-  provider: GoatGoogleProviderState["provider"] | "linear" | "github" | "jamie" | "slack",
+  provider:
+    | GoatGoogleProviderState["provider"]
+    | "linear"
+    | "github"
+    | "jamie"
+    | "slack"
+    | "granola",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -623,6 +636,7 @@ function integrationConnectHref(
   if (provider === "github")
     return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "jamie") return "/settings/jamie";
+  if (provider === "granola") return "/settings/granola";
   if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";
 }

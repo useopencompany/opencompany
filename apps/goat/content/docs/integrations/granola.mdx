@@ -1,0 +1,33 @@
+---
+title: Granola
+description: Connect Granola meeting notes to Goat Brain ingestion with a personal API key.
+---
+
+## What the connection does
+
+Granola has no webhooks, so Goat polls the Granola API every few minutes for notes updated since the last poll. A note becomes visible in the API once Granola finishes its AI summary and transcript; Goat then normalizes it into a Brain source item and enqueues the durable Brain ingestion agent, which writes a meeting page plus a raw evidence snapshot of the summary and transcript.
+
+The connection is personal: the API key is minted for your Granola account and only you can manage it or wire it into brains. Notes from before you connected are not imported.
+
+## Setup steps
+
+1. In the Granola app, open **Settings → Connectors → API keys**.
+2. Create a key with access to the notes you want to ingest (personal notes, and optionally public workspace notes).
+3. Copy the `grn_...` key Granola shows once.
+4. In Goat, open **Settings → Granola** (or choose **Set up** on the Granola source card).
+5. Paste the key and save it. Goat validates it against the Granola API before storing it.
+
+## Brain routing
+
+After the key is saved, enable Granola as a source from any brain's settings page under Sources. Each new meeting note fans out to every brain where your Granola source is enabled. If two members of the same brain both have access to a shared note, it is ingested once per brain.
+
+## Troubleshooting
+
+If meetings are not appearing in the brain, check these in order:
+
+- The Granola source is enabled on the target brain.
+- The connection status in **Settings → Granola** is Connected. A revoked or expired key flips it to "Needs a new API key" — paste a fresh key.
+- The meeting finished recently: notes are only visible to the API once Granola generates their summary and transcript, and Goat polls every few minutes after that.
+- The meeting happened after you connected. Goat starts ingesting from the moment of connection and does not backfill.
+
+The Granola API is documented at [docs.granola.ai](https://docs.granola.ai).

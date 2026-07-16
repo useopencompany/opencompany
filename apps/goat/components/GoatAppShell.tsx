@@ -10,6 +10,7 @@ import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
 import { type GoatCodexProviderState, type GoatIntegrationState } from "@/lib/integration-state";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
+import { getGoatGranolaIntegrationState } from "@/lib/integrations/granola";
 import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 import { getGoatPersonalAccounts } from "@/lib/integrations/personal-accounts";
@@ -30,6 +31,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     github,
     jamie,
     slack,
+    granola,
     codex,
     workspaceMembers,
     personalAccounts,
@@ -42,6 +44,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatGitHubIntegrationState(workspace.id),
     getGoatJamieIntegrationState(workspace.id),
     getGoatSlackIntegrationState(user.workosUserId),
+    getGoatGranolaIntegrationState(user.workosUserId),
     loadCurrentGoatCodexAuthSettings(),
     listGoatWorkspaceMembers(workspace.id),
     getGoatPersonalAccounts(user.workosUserId),
@@ -98,6 +101,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       github,
       jamie,
       slack,
+      granola,
       personalAccounts,
       codex: {
         provider: "codex",
@@ -141,6 +145,7 @@ function buildIntegrationState(input: {
   github: GoatIntegrationState["github"];
   jamie: GoatIntegrationState["jamie"];
   slack: GoatIntegrationState["slack"];
+  granola: GoatIntegrationState["granola"];
   personalAccounts: GoatIntegrationState["personalAccounts"];
   codex: GoatCodexProviderState;
 }): GoatIntegrationState {
@@ -152,6 +157,7 @@ function buildIntegrationState(input: {
     github: input.github,
     jamie: input.jamie,
     slack: input.slack,
+    granola: input.granola,
     codex: input.codex,
     personalAccounts: input.personalAccounts,
   };
