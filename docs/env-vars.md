@@ -374,6 +374,21 @@ Set these in the Render `opencompany-runner` service.
 
 Render also injects `PORT` and `RENDER_GIT_COMMIT`; do not set them manually unless debugging.
 
+## GitHub Actions CI Cache
+
+PR quality jobs use Vercel Remote Cache when these repository-level GitHub Actions secrets are set:
+
+| Name | Storage | Purpose |
+|---|---|---|
+| `TURBO_TEAM` | Infisical `prod` + `/ci/turbo` | Vercel team slug that owns the shared Turborepo cache. |
+| `TURBO_TOKEN` | Infisical `prod` + `/ci/turbo` | Vercel access token allowed to read and write the team's remote cache. |
+
+Infisical is the source of truth; publish both values to GitHub Actions as repository secrets after
+creation or rotation. Do not fetch them through the Preview OIDC identity in this workflow: PR code
+runs inside these jobs, while repository secrets are automatically withheld from fork pull requests.
+The workflow remains functional without them and falls back to local execution. Developers may set
+the same optional values locally to share cached tasks with CI; never commit a real token.
+
 ## GitHub Actions Production
 
 Use a protected GitHub environment named `production`. Store release secrets in Infisical `prod` +

@@ -220,6 +220,14 @@ Do not store per-commit release values in Infisical. The release workflow derive
 and injects them into the Vercel build, while Vercel and Render expose their own git commit metadata
 to server runtimes.
 
+## GitHub Actions Turbo Cache
+
+Store `TURBO_TEAM` and `TURBO_TOKEN` in Infisical `prod` + `/ci/turbo`, then publish both to GitHub
+Actions as repository secrets. Infisical remains authoritative, so republish the GitHub copies after
+a rotation. PR quality jobs intentionally use repository secrets instead of OIDC: GitHub withholds
+repository secrets from forks, while checked-out PR code in an OIDC-enabled job could request an
+identity token directly.
+
 ## Operational Rule
 
 Normal changes:

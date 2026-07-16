@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Lint, typecheck, build, and test
+  static:
+    name: Format, lint, and typecheck
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     env:
@@ -26,6 +26,8 @@ jobs:
       NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3000/auth/callback
       GOAT_NEXT_PUBLIC_APP_URL: http://localhost:3002
       GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3002/auth/callback
+      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -57,20 +59,97 @@ jobs:
         run: bun run format:check
 
       - name: Lint
-        run: bun run lint
+        run: bun --bun turbo run lint ${{ github.event_name == 'pull_request' && '--affected' || '' }}
 
       - name: Typecheck
-        run: bun run typecheck
+        run: bun --bun turbo run typecheck ${{ github.event_name == 'pull_request' && '--affected' || '' }}
+
+  build:
+    name: Build
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/opencompany_ci
+      WORKOS_CLIENT_ID: client_ci
+      WORKOS_API_KEY: sk_test_ci_placeholder
+      WORKOS_COOKIE_PASSWORD: replace-with-at-least-32-characters
+      NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3000/auth/callback
+      GOAT_NEXT_PUBLIC_APP_URL: http://localhost:3002
+      GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3002/auth/callback
+      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Build
-        run: bun run build
+        run: bun --bun turbo run build ${{ github.event_name == 'pull_request' && '--affected' || '' }}
+
+  test:
+    name: Test
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://user:password@localhost:5432/opencompany_ci
+      WORKOS_CLIENT_ID: client_ci
+      WORKOS_API_KEY: sk_test_ci_placeholder
+      WORKOS_COOKIE_PASSWORD: replace-with-at-least-32-characters
+      NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3000/auth/callback
+      GOAT_NEXT_PUBLIC_APP_URL: http://localhost:3002
+      GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: http://localhost:3002/auth/callback
+      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Test
-        run: bun run test
+        run: bun --bun turbo run test ${{ github.event_name == 'pull_request' && '--affected' || '' }}
 
       # scripts/ is not a workspace package, so turbo test doesn't cover it.
       - name: Test preview scripts
         run: node --test scripts/lib/preview-config.test.mjs scripts/lib/preview-render.test.mjs scripts/lib/preview-debug-session.test.mjs
+
+  quality:
+    # Keep this exact check name: branch protection requires it and pr-preview.yml polls it.
+    name: Lint, typecheck, build, and test
+    if: ${{ always() }}
+    needs: [static, build, test]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - name: Verify quality checks
+        env:
+          STATIC_RESULT: ${{ needs.static.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          echo "Static checks: $STATIC_RESULT"
+          echo "Build: $BUILD_RESULT"
+          echo "Tests: $TEST_RESULT"
+          if [ "$STATIC_RESULT" != "success" ] || [ "$BUILD_RESULT" != "success" ] || [ "$TEST_RESULT" != "success" ]; then
+            exit 1
+          fi
 
   secrets:
     name: Secret scan
