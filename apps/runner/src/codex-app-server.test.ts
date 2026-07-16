@@ -338,6 +338,7 @@ describe("runCodexAppServerTurn", () => {
       codexHome,
       skillFingerprint: "skills_a",
       task: "implement the request",
+      localImages: [{ path: "/home/user/work/screenshot.png", detail: "original" }],
       model: "gpt-5.5",
       reasoningEffort: "high",
       planModeReasoningEffort: "xhigh",
@@ -368,6 +369,20 @@ describe("runCodexAppServerTurn", () => {
         },
       },
     });
+    expect(sandbox.sentMessages().find((message) => message.method === "turn/start")).toMatchObject(
+      {
+        params: {
+          input: [
+            { type: "text", text: "implement the request", text_elements: [] },
+            {
+              type: "localImage",
+              path: "/home/user/work/screenshot.png",
+              detail: "original",
+            },
+          ],
+        },
+      },
+    );
     expect(sandbox.startedCommands()).toEqual(
       expect.arrayContaining([
         expect.stringContaining("codex app-server --listen"),

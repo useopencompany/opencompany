@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { codexCliModelNameForModelId } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
+  type GoatChatMessageAttachment,
   type GoatCodexChatTurnSettings,
   goatChatSessions,
   goatCodexChatSessions,
@@ -48,12 +49,16 @@ export async function createGoatCodexChatMessage(input: {
   userWorkosId: string;
   sessionId?: string | null;
   prompt: string;
+  attachments?: GoatChatMessageAttachment[];
   clientMessageId?: string | null;
   settings?: unknown;
   model?: unknown;
 }): Promise<CodexChatMessageResult> {
   const prompt = input.prompt.trim();
-  if (!prompt) return { ok: false, status: 400, error: "Enter a message before sending." };
+  const attachments = input.attachments ?? [];
+  if (!prompt && attachments.length === 0) {
+    return { ok: false, status: 400, error: "Enter a message or attach a file before sending." };
+  }
   if (prompt.length > CODEX_CHAT_PROMPT_MAX_LENGTH) {
     return { ok: false, status: 400, error: "Messages can be at most 10,000 characters." };
   }
@@ -81,6 +86,7 @@ export async function createGoatCodexChatMessage(input: {
       userWorkosId: input.userWorkosId,
       prompt,
       clientMessageId: input.clientMessageId ?? null,
+      attachments,
       settings,
       session,
     });
@@ -89,6 +95,7 @@ export async function createGoatCodexChatMessage(input: {
       userWorkosId: input.userWorkosId,
       prompt,
       clientMessageId: input.clientMessageId ?? null,
+      attachments,
       settings,
       modelId: requestedModelId,
     });
@@ -216,6 +223,7 @@ async function createFirstCodexChatTurn(input: {
   userWorkosId: string;
   prompt: string;
   clientMessageId: string | null;
+  attachments: GoatChatMessageAttachment[];
   settings: GoatCodexChatTurnSettings;
   modelId: CodexChatModelId;
 }): Promise<CodexChatMessageResult> {
@@ -226,7 +234,7 @@ async function createFirstCodexChatTurn(input: {
   const assistantMessageId = newGoatChatMessageId();
   const now = new Date();
   const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
-  const title = toGoatTaskTitle(input.prompt);
+  const title = toGoatTaskTitle(input.prompt || input.attachments[0]?.filename || "Attachment");
   const codexModel = codexCliModelNameForModelId(input.modelId);
   if (!codexModel) throw new Error(`Unsupported Codex model: ${input.modelId}`);
 
@@ -245,8 +253,18 @@ async function createFirstCodexChatTurn(input: {
       RETURNING id
     ),
     inserted_user_message AS (
-      INSERT INTO goat.chat_messages (id, session_id, role, content, created_at, updated_at)
-      VALUES (${userMessageId}, ${chatSessionId}, 'user', ${input.prompt}, ${now}, ${now})
+      INSERT INTO goat.chat_messages (
+        id, session_id, role, content, attachments, created_at, updated_at
+      )
+      VALUES (
+        ${userMessageId},
+        ${chatSessionId},
+        'user',
+        ${input.prompt},
+        ${attachmentsJsonbValue(input.attachments)}::jsonb,
+        ${now},
+        ${now}
+      )
       RETURNING id
     ),
     inserted_assistant_message AS (
@@ -304,6 +322,7 @@ async function enqueueExistingCodexChatMessage(input: {
   userWorkosId: string;
   prompt: string;
   clientMessageId: string | null;
+  attachments: GoatChatMessageAttachment[];
   settings: GoatCodexChatTurnSettings;
   session: { id: string; chatSessionId: string; status: string; model: string };
 }): Promise<CodexChatMessageResult> {
@@ -316,8 +335,18 @@ async function enqueueExistingCodexChatMessage(input: {
 
   await getDb().execute(sql`
     WITH inserted_user_message AS (
-      INSERT INTO goat.chat_messages (id, session_id, role, content, created_at, updated_at)
-      VALUES (${userMessageId}, ${input.session.chatSessionId}, 'user', ${input.prompt}, ${now}, ${now})
+      INSERT INTO goat.chat_messages (
+        id, session_id, role, content, attachments, created_at, updated_at
+      )
+      VALUES (
+        ${userMessageId},
+        ${input.session.chatSessionId},
+        'user',
+        ${input.prompt},
+        ${attachmentsJsonbValue(input.attachments)}::jsonb,
+        ${now},
+        ${now}
+      )
       RETURNING id
     ),
     inserted_assistant_message AS (
@@ -374,6 +403,10 @@ function emptyAssistantDebugTrace(model: string = CODEX_CHAT_DEFAULT_MODEL) {
     model,
     uiMessageParts: [],
   };
+}
+
+function attachmentsJsonbValue(attachments: GoatChatMessageAttachment[]) {
+  return attachments.length > 0 ? JSON.stringify(attachments) : null;
 }
 
 function safeClientMessageId(value: string | null | undefined) {
