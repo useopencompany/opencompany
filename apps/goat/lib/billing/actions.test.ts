@@ -89,6 +89,28 @@ describe("Goat billing actions", () => {
     expect(redirect).toHaveBeenCalledWith("https://checkout.stripe.test/session");
   });
 
+  it("only reuses Pro Checkout idempotency keys for identical parameters", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_784_190_000_000);
+
+    try {
+      await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
+      await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
+      vi.mocked(countGoatWorkspaceMembers).mockResolvedValue(4);
+      await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
+    } finally {
+      now.mockRestore();
+    }
+
+    const keys = checkoutCreate.mock.calls.map(
+      ([, options]) => (options as { idempotencyKey: string }).idempotencyKey,
+    );
+    expect(keys).toHaveLength(3);
+    expect(keys[0]).toMatch(/^goat-pro-v2-goat_ws_1-\d+-[a-f0-9]{16}$/);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).toMatch(/^goat-pro-v2-goat_ws_1-\d+-[a-f0-9]{16}$/);
+    expect(keys[2]).not.toBe(keys[0]);
+  });
+
   it("rejects billing changes from non-admin members", async () => {
     vi.mocked(currentGoatUser).mockResolvedValue({
       role: "member",

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Migrated the published OpenCompany blog archive into the marketing site with its existing URLs and search metadata.
+
 ## [1.0.0] - 2026-07-15
 
 Goat is a company brain — it turns your team's tools and conversations into a

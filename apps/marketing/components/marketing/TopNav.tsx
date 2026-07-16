@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Cta } from "./Cta";
 import { GoatMark } from "./GoatMark";
 
@@ -7,11 +8,14 @@ export function TopNav() {
   return (
     <header className="sticky top-0 z-50 bg-background">
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
-        <a href="#" className="flex items-center gap-2 text-ink" aria-label="opencompany home">
+        <Link href="/" className="flex items-center gap-2 text-ink" aria-label="opencompany home">
           <GoatMark className="size-5 animate-goat-mark-spin" />
           <span className="font-medium font-mono text-[15px] tracking-tight">opencompany</span>
-        </a>
+        </Link>
         <nav aria-label="Primary navigation" className="hidden items-center gap-6 sm:flex">
+          <Link href="/blog" className={navLinkClassName}>
+            blog
+          </Link>
           <a href="https://my.opencompany.chat/docs" className={navLinkClassName}>
             docs
           </a>
@@ -50,6 +54,9 @@ export function TopNav() {
             aria-label="Mobile navigation"
             className="absolute top-[calc(100%+0.5rem)] right-0 w-48 border border-border bg-background p-2 shadow-lg"
           >
+            <Link href="/blog" className={`${navLinkClassName} block px-3 py-2`}>
+              blog
+            </Link>
             <a
               href="https://my.opencompany.chat/docs"
               className={`${navLinkClassName} block px-3 py-2`}

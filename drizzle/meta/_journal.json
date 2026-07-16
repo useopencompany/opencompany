@@ -946,6 +946,20 @@
       "when": 1784652400000,
       "tag": "0134_goat_hubspot_source",
       "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "7",
+      "when": 1784652401000,
+      "tag": "0135_goat_slack_bot",
+      "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1784652402000,
+      "tag": "0136_goat_slack_bot_reliability",
+      "breakpoints": true
     }
   ]
 }

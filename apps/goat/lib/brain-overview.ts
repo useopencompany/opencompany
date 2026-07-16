@@ -1,6 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import { goatBrainSources, goatBrainToolRuns } from "@opencompany/db/goat-schema";
-import { and, count, eq, gte, inArray } from "drizzle-orm";
+import { and, count, eq, gte, inArray, ne } from "drizzle-orm";
 import { GOAT_BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
 
 export type GoatBrainOverviewStats = {
@@ -17,8 +17,8 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1_000;
 export async function getGoatBrainOverviewStats(
   brainRef: string,
   now = new Date(),
+  db = getDb(),
 ): Promise<GoatBrainOverviewStats> {
-  const db = getDb();
   const cutoff = new Date(now.getTime() - SEVEN_DAYS_MS);
   const [[retrievals], [sources]] = await Promise.all([
     db
@@ -35,7 +35,13 @@ export async function getGoatBrainOverviewStats(
     db
       .select({ value: count() })
       .from(goatBrainSources)
-      .where(and(eq(goatBrainSources.brainId, brainRef), eq(goatBrainSources.enabled, true))),
+      .where(
+        and(
+          eq(goatBrainSources.brainId, brainRef),
+          eq(goatBrainSources.enabled, true),
+          ne(goatBrainSources.provider, "slack_bot"),
+        ),
+      ),
   ]);
 
   return {

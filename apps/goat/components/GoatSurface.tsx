@@ -1171,9 +1171,9 @@ export function GoatSurface({
               <div className="flex shrink-0 items-center gap-2">
                 {activeEngineChat?.engine === "codex" ? (
                   <CodexSandboxStatusIndicator
-                    status={
-                      codexSandboxStatus ?? (engineRunning || engineSubmitting ? "running" : null)
-                    }
+                    // An active turn means the sandbox is running (or about to be) regardless
+                    // of what the 30s poll last saw — the poll data can be a turn stale.
+                    status={engineRunning || engineSubmitting ? "running" : codexSandboxStatus}
                   />
                 ) : null}
                 {currentContextTokens > 0 ? (
@@ -2037,15 +2037,20 @@ function formatCompactTokens(value: number): string {
 function CodexSandboxStatusIndicator({ status }: { status: GoatCodexSandboxStatus | null }) {
   if (!status) return null;
 
-  const label = status === "running" ? "Running" : status === "sleeping" ? "Sleeping" : "Deleted";
-  const dotClass =
-    status === "running" ? "bg-[#18a058]" : status === "sleeping" ? "bg-[#d7d7d2]" : "bg-danger";
+  // "deleted" is a normal end of life for an idle sandbox — the next message starts a fresh
+  // one — so it renders as neutral "Expired", not as an error.
+  const label = status === "running" ? "Running" : status === "sleeping" ? "Sleeping" : "Expired";
+  const dotClass = status === "running" ? "bg-[#18a058]" : "bg-[#d7d7d2]";
+  const title =
+    status === "deleted"
+      ? "Sandbox expired - your next message starts a fresh one"
+      : `Sandbox ${label.toLowerCase()}`;
 
   return (
     <div
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-[12px] font-medium leading-4 text-ink-muted shadow-[0_1px_3px_rgba(15,15,15,0.04)]"
-      title={`Sandbox ${label.toLowerCase()}`}
-      aria-label={`Sandbox ${label.toLowerCase()}`}
+      title={title}
+      aria-label={title}
     >
       <span className={cn("size-2 rounded-full", dotClass)} aria-hidden="true" />
       <span>{label}</span>

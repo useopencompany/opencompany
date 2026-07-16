@@ -71,7 +71,13 @@ export type GoatFailureCategory =
 
 export type GoatAttributeValue = string | number | boolean | null | undefined;
 export type GoatAttributes = Record<string, GoatAttributeValue>;
-export type GoatGatewayFeature = "chat" | "chat-title" | "task" | "brain-ingest" | "brain-query";
+export type GoatGatewayFeature =
+  | "chat"
+  | "chat-title"
+  | "task"
+  | "brain-ingest"
+  | "brain-query"
+  | "slack-bot";
 
 export type GoatGatewayAttribution = {
   user?: string;
