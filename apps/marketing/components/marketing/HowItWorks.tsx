@@ -17,7 +17,7 @@ export function HowItWorks() {
   return (
     <section id="how-it-works" className="border-border border-t">
       <div className="mx-auto max-w-5xl px-6 py-24">
-        <span className="font-medium font-mono text-[13px] text-violet-600"># How it works</span>
+        <h2 className="font-medium font-mono text-[13px] text-violet-600"># How it works</h2>
         <ol className="mt-12 space-y-8">
           {STEPS.map((step, i) => (
             <li key={step.title} className="flex gap-3 font-mono">

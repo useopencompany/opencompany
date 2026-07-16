@@ -31,7 +31,7 @@ export function Hero() {
               <span aria-hidden="true">→</span>
             </a>
             <h1 className="max-w-3xl text-balance font-medium font-mono text-3xl text-ink leading-[1.1] tracking-tight sm:text-4xl">
-              Give your company a living brain.
+              Give your AI agents a living company brain.
             </h1>
             <p className="mt-6 max-w-xl text-pretty font-medium text-[15px] text-ink-subtle leading-7 opacity-60">
               Add GitHub, Gmail, Linear, Slack, and meetings as sources. The brain figures out what
