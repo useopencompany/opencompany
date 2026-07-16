@@ -21,17 +21,20 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Markdown } from "@/components/Markdown";
+import { finiteDurationMs, formatGoatChatDuration } from "@/lib/chat-timing";
 
 export function BrainIngestTraceDialog({
   trace,
   traceId,
   sourceTitle,
+  durationMs,
   open,
   onOpenChange,
 }: {
   trace: GoatBrainIngestTrace | null;
   traceId: string;
   sourceTitle: string;
+  durationMs: number | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -43,8 +46,7 @@ export function BrainIngestTraceDialog({
         <DialogHeader className="shrink-0 border-b border-border px-5 py-4">
           <DialogTitle className="text-[15px]">Agent run trace</DialogTitle>
           <DialogDescription className="text-[12px]">
-            {trace.model} - {trace.steps} {trace.steps === 1 ? "step" : "steps"} -{" "}
-            {trace.toolCallCount} {trace.toolCallCount === 1 ? "tool call" : "tool calls"}
+            <TraceSummaryLine trace={trace} durationMs={durationMs} />
           </DialogDescription>
         </DialogHeader>
         <div
@@ -56,6 +58,24 @@ export function BrainIngestTraceDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function TraceSummaryLine({
+  trace,
+  durationMs,
+}: {
+  trace: GoatBrainIngestTrace;
+  durationMs: number | null;
+}) {
+  const safeDurationMs = finiteDurationMs(durationMs);
+  const parts = [
+    trace.model,
+    safeDurationMs !== null ? `Run ${formatGoatChatDuration(safeDurationMs)}` : null,
+    `${trace.steps} ${trace.steps === 1 ? "step" : "steps"}`,
+    `${trace.toolCallCount} ${trace.toolCallCount === 1 ? "tool call" : "tool calls"}`,
+  ].filter((part): part is string => Boolean(part));
+
+  return <>{parts.join(" - ")}</>;
 }
 
 export function BrainIngestTraceView({
