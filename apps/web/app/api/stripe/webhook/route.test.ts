@@ -18,7 +18,7 @@ vi.mock("@opencompany/analytics/server", () => ({
 }));
 
 vi.mock("@opencompany/db/goat-billing", () => ({
-  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS: 1_800,
+  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS: 1_700,
   applyGoatStripeInvoicePaymentState: vi.fn(),
   applyGoatStripeSubscriptionProjection: vi.fn(),
   findGoatWorkspaceIdForStripeSubscription: vi.fn(),

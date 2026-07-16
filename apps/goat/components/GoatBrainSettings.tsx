@@ -9,6 +9,7 @@ import { GoatBrainImport } from "@/components/GoatBrainImport";
 import { GoatBrainOverviewFlow } from "@/components/GoatBrainOverviewFlow";
 import { BrainSourcesSection } from "@/components/GoatBrainSourceCards";
 import { VisibilityOption } from "@/components/GoatBrainSwitcher";
+import { GoatSlackBotDestinationCard } from "@/components/GoatSlackBotDestinationCard";
 import {
   type GoatWorkspaceMemberView,
   getGoatBrainAccessDetailsAction,
@@ -77,6 +78,10 @@ export function GoatBrainSettings({
 
           <SettingsSection title="Sources">
             <BrainSourcesSection brainRef={brain.id} />
+          </SettingsSection>
+
+          <SettingsSection title="Destinations">
+            <GoatSlackBotDestinationCard brainRef={brain.id} />
           </SettingsSection>
 
           <SettingsSection title="Company context">

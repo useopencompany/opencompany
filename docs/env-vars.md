@@ -101,7 +101,7 @@ Set these in Vercel Production.
 | `GOAT_NEXT_PUBLIC_APP_URL` | Goat only | Canonical Goat app origin. Local default is `https://localhost:3443` through Caddy; hosted value is the separate Goat domain. |
 | `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Goat only | Goat AuthKit callback URL. Must be registered in the same WorkOS environment as the core app. |
 | `GOAT_STRIPE_API_KEY` | Goat only | Dedicated restricted Stripe key for Goat customers, subscription Checkout, credit top-up Checkout, and portal sessions. Store the live value in Infisical `prod` + `/goat`; use the corresponding development source for test mode. |
-| `GOAT_STRIPE_PRO_PRICE_ID` | Goat only | Environment-specific Stripe Price id for OpenCompany Pro: USD 18 per seat per month (subscription quantity = member count), tax-exclusive, monthly billing only (no annual Price). Lookup key `goat_pro_seat_monthly_usd`. Store it beside the Goat Stripe key in Infisical `prod` + `/goat`. |
+| `GOAT_STRIPE_PRO_PRICE_ID` | Goat only | Environment-specific Stripe Price id for OpenCompany Pro: USD 17 per seat per month (subscription quantity = member count), tax-exclusive, monthly billing only (no annual Price). Lookup key `goat_pro_seat_monthly_usd`. Store it beside the Goat Stripe key in Infisical `prod` + `/goat`. |
 | `GOAT_STRIPE_CHECKOUT_ENABLED` | Goat hosted only | Production live-Checkout gate for both Pro subscriptions and credit top-ups. Keep false until the business has configured its actual Stripe Tax registrations, then set true in Infisical `prod` + `/goat` and sync it to Goat Vercel. Test/local Checkout is not gated. The Goat Stripe account's webhook endpoint (the shared web `/api/stripe/webhook` route) must be subscribed to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, and `checkout.session.async_payment_failed`; its signing secret must match `STRIPE_WEBHOOK_SECRET` before enabling top-ups. |
 | `GOAT_CREDITS_ENFORCEMENT_ENABLED` | Goat only | Set `true` to enforce usage credits: chat turns hard-stop with 402 on an empty balance and Pro ingestion overage requires credits (otherwise over-quota work just pauses, as before). Usage debits and the ledger record regardless of this flag. Keep false in prod until `GOAT_STRIPE_CHECKOUT_ENABLED` is true — enforcement without purchasable top-ups locks users out of chat. Needed by the Goat web app and the runner. |
 | `CRON_SECRET` | Goat hosted only | Bearer secret protecting the hourly Goat billing reconciliation route (releases paused ingestion backlogs and repairs drifted Stripe seat quantities). Store it in Infisical `prod` + `/goat`; sync it to the Goat Vercel project, which sends it as the cron Authorization bearer token. |
@@ -187,7 +187,7 @@ Set these in the separate Vercel project for Goat:
 | `WORKOS_CLIENT_ID` | Yes | Goat WorkOS Application client id. Must differ from the core app. |
 | `WORKOS_API_KEY` | Yes | Goat WorkOS Application API key. Must differ from the core app so API-created invitations preserve Goat application context. |
 | `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. Use the same value only when the cookie domain setup intentionally allows it. |
-| `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Google only | Same base64-encoded 32-byte key used by web and runner. Required when Goat Gmail/Calendar/Drive connections are enabled. |
+| `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Google or Slack | Same base64-encoded 32-byte key used by web and runner. Required when Goat Gmail/Calendar/Drive or either Slack connection is enabled. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Google OAuth app used by Goat Gmail, Google Calendar, and Drive connect flows. Must match the runner values so refresh works. Drive also requires the Drive API and restricted-scope verification. |
 | `GOOGLE_OAUTH_CALLBACK_URL` | Google only | Optional stable Google callback broker URL for hosted previews. Leave unset for direct Goat-domain callbacks. |
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Google only | Dedicated secret used to sign Goat Google OAuth setup state. |
@@ -198,6 +198,9 @@ Set these in the separate Vercel project for Goat:
 | `GOAT_SLACK_CLIENT_ID` / `GOAT_SLACK_CLIENT_SECRET` | Slack only | Goat Slack ingestion app OAuth credentials (user-token app, `user_scope` only — no bot token). Distinct from `SLACK_MCP_*` and `SLACK_SUPPORT_*`. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack/callback`. |
 | `GOAT_SLACK_SIGNING_SECRET` | Slack only | Slack app signing secret used to verify Events API deliveries at `/api/webhooks/slack/events`. |
 | `GOAT_SLACK_STATE_SECRET` | Slack only | Dedicated secret used to sign Goat Slack OAuth setup state. Generate with `openssl rand -base64 32`. |
+| `GOAT_SLACK_BOT_CLIENT_ID` / `GOAT_SLACK_BOT_CLIENT_SECRET` | Slack bot only | Goat Slack answer-bot app OAuth credentials (bot-token app, `scope=` — separate Slack app from the ingestion one). Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack-bot/callback`. |
+| `GOAT_SLACK_BOT_SIGNING_SECRET` | Slack bot only | Slack bot app signing secret used to verify Events API deliveries at `/api/webhooks/slack-bot/events`. |
+| `GOAT_SLACK_BOT_STATE_SECRET` | Slack bot only | Dedicated secret used to sign Goat Slack bot install state. Generate with `openssl rand -base64 32`. |
 | `RUNNER_INTERNAL_URL` / `RUNNER_PUBLIC_URL` | Yes | Server-to-server runner URL. `RUNNER_INTERNAL_URL` wins when set. |
 | `RUNNER_INTERNAL_TOKEN` | Yes | Bearer token for the runner wake route. Must match Render. |
 | `ELECTRIC_URL` | Yes | Electric shape service base URL. The Goat proxy exposes only `goat.tasks` scoped to the signed-in WorkOS user. |
@@ -229,6 +232,24 @@ Goat Slack ingestion app setup checklist (api.slack.com/apps → From scratch):
 5. Local dev: the events URL must be public — use a second "dev" Slack app whose Request URL
    points at a tunnel (for example `cloudflared tunnel --url http://localhost:3443`) in front of
    the local Goat app.
+
+Goat Slack answer-bot app setup checklist (api.slack.com/apps → From scratch, a **separate app**
+from the ingestion one — this one has a bot user, named e.g. `OpenCompany` / `@opencompany`):
+
+1. OAuth & Permissions → **Bot Token Scopes** (no user scopes): `app_mentions:read`, `chat:write`,
+   `channels:read`, `groups:read`, `channels:history`, `groups:history`. Do not opt into token
+   rotation.
+2. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack-bot/callback`.
+3. Event Subscriptions → Request URL `${GOAT_NEXT_PUBLIC_APP_URL}/api/webhooks/slack-bot/events`,
+   then under **Subscribe to bot events** add `app_mention`, `app_uninstalled`, `tokens_revoked`.
+4. Add Client ID/Secret/Signing Secret to Infisical under `prod` + `/goat` (and `dev` + `/goat`
+   for shared development), then sync them into the Goat Vercel environments. The
+   state secret is generated, not sourced from Slack; store and sync it through Infisical too.
+   Workspace admins install the bot from Settings → Workspace → Slack bot, then enable it per brain
+   under Brain settings → Destinations and invite it to the chosen channels.
+5. Answers run inline in the goat web app (no runner env needed) and use
+   `VERCEL_AI_GATEWAY_API_KEY` plus `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` to read the stored
+   bot token.
 
 ## Slack support channel (Slack Connect)
 

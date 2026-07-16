@@ -6,7 +6,7 @@ import type { GoatWorkspacePlan } from "./goat-schema";
 
 export const GOAT_FREE_MONTHLY_INGESTION_LIMIT = 300;
 export const GOAT_PRO_MONTHLY_INGESTIONS_PER_SEAT = 300;
-export const GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS = 1_800;
+export const GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS = 1_700;
 
 export const GOAT_FREE_MAX_MEMBERS = 3;
 export const GOAT_PRO_MAX_MEMBERS = 50;

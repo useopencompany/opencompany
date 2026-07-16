@@ -15,7 +15,7 @@ vi.mock("@opencompany/analytics/server", () => ({
 }));
 
 vi.mock("@opencompany/db/goat-billing", () => ({
-  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS: 1_800,
+  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS: 1_700,
   loadGoatBillingOverview: vi.fn(),
   setGoatStripeCustomerId: vi.fn(),
 }));
@@ -75,16 +75,40 @@ describe("Goat billing actions", () => {
     const [params] = checkoutCreate.mock.calls[0] as [
       {
         line_items: Array<{ price: string; quantity: number }>;
+        allow_promotion_codes: boolean;
         automatic_tax: { enabled: boolean };
         payment_method_types?: unknown;
         subscription_data: { metadata: Record<string, string> };
       },
     ];
     expect(params.line_items).toEqual([{ price: "price_goat_pro", quantity: 3 }]);
+    expect(params.allow_promotion_codes).toBe(true);
     expect(params.automatic_tax).toEqual({ enabled: true });
     expect(params.payment_method_types).toBeUndefined();
     expect(params.subscription_data.metadata.goatWorkspaceId).toBe("goat_ws_1");
     expect(redirect).toHaveBeenCalledWith("https://checkout.stripe.test/session");
+  });
+
+  it("only reuses Pro Checkout idempotency keys for identical parameters", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_784_190_000_000);
+
+    try {
+      await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
+      await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
+      vi.mocked(countGoatWorkspaceMembers).mockResolvedValue(4);
+      await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
+    } finally {
+      now.mockRestore();
+    }
+
+    const keys = checkoutCreate.mock.calls.map(
+      ([, options]) => (options as { idempotencyKey: string }).idempotencyKey,
+    );
+    expect(keys).toHaveLength(3);
+    expect(keys[0]).toMatch(/^goat-pro-v2-goat_ws_1-\d+-[a-f0-9]{16}$/);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).toMatch(/^goat-pro-v2-goat_ws_1-\d+-[a-f0-9]{16}$/);
+    expect(keys[2]).not.toBe(keys[0]);
   });
 
   it("rejects billing changes from non-admin members", async () => {

@@ -25,6 +25,13 @@ import {
   readGoatGoogleDriveResources,
   upsertGoatGoogleDriveSyncCursor,
 } from "@opencompany/db/goat-google-drive";
+import {
+  GOAT_HUBSPOT_EVENT_TYPES,
+  type GoatHubspotEventRef,
+  type GoatHubspotEventType,
+  type GoatHubspotObjectTypeRef,
+  isGoatHubspotObjectType,
+} from "@opencompany/db/goat-hubspot";
 import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
 import {
   GOAT_LINEAR_EVENT_TYPES,
@@ -51,6 +58,7 @@ import type {
   GoatGmailSourceProviderState,
   GoatGoogleDriveSourceProviderState,
   GoatGranolaProviderState,
+  GoatHubspotSourceProviderState,
   GoatJamieProviderState,
   GoatLinearSourceProviderState,
   GoatSlackProviderState,
@@ -72,6 +80,7 @@ import {
   loadOwnGoatGoogleDriveAccount,
 } from "@/lib/integrations/google-drive";
 import { getGoatGranolaIntegrationState } from "@/lib/integrations/granola";
+import { getGoatHubspotSourceIntegrationState } from "@/lib/integrations/hubspot-ingest";
 import {
   getGoatJamieIntegrationState,
   isGoatJamieWebhookApiKeyConfigured,
@@ -131,6 +140,7 @@ export type GoatBrainSourcesDetails = {
     linear: GoatOwnSourceAccount[];
     gmail: GoatOwnSourceAccount[];
     google_drive: GoatOwnSourceAccount[];
+    hubspot: GoatOwnSourceAccount[];
     granola: GoatOwnSourceAccount[];
   };
   jamie: {
@@ -156,6 +166,9 @@ export type GoatBrainSourcesDetails = {
   googleDrive: {
     integration: GoatGoogleDriveSourceProviderState;
   };
+  hubspot: {
+    integration: GoatHubspotSourceProviderState;
+  };
   granola: {
     integration: GoatGranolaProviderState;
   };
@@ -171,6 +184,7 @@ function integrationProviderFor(
     case "github":
     case "slack":
     case "linear":
+    case "hubspot":
     case "granola":
       return provider;
     default:
@@ -333,11 +347,13 @@ export async function getGoatBrainSourcesAction(
     githubState,
     gmailState,
     googleDriveState,
+    hubspotState,
     granolaState,
     ownSlackAccounts,
     ownLinearAccounts,
     ownGmailAccounts,
     ownGoogleDriveAccounts,
+    ownHubspotAccounts,
     ownGranolaAccounts,
   ] = await Promise.all([
     listGoatBrainSourcesForBrain(brainRef),
@@ -347,6 +363,7 @@ export async function getGoatBrainSourcesAction(
     getGoatGitHubIntegrationState(context.workspace.id),
     getGoatGmailSourceIntegrationState(context.user.workosUserId),
     getGoatGoogleDriveSourceIntegrationState(context.user.workosUserId),
+    getGoatHubspotSourceIntegrationState(context.user.workosUserId),
     getGoatGranolaIntegrationState(context.user.workosUserId),
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
@@ -364,6 +381,10 @@ export async function getGoatBrainSourcesAction(
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "google_drive",
+    }),
+    listGoatPersonalIntegrationAccounts({
+      userWorkosId: context.user.workosUserId,
+      provider: "hubspot",
     }),
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
@@ -412,6 +433,7 @@ export async function getGoatBrainSourcesAction(
       linear: ownLinearAccounts,
       gmail: ownGmailAccounts,
       google_drive: ownGoogleDriveAccounts,
+      hubspot: ownHubspotAccounts,
       granola: ownGranolaAccounts,
     },
     jamie: {
@@ -433,6 +455,9 @@ export async function getGoatBrainSourcesAction(
     },
     googleDrive: {
       integration: googleDriveState,
+    },
+    hubspot: {
+      integration: hubspotState,
     },
     granola: {
       integration: granolaState,
@@ -784,6 +809,51 @@ export async function setGoatBrainLinearSourceAction(input: {
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Could not update the Linear source.",
+    };
+  }
+}
+
+export async function setGoatBrainHubspotSourceAction(input: {
+  brainRef: string;
+  integrationId: string;
+  enabled: boolean;
+  objectTypes: GoatHubspotObjectTypeRef[];
+  events: GoatHubspotEventRef[];
+}): Promise<GoatWorkspaceActionResult> {
+  const context = await requireBrainSourceContext(input.brainRef);
+  if (!context) {
+    return { ok: false, error: "You don't have access to this brain." };
+  }
+
+  const integration = await loadSourceIntegrationForContext({
+    integrationId: input.integrationId,
+    provider: "hubspot",
+    context,
+  });
+  if (!integration || integration.status === "disconnected") {
+    return { ok: false, error: "Connect HubSpot in your settings first." };
+  }
+
+  try {
+    await upsertGoatBrainSource({
+      brainRef: input.brainRef,
+      provider: "hubspot",
+      integrationId: input.integrationId,
+      userWorkosId: integration.userWorkosId,
+      createdByWorkosId: context.user.workosUserId,
+      enabled: input.enabled,
+      config: {
+        objectTypes: sanitizeHubspotObjectTypeRefs(input.objectTypes),
+        events: sanitizeHubspotEventRefs(input.events),
+      },
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update the HubSpot source.",
     };
   }
 }
@@ -1220,6 +1290,32 @@ function sanitizeLinearEventRefs(refs: GoatLinearEventRef[]): GoatLinearEventRef
     if (!allowed.has(id as GoatLinearEventType) || seen.has(id as GoatLinearEventType)) continue;
     seen.add(id as GoatLinearEventType);
     sanitized.push({ id: id as GoatLinearEventType });
+  }
+  return sanitized;
+}
+
+function sanitizeHubspotObjectTypeRefs(
+  refs: GoatHubspotObjectTypeRef[],
+): GoatHubspotObjectTypeRef[] {
+  const seen = new Set<string>();
+  const sanitized: GoatHubspotObjectTypeRef[] = [];
+  for (const ref of refs) {
+    if (!isGoatHubspotObjectType(ref.id) || seen.has(ref.id)) continue;
+    seen.add(ref.id);
+    sanitized.push({ id: ref.id });
+  }
+  return sanitized;
+}
+
+function sanitizeHubspotEventRefs(refs: GoatHubspotEventRef[]): GoatHubspotEventRef[] {
+  const allowed = new Set<GoatHubspotEventType>(GOAT_HUBSPOT_EVENT_TYPES);
+  const seen = new Set<GoatHubspotEventType>();
+  const sanitized: GoatHubspotEventRef[] = [];
+  for (const ref of refs) {
+    const id = typeof ref.id === "string" ? ref.id : "";
+    if (!allowed.has(id as GoatHubspotEventType) || seen.has(id as GoatHubspotEventType)) continue;
+    seen.add(id as GoatHubspotEventType);
+    sanitized.push({ id: id as GoatHubspotEventType });
   }
   return sanitized;
 }

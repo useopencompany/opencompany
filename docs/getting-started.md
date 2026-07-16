@@ -221,8 +221,8 @@ without copying them by hand.
 Stripe setup has a local fallback: if `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` are still
 placeholders, `bun run setup` reads the active Stripe CLI test key and runs
 `stripe listen --print-secret`, then writes both values into `.env.local` without printing them. It
-also loads Goat billing values from Infisical `dev` + `/web`, reuses or creates the flat USD 99
-OpenCompany Pro test Price by lookup key, generates `CRON_SECRET`, and refreshes
+also loads Goat billing values from Infisical `dev` + `/web`, reuses or creates the licensed USD 17
+per-seat monthly OpenCompany Pro test Price by lookup key, generates `CRON_SECRET`, and refreshes
 `apps/goat/.env.local`. Run `stripe login` once first. If you use a non-default Stripe CLI profile,
 set `STRIPE_CLI_PROJECT_NAME` before running setup.
 
@@ -244,10 +244,12 @@ Subscription read, and Subscription Item write permissions.
 Hosted live Checkout also requires `GOAT_STRIPE_CHECKOUT_ENABLED=true`; keep it false until the
 business's Stripe Tax registrations are configured.
 
-Goat credit top-ups accept promotion codes in Stripe Checkout. For internal no-cost top-up tests,
-create a 100%-off, once-duration coupon and a customer-facing promotion code in Stripe test mode.
-Use an expiry, redemption limit, or customer restriction as appropriate; create live-mode codes
-separately and keep them tightly restricted.
+Goat subscription and credit top-up Checkouts accept promotion codes. For internal no-cost tests,
+create a 100%-off coupon and a customer-facing promotion code in Stripe test mode. Leave the coupon
+unrestricted when it should work for both subscriptions and credit top-ups; scope subscription-only
+coupons to the OpenCompany Pro product. Use `once` duration for one free subscription invoice or
+`forever` for free renewals too. Add an expiry, redemption limit, or customer restriction unless the
+code is deliberately permanent; create live-mode codes separately and keep them private.
 
 Then pull them locally:
 
