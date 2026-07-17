@@ -18,6 +18,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useEffect, useMemo, useState, useTransition } from "react";
+import { AttioIntegrationSetup } from "@/components/AttioIntegrationSetup";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import {
   type GoatAppInitialData,
@@ -348,6 +349,26 @@ export function GoatFathomSettingsRoute() {
     >
       <FathomIntegrationSetup
         initialState={integrations.fathom}
+        brainSourcesHref={brainSourcesHref}
+      />
+    </GoatSettingsContent>
+  );
+}
+
+export function GoatAttioSettingsRoute() {
+  const { activeBrain, integrations } = useGoatAppData();
+  const brainSourcesHref = activeBrain
+    ? `/brain/${encodeURIComponent(activeBrain.id)}/settings`
+    : null;
+
+  return (
+    <GoatSettingsContent
+      title="Attio"
+      description="CRM activity for Goat Brain"
+      backLink={{ href: "/settings/integrations", label: "Integrations" }}
+    >
+      <AttioIntegrationSetup
+        initialState={integrations.attio}
         brainSourcesHref={brainSourcesHref}
       />
     </GoatSettingsContent>

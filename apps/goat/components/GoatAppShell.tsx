@@ -8,6 +8,7 @@ import { isGoatChatResumeEnabled } from "@/lib/chat-streams";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
 import { type GoatCodexProviderState, type GoatIntegrationState } from "@/lib/integration-state";
+import { getGoatAttioIntegrationState } from "@/lib/integrations/attio";
 import { getGoatFathomIntegrationState } from "@/lib/integrations/fathom";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
@@ -34,6 +35,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     slack,
     granola,
     fathom,
+    attio,
     codex,
     workspaceMembers,
     personalAccounts,
@@ -48,6 +50,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatSlackIntegrationState(user.workosUserId),
     getGoatGranolaIntegrationState(user.workosUserId),
     getGoatFathomIntegrationState(user.workosUserId),
+    getGoatAttioIntegrationState(user.workosUserId),
     loadCurrentGoatCodexAuthSettings(),
     listGoatWorkspaceMembers(workspace.id),
     getGoatPersonalAccounts(user.workosUserId),
@@ -106,6 +109,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       slack,
       granola,
       fathom,
+      attio,
       personalAccounts,
       codex: {
         provider: "codex",
@@ -151,6 +155,7 @@ function buildIntegrationState(input: {
   slack: GoatIntegrationState["slack"];
   granola: GoatIntegrationState["granola"];
   fathom: GoatIntegrationState["fathom"];
+  attio: GoatIntegrationState["attio"];
   personalAccounts: GoatIntegrationState["personalAccounts"];
   codex: GoatCodexProviderState;
 }): GoatIntegrationState {
@@ -164,6 +169,7 @@ function buildIntegrationState(input: {
     slack: input.slack,
     granola: input.granola,
     fathom: input.fathom,
+    attio: input.attio,
     codex: input.codex,
     personalAccounts: input.personalAccounts,
   };

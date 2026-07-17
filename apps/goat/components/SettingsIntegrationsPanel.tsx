@@ -6,6 +6,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import {
   CalendarDays,
   Code2,
+  Contact,
   Files,
   FileText,
   GitBranch,
@@ -183,6 +184,12 @@ function IntegrationRows({
           label="HubSpot"
           provider="hubspot"
           accounts={integrations.personalAccounts.hubspot}
+        />
+        <IntegrationProviderGroup
+          icon={Contact}
+          label="Attio"
+          provider="attio"
+          accounts={integrations.personalAccounts.attio}
         />
         <IntegrationProviderGroup
           icon={NotebookPen}
@@ -374,7 +381,9 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
       ? [account.connectionLabel, account.accountName].filter(Boolean).join(" · ") ||
         account.accountEmail ||
         account.integrationId
-      : account.provider === "linear" || account.provider === "hubspot"
+      : account.provider === "linear" ||
+          account.provider === "hubspot" ||
+          account.provider === "attio"
         ? account.connectionLabel ||
           account.accountName ||
           account.accountEmail ||
@@ -643,7 +652,8 @@ function integrationConnectHref(
     | "slack"
     | "hubspot"
     | "granola"
-    | "fathom",
+    | "fathom"
+    | "attio",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -657,6 +667,7 @@ function integrationConnectHref(
   if (provider === "jamie") return "/settings/jamie";
   if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
+  if (provider === "attio") return "/settings/attio";
   if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";

@@ -108,6 +108,19 @@ export type GoatFathomProviderState = {
   statusReason: string | null;
 };
 
+// Attio connects with a workspace API key minted in Attio's developer
+// settings; connect also mints the Attio webhook that feeds ingestion. Rows
+// key external_id on the Attio workspace id so inbound webhooks route by the
+// event's workspace_id.
+export type GoatAttioProviderState = {
+  provider: "attio";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  workspaceName: string | null;
+  statusReason: string | null;
+};
+
 export type GoatSlackProviderState = {
   provider: "slack";
   connected: boolean;
@@ -149,7 +162,8 @@ export type GoatPersonalAccountProvider =
   | "slack"
   | "hubspot"
   | "granola"
-  | "fathom";
+  | "fathom"
+  | "attio";
 
 export type GoatIntegrationState = {
   gmail: GoatGoogleProviderState;
@@ -161,6 +175,7 @@ export type GoatIntegrationState = {
   slack: GoatSlackProviderState;
   granola: GoatGranolaProviderState;
   fathom: GoatFathomProviderState;
+  attio: GoatAttioProviderState;
   codex: GoatCodexProviderState;
   // All of the user's connected accounts per personal provider. The
   // single-account states above remain the "primary connection" view used by
@@ -203,6 +218,7 @@ export function goatPersonalAccountsFromRows(
     hubspot: [],
     granola: [],
     fathom: [],
+    attio: [],
   };
   for (const row of rows) {
     if (row.status === "disconnected") continue;
@@ -220,7 +236,8 @@ export function goatPersonalAccountsFromRows(
       row.provider === "slack" ||
       row.provider === "hubspot" ||
       row.provider === "granola" ||
-      row.provider === "fathom"
+      row.provider === "fathom" ||
+      row.provider === "attio"
     ) {
       personalAccounts[row.provider].push(accountViewFromRow(row.provider, row));
     }
@@ -260,6 +277,7 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     slack: slackProviderState(byProvider.get("slack")),
     granola: granolaProviderState(byProvider.get("granola")),
     fathom: fathomProviderState(byProvider.get("fathom")),
+    attio: attioProviderState(byProvider.get("attio")),
     codex: {
       provider: "codex",
       connected: false,
@@ -420,6 +438,28 @@ function fathomProviderState(row: IntegrationStateRow | undefined): GoatFathomPr
     integrationId: row.id ?? null,
     accountEmail: row.accountEmail ?? row.account_email ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+  };
+}
+
+function attioProviderState(row: IntegrationStateRow | undefined): GoatAttioProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "attio",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      workspaceName: null,
+      statusReason: null,
+    };
+  }
+
+  return {
+    provider: "attio",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    workspaceName: row.connectionLabel ?? row.connection_label ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
   };
 }

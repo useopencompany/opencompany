@@ -17,6 +17,7 @@ import { assertRunnerDbConfig, closeDb } from "./db";
 import { sweepDeadParentDelegatedChildren, sweepDelegationBackstop } from "./delegation";
 import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
+import { startGoatAttioFlushWorker } from "./goat-attio-flush-worker";
 import { setGoatBrainImportWakeup, startGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { setGoatCodexChatWakeup, startGoatCodexChatWorker } from "./goat-codex-chat-worker";
@@ -111,6 +112,7 @@ const goatBrainImportWorker = env.goatTaskWorkerEnabled ? startGoatBrainImportWo
 const goatSlackFlushWorker = env.goatTaskWorkerEnabled ? startGoatSlackFlushWorker() : null;
 const goatLinearFlushWorker = env.goatTaskWorkerEnabled ? startGoatLinearFlushWorker() : null;
 const goatHubspotFlushWorker = env.goatTaskWorkerEnabled ? startGoatHubspotFlushWorker(env) : null;
+const goatAttioFlushWorker = env.goatTaskWorkerEnabled ? startGoatAttioFlushWorker() : null;
 const goatGmailPollWorker = env.goatTaskWorkerEnabled ? startGoatGmailPollWorker(env) : null;
 const goatGmailFlushWorker = env.goatTaskWorkerEnabled ? startGoatGmailFlushWorker(env) : null;
 const goatGranolaPollWorker = env.goatTaskWorkerEnabled ? startGoatGranolaPollWorker() : null;
@@ -189,6 +191,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatSlackFlushWorker?.stop() ?? Promise.resolve(),
       goatLinearFlushWorker?.stop() ?? Promise.resolve(),
       goatHubspotFlushWorker?.stop() ?? Promise.resolve(),
+      goatAttioFlushWorker?.stop() ?? Promise.resolve(),
       goatGmailPollWorker?.stop() ?? Promise.resolve(),
       goatGmailFlushWorker?.stop() ?? Promise.resolve(),
       goatGranolaPollWorker?.stop() ?? Promise.resolve(),

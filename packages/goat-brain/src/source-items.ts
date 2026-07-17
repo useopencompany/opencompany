@@ -13,7 +13,8 @@ export type BrainSourceProvider =
   | "google_drive"
   | "hubspot"
   | "granola"
-  | "fathom";
+  | "fathom"
+  | "attio";
 export type BrainSourceType =
   | "meeting"
   | "run"
@@ -1100,6 +1101,174 @@ export function isNormalizedHubspotObjectSourceItem(
     typeof object.portalId === "string" &&
     typeof object.objectType === "string" &&
     typeof object.objectId === "string" &&
+    typeof object.name === "string" &&
+    Array.isArray(object.activity) &&
+    object.activity.length > 0
+  );
+}
+
+export type NormalizedAttioObjectType = "person" | "company" | "deal";
+
+export type NormalizedAttioObjectActivity = {
+  occurredAt: string;
+  action: "create" | "update" | "note";
+  /** Resolved attribute title for update events, when enrichment succeeded. */
+  attributeName?: string;
+  noteTitle?: string;
+  actorType?: string;
+};
+
+export type NormalizedAttioObjectNote = {
+  noteId: string;
+  title: string;
+  createdAt?: string;
+  /** Plaintext note content, truncated by the flush worker. */
+  content: string;
+};
+
+export type NormalizedAttioObjectContent = {
+  object: {
+    workspaceId: string;
+    objectType: NormalizedAttioObjectType;
+    recordId: string;
+    /** Display name: person full name, company name, or deal name. */
+    name: string;
+    url?: string;
+    stage?: string;
+    /** Selected record values from the live snapshot, keyed by attribute slug. */
+    properties?: Record<string, string>;
+    createdAt?: string;
+    /** True when the live record snapshot could not be fetched (deleted record,
+     * revoked key); fields above then reflect the buffered events only. */
+    snapshotStale?: boolean;
+    windowStart: string;
+    windowEnd: string;
+    activity: NormalizedAttioObjectActivity[];
+    /** Full content of notes added inside this window, fetched at flush time. */
+    notes?: NormalizedAttioObjectNote[];
+  };
+};
+
+export type NormalizedAttioObjectSourceItem =
+  NormalizedBrainSourceItem<NormalizedAttioObjectContent> & {
+    sourceProvider: "attio";
+    sourceType: "activity";
+  };
+
+export function normalizeAttioObjectWindow(input: {
+  // Minted per flush, so it doubles as the stable external id for dedupe.
+  windowId: string;
+  workspaceId: string;
+  objectType: NormalizedAttioObjectType;
+  recordId: string;
+  name: string;
+  activity: NormalizedAttioObjectActivity[];
+  flushedAt: string;
+  url?: string;
+  stage?: string;
+  properties?: Record<string, string>;
+  createdAt?: string;
+  snapshotStale?: boolean;
+  notes?: NormalizedAttioObjectNote[];
+}): NormalizedAttioObjectSourceItem {
+  const windowId = input.windowId.trim();
+  if (!windowId) throw invalid("object windowId must not be empty", "invalid_object");
+  const workspaceId = input.workspaceId.trim();
+  if (!workspaceId) throw invalid("object workspaceId must not be empty", "invalid_object");
+  const recordId = input.recordId.trim();
+  if (!recordId) throw invalid("object recordId must not be empty", "invalid_object");
+  if (input.activity.length === 0) {
+    throw invalid("object activity must not be empty", "invalid_object");
+  }
+  const flushedAt = optionalIsoString(input.flushedAt);
+  if (!flushedAt) throw invalid("object flushedAt must be a timestamp", "invalid_object");
+  const name = optionalString(input.name) ?? recordId;
+
+  const activity = [...input.activity].sort(
+    (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime(),
+  );
+  const windowStart = activity[0]!.occurredAt;
+  const windowEnd = activity[activity.length - 1]!.occurredAt;
+  const url = optionalString(input.url);
+  const stage = optionalString(input.stage);
+  const createdAt = optionalIsoString(input.createdAt);
+  const properties =
+    input.properties && Object.keys(input.properties).length > 0 ? input.properties : undefined;
+  const notes = input.notes && input.notes.length > 0 ? input.notes : undefined;
+
+  const object = {
+    workspaceId,
+    objectType: input.objectType,
+    recordId,
+    name,
+    ...(url ? { url } : {}),
+    ...(stage ? { stage } : {}),
+    ...(properties ? { properties } : {}),
+    ...(createdAt ? { createdAt } : {}),
+    ...(input.snapshotStale ? { snapshotStale: true } : {}),
+    windowStart,
+    windowEnd,
+    activity,
+    ...(notes ? { notes } : {}),
+  };
+  const contentHashInput = {
+    sourceProvider: "attio",
+    sourceType: "activity",
+    workspaceId,
+    objectType: input.objectType,
+    recordId,
+    activity: activity.map((entry) => ({
+      occurredAt: entry.occurredAt,
+      action: entry.action,
+      ...(entry.attributeName ? { attributeName: entry.attributeName } : {}),
+    })),
+    name,
+    ...(stage ? { stage } : {}),
+    ...(notes ? { noteIds: notes.map((note) => note.noteId) } : {}),
+  };
+
+  return {
+    sourceProvider: "attio",
+    sourceType: "activity",
+    externalId: windowId,
+    // Attio record ids are unique only within a workspace. Keep the workspace
+    // in provenance so records from two connected accounts can never collide.
+    sourceRef: `attio:${workspaceId}:${input.objectType}:${recordId}`,
+    title: name,
+    occurredAt: windowStart,
+    capturedAt: flushedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: { object },
+  };
+}
+
+export function isNormalizedAttioObjectSourceItem(
+  value: unknown,
+): value is NormalizedAttioObjectSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedAttioObjectSourceItem>;
+  if (
+    item.sourceProvider !== "attio" ||
+    item.sourceType !== "activity" ||
+    typeof item.externalId !== "string" ||
+    typeof item.sourceRef !== "string" ||
+    typeof item.title !== "string" ||
+    typeof item.occurredAt !== "string" ||
+    typeof item.capturedAt !== "string" ||
+    typeof item.contentHash !== "string" ||
+    !item.content ||
+    typeof item.content !== "object"
+  ) {
+    return false;
+  }
+  const object = (item.content as Partial<NormalizedAttioObjectContent>).object;
+  return (
+    !!object &&
+    typeof object === "object" &&
+    typeof object.workspaceId === "string" &&
+    typeof object.objectType === "string" &&
+    typeof object.recordId === "string" &&
     typeof object.name === "string" &&
     Array.isArray(object.activity) &&
     object.activity.length > 0
