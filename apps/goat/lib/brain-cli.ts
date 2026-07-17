@@ -94,6 +94,7 @@ export async function runGoatBrainCliForUser(input: {
   if (!resolved) {
     return {
       ok: false,
+      brainRef: input.brainRef,
       exitCode: null,
       stdout: "",
       stderr: "",
@@ -129,6 +130,7 @@ export async function runGoatBrainToolForUser(input: {
   } catch (error) {
     return {
       ok: false,
+      brainRef: input.brainRef,
       exitCode: null,
       stdout: "",
       stderr: "",
@@ -243,6 +245,7 @@ async function runResolvedGoatBrainCliForUser(
   const durationMs = Date.now() - startedAtMs;
   output = {
     ...output,
+    brainRef: input.brainRef,
     traceId,
     durationMs,
   };
@@ -323,7 +326,7 @@ async function runGoatBrainReadCommandForUser(
   }
 
   const durationMs = Date.now() - startedAtMs;
-  output = { ...output, traceId, durationMs };
+  output = { ...output, brainRef: input.brainRef, traceId, durationMs };
   await recordGoatBrainToolRun({
     traceId,
     brainRef: input.brainRef,
