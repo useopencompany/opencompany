@@ -40,7 +40,10 @@ export async function listCurrentUserGoatTasks() {
       and(
         eq(goatTasks.userWorkosId, user.workosUserId),
         isNull(goatTasks.archivedAt),
-        gte(goatTasks.createdAt, goatHomeActivityCutoff()),
+        or(
+          inArray(goatTasks.status, ["queued", "running"]),
+          gte(goatTasks.createdAt, goatHomeActivityCutoff()),
+        ),
       ),
     )
     .orderBy(desc(goatTasks.createdAt))

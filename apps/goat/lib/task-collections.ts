@@ -471,15 +471,6 @@ function createLocalCodexSessionCollection(chatSessionId: string) {
   });
 }
 
-function createCodexChatSessionCollection(chatSessionId: string) {
-  return createGoatElectricCollection<GoatCodexChatSessionRow>({
-    id: `goat:codex_chat_sessions:${chatSessionId}`,
-    table: "goat.codex_chat_sessions",
-    params: { chat_session_id: chatSessionId },
-    getKey: (row) => row.id,
-  });
-}
-
 const taskRunCollectionsByTaskId = new Map<string, ReturnType<typeof createTaskRunCollections>>();
 const chatMessageCollectionsBySessionId = new Map<
   string,
@@ -488,10 +479,6 @@ const chatMessageCollectionsBySessionId = new Map<
 const localCodexSessionCollectionsByChatSessionId = new Map<
   string,
   ReturnType<typeof createLocalCodexSessionCollection>
->();
-const codexChatSessionCollectionsByChatSessionId = new Map<
-  string,
-  ReturnType<typeof createCodexChatSessionCollection>
 >();
 const brainCollectionsByBrainRef = new Map<string, ReturnType<typeof createBrainCollections>>();
 
@@ -531,15 +518,6 @@ function getLocalCodexSessionCollection(chatSessionId: string) {
   return collection;
 }
 
-function getCodexChatSessionCollection(chatSessionId: string) {
-  const cached = codexChatSessionCollectionsByChatSessionId.get(chatSessionId);
-  if (cached) return cached;
-
-  const collection = createCodexChatSessionCollection(chatSessionId);
-  codexChatSessionCollectionsByChatSessionId.set(chatSessionId, collection);
-  return collection;
-}
-
 function buildGoatCollections() {
   const tasks = createGoatElectricCollection<GoatTaskRow>({
     id: "goat:tasks",
@@ -556,6 +534,12 @@ function buildGoatCollections() {
   const chatSessions = createGoatElectricCollection<GoatChatSessionRow>({
     id: "goat:chat_sessions",
     table: "goat.chat_sessions",
+    getKey: (row) => row.id,
+  });
+
+  const codexChatSessions = createGoatElectricCollection<GoatCodexChatSessionRow>({
+    id: "goat:codex_chat_sessions",
+    table: "goat.codex_chat_sessions",
     getKey: (row) => row.id,
   });
 
@@ -590,7 +574,7 @@ function buildGoatCollections() {
     taskRunCollections: getTaskRunCollections,
     chatMessages: getChatMessageCollection,
     localCodexSessions: getLocalCodexSessionCollection,
-    codexChatSessions: getCodexChatSessionCollection,
+    codexChatSessions,
     integrations,
     brainCollections: getBrainCollections,
     brainSourceItems,

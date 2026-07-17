@@ -12,6 +12,7 @@ import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/i
 import {
   createGoatCollections,
   type GoatChatSessionRow,
+  type GoatCodexChatSessionRow,
   type GoatIntegrationRow,
   type GoatTaskRow,
   type GoatTaskScheduleRow,
@@ -100,6 +101,9 @@ export function GoatAppDataProvider({
   const { data: chatSessionRows, isLoading: chatsLoading } = useLiveQuery((q) =>
     q.from({ session: collections.chatSessions }),
   );
+  const { data: codexChatSessionRows } = useLiveQuery((q) =>
+    q.from({ codexSession: collections.codexChatSessions }),
+  );
   const { data: integrationRows, isLoading: integrationsLoading } = useLiveQuery((q) =>
     q.from({ integration: collections.integrations }),
   );
@@ -109,8 +113,14 @@ export function GoatAppDataProvider({
     if (tasksLoading && !taskRows?.length) return initialData.tasks;
     return ((taskRows ?? []) as GoatTaskRow[])
       .map(taskRowToView)
-      .filter((task) => !task.archivedAt && isRecentGoatHomeActivity(task.createdAt))
-      .toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .filter(
+        (task) =>
+          !task.archivedAt &&
+          (task.status === "queued" ||
+            task.status === "running" ||
+            isRecentGoatHomeActivity(task.createdAt)),
+      )
+      .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   }, [initialData.featureFlags.taskSpawning, initialData.tasks, taskRows, tasksLoading]);
 
   const schedules = useMemo(() => {
@@ -130,14 +140,27 @@ export function GoatAppDataProvider({
   const recentChats = useMemo(() => {
     if (chatsLoading && !chatSessionRows?.length) return initialData.recentChats;
     const initialById = new Map(initialData.recentChats.map((chat) => [chat.id, chat]));
+    const codexRuntimeByChatId = new Map(
+      ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[]).map((row) => [
+        row.chat_session_id,
+        {
+          status: row.status,
+          error: row.error,
+          updatedAt: row.updated_at,
+        },
+      ]),
+    );
     const toSummary = (row: GoatChatSessionRow) => {
       const initial = initialById.get(row.id);
+      const liveCodexRuntime = codexRuntimeByChatId.get(row.id);
       return {
         id: row.id,
         title: row.title,
         model: row.model as AgentModelId,
         engine: row.engine,
         codexComposerSettings: initial?.codexComposerSettings ?? null,
+        codexRuntime:
+          row.engine === "codex" ? (liveCodexRuntime ?? initial?.codexRuntime ?? null) : null,
         preview: initial?.preview ?? "No messages yet.",
         updatedAt: row.updated_at,
         pinnedAt: row.pinned_at,
@@ -145,6 +168,11 @@ export function GoatAppDataProvider({
     };
     const openRows = ((chatSessionRows ?? []) as GoatChatSessionRow[]).filter(
       (row) => !row.closed_at,
+    );
+    const activeCodexChatIds = new Set(
+      ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[])
+        .filter((row) => row.status === "starting" || row.status === "running")
+        .map((row) => row.chat_session_id),
     );
     // Pinned chats stay visible regardless of the recency window, with separate
     // caps for pinned and unpinned hydration (mirrors listOpenSessions on the server).
@@ -155,13 +183,22 @@ export function GoatAppDataProvider({
       )
       .slice(0, GOAT_PINNED_CHAT_LIMIT)
       .map(toSummary);
+    const activeCodex = openRows
+      .filter((row) => !row.pinned_at && activeCodexChatIds.has(row.id))
+      .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .map(toSummary);
     const recent = openRows
-      .filter((row) => !row.pinned_at && isRecentGoatHomeActivity(row.updated_at))
+      .filter(
+        (row) =>
+          !row.pinned_at &&
+          !activeCodexChatIds.has(row.id) &&
+          isRecentGoatHomeActivity(row.updated_at),
+      )
       .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
       .slice(0, 8)
       .map(toSummary);
-    return [...pinned, ...recent];
-  }, [chatSessionRows, chatsLoading, initialData.recentChats]);
+    return [...pinned, ...activeCodex, ...recent];
+  }, [chatSessionRows, chatsLoading, codexChatSessionRows, initialData.recentChats]);
 
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;

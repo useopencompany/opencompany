@@ -381,12 +381,13 @@ export function goatElectricCodexChatSessionId(requestUrl: URL) {
 }
 
 function scopedCodexChatSessionWhere(
-  _userWorkosId: string,
+  userWorkosId: string,
   requestUrl: URL,
   context: ShapeWhereContext,
 ): ShapeWhere | null {
   const sessionId = goatElectricCodexChatSessionId(requestUrl);
-  if (!sessionId || context.authorizedChatSessionId !== sessionId) return null;
+  if (!sessionId) return scopedUserWhere(userWorkosId);
+  if (context.authorizedChatSessionId !== sessionId) return null;
 
   return {
     clause: `"chat_session_id" = $1`,
