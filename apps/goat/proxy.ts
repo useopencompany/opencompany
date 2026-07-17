@@ -18,6 +18,10 @@ export default async function proxy(request: NextRequest) {
     return NextResponse.redirect(localHttpsRedirect);
   }
 
+  if (isLocalAdaptiveToolExposureRequest(request.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
+
   const { session, headers, authorizationUrl } = await authkit(request, {
     redirectUri: getGoatWorkOSRedirectUri(),
   });
@@ -33,6 +37,14 @@ export default async function proxy(request: NextRequest) {
   return handleAuthkitHeaders(request, headers, {
     redirect: authorizationUrl ?? new URL("/auth/sign-in", request.url).toString(),
   });
+}
+
+function isLocalAdaptiveToolExposureRequest(pathname: string) {
+  return (
+    process.env.NODE_ENV === "development" &&
+    (pathname === "/experiments/adaptive-tool-exposure" ||
+      pathname === "/api/experiments/adaptive-tool-exposure")
+  );
 }
 
 export const config = {
