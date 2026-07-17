@@ -103,6 +103,13 @@ type AttioWindowEnrichment = {
   routingEnabled: boolean;
 };
 
+type AttioRoutedEventGroup = {
+  events: BufferedAttioEventRow[];
+  eventKeys: string[];
+  brainRefs: string[];
+  eventKeysByBrainRef: Map<string, string[]>;
+};
+
 export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Promise<{
   sourceItemId: string;
   eventCount: number;
@@ -146,13 +153,6 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
     // Keep the pre-fetched snapshot aligned with the exact flushed window.
     if (claimed.length !== preview.length) return null;
 
-    const item = buildAttioObjectWindowItem({
-      window,
-      events: claimed,
-      enrichment,
-      flushedAt,
-    });
-
     // Routing is re-resolved at flush time: the user may have deselected the
     // object type or disabled the source since the events were buffered. A
     // revoked integration still flushes (persisting the window) with no jobs,
@@ -167,16 +167,13 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
     const routes = canRouteAttioWindow(currentStatus, enrichment.routingEnabled)
       ? await listEnabledGoatAttioBrainSourceRoutes([window.integrationId], tx)
       : [];
-    const candidateBrainRefs = routes
-      .filter((route) => {
-        const selected = goatAttioSelectedObjectTypes(route.config);
-        if (selected.size === 0) return false;
-        if (!selected.has(window.objectType)) return false;
-        return claimed.some((row) =>
-          goatAttioRouteMatchesEvent(route.config, goatAttioEventTypeFor(row.action)),
-        );
-      })
-      .map((route) => route.brainRef);
+    const routableRoutes = hasUsableAttioRecordIdentity(enrichment.snapshot)
+      ? routes.filter((route) => {
+          const selected = goatAttioSelectedObjectTypes(route.config);
+          if (selected.size === 0) return false;
+          return selected.has(window.objectType);
+        })
+      : [];
 
     // Cross-member dedup: Attio delivers separately to each member's webhook,
     // so claim keys derive from event content (note ids, record creation,
@@ -194,61 +191,136 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
         eventTime: eventTimeDate(row.eventTime),
       }),
     );
-    const brainRefs: string[] = [];
-    const claimedEventKeysByBrainRef = new Map<string, string[]>();
-    const newlyClaimedEventKeys = new Set<string>();
-    for (const brainRef of new Set(candidateBrainRefs)) {
+    const eventKeyByEventId = new Map(claimed.map((row, index) => [row.id, eventKeys[index]!]));
+    const groups = new Map<string, AttioRoutedEventGroup>();
+    for (const route of routableRoutes) {
+      const matchingEventKeys = claimed.flatMap((row, index) =>
+        goatAttioRouteMatchesEvent(route.config, goatAttioEventTypeFor(row.action), {
+          actorType: attioActorType(row),
+        })
+          ? [eventKeys[index]!]
+          : [],
+      );
+      if (matchingEventKeys.length === 0) continue;
       const { claimedEventKeys } = await claimGoatBrainSourceEvents({
-        brainRef,
+        brainRef: route.brainRef,
         sourceProvider: "attio",
-        eventKeys,
+        eventKeys: matchingEventKeys,
         db: tx,
       });
       if (claimedEventKeys.length === 0) continue;
-      brainRefs.push(brainRef);
-      claimedEventKeysByBrainRef.set(brainRef, claimedEventKeys);
-      for (const eventKey of claimedEventKeys) newlyClaimedEventKeys.add(eventKey);
-    }
-
-    const upserted = await upsertGoatBrainSourceItemAndEnqueue({
-      userWorkosId: window.userWorkosId,
-      sourceConnectionId: window.integrationId,
-      integrationId: window.integrationId,
-      item,
-      rawPayload: { eventIds: claimed.map((row) => row.id) },
-      rawEventCount: brainRefs.length > 0 ? newlyClaimedEventKeys.size : claimed.length,
-      rawEventKeysByBrainRef: claimedEventKeysByBrainRef,
-      kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
-      brainRefs,
-      skipReason: null,
-      now: flushedAt,
-      db: tx,
-    });
-
-    await tx.execute(sql`
-      UPDATE goat.attio_object_events
-      SET source_item_id = ${upserted.sourceItemId}
-      WHERE id IN (${sql.join(
-        claimed.map((row) => sql`${row.id}`),
-        sql`, `,
-      )})
-    `);
-    for (const brainRef of brainRefs) {
-      await attributeGoatBrainSourceEventClaims({
-        brainRef,
-        sourceProvider: "attio",
-        eventKeys: claimedEventKeysByBrainRef.get(brainRef) ?? [],
-        sourceItemId: upserted.sourceItemId,
-        db: tx,
+      const claimedKeySet = new Set(claimedEventKeys);
+      const groupEventKeys = [
+        ...new Set(eventKeys.filter((eventKey) => claimedKeySet.has(eventKey))),
+      ];
+      const groupKey = JSON.stringify(groupEventKeys);
+      const existing = groups.get(groupKey);
+      if (existing) {
+        existing.brainRefs.push(route.brainRef);
+        existing.eventKeysByBrainRef.set(route.brainRef, groupEventKeys);
+        continue;
+      }
+      groups.set(groupKey, {
+        events: claimed.filter((_row, index) => claimedKeySet.has(eventKeys[index]!)),
+        eventKeys: groupEventKeys,
+        brainRefs: [route.brainRef],
+        eventKeysByBrainRef: new Map([[route.brainRef, groupEventKeys]]),
       });
     }
 
+    // A single integration can feed multiple Brains with different event
+    // selections. Persist one normalized item per distinct claimed event set
+    // so a Brain subscribed only to notes never sees an update that another
+    // Brain explicitly opted into.
+    const sourceItemIdByEventId = new Map<string, string>();
+    const upsertedGroups: Array<Awaited<ReturnType<typeof upsertGoatBrainSourceItemAndEnqueue>>> =
+      [];
+    for (const group of groups.values()) {
+      const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+        userWorkosId: window.userWorkosId,
+        sourceConnectionId: window.integrationId,
+        integrationId: window.integrationId,
+        item: buildAttioObjectWindowItem({
+          window,
+          events: group.events,
+          enrichment,
+          flushedAt,
+        }),
+        rawPayload: { eventIds: group.events.map((row) => row.id) },
+        rawEventCount: group.eventKeys.length,
+        rawEventKeysByBrainRef: group.eventKeysByBrainRef,
+        kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+        brainRefs: group.brainRefs,
+        skipReason: null,
+        now: flushedAt,
+        db: tx,
+      });
+      upsertedGroups.push(upserted);
+      for (const event of group.events) {
+        if (!sourceItemIdByEventId.has(event.id)) {
+          sourceItemIdByEventId.set(event.id, upserted.sourceItemId);
+        }
+      }
+      for (const brainRef of group.brainRefs) {
+        await attributeGoatBrainSourceEventClaims({
+          brainRef,
+          sourceProvider: "attio",
+          eventKeys: group.eventKeysByBrainRef.get(brainRef) ?? [],
+          sourceItemId: upserted.sourceItemId,
+          db: tx,
+        });
+      }
+    }
+
+    // Persist filtered or unroutable events as evidence without enqueueing a
+    // Brain job, and use source_item_id as the durable flushed marker.
+    const unrouted = claimed.filter((row) => !sourceItemIdByEventId.has(row.id));
+    if (unrouted.length > 0) {
+      const upserted = await upsertGoatBrainSourceItemAndEnqueue({
+        userWorkosId: window.userWorkosId,
+        sourceConnectionId: window.integrationId,
+        integrationId: window.integrationId,
+        item: buildAttioObjectWindowItem({ window, events: unrouted, enrichment, flushedAt }),
+        rawPayload: { eventIds: unrouted.map((row) => row.id) },
+        rawEventCount: new Set(unrouted.map((row) => eventKeyByEventId.get(row.id)!)).size,
+        rawEventKeysByBrainRef: new Map(),
+        kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+        brainRefs: [],
+        skipReason: null,
+        now: flushedAt,
+        db: tx,
+      });
+      upsertedGroups.push(upserted);
+      for (const event of unrouted) sourceItemIdByEventId.set(event.id, upserted.sourceItemId);
+    }
+
+    const eventIdsBySourceItemId = new Map<string, string[]>();
+    for (const row of claimed) {
+      const sourceItemId = sourceItemIdByEventId.get(row.id);
+      if (!sourceItemId) throw new Error(`Attio event ${row.id} was not persisted.`);
+      const ids = eventIdsBySourceItemId.get(sourceItemId) ?? [];
+      ids.push(row.id);
+      eventIdsBySourceItemId.set(sourceItemId, ids);
+    }
+    for (const [sourceItemId, eventIds] of eventIdsBySourceItemId) {
+      await tx.execute(sql`
+        UPDATE goat.attio_object_events
+        SET source_item_id = ${sourceItemId}
+        WHERE id IN (${sql.join(
+          eventIds.map((eventId) => sql`${eventId}`),
+          sql`, `,
+        )})
+      `);
+    }
+
+    const firstSourceItemId = sourceItemIdByEventId.get(claimed[0]!.id);
+    if (!firstSourceItemId) throw new Error("Attio flush did not persist its first event.");
     return {
-      sourceItemId: upserted.sourceItemId,
+      sourceItemId: firstSourceItemId,
       eventCount: claimed.length,
-      enqueued: upserted.enqueued,
-      skipped: upserted.skipped,
-      ...(upserted.quotaUpdates ? { quotaUpdates: upserted.quotaUpdates } : {}),
+      enqueued: upsertedGroups.some((upserted) => upserted.enqueued),
+      skipped: upsertedGroups.every((upserted) => upserted.skipped),
+      quotaUpdates: upsertedGroups.flatMap((upserted) => upserted.quotaUpdates ?? []),
     };
   });
 
@@ -316,7 +388,11 @@ export function buildAttioObjectWindowItem(input: {
   flushedAt: Date;
 }): NormalizedAttioObjectSourceItem {
   const { window, events, enrichment } = input;
-  const notesById = new Map(enrichment.notes.map((note) => [note.noteId, note]));
+  const selectedNoteIds = new Set(
+    events.flatMap((row) => (row.action === "note" && row.noteId ? [row.noteId] : [])),
+  );
+  const notes = enrichment.notes.filter((note) => selectedNoteIds.has(note.noteId));
+  const notesById = new Map(notes.map((note) => [note.noteId, note]));
   const activity = events.map((row) =>
     toNormalizedActivity(row, enrichment.attributeTitles, notesById),
   );
@@ -337,7 +413,7 @@ export function buildAttioObjectWindowItem(input: {
           ...(enrichment.snapshot.createdAt ? { createdAt: enrichment.snapshot.createdAt } : {}),
         }
       : { snapshotStale: true }),
-    ...(enrichment.notes.length > 0 ? { notes: enrichment.notes } : {}),
+    ...(notes.length > 0 ? { notes } : {}),
   });
 }
 
@@ -362,6 +438,14 @@ export function canRouteAttioWindow(
   enrichmentRoutingEnabled: boolean,
 ) {
   return enrichmentRoutingEnabled && status === "connected";
+}
+
+export function hasUsableAttioRecordIdentity(snapshot: AttioRecordSnapshot | null) {
+  return Boolean(snapshot?.name?.trim());
+}
+
+function attioActorType(row: BufferedAttioEventRow): string | null {
+  return typeof row.payload.actorType === "string" ? row.payload.actorType : null;
 }
 
 export function startGoatAttioFlushWorker(options: { pollIntervalMs?: number } = {}) {

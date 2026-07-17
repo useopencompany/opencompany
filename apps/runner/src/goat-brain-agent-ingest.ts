@@ -1291,6 +1291,10 @@ async function runBrainAgentIngestSession(input: {
       ...goatBrainBudgetLogFields(loop.budget),
     });
 
+    // The source may have been disabled while the model was running. Its job
+    // lease is revoked by the source action and propagated through this signal;
+    // never sync the temporary Brain after that cancellation point.
+    input.signal?.throwIfAborted();
     const synced = await syncGoatBrainFilesFromRoot({
       brainRef,
       userWorkosId: input.userWorkosId,

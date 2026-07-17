@@ -62,7 +62,7 @@ Runner
     mark task succeeded, failed, or canceled
 
 Goat UI
-  subscribes to Electric task, chat, and local Codex shapes
+  subscribes to Electric task, chat, Cloud Codex, and local Codex shapes
 ```
 
 ## Foreground Chat Loop
@@ -127,10 +127,11 @@ The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, 
 structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
 timezone. `goat_brain` is always available and `web_search` is available when Exa is configured.
-`start_task` and the recurring schedule tools, prompt guidance, schedule context, Results UI, and
-runner claims are enabled only when the user opts into **Background tasks** in Preferences. The
-database flag defaults off, so the standard Goat experience is chat plus Brain without task
-spawning. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
+`start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
+rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
+Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The
+database flag defaults off, so the standard Goat experience is chat plus Brain without background
+task spawning. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
 
 The default chat model is `anthropic/claude-sonnet-5`. New tasks store the chat-selected model at
 creation time, then the runner planner chooses the task execution model from its allowed model
@@ -225,6 +226,12 @@ OpenCompany-managed ids and preserves any unrelated native skills. A content fin
 the app-server daemon when the installed set changes, while the persistent Codex thread is resumed.
 Only skills whose first activation belongs to the current turn are included as native `skill`
 inputs; previously activated skills remain installed and in thread history.
+
+On the Goat home, open Cloud Codex sessions are projected into the unified Tasks section alongside
+background `goat.tasks`. This is a live UI projection of the chat-backed session and its
+`goat.codex_chat_sessions` runtime state, not a copied task row: selecting it still opens
+`/chat/<session-id>`, pinning and archiving keep their chat semantics, and the sidebar continues to
+show it in conversation history. Local Codex remains a chat-only surface.
 
 ## Task Creation
 
@@ -473,7 +480,7 @@ queued -> running/planning -> running/running
   -> failed/failed
 ```
 
-The UI maps this to Results rows and task detail pages. Goat task pages subscribe to TanStack DB
+The UI maps this to Tasks rows and task detail pages. Goat task pages subscribe to TanStack DB
 collections backed by Electric shapes for `goat.tasks`, `goat.task_messages`, and
 `goat.task_events`, scoped by `user_workos_id`. The active chat also subscribes to scoped
 `goat.chat_messages` rows so persisted task completion notifications appear without a manual

@@ -150,11 +150,13 @@ async function handleAttioEvents(input: {
     });
     if (!parsed) continue;
     const eventType = goatAttioEventTypeFor(parsed.action);
+    const actorType =
+      typeof parsed.payload.actorType === "string" ? parsed.payload.actorType : null;
     const matched = routes.some((route) => {
       const selected = goatAttioSelectedObjectTypes(route.config);
       if (selected.size === 0) return false;
       if (!selected.has(parsed.objectType)) return false;
-      return goatAttioRouteMatchesEvent(route.config, eventType);
+      return goatAttioRouteMatchesEvent(route.config, eventType, { actorType });
     });
     if (!matched) continue;
     inserts.push({

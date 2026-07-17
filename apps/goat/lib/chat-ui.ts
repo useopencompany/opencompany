@@ -4,6 +4,7 @@ import type {
   GoatChatAttachmentKind,
   GoatChatEngine,
   GoatChatMessage,
+  GoatCodexChatSessionStatus,
   GoatHarnessEngine,
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
@@ -317,7 +318,14 @@ export type GoatChatSessionView = {
   model: AgentModelId;
   engine?: GoatChatEngine;
   codexComposerSettings?: GoatCodexComposerSettingsView | null;
+  codexRuntime?: GoatCodexRuntimeView | null;
   messages: GoatChatUiMessage[];
+};
+
+export type GoatCodexRuntimeView = {
+  status: GoatCodexChatSessionStatus;
+  error: string | null;
+  updatedAt: string;
 };
 
 export type GoatChatSummaryView = {
@@ -326,6 +334,7 @@ export type GoatChatSummaryView = {
   model: AgentModelId;
   engine?: GoatChatEngine;
   codexComposerSettings?: GoatCodexComposerSettingsView | null;
+  codexRuntime?: GoatCodexRuntimeView | null;
   preview: string;
   updatedAt: string;
   pinnedAt?: string | null;
@@ -585,7 +594,7 @@ function legacyTaskOrderedParts(
     output,
   } as GoatChatUiMessage["parts"][number];
 
-  const split = splitTaskContentAroundResults(message.content);
+  const split = splitTaskContentAroundTaskNotice(message.content);
   if (!split) return [...textParts(message.content), part];
 
   const parts: GoatChatUiMessage["parts"] = [];
@@ -644,8 +653,8 @@ function legacyStartTaskInput(
   };
 }
 
-function splitTaskContentAroundResults(content: string) {
-  const match = /\s*added to Results\b/i.exec(content);
+function splitTaskContentAroundTaskNotice(content: string) {
+  const match = /\s*added to (?:Tasks|Results)\b/i.exec(content);
   if (!match) return null;
 
   return {

@@ -103,6 +103,47 @@ describe("buildGoatElectricOriginUrl", () => {
     expect(url?.searchParams.get("where")).not.toBe("1=1");
   });
 
+  it("scopes the global Codex session feed to the authenticated WorkOS user", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions",
+      ),
+      userWorkosId: "user_123",
+    });
+
+    expect(url?.searchParams.get("table")).toBe("goat.codex_chat_sessions");
+    expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1');
+    expect(url?.searchParams.get("params[1]")).toBe("user_123");
+  });
+
+  it("keeps detail-scoped Codex session feeds bound to an authorized chat", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions&chat_session_id=goat_chat_1",
+      ),
+      userWorkosId: "user_123",
+      authorizedChatSessionId: "goat_chat_1",
+    });
+
+    expect(url?.searchParams.get("where")).toBe('"chat_session_id" = $1');
+    expect(url?.searchParams.get("params[1]")).toBe("goat_chat_1");
+  });
+
+  it("rejects a detail-scoped Codex session feed for a different chat", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.codex_chat_sessions&chat_session_id=goat_chat_1",
+      ),
+      userWorkosId: "user_123",
+      authorizedChatSessionId: "goat_chat_2",
+    });
+
+    expect(url).toBeNull();
+  });
+
   it.each([
     "goat.task_model_usage",
     "goat.task_tool_usage",

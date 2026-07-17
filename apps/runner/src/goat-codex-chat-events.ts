@@ -210,30 +210,41 @@ export function createGoatCodexChatProjector(input: {
     const now = options.completedAt ?? new Date();
     assertRowsChanged(
       await getDb().execute(sql`
-        UPDATE goat.codex_chat_turns AS turn
-        SET status = ${options.turnStatus},
-            error = ${options.error},
-            completed_at = ${now},
-            updated_at = ${now}
-        WHERE turn.id = ${target.turnId}
-          AND turn.user_workos_id = ${target.userWorkosId}
-          AND turn.lease_id = ${target.leaseId}
-          AND turn.lease_owner = ${target.leaseOwner}
-          AND turn.status = 'running'
-        RETURNING turn.id
-      `),
-    );
-    assertRowsChanged(
-      await getDb().execute(sql`
+        WITH settled_turn AS (
+          UPDATE goat.codex_chat_turns AS turn
+          SET status = ${options.turnStatus},
+              error = ${options.error},
+              completed_at = ${now},
+              updated_at = ${now}
+          WHERE turn.id = ${target.turnId}
+            AND turn.user_workos_id = ${target.userWorkosId}
+            AND turn.lease_id = ${target.leaseId}
+            AND turn.lease_owner = ${target.leaseOwner}
+            AND turn.status = 'running'
+          RETURNING turn.id
+        ),
+        next_queued_turn AS (
+          SELECT queued.id
+          FROM goat.codex_chat_turns AS queued
+          WHERE queued.codex_chat_session_id = ${target.codexChatSessionId}
+            AND queued.user_workos_id = ${target.userWorkosId}
+            AND queued.status = 'queued'
+            AND EXISTS (SELECT 1 FROM settled_turn)
+          ORDER BY queued.created_at ASC, queued.id ASC
+          LIMIT 1
+        )
         UPDATE goat.codex_chat_sessions AS session
-        SET active_turn_id = NULL,
-            status = ${options.sessionStatus},
+        SET active_turn_id = (SELECT id FROM next_queued_turn),
+            status = CASE
+              WHEN EXISTS (SELECT 1 FROM next_queued_turn) THEN 'starting'
+              ELSE ${options.sessionStatus}
+            END,
             error = ${options.error},
             updated_at = ${now}
         WHERE session.id = ${target.codexChatSessionId}
           AND session.user_workos_id = ${target.userWorkosId}
           AND (session.active_turn_id IS NULL OR session.active_turn_id = ${target.turnId})
-          AND EXISTS (${turnLeaseSubquery({ runningOnly: false })})
+          AND EXISTS (SELECT 1 FROM settled_turn)
         RETURNING session.id
       `),
     );

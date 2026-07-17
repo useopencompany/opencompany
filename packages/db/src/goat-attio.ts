@@ -29,6 +29,7 @@ export type GoatAttioObjectTypeRef = {
 };
 
 export const GOAT_ATTIO_EVENT_TYPES = ["object_created", "object_updated", "note_added"] as const;
+export const GOAT_ATTIO_DEFAULT_EVENT_TYPES = ["object_created", "note_added"] as const;
 
 // Attio record.updated payloads have no provider-native event id. Deliveries
 // for the same update reach each member webhook within a short interval, while
@@ -64,6 +65,10 @@ export type GoatAttioApiKeyCredentialPayload = {
 export type GoatAttioBrainSourceConfig = {
   objectTypes?: GoatAttioObjectTypeRef[];
   events?: GoatAttioEventRef[];
+  // Attio recalculates enrichment and relationship fields across hundreds of
+  // records as actor "system". Those updates are high-volume and excluded
+  // unless the source owner explicitly opts in.
+  includeSystemUpdates?: boolean;
 };
 
 export type GoatAttioIntegrationForWorkspace = {
@@ -100,6 +105,7 @@ export function parseGoatAttioBrainSourceConfig(value: unknown): GoatAttioBrainS
   return {
     ...(objectTypes ? { objectTypes } : {}),
     ...(events ? { events } : {}),
+    ...(record.includeSystemUpdates === true ? { includeSystemUpdates: true } : {}),
   };
 }
 
@@ -113,17 +119,24 @@ export function goatAttioSelectedObjectTypes(
 
 export function goatAttioSelectedEventTypes(
   config: GoatAttioBrainSourceConfig,
-): Set<GoatAttioEventType> | null {
-  if (!config.events) return null;
-  return new Set(config.events.map((ref) => ref.id));
+): Set<GoatAttioEventType> {
+  return new Set(
+    (config.events ?? GOAT_ATTIO_DEFAULT_EVENT_TYPES.map((id) => ({ id }))).map((ref) => ref.id),
+  );
 }
 
 export function goatAttioRouteMatchesEvent(
   config: GoatAttioBrainSourceConfig,
   eventType: GoatAttioEventType,
+  context: { actorType?: string | null } = {},
 ) {
   const selected = goatAttioSelectedEventTypes(config);
-  return selected === null || selected.has(eventType);
+  if (!selected.has(eventType)) return false;
+  return !(
+    eventType === "object_updated" &&
+    context.actorType?.trim().toLowerCase() === "system" &&
+    config.includeSystemUpdates !== true
+  );
 }
 
 export function goatAttioEventTypeFor(action: GoatAttioEventAction): GoatAttioEventType {

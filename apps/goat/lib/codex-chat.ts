@@ -426,6 +426,22 @@ async function enqueueExistingCodexChatMessage(input: {
         ${now}
       )
       RETURNING id
+    ),
+    updated_codex_session AS (
+      UPDATE goat.codex_chat_sessions AS session
+      SET status = CASE
+            WHEN session.status IN ('starting', 'running') THEN session.status
+            ELSE 'starting'
+          END,
+          active_turn_id = CASE
+            WHEN session.status IN ('starting', 'running') THEN session.active_turn_id
+            ELSE ${turnId}
+          END,
+          error = NULL,
+          updated_at = ${now}
+      WHERE session.id = ${input.session.id}
+        AND session.user_workos_id = ${input.userWorkosId}
+      RETURNING session.id
     )
     UPDATE goat.chat_sessions
     SET updated_at = ${assistantCreatedAt}

@@ -17,7 +17,11 @@ import {
   textFromGoatChatUiMessage,
 } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION } from "@/lib/chat-agent";
-import { GOAT_PINNED_CHAT_LIMIT, START_TASK_TOOL_NAME } from "@/lib/chat-ui";
+import {
+  GOAT_PINNED_CHAT_LIMIT,
+  type GoatCodexRuntimeView,
+  START_TASK_TOOL_NAME,
+} from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
 vi.mock("next/cache", () => ({
@@ -31,6 +35,32 @@ vi.mock("@/lib/auth", () => ({
 type StoredChatMessage = Awaited<ReturnType<GoatChatStore["listMessages"]>>[number];
 
 describe("createDbGoatChatStore", () => {
+  it("loads active Codex sessions outside the recent-chat limit", async () => {
+    const query = vi.fn(async (...[statement, params]: [string, unknown[], object]) => {
+      void statement;
+      void params;
+      return { rows: [] };
+    });
+    const client = Object.assign(query, {
+      transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
+    });
+    const store = createDbGoatChatStore(drizzle(client as never) as never);
+
+    await store.listOpenSessions({
+      userWorkosId: "user_1",
+      limit: 8,
+      updatedAfter: new Date("2026-07-16T12:00:00.000Z"),
+    });
+
+    const activeQuery = query.mock.calls.find(([statement]) =>
+      statement.includes('"goat"."codex_chat_sessions"'),
+    );
+    expect(activeQuery).toBeDefined();
+    expect(activeQuery?.[0]).toContain("exists");
+    expect(activeQuery?.[0]).not.toContain("limit");
+    expect(activeQuery?.[1]).toEqual(expect.arrayContaining(["user_1", "starting", "running"]));
+  });
+
   it.each([
     { pinned: true, expectedPinnedAt: "2026-07-14T17:15:00.000Z", checksCapacity: true },
     { pinned: false, expectedPinnedAt: null, checksCapacity: false },
@@ -447,6 +477,13 @@ describe("Goat chat history helpers", () => {
           goalMode: { objective: "Ship the fix", tokenBudget: 200000 },
         },
       },
+      codexRuntimeBySessionId: {
+        goat_chat_codex_1: {
+          status: "idle",
+          error: null,
+          updatedAt: "2026-07-04T12:15:00.000Z",
+        },
+      },
     });
     try {
       const now = new Date("2026-07-04T12:00:00.000Z");
@@ -473,6 +510,11 @@ describe("Goat chat history helpers", () => {
           planModeEnabled: true,
           goalMode: { objective: "Ship the fix", tokenBudget: 200000 },
         },
+        codexRuntime: {
+          status: "idle",
+          error: null,
+          updatedAt: "2026-07-04T12:15:00.000Z",
+        },
       });
 
       const summaries = await listRecentGoatChatsForUser(
@@ -485,6 +527,11 @@ describe("Goat chat history helpers", () => {
           reasoningEffort: "high",
           planModeEnabled: true,
           goalMode: { objective: "Ship the fix", tokenBudget: 200000 },
+        },
+        codexRuntime: {
+          status: "idle",
+          error: null,
+          updatedAt: "2026-07-04T12:15:00.000Z",
         },
       });
     } finally {
@@ -500,6 +547,7 @@ function createInMemoryChatStore(
       { displayId: string; name: string; prompt: string; status: GoatTaskStatus }
     >;
     codexSettingsBySessionId?: Record<string, GoatCodexChatTurnSettings | null>;
+    codexRuntimeBySessionId?: Record<string, GoatCodexRuntimeView | null>;
   } = {},
 ) {
   const sessions: GoatChatSession[] = [];
@@ -557,6 +605,10 @@ function createInMemoryChatStore(
 
     async loadLatestCodexTurnSettings(input) {
       return options.codexSettingsBySessionId?.[input.sessionId] ?? null;
+    },
+
+    async loadCodexRuntime(input) {
+      return options.codexRuntimeBySessionId?.[input.sessionId] ?? null;
     },
 
     async listMessages(sessionId) {
