@@ -795,6 +795,7 @@ describe("resolveAgentRuntimeConfig", () => {
   });
 
   it.each([
+    "moonshotai/kimi-k3",
     "moonshotai/kimi-k2.6",
     "moonshotai/kimi-k2.5",
     "moonshotai/kimi-k2-thinking",

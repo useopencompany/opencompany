@@ -49,6 +49,12 @@ export const GOAT_HARNESS_MODEL_OPTIONS = [
     default: true,
   },
   {
+    id: "moonshotai/kimi-k3",
+    label: "Kimi K3",
+    guidance:
+      "Premium Kimi. Use when the user requests Kimi K3, needs the largest Kimi context window, or explicitly prioritizes frontier Kimi reasoning over cost.",
+  },
+  {
     id: "zai/glm-5.2",
     label: "GLM 5.2",
     guidance:
@@ -157,6 +163,7 @@ export const GOAT_HARNESS_CREATION_MODEL_SELECTION = promptBlock("model_selectio
   'When engine is "codex", choose an OpenAI Codex-capable model from the execution model options.',
   "Cost matters. Prefer the cheapest capable default unless a premium or specialized model is clearly justified.",
   "For deep web research, market research, literature research, landscape research, and brain_markdown_report tasks, choose Kimi K2.6 by default.",
+  "Choose Kimi K3 when the user requests Kimi K3, needs the largest Kimi context window, or explicitly prioritizes frontier Kimi reasoning over cost.",
   "Do not upgrade deep research to Claude Sonnet merely because the task is deep, multi-source, or report-shaped.",
   "Choose GLM 5.2 when the task likely needs very large context, long source-set synthesis, or long-horizon structured reasoning and does not need premium multimodal/file-input behavior.",
   "Choose Claude Sonnet 5 only when the user requests Claude/Sonnet, explicitly prioritizes maximum quality over cost, or the task needs premium polished writing/editorial judgment, vision, or file-input strengths.",

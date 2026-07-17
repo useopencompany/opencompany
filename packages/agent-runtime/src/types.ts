@@ -94,6 +94,7 @@ export type AgentModelId =
   | "minimax/minimax-m2.1"
   | "minimax/minimax-m2.1-lightning"
   | "minimax/minimax-m2"
+  | "moonshotai/kimi-k3"
   | "moonshotai/kimi-k2.6"
   | "moonshotai/kimi-k2.5"
   | "moonshotai/kimi-k2-thinking"
