@@ -30,6 +30,13 @@ export type GoatAttioObjectTypeRef = {
 
 export const GOAT_ATTIO_EVENT_TYPES = ["object_created", "object_updated", "note_added"] as const;
 
+// Attio record.updated payloads have no provider-native event id. Deliveries
+// for the same update reach each member webhook within a short interval, while
+// distinct windows are separated by the worker's 15-minute quiet period. A
+// five-minute bucket therefore deduplicates the former without collapsing all
+// changes to one attribute for an entire day.
+export const GOAT_ATTIO_UPDATE_CLAIM_BUCKET_MS = 5 * 60_000;
+
 export type GoatAttioEventType = (typeof GOAT_ATTIO_EVENT_TYPES)[number];
 
 export type GoatAttioEventRef = {
@@ -133,9 +140,9 @@ export function isGoatAttioObjectType(value: unknown): value is GoatAttioObjectT
 
 // Cross-member dedup identity for an event. Attio delivers separately to each
 // member's webhook (no shared delivery id), so keys derive from event content:
-// note and creation events have stable native ids; attribute updates fall back
-// to record+attribute+day, which coalesces same-day edits of one attribute —
-// harmless, since the flush prompt is built from a live record snapshot.
+// note and creation events have stable native ids; attribute updates use a
+// short receipt-time bucket so the same update coalesces across member
+// webhooks without suppressing a later, distinct activity window.
 export function goatAttioEventClaimKey(event: {
   workspaceId: string;
   objectType: GoatAttioObjectType;
@@ -148,8 +155,11 @@ export function goatAttioEventClaimKey(event: {
   const scope = `${event.workspaceId}:${event.objectType}:${event.recordId}`;
   if (event.action === "note") return `${scope}:note:${event.noteId ?? "unknown"}`;
   if (event.action === "create") return `${scope}:created`;
-  const day = event.eventTime.toISOString().slice(0, 10);
-  return `${scope}:updated:${event.attributeId ?? "unknown"}:${day}`;
+  const bucketStart = new Date(
+    Math.floor(event.eventTime.getTime() / GOAT_ATTIO_UPDATE_CLAIM_BUCKET_MS) *
+      GOAT_ATTIO_UPDATE_CLAIM_BUCKET_MS,
+  ).toISOString();
+  return `${scope}:updated:${event.attributeId ?? "unknown"}:${bucketStart}`;
 }
 
 export async function listGoatAttioIntegrationsForWorkspace(

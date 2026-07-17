@@ -42,6 +42,7 @@ import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-attio-flush" });
+type DbLike = any;
 
 // A window flushes after the CRM record has been quiet for the quiet period,
 // or once its oldest buffered event has waited out the max wait — whichever
@@ -51,6 +52,7 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "goat-atti
 export const GOAT_ATTIO_QUIET_PERIOD_MS = 15 * 60_000;
 export const GOAT_ATTIO_MAX_WAIT_MS = 4 * 60 * 60_000;
 export const GOAT_ATTIO_MAX_WINDOW_EVENTS = 200;
+export const GOAT_ATTIO_MAX_NOTES_PER_WINDOW = 5;
 const GOAT_ATTIO_FLUSH_POLL_INTERVAL_MS = 60_000;
 
 export type GoatAttioDueWindow = {
@@ -98,6 +100,7 @@ type AttioWindowEnrichment = {
   snapshot: AttioRecordSnapshot | null;
   attributeTitles: Map<string, string>;
   notes: NormalizedAttioObjectNote[];
+  routingEnabled: boolean;
 };
 
 export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Promise<{
@@ -111,7 +114,7 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
   // Enrichment happens before the transaction so no network call ever holds
   // row locks. An event that slips in mid-flush stays pending and seeds the
   // next window anyway.
-  const preview = await previewBufferedAttioEvents(window);
+  const preview = selectAttioWindowEventsForFlush(await previewBufferedAttioEvents(window));
   if (preview.length === 0) return null;
   const status = await loadAttioIntegrationStatus(window);
   const enrichment = await enrichAttioWindow(window, preview, status);
@@ -154,10 +157,16 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
     // object type or disabled the source since the events were buffered. A
     // revoked integration still flushes (persisting the window) with no jobs,
     // so the buffer never wedges on a dead key.
-    const routes =
-      status === "connected"
-        ? await listEnabledGoatAttioBrainSourceRoutes([window.integrationId], tx)
-        : [];
+    // Enrichment can discover a revoked key and mark the integration
+    // needs_reauth. Re-read inside the transaction so that status change (or a
+    // concurrent disconnect) prevents this incomplete window from being
+    // routed and billed.
+    const currentStatus = enrichment.routingEnabled
+      ? await loadAttioIntegrationStatus(window, tx)
+      : status;
+    const routes = canRouteAttioWindow(currentStatus, enrichment.routingEnabled)
+      ? await listEnabledGoatAttioBrainSourceRoutes([window.integrationId], tx)
+      : [];
     const candidateBrainRefs = routes
       .filter((route) => {
         const selected = goatAttioSelectedObjectTypes(route.config);
@@ -171,7 +180,7 @@ export async function flushGoatAttioObjectWindow(window: GoatAttioDueWindow): Pr
 
     // Cross-member dedup: Attio delivers separately to each member's webhook,
     // so claim keys derive from event content (note ids, record creation,
-    // attribute+day) rather than a shared delivery id. A brain whose claims
+    // short update-time buckets) rather than a shared delivery id. A brain whose claims
     // all lose (record window already ingested via another member's
     // integration) is skipped — no job, no billing.
     const eventKeys = claimed.map((row) =>
@@ -257,6 +266,7 @@ async function enrichAttioWindow(
     snapshot: null,
     attributeTitles: new Map(),
     notes: [],
+    routingEnabled: false,
   };
   if (status !== "connected") return empty;
   const apiKey = await loadAttioApiKey({
@@ -283,7 +293,7 @@ async function enrichAttioWindow(
         : Promise.resolve(new Map<string, string>()),
       noteIds.length > 0 ? fetchAttioNotes({ apiKey, noteIds }) : Promise.resolve([]),
     ]);
-    return { snapshot, attributeTitles, notes };
+    return { snapshot, attributeTitles, notes, routingEnabled: true };
   } catch (error) {
     if (error instanceof AttioAuthError) {
       await markAttioNeedsReauth(window, "Attio rejected the saved API key.");
@@ -329,6 +339,29 @@ export function buildAttioObjectWindowItem(input: {
       : { snapshotStale: true }),
     ...(enrichment.notes.length > 0 ? { notes: enrichment.notes } : {}),
   });
+}
+
+export function selectAttioWindowEventsForFlush<T extends { action: GoatAttioEventAction }>(
+  events: readonly T[],
+  maxNotes = GOAT_ATTIO_MAX_NOTES_PER_WINDOW,
+): T[] {
+  const selected: T[] = [];
+  let selectedNotes = 0;
+  for (const event of events) {
+    if (event.action === "note") {
+      if (selectedNotes >= maxNotes) continue;
+      selectedNotes += 1;
+    }
+    selected.push(event);
+  }
+  return selected;
+}
+
+export function canRouteAttioWindow(
+  status: GoatIntegrationStatus | "unknown",
+  enrichmentRoutingEnabled: boolean,
+) {
+  return enrichmentRoutingEnabled && status === "connected";
 }
 
 export function startGoatAttioFlushWorker(options: { pollIntervalMs?: number } = {}) {
@@ -435,9 +468,10 @@ async function previewBufferedAttioEvents(window: GoatAttioDueWindow) {
 
 async function loadAttioIntegrationStatus(
   window: GoatAttioDueWindow,
+  db: DbLike = getDb(),
 ): Promise<GoatIntegrationStatus | "unknown"> {
   const statusRows = rowsFromExecute<{ status: GoatIntegrationStatus }>(
-    await getDb().execute(sql`
+    await db.execute(sql`
       SELECT status FROM goat.integrations WHERE id = ${window.integrationId}
     `),
   );

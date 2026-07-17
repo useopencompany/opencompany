@@ -60,6 +60,7 @@ export async function POST(request: Request) {
 
   const signature =
     request.headers.get("attio-signature") ?? request.headers.get("x-attio-signature");
+  const idempotencyKey = asHeaderValue(request.headers.get("idempotency-key"));
 
   // Surface transient routing or storage failures so Attio redelivers instead
   // of silently losing CRM activity.
@@ -76,7 +77,9 @@ export async function POST(request: Request) {
     if (!verified) {
       return NextResponse.json({ error: "Invalid Attio signature." }, { status: 401 });
     }
-    return NextResponse.json(await handleAttioEvents({ events, workspaceId, match }));
+    return NextResponse.json(
+      await handleAttioEvents({ events, workspaceId, idempotencyKey, match }),
+    );
   } catch (error) {
     console.error("[goat-attio] Failed to process Attio events", {
       eventCount: events.length,
@@ -123,9 +126,10 @@ async function findIntegrationForWebhook(
 async function handleAttioEvents(input: {
   events: AttioWebhookEvent[];
   workspaceId: string;
+  idempotencyKey: string | null;
   match: AttioIntegrationMatch;
 }) {
-  const { events, workspaceId, match } = input;
+  const { events, workspaceId, idempotencyKey, match } = input;
   if (!match.connected) return { ok: true, ignored: true };
 
   const objectTypeById = new Map<string, GoatAttioObjectType>();
@@ -139,8 +143,11 @@ async function handleAttioEvents(input: {
   if (routes.length === 0) return { ok: true, ignored: true };
 
   const inserts: GoatAttioObjectEventInsert[] = [];
-  for (const event of events) {
-    const parsed = parseAttioEvent(event, objectTypeById);
+  for (const [eventIndex, event] of events.entries()) {
+    const parsed = parseAttioEvent(event, objectTypeById, {
+      idempotencyKey,
+      eventIndex,
+    });
     if (!parsed) continue;
     const eventType = goatAttioEventTypeFor(parsed.action);
     const matched = routes.some((route) => {
@@ -165,6 +172,7 @@ async function handleAttioEvents(input: {
 function parseAttioEvent(
   event: AttioWebhookEvent,
   objectTypeById: ReadonlyMap<string, GoatAttioObjectType>,
+  delivery: { idempotencyKey: string | null; eventIndex: number },
 ): Omit<GoatAttioObjectEventInsert, "integrationId" | "userWorkosId" | "workspaceId"> | null {
   const eventType = event.event_type;
   const actorType = typeof event.actor?.type === "string" ? event.actor.type : null;
@@ -179,13 +187,14 @@ function parseAttioEvent(
     return {
       objectType,
       recordId,
-      // Creations are one-shot per record, so the id is stable across Attio's
-      // redeliveries; attribute updates carry no native event id, so they get
-      // a unique row per delivery and coalesce in the flush window instead.
       deliveryId:
         action === "create"
           ? `created:${recordId}`
-          : `updated:${recordId}:${attributeId ?? "unknown"}:${randomUUID()}`,
+          : attioDeliveryId({
+              idempotencyKey: delivery.idempotencyKey,
+              eventIndex: delivery.eventIndex,
+              fallback: `updated:${recordId}:${attributeId ?? "unknown"}:${randomUUID()}`,
+            }),
       action,
       attributeId,
       noteId: null,
@@ -229,4 +238,20 @@ function parseAttioEvent(
 
 function asId(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function asHeaderValue(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return trimmed && trimmed.length <= 512 ? trimmed : null;
+}
+
+function attioDeliveryId(input: {
+  idempotencyKey: string | null;
+  eventIndex: number;
+  fallback: string;
+}) {
+  return input.idempotencyKey
+    ? `delivery:${input.idempotencyKey}:${input.eventIndex}`
+    : input.fallback;
 }

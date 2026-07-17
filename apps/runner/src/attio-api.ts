@@ -25,7 +25,6 @@ const ATTIO_API_TIMEOUT_MS = 10_000;
 const SNAPSHOT_PROPERTY_VALUE_MAX_CHARS = 2_000;
 const SNAPSHOT_PROPERTY_MAX_COUNT = 40;
 const NOTE_CONTENT_MAX_CHARS = 8_000;
-const NOTE_FETCH_LIMIT = 5;
 
 // Record values that are system bookkeeping or interaction rollups; they
 // change constantly and carry no durable knowledge for the prompt.
@@ -181,7 +180,7 @@ export async function fetchAttioNotes(input: {
   noteIds: readonly string[];
 }): Promise<AttioNote[]> {
   const notes: AttioNote[] = [];
-  for (const noteId of input.noteIds.slice(0, NOTE_FETCH_LIMIT)) {
+  for (const noteId of input.noteIds) {
     try {
       const response = (await attioApiRequest({
         apiKey: input.apiKey,

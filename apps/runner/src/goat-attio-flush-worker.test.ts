@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildAttioObjectWindowItem } from "./goat-attio-flush-worker";
+import {
+  buildAttioObjectWindowItem,
+  canRouteAttioWindow,
+  selectAttioWindowEventsForFlush,
+} from "./goat-attio-flush-worker";
 
 describe("buildAttioObjectWindowItem", () => {
   const window = {
@@ -50,6 +54,7 @@ describe("buildAttioObjectWindowItem", () => {
             content: "Agreed on a two-year term.",
           },
         ],
+        routingEnabled: true,
       },
       flushedAt: new Date("2026-07-16T10:30:00.000Z"),
     });
@@ -85,12 +90,44 @@ describe("buildAttioObjectWindowItem", () => {
           eventTime: "2026-07-16T10:00:00.000Z",
         },
       ],
-      enrichment: { snapshot: null, attributeTitles: new Map(), notes: [] },
+      enrichment: {
+        snapshot: null,
+        attributeTitles: new Map(),
+        notes: [],
+        routingEnabled: false,
+      },
       flushedAt: new Date("2026-07-16T10:30:00.000Z"),
     });
 
     expect(item.title).toBe("rec_9876");
     expect(item.content.object.snapshotStale).toBe(true);
     expect(item.content.object.activity[0]?.attributeName).toBeUndefined();
+  });
+
+  it("keeps excess notes pending for a later flush instead of claiming them without content", () => {
+    const events = [
+      { id: "update_1", action: "update" as const },
+      ...Array.from({ length: 7 }, (_, index) => ({
+        id: `note_${index + 1}`,
+        action: "note" as const,
+      })),
+      { id: "create_1", action: "create" as const },
+    ];
+
+    expect(selectAttioWindowEventsForFlush(events).map((event) => event.id)).toEqual([
+      "update_1",
+      "note_1",
+      "note_2",
+      "note_3",
+      "note_4",
+      "note_5",
+      "create_1",
+    ]);
+  });
+
+  it("does not route a window when enrichment invalidated the saved credential", () => {
+    expect(canRouteAttioWindow("connected", false)).toBe(false);
+    expect(canRouteAttioWindow("needs_reauth", true)).toBe(false);
+    expect(canRouteAttioWindow("connected", true)).toBe(true);
   });
 });

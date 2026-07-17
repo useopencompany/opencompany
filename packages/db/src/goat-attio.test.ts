@@ -64,22 +64,22 @@ describe("goatAttioEventClaimKey", () => {
     expect(goatAttioEventClaimKey({ ...base, action: "create" })).toBe("ws_1:deal:rec_1:created");
   });
 
-  it("keys attribute updates on attribute plus day so same-day edits coalesce", () => {
+  it("coalesces nearby copies of an attribute update without suppressing a later window", () => {
     const key = goatAttioEventClaimKey({ ...base, action: "update", attributeId: "attr_5" });
-    expect(key).toBe("ws_1:deal:rec_1:updated:attr_5:2026-07-17");
-    const sameDayLater = goatAttioEventClaimKey({
+    expect(key).toBe("ws_1:deal:rec_1:updated:attr_5:2026-07-17T10:15:00.000Z");
+    const nearbyCopy = goatAttioEventClaimKey({
       ...base,
       action: "update",
       attributeId: "attr_5",
-      eventTime: new Date("2026-07-17T23:59:00.000Z"),
+      eventTime: new Date("2026-07-17T10:19:59.000Z"),
     });
-    expect(sameDayLater).toBe(key);
-    const nextDay = goatAttioEventClaimKey({
+    expect(nearbyCopy).toBe(key);
+    const laterWindow = goatAttioEventClaimKey({
       ...base,
       action: "update",
       attributeId: "attr_5",
-      eventTime: new Date("2026-07-18T00:01:00.000Z"),
+      eventTime: new Date("2026-07-17T10:20:00.000Z"),
     });
-    expect(nextDay).not.toBe(key);
+    expect(laterWindow).not.toBe(key);
   });
 });

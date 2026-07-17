@@ -79,8 +79,19 @@ describe("POST /api/webhooks/attio/events", () => {
         recordId: RECORD_ID,
         action: "update",
         attributeId: "attr_1",
+        deliveryId: "delivery:delivery_1:0",
       }),
     ]);
+  });
+
+  it("uses Attio's idempotency key as the stable retry identity", async () => {
+    await POST(attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID), "retry-stable"));
+    await POST(attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID), "retry-stable"));
+
+    const first = vi.mocked(insertGoatAttioObjectEvents).mock.calls[0]?.[0]?.[0];
+    const second = vi.mocked(insertGoatAttioObjectEvents).mock.calls[1]?.[0]?.[0];
+    expect(first?.deliveryId).toBe("delivery:retry-stable:0");
+    expect(second?.deliveryId).toBe(first?.deliveryId);
   });
 
   it("keys note events on the stable note id", async () => {
@@ -157,12 +168,13 @@ function recordUpdatedEvent(objectId: string) {
   };
 }
 
-function attioRequest(event: Record<string, unknown>) {
+function attioRequest(event: Record<string, unknown>, idempotencyKey = "delivery_1") {
   return new Request("https://goat.example.com/api/webhooks/attio/events", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "attio-signature": "valid-signature",
+      "idempotency-key": idempotencyKey,
     },
     body: JSON.stringify({ webhook_id: "wh_1", events: [event] }),
   });
