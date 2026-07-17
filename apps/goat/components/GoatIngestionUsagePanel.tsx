@@ -159,6 +159,7 @@ function formatProvider(provider: string) {
     github: "GitHub",
     gmail: "Gmail",
     hubspot: "HubSpot",
+    attio: "Attio",
     jamie: "Jamie",
     linear: "Linear",
     slack: "Slack",

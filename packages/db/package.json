@@ -80,6 +80,10 @@
       "types": "./src/goat-hubspot.ts",
       "default": "./src/goat-hubspot.ts"
     },
+    "./goat-attio": {
+      "types": "./src/goat-attio.ts",
+      "default": "./src/goat-attio.ts"
+    },
     "./goat-linear": {
       "types": "./src/goat-linear.ts",
       "default": "./src/goat-linear.ts"

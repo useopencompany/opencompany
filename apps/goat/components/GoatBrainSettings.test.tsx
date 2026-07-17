@@ -315,6 +315,7 @@ describe("GoatBrainSourceCards", () => {
             hubspot: [],
             granola: [],
             fathom: [],
+            attio: [],
           },
         })}
         onChanged={async () => {}}
@@ -399,6 +400,7 @@ function brainSourceDetails(
       hubspot: [],
       granola: [],
       fathom: [],
+      attio: [],
     },
     jamie: {
       integration: jamieState({
@@ -491,6 +493,16 @@ function brainSourceDetails(
         integrationId: null,
         accountEmail: null,
         accountName: null,
+        statusReason: null,
+      },
+    },
+    attio: {
+      integration: {
+        provider: "attio",
+        connected: false,
+        status: "not_connected",
+        integrationId: null,
+        workspaceName: null,
         statusReason: null,
       },
     },

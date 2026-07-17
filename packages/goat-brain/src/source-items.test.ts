@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BrainSourceNormalizationError,
   githubActivityEventType,
+  isNormalizedAttioObjectSourceItem,
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
@@ -11,6 +12,7 @@ import {
   isNormalizedLinearIssueSourceItem,
   isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
+  normalizeAttioObjectWindow,
   normalizeGitHubActivityWebhook,
   normalizeGmailThreadWindow,
   normalizeGoatChatCapture,
@@ -715,6 +717,62 @@ describe("HubSpot object window normalization", () => {
     const second = normalizeHubspotObjectWindow({ ...input, portalId: "99117" });
 
     expect(second.sourceRef).toBe("hubspot:99117:deal:9876");
+    expect(second.sourceRef).not.toBe(first.sourceRef);
+  });
+});
+
+describe("Attio object window normalization", () => {
+  const input = {
+    windowId: "gattwin_abc123",
+    workspaceId: "14beef7a-99f7-4534-a87e-70b564330a4c",
+    objectType: "deal" as const,
+    recordId: "bf071e1f-6035-429d-b874-d83ea64ea13b",
+    name: "Acme renewal",
+    activity: [
+      {
+        occurredAt: "2026-07-16T10:00:00.000Z",
+        action: "update" as const,
+        attributeName: "Stage",
+      },
+      {
+        occurredAt: "2026-07-16T09:00:00.000Z",
+        action: "note" as const,
+        noteTitle: "Kickoff call",
+      },
+    ],
+    flushedAt: "2026-07-16T10:30:00.000Z",
+    notes: [
+      {
+        noteId: "note_1",
+        title: "Kickoff call",
+        createdAt: "2026-07-16T09:00:00.000Z",
+        content: "Agreed on pilot scope.",
+      },
+    ],
+  };
+
+  it("includes the workspace id in stable provenance", () => {
+    const item = normalizeAttioObjectWindow(input);
+
+    expect(item.sourceRef).toBe(
+      "attio:14beef7a-99f7-4534-a87e-70b564330a4c:deal:bf071e1f-6035-429d-b874-d83ea64ea13b",
+    );
+    expect(item.sourceProvider).toBe("attio");
+    expect(isNormalizedAttioObjectSourceItem(item)).toBe(true);
+  });
+
+  it("orders the window by occurrence and keeps note content", () => {
+    const item = normalizeAttioObjectWindow(input);
+
+    expect(item.content.object.windowStart).toBe("2026-07-16T09:00:00.000Z");
+    expect(item.content.object.windowEnd).toBe("2026-07-16T10:00:00.000Z");
+    expect(item.content.object.notes?.[0]?.content).toBe("Agreed on pilot scope.");
+  });
+
+  it("keeps equal record ids from different workspaces distinct", () => {
+    const first = normalizeAttioObjectWindow(input);
+    const second = normalizeAttioObjectWindow({ ...input, workspaceId: "other-workspace" });
+
     expect(second.sourceRef).not.toBe(first.sourceRef);
   });
 });

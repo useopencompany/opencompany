@@ -1,0 +1,34 @@
+---
+title: Attio
+description: Connect Attio CRM activity to Goat Brain ingestion with a workspace API key.
+---
+
+## What the connection does
+
+When you save an Attio API key, Goat registers a webhook in your Attio workspace and starts receiving CRM activity as it happens: new people, companies, and deals, attribute changes on those records, and notes added to them. Events for one record are buffered and batched — once the record has been quiet for about fifteen minutes (or four hours have passed since the first buffered event), Goat fetches a live snapshot of the record plus the full content of any new notes, folds everything into one activity window, and enqueues the durable Brain ingestion agent. The agent judges the window and only writes durable knowledge: deals advancing or closing, relationships that matter, and substantive notes. Routine data-entry churn is skipped.
+
+The connection is personal: the API key is minted in your Attio workspace's developer settings and only you can manage it or wire it into brains. Records follow the pointer rule — Attio stays the canonical home of the record; the brain gets pointers, current-state summaries, and the knowledge extracted from activity and notes, never a copy of the CRM.
+
+## Setup steps
+
+1. In Attio, open **Workspace settings → Developers** and create an integration.
+2. Generate an access token with read access to records, notes, and object configuration, plus read-write access to webhooks (the webhook scope lets Goat register its event subscription for you).
+3. Copy the token.
+4. In Goat, open **Settings → Attio** (or choose **Set up** on the Attio source card).
+5. Paste the token and save it. Goat validates it against the Attio API, registers the webhook, and stores the signing secret.
+
+## Brain routing
+
+After the key is saved, enable Attio as a source from any brain's settings page under Sources, then choose which record types (people, companies, deals) and events (record created, record updated, note added) the brain should ingest. Activity fans out to every brain where your Attio source is enabled and matches the selection. If two members of the same brain connect the same Attio workspace, each event is ingested once per brain.
+
+## Troubleshooting
+
+If CRM activity is not appearing in the brain, check these in order:
+
+- The Attio source is enabled on the target brain and at least one record type is selected.
+- The connection status in **Settings → Attio** is Connected. A revoked key flips it to "Needs a new API key" — paste a fresh key, which also re-registers the webhook.
+- The record was touched after connecting. The webhook only delivers new activity; there is no historical backfill yet.
+- Enough time has passed: windows intentionally wait out a quiet period (about fifteen minutes after the last change) before ingesting, so a burst of edits lands as one batch.
+- The activity is on a standard object. Custom Attio objects are not ingested yet.
+
+The Attio API is documented at [docs.attio.com](https://docs.attio.com).

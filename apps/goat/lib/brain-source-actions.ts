@@ -2,6 +2,13 @@
 
 import { getDb } from "@opencompany/db/client";
 import {
+  GOAT_ATTIO_EVENT_TYPES,
+  type GoatAttioEventRef,
+  type GoatAttioEventType,
+  type GoatAttioObjectTypeRef,
+  isGoatAttioObjectType,
+} from "@opencompany/db/goat-attio";
+import {
   deleteGoatBrainSource,
   hasAnyBrainSourceForIntegration,
   listGoatBrainSourcesForBrain,
@@ -57,6 +64,7 @@ import { and, eq, isNull, ne, type SQL } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import type {
+  GoatAttioProviderState,
   GoatFathomProviderState,
   GoatGmailSourceProviderState,
   GoatGoogleDriveSourceProviderState,
@@ -66,6 +74,7 @@ import type {
   GoatLinearSourceProviderState,
   GoatSlackProviderState,
 } from "@/lib/integration-state";
+import { getGoatAttioIntegrationState } from "@/lib/integrations/attio";
 import { getGoatFathomIntegrationState } from "@/lib/integrations/fathom";
 import {
   type GoatGitHubProviderState,
@@ -147,6 +156,7 @@ export type GoatBrainSourcesDetails = {
     hubspot: GoatOwnSourceAccount[];
     granola: GoatOwnSourceAccount[];
     fathom: GoatOwnSourceAccount[];
+    attio: GoatOwnSourceAccount[];
   };
   jamie: {
     integration: GoatJamieProviderState;
@@ -180,6 +190,9 @@ export type GoatBrainSourcesDetails = {
   fathom: {
     integration: GoatFathomProviderState;
   };
+  attio: {
+    integration: GoatAttioProviderState;
+  };
 };
 
 function integrationProviderFor(
@@ -195,6 +208,7 @@ function integrationProviderFor(
     case "hubspot":
     case "granola":
     case "fathom":
+    case "attio":
       return provider;
     default:
       return null;
@@ -359,6 +373,7 @@ export async function getGoatBrainSourcesAction(
     hubspotState,
     granolaState,
     fathomState,
+    attioState,
     ownSlackAccounts,
     ownLinearAccounts,
     ownGmailAccounts,
@@ -366,6 +381,7 @@ export async function getGoatBrainSourcesAction(
     ownHubspotAccounts,
     ownGranolaAccounts,
     ownFathomAccounts,
+    ownAttioAccounts,
   ] = await Promise.all([
     listGoatBrainSourcesForBrain(brainRef),
     getGoatJamieIntegrationState(context.workspace.id),
@@ -377,6 +393,7 @@ export async function getGoatBrainSourcesAction(
     getGoatHubspotSourceIntegrationState(context.user.workosUserId),
     getGoatGranolaIntegrationState(context.user.workosUserId),
     getGoatFathomIntegrationState(context.user.workosUserId),
+    getGoatAttioIntegrationState(context.user.workosUserId),
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "slack",
@@ -405,6 +422,10 @@ export async function getGoatBrainSourcesAction(
     listGoatPersonalIntegrationAccounts({
       userWorkosId: context.user.workosUserId,
       provider: "fathom",
+    }),
+    listGoatPersonalIntegrationAccounts({
+      userWorkosId: context.user.workosUserId,
+      provider: "attio",
     }),
   ]);
 
@@ -452,6 +473,7 @@ export async function getGoatBrainSourcesAction(
       hubspot: ownHubspotAccounts,
       granola: ownGranolaAccounts,
       fathom: ownFathomAccounts,
+      attio: ownAttioAccounts,
     },
     jamie: {
       integration: jamieState,
@@ -481,6 +503,9 @@ export async function getGoatBrainSourcesAction(
     },
     fathom: {
       integration: fathomState,
+    },
+    attio: {
+      integration: attioState,
     },
   };
 }
@@ -874,6 +899,51 @@ export async function setGoatBrainHubspotSourceAction(input: {
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Could not update the HubSpot source.",
+    };
+  }
+}
+
+export async function setGoatBrainAttioSourceAction(input: {
+  brainRef: string;
+  integrationId: string;
+  enabled: boolean;
+  objectTypes: GoatAttioObjectTypeRef[];
+  events: GoatAttioEventRef[];
+}): Promise<GoatWorkspaceActionResult> {
+  const context = await requireBrainSourceContext(input.brainRef);
+  if (!context) {
+    return { ok: false, error: "You don't have access to this brain." };
+  }
+
+  const integration = await loadSourceIntegrationForContext({
+    integrationId: input.integrationId,
+    provider: "attio",
+    context,
+  });
+  if (!integration || integration.status === "disconnected") {
+    return { ok: false, error: "Connect Attio in your settings first." };
+  }
+
+  try {
+    await upsertGoatBrainSource({
+      brainRef: input.brainRef,
+      provider: "attio",
+      integrationId: input.integrationId,
+      userWorkosId: integration.userWorkosId,
+      createdByWorkosId: context.user.workosUserId,
+      enabled: input.enabled,
+      config: {
+        objectTypes: sanitizeAttioObjectTypeRefs(input.objectTypes),
+        events: sanitizeAttioEventRefs(input.events),
+      },
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update the Attio source.",
     };
   }
 }
@@ -1351,6 +1421,30 @@ function sanitizeHubspotEventRefs(refs: GoatHubspotEventRef[]): GoatHubspotEvent
     if (!allowed.has(id as GoatHubspotEventType) || seen.has(id as GoatHubspotEventType)) continue;
     seen.add(id as GoatHubspotEventType);
     sanitized.push({ id: id as GoatHubspotEventType });
+  }
+  return sanitized;
+}
+
+function sanitizeAttioObjectTypeRefs(refs: GoatAttioObjectTypeRef[]): GoatAttioObjectTypeRef[] {
+  const seen = new Set<string>();
+  const sanitized: GoatAttioObjectTypeRef[] = [];
+  for (const ref of refs) {
+    if (!isGoatAttioObjectType(ref.id) || seen.has(ref.id)) continue;
+    seen.add(ref.id);
+    sanitized.push({ id: ref.id });
+  }
+  return sanitized;
+}
+
+function sanitizeAttioEventRefs(refs: GoatAttioEventRef[]): GoatAttioEventRef[] {
+  const allowed = new Set<GoatAttioEventType>(GOAT_ATTIO_EVENT_TYPES);
+  const seen = new Set<GoatAttioEventType>();
+  const sanitized: GoatAttioEventRef[] = [];
+  for (const ref of refs) {
+    const id = typeof ref.id === "string" ? ref.id : "";
+    if (!allowed.has(id as GoatAttioEventType) || seen.has(id as GoatAttioEventType)) continue;
+    seen.add(id as GoatAttioEventType);
+    sanitized.push({ id: id as GoatAttioEventType });
   }
   return sanitized;
 }

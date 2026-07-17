@@ -27,6 +27,7 @@ import {
   listGoatLinearTeamsAction,
   listGoatSlackConversationsAction,
   removeGoatBrainSourceAction,
+  setGoatBrainAttioSourceAction,
   setGoatBrainGitHubSourceAction,
   setGoatBrainGmailSourceAction,
   setGoatBrainGoogleDriveSourceAction,
@@ -73,11 +74,13 @@ export function resolveGoatBrainSourceState(
                 ? details?.googleDrive.integration
                 : providerId === "hubspot"
                   ? details?.hubspot.integration
-                  : providerId === "granola"
-                    ? details?.granola.integration
-                    : providerId === "fathom"
-                      ? details?.fathom.integration
-                      : undefined;
+                  : providerId === "attio"
+                    ? details?.attio.integration
+                    : providerId === "granola"
+                      ? details?.granola.integration
+                      : providerId === "fathom"
+                        ? details?.fathom.integration
+                        : undefined;
   const jamieReady =
     providerId === "jamie" ? Boolean(details?.jamie.integration.apiKeyConfigured) : false;
   const connected = providerId === "jamie" ? jamieReady : Boolean(integration?.connected);
@@ -225,6 +228,7 @@ export function SourceProviderCard({
   const gmail = provider.id === "gmail" ? details?.gmail : undefined;
   const googleDrive = provider.id === "google_drive" ? details?.googleDrive : undefined;
   const hubspot = provider.id === "hubspot" ? details?.hubspot : undefined;
+  const attio = provider.id === "attio" ? details?.attio : undefined;
   const canToggle =
     provider.available &&
     (source ? source.canToggle : connected) &&
@@ -431,6 +435,17 @@ export function SourceProviderCard({
           onChanged={onChanged}
         />
       ) : null}
+      {provider.id === "attio" &&
+      attio?.integration.integrationId &&
+      (connected || source) &&
+      (source ? source.canConfigure : true) ? (
+        <AttioObjectPicker
+          brainRef={brainRef}
+          integrationId={source?.integrationId ?? attio.integration.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
       {personalProvider ? (
         <AddOwnAccountSection
           brainRef={brainRef}
@@ -453,7 +468,8 @@ type GoatPersonalBrainSourceProvider =
   | "google_drive"
   | "hubspot"
   | "granola"
-  | "fathom";
+  | "fathom"
+  | "attio";
 
 function isPersonalSourceProvider(
   providerId: GoatBrainSourceProviderDef["id"],
@@ -465,7 +481,8 @@ function isPersonalSourceProvider(
     providerId === "google_drive" ||
     providerId === "hubspot" ||
     providerId === "granola" ||
-    providerId === "fathom"
+    providerId === "fathom" ||
+    providerId === "attio"
   );
 }
 
@@ -486,6 +503,8 @@ const ADD_SOURCE_CONSENT_COPY: Record<GoatPersonalBrainSourceProvider, string> =
     "Your Granola meeting notes — including what other participants said — will be summarized into this brain and visible to everyone with access to it.",
   fathom:
     "Your Fathom meeting recordings — including what other participants said — will be summarized into this brain and visible to everyone with access to it.",
+  attio:
+    "CRM activity and notes on the record types you select will be summarized into this brain and visible to everyone with access to it.",
 };
 
 const ADD_SOURCE_CONSENT_FOOTER =
@@ -500,6 +519,7 @@ function sourceAccountLabel(source: GoatBrainSourceView): string | null {
   }
   if (source.provider === "linear") return source.connectionLabel ?? source.accountName;
   if (source.provider === "hubspot") return source.connectionLabel ?? source.accountEmail;
+  if (source.provider === "attio") return source.connectionLabel ?? source.accountName;
   return source.accountEmail ?? source.accountName;
 }
 
@@ -516,6 +536,9 @@ function ownAccountLabel(account: GoatOwnSourceAccount, provider: string): strin
   }
   if (provider === "hubspot") {
     return account.connectionLabel || account.accountEmail || account.integrationId;
+  }
+  if (provider === "attio") {
+    return account.connectionLabel || account.accountName || account.integrationId;
   }
   return account.accountEmail || account.accountName || account.integrationId;
 }
@@ -693,6 +716,14 @@ function SourceRow({
       ) : null}
       {source.canConfigure && provider.id === "hubspot" ? (
         <HubspotObjectPicker
+          brainRef={brainRef}
+          integrationId={source.integrationId}
+          source={source}
+          onChanged={onChanged}
+        />
+      ) : null}
+      {source.canConfigure && provider.id === "attio" ? (
+        <AttioObjectPicker
           brainRef={brainRef}
           integrationId={source.integrationId}
           source={source}
@@ -1775,6 +1806,218 @@ function HubspotObjectPicker({
             className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
           >
             {isPending ? "Saving…" : "Save HubSpot source"}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type AttioObjectSelection = "person" | "company" | "deal";
+type AttioEventSelection = "object_created" | "object_updated" | "note_added";
+
+const ATTIO_OBJECT_OPTIONS: Array<{ id: AttioObjectSelection; label: string }> = [
+  { id: "person", label: "People" },
+  { id: "company", label: "Companies" },
+  { id: "deal", label: "Deals" },
+];
+
+const ATTIO_EVENT_OPTIONS: Array<{ id: AttioEventSelection; label: string }> = [
+  { id: "object_created", label: "Record created" },
+  { id: "object_updated", label: "Record updated" },
+  { id: "note_added", label: "Note added" },
+];
+
+function attioObjectTypesFromConfig(
+  config: Record<string, unknown> | undefined,
+): AttioObjectSelection[] {
+  const value = config?.objectTypes;
+  if (!Array.isArray(value)) return [];
+  const allowed = new Set(ATTIO_OBJECT_OPTIONS.map((option) => option.id));
+  const seen = new Set<AttioObjectSelection>();
+  for (const entry of value) {
+    const id =
+      typeof entry === "string"
+        ? entry
+        : entry && typeof entry === "object" && !Array.isArray(entry)
+          ? (entry as Record<string, unknown>).id
+          : null;
+    if (typeof id !== "string" || !allowed.has(id as AttioObjectSelection)) continue;
+    seen.add(id as AttioObjectSelection);
+  }
+  return [...seen];
+}
+
+function attioEventsFromConfig(config: Record<string, unknown> | undefined): AttioEventSelection[] {
+  const value = config?.events;
+  if (!Array.isArray(value)) return ATTIO_EVENT_OPTIONS.map((option) => option.id);
+  const allowed = new Set(ATTIO_EVENT_OPTIONS.map((option) => option.id));
+  const seen = new Set<AttioEventSelection>();
+  for (const entry of value) {
+    const id =
+      typeof entry === "string"
+        ? entry
+        : entry && typeof entry === "object" && !Array.isArray(entry)
+          ? (entry as Record<string, unknown>).id
+          : null;
+    if (typeof id !== "string" || !allowed.has(id as AttioEventSelection)) continue;
+    seen.add(id as AttioEventSelection);
+  }
+  return [...seen];
+}
+
+function AttioObjectPicker({
+  brainRef,
+  integrationId,
+  source,
+  onChanged,
+}: {
+  brainRef: string;
+  integrationId: string;
+  source: GoatBrainSourceView | null;
+  onChanged: () => Promise<void>;
+}) {
+  const saved = useMemo(() => attioObjectTypesFromConfig(source?.config), [source]);
+  const savedEvents = useMemo(() => attioEventsFromConfig(source?.config), [source]);
+  const [expanded, setExpanded] = useState(false);
+  const [selection, setSelection] = useState<Set<AttioObjectSelection>>(() => new Set(saved));
+  const [eventSelection, setEventSelection] = useState<Set<AttioEventSelection>>(
+    () => new Set(savedEvents),
+  );
+  const [dirty, setDirty] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  const toggleObjectType = (id: AttioObjectSelection) => {
+    setDirty(true);
+    setSelection((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleEvent = (eventId: AttioEventSelection) => {
+    setDirty(true);
+    setEventSelection((current) => {
+      const next = new Set(current);
+      if (next.has(eventId)) {
+        next.delete(eventId);
+      } else {
+        next.add(eventId);
+      }
+      return next;
+    });
+  };
+
+  const save = () => {
+    startTransition(async () => {
+      const result = await setGoatBrainAttioSourceAction({
+        brainRef,
+        integrationId,
+        enabled: source ? source.enabled : true,
+        objectTypes: [...selection].map((id) => ({ id })),
+        events: [...eventSelection].map((id) => ({ id })),
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setDirty(false);
+      toast.success("Attio records updated.");
+      await onChanged();
+    });
+  };
+
+  const selectedCount = selection.size;
+  const selectedEventCount = eventSelection.size;
+  const summary =
+    selectedCount === 0
+      ? "No record types selected yet — nothing is ingested until you choose some."
+      : `${selectedCount} record type${selectedCount === 1 ? "" : "s"} and ${selectedEventCount} event${
+          selectedEventCount === 1 ? "" : "s"
+        } selected.`;
+
+  if (!expanded) {
+    return (
+      <div className="flex items-center justify-between gap-2 border-t border-ink/10 pt-2">
+        <p className="text-[11.5px] leading-4 text-ink-subtle">{summary}</p>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="shrink-0 rounded-md border border-ink/15 px-2.5 py-1 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
+        >
+          Choose records and events
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-ink/10 pt-2">
+      <div className="flex items-center justify-end">
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+        >
+          Collapse
+        </button>
+      </div>
+      <div className="flex flex-col gap-1 rounded-md border border-ink/10 p-1">
+        <div className="px-1 py-0.5 text-[12px] font-medium text-ink">Record types</div>
+        <div className="grid grid-cols-1 gap-px sm:grid-cols-2">
+          {ATTIO_OBJECT_OPTIONS.map((option) => (
+            <label
+              key={option.id}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+            >
+              <input
+                type="checkbox"
+                checked={selection.has(option.id)}
+                onChange={() => toggleObjectType(option.id)}
+                className="accent-ink"
+              />
+              <span className="min-w-0 flex-1 truncate">{option.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col gap-1 rounded-md border border-ink/10 p-1">
+        <div className="px-1 py-0.5 text-[12px] font-medium text-ink">Events</div>
+        <div className="grid grid-cols-1 gap-px sm:grid-cols-2">
+          {ATTIO_EVENT_OPTIONS.map((option) => (
+            <label
+              key={option.id}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+            >
+              <input
+                type="checkbox"
+                checked={eventSelection.has(option.id)}
+                onChange={() => toggleEvent(option.id)}
+                className="accent-ink"
+              />
+              <span className="min-w-0 flex-1 truncate">{option.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <p className="text-[11.5px] leading-4 text-ink-subtle">
+        Selected Attio CRM activity is ingested into this brain and visible to everyone with access
+        to it.
+      </p>
+      {dirty ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={save}
+            className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
+          >
+            {isPending ? "Saving…" : "Save Attio source"}
           </button>
         </div>
       ) : null}

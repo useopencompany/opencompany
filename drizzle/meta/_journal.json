@@ -974,6 +974,13 @@
       "when": 1784652404000,
       "tag": "0138_goat_codex_event_type_coverage",
       "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1784652405000,
+      "tag": "0139_goat_attio_source",
+      "breakpoints": true
     }
   ]
 }
