@@ -40,6 +40,7 @@ describe("runOpenCompanyChatAgent", () => {
         expect(system).toContain("inbox");
         expect(system).toContain("Gmail");
         expect(system).toContain("goat_brain");
+        expect(system).toContain("The chat UI attaches compact Brain source chips");
         expect(system).toContain(OPENCOMPANY_CHAT_SOUL);
         expect(system).toContain("founder-focused operator");
         expect(extractStartTaskToolDescription(options)).toContain(
