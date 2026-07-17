@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAttioObjectWindowItem,
   canRouteAttioWindow,
+  hasUsableAttioRecordIdentity,
   selectAttioWindowEventsForFlush,
 } from "./goat-attio-flush-worker";
 
@@ -129,5 +130,59 @@ describe("buildAttioObjectWindowItem", () => {
     expect(canRouteAttioWindow("connected", false)).toBe(false);
     expect(canRouteAttioWindow("needs_reauth", true)).toBe(false);
     expect(canRouteAttioWindow("connected", true)).toBe(true);
+  });
+
+  it("does not route unnamed CRM records as raw UUID activity", () => {
+    expect(hasUsableAttioRecordIdentity(null)).toBe(false);
+    expect(
+      hasUsableAttioRecordIdentity({
+        name: null,
+        url: null,
+        properties: {},
+      }),
+    ).toBe(false);
+    expect(
+      hasUsableAttioRecordIdentity({
+        name: "Acme renewal",
+        url: null,
+        properties: { name: "Acme renewal" },
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps note content out of event subsets that did not claim the note", () => {
+    const item = buildAttioObjectWindowItem({
+      window,
+      events: [
+        {
+          id: "gattevt_update_only",
+          deliveryId: "updated:rec_9876:attr_stage:z",
+          action: "update",
+          attributeId: "attr_stage",
+          noteId: null,
+          payload: { actorType: "workspace-member" },
+          eventTime: "2026-07-16T10:00:00.000Z",
+        },
+      ],
+      enrichment: {
+        snapshot: {
+          name: "Acme renewal",
+          url: null,
+          properties: { name: "Acme renewal" },
+        },
+        attributeTitles: new Map([["attr_stage", "Stage"]]),
+        notes: [
+          {
+            noteId: "note_for_another_brain",
+            title: "Private note",
+            content: "This route did not select notes.",
+          },
+        ],
+        routingEnabled: true,
+      },
+      flushedAt: new Date("2026-07-16T10:30:00.000Z"),
+    });
+
+    expect(item.content.object.notes).toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   type GoatBrainSourceConfigProvider,
@@ -10,6 +10,9 @@ import {
 } from "./goat-schema";
 
 type DbLike = any;
+
+export const GOAT_BRAIN_SOURCE_DISABLED_INGEST_REASON =
+  "Stopped because this Brain source was disabled.";
 
 export type GoatBrainSourceWithIntegration = {
   id: string;
@@ -117,7 +120,10 @@ export async function upsertGoatBrainSource(input: {
   now?: Date;
   db?: DbLike;
 }): Promise<{ id: string }> {
-  const db = input.db ?? getDb();
+  if (!input.db) {
+    return await getDb().transaction((tx) => upsertGoatBrainSource({ ...input, db: tx }));
+  }
+  const db = input.db;
   const now = input.now ?? new Date();
 
   const [row] = await db
@@ -144,7 +150,49 @@ export async function upsertGoatBrainSource(input: {
     .returning({ id: goatBrainSources.id });
 
   if (!row) throw new Error("Could not persist Goat Brain source.");
+  if (!input.enabled) {
+    await cancelActiveGoatBrainIngestJobsForSource({
+      brainRef: input.brainRef,
+      integrationId: input.integrationId,
+      now,
+      db,
+    });
+  }
   return { id: row.id };
+}
+
+export async function setGoatBrainSourceEnabled(input: {
+  brainRef: string;
+  sourceId: string;
+  enabled: boolean;
+  now?: Date;
+  db?: DbLike;
+}): Promise<boolean> {
+  if (!input.db) {
+    return await getDb().transaction((tx) => setGoatBrainSourceEnabled({ ...input, db: tx }));
+  }
+  const db = input.db;
+  const now = input.now ?? new Date();
+  const [source] = await db
+    .update(goatBrainSources)
+    .set({ enabled: input.enabled, updatedAt: now })
+    .where(
+      and(eq(goatBrainSources.id, input.sourceId), eq(goatBrainSources.brainId, input.brainRef)),
+    )
+    .returning({
+      id: goatBrainSources.id,
+      integrationId: goatBrainSources.integrationId,
+    });
+  if (!source) return false;
+  if (!input.enabled) {
+    await cancelActiveGoatBrainIngestJobsForSource({
+      brainRef: input.brainRef,
+      integrationId: source.integrationId,
+      now,
+      db,
+    });
+  }
+  return true;
 }
 
 export async function deleteGoatBrainSource(input: {
@@ -152,14 +200,73 @@ export async function deleteGoatBrainSource(input: {
   sourceId: string;
   db?: DbLike;
 }): Promise<boolean> {
-  const db = input.db ?? getDb();
+  if (!input.db) {
+    return await getDb().transaction((tx) => deleteGoatBrainSource({ ...input, db: tx }));
+  }
+  const db = input.db;
+  const now = new Date();
   const rows = await db
     .delete(goatBrainSources)
     .where(
       and(eq(goatBrainSources.id, input.sourceId), eq(goatBrainSources.brainId, input.brainRef)),
     )
-    .returning({ id: goatBrainSources.id });
+    .returning({ id: goatBrainSources.id, integrationId: goatBrainSources.integrationId });
+  const source = rows[0];
+  if (source) {
+    await cancelActiveGoatBrainIngestJobsForSource({
+      brainRef: input.brainRef,
+      integrationId: source.integrationId,
+      now,
+      db,
+    });
+  }
   return rows.length > 0;
+}
+
+async function cancelActiveGoatBrainIngestJobsForSource(input: {
+  brainRef: string;
+  integrationId: string;
+  now: Date;
+  db: DbLike;
+}) {
+  const reason = GOAT_BRAIN_SOURCE_DISABLED_INGEST_REASON;
+  await input.db.execute(sql`
+    WITH canceled_jobs AS MATERIALIZED (
+      UPDATE goat.brain_ingest_jobs AS job
+      SET status = 'skipped',
+          plan_paused = false,
+          lease_id = NULL,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          last_error = NULL,
+          result = job.result || jsonb_build_object(
+            'skipped', true,
+            'reason', ${reason},
+            'summary', ${reason}
+          ),
+          completed_at = ${input.now},
+          updated_at = ${input.now}
+      WHERE job.brain_ref = ${input.brainRef}
+        AND job.integration_id = ${input.integrationId}
+        AND job.status IN ('queued', 'running')
+      RETURNING job.id, job.source_item_id
+    )
+    UPDATE goat.brain_source_items AS source
+    SET last_ingest_status = 'skipped',
+        last_ingested_at = ${input.now},
+        last_ingest_error = ${reason},
+        updated_at = ${input.now}
+    FROM canceled_jobs AS job
+    WHERE source.id = job.source_item_id
+      AND source.last_ingest_job_id = job.id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM goat.brain_ingest_jobs AS other
+        WHERE other.source_item_id = source.id
+          AND other.id <> job.id
+          AND other.status IN ('queued', 'running')
+      )
+  `);
 }
 
 // The actor's personal (workspace_id IS NULL) connections for one provider —

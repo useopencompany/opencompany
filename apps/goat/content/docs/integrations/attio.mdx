@@ -19,7 +19,11 @@ The connection is personal: the API key is minted in your Attio workspace's deve
 
 ## Brain routing
 
-After the key is saved, enable Attio as a source from any brain's settings page under Sources, then choose which record types (people, companies, deals) and events (record created, record updated, note added) the brain should ingest. Activity fans out to every brain where your Attio source is enabled and matches the selection. If two members of the same brain connect the same Attio workspace, each event is ingested once per brain.
+After the key is saved, enable Attio as a source from any brain's settings page under Sources, then choose which record types (people, companies, deals) and events the brain should ingest. New sources default to **Record created** and **Note added**. **Record updated** is opt-in because CRM fields can change at high volume.
+
+Attio automation and system updates are excluded by default even when **Record updated** is selected. Turn on the separate system-update option only when provider-managed or automated field changes are intentionally part of the brain's knowledge. Records without a usable name are not filed as raw CRM IDs.
+
+Activity fans out to every brain where your Attio source is enabled and matches the selection. If two members of the same brain connect the same Attio workspace, each event is ingested once per brain. Disabling or removing the source stops new activity and cancels its queued or running ingestion jobs for that brain; canceled events are not replayed when the source is enabled again.
 
 ## Troubleshooting
 

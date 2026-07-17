@@ -224,14 +224,17 @@ describe("Goat Brain ingest worker", () => {
       },
     });
 
-    expect(run).toHaveBeenCalledWith({
-      jobId: "gbjob_123",
-      userWorkosId: "user_123",
-      brainRef: "gbrain_123",
-      integrationId: "gint_123",
-      item: normalizedPayload,
-      env: { vercelAiGatewayApiKey: "gw_test", blobReadWriteToken: undefined },
-    });
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: "gbjob_123",
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        integrationId: "gint_123",
+        item: normalizedPayload,
+        env: { vercelAiGatewayApiKey: "gw_test", blobReadWriteToken: undefined },
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(complete).toHaveBeenCalledWith(
       expect.objectContaining({
         result: expect.objectContaining({ handled: true, durationMs: expect.any(Number) }),
@@ -253,6 +256,111 @@ describe("Goat Brain ingest worker", () => {
     expect(skip).not.toHaveBeenCalled();
     expect(fail).not.toHaveBeenCalled();
     expect(telemetry.recordGoatModelCost).not.toHaveBeenCalled();
+  });
+
+  it("aborts in-flight handlers when their source revokes the job lease", async () => {
+    vi.useFakeTimers();
+    try {
+      const normalizedPayload = {
+        sourceProvider: "attio" as const,
+        sourceType: "activity" as const,
+        externalId: "window_123",
+        sourceRef: "attio:workspace_1:person:record_1",
+        title: "Ada Lovelace",
+        occurredAt: "2026-07-17T10:00:00.000Z",
+        capturedAt: "2026-07-17T10:01:00.000Z",
+        contentHash: "hash_123",
+        contentHashInput: {},
+        content: {},
+      };
+      let markStarted = () => {};
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      const run = vi.fn(
+        async (input: { signal?: AbortSignal }): Promise<Record<string, unknown>> => {
+          markStarted();
+          return await new Promise<Record<string, unknown>>((_resolve, reject) => {
+            input.signal?.addEventListener(
+              "abort",
+              () => reject(input.signal?.reason ?? new Error("aborted")),
+              { once: true },
+            );
+          });
+        },
+      );
+      const heartbeat = vi
+        .fn<GoatBrainIngestStore["heartbeat"]>()
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false);
+      const complete = vi.fn(async () => true);
+      const fail = vi.fn(async () => true);
+      const store: GoatBrainIngestStore = {
+        claimNext: vi.fn(async () => null),
+        heartbeat,
+        complete,
+        skip: vi.fn(async () => true),
+        fail,
+      };
+
+      const processing = runClaimedGoatBrainIngestJob({
+        env: { jobLeaseTtlMs: 30_000, vercelAiGatewayApiKey: "gw_test" },
+        store,
+        handlers: [
+          {
+            descriptor: {
+              kind: "brain_agent_ingest",
+              sourceProvider: "attio",
+              sourceType: "activity",
+            },
+            isPayload: (value): value is typeof normalizedPayload => value === normalizedPayload,
+            run,
+          },
+        ],
+        job: {
+          id: "gbjob_attio_1",
+          sourceItemId: "gbsrc_attio_1",
+          userWorkosId: "user_123",
+          sourceProvider: "attio",
+          sourceConnectionId: "gint_attio_1",
+          integrationId: "gint_attio_1",
+          brainRef: "gbrain_123",
+          sourceType: "activity",
+          kind: "brain_agent_ingest",
+          contentHash: "hash_123",
+          status: "running",
+          attempts: 1,
+          nextRunAt: new Date("2026-07-17T10:00:00.000Z"),
+          leaseId: "lease_123",
+          leaseOwner: "runner_123",
+          leaseExpiresAt: new Date("2026-07-17T10:05:00.000Z"),
+          lastError: null,
+          result: {},
+          completedAt: null,
+          createdAt: new Date("2026-07-17T10:00:00.000Z"),
+          updatedAt: new Date("2026-07-17T10:00:00.000Z"),
+          normalizedPayload,
+        },
+      });
+
+      await started;
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(processing).resolves.toBeUndefined();
+
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+      expect(complete).not.toHaveBeenCalled();
+      expect(fail).not.toHaveBeenCalled();
+      expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outcome: "aborted",
+          attributes: expect.objectContaining({ "goat.failure_category": "lease_lost" }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("records agent ingestion model cost with the brain_ingest surface", async () => {
