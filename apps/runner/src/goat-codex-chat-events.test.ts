@@ -83,6 +83,33 @@ describe("createGoatCodexChatProjector", () => {
       expect.objectContaining({ original_error_code: undefined }),
     );
   });
+
+  it("keeps the session starting until a queued follow-up turn drains", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const projector = createGoatCodexChatProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+    });
+
+    await projector.finalize({
+      sessionId: "codex_thread_1",
+      status: "success",
+      result: "Done",
+      error: null,
+      usage: null,
+      goal: null,
+    });
+
+    const sessionUpdate = mocks.execute.mock.calls
+      .map(([query]) => sqlText(query))
+      .find((query) => query.includes("UPDATE goat.codex_chat_sessions AS session"));
+    expect(sessionUpdate).toContain("WITH settled_turn AS");
+    expect(sessionUpdate).toContain("UPDATE goat.codex_chat_turns AS turn");
+    expect(sessionUpdate).toContain("queued.status = 'queued'");
+    expect(sessionUpdate).toContain("ORDER BY queued.created_at ASC, queued.id ASC");
+    expect(sessionUpdate).toContain("THEN 'starting'");
+    expect(sessionUpdate).toContain("ELSE idle");
+  });
 });
 
 function projectorTarget() {
@@ -109,4 +136,19 @@ function fileChangeStartedEvent() {
       },
     },
   };
+}
+
+function sqlText(query: unknown): string {
+  const chunks = (query as { queryChunks?: unknown[] }).queryChunks ?? [];
+  return chunks
+    .map((chunk) => {
+      if (typeof chunk === "string") return chunk;
+      if (chunk && typeof chunk === "object" && "value" in chunk) {
+        const value = (chunk as { value?: unknown }).value;
+        return Array.isArray(value) ? value.join("") : String(value ?? "");
+      }
+      if (chunk && typeof chunk === "object" && "queryChunks" in chunk) return sqlText(chunk);
+      return "";
+    })
+    .join("");
 }

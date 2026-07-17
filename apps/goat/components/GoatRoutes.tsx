@@ -67,6 +67,7 @@ export function GoatHomeRoute({
       model: summary?.model ?? DEFAULT_GOAT_MODEL,
       engine: summary?.engine ?? "opencompany",
       codexComposerSettings: summary?.codexComposerSettings ?? null,
+      codexRuntime: summary?.codexRuntime ?? null,
       messages: [],
     };
   }, [chatId, data.recentChats, routeInitialChat]);
@@ -208,7 +209,7 @@ export function GoatPreferencesSettingsRoute() {
         <BetaFeatureSwitch
           icon={ListTodo}
           label="Background tasks"
-          description="Spawn tasks, Results, and recurring routines from chat"
+          description="Spawn tracked tasks and recurring routines from chat"
           checked={featureFlags.taskSpawning}
           update={updateGoatTaskSpawningAction}
         />
@@ -451,7 +452,7 @@ export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
         <div className="flex w-full max-w-[720px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
-          <BackLink href="/" label="Results" />
+          <BackLink href="/" label="Tasks" />
           {run ? <TaskDetailPanel initialRun={run} /> : <TaskRouteSkeleton label="Loading task" />}
         </div>
       </div>
@@ -477,7 +478,7 @@ export function GoatTaskRunRoute({ taskId }: { taskId: string }) {
               prefetch
               className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
             >
-              Results
+              Tasks
             </Link>
           </nav>
 
@@ -564,7 +565,7 @@ function TasksDisabledRoute() {
             Background tasks are disabled
           </h1>
           <p className="text-[13px] leading-5 text-ink-subtle">
-            Enable Background tasks in Preferences to use Results and recurring routines.
+            Enable Background tasks in Preferences to use background tasks and recurring routines.
           </p>
           <Link
             href="/settings/preferences"

@@ -602,7 +602,7 @@ export function normalizeAgentText(text: string, startedTask: StartedTask | null
   const trimmed = text.trim();
   if (trimmed) return trimmed;
   if (startedTask) {
-    return "I've started a task and added it to Results.";
+    return "I've started a task and added it to Tasks.";
   }
   return "I could not produce a response. Try sending that again.";
 }

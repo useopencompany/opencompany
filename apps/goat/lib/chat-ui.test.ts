@@ -47,10 +47,12 @@ describe("toGoatChatUiMessage", () => {
     ]);
   });
 
-  it("places legacy task cards before the Added to Results continuation", () => {
+  it.each([
+    "Tasks",
+    "Results",
+  ])("places legacy task cards before the Added to %s continuation", (destination) => {
     const message = storedAssistantMessage({
-      content:
-        "This needs live Linear access, so I'm spinning up a task to pull the Goat team's current issues and give you a prioritized \"what's next\" recommendation.Added to Results as TASK-26. It'll pull the Goat team's Linear board.",
+      content: `This needs live Linear access, so I'm spinning up a task to pull the Goat team's current issues and give you a prioritized "what's next" recommendation.Added to ${destination} as TASK-26. It'll pull the Goat team's Linear board.`,
       taskId: "task_26",
       taskDisplayId: "TASK-26",
       taskName: "Linear Goat team status + next steps",
@@ -79,7 +81,7 @@ describe("toGoatChatUiMessage", () => {
     });
     expect(parts[2]).toEqual({
       type: "text",
-      text: "Added to Results as TASK-26. It'll pull the Goat team's Linear board.",
+      text: `Added to ${destination} as TASK-26. It'll pull the Goat team's Linear board.`,
     });
   });
 

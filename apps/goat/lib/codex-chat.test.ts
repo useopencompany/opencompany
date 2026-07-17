@@ -195,6 +195,36 @@ describe("createGoatCodexChatMessage", () => {
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    "idle",
+    "failed",
+    "interrupted",
+  ] as const)("marks a %s session as starting and clears its previous error when retrying", async (status) => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          status,
+          error: "Previous turn failed.",
+        },
+      },
+    ]);
+
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      sessionId: "goat_chat_1",
+      prompt: "try again",
+    });
+
+    expect(result).toMatchObject({ ok: true, mode: "started" });
+    const statement = sqlText(mocks.execute.mock.calls[0]?.[0]);
+    expect(statement).toContain("UPDATE goat.codex_chat_sessions AS session");
+    expect(statement).toContain("ELSE 'starting'");
+    expect(statement).toContain("active_turn_id = CASE");
+    expect(statement).toContain("error = NULL");
+  });
+
   it("still succeeds when the runner wake fails", async () => {
     mocks.wake.mockRejectedValue(new Error("runner offline"));
     const result = await createGoatCodexChatMessage({ userWorkosId: "user_1", prompt: "hello" });
