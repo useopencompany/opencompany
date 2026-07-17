@@ -11,7 +11,8 @@ export type GoatBrainClaimProvider =
   | "linear"
   | "hubspot"
   | "granola"
-  | "fathom";
+  | "fathom"
+  | "attio";
 
 // Claims provider-native event identities for a brain. Inserts are
 // ON CONFLICT DO NOTHING against the (brain, provider, event_key) unique

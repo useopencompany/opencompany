@@ -17,6 +17,7 @@ import {
 } from "@opencompany/db/goat-schema";
 import { getDefaultGoatBrainForUser } from "@opencompany/db/goat-workspaces";
 import {
+  isNormalizedAttioObjectSourceItem,
   isNormalizedFathomMeetingSourceItem,
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
@@ -52,6 +53,7 @@ import {
   type GoatBrainAgentIngestEnv,
   GoatBrainAgentOutcomeError,
   GoatBrainIngestBudgetError,
+  runAttioObjectAgentIngest,
   runFathomMeetingAgentIngest,
   runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
@@ -201,6 +203,12 @@ const HUBSPOT_OBJECT_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "activity",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const ATTIO_OBJECT_AGENT_INGEST_DESCRIPTOR = {
+  kind: "brain_agent_ingest",
+  sourceProvider: "attio",
+  sourceType: "activity",
+} as const satisfies GoatBrainIngestJobDescriptor;
+
 const GMAIL_THREAD_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "gmail",
@@ -269,6 +277,11 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     descriptor: HUBSPOT_OBJECT_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedHubspotObjectSourceItem,
     run: runTypedGoatBrainIngestHandler(runHubspotObjectAgentIngest),
+  },
+  {
+    descriptor: ATTIO_OBJECT_AGENT_INGEST_DESCRIPTOR,
+    isPayload: isNormalizedAttioObjectSourceItem,
+    run: runTypedGoatBrainIngestHandler(runAttioObjectAgentIngest),
   },
   {
     descriptor: GMAIL_THREAD_AGENT_INGEST_DESCRIPTOR,

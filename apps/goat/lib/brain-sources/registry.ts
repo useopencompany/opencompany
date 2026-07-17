@@ -1,6 +1,7 @@
 import type { GoatBrainSourceConfigProvider } from "@opencompany/db/goat-schema";
 import type { LucideIcon } from "lucide-react";
 import {
+  Contact,
   Files,
   FileText,
   GitBranch,
@@ -116,5 +117,15 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     connectionKind: "oauth",
     available: true,
     connectHref: "/api/integrations/hubspot/start?returnTo=/settings/integrations",
+  },
+  {
+    id: "attio",
+    name: "Attio",
+    description: "Ingest CRM activity and notes on people, companies, and deals into this brain.",
+    icon: Contact,
+    connectionKind: "api_key",
+    available: true,
+    connectHref: "/settings/attio",
+    docsHref: "/docs/integrations/attio",
   },
 ];
