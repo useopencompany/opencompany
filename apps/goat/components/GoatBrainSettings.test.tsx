@@ -13,6 +13,7 @@ const brainSourceActionsMock = vi.hoisted(() => ({
   listGoatGitHubRepositoriesAction: vi.fn(),
   listGoatLinearTeamsAction: vi.fn(),
   listGoatSlackConversationsAction: vi.fn(),
+  setGoatBrainAttioSourceAction: vi.fn(),
   setGoatBrainGitHubSourceAction: vi.fn(),
   setGoatBrainGmailSourceAction: vi.fn(),
   setGoatBrainGoogleDriveSourceAction: vi.fn(),
@@ -37,6 +38,8 @@ describe("GoatBrainSourceCards", () => {
     brainSourceActionsMock.getGoatBrainSourcesAction.mockReset();
     brainSourceActionsMock.getGoatBrainSourcesAction.mockResolvedValue(brainSourceDetails());
     brainSourceActionsMock.setGoatBrainSourceEnabledAction.mockClear();
+    brainSourceActionsMock.setGoatBrainAttioSourceAction.mockReset();
+    brainSourceActionsMock.setGoatBrainAttioSourceAction.mockResolvedValue({ ok: true });
     brainSourceActionsMock.listGoatGoogleDriveResourcesAction.mockResolvedValue({
       ok: true,
       files: [
@@ -193,6 +196,55 @@ describe("GoatBrainSourceCards", () => {
         enabled: true,
         allFiles: true,
         resourceIds: [],
+      }),
+    );
+  });
+
+  it("uses safe Attio defaults and requires an explicit system-update opt-in", async () => {
+    const user = userEvent.setup();
+    const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "attio");
+    if (!provider) throw new Error("Attio source provider is not registered.");
+    render(
+      <SourceProviderCard
+        brainRef="goat_brain_1"
+        provider={provider}
+        details={brainSourceDetails({
+          sources: [attioSource({ config: { objectTypes: [{ id: "person" }] } })],
+          attio: {
+            integration: {
+              provider: "attio",
+              connected: true,
+              status: "connected",
+              integrationId: "gint_attio_1",
+              workspaceName: "Acme",
+              statusReason: null,
+            },
+          },
+        })}
+        onChanged={async () => {}}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose records and events" }));
+    expect(screen.getByRole("checkbox", { name: "Record created" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Note added" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Record updated" })).not.toBeChecked();
+    expect(
+      screen.queryByRole("checkbox", { name: /Include Attio automation/ }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Record updated" }));
+    await user.click(screen.getByRole("checkbox", { name: /Include Attio automation/ }));
+    await user.click(screen.getByRole("button", { name: "Save Attio source" }));
+
+    await waitFor(() =>
+      expect(brainSourceActionsMock.setGoatBrainAttioSourceAction).toHaveBeenCalledWith({
+        brainRef: "goat_brain_1",
+        integrationId: "gint_attio_1",
+        enabled: true,
+        objectTypes: [{ id: "person" }],
+        events: [{ id: "object_created" }, { id: "note_added" }, { id: "object_updated" }],
+        includeSystemUpdates: true,
       }),
     );
   });
@@ -527,6 +579,29 @@ function gmailSource(overrides: Partial<GoatBrainSourceView> = {}): GoatBrainSou
     canConfigure: false,
     canToggle: false,
     canRemove: false,
+    integrationStatus: "connected",
+    config: {},
+    ...overrides,
+  };
+}
+
+function attioSource(overrides: Partial<GoatBrainSourceView> = {}): GoatBrainSourceView {
+  return {
+    sourceId: "gbscfg_attio_1",
+    provider: "attio",
+    integrationId: "gint_attio_1",
+    enabled: true,
+    connectedByName: "Ada Lovelace",
+    ownerEmail: "ada@example.com",
+    ownerAvatarUrl: null,
+    accountEmail: null,
+    accountName: "acme",
+    connectionLabel: "Acme",
+    ownerKind: "user",
+    isOwn: true,
+    canConfigure: true,
+    canToggle: true,
+    canRemove: true,
     integrationStatus: "connected",
     config: {},
     ...overrides,
