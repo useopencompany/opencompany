@@ -276,6 +276,14 @@ const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
     cacheWriteUsdMicrosPerMillion: 380_000,
     outputUsdMicrosPerMillion: 1_200_000,
   },
+  "moonshotai/kimi-k3": {
+    model: "moonshotai/kimi-k3",
+    provider: "moonshotai",
+    inputUsdMicrosPerMillion: 3_000_000,
+    cachedInputUsdMicrosPerMillion: 300_000,
+    cacheWriteUsdMicrosPerMillion: 3_000_000,
+    outputUsdMicrosPerMillion: 15_000_000,
+  },
   "moonshotai/kimi-k2.6": {
     model: "moonshotai/kimi-k2.6",
     provider: "moonshotai",

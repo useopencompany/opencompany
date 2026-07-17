@@ -66,6 +66,7 @@ describe("calculateModelUsageCost", () => {
     ["minimax/minimax-m2.1", 1_910],
     ["minimax/minimax-m2.1-lightning", 1_910],
     ["minimax/minimax-m2", 1_910],
+    ["moonshotai/kimi-k3", 21_300],
     ["moonshotai/kimi-k2.6", 6_060],
     ["moonshotai/kimi-k2.5", 3_900],
     ["moonshotai/kimi-k2-thinking", 3_850],

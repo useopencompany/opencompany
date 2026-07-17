@@ -243,16 +243,17 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getAllByText("Claude Sonnet 5").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Claude Opus 4.8")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.5")).toBeInTheDocument();
+    expect(screen.getByText("Kimi K3")).toBeInTheDocument();
     expect(screen.getByText("Kimi K2.6")).toBeInTheDocument();
     expect(screen.queryByText("GPT 5.4 Mini")).not.toBeInTheDocument();
     expect(screen.queryByText("Local Codex")).not.toBeInTheDocument();
 
-    await user.click(screen.getByText("Kimi K2.6"));
+    await user.click(screen.getByText("Kimi K3"));
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Compare");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
-      model: "moonshotai/kimi-k2.6",
+      model: "moonshotai/kimi-k3",
     });
   });
 
