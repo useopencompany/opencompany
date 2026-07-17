@@ -10,6 +10,9 @@ import {
   normalizeGoatBrainReadToolInput,
 } from "@/lib/brain-surface";
 import {
+  CALL_INTEGRATION_TOOL_TOOL_NAME,
+  type CallIntegrationToolInput,
+  type CallIntegrationToolOutput,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
@@ -25,6 +28,9 @@ import {
   SCHEDULE_TASK_TOOL_NAME,
   type ScheduleTaskToolInput,
   type ScheduleTaskToolOutput,
+  SEARCH_INTEGRATION_TOOLS_TOOL_NAME,
+  type SearchIntegrationToolsInput,
+  type SearchIntegrationToolsOutput,
   START_TASK_TOOL_NAME,
   type StartTaskToolInput,
   type StartTaskToolOutput,
@@ -33,6 +39,9 @@ import {
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
 import {
+  CALL_INTEGRATION_TOOL_ARGUMENTS_DESCRIPTION,
+  CALL_INTEGRATION_TOOL_NAME_DESCRIPTION,
+  CALL_INTEGRATION_TOOL_TOOL_DESCRIPTION,
   createOpenCompanyChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
@@ -48,6 +57,8 @@ import {
   SCHEDULE_TASK_SOURCE_DESCRIPTION,
   SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
   SCHEDULE_TASK_TOOL_DESCRIPTION,
+  SEARCH_INTEGRATION_TOOLS_QUERY_DESCRIPTION,
+  SEARCH_INTEGRATION_TOOLS_TOOL_DESCRIPTION,
   START_TASK_ENGINE_DESCRIPTION,
   START_TASK_NAME_DESCRIPTION,
   START_TASK_PROMPT_DESCRIPTION,
@@ -89,6 +100,12 @@ type GoatBrainCliRunner = (
 ) => Promise<GoatBrainToolOutput>;
 type SaveToBrainRunner = (input: SaveToBrainToolInput) => Promise<SaveToBrainToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
+export type IntegrationChatToolsRunner = {
+  search: (
+    input: SearchIntegrationToolsInput,
+  ) => SearchIntegrationToolsOutput | Promise<SearchIntegrationToolsOutput>;
+  call: (input: CallIntegrationToolInput) => Promise<CallIntegrationToolOutput>;
+};
 type ScheduleTaskRunner = (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
 type EditTaskScheduleRunner = (
   input: EditTaskScheduleToolInput,
@@ -151,8 +168,10 @@ export async function runOpenCompanyChatAgent(input: {
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   webSearch?: WebSearchRunner;
+  integrationTools?: IntegrationChatToolsRunner;
   currentDate?: Date | string;
   userContext?: OpenCompanyChatSystemPromptInput["userContext"];
+  integrations?: OpenCompanyChatSystemPromptInput["integrations"];
   recurringSchedules?: OpenCompanyChatSystemPromptInput["recurringSchedules"];
   userWorkosId?: string | null;
   chatSessionId?: string | null;
@@ -184,12 +203,14 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
+    ...(input.integrationTools ? { integrationTools: input.integrationTools } : {}),
   });
 
   const systemPromptInput = {
     webSearchEnabled: Boolean(input.webSearch),
     ...(input.currentDate ? { currentDate: input.currentDate } : {}),
     ...(input.userContext ? { userContext: input.userContext } : {}),
+    ...(input.integrations ? { integrations: input.integrations } : {}),
     ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
   };
 
@@ -231,6 +252,7 @@ export function createOpenCompanyChatToolContext(input: {
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   webSearch?: WebSearchRunner;
+  integrationTools?: IntegrationChatToolsRunner;
 }) {
   let startedTask: StartedTask | null = null;
   let startTaskInFlight: Promise<StartedTask> | null = null;
@@ -563,6 +585,57 @@ export function createOpenCompanyChatToolContext(input: {
           query,
           ...(recencyDays ? { recencyDays } : {}),
         });
+      },
+    });
+  }
+
+  const integrationTools = input.integrationTools;
+  if (integrationTools) {
+    tools[SEARCH_INTEGRATION_TOOLS_TOOL_NAME] = tool<
+      SearchIntegrationToolsInput,
+      SearchIntegrationToolsOutput
+    >({
+      description: SEARCH_INTEGRATION_TOOLS_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<SearchIntegrationToolsInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: {
+            type: "string",
+            description: SEARCH_INTEGRATION_TOOLS_QUERY_DESCRIPTION,
+          },
+        },
+        required: ["query"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        return integrationTools.search(args);
+      },
+    });
+
+    tools[CALL_INTEGRATION_TOOL_TOOL_NAME] = tool<
+      CallIntegrationToolInput,
+      CallIntegrationToolOutput
+    >({
+      description: CALL_INTEGRATION_TOOL_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<CallIntegrationToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          tool: {
+            type: "string",
+            description: CALL_INTEGRATION_TOOL_NAME_DESCRIPTION,
+          },
+          arguments: {
+            type: "object",
+            description: CALL_INTEGRATION_TOOL_ARGUMENTS_DESCRIPTION,
+          },
+        },
+        required: ["tool"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        return integrationTools.call(args);
       },
     });
   }

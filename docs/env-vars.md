@@ -105,6 +105,7 @@ Set these in Vercel Production.
 | `GOAT_STRIPE_CHECKOUT_ENABLED` | Goat hosted only | Production live-Checkout gate for both Pro subscriptions and credit top-ups. Keep false until the business has configured its actual Stripe Tax registrations, then set true in Infisical `prod` + `/goat` and sync it to Goat Vercel. Test/local Checkout is not gated. The Goat Stripe account's webhook endpoint (the shared web `/api/stripe/webhook` route) must be subscribed to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, and `checkout.session.async_payment_failed`; its signing secret must match `STRIPE_WEBHOOK_SECRET` before enabling top-ups. |
 | `GOAT_CREDITS_ENFORCEMENT_ENABLED` | Goat only | Set `true` to enforce usage credits: chat turns hard-stop with 402 on an empty balance and Pro ingestion overage requires credits (otherwise over-quota work just pauses, as before). Usage debits and the ledger record regardless of this flag. Keep false in prod until `GOAT_STRIPE_CHECKOUT_ENABLED` is true — enforcement without purchasable top-ups locks users out of chat. Needed by the Goat web app and the runner. |
 | `CRON_SECRET` | Goat hosted only | Bearer secret protecting the hourly Goat billing reconciliation route (releases paused ingestion backlogs and repairs drifted Stripe seat quantities). Store it in Infisical `prod` + `/goat`; sync it to the Goat Vercel project, which sends it as the cron Authorization bearer token. |
+| `GOAT_MAIN_CHAT_INTEGRATION_TOOLS_DISABLED` | No | Kill switch for connected-integration tools in the Goat main chat. Any truthy value (`1`/`true`) removes `search_integration_tools`/`call_integration_tool` and the prompt index; chat continues without them. Tools otherwise appear automatically for users with a connected Linear, Slack, or Gmail integration. |
 | `GOAT_PORT` | Local Goat only | Internal Next.js port for `bun run dev:goat`; defaults to `3002`. |
 | `GOAT_HTTPS_PORT` | Local Goat only | Browser-facing Caddy HTTPS port for `bun run dev:goat`; defaults to `3443`. |
 | `OPENCOMPANY_GITHUB_ORG` | Yes | GitHub org where workspace repos are created. |
@@ -223,7 +224,10 @@ Goat Slack ingestion app setup checklist (api.slack.com/apps → From scratch):
 
 1. OAuth & Permissions → **User Token Scopes** (no bot scopes): `channels:history`,
    `groups:history`, `im:history`, `mpim:history`, `channels:read`, `groups:read`, `im:read`,
-   `mpim:read`, `users:read`, `team:read`. Do not opt into token rotation.
+   `mpim:read`, `users:read`, `team:read`, `search:read`. Do not opt into token rotation.
+   `search:read` powers `slack_search_messages` in the main chat; connections created before it
+   was added must reconnect Slack to grant it — until then chat search returns a reconnect hint
+   while channel history and thread reads keep working.
 2. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack/callback`.
 3. Event Subscriptions → Request URL `${GOAT_NEXT_PUBLIC_APP_URL}/api/webhooks/slack/events`,
    then under **Subscribe to events on behalf of users** add `message.channels`,

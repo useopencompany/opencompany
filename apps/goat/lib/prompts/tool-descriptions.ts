@@ -68,3 +68,18 @@ export const WEB_SEARCH_QUERY_DESCRIPTION =
 
 export const WEB_SEARCH_RECENCY_DAYS_DESCRIPTION =
   "Optional freshness window for latest/recent requests. Use 7 for very recent news, 30 for recent updates, and 90 for broader current context.";
+
+export const SEARCH_INTEGRATION_TOOLS_TOOL_DESCRIPTION =
+  "Search the read-only tools available for the user's connected integrations listed in the integrations context. Returns full tool definitions — name, description, and input schema — for matching tools. Pass keywords describing what you need, a provider name for that provider's full list, or an empty query for everything available. Always call this before call_integration_tool unless you already have the definition from this conversation.";
+
+export const SEARCH_INTEGRATION_TOOLS_QUERY_DESCRIPTION =
+  "Keywords for the needed capability, e.g. 'linear issues assigned to me', 'slack thread', or 'unread email'. A provider name alone lists that provider's tools; an empty string lists everything.";
+
+export const CALL_INTEGRATION_TOOL_TOOL_DESCRIPTION =
+  "Execute one read-only integration tool by its exact name from a search_integration_tools result, with arguments matching its input schema. Results are bounded; refine arguments and call again for more. Errors are returned in-band with guidance — relay permission or connection problems to the user briefly.";
+
+export const CALL_INTEGRATION_TOOL_NAME_DESCRIPTION =
+  "Exact tool name from a search_integration_tools result, e.g. 'linear_list_issues'. Never guess names.";
+
+export const CALL_INTEGRATION_TOOL_ARGUMENTS_DESCRIPTION =
+  "Arguments matching the tool's input schema from search_integration_tools. Omit for tools without required parameters.";

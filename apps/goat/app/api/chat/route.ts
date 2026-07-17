@@ -69,6 +69,19 @@ import {
 import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, validateGoatChatInput } from "@/lib/chat-validation";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
+  integrationIndexEntriesFromConnections,
+  isIntegrationToolsKillSwitchEnabled,
+  resolveIntegrationToolConnections,
+} from "@/lib/integration-tools/connections";
+import {
+  createIntegrationToolDispatcher,
+  type IntegrationToolDispatcher,
+} from "@/lib/integration-tools/dispatcher";
+import { createGmailIntegrationToolExecutor } from "@/lib/integration-tools/gmail";
+import { createLinearIntegrationToolExecutor } from "@/lib/integration-tools/linear";
+import { createSlackIntegrationToolExecutor } from "@/lib/integration-tools/slack";
+import type { OpenCompanyChatIntegrationIndexEntry } from "@/lib/prompts/integrations";
+import {
   createGoatTaskScheduleForUser,
   deleteGoatTaskScheduleAction,
   type GoatTaskScheduleView,
@@ -272,9 +285,76 @@ export async function POST(request: Request): Promise<Response> {
     }
   };
 
+  // Connected-integration tools (Linear/Slack/Gmail reads): resolved per
+  // request, registered only when at least one relevant provider is connected.
+  // Setup failures degrade to a normal turn without integration tools.
+  let integrationDispatcher: IntegrationToolDispatcher | null = null;
+  let integrationIndexEntries: OpenCompanyChatIntegrationIndexEntry[] = [];
+  if (!isIntegrationToolsKillSwitchEnabled()) {
+    try {
+      const connections = await resolveIntegrationToolConnections({
+        userWorkosId: context.user.workosUserId,
+      });
+      if (connections.providers.length > 0) {
+        integrationDispatcher = createIntegrationToolDispatcher({
+          connectedProviders: connections.providers,
+          executors: {
+            ...(connections.linearCredentialSources.length > 0
+              ? {
+                  linear: createLinearIntegrationToolExecutor({
+                    userWorkosId: context.user.workosUserId,
+                    sources: connections.linearCredentialSources,
+                    signal: generationSignal,
+                  }),
+                }
+              : {}),
+            ...(connections.slackAccounts.length > 0
+              ? {
+                  slack: createSlackIntegrationToolExecutor({
+                    userWorkosId: context.user.workosUserId,
+                    accounts: connections.slackAccounts,
+                    signal: generationSignal,
+                  }),
+                }
+              : {}),
+            ...(connections.gmailAccounts.length > 0
+              ? {
+                  gmail: createGmailIntegrationToolExecutor({
+                    userWorkosId: context.user.workosUserId,
+                    accounts: connections.gmailAccounts,
+                    signal: generationSignal,
+                  }),
+                }
+              : {}),
+          },
+        });
+        integrationIndexEntries = integrationIndexEntriesFromConnections(connections);
+        chatSpan.setAttributes({
+          "goat.integration_tools_providers": connections.providers.join(","),
+        });
+      }
+    } catch (error) {
+      logger.warn("Goat chat integration tools setup failed", {
+        event: "goat.chat_integration_tools_setup_failed",
+        chat_session_id: turn.session.id,
+        error,
+      });
+      integrationDispatcher = null;
+      integrationIndexEntries = [];
+    }
+  }
+
   const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
     latestUserMessage: parsed.value.prompt,
+    ...(integrationDispatcher
+      ? {
+          integrationTools: {
+            search: integrationDispatcher.search,
+            call: integrationDispatcher.call,
+          },
+        }
+      : {}),
     ...(requestedEngine ? { requestedEngine } : {}),
     // goat_brain is read-only for everyone (recall/inspect). The only write path
     // in chat is save_to_brain, which is wired below for admins and enqueues the
@@ -573,6 +653,7 @@ export async function POST(request: Request): Promise<Response> {
       brainCaptureEnabled: canManageWorkspaceBrain,
       taskToolsEnabled,
       scheduleToolsEnabled: taskToolsEnabled,
+      ...(integrationIndexEntries.length > 0 ? { integrations: integrationIndexEntries } : {}),
       recurringSchedules,
     }),
     messages: await convertToModelMessages(

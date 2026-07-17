@@ -722,3 +722,36 @@ async function executeWebSearchTool(options: unknown, input: WebSearchToolInput)
   }
   return tool.execute(input);
 }
+
+describe("createOpenCompanyChatToolContext integration tools", () => {
+  it("registers the two dispatcher tools only when integrationTools is provided", async () => {
+    const { createOpenCompanyChatToolContext } = await import("@/lib/chat-agent");
+    const { CALL_INTEGRATION_TOOL_TOOL_NAME, SEARCH_INTEGRATION_TOOLS_TOOL_NAME } = await import(
+      "@/lib/chat-ui"
+    );
+
+    const without = createOpenCompanyChatToolContext({ model: DEFAULT_GOAT_MODEL });
+    expect(without.tools[SEARCH_INTEGRATION_TOOLS_TOOL_NAME]).toBeUndefined();
+    expect(without.tools[CALL_INTEGRATION_TOOL_TOOL_NAME]).toBeUndefined();
+
+    const search = vi.fn().mockReturnValue({ ok: true, tools: [] });
+    const call = vi.fn().mockResolvedValue({ ok: true, tool: "linear_list_teams", result: {} });
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      integrationTools: { search, call },
+    });
+    const searchTool = context.tools[SEARCH_INTEGRATION_TOOLS_TOOL_NAME];
+    const callTool = context.tools[CALL_INTEGRATION_TOOL_TOOL_NAME];
+    if (typeof searchTool?.execute !== "function" || typeof callTool?.execute !== "function") {
+      throw new Error("integration tools were not registered with execute functions");
+    }
+
+    const toolCallOptions = { toolCallId: "call_test", messages: [] };
+    expect(context.hasVisibleToolActivity()).toBe(false);
+    await searchTool.execute({ query: "linear" }, toolCallOptions);
+    expect(search).toHaveBeenCalledWith({ query: "linear" });
+    await callTool.execute({ tool: "linear_list_teams" }, toolCallOptions);
+    expect(call).toHaveBeenCalledWith({ tool: "linear_list_teams" });
+    expect(context.hasVisibleToolActivity()).toBe(true);
+  });
+});

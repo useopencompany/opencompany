@@ -1,6 +1,7 @@
 import type { GoatTaskStatus } from "@opencompany/db/goat-schema";
 import type { GoatTaskView } from "@/components/GoatSurface";
 import {
+  CALL_INTEGRATION_TOOL_TOOL_NAME,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_FILE_CHANGE_TOOL_NAME,
@@ -16,6 +17,7 @@ import {
   type GoatChatUiMessage,
   type GoatTaskCardMetadata,
   SCHEDULE_TASK_TOOL_NAME,
+  SEARCH_INTEGRATION_TOOLS_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
   type StartTaskToolOutput,
@@ -232,6 +234,8 @@ export function toolLabel(name: string) {
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
   if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
   if (name === WEB_SEARCH_TOOL_NAME) return "Web Search";
+  if (name === SEARCH_INTEGRATION_TOOLS_TOOL_NAME) return "Tool search";
+  if (name === CALL_INTEGRATION_TOOL_TOOL_NAME) return "Connected tool";
   return name
     .split(/[_-]+/)
     .filter(Boolean)
@@ -278,8 +282,46 @@ export function toolDetail(
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME || name === DELETE_TASK_SCHEDULE_TOOL_NAME) {
     return taskScheduleMutationToolDetail(part);
   }
+  if (name === SEARCH_INTEGRATION_TOOLS_TOOL_NAME) {
+    return isRecord(part.input) && typeof part.input.query === "string" && part.input.query
+      ? truncateToolPreview(part.input.query)
+      : formatToolInput(part.input);
+  }
+  if (name === CALL_INTEGRATION_TOOL_TOOL_NAME) {
+    return callIntegrationToolDetail(part);
+  }
 
   return formatToolInput(part.input);
+}
+
+function callIntegrationToolDetail(part: Record<string, unknown> & { type: string }) {
+  const input = isRecord(part.input) ? part.input : null;
+  const toolName = input && typeof input.tool === "string" ? input.tool : null;
+
+  // Failed calls carry their error in-band (state is still output-available).
+  if (
+    part.state === "output-available" &&
+    isRecord(part.output) &&
+    part.output.ok === false &&
+    typeof part.output.error === "string"
+  ) {
+    return truncateToolPreview(toolName ? `${toolName} — ${part.output.error}` : part.output.error);
+  }
+
+  const argsPreview =
+    input && isRecord(input.arguments) && Object.keys(input.arguments).length > 0
+      ? safeJsonPreview(input.arguments)
+      : null;
+  if (toolName) return truncateToolPreview(argsPreview ? `${toolName} ${argsPreview}` : toolName);
+  return formatToolInput(part.input);
+}
+
+function safeJsonPreview(value: unknown) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
 }
 
 function goatBrainToolDetail(

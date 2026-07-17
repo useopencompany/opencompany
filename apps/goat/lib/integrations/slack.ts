@@ -41,6 +41,9 @@ export const GOAT_SLACK_USER_SCOPES = [
   "mpim:read",
   "users:read",
   "team:read",
+  // Message search for the main-chat integration tools; connections that
+  // predate this scope must reconnect before slack_search_messages works.
+  "search:read",
 ] as const;
 
 export function isGoatSlackIntegrationConfigured() {

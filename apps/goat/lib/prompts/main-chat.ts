@@ -1,6 +1,10 @@
-function promptBlock(name: string, lines: readonly string[]) {
-  return [`<${name}>`, ...lines, `</${name}>`].join("\n");
-}
+import { promptBlock } from "./blocks";
+import {
+  formatIntegrationsBlock,
+  OPENCOMPANY_CHAT_CONNECTED_ACCOUNT_TASK_LINE_WITH_INTEGRATIONS,
+  OPENCOMPANY_CHAT_INTEGRATION_TOOLS_BEHAVIOR_LINES,
+  type OpenCompanyChatIntegrationIndexEntry,
+} from "./integrations";
 
 export type OpenCompanyChatUserContext = {
   email: string;
@@ -81,6 +85,7 @@ export function createOpenCompanyChatSystemPrompt(
     taskToolsEnabled?: boolean;
     scheduleToolsEnabled?: boolean;
     activeBrain?: { name: string; workspaceName: string; readOnly?: boolean } | null;
+    integrations?: readonly OpenCompanyChatIntegrationIndexEntry[];
     recurringSchedules?: readonly {
       id: string;
       name: string;
@@ -93,6 +98,7 @@ export function createOpenCompanyChatSystemPrompt(
 ) {
   const taskToolsEnabled = input.taskToolsEnabled ?? true;
   const scheduleToolsEnabled = input.scheduleToolsEnabled ?? taskToolsEnabled;
+  const integrationToolsEnabled = Boolean(input.integrations?.length);
   return [
     promptBlock("system", [
       ...OPENCOMPANY_CHAT_SYSTEM_BASE_LINES,
@@ -104,12 +110,15 @@ export function createOpenCompanyChatSystemPrompt(
       ...(scheduleToolsEnabled ? formatRecurringScheduleContext(input.recurringSchedules) : []),
     ]),
     promptBlock("user_context", formatUserContext(input.userContext)),
+    ...(integrationToolsEnabled ? [formatIntegrationsBlock(input.integrations ?? [])] : []),
     promptBlock("behavior", [
       ...formatBaseBehaviorLines({
         brainCaptureEnabled: input.brainCaptureEnabled,
         taskToolsEnabled,
         scheduleToolsEnabled,
+        integrationToolsEnabled,
       }),
+      ...(integrationToolsEnabled ? OPENCOMPANY_CHAT_INTEGRATION_TOOLS_BEHAVIOR_LINES : []),
       ...(input.webSearchEnabled
         ? [
             ...OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES,
@@ -143,10 +152,12 @@ function formatBaseBehaviorLines(input: {
   brainCaptureEnabled?: boolean | undefined;
   taskToolsEnabled?: boolean | undefined;
   scheduleToolsEnabled?: boolean | undefined;
+  integrationToolsEnabled?: boolean | undefined;
 }) {
   const brainCaptureEnabled = input.brainCaptureEnabled ?? true;
   const taskToolsEnabled = input.taskToolsEnabled ?? true;
   const scheduleToolsEnabled = input.scheduleToolsEnabled ?? taskToolsEnabled;
+  const integrationToolsEnabled = input.integrationToolsEnabled ?? false;
   const lines = OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES.filter((line) => {
     // goat_brain is always read-only, so only the save_to_brain (capture) lines
     // are gated: browse-only members keep the read guidance but lose capture.
@@ -176,6 +187,13 @@ function formatBaseBehaviorLines(input: {
       return false;
     }
     return true;
+  }).map((line) => {
+    // Connected providers listed in the integrations block are read directly
+    // in chat; only the rest of the connected-account surface stays a task.
+    if (integrationToolsEnabled && line.startsWith("Requests to check")) {
+      return OPENCOMPANY_CHAT_CONNECTED_ACCOUNT_TASK_LINE_WITH_INTEGRATIONS;
+    }
+    return line;
   });
 
   return [
