@@ -31,6 +31,10 @@
       "types": "./src/schema.ts",
       "default": "./src/schema.ts"
     },
+    "./skills": {
+      "types": "./src/skills.ts",
+      "default": "./src/skills.ts"
+    },
     "./usage": {
       "types": "./src/usage.ts",
       "default": "./src/usage.ts"

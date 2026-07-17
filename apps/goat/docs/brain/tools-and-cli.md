@@ -15,10 +15,10 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 | Command | Does |
 | --- | --- |
 | `help` | Global or per-command help. |
-| `list` | List docs without retrieval or model calls (`--folder`, `--limit`, `--include-merged`). Use this for inventory, not wildcard queries. |
+| `list` | List docs without retrieval or model calls (`--folder`, `--limit`, `--include-merged`). The `skills/` zone is omitted unless explicitly selected with `--folder skills` or a descendant. Use this for inventory, not wildcard queries. |
 | `get <id>` | Read one doc (`--section all\|truth\|timeline\|frontmatter`). |
 | `timeline <id>` | Dated evidence entries (`--since 30d`, `--limit`). |
-| `query <text>` | Hybrid retrieval: BM25 + optional embeddings, graph expansion (`--hops`, `--graph-direction out\|in\|both`), filters (`--folder`, `--since`, `--lexical-only`, `--include-invalid`, `--include-merged`). `--since` accepts compact windows like `6h`/`2d` or natural windows like `last 6 hours`. No LLM calls in the ranking loop (see [retrieval-planes.md](./retrieval-planes.md)). |
+| `query <text>` | Hybrid retrieval: BM25 + optional embeddings, graph expansion (`--hops`, `--graph-direction out\|in\|both`), filters (`--folder`, `--since`, `--lexical-only`, `--include-invalid`, `--include-merged`). The `skills/` zone is omitted unless explicitly selected with `--folder skills` or a descendant. `--since` accepts compact windows like `6h`/`2d` or natural windows like `last 6 hours`. No LLM calls in the ranking loop (see [retrieval-planes.md](./retrieval-planes.md)). |
 | `folder list` | Folders in use. |
 | `doctor` | Validation, link, folder-shape, and weak-provenance findings (`health.ts`). |
 

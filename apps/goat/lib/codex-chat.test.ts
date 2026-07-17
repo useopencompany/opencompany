@@ -129,6 +129,29 @@ describe("createGoatCodexChatMessage", () => {
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
 
+  it("persists immutable native skill snapshots with the first session turn", async () => {
+    await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "Implement this",
+      skills: [
+        {
+          id: "coding-work",
+          brainRef: "brain_1",
+          name: "Coding work",
+          description: "How coding work should happen.",
+          instructions: "Inspect, implement, and verify.",
+        },
+      ],
+    });
+
+    const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
+    const serialized = JSON.stringify(statement.queryChunks);
+    expect(serialized).toContain("Implement this");
+    expect(serialized).toContain("coding-work");
+    expect(serialized).toContain("Inspect, implement, and verify.");
+    expect(sqlText(statement)).toContain("INSERT INTO goat.chat_session_skills");
+  });
+
   it("persists attachments and allows an attachment-only first turn", async () => {
     const result = await createGoatCodexChatMessage({
       userWorkosId: "user_1",
@@ -193,6 +216,38 @@ describe("createGoatCodexChatMessage", () => {
     expect(result).toMatchObject({ ok: true, mode: "queued", sessionId: "goat_chat_1" });
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.wake).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists newly activated native skill snapshots with queued turns", async () => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          status: "running",
+        },
+      },
+    ]);
+    await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      sessionId: "goat_chat_1",
+      prompt: "Implement this",
+      skills: [
+        {
+          id: "coding-work",
+          brainRef: "brain_1",
+          name: "Coding work",
+          description: "How coding work should happen.",
+          instructions: "Inspect, implement, and verify.",
+        },
+      ],
+    });
+
+    const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
+    const serialized = JSON.stringify(statement.queryChunks);
+    expect(serialized).toContain("Implement this");
+    expect(serialized).toContain("coding-work");
+    expect(sqlText(statement)).toContain("ON CONFLICT (chat_session_id, skill_id) DO NOTHING");
   });
 
   it("still succeeds when the runner wake fails", async () => {

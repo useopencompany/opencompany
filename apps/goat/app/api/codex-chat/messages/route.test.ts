@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoatAuthContext } from "@/lib/auth";
 import { currentGoatUser } from "@/lib/auth";
+import { GoatBrainSkillMentionError, resolveGoatBrainSkillMentions } from "@/lib/brain-skills";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import { createGoatCodexChatMessage } from "@/lib/codex-chat";
 import { POST } from "./route";
@@ -16,6 +17,11 @@ vi.mock("@/lib/codex-chat", () => ({
 vi.mock("@/lib/chat-title", () => ({
   generateGoatChatTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
 }));
+
+vi.mock("@/lib/brain-skills", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/brain-skills")>();
+  return { ...actual, resolveGoatBrainSkillMentions: vi.fn() };
+});
 
 vi.mock("next/server", () => ({
   after: vi.fn((work: Promise<unknown>) => work),
@@ -45,6 +51,7 @@ describe("POST /api/codex-chat/messages", () => {
         createdAt: new Date("2026-07-10T00:00:00.000Z"),
         updatedAt: new Date("2026-07-10T00:00:00.000Z"),
       },
+      activeBrain: { id: "goat_brain_1" },
     } as GoatAuthContext);
     mockCreateGoatCodexChatMessage().mockResolvedValue({
       ok: true,
@@ -53,6 +60,7 @@ describe("POST /api/codex-chat/messages", () => {
       assistantMessageId: "goat_chat_msg_assistant",
       mode: "started",
     });
+    vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([]);
   });
 
   it("rejects malformed JSON shapes", async () => {
@@ -80,6 +88,7 @@ describe("POST /api/codex-chat/messages", () => {
       userWorkosId: "user_1",
       sessionId: "goat_chat_1",
       prompt: "hello",
+      skills: [],
       attachments: [],
       clientMessageId: "client_msg_1",
       settings: undefined,
@@ -155,6 +164,67 @@ describe("POST /api/codex-chat/messages", () => {
       messageId: "goat_chat_msg_user",
       apiKey: "test-key",
     });
+  });
+
+  it("forwards a validated skill snapshot for native session activation", async () => {
+    vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "How coding work should happen.",
+        instructions: "Inspect, implement, and verify.",
+      },
+    ]);
+    const response = await POST(
+      jsonRequest({
+        message: {
+          id: "client_msg_skill",
+          role: "user",
+          parts: [{ type: "text", text: "Implement this" }],
+          metadata: {
+            mentions: [{ kind: "skill", brainRef: "goat_brain_1", id: "coding-work" }],
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "Implement this",
+        skills: [
+          {
+            id: "coding-work",
+            brainRef: "goat_brain_1",
+            name: "Coding work",
+            description: "How coding work should happen.",
+            instructions: "Inspect, implement, and verify.",
+          },
+        ],
+      }),
+    );
+  });
+
+  it("rejects stale structured skill references before queueing", async () => {
+    vi.mocked(resolveGoatBrainSkillMentions).mockRejectedValue(
+      new GoatBrainSkillMentionError("Skill is unavailable."),
+    );
+    const response = await POST(
+      jsonRequest({
+        prompt: "Implement this",
+        message: {
+          role: "user",
+          parts: [{ type: "text", text: "Implement this" }],
+          metadata: {
+            mentions: [{ kind: "skill", brainRef: "goat_brain_1", id: "missing" }],
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe("Skill is unavailable.");
+    expect(mockCreateGoatCodexChatMessage()).not.toHaveBeenCalled();
   });
 });
 

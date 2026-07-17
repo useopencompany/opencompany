@@ -22,6 +22,7 @@ import {
   goatBrainTimelineEntryFromParts,
   ingestGoatBrain,
   isBuiltInGoatBrainEntityType,
+  isGoatBrainSkillFolder,
   isHardDefaultGoatBrainFolder,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
@@ -388,7 +389,7 @@ Examples:
 
 List folders in use, create an empty adjustable folder, delete an empty adjustable folder,
 or rename an adjustable folder and the documents under it. Required folders
-(inbox, people, companies, evidence) cannot be renamed or removed.
+(inbox, skills, people, companies, evidence) cannot be renamed or removed.
 
 Examples:
   goat-brain folder list
@@ -596,6 +597,7 @@ async function list(ctx: CommandContext): Promise<CommandResult> {
           ) {
             return null;
           }
+          if (!folder && isGoatBrainSkillFolder(folderPath)) return null;
           if (!ctx.args.has("include-merged") && doc.frontmatter.status === "merged") return null;
           if (
             !ctx.args.has("include-conflicts") &&
@@ -1362,6 +1364,7 @@ function toWritableDocument(
       updatedAt: fm.updatedAt,
       relations: fm.relations ?? [],
       ...(fm.title ? { title: fm.title } : {}),
+      ...(fm.description ? { description: fm.description } : {}),
       ...(fm.aliases ? { aliases: fm.aliases } : {}),
       ...(fm.sources ? { sources: fm.sources } : {}),
       ...(fm.mergedInto ? { mergedInto: fm.mergedInto } : {}),

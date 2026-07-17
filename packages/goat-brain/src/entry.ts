@@ -34,6 +34,7 @@ export type GoatBrainEntry = {
   id: string;
   folder: string;
   title: string;
+  description?: string;
   format: GoatBrainEntryFormat;
   mimeType: string;
   body: string;
@@ -62,6 +63,7 @@ export type GoatBrainSidecar = {
   id: string;
   folder: string;
   title: string;
+  description?: string;
   format: GoatBrainEntryFormat;
   mimeType: string;
   createdAt: string;
@@ -119,6 +121,7 @@ export function goatBrainEntryFromLegacyDocument(doc: GoatBrainDocument): GoatBr
     id: doc.frontmatter.id,
     folder: doc.frontmatter.folder,
     title: (doc.frontmatter.title ?? doc.title ?? doc.frontmatter.id).trim(),
+    ...(doc.frontmatter.description ? { description: doc.frontmatter.description } : {}),
     format: "markdown",
     mimeType: GOAT_BRAIN_MARKDOWN_MIME_TYPE,
     body: doc.compiledTruth,
@@ -155,6 +158,7 @@ export function goatBrainEntryFromParsedLegacy(parsed: ParsedGoatBrainDocument):
     id,
     folder,
     title: title || id,
+    ...(frontmatter.description ? { description: frontmatter.description } : {}),
     format: "markdown",
     mimeType: GOAT_BRAIN_MARKDOWN_MIME_TYPE,
     body: parsed.compiledTruth,
@@ -176,6 +180,7 @@ export function legacyGoatBrainDocumentFromEntry(entry: GoatBrainEntry): GoatBra
       id: entry.id,
       folder: entry.folder,
       title: entry.title,
+      ...(entry.description ? { description: entry.description } : {}),
       kind: entry.kind,
       type: entry.type,
       status: entry.status,
@@ -212,6 +217,7 @@ export function serializeGoatBrainSidecar(entry: GoatBrainEntry): string {
     id: entry.id,
     folder: entry.folder,
     title: entry.title,
+    ...(entry.description ? { description: entry.description } : {}),
     format: entry.format,
     mimeType: entry.mimeType,
     createdAt: entry.createdAt,
@@ -291,6 +297,9 @@ function validateGoatBrainSidecarMetadata(input: {
   if (typeof sidecar.title !== "string" || !sidecar.title.trim()) {
     errors.push("sidecar.title must not be empty.");
   }
+  if (sidecar.description !== undefined && !sidecar.description.trim()) {
+    errors.push("sidecar.description must not be empty when present.");
+  }
   if (sidecar.status !== undefined && !isValidGoatBrainStatus(sidecar.status)) {
     errors.push("sidecar.status is invalid.");
   }
@@ -324,6 +333,7 @@ function entryFromValidSidecar(sidecar: GoatBrainSidecar, payloadContent: string
     id: sidecar.id,
     folder: sidecar.folder,
     title: sidecar.title.trim(),
+    ...(sidecar.description ? { description: sidecar.description.trim() } : {}),
     format: sidecar.format,
     mimeType: sidecar.mimeType,
     body: payloadContent,

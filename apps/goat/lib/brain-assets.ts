@@ -10,6 +10,7 @@ import {
   upsertGoatBrainSourceItemAndEnqueue,
 } from "@opencompany/db/goat-brain-ingest";
 import {
+  isGoatBrainSkillFolder,
   isValidGoatBrainFolder,
   normalizeGoatBrainFolderForV1,
   normalizeGoatBrainId,
@@ -66,6 +67,9 @@ export async function createGoatBrainAssetForUser(
   const folderPath = normalizeGoatBrainFolderForV1(input.folderPath);
   if (!isValidGoatBrainFolder(folderPath)) {
     return { ok: false, message: "Folder paths must be lowercase slugs separated by /." };
+  }
+  if (isGoatBrainSkillFolder(folderPath)) {
+    return { ok: false, message: "Skills are Markdown-only and cannot contain uploads." };
   }
 
   const fileName = input.originalFileName.trim() || "upload";

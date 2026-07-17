@@ -17,6 +17,7 @@ describe("Goat Brain folder taxonomy", () => {
       "research",
       "decisions",
       "concepts",
+      "skills",
       "people",
       "companies",
       "evidence",
@@ -25,6 +26,7 @@ describe("Goat Brain folder taxonomy", () => {
 
   it("marks only hard roots as system folders", () => {
     expect(goatBrainFolderSourceForPath("inbox")).toBe("system");
+    expect(goatBrainFolderSourceForPath("skills")).toBe("system");
     expect(goatBrainFolderSourceForPath("people")).toBe("system");
     expect(goatBrainFolderSourceForPath("companies")).toBe("system");
     expect(goatBrainFolderSourceForPath("evidence")).toBe("system");
@@ -44,6 +46,7 @@ describe("Goat Brain folder taxonomy", () => {
     expect(entries.map((entry) => entry.path)).toEqual([
       "inbox",
       "partners",
+      "skills",
       "people",
       "companies",
       "evidence",
@@ -64,6 +67,7 @@ describe("Goat Brain folder taxonomy", () => {
       { path: "research", source: "custom" },
       { path: "alpha", source: "custom" },
       { path: "zeta", source: "custom" },
+      { path: "skills", source: "system" },
       { path: "people", source: "system" },
       { path: "companies", source: "system" },
       { path: "evidence", source: "system" },

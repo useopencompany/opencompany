@@ -981,6 +981,20 @@
       "when": 1784652405000,
       "tag": "0139_goat_attio_source",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1784652406000,
+      "tag": "0140_goat_brain_skills_folder",
+      "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1784652407000,
+      "tag": "0141_goat_chat_session_skills",
+      "breakpoints": true
     }
   ]
 }
