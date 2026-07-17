@@ -1,6 +1,5 @@
 import type { GoatTaskStatus } from "@opencompany/db/goat-schema";
 import type { GoatTaskView } from "@/components/GoatSurface";
-import { sourceChipDisplay, sourceHrefForRef } from "@/lib/brain-source-links";
 import {
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
@@ -33,8 +32,7 @@ export type BrainCitation = {
   key: string;
   label: string;
   title: string;
-  href: string | null;
-  icon: "brain" | "github" | "link";
+  href: string;
 };
 
 export type ChatTaskCardView = {
@@ -492,12 +490,10 @@ export function brainCitationsFromToolOutput(output: unknown): BrainCitation[] {
   if (Array.isArray(parsed.documents)) {
     for (const document of parsed.documents) {
       addBrainDocumentCitation(citations, document, brainRef);
-      addBrainDocumentSourceCitations(citations, document);
     }
   }
   if (Array.isArray(parsed.entries)) {
     addTimelineDocumentCitation(citations, parsed, brainRef);
-    for (const entry of parsed.entries) addBrainSourceCitation(citations, entry);
   }
 
   return mergeBrainCitations([], citations);
@@ -515,13 +511,7 @@ function addTimelineDocumentCitation(
     label: id,
     title: `Brain document ${id}`,
     href: brainRef ? brainRootHref(brainRef) : "/brain",
-    icon: "brain",
   });
-}
-
-function addBrainDocumentSourceCitations(citations: BrainCitation[], value: unknown) {
-  if (!isRecord(value) || !Array.isArray(value.sources)) return;
-  for (const source of value.sources) addBrainSourceCitation(citations, source);
 }
 
 function addBrainDocumentCitation(
@@ -530,6 +520,7 @@ function addBrainDocumentCitation(
   brainRef: string | null,
 ) {
   if (!isRecord(value)) return;
+  if (readString(value.kind) === "evidence") return;
   const id = readString(value.id) ?? readString(value.brainId) ?? readString(value.requestedId);
   const title = readString(value.title) ?? id;
   if (!id || !title) return;
@@ -541,23 +532,6 @@ function addBrainDocumentCitation(
     label: title,
     title: folder ? `${title} (${folder}/${id})` : `${title} (${id})`,
     href,
-    icon: "brain",
-  });
-}
-
-function addBrainSourceCitation(citations: BrainCitation[], value: unknown) {
-  if (!isRecord(value)) return;
-  const ref = readString(value.ref) ?? readString(value.sourceRef);
-  if (!ref) return;
-
-  const fallbackLabel = readString(value.title) ?? readString(value.sourceTitle) ?? ref;
-  const chip = sourceChipDisplay(ref, fallbackLabel);
-  addUniqueBrainCitation(citations, {
-    key: `source:${ref}`,
-    label: chip.label,
-    title: fallbackLabel === ref ? ref : `${fallbackLabel} (${ref})`,
-    href: sourceHrefForRef(ref),
-    icon: chip.icon,
   });
 }
 
