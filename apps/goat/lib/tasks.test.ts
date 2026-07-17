@@ -193,6 +193,7 @@ describe("cancelGoatTaskAction", () => {
         timezone: "UTC",
         taskSpawningEnabled: true,
         localCodexBetaEnabled: false,
+        mainChatIntegrationToolsBetaEnabled: false,
         preferredMcpClient: null,
         mcpSetupCompletedAt: null,
         onboardedAt: null,

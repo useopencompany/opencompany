@@ -446,6 +446,16 @@ export type GoatChatMessageDebugTrace = {
     outputTokens?: number;
     totalTokens?: number;
   };
+  // Connected-integration tool activation metadata for the main-chat beta.
+  // Safe fields only: providers, rules, and timings — no arguments or results.
+  integrationTools?: {
+    version: string;
+    connectedProviders: string[];
+    activatedProviders: string[];
+    matches: Array<{ provider: string; rule: string; matchedText: string; score: number }>;
+    capped: boolean;
+    elapsedMs: number;
+  };
   error?: string;
 };
 
@@ -465,6 +475,9 @@ export const goatUsers = goat.table(
     timezone: text("timezone").notNull().default("UTC"),
     taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
+    mainChatIntegrationToolsBetaEnabled: boolean("main_chat_integration_tools_beta_enabled")
+      .notNull()
+      .default(false),
     preferredMcpClient: text("preferred_mcp_client").$type<GoatMcpClient>(),
     // Set exactly once, when this user first completes a successful Brain query over MCP.
     mcpSetupCompletedAt: timestamp("mcp_setup_completed_at", { withTimezone: true }),

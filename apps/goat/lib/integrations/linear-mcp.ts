@@ -1,6 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   auth,
+  createMCPClient,
   type OAuthClientInformation,
   type OAuthClientMetadata,
   type OAuthClientProvider,
@@ -83,6 +84,57 @@ export async function getGoatLinearIntegrationState(
     accountName: row.accountName,
     statusReason: row.statusReason,
   };
+}
+
+// Connects an MCP client for main-chat tool execution using the stored
+// linear_mcp credential. Callers own closing the client. Unlike the runner's
+// variant this filters on external_id, so the Linear brain-ingestion OAuth row
+// (which shares provider "linear") can never be picked up.
+export async function connectGoatLinearMcpClientForUser(userWorkosId: string) {
+  const [integration] = await getDb()
+    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.userWorkosId, userWorkosId),
+        eq(goatIntegrations.provider, GOAT_LINEAR_PROVIDER),
+        eq(goatIntegrations.externalId, LINEAR_EXTERNAL_ID),
+      ),
+    )
+    .orderBy(desc(goatIntegrations.updatedAt))
+    .limit(1);
+
+  if (!integration || integration.status !== "connected") {
+    throw new Error("Linear is not connected. Connect Linear in Settings → Integrations first.");
+  }
+
+  const payload = await loadLinearPayload({ userWorkosId, integrationId: integration.id });
+  if (!payload.clientInformation || !payload.tokens) {
+    throw new Error(
+      "The Linear connection is incomplete. Reconnect Linear in Settings → Integrations.",
+    );
+  }
+
+  return createMCPClient({
+    clientName: "opencompany-goat-chat",
+    version: "0.1.0",
+    transport: {
+      type: "http" as const,
+      url: GOAT_LINEAR_MCP_ENDPOINT_URL,
+      authProvider: createLinearClientProvider({
+        userWorkosId,
+        integrationId: integration.id,
+        payload,
+        // Token refresh happens inside the SDK; if it falls back to a full
+        // authorization redirect the stored credential is unusable in chat.
+        onAuthorizationUrl: () => {
+          throw new Error(
+            "The Linear connection expired. Reconnect Linear in Settings → Integrations.",
+          );
+        },
+      }),
+    },
+  });
 }
 
 export async function startGoatLinearMcpOAuth(input: { userWorkosId: string; returnTo: string }) {

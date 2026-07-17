@@ -4,6 +4,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
+  Cable,
   CircleUserRound,
   Code2,
   Download,
@@ -45,6 +46,7 @@ import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import {
   updateGoatLocalCodexBetaAction,
+  updateGoatMainChatIntegrationToolsAction,
   updateGoatTaskSpawningAction,
 } from "@/lib/user-preferences";
 
@@ -219,6 +221,13 @@ export function GoatPreferencesSettingsRoute() {
           checked={featureFlags.localCodexBridge}
           update={updateGoatLocalCodexBetaAction}
           showLocalBridgePairing
+        />
+        <BetaFeatureSwitch
+          icon={Cable}
+          label="Connected tools in main chat"
+          description="Read connected Linear and GitHub directly in chat"
+          checked={featureFlags.mainChatIntegrationTools}
+          update={updateGoatMainChatIntegrationToolsAction}
         />
       </section>
     </GoatSettingsContent>

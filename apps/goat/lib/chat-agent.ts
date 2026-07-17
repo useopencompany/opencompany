@@ -10,6 +10,9 @@ import {
   normalizeGoatBrainReadToolInput,
 } from "@/lib/brain-surface";
 import {
+  CALL_INTEGRATION_TOOL_TOOL_NAME,
+  type CallIntegrationToolInput,
+  type CallIntegrationToolOutput,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
@@ -19,12 +22,18 @@ import {
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainToolInput,
   type GoatBrainToolOutput,
+  INSPECT_INTEGRATION_TOOL_TOOL_NAME,
+  type InspectIntegrationToolInput,
+  type InspectIntegrationToolOutput,
   SAVE_TO_BRAIN_TOOL_NAME,
   type SaveToBrainToolInput,
   type SaveToBrainToolOutput,
   SCHEDULE_TASK_TOOL_NAME,
   type ScheduleTaskToolInput,
   type ScheduleTaskToolOutput,
+  SEARCH_INTEGRATION_TOOLS_TOOL_NAME,
+  type SearchIntegrationToolsInput,
+  type SearchIntegrationToolsOutput,
   START_TASK_TOOL_NAME,
   type StartTaskToolInput,
   type StartTaskToolOutput,
@@ -33,10 +42,15 @@ import {
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
 import {
+  CALL_INTEGRATION_TOOL_ARGUMENTS_DESCRIPTION,
+  CALL_INTEGRATION_TOOL_POINTER_DESCRIPTION,
+  CALL_INTEGRATION_TOOL_TOOL_DESCRIPTION,
   createOpenCompanyChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
   GOAT_BRAIN_TOOL_DESCRIPTION,
+  INSPECT_INTEGRATION_TOOL_POINTER_DESCRIPTION,
+  INSPECT_INTEGRATION_TOOL_TOOL_DESCRIPTION,
   SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION,
   SAVE_TO_BRAIN_CONTENT_DESCRIPTION,
   SAVE_TO_BRAIN_INTENT_DESCRIPTION,
@@ -48,6 +62,8 @@ import {
   SCHEDULE_TASK_SOURCE_DESCRIPTION,
   SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
   SCHEDULE_TASK_TOOL_DESCRIPTION,
+  SEARCH_INTEGRATION_TOOLS_QUERY_DESCRIPTION,
+  SEARCH_INTEGRATION_TOOLS_TOOL_DESCRIPTION,
   START_TASK_ENGINE_DESCRIPTION,
   START_TASK_NAME_DESCRIPTION,
   START_TASK_PROMPT_DESCRIPTION,
@@ -97,6 +113,19 @@ type DeleteTaskScheduleRunner = (
   input: DeleteTaskScheduleToolInput,
 ) => Promise<DeleteTaskScheduleToolOutput>;
 
+// The route wires this from the request-scoped integration-tool dispatcher.
+// level1CardsText carries the auto-activated Level 1 cards into the
+// call_integration_tool description so ambiguous prompts never see the full
+// catalog.
+export type IntegrationChatToolsRunner = {
+  level1CardsText: string;
+  search: (
+    input: SearchIntegrationToolsInput,
+  ) => SearchIntegrationToolsOutput | Promise<SearchIntegrationToolsOutput>;
+  inspect: (input: InspectIntegrationToolInput) => Promise<InspectIntegrationToolOutput>;
+  call: (input: CallIntegrationToolInput) => Promise<CallIntegrationToolOutput>;
+};
+
 // Main chat (and the MCP connector) get a read-only brain surface: recall and
 // inspect only. Every write path — new content and edits to existing records —
 // goes through save_to_brain, which enqueues the durable ingestion/curation
@@ -118,6 +147,16 @@ export type OpenCompanyChatAgentDebugTrace = {
     inputTokens?: number;
     outputTokens?: number;
     totalTokens?: number;
+  };
+  // Safe activation metadata for the connected-integration tools beta:
+  // providers and rule hits only, never tool arguments or provider results.
+  integrationTools?: {
+    version: string;
+    connectedProviders: string[];
+    activatedProviders: string[];
+    matches: Array<{ provider: string; rule: string; matchedText: string; score: number }>;
+    capped: boolean;
+    elapsedMs: number;
   };
   error?: string;
 };
@@ -231,6 +270,7 @@ export function createOpenCompanyChatToolContext(input: {
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   webSearch?: WebSearchRunner;
+  integrationTools?: IntegrationChatToolsRunner;
 }) {
   let startedTask: StartedTask | null = null;
   let startTaskInFlight: Promise<StartedTask> | null = null;
@@ -567,6 +607,90 @@ export function createOpenCompanyChatToolContext(input: {
     });
   }
 
+  const integrationTools = input.integrationTools;
+  if (integrationTools) {
+    tools[SEARCH_INTEGRATION_TOOLS_TOOL_NAME] = tool<
+      SearchIntegrationToolsInput,
+      SearchIntegrationToolsOutput
+    >({
+      description: SEARCH_INTEGRATION_TOOLS_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<SearchIntegrationToolsInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: {
+            type: "string",
+            description: SEARCH_INTEGRATION_TOOLS_QUERY_DESCRIPTION,
+          },
+        },
+        required: ["query"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        return integrationTools.search({
+          query: typeof args.query === "string" ? args.query : "",
+        });
+      },
+    });
+
+    tools[INSPECT_INTEGRATION_TOOL_TOOL_NAME] = tool<
+      InspectIntegrationToolInput,
+      InspectIntegrationToolOutput
+    >({
+      description: INSPECT_INTEGRATION_TOOL_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<InspectIntegrationToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          pointer: {
+            type: "string",
+            description: INSPECT_INTEGRATION_TOOL_POINTER_DESCRIPTION,
+          },
+        },
+        required: ["pointer"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        return integrationTools.inspect({
+          pointer: typeof args.pointer === "string" ? args.pointer : "",
+        });
+      },
+    });
+
+    tools[CALL_INTEGRATION_TOOL_TOOL_NAME] = tool<
+      CallIntegrationToolInput,
+      CallIntegrationToolOutput
+    >({
+      description: integrationTools.level1CardsText
+        ? `${CALL_INTEGRATION_TOOL_TOOL_DESCRIPTION}\n\nTools selected for this request:\n${integrationTools.level1CardsText}`
+        : `${CALL_INTEGRATION_TOOL_TOOL_DESCRIPTION}\n\nNo tools were pre-selected for this request; use search_integration_tools to find one.`,
+      inputSchema: jsonSchema<CallIntegrationToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          pointer: {
+            type: "string",
+            description: CALL_INTEGRATION_TOOL_POINTER_DESCRIPTION,
+          },
+          arguments: {
+            type: "object",
+            description: CALL_INTEGRATION_TOOL_ARGUMENTS_DESCRIPTION,
+          },
+        },
+        required: ["pointer"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        return integrationTools.call({
+          pointer: typeof args.pointer === "string" ? args.pointer : "",
+          ...(args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments)
+            ? { arguments: args.arguments as Record<string, unknown> }
+            : {}),
+        });
+      },
+    });
+  }
+
   return {
     getStartedTask: () => startedTask,
     hasVisibleToolActivity: () => visibleToolActivity,
@@ -580,6 +704,7 @@ export function createOpenCompanyChatDebugTrace(input: {
   finishReason?: string;
   uiMessageParts?: unknown[];
   steps?: unknown;
+  integrationTools?: OpenCompanyChatAgentDebugTrace["integrationTools"];
   error?: string;
 }): OpenCompanyChatAgentDebugTrace {
   return {
@@ -594,6 +719,7 @@ export function createOpenCompanyChatDebugTrace(input: {
       const usage = usageFromSteps(input.steps);
       return usage ? { usage } : {};
     })(),
+    ...(input.integrationTools ? { integrationTools: input.integrationTools } : {}),
     ...(input.error ? { error: input.error } : {}),
   };
 }

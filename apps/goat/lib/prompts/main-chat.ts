@@ -43,6 +43,29 @@ const OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES = [
   "Do not claim to browse the web unless you used web_search successfully. Do not claim to use a sandbox, access connected accounts, or complete asynchronous work inside chat. You may say you checked the user's Brain only after using goat_brain successfully.",
 ];
 
+// Compact L0 pointer line for each connected integration. Lossless: even when
+// automatic activation misses, the model can expand any connected provider by
+// pointer through inspect_integration_tool / search_integration_tools.
+export type OpenCompanyChatConnectedIntegration = {
+  label: string;
+  summary: string;
+  pointer: string;
+};
+
+const OPENCOMPANY_CHAT_INTEGRATION_TOOLS_BEHAVIOR_LINES = [
+  "For reading data from the connected tools listed in runtime context (such as Linear issues or GitHub pull requests), call call_integration_tool directly in this chat instead of starting a task. Multi-provider requests may call several integration tools in one turn.",
+  "The call_integration_tool description lists the tools pre-selected for this request. If none fit, use search_integration_tools to find the right tool, and inspect_integration_tool when a compact signature is not enough or a call failed validation.",
+  "Never invent tool:// pointers. Use only pointers from the tool list, search results, or runtime context.",
+  "Connected integration tools are read-only in chat today. For writes — creating issues, commenting, merging — start a task instead and briefly say why.",
+  "If an integration tool reports a connection or authorization problem, tell the user to reconnect that provider in Settings → Integrations.",
+];
+
+// The base behavior line that routes connected-account reads to tasks; when
+// integration tools are on it gets a carve-out for the connected providers.
+const OPENCOMPANY_CHAT_CONNECTED_ACCOUNT_TASK_LINE_PREFIX = "Requests to check";
+const OPENCOMPANY_CHAT_CONNECTED_ACCOUNT_TASK_LINE_WITH_INTEGRATIONS =
+  "Requests to check, read, summarize, triage, or monitor the user's latest emails, inbox, Gmail, calendar, or other connected accounts without a connected tool in runtime context are task requests. Providers listed under connected tools are read directly in chat instead.";
+
 const OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES = [
   "Use the web_search tool inside chat for simple one-shot public-web freshness questions, such as latest company updates, current facts, or current docs. After searching, answer directly and include a compact Sources list with markdown links.",
   'For web search, a good natural pre-tool sentence is: "I\'ll quickly check the web for the latest sources."',
@@ -81,6 +104,7 @@ export function createOpenCompanyChatSystemPrompt(
     taskToolsEnabled?: boolean;
     scheduleToolsEnabled?: boolean;
     activeBrain?: { name: string; workspaceName: string; readOnly?: boolean } | null;
+    connectedIntegrations?: readonly OpenCompanyChatConnectedIntegration[];
     recurringSchedules?: readonly {
       id: string;
       name: string;
@@ -93,6 +117,8 @@ export function createOpenCompanyChatSystemPrompt(
 ) {
   const taskToolsEnabled = input.taskToolsEnabled ?? true;
   const scheduleToolsEnabled = input.scheduleToolsEnabled ?? taskToolsEnabled;
+  const connectedIntegrations = input.connectedIntegrations ?? [];
+  const integrationToolsEnabled = connectedIntegrations.length > 0;
   return [
     promptBlock("system", [
       ...OPENCOMPANY_CHAT_SYSTEM_BASE_LINES,
@@ -101,6 +127,7 @@ export function createOpenCompanyChatSystemPrompt(
     promptBlock("runtime_context", [
       `Current date: ${formatPromptDate(input.currentDate)}.`,
       ...formatActiveBrainContext(input.activeBrain),
+      ...formatConnectedIntegrationsContext(connectedIntegrations),
       ...(scheduleToolsEnabled ? formatRecurringScheduleContext(input.recurringSchedules) : []),
     ]),
     promptBlock("user_context", formatUserContext(input.userContext)),
@@ -109,7 +136,9 @@ export function createOpenCompanyChatSystemPrompt(
         brainCaptureEnabled: input.brainCaptureEnabled,
         taskToolsEnabled,
         scheduleToolsEnabled,
+        integrationToolsEnabled,
       }),
+      ...(integrationToolsEnabled ? OPENCOMPANY_CHAT_INTEGRATION_TOOLS_BEHAVIOR_LINES : []),
       ...(input.webSearchEnabled
         ? [
             ...OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES,
@@ -139,10 +168,24 @@ function formatActiveBrainContext(
   ];
 }
 
+function formatConnectedIntegrationsContext(
+  integrations: readonly OpenCompanyChatConnectedIntegration[],
+) {
+  if (integrations.length === 0) return [];
+  return [
+    "Connected tools:",
+    ...integrations.map(
+      (integration) =>
+        `- ${integration.label} — ${integration.summary}. Pointer: ${integration.pointer}`,
+    ),
+  ];
+}
+
 function formatBaseBehaviorLines(input: {
   brainCaptureEnabled?: boolean | undefined;
   taskToolsEnabled?: boolean | undefined;
   scheduleToolsEnabled?: boolean | undefined;
+  integrationToolsEnabled?: boolean | undefined;
 }) {
   const brainCaptureEnabled = input.brainCaptureEnabled ?? true;
   const taskToolsEnabled = input.taskToolsEnabled ?? true;
@@ -178,11 +221,19 @@ function formatBaseBehaviorLines(input: {
     return true;
   });
 
+  const adjusted = input.integrationToolsEnabled
+    ? lines.map((line) =>
+        line.startsWith(OPENCOMPANY_CHAT_CONNECTED_ACCOUNT_TASK_LINE_PREFIX)
+          ? OPENCOMPANY_CHAT_CONNECTED_ACCOUNT_TASK_LINE_WITH_INTEGRATIONS
+          : line,
+      )
+    : lines;
+
   return [
     ...(!taskToolsEnabled
       ? ["Handle the user's request directly in this chat when possible."]
       : []),
-    ...lines,
+    ...adjusted,
   ];
 }
 

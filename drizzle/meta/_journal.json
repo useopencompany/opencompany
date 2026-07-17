@@ -981,6 +981,13 @@
       "when": 1784652405000,
       "tag": "0139_goat_attio_source",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1784652406000,
+      "tag": "0140_goat_main_chat_integration_tools",
+      "breakpoints": true
     }
   ]
 }

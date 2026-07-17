@@ -20,7 +20,7 @@ const appDataMock = vi.hoisted(() => ({
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
     workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
-    featureFlags: { taskSpawning: false, localCodexBridge: false },
+    featureFlags: { taskSpawning: false, localCodexBridge: false, mainChatIntegrationTools: false },
     integrations: {},
   },
 }));
@@ -28,6 +28,10 @@ const appDataMock = vi.hoisted(() => ({
 const userPreferencesMock = vi.hoisted(() => ({
   updateGoatLocalCodexBetaAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateGoatTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateGoatMainChatIntegrationToolsAction: vi.fn(async (enabled: boolean) => ({
+    ok: true,
+    enabled,
+  })),
 }));
 
 const themeMock = vi.hoisted(() => ({
@@ -105,6 +109,8 @@ vi.mock("@/components/SettingsIntegrationsPanel", () => ({
 vi.mock("@/lib/user-preferences", () => ({
   updateGoatLocalCodexBetaAction: userPreferencesMock.updateGoatLocalCodexBetaAction,
   updateGoatTaskSpawningAction: userPreferencesMock.updateGoatTaskSpawningAction,
+  updateGoatMainChatIntegrationToolsAction:
+    userPreferencesMock.updateGoatMainChatIntegrationToolsAction,
 }));
 
 vi.mock("@/components/ThemeProvider", () => ({
@@ -127,6 +133,7 @@ describe("GoatSettingsRoute", () => {
     routerMock.refresh.mockReset();
     userPreferencesMock.updateGoatLocalCodexBetaAction.mockClear();
     userPreferencesMock.updateGoatTaskSpawningAction.mockClear();
+    userPreferencesMock.updateGoatMainChatIntegrationToolsAction.mockClear();
     toastMock.success.mockClear();
     toastMock.error.mockClear();
     fetchMock.mockReset();

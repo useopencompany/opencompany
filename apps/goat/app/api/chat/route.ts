@@ -68,6 +68,18 @@ import {
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, validateGoatChatInput } from "@/lib/chat-validation";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
+import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
+import {
+  activateIntegrationProviders,
+  type IntegrationActivationResult,
+} from "@/lib/integration-tools/activation";
+import { resolveConnectedIntegrationProviders } from "@/lib/integration-tools/connections";
+import {
+  createIntegrationToolDispatcher,
+  type IntegrationToolDispatcher,
+} from "@/lib/integration-tools/dispatcher";
+import { createGitHubIntegrationExecutor } from "@/lib/integration-tools/github-adapter";
+import { createLinearIntegrationExecutor } from "@/lib/integration-tools/linear-adapter";
 import {
   createGoatTaskScheduleForUser,
   deleteGoatTaskScheduleAction,
@@ -272,9 +284,72 @@ export async function POST(request: Request): Promise<Response> {
     }
   };
 
+  // Connected-integration tools beta: resolve the user's eligible connections,
+  // deterministically activate providers from the latest turn, and expose the
+  // fixed search/inspect/call dispatcher surface. Setup failures degrade to a
+  // normal chat turn — the beta must never break the baseline loop.
+  let integrationDispatcher: IntegrationToolDispatcher | null = null;
+  let integrationActivation: IntegrationActivationResult | null = null;
+  if (goatFeatureFlagsFromUser(context.user).mainChatIntegrationTools) {
+    try {
+      const connectedProviders = await resolveConnectedIntegrationProviders({
+        userWorkosId: context.user.workosUserId,
+        workspaceId: context.workspace.id,
+      });
+      if (connectedProviders.length > 0) {
+        integrationActivation = activateIntegrationProviders({
+          message: parsed.value.prompt,
+          previousUserMessage: previousUserMessageText(turn.messages),
+          connectedProviders,
+        });
+        integrationDispatcher = createIntegrationToolDispatcher({
+          connectedProviders,
+          activatedProviders: integrationActivation.activated,
+          executors: {
+            linear: createLinearIntegrationExecutor({
+              userWorkosId: context.user.workosUserId,
+              signal: generationSignal,
+            }),
+            github: createGitHubIntegrationExecutor({
+              workspaceId: context.workspace.id,
+              signal: generationSignal,
+            }),
+          },
+        });
+        chatSpan.setAttributes({
+          "goat.integration_tools_connected_count": connectedProviders.length,
+          "goat.integration_tools_activated": integrationActivation.activated.join(",") || "none",
+          "goat.integration_tools_activation_ms": integrationActivation.elapsedMs,
+        });
+      }
+    } catch (error) {
+      logger.warn("Goat chat integration tools setup failed", {
+        event: "goat.chat_integration_tools_setup_failed",
+        chat_session_id: turn.session.id,
+        error,
+      });
+      integrationDispatcher = null;
+      integrationActivation = null;
+    }
+  }
+  const integrationToolsTrace =
+    integrationDispatcher && integrationActivation
+      ? {
+          version: integrationActivation.version,
+          connectedProviders: integrationDispatcher.connectedIntegrations.map(
+            (integration) => integration.provider,
+          ),
+          activatedProviders: integrationActivation.activated,
+          matches: integrationActivation.matches,
+          capped: integrationActivation.capped,
+          elapsedMs: Math.round(integrationActivation.elapsedMs * 1000) / 1000,
+        }
+      : undefined;
+
   const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
     latestUserMessage: parsed.value.prompt,
+    ...(integrationDispatcher ? { integrationTools: integrationDispatcher } : {}),
     ...(requestedEngine ? { requestedEngine } : {}),
     // goat_brain is read-only for everyone (recall/inspect). The only write path
     // in chat is save_to_brain, which is wired below for admins and enqueues the
@@ -491,6 +566,7 @@ export async function POST(request: Request): Promise<Response> {
 
   let debugTrace: GoatChatMessageDebugTrace = createOpenCompanyChatDebugTrace({
     model: turn.session.model,
+    ...(integrationToolsTrace ? { integrationTools: integrationToolsTrace } : {}),
   });
   let assistantPersisted = false;
   let assistantPersistPromise: Promise<void> | null = null;
@@ -563,6 +639,9 @@ export async function POST(request: Request): Promise<Response> {
         timezone: context.user.timezone,
       },
       webSearchEnabled: Boolean(exaApiKey),
+      ...(integrationDispatcher
+        ? { connectedIntegrations: integrationDispatcher.connectedIntegrations }
+        : {}),
       activeBrain: context.activeBrain
         ? {
             name: context.activeBrain.name,
@@ -602,6 +681,7 @@ export async function POST(request: Request): Promise<Response> {
       debugTrace = createOpenCompanyChatDebugTrace({
         model: turn.session.model,
         steps: event.steps,
+        ...(integrationToolsTrace ? { integrationTools: integrationToolsTrace } : {}),
         ...(finishReason ? { finishReason } : {}),
       });
     },
@@ -619,6 +699,7 @@ export async function POST(request: Request): Promise<Response> {
       );
       debugTrace = createOpenCompanyChatDebugTrace({
         model: turn.session.model,
+        ...(integrationToolsTrace ? { integrationTools: integrationToolsTrace } : {}),
         error: event.error instanceof Error ? event.error.message : "Goat chat failed.",
       });
       void persistFallbackAssistantMessage(event.error, "error");
@@ -951,6 +1032,24 @@ async function readJsonBody(
   } catch {
     return { ok: false, error: "Invalid chat request." };
   }
+}
+
+// The user message before the latest one, used for bounded one-turn activation
+// continuity ("reply to that thread"). turn.messages ends with the current
+// user message.
+function previousUserMessageText(messages: readonly GoatChatUiMessage[]) {
+  let skippedLatest = false;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") continue;
+    if (!skippedLatest) {
+      skippedLatest = true;
+      continue;
+    }
+    const text = textFromGoatChatUiMessage(message);
+    if (text) return text;
+  }
+  return undefined;
 }
 
 function parseUserMessage(value: unknown): GoatChatUiMessage | null {

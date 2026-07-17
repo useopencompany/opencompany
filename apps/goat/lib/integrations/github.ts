@@ -422,11 +422,12 @@ function toGoatGitHubRepository(repository: GitHubRepo): GoatGitHubRepository {
   };
 }
 
-async function githubRequest<T>(input: {
+export async function githubRequest<T>(input: {
   token: string;
   path: string;
   method: "GET" | "POST";
   authScheme?: "Bearer" | "token";
+  signal?: AbortSignal;
 }): Promise<T> {
   const response = await fetch(`https://api.github.com${input.path}`, {
     method: input.method,
@@ -436,6 +437,7 @@ async function githubRequest<T>(input: {
       "Content-Type": "application/json",
       "X-GitHub-Api-Version": "2022-11-28",
     },
+    ...(input.signal ? { signal: input.signal } : {}),
   });
 
   if (!response.ok) {

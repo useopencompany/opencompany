@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
 
 describe("goatFeatureFlagsFromUser", () => {
@@ -20,5 +20,38 @@ describe("goatFeatureFlagsFromUser", () => {
   it("enables Local Codex bridge beta only for an explicit true value", () => {
     expect(goatFeatureFlagsFromUser({ localCodexBetaEnabled: true }).localCodexBridge).toBe(true);
     expect(goatFeatureFlagsFromUser({ localCodexBetaEnabled: false }).localCodexBridge).toBe(false);
+  });
+
+  describe("main-chat integration tools beta", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("defaults to off", () => {
+      expect(goatFeatureFlagsFromUser({}).mainChatIntegrationTools).toBe(false);
+      expect(
+        goatFeatureFlagsFromUser({ mainChatIntegrationToolsBetaEnabled: null })
+          .mainChatIntegrationTools,
+      ).toBe(false);
+    });
+
+    it("enables only for an explicit true value", () => {
+      expect(
+        goatFeatureFlagsFromUser({ mainChatIntegrationToolsBetaEnabled: true })
+          .mainChatIntegrationTools,
+      ).toBe(true);
+      expect(
+        goatFeatureFlagsFromUser({ mainChatIntegrationToolsBetaEnabled: false })
+          .mainChatIntegrationTools,
+      ).toBe(false);
+    });
+
+    it("is forced off by the global kill switch", () => {
+      vi.stubEnv("GOAT_MAIN_CHAT_INTEGRATION_TOOLS_DISABLED", "true");
+      expect(
+        goatFeatureFlagsFromUser({ mainChatIntegrationToolsBetaEnabled: true })
+          .mainChatIntegrationTools,
+      ).toBe(false);
+    });
   });
 });

@@ -5,7 +5,10 @@ import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
 
 export async function loadGoatFeatureFlagsForUser(userWorkosId: string) {
   const [user] = await getDb()
-    .select({ localCodexBetaEnabled: goatUsers.localCodexBetaEnabled })
+    .select({
+      localCodexBetaEnabled: goatUsers.localCodexBetaEnabled,
+      mainChatIntegrationToolsBetaEnabled: goatUsers.mainChatIntegrationToolsBetaEnabled,
+    })
     .from(goatUsers)
     .where(eq(goatUsers.workosUserId, userWorkosId))
     .limit(1);

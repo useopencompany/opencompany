@@ -10,6 +10,14 @@ import type {
 import type { UIMessage } from "ai";
 import { finiteDurationMs } from "@/lib/chat-timing";
 import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
+import type {
+  CallIntegrationToolInput,
+  CallIntegrationToolOutput,
+  InspectIntegrationToolInput,
+  InspectIntegrationToolOutput,
+  SearchIntegrationToolsInput,
+  SearchIntegrationToolsOutput,
+} from "@/lib/integration-tools/types";
 
 export {
   CODEX_APPROVAL_TOOL_NAME,
@@ -24,6 +32,14 @@ export {
   type CodexCommandToolInput,
   type CodexCommandToolOutput,
 } from "@opencompany/agent-runtime";
+export type {
+  CallIntegrationToolInput,
+  CallIntegrationToolOutput,
+  InspectIntegrationToolInput,
+  InspectIntegrationToolOutput,
+  SearchIntegrationToolsInput,
+  SearchIntegrationToolsOutput,
+} from "@/lib/integration-tools/types";
 
 export const START_TASK_TOOL_NAME = "start_task";
 export const START_TASK_TOOL_PART_TYPE = `tool-${START_TASK_TOOL_NAME}` as const;
@@ -40,6 +56,15 @@ export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
 export const SAVE_TO_BRAIN_TOOL_PART_TYPE = `tool-${SAVE_TO_BRAIN_TOOL_NAME}` as const;
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
+export const SEARCH_INTEGRATION_TOOLS_TOOL_NAME = "search_integration_tools";
+export const SEARCH_INTEGRATION_TOOLS_TOOL_PART_TYPE =
+  `tool-${SEARCH_INTEGRATION_TOOLS_TOOL_NAME}` as const;
+export const INSPECT_INTEGRATION_TOOL_TOOL_NAME = "inspect_integration_tool";
+export const INSPECT_INTEGRATION_TOOL_TOOL_PART_TYPE =
+  `tool-${INSPECT_INTEGRATION_TOOL_TOOL_NAME}` as const;
+export const CALL_INTEGRATION_TOOL_TOOL_NAME = "call_integration_tool";
+export const CALL_INTEGRATION_TOOL_TOOL_PART_TYPE =
+  `tool-${CALL_INTEGRATION_TOOL_TOOL_NAME}` as const;
 
 export type GoatTaskCardMetadata = {
   id: string;
@@ -292,6 +317,18 @@ export type GoatChatTools = {
   web_search: {
     input: WebSearchToolInput;
     output: WebSearchToolOutput;
+  };
+  search_integration_tools: {
+    input: SearchIntegrationToolsInput;
+    output: SearchIntegrationToolsOutput;
+  };
+  inspect_integration_tool: {
+    input: InspectIntegrationToolInput;
+    output: InspectIntegrationToolOutput;
+  };
+  call_integration_tool: {
+    input: CallIntegrationToolInput;
+    output: CallIntegrationToolOutput;
   };
   codex_command: {
     input: CodexCommandToolInput;

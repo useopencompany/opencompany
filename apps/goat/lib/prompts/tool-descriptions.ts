@@ -68,3 +68,24 @@ export const WEB_SEARCH_QUERY_DESCRIPTION =
 
 export const WEB_SEARCH_RECENCY_DAYS_DESCRIPTION =
   "Optional freshness window for latest/recent requests. Use 7 for very recent news, 30 for recent updates, and 90 for broader current context.";
+
+export const SEARCH_INTEGRATION_TOOLS_TOOL_DESCRIPTION =
+  "Search the catalog of tools available from the user's connected integrations (such as Linear and GitHub). Use this when you need an integration capability that is not already listed in the call_integration_tool description, or when a request clearly needs a connected integration but no tool was pre-selected for it. Returns ranked tool cards with tool:// pointers, typed compact signatures, and summaries.";
+
+export const SEARCH_INTEGRATION_TOOLS_QUERY_DESCRIPTION =
+  "Keywords for the needed capability, for example 'linear issue comments' or 'github pull request reviews'.";
+
+export const INSPECT_INTEGRATION_TOOL_TOOL_DESCRIPTION =
+  "Fetch the full input schema, usage conventions, and constraints for one integration tool before calling it. Use it when a compact signature is not enough, after a call failed validation, or with an integration://provider pointer to list everything a connected provider offers.";
+
+export const INSPECT_INTEGRATION_TOOL_POINTER_DESCRIPTION =
+  "A tool://provider/name pointer from the tool list or search results, or an integration://provider pointer to list that provider's tools. Never invent pointers.";
+
+export const CALL_INTEGRATION_TOOL_TOOL_DESCRIPTION =
+  "Execute one read-only tool from the user's connected integrations and return its bounded result. Use the exact tool:// pointer with arguments matching the tool's typed signature; required fields must be present. Prefer these direct calls over starting a background task when the user asks to read connected Linear or GitHub data. If the call returns validation errors, fix the arguments using the returned signature and call again.";
+
+export const CALL_INTEGRATION_TOOL_POINTER_DESCRIPTION =
+  "The tool://provider/name pointer to execute, taken from the tool list, search results, or inspection. Never invent pointers.";
+
+export const CALL_INTEGRATION_TOOL_ARGUMENTS_DESCRIPTION =
+  "Arguments object matching the tool's typed signature. Include every required field; omit optional fields you do not need.";
