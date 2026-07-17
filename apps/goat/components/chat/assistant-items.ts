@@ -23,10 +23,17 @@ import {
 } from "@/lib/chat-ui";
 
 export type AssistantRenderItem =
-  | { type: "text"; key: string; text: string }
+  | { type: "text"; key: string; text: string; citations: BrainCitation[] }
   | { type: "reasoning"; key: string; text: string }
   | { type: "task"; key: string; task: ChatTaskCardView }
   | { type: "tool"; key: string; tool: ToolCallView };
+
+export type BrainCitation = {
+  key: string;
+  label: string;
+  title: string;
+  href: string;
+};
 
 export type ChatTaskCardView = {
   id: string;
@@ -55,12 +62,14 @@ export function getOrderedAssistantItems(
 ) {
   const items: AssistantRenderItem[] = [];
   let textBuffer = "";
+  let pendingCitations: BrainCitation[] = [];
 
   const flushText = (key: string) => {
     const text = textBuffer.trim();
     textBuffer = "";
     if (!text) return;
-    items.push({ type: "text", key, text });
+    items.push({ type: "text", key, text, citations: pendingCitations });
+    pendingCitations = [];
   };
 
   for (const [index, part] of message.parts.entries()) {
@@ -78,6 +87,12 @@ export function getOrderedAssistantItems(
     const tool = toolCallViewFromPart(part, stopped);
     if (!tool) continue;
     flushText(`text-${index}`);
+    if (tool.name === GOAT_BRAIN_TOOL_NAME && tool.status === "completed") {
+      pendingCitations = mergeBrainCitations(
+        pendingCitations,
+        brainCitationsFromToolOutput(tool.output),
+      );
+    }
     if (
       part.type === START_TASK_TOOL_PART_TYPE &&
       part.state === "output-available" &&
@@ -453,10 +468,100 @@ export function isGoatBrainToolOutput(value: unknown): value is GoatBrainToolOut
   if (!isRecord(value)) return false;
   return (
     typeof value.ok === "boolean" &&
+    (typeof value.brainRef === "string" || value.brainRef === undefined) &&
     (typeof value.stdout === "string" || value.stdout === undefined) &&
     (typeof value.stderr === "string" || value.stderr === undefined) &&
     (typeof value.error === "string" || value.error === undefined)
   );
+}
+
+const MAX_BRAIN_CITATIONS_PER_TEXT = 6;
+
+export function brainCitationsFromToolOutput(output: unknown): BrainCitation[] {
+  if (!isGoatBrainToolOutput(output) || !output.ok) return [];
+  const parsed = isRecord(output.parsed) ? output.parsed : null;
+  if (!parsed) return [];
+
+  const brainRef = readString(output.brainRef);
+  const citations: BrainCitation[] = [];
+  if (Array.isArray(parsed.hits)) {
+    for (const hit of parsed.hits) addBrainDocumentCitation(citations, hit, brainRef);
+  }
+  if (Array.isArray(parsed.documents)) {
+    for (const document of parsed.documents) {
+      addBrainDocumentCitation(citations, document, brainRef);
+    }
+  }
+  if (Array.isArray(parsed.entries)) {
+    addTimelineDocumentCitation(citations, parsed, brainRef);
+  }
+
+  return mergeBrainCitations([], citations);
+}
+
+function addTimelineDocumentCitation(
+  citations: BrainCitation[],
+  value: Record<string, unknown>,
+  brainRef: string | null,
+) {
+  const id = readString(value.id);
+  if (!id) return;
+  addUniqueBrainCitation(citations, {
+    key: `brain:${brainRef ?? ""}:${id}`,
+    label: id,
+    title: `Brain document ${id}`,
+    href: brainRef ? brainRootHref(brainRef) : "/brain",
+  });
+}
+
+function addBrainDocumentCitation(
+  citations: BrainCitation[],
+  value: unknown,
+  brainRef: string | null,
+) {
+  if (!isRecord(value)) return;
+  if (readString(value.kind) === "evidence") return;
+  const id = readString(value.id) ?? readString(value.brainId) ?? readString(value.requestedId);
+  const title = readString(value.title) ?? id;
+  if (!id || !title) return;
+
+  const folder = readString(value.folder) ?? readString(value.folderPath);
+  const href = folder ? brainDocumentHref(brainRef, folder, id) : brainRootHref(brainRef);
+  addUniqueBrainCitation(citations, {
+    key: `brain:${brainRef ?? ""}:${folder ?? ""}:${id}`,
+    label: title,
+    title: folder ? `${title} (${folder}/${id})` : `${title} (${id})`,
+    href,
+  });
+}
+
+function mergeBrainCitations(
+  existing: readonly BrainCitation[],
+  additions: readonly BrainCitation[],
+): BrainCitation[] {
+  const citations: BrainCitation[] = [];
+  for (const citation of [...existing, ...additions]) {
+    addUniqueBrainCitation(citations, citation);
+    if (citations.length >= MAX_BRAIN_CITATIONS_PER_TEXT) break;
+  }
+  return citations;
+}
+
+function addUniqueBrainCitation(citations: BrainCitation[], citation: BrainCitation) {
+  if (citations.some((current) => current.key === citation.key)) return;
+  citations.push(citation);
+}
+
+function brainDocumentHref(brainRef: string | null, folder: string, id: string) {
+  return brainPathHref([...(brainRef ? [brainRef] : []), ...folder.split("/").filter(Boolean), id]);
+}
+
+function brainRootHref(brainRef: string | null) {
+  return brainPathHref(brainRef ? [brainRef] : []);
+}
+
+function brainPathHref(segments: string[]) {
+  return `/brain${segments.length ? `/${segments.map((segment) => encodeURIComponent(segment)).join("/")}` : ""}`;
 }
 
 function goatBrainToolOutputSucceeded(output: GoatBrainToolOutput) {

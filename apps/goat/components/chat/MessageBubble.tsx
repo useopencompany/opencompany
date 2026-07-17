@@ -59,7 +59,12 @@ function AssistantTurn({
       {items.map((item) => {
         if (item.type === "text") {
           return (
-            <AssistantTextBubble key={item.key} text={item.text} {...(error ? { error } : {})} />
+            <AssistantTextBubble
+              key={item.key}
+              text={item.text}
+              citations={item.citations}
+              {...(error ? { error } : {})}
+            />
           );
         }
         if (item.type === "reasoning") return <ReasoningItem key={item.key} text={item.text} />;

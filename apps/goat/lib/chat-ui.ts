@@ -198,6 +198,7 @@ export type GoatBrainToolInput = {
 
 export type GoatBrainToolOutput = {
   ok: boolean;
+  brainRef?: string;
   exitCode: number | null;
   stdout: string;
   stderr: string;
