@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { GOAT_BRAIN_TOOL_PART_TYPE, type GoatChatUiMessage } from "@/lib/chat-ui";
+import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
 import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";
 
@@ -158,5 +159,40 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.queryByText("Ada was hired")).not.toBeInTheDocument();
     expect(screen.queryByText("acme/api #123")).not.toBeInTheDocument();
     expect(screen.queryByText("Hiring update")).not.toBeInTheDocument();
+  });
+});
+
+describe("getVisibleBrainCitationCount", () => {
+  it("keeps every source when they fit on one row", () => {
+    expect(
+      getVisibleBrainCitationCount({
+        availableWidth: 158,
+        chipWidths: [50, 50, 50],
+        overflowWidths: { 1: 90, 2: 90 },
+        gap: 4,
+      }),
+    ).toBe(3);
+  });
+
+  it("collapses wrapped sources behind an overflow control", () => {
+    expect(
+      getVisibleBrainCitationCount({
+        availableWidth: 304,
+        chipWidths: [90, 90, 90, 90, 90, 90],
+        overflowWidths: { 1: 116, 2: 116, 3: 116, 4: 116, 5: 116 },
+        gap: 4,
+      }),
+    ).toBe(2);
+  });
+
+  it("keeps the first source visible when the row is very narrow", () => {
+    expect(
+      getVisibleBrainCitationCount({
+        availableWidth: 80,
+        chipWidths: [120, 120, 120],
+        overflowWidths: { 1: 110, 2: 110 },
+        gap: 4,
+      }),
+    ).toBe(1);
   });
 });
