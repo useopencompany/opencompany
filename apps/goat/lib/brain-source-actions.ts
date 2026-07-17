@@ -13,6 +13,7 @@ import {
   hasAnyBrainSourceForIntegration,
   listGoatBrainSourcesForBrain,
   listGoatPersonalIntegrationAccounts,
+  setGoatBrainSourceEnabled,
   upsertGoatBrainSource,
 } from "@opencompany/db/goat-brain-sources";
 import {
@@ -537,10 +538,11 @@ export async function setGoatBrainSourceEnabledAction(input: {
       return { ok: false, error: "Only the source owner or a workspace admin can change this." };
     }
     try {
-      await getDb()
-        .update(goatBrainSources)
-        .set({ enabled: input.enabled, updatedAt: new Date() })
-        .where(eq(goatBrainSources.id, existing.id));
+      await setGoatBrainSourceEnabled({
+        brainRef: input.brainRef,
+        sourceId: existing.id,
+        enabled: input.enabled,
+      });
       revalidatePath("/", "layout");
       return { ok: true };
     } catch (error) {
@@ -909,6 +911,7 @@ export async function setGoatBrainAttioSourceAction(input: {
   enabled: boolean;
   objectTypes: GoatAttioObjectTypeRef[];
   events: GoatAttioEventRef[];
+  includeSystemUpdates?: boolean;
 }): Promise<GoatWorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
@@ -935,6 +938,7 @@ export async function setGoatBrainAttioSourceAction(input: {
       config: {
         objectTypes: sanitizeAttioObjectTypeRefs(input.objectTypes),
         events: sanitizeAttioEventRefs(input.events),
+        includeSystemUpdates: input.includeSystemUpdates === true,
       },
     });
 

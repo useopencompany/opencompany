@@ -84,6 +84,32 @@ describe("POST /api/webhooks/attio/events", () => {
     ]);
   });
 
+  it("ignores Attio system record updates unless the Brain source opts in", async () => {
+    const ignored = await POST(
+      attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID, "system"), "system-default"),
+    );
+
+    await expect(ignored.json()).resolves.toEqual({ ok: true, buffered: 0 });
+    expect(insertGoatAttioObjectEvents).toHaveBeenLastCalledWith([]);
+
+    vi.mocked(listEnabledGoatAttioBrainSourceRoutes).mockResolvedValueOnce([
+      {
+        integrationId: "gint_attio_1",
+        brainRef: "gbrain_1",
+        config: {
+          objectTypes: [{ id: "deal" }],
+          events: [{ id: "object_updated" }],
+          includeSystemUpdates: true,
+        },
+      },
+    ]);
+    const included = await POST(
+      attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID, "system"), "system-opt-in"),
+    );
+
+    await expect(included.json()).resolves.toEqual({ ok: true, buffered: 1 });
+  });
+
   it("uses Attio's idempotency key as the stable retry identity", async () => {
     await POST(attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID), "retry-stable"));
     await POST(attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID), "retry-stable"));
@@ -155,7 +181,7 @@ describe("POST /api/webhooks/attio/events", () => {
   });
 });
 
-function recordUpdatedEvent(objectId: string) {
+function recordUpdatedEvent(objectId: string, actorType = "workspace-member") {
   return {
     event_type: "record.updated",
     id: {
@@ -164,7 +190,7 @@ function recordUpdatedEvent(objectId: string) {
       record_id: RECORD_ID,
       attribute_id: "attr_1",
     },
-    actor: { type: "workspace-member", id: "member_1" },
+    actor: { type: actorType, id: "member_1" },
   };
 }
 

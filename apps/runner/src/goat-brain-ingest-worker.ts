@@ -131,6 +131,7 @@ export type GoatBrainIngestHandlerInput<
   importRunId?: string | null;
   item: TItem;
   env: GoatBrainAgentIngestEnv;
+  signal?: AbortSignal;
 };
 
 export type GoatBrainIngestHandler<
@@ -369,6 +370,20 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
               OR (job.status = 'running' AND job.lease_expires_at < ${input.now})
             )
             AND (${supportedJobsWhere})
+            -- A queued integration job is no longer runnable after its source
+            -- is disabled or removed. The source action also terminally skips
+            -- existing work; this guard closes the concurrent claim race.
+            AND (
+              job.integration_id IS NULL
+              OR job.brain_ref IS NULL
+              OR EXISTS (
+                SELECT 1
+                FROM goat.brain_sources AS brain_source
+                WHERE brain_source.brain_id = job.brain_ref
+                  AND brain_source.integration_id = job.integration_id
+                  AND brain_source.enabled = true
+              )
+            )
             -- Legacy jobs without workspace attribution predate plan quotas and
             -- remain runnable. Every new workspace-attributed job requires a
             -- consumed reservation; pending reservations are the durable pause.
@@ -621,6 +636,13 @@ export async function runClaimedGoatBrainIngestJob(input: {
   const runSpan = startGoatSpan(GOAT_SPANS.brainIngestRun, baseAttributes);
   let leaseActive = true;
   let telemetryFinished = false;
+  const runAbort = new AbortController();
+
+  const loseLease = () => {
+    if (!leaseActive) return;
+    leaseActive = false;
+    runAbort.abort(new Error("Goat Brain ingestion lease was revoked."));
+  };
 
   const finishTelemetry = (
     outcome: "success" | "failure" | "aborted" | "skipped",
@@ -684,7 +706,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
       now,
       leaseExpiresAt: new Date(now.getTime() + GOAT_BRAIN_INGEST_LEASE_TTL_MS),
     });
-    if (!active) leaseActive = false;
+    if (!active) loseLease();
   };
 
   const heartbeatTimer = setInterval(() => {
@@ -698,11 +720,22 @@ export async function runClaimedGoatBrainIngestJob(input: {
         job_id: input.job.id,
         error,
       });
-      leaseActive = false;
+      loseLease();
     });
   }, GOAT_BRAIN_INGEST_HEARTBEAT_INTERVAL_MS);
 
   try {
+    // Revalidate immediately before starting expensive work. Disable/remove
+    // transitions revoke the lease, and the shared signal then stops the model
+    // loop and CLI before its final Brain sync.
+    await heartbeat();
+    if (!leaseActive) {
+      finishTelemetry("aborted", {
+        "goat.status": "running",
+        "goat.failure_category": "lease_lost",
+      });
+      return;
+    }
     const handler = findGoatBrainIngestHandler(handlers, input.job);
     if (!handler) {
       throw new Error(
@@ -752,6 +785,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
               blobReadWriteToken: input.env.blobReadWriteToken,
               ...(input.env.exaApiKey ? { exaApiKey: input.env.exaApiKey } : {}),
             },
+            signal: runAbort.signal,
           }),
       ),
     );
@@ -824,6 +858,13 @@ export async function runClaimedGoatBrainIngestJob(input: {
       // frontier pass-through still charges it.
       await debitFrontierIngestCost(input.job, error.result);
     }
+    if (!leaseActive) {
+      finishTelemetry("aborted", {
+        "goat.status": "running",
+        "goat.failure_category": "lease_lost",
+      });
+      return;
+    }
     const message = errorMessage(error);
     const maxAttempts =
       error instanceof GoatBrainIngestBudgetError
@@ -851,12 +892,12 @@ export async function runClaimedGoatBrainIngestJob(input: {
         }),
       ),
     );
-    if (!active || !leaseActive) {
+    if (!active) {
       finishTelemetry("aborted", {
         "goat.status": "running",
         "goat.failure_category": "lease_lost",
       });
-      throw error;
+      return;
     }
     finishTelemetry(
       "failure",

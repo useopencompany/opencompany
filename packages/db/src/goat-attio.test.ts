@@ -9,14 +9,15 @@ import {
 } from "./goat-attio";
 
 describe("Goat Attio brain source config", () => {
-  it("keeps missing events as all events for backwards compatibility", () => {
+  it("uses creation and notes as the safe default event selection", () => {
     const config = parseGoatAttioBrainSourceConfig({
       objectTypes: [{ id: "deal" }],
     });
 
-    expect(goatAttioSelectedEventTypes(config)).toBeNull();
+    expect(goatAttioSelectedEventTypes(config)).toEqual(new Set(["object_created", "note_added"]));
     expect(goatAttioRouteMatchesEvent(config, "object_created")).toBe(true);
     expect(goatAttioRouteMatchesEvent(config, "note_added")).toBe(true);
+    expect(goatAttioRouteMatchesEvent(config, "object_updated")).toBe(false);
   });
 
   it("preserves an explicit empty event selection", () => {
@@ -43,6 +44,26 @@ describe("Goat Attio brain source config", () => {
     expect(goatAttioEventTypeFor("create")).toBe("object_created");
     expect(goatAttioEventTypeFor("update")).toBe("object_updated");
     expect(goatAttioEventTypeFor("note")).toBe("note_added");
+  });
+
+  it("requires an explicit opt-in for Attio system record updates", () => {
+    const safe = parseGoatAttioBrainSourceConfig({
+      objectTypes: [{ id: "person" }],
+      events: [{ id: "object_updated" }],
+    });
+    expect(goatAttioRouteMatchesEvent(safe, "object_updated", { actorType: "system" })).toBe(false);
+    expect(
+      goatAttioRouteMatchesEvent(safe, "object_updated", { actorType: "workspace-member" }),
+    ).toBe(true);
+
+    const optedIn = parseGoatAttioBrainSourceConfig({
+      objectTypes: [{ id: "person" }],
+      events: [{ id: "object_updated" }],
+      includeSystemUpdates: true,
+    });
+    expect(goatAttioRouteMatchesEvent(optedIn, "object_updated", { actorType: "system" })).toBe(
+      true,
+    );
   });
 });
 
