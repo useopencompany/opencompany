@@ -448,13 +448,16 @@ export type GoatChatMessageDebugTrace = {
   };
   // Connected-integration tool activation metadata for the main-chat beta.
   // Safe fields only: providers, rules, and timings — no arguments or results.
+  // On a setup failure only version + setupError are present (logs are not
+  // queryable from debugging sessions; the trace is the durable record).
   integrationTools?: {
-    version: string;
-    connectedProviders: string[];
-    activatedProviders: string[];
-    matches: Array<{ provider: string; rule: string; matchedText: string; score: number }>;
-    capped: boolean;
-    elapsedMs: number;
+    version?: string;
+    connectedProviders?: string[];
+    activatedProviders?: string[];
+    matches?: Array<{ provider: string; rule: string; matchedText: string; score: number }>;
+    capped?: boolean;
+    elapsedMs?: number;
+    setupError?: string;
   };
   error?: string;
 };

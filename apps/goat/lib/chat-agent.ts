@@ -150,13 +150,15 @@ export type OpenCompanyChatAgentDebugTrace = {
   };
   // Safe activation metadata for the connected-integration tools beta:
   // providers and rule hits only, never tool arguments or provider results.
+  // A setup failure records only version + setupError.
   integrationTools?: {
-    version: string;
-    connectedProviders: string[];
-    activatedProviders: string[];
-    matches: Array<{ provider: string; rule: string; matchedText: string; score: number }>;
-    capped: boolean;
-    elapsedMs: number;
+    version?: string;
+    connectedProviders?: string[];
+    activatedProviders?: string[];
+    matches?: Array<{ provider: string; rule: string; matchedText: string; score: number }>;
+    capped?: boolean;
+    elapsedMs?: number;
+    setupError?: string;
   };
   error?: string;
 };

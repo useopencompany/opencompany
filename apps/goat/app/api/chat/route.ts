@@ -290,6 +290,7 @@ export async function POST(request: Request): Promise<Response> {
   // normal chat turn — the beta must never break the baseline loop.
   let integrationDispatcher: IntegrationToolDispatcher | null = null;
   let integrationActivation: IntegrationActivationResult | null = null;
+  let integrationSetupError: string | null = null;
   if (goatFeatureFlagsFromUser(context.user).mainChatIntegrationTools) {
     try {
       const connectedProviders = await resolveConnectedIntegrationProviders({
@@ -330,6 +331,7 @@ export async function POST(request: Request): Promise<Response> {
       });
       integrationDispatcher = null;
       integrationActivation = null;
+      integrationSetupError = error instanceof Error ? error.message : "Setup failed.";
     }
   }
   const integrationToolsTrace =
@@ -344,7 +346,9 @@ export async function POST(request: Request): Promise<Response> {
           capped: integrationActivation.capped,
           elapsedMs: Math.round(integrationActivation.elapsedMs * 1000) / 1000,
         }
-      : undefined;
+      : integrationSetupError
+        ? { setupError: integrationSetupError.slice(0, 600) }
+        : undefined;
 
   const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
