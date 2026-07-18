@@ -119,7 +119,7 @@ export function loadEnv(): RunnerEnv {
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     opencodeTimeoutMs: optionalPositiveIntegerEnv("RUNNER_OPENCODE_TIMEOUT_MS", 1_200_000),
     codexTimeoutMs: optionalPositiveIntegerEnv("RUNNER_CODEX_TIMEOUT_MS", DEFAULT_CODEX_TIMEOUT_MS),
-    codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.5",
+    codexModel: optionalEnv("RUNNER_CODEX_MODEL") ?? "gpt-5.6-sol",
     goatCodexChatIdleTimeoutMs: optionalPositiveIntegerEnv(
       "RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS",
       5 * 60_000,
