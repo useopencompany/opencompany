@@ -9,6 +9,7 @@ import type {
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
+import type { GoatCapabilityEnvelope } from "@/lib/capabilities/types";
 import { finiteDurationMs } from "@/lib/chat-timing";
 import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 
@@ -41,6 +42,8 @@ export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
 export const SAVE_TO_BRAIN_TOOL_PART_TYPE = `tool-${SAVE_TO_BRAIN_TOOL_NAME}` as const;
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
+export const USE_CAPABILITY_TOOL_NAME = "use_capability";
+export const USE_CAPABILITY_TOOL_PART_TYPE = `tool-${USE_CAPABILITY_TOOL_NAME}` as const;
 
 export type GoatTaskCardMetadata = {
   id: string;
@@ -265,6 +268,17 @@ export type WebSearchToolOutput =
       error: string;
     };
 
+export type UseCapabilityToolInput = {
+  capability: string;
+  request: string;
+};
+
+// The worker's envelope plus the capability id, so the UI can label the row
+// without re-reading the input part.
+export type UseCapabilityToolOutput = GoatCapabilityEnvelope & {
+  capability: string;
+};
+
 export type GoatChatTools = {
   start_task: {
     input: StartTaskToolInput;
@@ -293,6 +307,10 @@ export type GoatChatTools = {
   web_search: {
     input: WebSearchToolInput;
     output: WebSearchToolOutput;
+  };
+  use_capability: {
+    input: UseCapabilityToolInput;
+    output: UseCapabilityToolOutput;
   };
   codex_command: {
     input: CodexCommandToolInput;

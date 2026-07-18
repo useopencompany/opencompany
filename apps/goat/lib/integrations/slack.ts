@@ -29,7 +29,9 @@ const GOAT_SLACK_INTEGRATION_ENVS = [
 ] as const;
 
 // User-token scopes: the app reads what the connected user can read (their
-// channels and DMs) and never gets a bot presence in the workspace.
+// channels and DMs) and never gets a bot presence in the workspace. The
+// search:read.* family powers chat-capability keyword search; connections
+// created before it was added keep working without search until reconnected.
 export const GOAT_SLACK_USER_SCOPES = [
   "channels:history",
   "groups:history",
@@ -41,6 +43,10 @@ export const GOAT_SLACK_USER_SCOPES = [
   "mpim:read",
   "users:read",
   "team:read",
+  "search:read.public",
+  "search:read.private",
+  "search:read.im",
+  "search:read.mpim",
 ] as const;
 
 export function isGoatSlackIntegrationConfigured() {

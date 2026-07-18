@@ -85,6 +85,52 @@ export async function getGoatLinearIntegrationState(
   };
 }
 
+export type GoatLinearMcpWorkerConnection =
+  | { ok: false; reason: "not_connected" | "needs_reauth" }
+  | { ok: true; integrationId: string; authProvider: OAuthClientProvider };
+
+// Read-path connection for capability workers: resolves the connected MCP row
+// and builds an OAuth provider that refreshes/persists tokens but can never
+// start an interactive authorization (it calls onAuthorizationRequired instead).
+export async function loadGoatLinearMcpWorkerConnection(input: {
+  userWorkosId: string;
+  onAuthorizationRequired: () => never;
+}): Promise<GoatLinearMcpWorkerConnection> {
+  const [row] = await getDb()
+    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.userWorkosId, input.userWorkosId),
+        eq(goatIntegrations.provider, GOAT_LINEAR_PROVIDER),
+        eq(goatIntegrations.externalId, LINEAR_EXTERNAL_ID),
+      ),
+    )
+    .orderBy(desc(goatIntegrations.updatedAt))
+    .limit(1);
+
+  if (!row || row.status !== "connected") return { ok: false, reason: "not_connected" };
+
+  const payload = await loadLinearPayload({
+    userWorkosId: input.userWorkosId,
+    integrationId: row.id,
+  });
+  if (!payload.clientInformation || !payload.tokens) {
+    return { ok: false, reason: "needs_reauth" };
+  }
+
+  return {
+    ok: true,
+    integrationId: row.id,
+    authProvider: createLinearClientProvider({
+      userWorkosId: input.userWorkosId,
+      integrationId: row.id,
+      payload,
+      onAuthorizationUrl: () => input.onAuthorizationRequired(),
+    }),
+  };
+}
+
 export async function startGoatLinearMcpOAuth(input: { userWorkosId: string; returnTo: string }) {
   const integration = await upsertGoatLinearIntegration({
     userWorkosId: input.userWorkosId,

@@ -42,6 +42,27 @@ export async function updateGoatLocalCodexBetaAction(enabled: boolean) {
   } as const;
 }
 
+export async function updateGoatChatCapabilitiesBetaAction(enabled: boolean) {
+  const { user } = await currentGoatUser();
+  const nextEnabled = enabled === true;
+  if (nextEnabled === user.chatCapabilitiesBetaEnabled) {
+    return { ok: true, enabled: nextEnabled } as const;
+  }
+
+  const [updated] = await getDb()
+    .update(goatUsers)
+    .set({ chatCapabilitiesBetaEnabled: nextEnabled, updatedAt: new Date() })
+    .where(eq(goatUsers.workosUserId, user.workosUserId))
+    .returning({ chatCapabilitiesBetaEnabled: goatUsers.chatCapabilitiesBetaEnabled });
+
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return {
+    ok: Boolean(updated),
+    enabled: updated?.chatCapabilitiesBetaEnabled ?? user.chatCapabilitiesBetaEnabled,
+  } as const;
+}
+
 export async function updateGoatTaskSpawningAction(enabled: boolean) {
   const { user } = await currentGoatUser();
   const nextEnabled = enabled === true;

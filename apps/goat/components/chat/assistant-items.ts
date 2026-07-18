@@ -19,6 +19,8 @@ import {
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
   type StartTaskToolOutput,
+  USE_CAPABILITY_TOOL_NAME,
+  type UseCapabilityToolOutput,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
 
@@ -33,6 +35,9 @@ export type BrainCitation = {
   label: string;
   title: string;
   href: string;
+  // External chips (capability entities) open provider URLs in a new tab;
+  // internal chips stay next/link Brain navigations.
+  external?: boolean;
 };
 
 export type ChatTaskCardView = {
@@ -93,6 +98,12 @@ export function getOrderedAssistantItems(
         brainCitationsFromToolOutput(tool.output),
       );
     }
+    if (tool.name === USE_CAPABILITY_TOOL_NAME && tool.status === "completed") {
+      pendingCitations = mergeBrainCitations(
+        pendingCitations,
+        capabilityCitationsFromToolOutput(tool.output),
+      );
+    }
     if (
       part.type === START_TASK_TOOL_PART_TYPE &&
       part.state === "output-available" &&
@@ -146,6 +157,14 @@ export function toolCallViewFromPart(
     name === GOAT_BRAIN_TOOL_NAME && state === "output-available" && isGoatBrainToolOutput(output)
       ? !goatBrainToolOutputSucceeded(output)
       : false;
+  // A capability worker reports failures inside its envelope, not via the
+  // part state: completed-with-error renders as failed.
+  const failedCapability =
+    name === USE_CAPABILITY_TOOL_NAME &&
+    state === "output-available" &&
+    isUseCapabilityToolOutput(output)
+      ? Boolean(output.error)
+      : false;
   // Codex item parts (file changes, MCP tools, web searches) carry their outcome in
   // output.status rather than the part state.
   const codexItemOutcome =
@@ -154,11 +173,13 @@ export function toolCallViewFromPart(
       : null;
   const status = failedGoatBrain
     ? "failed"
-    : codexItemOutcome === "failed"
+    : failedCapability
       ? "failed"
-      : codexItemOutcome === "interrupted"
-        ? "stopped"
-        : toolStatusFromState(state, stopped);
+      : codexItemOutcome === "failed"
+        ? "failed"
+        : codexItemOutcome === "interrupted"
+          ? "stopped"
+          : toolStatusFromState(state, stopped);
   // Questions/approvals have no response channel in this chat: a settled part means the
   // prompt went unanswered, not that it succeeded.
   const unansweredCodexPrompt =
@@ -166,7 +187,7 @@ export function toolCallViewFromPart(
     state === "output-available";
   return {
     name,
-    label: toolLabel(name),
+    label: name === USE_CAPABILITY_TOOL_NAME ? capabilityToolLabel(part.input) : toolLabel(name),
     status,
     statusText: unansweredCodexPrompt ? "Unanswered" : toolStatusText(status, state),
     detail: toolDetail(name, part, status),
@@ -278,8 +299,55 @@ export function toolDetail(
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME || name === DELETE_TASK_SCHEDULE_TOOL_NAME) {
     return taskScheduleMutationToolDetail(part);
   }
+  if (name === USE_CAPABILITY_TOOL_NAME) {
+    return capabilityToolDetail(part);
+  }
 
   return formatToolInput(part.input);
+}
+
+function capabilityToolDetail(part: Record<string, unknown>) {
+  if (part.state === "output-available" && isUseCapabilityToolOutput(part.output)) {
+    if (part.output.error) return truncateToolPreview(part.output.error.hint);
+    return truncateToolPreview(part.output.summary);
+  }
+  if (isRecord(part.input) && typeof part.input.request === "string") {
+    return truncateToolPreview(part.input.request);
+  }
+  return formatToolInput(part.input);
+}
+
+function capabilityToolLabel(input: unknown) {
+  const capability =
+    isRecord(input) && typeof input.capability === "string" ? input.capability : "";
+  if (!capability) return "Capability";
+  return toolLabel(capability);
+}
+
+export function isUseCapabilityToolOutput(value: unknown): value is UseCapabilityToolOutput {
+  if (!isRecord(value)) return false;
+  return typeof value.summary === "string" && Array.isArray(value.entities);
+}
+
+export function capabilityCitationsFromToolOutput(output: unknown): BrainCitation[] {
+  if (!isUseCapabilityToolOutput(output)) return [];
+  const citations: BrainCitation[] = [];
+  for (const entity of output.entities) {
+    if (!isRecord(entity)) continue;
+    const id = readString(entity.id);
+    const url = readString(entity.url);
+    const type = readString(entity.type);
+    if (!id || !url || !type) continue;
+    const title = readString(entity.title);
+    addUniqueBrainCitation(citations, {
+      key: `capability:${output.capability}:${type}:${id}`,
+      label: title ?? id,
+      title: title ? `${title} (${id})` : id,
+      href: url,
+      external: true,
+    });
+  }
+  return mergeBrainCitations([], citations);
 }
 
 function goatBrainToolDetail(

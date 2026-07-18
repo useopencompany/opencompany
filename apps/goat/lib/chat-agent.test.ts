@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { runOpenCompanyChatAgent } from "@/lib/chat-agent";
+import {
+  createOpenCompanyChatToolContext,
+  MAX_CAPABILITY_CALLS_PER_TURN,
+  runOpenCompanyChatAgent,
+} from "@/lib/chat-agent";
 import {
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainToolInput,
@@ -7,6 +11,9 @@ import {
   type SaveToBrainToolInput,
   type SaveToBrainToolOutput,
   START_TASK_TOOL_NAME,
+  USE_CAPABILITY_TOOL_NAME,
+  type UseCapabilityToolInput,
+  type UseCapabilityToolOutput,
   WEB_SEARCH_TOOL_NAME,
   type WebSearchToolInput,
   type WebSearchToolOutput,
@@ -637,6 +644,87 @@ describe("runOpenCompanyChatAgent", () => {
   });
 });
 
+describe("use_capability tool", () => {
+  const okEnvelope = (capability: string): UseCapabilityToolOutput => ({
+    capability,
+    summary: "found it",
+    entities: [],
+  });
+
+  it("is absent without a capability universe", () => {
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+    });
+    expect(context.tools[USE_CAPABILITY_TOOL_NAME]).toBeUndefined();
+
+    const emptyContext = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      capabilities: { list: [], execute: vi.fn() },
+    });
+    expect(emptyContext.tools[USE_CAPABILITY_TOOL_NAME]).toBeUndefined();
+  });
+
+  it("builds the capability enum from the resolved universe", () => {
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      capabilities: {
+        list: [{ id: "slack" }, { id: "linear" }],
+        execute: vi.fn(),
+      },
+    });
+    expect(extractUseCapabilityEnum(context.tools)).toEqual(["slack", "linear"]);
+  });
+
+  it("dispatches valid calls and steers invalid or over-budget ones", async () => {
+    const execute = vi.fn(async ({ capability }: { capability: string }) => okEnvelope(capability));
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      capabilities: { list: [{ id: "slack" }], execute },
+    });
+
+    const valid = await executeUseCapabilityTool(context.tools, {
+      capability: "slack",
+      request: "Messages in #general since 2026-07-17.",
+    });
+    expect(valid.summary).toBe("found it");
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capability: "slack",
+        request: "Messages in #general since 2026-07-17.",
+      }),
+    );
+
+    const unknown = await executeUseCapabilityTool(context.tools, {
+      capability: "github",
+      request: "anything",
+    });
+    expect(unknown.error?.code).toBe("invalid_request");
+
+    const empty = await executeUseCapabilityTool(context.tools, {
+      capability: "slack",
+      request: "   ",
+    });
+    expect(empty.error?.code).toBe("invalid_request");
+
+    for (let call = 1; call < MAX_CAPABILITY_CALLS_PER_TURN; call += 1) {
+      await executeUseCapabilityTool(context.tools, {
+        capability: "slack",
+        request: `lookup ${call}`,
+      });
+    }
+    const overBudget = await executeUseCapabilityTool(context.tools, {
+      capability: "slack",
+      request: "one too many",
+    });
+    expect(overBudget.error?.code).toBe("call_budget");
+    expect(execute).toHaveBeenCalledTimes(MAX_CAPABILITY_CALLS_PER_TURN);
+  });
+});
+
 function extractSystemPrompt(options: unknown) {
   return (options as { system?: string }).system ?? "";
 }
@@ -721,4 +809,30 @@ async function executeWebSearchTool(options: unknown, input: WebSearchToolInput)
     throw new Error(`${WEB_SEARCH_TOOL_NAME} execute function was not configured.`);
   }
   return tool.execute(input);
+}
+
+function extractUseCapabilityEnum(tools: unknown) {
+  type CapabilitySchema = { properties?: { capability?: { enum?: string[] } } };
+  type Tools = Record<
+    typeof USE_CAPABILITY_TOOL_NAME,
+    { inputSchema?: CapabilitySchema & { jsonSchema?: CapabilitySchema } }
+  >;
+  const inputSchema = (tools as Tools)[USE_CAPABILITY_TOOL_NAME]?.inputSchema;
+  return (
+    inputSchema?.properties?.capability?.enum ??
+    inputSchema?.jsonSchema?.properties?.capability?.enum ??
+    []
+  );
+}
+
+async function executeUseCapabilityTool(
+  tools: unknown,
+  input: UseCapabilityToolInput,
+): Promise<UseCapabilityToolOutput> {
+  type Tools = Record<typeof USE_CAPABILITY_TOOL_NAME, { execute?: unknown }>;
+  const tool = (tools as Tools)[USE_CAPABILITY_TOOL_NAME];
+  if (typeof tool?.execute !== "function") {
+    throw new Error(`${USE_CAPABILITY_TOOL_NAME} execute function was not configured.`);
+  }
+  return tool.execute(input, { toolCallId: "call_1", messages: [] });
 }
