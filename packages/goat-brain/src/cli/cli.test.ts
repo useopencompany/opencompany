@@ -215,6 +215,38 @@ describe("goat-brain cli", () => {
     );
   });
 
+  it("hides skills from default retrieval but allows explicit folder and direct get", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "skills",
+        "--type",
+        "note",
+        "--id",
+        "coding-work",
+        "--title",
+        "Coding work",
+        "--truth",
+        "Always verify coding changes.",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    await expect(run(["list", "--root", root, "--json"])).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.not.stringContaining("coding-work"),
+    });
+    await expect(
+      run(["list", "--root", root, "--folder", "skills", "--json"]),
+    ).resolves.toMatchObject({ exitCode: 0, stdout: expect.stringContaining("coding-work") });
+    await expect(run(["get", "--root", root, "coding-work", "--json"])).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining("coding-work"),
+    });
+  });
+
   it("persists adjustable folders and protects hard default folders", async () => {
     await expect(
       run(["folder", "--root", root, "create", "--path", "market-research"]),
@@ -243,6 +275,18 @@ describe("goat-brain cli", () => {
     ).resolves.toMatchObject({
       exitCode: 1,
       stderr: expect.stringContaining('Folder "inbox" is required and already exists.'),
+    });
+    await expect(
+      run(["folder", "--root", root, "delete", "--path", "skills"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining('Folder "skills" is required and cannot be removed.'),
+    });
+    await expect(
+      run(["folder", "--root", root, "rename", "--from", "skills", "--to", "abilities"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("Required folders cannot be renamed."),
     });
   });
 

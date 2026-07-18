@@ -5,12 +5,14 @@ import {
   type BrainMutationResult,
   createGoatBrainDocumentForUser,
   createGoatBrainFolderForUser,
+  createGoatBrainSkillForUser,
   deleteGoatBrainDocumentForUser,
   deleteGoatBrainFolderForUser,
   moveGoatBrainDocumentForUser,
   renameGoatBrainDocumentForUser,
   renameGoatBrainFolderForUser,
   updateGoatBrainDocumentForUser,
+  updateGoatBrainSkillForUser,
 } from "@/lib/brain";
 import {
   createGoatBrainAssetForUser,
@@ -39,6 +41,24 @@ export async function createGoatBrainDocumentAction(input: {
   });
 }
 
+export async function createGoatBrainSkillAction(input: {
+  brainRef: string;
+  folderPath: string;
+  name: string;
+  description: string;
+}): Promise<BrainMutationResult> {
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
+  return createGoatBrainSkillForUser({
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
+    folderPath: input.folderPath,
+    name: input.name,
+    description: input.description,
+  });
+}
+
 export async function updateGoatBrainDocumentAction(input: {
   brainRef: string;
   documentId: string;
@@ -53,6 +73,28 @@ export async function updateGoatBrainDocumentAction(input: {
     userWorkosId: context.user.workosUserId,
     documentId: input.documentId,
     body: input.body,
+    ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
+  });
+}
+
+export async function updateGoatBrainSkillAction(input: {
+  brainRef: string;
+  documentId: string;
+  name: string;
+  description: string;
+  instructions: string;
+  expectedContentHash?: string;
+}): Promise<BrainMutationResult> {
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
+  return updateGoatBrainSkillForUser({
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
+    documentId: input.documentId,
+    name: input.name,
+    description: input.description,
+    instructions: input.instructions,
     ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
   });
 }

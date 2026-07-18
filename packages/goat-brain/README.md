@@ -2,6 +2,10 @@
 
 Shared Goat Brain contracts for Markdown documents, validation, retrieval, and CLI behavior.
 
+Brain-owned skills are Markdown pages under `skills/`. `src/skills.ts` validates eligible pages and
+materializes them as standard single-file `SKILL.md` content. Default list/query retrieval excludes
+that zone unless the caller explicitly selects `skills` or one of its descendants.
+
 ## Inline Links
 
 Inline links are parsed and formatted by `src/inline-links.ts`. Keep new link syntax, validation,

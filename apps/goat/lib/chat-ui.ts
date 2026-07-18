@@ -49,10 +49,16 @@ export type GoatTaskCardMetadata = {
   status?: GoatTaskStatus | null;
 };
 
-export type GoatChatMention = {
-  kind: "engine";
-  id: "codex";
-};
+export type GoatChatMention =
+  | {
+      kind: "engine";
+      id: "codex";
+    }
+  | {
+      kind: "skill";
+      brainRef: string;
+      id: string;
+    };
 
 // Attachment view riding on user-message metadata. The blob fields are only
 // present client → server on submit (the server re-validates them); server →
@@ -383,6 +389,23 @@ export function textFromGoatChatUiMessage(message: Pick<GoatChatUiMessage, "part
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
     .join("")
     .trim();
+}
+
+export function replaceGoatChatUiMessageText(
+  message: GoatChatUiMessage,
+  text: string,
+): GoatChatUiMessage {
+  let replaced = false;
+  const parts = message.parts.map((part) => {
+    if (part.type !== "text") return part;
+    if (replaced) return { ...part, text: "" };
+    replaced = true;
+    return { ...part, text };
+  });
+  return {
+    ...message,
+    parts: replaced ? parts : [{ type: "text", text }, ...parts],
+  };
 }
 
 export function toGoatChatUiMessage(message: GoatStoredChatMessage): GoatChatUiMessage {

@@ -57,13 +57,13 @@ the closed set above is what validators actually accept.
 
 ## Default folders
 
-`DEFAULT_GOAT_BRAIN_FOLDERS` — the 10 folders seeded per brain. `inbox`, `people`, `companies`,
-and `evidence` are required system folders; the rest are adjustable custom defaults. Users and
+`DEFAULT_GOAT_BRAIN_FOLDERS` — the 11 folders seeded per brain. `inbox`, `skills`, `people`,
+`companies`, and `evidence` are required system folders; the rest are adjustable custom defaults. Users and
 agents can create free-form custom folders beyond these:
 
 ```
 inbox/  thoughts/  projects/  meetings/  research/  decisions/
-concepts/  people/  companies/  evidence/
+concepts/  skills/  people/  companies/  evidence/
 ```
 
 Folder paths match `GOAT_BRAIN_FOLDER_PATTERN`: lowercase `a-z0-9-` segments separated by `/`,
@@ -127,10 +127,32 @@ meeting [[evidence:ev-jamie-abc123]].
 
 - **Frontmatter** — the full field contract is `GoatBrainFrontmatter` in `schema.ts`: required
   `id`, `folder`, `kind`, `type`, `status`, `createdAt`, `updatedAt`, `relations`; optional
-  `title`, `aliases`, `tags`, `sources`, `mergedInto`, `legacyKeys`.
+  `title`, `description`, `aliases`, `tags`, `sources`, `mergedInto`, `legacyKeys`.
 - **Compiled truth** — the current state of knowledge, rewritten in place (`goat-brain rewrite`).
 - **Timeline** — append-only dated entries, each with an `ev-*` id and optionally a source ref.
   History is never rewritten; the truth section is recompiled *from* it.
+
+## Skills
+
+Markdown pages in `skills/` or a descendant are formal, Brain-owned skills. Their stable `id` is
+the document slug; `name` is the editable document title; required `description` is stored in
+frontmatter; and `instructions` are the compiled truth. Draft and active pages are attachable once
+description and instructions are non-empty. Archived, merged, binary, and incomplete pages are not
+listed or resolved as skills.
+
+`serializeGoatBrainSkillMarkdown` materializes an eligible page as a standard single-file
+`SKILL.md`. The stable document id becomes the native lowercase/hyphenated `name`; the editable
+title remains Goat display metadata. Descriptions follow the cross-runtime 1,024-character,
+no-XML contract. Default Brain `list` and `query` retrieval
+exclude the skills zone; callers must explicitly pass `folder=skills` (or a descendant). Direct
+lookup by document id remains available.
+
+Explicit chat mentions snapshot the resolved skill in `goat.chat_session_skills`, keyed by chat
+session and skill id and linked to the first activating user message. The snapshot is immutable for
+the life of that chat: normal chat replays it at the activation point in model history, and Cloud
+Codex installs it under `.agents/skills/<id>/SKILL.md` for native discovery and invocation. Its
+`brain_ref` is provenance rather than a foreign key, so deleting the source Brain cannot invalidate
+an existing conversation.
 
 ## Binary assets (PDF)
 
@@ -173,6 +195,7 @@ brain-scoped carries a `brain_ref`.
 | `brain_source_items` | `goatBrainSourceItems` | Normalized external captures awaiting/after ingestion (see [ingestion.md](./ingestion.md)). |
 | `brain_ingest_jobs` | `goatBrainIngestJobs` | The ingest job queue (lease, attempts, status). |
 | `brain_tool_runs` | `goatBrainToolRuns` | Audit rows for brain tool invocations. |
+| `chat_session_skills` | `goatChatSessionSkills` | Immutable session skill snapshots linked to their first activating chat message. |
 
 Documents are materialized to a temp filesystem root for CLI access via
 `materializeGoatBrainFilesToRoot` (`packages/db/src/goat-brain-files.ts`) — there is no persistent

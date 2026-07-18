@@ -78,6 +78,7 @@ export type GoatBrainFileProjection = {
   contentHash: string;
   sizeBytes: number;
   title: string;
+  description?: string;
   kind: GoatBrainKind;
   entityType: GoatBrainEntityType;
   status: GoatBrainStatus;
@@ -92,6 +93,7 @@ export type GoatBrainStoredFrontmatter = {
   type?: string;
   status?: string;
   title?: string;
+  description?: string;
   createdAt?: string;
   updatedAt?: string;
   aliases?: string[];
@@ -161,6 +163,7 @@ export function createGoatBrainMarkdownContent(input: {
   id: string;
   folderPath: string;
   title: string;
+  description?: string;
   type: GoatBrainEntityType;
   status?: GoatBrainStatus;
   compiledTruth?: string;
@@ -182,6 +185,7 @@ export function createGoatBrainMarkdownContent(input: {
       type: input.type,
       status: input.status ?? "draft",
       title: input.title,
+      ...(input.description ? { description: input.description } : {}),
       createdAt: input.createdAt ?? now,
       updatedAt: input.updatedAt ?? now,
       relations: input.related ?? [],
@@ -283,6 +287,7 @@ export function deriveGoatBrainFileProjection(input: {
     contentHash: hashGoatBrainContent(content),
     sizeBytes,
     title,
+    ...(parsed.frontmatter.description ? { description: parsed.frontmatter.description } : {}),
     kind,
     entityType,
     status,
@@ -330,6 +335,7 @@ function canonicalGoatBrainContent(input: {
       updatedAt: fm.updatedAt ?? new Date().toISOString(),
       relations: fm.relations ?? [],
       ...(fm.aliases ? { aliases: fm.aliases } : {}),
+      ...(fm.description ? { description: fm.description } : {}),
       ...(fm.sources ? { sources: fm.sources } : {}),
       ...(fm.mergedInto ? { mergedInto: fm.mergedInto } : {}),
     },
@@ -482,6 +488,9 @@ export async function renameGoatBrainFolderRow(
           updatedAt: new Date().toISOString(),
           relations: parsed.frontmatter.relations ?? [],
           ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
+          ...(parsed.frontmatter.description
+            ? { description: parsed.frontmatter.description }
+            : {}),
           ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
           ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
         },

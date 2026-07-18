@@ -338,6 +338,12 @@ describe("runCodexAppServerTurn", () => {
       codexHome,
       skillFingerprint: "skills_a",
       task: "implement the request",
+      skills: [
+        {
+          name: "coding-work",
+          path: "/home/user/work/.agents/skills/coding-work/SKILL.md",
+        },
+      ],
       localImages: [{ path: "/home/user/work/screenshot.png", detail: "original" }],
       model: "gpt-5.5",
       reasoningEffort: "high",
@@ -374,6 +380,11 @@ describe("runCodexAppServerTurn", () => {
         params: {
           input: [
             { type: "text", text: "implement the request", text_elements: [] },
+            {
+              type: "skill",
+              name: "coding-work",
+              path: "/home/user/work/.agents/skills/coding-work/SKILL.md",
+            },
             {
               type: "localImage",
               path: "/home/user/work/screenshot.png",

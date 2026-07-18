@@ -1,6 +1,10 @@
 "use client";
 
-import { normalizeGoatBrainCompiledTruth } from "@opencompany/goat-brain/document";
+import {
+  GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER,
+  normalizeGoatBrainCompiledTruth,
+  parseGoatBrainDocument,
+} from "@opencompany/goat-brain/document";
 import {
   compareGoatBrainFolderPaths,
   goatBrainFolderSourceForPath,
@@ -12,6 +16,10 @@ import {
   pageLinkTargets,
   sourceLinkTargets,
 } from "@opencompany/goat-brain/inline-links";
+import {
+  isGoatBrainSkillFolder,
+  serializeGoatBrainSkillMarkdown,
+} from "@opencompany/goat-brain/skills";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import { useLiveQuery } from "@tanstack/react-db";
@@ -42,6 +50,7 @@ import {
   RotateCw,
   Search,
   Settings2,
+  Sparkles,
   Trash2,
   Users,
 } from "lucide-react";
@@ -68,12 +77,14 @@ import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
 import {
   createGoatBrainDocumentAction,
   createGoatBrainFolderAction,
+  createGoatBrainSkillAction,
   deleteGoatBrainDocumentAction,
   deleteGoatBrainFolderAction,
   renameGoatBrainDocumentAction,
   renameGoatBrainFolderAction,
   replaceGoatBrainAssetAction,
   updateGoatBrainDocumentAction,
+  updateGoatBrainSkillAction,
   uploadGoatBrainAssetAction,
 } from "@/lib/brain-actions";
 import {
@@ -286,7 +297,7 @@ function GoatBrainEditor({
   brainRef,
   brain,
   folders,
-  documents,
+  documents: syncedDocuments,
   edgeRows = [],
   draftIngestStatesByBrainId = EMPTY_DRAFT_INGEST_STATES,
   initialFolderPath,
@@ -302,6 +313,28 @@ function GoatBrainEditor({
   const navInset = useGoatNavInset();
   const { workspace } = useGoatAppData();
   const canEditBrain = workspace.role === "admin";
+  const [optimisticDocumentState, setOptimisticDocumentState] = useState<{
+    syncedDocuments: GoatBrainDocumentView[];
+    createdDocuments: GoatBrainDocumentView[];
+  }>({ syncedDocuments, createdDocuments: [] });
+  if (optimisticDocumentState.syncedDocuments !== syncedDocuments) {
+    const syncedIds = new Set(syncedDocuments.map((document) => document.id));
+    setOptimisticDocumentState({
+      syncedDocuments,
+      createdDocuments: optimisticDocumentState.createdDocuments.filter(
+        (document) => !syncedIds.has(document.id),
+      ),
+    });
+  }
+  const optimisticCreatedDocuments = optimisticDocumentState.createdDocuments;
+  const documents = useMemo(() => {
+    if (optimisticCreatedDocuments.length === 0) return syncedDocuments;
+    const syncedIds = new Set(syncedDocuments.map((document) => document.id));
+    return [
+      ...syncedDocuments,
+      ...optimisticCreatedDocuments.filter((document) => !syncedIds.has(document.id)),
+    ].toSorted(compareBrainDocuments);
+  }, [optimisticCreatedDocuments, syncedDocuments]);
   const selectedBrainId = routeBrainId ?? null;
   const initialDocument = useMemo(
     () =>
@@ -333,11 +366,13 @@ function GoatBrainEditor({
   const [docPanelState, setDocPanelState] = useState<{
     docId: string | null;
     value: string;
+    description: string;
     detailsOpen: boolean;
     timelineOpen: boolean;
   }>({
     docId: initialDocument?.id ?? null,
     value: documentEditorBody(initialDocument),
+    description: initialDocument?.description ?? "",
     detailsOpen: false,
     timelineOpen: false,
   });
@@ -390,13 +425,23 @@ function GoatBrainEditor({
     setDocPanelState({
       docId: selectedDocument?.id ?? null,
       value: documentEditorBody(selectedDocument),
+      description: selectedDocument?.description ?? "",
       detailsOpen: false,
       timelineOpen: false,
     });
   }
   const editorValue = docPanelState.value;
+  const editorDescription = docPanelState.description;
   const selectedBody = documentEditorBody(selectedDocument);
-  const dirty = Boolean(selectedDocument && editorValue !== selectedBody);
+  const isSelectedSkill = Boolean(
+    selectedDocument && isGoatBrainSkillFolder(selectedDocument.folderPath),
+  );
+  const dirty = Boolean(
+    selectedDocument &&
+      (editorValue !== selectedBody ||
+        (isSelectedSkill && editorDescription !== (selectedDocument.description ?? ""))),
+  );
+  const editorSnapshot = JSON.stringify([editorValue, editorDescription]);
   const activeFolder = selectedDocument?.folderPath ?? selectedFolder;
   const activePath = overviewSelected
     ? ""
@@ -551,24 +596,33 @@ function GoatBrainEditor({
     )
       return;
     const autosave = autosaveFor(selectedDocument.id);
-    if (editorValue === autosave.savedValue) return;
+    if (editorSnapshot === autosave.savedValue) return;
     const documentId = selectedDocument.id;
     const body = editorValue;
     const expectedContentHash = autosave.savedHash ?? selectedDocument.contentHash;
     startDocTransition(async () => {
-      const result = await updateGoatBrainDocumentAction({
-        brainRef,
-        documentId,
-        body,
-        expectedContentHash,
-      });
+      const result = isGoatBrainSkillFolder(selectedDocument.folderPath)
+        ? await updateGoatBrainSkillAction({
+            brainRef,
+            documentId,
+            name: selectedDocument.title,
+            description: editorDescription,
+            instructions: body,
+            expectedContentHash,
+          })
+        : await updateGoatBrainDocumentAction({
+            brainRef,
+            documentId,
+            body,
+            expectedContentHash,
+          });
       if (autosaveRef.current.docId !== documentId) return;
       if (!result.ok) {
-        autosaveRef.current.failedValue = body;
+        autosaveRef.current.failedValue = editorSnapshot;
         toast.error(result.message);
         return;
       }
-      autosaveRef.current.savedValue = body;
+      autosaveRef.current.savedValue = editorSnapshot;
       autosaveRef.current.failedValue = null;
       if (result.document) autosaveRef.current.savedHash = result.document.contentHash;
     });
@@ -590,10 +644,10 @@ function GoatBrainEditor({
   useEffect(() => {
     if (!canEditBrain || !dirty || isDocPending) return;
     const autosave = autosaveFor(selectedDocumentId);
-    if (editorValue === autosave.savedValue || editorValue === autosave.failedValue) return;
+    if (editorSnapshot === autosave.savedValue || editorSnapshot === autosave.failedValue) return;
     const timer = setTimeout(() => saveRef.current(), AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [autosaveFor, canEditBrain, dirty, editorValue, isDocPending, selectedDocumentId]);
+  }, [autosaveFor, canEditBrain, dirty, editorSnapshot, isDocPending, selectedDocumentId]);
 
   // Rename deliberately does NOT reseed the editor draft (applyDocumentResult), so unsaved
   // body edits survive a title change; the live collection syncs title + contentHash after.
@@ -618,7 +672,20 @@ function GoatBrainEditor({
   const copyDocument = async () => {
     if (!selectedDocument) return;
     try {
-      await navigator.clipboard.writeText(editorValue);
+      const skillIsComplete =
+        isGoatBrainSkillFolder(selectedDocument.folderPath) &&
+        Boolean(editorDescription.trim()) &&
+        Boolean(editorValue.trim());
+      await navigator.clipboard.writeText(
+        skillIsComplete
+          ? serializeGoatBrainSkillMarkdown({
+              id: selectedDocument.brainId,
+              name: selectedDocument.title,
+              description: editorDescription.trim(),
+              instructions: editorValue.trim(),
+            })
+          : editorValue,
+      );
       toast.success("Copied markdown");
     } catch {
       toast.error("Could not copy to clipboard.");
@@ -672,8 +739,49 @@ function GoatBrainEditor({
       }
       setFileDialogFolder(null);
       setQuery("");
-      if (result.document) selectDocument(result.document);
+      const createdDocument = result.document;
+      if (createdDocument) {
+        setOptimisticDocumentState((current) => ({
+          ...current,
+          createdDocuments: [
+            ...current.createdDocuments.filter((document) => document.id !== createdDocument.id),
+            createdDocument,
+          ],
+        }));
+        selectDocument(createdDocument);
+      }
       toast.success("Markdown file created");
+    });
+  };
+
+  const submitSkillDialog = (name: string, description: string) => {
+    const folderPath = fileDialogFolder;
+    if (!brainRef || !folderPath || !canEditBrain) return;
+    startCreateTransition(async () => {
+      const result = await createGoatBrainSkillAction({
+        brainRef,
+        folderPath,
+        name,
+        description,
+      });
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      setFileDialogFolder(null);
+      setQuery("");
+      const createdDocument = result.document;
+      if (createdDocument) {
+        setOptimisticDocumentState((current) => ({
+          ...current,
+          createdDocuments: [
+            ...current.createdDocuments.filter((document) => document.id !== createdDocument.id),
+            createdDocument,
+          ],
+        }));
+        selectDocument(createdDocument);
+      }
+      toast.success("Skill created");
     });
   };
 
@@ -740,6 +848,10 @@ function GoatBrainEditor({
 
   const uploadAssetFile = async (file: File | undefined) => {
     if (!file || !brainRef || isUploading || !canEditBrain) return;
+    if (isGoatBrainSkillFolder(activeFolder)) {
+      toast.error("Skills are Markdown-only and cannot contain uploads.");
+      return;
+    }
     const invalid = validateBrainAssetFile(file);
     if (invalid) {
       toast.error(invalid);
@@ -1072,27 +1184,29 @@ function GoatBrainEditor({
                     <Ellipsis size={15} strokeWidth={1.9} />
                   </PopoverTrigger>
                   <PopoverContent align="end" sideOffset={4} className="w-48 p-1">
-                    <button
-                      type="button"
-                      aria-label="Toggle timeline"
-                      onClick={() => {
-                        setDocPanelState((state) => ({
-                          ...state,
-                          timelineOpen: !state.timelineOpen,
-                        }));
-                        setMenuOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-left text-[12.5px] text-ink transition-colors duration-150 hover:bg-surface-hover"
-                    >
-                      <History size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
-                      <span className="flex-1">
-                        {docPanelState.timelineOpen ? "Hide timeline" : "Timeline"}
-                      </span>
-                      <span className="text-[11.5px] text-ink-subtle">
-                        {selectedDocument.timeline.length}
-                      </span>
-                    </button>
-                    {canEditBrain && selectedDocument.format !== "markdown" ? (
+                    {!isSelectedSkill ? (
+                      <button
+                        type="button"
+                        aria-label="Toggle timeline"
+                        onClick={() => {
+                          setDocPanelState((state) => ({
+                            ...state,
+                            timelineOpen: !state.timelineOpen,
+                          }));
+                          setMenuOpen(false);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-left text-[12.5px] text-ink transition-colors duration-150 hover:bg-surface-hover"
+                      >
+                        <History size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+                        <span className="flex-1">
+                          {docPanelState.timelineOpen ? "Hide timeline" : "Timeline"}
+                        </span>
+                        <span className="text-[11.5px] text-ink-subtle">
+                          {selectedDocument.timeline.length}
+                        </span>
+                      </button>
+                    ) : null}
+                    {canEditBrain && !isSelectedSkill && selectedDocument.format !== "markdown" ? (
                       <button
                         type="button"
                         aria-label="Replace file"
@@ -1181,12 +1295,18 @@ function GoatBrainEditor({
             graphLinks={graphLinks}
             routeBrainId={selectedBrainId}
             editorValue={editorValue}
+            editorDescription={editorDescription}
             detailsOpen={docPanelState.detailsOpen}
-            timelineOpen={docPanelState.timelineOpen}
+            timelineOpen={isSelectedSkill ? false : docPanelState.timelineOpen}
             isDocPending={isDocPending}
             readOnly={!canEditBrain}
             onEditorChange={(value) =>
               setDocPanelState((state) => (state.value === value ? state : { ...state, value }))
+            }
+            onDescriptionChange={(description) =>
+              setDocPanelState((state) =>
+                state.description === description ? state : { ...state, description },
+              )
             }
             onRenameTitle={renameDocument}
             onNavigateInternal={navigateToBrainHref}
@@ -1196,6 +1316,7 @@ function GoatBrainEditor({
       {contextMenu && canEditBrain ? (
         <BrainContextMenu
           state={contextMenu}
+          creatingSkill={isGoatBrainSkillFolder(contextMenu.fileFolderPath)}
           onCreateFile={() => {
             setContextMenu(null);
             setFileDialogFolder(contextMenu.fileFolderPath);
@@ -1212,11 +1333,19 @@ function GoatBrainEditor({
         />
       ) : null}
       {fileDialogFolder && canEditBrain ? (
-        <FileDialog
-          pending={isCreatePending}
-          onClose={() => setFileDialogFolder(null)}
-          onSubmit={submitFileDialog}
-        />
+        isGoatBrainSkillFolder(fileDialogFolder) ? (
+          <SkillDialog
+            pending={isCreatePending}
+            onClose={() => setFileDialogFolder(null)}
+            onSubmit={submitSkillDialog}
+          />
+        ) : (
+          <FileDialog
+            pending={isCreatePending}
+            onClose={() => setFileDialogFolder(null)}
+            onSubmit={submitFileDialog}
+          />
+        )
       ) : null}
       {folderDialog && canEditBrain ? (
         <FolderDialog
@@ -1232,10 +1361,12 @@ function GoatBrainEditor({
 
 function BrainContextMenu({
   state,
+  creatingSkill,
   onCreateFile,
   onCreateFolder,
 }: {
   state: BrainContextMenuState;
+  creatingSkill: boolean;
   onCreateFile: () => void;
   onCreateFolder: () => void;
 }) {
@@ -1261,8 +1392,14 @@ function BrainContextMenu({
     >
       <ContextMenuButton
         autoFocus
-        icon={<FilePlus2 size={14} strokeWidth={1.8} />}
-        label="New Markdown file"
+        icon={
+          creatingSkill ? (
+            <Sparkles size={14} strokeWidth={1.8} />
+          ) : (
+            <FilePlus2 size={14} strokeWidth={1.8} />
+          )
+        }
+        label={creatingSkill ? "New skill" : "New Markdown file"}
         onClick={onCreateFile}
       />
       <ContextMenuButton
@@ -1270,6 +1407,80 @@ function BrainContextMenu({
         label="New folder"
         onClick={onCreateFolder}
       />
+    </div>
+  );
+}
+
+function SkillDialog({
+  pending,
+  onClose,
+  onSubmit,
+}: {
+  pending: boolean;
+  onClose: () => void;
+  onSubmit: (name: string, description: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/20 p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="New skill"
+    >
+      <div className="flex w-full max-w-[420px] flex-col gap-3 rounded-lg bg-canvas p-4 shadow-xl">
+        <div className="text-[14px] font-semibold text-ink">New skill</div>
+        <label className="flex flex-col gap-1 text-[12px] text-ink-subtle">
+          Name
+          <input
+            autoFocus
+            value={name}
+            maxLength={160}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") onClose();
+            }}
+            placeholder="Coding work"
+            className="rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[12px] text-ink-subtle">
+          Description
+          <textarea
+            value={description}
+            maxLength={1000}
+            rows={3}
+            onChange={(event) => setDescription(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") onClose();
+            }}
+            placeholder="How this skill guides coding sessions"
+            className="resize-none rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
+          />
+        </label>
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md px-3 py-1.5 text-[13px] text-ink/70 transition-colors hover:bg-surface-hover"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={pending || !name.trim() || !description.trim()}
+            onClick={() => onSubmit(name, description)}
+            className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
+          >
+            {pending ? "Creating…" : "Create"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1527,11 +1738,13 @@ function BrainDocumentPanel({
   graphLinks,
   routeBrainId,
   editorValue,
+  editorDescription,
   detailsOpen,
   timelineOpen,
   isDocPending,
   readOnly,
   onEditorChange,
+  onDescriptionChange,
   onRenameTitle,
   onNavigateInternal,
 }: {
@@ -1541,11 +1754,13 @@ function BrainDocumentPanel({
   graphLinks: BrainGraphLink[];
   routeBrainId: string | null;
   editorValue: string;
+  editorDescription: string;
   detailsOpen: boolean;
   timelineOpen: boolean;
   isDocPending: boolean;
   readOnly: boolean;
   onEditorChange: (value: string) => void;
+  onDescriptionChange: (value: string) => void;
   onRenameTitle: (title: string) => void;
   onNavigateInternal: (href: string) => boolean;
 }) {
@@ -1560,6 +1775,8 @@ function BrainDocumentPanel({
       </section>
     );
   }
+
+  const isSkill = isGoatBrainSkillFolder(selectedDocument.folderPath);
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
@@ -1580,7 +1797,25 @@ function BrainDocumentPanel({
                 disabled={isDocPending || readOnly}
                 onRename={onRenameTitle}
               />
+              {isSkill ? (
+                <label className="mt-6 flex flex-col gap-2 text-[12px] font-medium text-ink-muted">
+                  Description
+                  <textarea
+                    value={editorDescription}
+                    maxLength={1000}
+                    rows={3}
+                    readOnly={readOnly}
+                    disabled={isDocPending}
+                    onChange={(event) => onDescriptionChange(event.target.value)}
+                    placeholder="Describe when this skill should be used"
+                    className="resize-none rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-normal leading-5 text-ink outline-none transition-colors focus:border-border-strong disabled:opacity-60"
+                  />
+                </label>
+              ) : null}
               <div className="mt-6">
+                {isSkill ? (
+                  <div className="mb-2 text-[12px] font-medium text-ink-muted">Instructions</div>
+                ) : null}
                 <MarkdownGoatBrainEditor
                   content={editorValue}
                   onChange={onEditorChange}
@@ -1781,7 +2016,9 @@ function BrainMetadataSidebar({
         </section>
       ) : null}
 
-      <SidebarTimelineSection document={document} />
+      {!isGoatBrainSkillFolder(document.folderPath) ? (
+        <SidebarTimelineSection document={document} />
+      ) : null}
 
       <GraphLinksList
         title="Outgoing"
@@ -2244,6 +2481,8 @@ function FolderIcon({ path }: { path: string }) {
   switch (root) {
     case "inbox":
       return <Inbox size={14} strokeWidth={1.8} className={className} />;
+    case "skills":
+      return <Sparkles size={14} strokeWidth={1.8} className={className} />;
     case "thoughts":
       return <Brain size={14} strokeWidth={1.8} className={className} />;
     case "companies":
@@ -2264,6 +2503,9 @@ function FolderIcon({ path }: { path: string }) {
 }
 
 function FileIcon({ path }: { path: string }) {
+  if (isGoatBrainSkillFolder(path)) {
+    return <Sparkles size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />;
+  }
   if (/\.(ts|tsx|js|jsx|json|css|sql|sh|py|rs|go)$/i.test(path)) {
     return <FileCode2 size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />;
   }
@@ -2507,7 +2749,12 @@ function documentInlineLinkText(document: GoatBrainDocumentView) {
 }
 
 function documentEditorBody(document: GoatBrainDocumentView | null | undefined) {
-  return document ? normalizeGoatBrainCompiledTruth(document.body, document.title) : "";
+  if (!document) return "";
+  const body = normalizeGoatBrainCompiledTruth(document.body, document.title);
+  return isGoatBrainSkillFolder(document.folderPath) &&
+    body.trim() === GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER
+    ? ""
+    : body;
 }
 
 function ancestorFolderPaths(path: string) {
@@ -2532,12 +2779,17 @@ function documentViewFromRow(
 ): GoatBrainDocumentView {
   const path = `${row.folder_path}/${row.brain_id}.md`;
   const title = row.title ?? row.brain_id;
+  let description: string | undefined;
+  try {
+    description = parseGoatBrainDocument(row.content).frontmatter.description;
+  } catch {}
   return {
     id: row.id,
     brainId: row.brain_id,
     folderPath: row.folder_path,
     path,
     title,
+    ...(description ? { description } : {}),
     content: row.content,
     body: normalizeGoatBrainCompiledTruth(row.body, title),
     timeline: timelineRows ? timelineRowsFromRows(timelineRows) : normalizeTimeline(row.timeline),

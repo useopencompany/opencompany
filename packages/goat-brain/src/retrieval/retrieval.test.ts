@@ -16,6 +16,28 @@ afterEach(async () => {
 });
 
 describe("goat brain retrieval", () => {
+  it("excludes skills by default and includes them for an explicit skills folder", async () => {
+    await writeDoc("skills/coding-work.md", {
+      id: "coding-work",
+      folder: "skills",
+      type: "note",
+      title: "Coding work",
+      truth: "Always run focused verification.",
+      relations: [],
+    });
+
+    await expect(
+      queryGoatBrain(root, { text: "focused verification", lexicalOnly: true }),
+    ).resolves.toEqual([]);
+    await expect(
+      queryGoatBrain(root, {
+        text: "focused verification",
+        folder: "skills",
+        lexicalOnly: true,
+      }),
+    ).resolves.toEqual([expect.objectContaining({ id: "coding-work", folder: "skills" })]);
+  });
+
   it("queries lexically and expands one hop across related docs", async () => {
     await writeDoc("companies/acme.md", {
       id: "acme",

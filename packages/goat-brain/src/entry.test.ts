@@ -15,6 +15,7 @@ const entry: GoatBrainEntry = {
   id: "launch-plan",
   folder: "concepts",
   title: "Launch plan",
+  description: "A reusable launch workflow.",
   format: "markdown",
   kind: "page",
   mimeType: "text/markdown",
@@ -44,6 +45,7 @@ describe("goat brain canonical entries", () => {
       id: "launch-plan",
       folder: "concepts",
       title: "Launch plan",
+      description: "A reusable launch workflow.",
       format: "markdown",
       kind: "page",
       mimeType: "text/markdown",
@@ -78,6 +80,7 @@ describe("goat brain canonical entries", () => {
       format: "markdown",
       kind: "page",
       type: "concept",
+      description: "A reusable launch workflow.",
       aliases: ["Founder beta"],
       payload: {
         path: "concepts/launch-plan.md",

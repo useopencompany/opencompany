@@ -75,6 +75,7 @@ export function GoatHomeRoute({
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <GoatSurface
+        key={data.activeBrain?.id ?? "no-brain"}
         tasks={data.tasks}
         schedules={data.schedules}
         defaultModel={DEFAULT_GOAT_MODEL}

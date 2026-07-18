@@ -10,11 +10,13 @@ import {
   type GoatCodexChatSession,
   type GoatCodexChatTurn,
   goatChatMessages,
+  goatChatSessionSkills,
   goatCodexChatTurns,
   goatIntegrations,
 } from "@opencompany/db/goat-schema";
+import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
 import { captureException, createLogger } from "@opencompany/observability";
-import { and, desc, eq, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
 import { runCodexAppServerTurn } from "./codex-app-server";
 import { ensureCodexInstalled } from "./codex-tool";
@@ -34,12 +36,12 @@ import {
   type SandboxHandle,
   writeSandboxTextFiles,
 } from "./sandbox";
+import { materializeCodexSkillSnapshotsForSession } from "./skills";
 import { rowsFromExecute } from "./sql-exec";
 
 const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
 const CODEX_CHAT_WORKDIR = "/home/user/opencompany-goat/codex-chat";
 const CODEX_CHAT_ATTACHMENTS_ROOT = "/home/user/.opencompany-goat/codex-chat-attachments";
-const GOAT_CODEX_CHAT_SKILL_FINGERPRINT = "goat-codex-chat-v1";
 const INTERRUPT_POLL_INTERVAL_MS = 2_000;
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat" });
@@ -156,6 +158,31 @@ export async function runGoatCodexChatTurn(input: {
       await sandbox.files.write(`${CODEX_CHAT_HOME}/auth.json`, serializedAuthJson);
     }
     await ensureCodexInstalled(sandbox);
+    const sessionSkills = await loadGoatCodexChatSessionSkills(turn);
+    const codexSkills = await materializeCodexSkillSnapshotsForSession({
+      sandbox,
+      codexWorkRoot: CODEX_CHAT_WORKDIR,
+      skills: sessionSkills.map((skill) => ({
+        id: skill.skillId,
+        files: [
+          {
+            path: "SKILL.md",
+            content: serializeGoatBrainSkillMarkdown({
+              id: skill.skillId,
+              name: skill.name,
+              description: skill.description,
+              instructions: skill.instructions,
+            }),
+          },
+        ],
+      })),
+    });
+    const invokedSkills = sessionSkills
+      .filter((skill) => skill.activatedMessageId === turn.userMessageId)
+      .map((skill) => ({
+        name: skill.skillId,
+        path: `${CODEX_CHAT_WORKDIR}/.agents/skills/${skill.skillId}/SKILL.md`,
+      }));
     const materializedAttachments = await materializeGoatCodexChatAttachments({
       sandbox,
       turnId: turn.id,
@@ -167,7 +194,8 @@ export async function runGoatCodexChatTurn(input: {
       sandbox,
       codexWorkRoot: CODEX_CHAT_WORKDIR,
       codexHome: CODEX_CHAT_HOME,
-      skillFingerprint: GOAT_CODEX_CHAT_SKILL_FINGERPRINT,
+      skillFingerprint: codexSkills.fingerprint,
+      skills: invokedSkills,
       task: input.recovery
         ? buildCodexChatRecoveryTask({
             prompt: turn.prompt,
@@ -247,6 +275,50 @@ export async function runGoatCodexChatTurn(input: {
     // next message reconnects to warm files and a reusable app-server daemon.
     await armSandboxIdleTimeout(sandbox, env.goatCodexChatIdleTimeoutMs).catch(() => undefined);
   }
+}
+
+async function loadGoatCodexChatSessionSkills(turn: GoatCodexChatTurn) {
+  return getDb()
+    .select({
+      skillId: goatChatSessionSkills.skillId,
+      activatedMessageId: goatChatSessionSkills.activatedMessageId,
+      name: goatChatSessionSkills.name,
+      description: goatChatSessionSkills.description,
+      instructions: goatChatSessionSkills.instructions,
+      activatedAt: goatCodexChatTurns.createdAt,
+    })
+    .from(goatChatSessionSkills)
+    .innerJoin(
+      goatChatMessages,
+      and(
+        eq(goatChatMessages.id, goatChatSessionSkills.activatedMessageId),
+        eq(goatChatMessages.sessionId, turn.chatSessionId),
+      ),
+    )
+    .innerJoin(
+      goatCodexChatTurns,
+      and(
+        eq(goatCodexChatTurns.userMessageId, goatChatMessages.id),
+        eq(goatCodexChatTurns.chatSessionId, turn.chatSessionId),
+      ),
+    )
+    .where(
+      and(
+        eq(goatChatSessionSkills.chatSessionId, turn.chatSessionId),
+        or(
+          lt(goatCodexChatTurns.createdAt, turn.createdAt),
+          and(
+            eq(goatCodexChatTurns.createdAt, turn.createdAt),
+            lte(goatCodexChatTurns.id, turn.id),
+          ),
+        ),
+      ),
+    )
+    .orderBy(
+      asc(goatCodexChatTurns.createdAt),
+      asc(goatCodexChatTurns.id),
+      asc(goatChatSessionSkills.skillId),
+    );
 }
 
 // GitHub auth is injected whenever the user has a connected Goat GitHub integration; the token

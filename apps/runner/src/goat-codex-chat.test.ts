@@ -177,6 +177,63 @@ describe("runGoatCodexChatTurn", () => {
     );
   });
 
+  it("materializes every active session skill and only invokes skills activated by this message", async () => {
+    dbMocks.selectRows.push(
+      [],
+      [],
+      [
+        {
+          skillId: "review-work",
+          activatedMessageId: "goat_msg_user_previous",
+          name: "Review work",
+          description: "How reviews should happen.",
+          instructions: "Review the existing implementation.",
+          activatedAt: new Date("2026-07-10T11:00:00Z"),
+        },
+        {
+          skillId: "coding-work",
+          activatedMessageId: "goat_msg_user_1",
+          name: "Coding work",
+          description: "How coding work should happen.",
+          instructions: "Inspect, implement, and verify.",
+          activatedAt: new Date("2026-07-10T12:00:00Z"),
+        },
+      ],
+    );
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      env: env(),
+    });
+
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        {
+          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/review-work/SKILL.md",
+          data: expect.stringContaining('name: "review-work"'),
+        },
+        {
+          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
+          data: expect.stringContaining('name: "coding-work"'),
+        },
+      ]),
+    );
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+        skills: [
+          {
+            name: "coding-work",
+            path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
+          },
+        ],
+      }),
+    );
+  });
+
   it("reuses a stored sandbox id and rearms the 5 minute idle pause window after the turn", async () => {
     dbMocks.selectRows.push([]);
     const sandbox = fakeSandbox("sbx_existing");
@@ -252,6 +309,10 @@ function queryBuilder(rows: unknown[][], execute: ReturnType<typeof vi.fn>) {
     where: () => builder,
     orderBy: () => builder,
     limit: async () => rows.shift() ?? [],
+    then: <TResult1 = unknown[], TResult2 = never>(
+      onFulfilled?: ((value: unknown[]) => TResult1 | PromiseLike<TResult1>) | null,
+      onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+    ) => Promise.resolve(rows.shift() ?? []).then(onFulfilled, onRejected),
     execute,
   };
   return builder;
