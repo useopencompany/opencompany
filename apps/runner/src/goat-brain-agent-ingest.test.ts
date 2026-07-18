@@ -753,6 +753,34 @@ describe("runGmailThreadAgentIngest", () => {
     expect(result).toMatchObject({ skipped: true, hadInstructions: false });
   });
 
+  it("loads instructions from the resolved default brain", async () => {
+    goatGmailMock.getGoatGmailBrainSourceInstructions.mockResolvedValueOnce(
+      "Only investor emails.",
+    );
+    mockAgentRun({ finalText: "SKIP" });
+
+    const result = await runGmailThreadAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: null,
+        integrationId: "gint_gmail",
+        item: gmailItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(goatGmailMock.getGoatGmailBrainSourceInstructions).toHaveBeenCalledWith(
+      { integrationId: "gint_gmail", brainRef: "gbrain_default" },
+      expect.anything(),
+    );
+    expect(result).toMatchObject({
+      brainRef: "gbrain_default",
+      skipped: true,
+      hadInstructions: true,
+    });
+  });
+
   it("infers a skip when a Gmail run completes cleanly without mutations", async () => {
     mockAgentRun({
       finalText: "Routine transactional email; no durable brain update is needed.",

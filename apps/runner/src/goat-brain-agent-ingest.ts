@@ -1810,7 +1810,7 @@ const GMAIL_THREAD_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedGmailThreadS
   noMutationOutcome: "skip",
   // Email content is authored by the correspondents, not the integration owner.
   authorship: "external",
-  async prepare({ input, db }) {
+  async prepare({ input, brainRef, db }) {
     const thread = input.item.content.thread;
     // The thread snapshot is written deterministically before the agent runs:
     // per the pointer-copy rule emails snapshot into evidence/, and full bodies
@@ -1819,24 +1819,23 @@ const GMAIL_THREAD_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedGmailThreadS
     // Instructions are looked up live (not snapshotted at enqueue) so edits in
     // brain settings apply to already-queued jobs; the job content hash covers
     // only the normalized item, so this never invalidates the claim.
-    const instructions =
-      input.brainRef && input.integrationId
-        ? await getGoatGmailBrainSourceInstructions(
-            {
-              integrationId: input.integrationId,
-              brainRef: input.brainRef,
-            },
-            db,
-          ).catch((error) => {
-            logger.warn("Goat Gmail ingest instructions lookup failed", {
-              event: "opencompany.goat_gmail_instructions_lookup_failed",
-              brain_ref: input.brainRef,
-              integration_id: input.integrationId,
-              error,
-            });
-            return null;
-          })
-        : null;
+    const instructions = input.integrationId
+      ? await getGoatGmailBrainSourceInstructions(
+          {
+            integrationId: input.integrationId,
+            brainRef,
+          },
+          db,
+        ).catch((error) => {
+          logger.warn("Goat Gmail ingest instructions lookup failed", {
+            event: "opencompany.goat_gmail_instructions_lookup_failed",
+            brain_ref: brainRef,
+            integration_id: input.integrationId,
+            error,
+          });
+          return null;
+        })
+      : null;
     return {
       buildPrompt: () =>
         buildGmailThreadAgentIngestPrompt(input.item, {
