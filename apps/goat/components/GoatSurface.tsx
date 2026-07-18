@@ -68,6 +68,7 @@ import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useHydrated } from "@/components/useHydrated";
+import type { GoatBrainSkillCatalogItem } from "@/lib/brain-skills";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import {
@@ -135,6 +136,16 @@ type ActiveMentionToken = {
   end: number;
   query: string;
 };
+
+type MentionOption =
+  | { kind: "engine"; token: "@codex"; label: string; mention: GoatChatMention }
+  | {
+      kind: "skill";
+      token: string;
+      label: string;
+      description: string;
+      mention: GoatChatMention;
+    };
 
 type GoatChatModelSelection = AgentModelId | LocalCodexPickerValue | CodexPickerValue;
 
@@ -251,6 +262,9 @@ export function GoatSurface({
   const [input, setInput] = useState("");
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
+  const [skillCatalog, setSkillCatalog] = useState<GoatBrainSkillCatalogItem[]>([]);
+  const [skillCatalogLoaded, setSkillCatalogLoaded] = useState(false);
+  const [mentionOptionIndex, setMentionOptionIndex] = useState(0);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
   // Keyed useChat instance: changes only when the user opens a different chat,
@@ -308,9 +322,6 @@ export function GoatSurface({
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [newChatPrompt, setNewChatPrompt] = useState("");
   const [backgroundChatCount, setBackgroundChatCount] = useState(0);
-  const activeSelectedMentions = codexConnected ? selectedMentions : [];
-  const shouldHighlightCodexMention =
-    activeSelectedMentions.length > 0 && hasCodexMentionToken(input);
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -511,6 +522,18 @@ export function GoatSurface({
       : null;
   const activeEngine = activeEngineChat?.engine ?? selectedEngine;
   const isEngineChat = activeEngine !== null;
+  const activeSelectedMentions = selectedMentions.filter((mention) => {
+    if (!goatChatMentionIsVisible(input, mention)) return false;
+    if (mention.kind === "engine") return codexConnected;
+    return activeEngine !== "local_codex";
+  });
+  const mentionOptions = buildMentionOptions({
+    token: mentionToken,
+    skills: skillCatalog,
+    selectedMentions: activeSelectedMentions,
+    codexConnected,
+    skillsEnabled: activeEngine !== "local_codex",
+  });
   const localCodexFeatureDisabledForChat = Boolean(
     initialChat &&
       !localCodexBetaEnabled &&
@@ -526,6 +549,38 @@ export function GoatSurface({
     enabled: attachmentsEnabled && !engineSubmitting,
     ...(activeEngine === "codex" ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES } : {}),
   });
+
+  useEffect(() => {
+    if (!userWorkosId || skillCatalogLoaded || !mentionToken || activeEngine === "local_codex") {
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void fetch("/api/brain/skills", { signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) return [];
+          const payload = (await response.json()) as { skills?: unknown };
+          return Array.isArray(payload.skills)
+            ? payload.skills.filter(isGoatBrainSkillCatalogItem)
+            : [];
+        })
+        .then((skills) => {
+          setSkillCatalog(skills);
+          setSkillCatalogLoaded(true);
+        })
+        .catch((error) => {
+          if (!(error instanceof DOMException && error.name === "AbortError")) {
+            setSkillCatalog([]);
+            setSkillCatalogLoaded(true);
+          }
+        });
+    }, 80);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeEngine, mentionToken, skillCatalogLoaded, userWorkosId]);
+
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   // Render list: Electric-synced rows are the source of truth for persisted
   // messages; the useChat overlay contributes only entries Electric has not
@@ -909,10 +964,9 @@ export function GoatSurface({
       toast.error("Remove failed attachments before sending.");
       return;
     }
-    const mentions =
-      activeSelectedMentions.length > 0 && hasCodexMentionToken(prompt)
-        ? activeSelectedMentions
-        : [];
+    const mentions = activeSelectedMentions.filter((mention) =>
+      goatChatMentionIsVisible(prompt, mention),
+    );
     // previewUrl rides along for the optimistic bubble render; the server ignores it and
     // re-mints attachment ids on persist.
     const attachmentsMetadata = readyAttachments.map((attachment) => ({
@@ -966,6 +1020,7 @@ export function GoatSurface({
         settings: settings.settings,
         userMessageId,
         attachments: attachmentsMetadata,
+        mentions: engine === "codex" ? mentions.filter(isSkillMention) : [],
         ...(engine === "codex" && !existingEngineSessionId ? { model: codexModel } : {}),
       })
         .then((result) => {
@@ -1000,6 +1055,7 @@ export function GoatSurface({
         .catch((error) => {
           clearActiveTurn();
           setInput(prompt);
+          setSelectedMentions(mentions);
           composerAttachments.setAttachments(pendingAttachments);
           toast.error(
             error instanceof Error ? error.message : `${config.label} could not start that turn.`,
@@ -1090,9 +1146,20 @@ export function GoatSurface({
         setMentionToken(null);
         return;
       }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        setMentionOptionIndex((current) =>
+          mentionOptions.length === 0
+            ? 0
+            : (current + direction + mentionOptions.length) % mentionOptions.length,
+        );
+        return;
+      }
       if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault();
-        selectCodexMention();
+        const option = mentionOptions[mentionOptionIndex];
+        if (option) selectMention(option);
         return;
       }
     }
@@ -1104,31 +1171,39 @@ export function GoatSurface({
   };
 
   const updateMentionToken = (value: string, selectionStart: number | null) => {
+    setMentionOptionIndex(0);
     if (selectionStart === null) {
       setMentionToken(null);
       return;
     }
-    setMentionToken(codexConnected ? findActiveMentionToken(value, selectionStart) : null);
+    setMentionToken(findActiveMentionToken(value, selectionStart));
   };
 
   const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextInput = event.target.value;
     setInput(nextInput);
     setSelectedMentions((current) =>
-      current.length > 0 && !hasCodexMentionToken(nextInput) ? [] : current,
+      current.filter((mention) => goatChatMentionIsVisible(nextInput, mention)),
     );
     updateMentionToken(nextInput, event.target.selectionStart);
   };
 
-  const selectCodexMention = () => {
-    if (!codexConnected || !mentionToken) return;
+  const selectMention = (option: MentionOption) => {
+    if (!mentionToken) return;
     const before = input.slice(0, mentionToken.start);
     const after = input.slice(mentionToken.end);
-    const nextInput = `${before}@codex ${after}`;
-    const nextCaret = before.length + "@codex ".length;
+    const nextInput = `${before}${option.token} ${after}`;
+    const nextCaret = before.length + option.token.length + 1;
     pendingInputCaretRef.current = nextCaret;
     setInput(nextInput);
-    setSelectedMentions([CODEX_MENTION]);
+    setSelectedMentions((current) => {
+      if (option.mention.kind === "engine") {
+        return [...current.filter((mention) => mention.kind !== "engine"), option.mention];
+      }
+      return current.some((mention) => mention.kind === "skill" && mention.id === option.mention.id)
+        ? current
+        : [...current, option.mention];
+    });
     setMentionToken(null);
   };
 
@@ -1343,27 +1418,53 @@ export function GoatSurface({
               {LOCAL_CODEX_BETA_DISABLED_MESSAGE}
             </p>
           ) : null}
-          {mentionToken ? (
+          {mentionToken && mentionOptions.length > 0 ? (
             <div
               role="listbox"
               aria-label="Mention menu"
-              className="absolute bottom-full left-3 z-20 mb-2 w-56 rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
+              className="absolute bottom-full left-3 z-20 mb-2 max-h-72 w-80 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
             >
-              <button
-                type="button"
-                role="option"
-                aria-selected="true"
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  selectCodexMention();
-                }}
-                onClick={selectCodexMention}
-                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-surface-hover focus:bg-surface-hover focus:outline-none"
-              >
-                <Code2 size={14} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-                <span className="text-[13px] font-medium leading-4 text-ink">@codex</span>
-                <span className="ml-auto text-[12px] leading-4 text-ink-subtle">Codex</span>
-              </button>
+              {mentionOptions.map((option, index) => (
+                <button
+                  key={option.token}
+                  type="button"
+                  role="option"
+                  aria-selected={index === mentionOptionIndex}
+                  onMouseEnter={() => setMentionOptionIndex(index)}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    selectMention(option);
+                  }}
+                  onClick={() => selectMention(option)}
+                  className={cn(
+                    "flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-surface-hover focus:bg-surface-hover focus:outline-none",
+                    index === mentionOptionIndex && "bg-surface-hover",
+                  )}
+                >
+                  {option.kind === "engine" ? (
+                    <Code2 size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
+                  ) : (
+                    <Sparkles
+                      size={14}
+                      strokeWidth={2}
+                      className="mt-0.5 shrink-0 text-ink-subtle"
+                    />
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-medium leading-4 text-ink">
+                      {option.token}
+                    </span>
+                    {option.kind === "skill" ? (
+                      <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
+                        {option.label} · {option.description}
+                      </span>
+                    ) : null}
+                  </span>
+                  {option.kind === "engine" ? (
+                    <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
+                  ) : null}
+                </button>
+              ))}
             </div>
           ) : null}
           <div
@@ -1389,7 +1490,7 @@ export function GoatSurface({
                     aria-hidden="true"
                     className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
                   >
-                    {renderComposerInputOverlay(input, shouldHighlightCodexMention)}
+                    {renderComposerInputOverlay(input, activeSelectedMentions)}
                   </div>
                 ) : null}
                 <textarea
@@ -1649,6 +1750,7 @@ async function sendEngineChatMessage(input: {
   settings: CodexComposerSettings;
   userMessageId: string;
   attachments: GoatChatUiAttachment[];
+  mentions: GoatChatMention[];
   model?: CodexChatModelId;
 }): Promise<EngineChatMessageResponse> {
   const response = await fetch(input.endpoint, {
@@ -1660,7 +1762,14 @@ async function sendEngineChatMessage(input: {
         id: input.userMessageId,
         role: "user",
         parts: [{ type: "text", text: input.prompt }],
-        ...(input.attachments.length > 0 ? { metadata: { attachments: input.attachments } } : {}),
+        ...(input.attachments.length > 0 || input.mentions.length > 0
+          ? {
+              metadata: {
+                ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
+                ...(input.mentions.length > 0 ? { mentions: input.mentions } : {}),
+              },
+            }
+          : {}),
       },
       settings: input.settings,
       ...(input.model ? { model: input.model } : {}),
@@ -1796,11 +1905,16 @@ function buildCodexComposerSettings(input: {
 }
 
 function isSupportedMention(mention: GoatChatMention): mention is GoatChatMention {
-  return mention.kind === "engine" && mention.id === "codex";
+  return (
+    (mention.kind === "engine" && mention.id === "codex") ||
+    (mention.kind === "skill" && Boolean(mention.brainRef) && Boolean(mention.id))
+  );
 }
 
-function hasCodexMentionToken(value: string) {
-  return /(^|\s)@codex(?=\s|$)/i.test(value);
+function isSkillMention(
+  mention: GoatChatMention,
+): mention is Extract<GoatChatMention, { kind: "skill" }> {
+  return mention.kind === "skill";
 }
 
 function findActiveMentionToken(value: string, caret: number): ActiveMentionToken | null {
@@ -1817,35 +1931,100 @@ function findActiveMentionToken(value: string, caret: number): ActiveMentionToke
   const token = value.slice(start, end);
   if (!token.startsWith("@")) return null;
 
-  const query = token.slice(1).toLowerCase();
-  if (!query || "codex".startsWith(query)) {
-    return { start, end, query };
-  }
-  return null;
+  return { start, end, query: token.slice(1).toLowerCase() };
 }
 
-function renderComposerInputOverlay(value: string, highlightCodexMention: boolean) {
-  if (!highlightCodexMention) return value;
-  const match = /(^|\s)(@codex)(?=\s|$)/i.exec(value);
-  if (!match || match.index === undefined) return value;
+function goatChatMentionToken(mention: GoatChatMention) {
+  return mention.kind === "engine" ? "@codex" : `@skill/${mention.id}`;
+}
 
-  const leadingWhitespace = match[1] ?? "";
-  const mention = match[2] ?? "@codex";
-  const mentionStart = match.index + leadingWhitespace.length;
-  const mentionEnd = mentionStart + mention.length;
-  return (
-    <>
-      {value.slice(0, mentionStart)}
-      {/* Keep inline metrics identical to the textarea; paint-only styles preserve caret alignment. */}
+function goatChatMentionIsVisible(value: string, mention: GoatChatMention) {
+  const token = escapeRegExp(goatChatMentionToken(mention));
+  return new RegExp(`(^|\\s)${token}(?=\\s|$)`, "i").test(value);
+}
+
+function buildMentionOptions(input: {
+  token: ActiveMentionToken | null;
+  skills: GoatBrainSkillCatalogItem[];
+  selectedMentions: GoatChatMention[];
+  codexConnected: boolean;
+  skillsEnabled: boolean;
+}): MentionOption[] {
+  if (!input.token) return [];
+  const query = input.token.query;
+  const options: MentionOption[] = [];
+  if (input.codexConnected && (!query || "codex".startsWith(query))) {
+    options.push({ kind: "engine", token: "@codex", label: "Codex", mention: CODEX_MENTION });
+  }
+  if (!input.skillsEnabled) return options;
+
+  const selectedSkillIds = new Set(
+    input.selectedMentions.flatMap((mention) => (mention.kind === "skill" ? [mention.id] : [])),
+  );
+  for (const skill of input.skills) {
+    if (selectedSkillIds.has(skill.id)) continue;
+    const haystack = `skill/${skill.id} ${skill.name} ${skill.description}`.toLowerCase();
+    if (query && !haystack.includes(query)) continue;
+    options.push({
+      kind: "skill",
+      token: `@skill/${skill.id}`,
+      label: skill.name,
+      description: skill.description,
+      mention: { kind: "skill", brainRef: skill.brainRef, id: skill.id },
+    });
+  }
+  return options;
+}
+
+function renderComposerInputOverlay(value: string, mentions: GoatChatMention[]) {
+  const ranges = mentions
+    .flatMap((mention) => {
+      const token = goatChatMentionToken(mention);
+      const match = new RegExp(`(^|\\s)(${escapeRegExp(token)})(?=\\s|$)`, "i").exec(value);
+      if (!match || match.index === undefined) return [];
+      const start = match.index + (match[1]?.length ?? 0);
+      return [{ start, end: start + (match[2]?.length ?? token.length), kind: mention.kind }];
+    })
+    .toSorted((left, right) => left.start - right.start);
+  if (ranges.length === 0) return value;
+
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  for (const range of ranges) {
+    parts.push(value.slice(cursor, range.start));
+    parts.push(
       <span
-        data-testid="selected-codex-mention"
+        key={`${range.start}:${range.end}`}
+        data-testid={range.kind === "engine" ? "selected-codex-mention" : "selected-skill-mention"}
         className="rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]"
       >
-        {value.slice(mentionStart, mentionEnd)}
-      </span>
-      {value.slice(mentionEnd)}
+        {value.slice(range.start, range.end)}
+      </span>,
+    );
+    cursor = range.end;
+  }
+  parts.push(value.slice(cursor));
+  return (
+    <>
+      {/* Keep inline metrics identical to the textarea; paint-only styles preserve caret alignment. */}
+      {parts}
     </>
   );
+}
+
+function isGoatBrainSkillCatalogItem(value: unknown): value is GoatBrainSkillCatalogItem {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.brainRef === "string" &&
+    typeof item.id === "string" &&
+    typeof item.name === "string" &&
+    typeof item.description === "string"
+  );
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function CodexModelPicker({

@@ -69,6 +69,31 @@ describe("goat brain file sync", () => {
     });
   });
 
+  it("preserves skill descriptions in the database projection", () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "coding-work",
+      folderPath: "skills",
+      title: "Coding work",
+      description: "How coding work should happen.",
+      type: "note",
+      status: "draft",
+      compiledTruth: "Inspect, implement, and verify.",
+    });
+
+    const projection = deriveGoatBrainFileProjection({
+      path: "skills/coding-work.md",
+      content,
+    });
+    expect(projection).toMatchObject({
+      brainId: "coding-work",
+      folderPath: "skills",
+      description: "How coding work should happen.",
+    });
+    expect(parseGoatBrainDocument(projection.content).frontmatter.description).toBe(
+      "How coding work should happen.",
+    );
+  });
+
   it("projects nested legacy markdown compiled truth as body-only text", () => {
     const nested = createGoatBrainMarkdownContent({
       id: "nested-note",
@@ -578,6 +603,7 @@ describe("goat brain file sync", () => {
     expect(folders).toEqual(
       expect.arrayContaining([
         { path: "inbox", source: "system" },
+        { path: "skills", source: "system" },
         { path: "research", source: "custom" },
         { path: "people", source: "system" },
         { path: "companies", source: "system" },
@@ -605,6 +631,7 @@ describe("goat brain file sync", () => {
     expect(db.insertedFolders()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ path: "inbox", source: "system" }),
+        expect.objectContaining({ path: "skills", source: "system" }),
         expect.objectContaining({ path: "research", source: "custom" }),
         expect.objectContaining({ path: "partners", source: "custom" }),
         expect.objectContaining({ path: "people", source: "system" }),

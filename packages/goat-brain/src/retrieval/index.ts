@@ -1,4 +1,5 @@
 import type { GoatBrainGraphDirection, GoatBrainRelation } from "../schema";
+import { isGoatBrainSkillFolder } from "../skills";
 import { blend } from "./blend";
 import { createLexicalIndex, lexicalSearch, titleTagMatch } from "./bm25";
 import { buildCorpus, type IndexRecord, loadCachedDocumentEmbeddings } from "./corpus";
@@ -171,6 +172,7 @@ function applyFilters(records: IndexRecord[], options: GoatBrainQueryOptions): I
     ) {
       return false;
     }
+    if (!options.folder && isGoatBrainSkillFolder(record.folder)) return false;
     if (!Number.isNaN(sinceMs)) {
       const updated = Date.parse(record.updatedAt);
       if (Number.isNaN(updated) || updated < sinceMs) return false;

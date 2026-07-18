@@ -31,9 +31,11 @@ import {
   goatBrainFolderKindError,
   goatBrainFolderSourceForPath,
   isBuiltInGoatBrainEntityType,
+  isGoatBrainSkillFolder,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   isValidGoatBrainKind,
+  isValidGoatBrainStatus,
   normalizeGoatBrainCompiledTruth,
   normalizeGoatBrainFolderForV1,
   normalizeGoatBrainId,
@@ -58,6 +60,7 @@ export type GoatBrainDocumentView = {
   folderPath: string;
   path: string;
   title: string;
+  description?: string;
   content: string;
   body: string;
   timeline: GoatBrainTimelineEntry[];
@@ -161,6 +164,9 @@ export async function createGoatBrainDocumentForUser(input: {
   userWorkosId: string;
   folderPath: string;
   fileName: string;
+  description?: string;
+  compiledTruth?: string;
+  brainIdMaxLength?: number;
 }): Promise<BrainMutationResult> {
   const folderPath = normalizeGoatBrainFolderForV1(input.folderPath);
   if (!isValidGoatBrainFolder(folderPath)) {
@@ -178,7 +184,8 @@ export async function createGoatBrainDocumentForUser(input: {
     return { ok: false, message: "File names must be 160 characters or fewer." };
   }
 
-  const baseId = normalizeGoatBrainId(title);
+  const brainIdMaxLength = Math.min(80, Math.max(1, input.brainIdMaxLength ?? 80));
+  const baseId = normalizeGoatBrainId(title).slice(0, brainIdMaxLength).replace(/-+$/g, "");
   if (!baseId) {
     return { ok: false, message: "File names must contain at least one letter or number." };
   }
@@ -187,7 +194,7 @@ export async function createGoatBrainDocumentForUser(input: {
     const rows = await listGoatBrainFiles({ brainRef: input.brainRef }, { includeInvalid: true });
     const used = new Set(rows.map((row) => row.brainId));
     for (let suffix = 1; suffix < 1000; suffix++) {
-      const brainId = goatBrainIdCandidate(baseId, suffix);
+      const brainId = goatBrainIdCandidate(baseId, suffix, brainIdMaxLength);
       if (used.has(brainId)) continue;
       const path = goatBrainFilePathFor(folderPath, brainId);
       const row = await createGoatBrainMarkdownDocument({
@@ -198,14 +205,102 @@ export async function createGoatBrainDocumentForUser(input: {
           id: brainId,
           folderPath,
           title,
+          ...(input.description ? { description: input.description } : {}),
           type: "note",
           status: "draft",
+          ...(input.compiledTruth ? { compiledTruth: input.compiledTruth } : {}),
         }),
       });
       if (row) return { ok: true, path, document: documentViewFromFileRow(row) };
       used.add(brainId);
     }
     throw new Error("Could not allocate a unique brain id.");
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
+}
+
+export async function createGoatBrainSkillForUser(input: {
+  brainRef: string;
+  userWorkosId: string;
+  folderPath: string;
+  name: string;
+  description: string;
+}): Promise<BrainMutationResult> {
+  const folderPath = normalizeGoatBrainFolderForV1(input.folderPath);
+  if (!isGoatBrainSkillFolder(folderPath)) {
+    return { ok: false, message: 'Skills must live in the "skills" folder.' };
+  }
+  const invalid = validateGoatBrainSkillFields({
+    name: input.name,
+    description: input.description,
+  });
+  if (invalid) return { ok: false, message: invalid };
+  return createGoatBrainDocumentForUser({
+    brainRef: input.brainRef,
+    userWorkosId: input.userWorkosId,
+    folderPath,
+    fileName: input.name,
+    description: input.description.trim(),
+    brainIdMaxLength: 64,
+  });
+}
+
+export async function updateGoatBrainSkillForUser(input: {
+  brainRef: string;
+  userWorkosId: string;
+  documentId: string;
+  name: string;
+  description: string;
+  instructions: string;
+  expectedContentHash?: string;
+}): Promise<BrainMutationResult> {
+  const invalid = validateGoatBrainSkillFields(input);
+  if (invalid) return { ok: false, message: invalid };
+  const existing = await getGoatBrainFile({
+    brainRef: input.brainRef,
+    fileId: input.documentId,
+  });
+  if (!existing) return { ok: false, message: "Brain skill not found." };
+  if (existing.format !== "markdown" || !isGoatBrainSkillFolder(existing.folderPath)) {
+    return { ok: false, message: "That Brain document is not a skill." };
+  }
+  const parsed = parseGoatBrainDocument(existing.content);
+  const content = serializeGoatBrainDocument({
+    title: input.name.trim(),
+    compiledTruth: input.instructions,
+    timeline: parsed.timeline,
+    frontmatter: {
+      id: existing.brainId,
+      folder: existing.folderPath,
+      kind: "page",
+      type: "note",
+      status: isValidGoatBrainStatus(parsed.frontmatter.status)
+        ? parsed.frontmatter.status
+        : existing.status,
+      title: input.name.trim(),
+      description: input.description.trim(),
+      createdAt: parsed.frontmatter.createdAt ?? existing.createdAt.toISOString(),
+      updatedAt: nowIso(),
+      relations: parsed.frontmatter.relations ?? [],
+      ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
+      ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
+      ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
+    },
+  });
+  try {
+    const row = await updateGoatBrainFileContent({
+      brainRef: input.brainRef,
+      userWorkosId: input.userWorkosId,
+      fileId: input.documentId,
+      content,
+      ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
+    });
+    return {
+      ok: true,
+      path: goatBrainFilePathFor(row.folderPath, row.brainId),
+      document: documentViewFromFileRow(row),
+    };
   } catch (error) {
     return { ok: false, message: errorMessage(error) };
   }
@@ -247,6 +342,7 @@ export async function renameGoatBrainDocumentForUser(input: {
       updatedAt: nowIso(),
       relations: parsed.frontmatter.relations ?? [],
       ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
+      ...(parsed.frontmatter.description ? { description: parsed.frontmatter.description } : {}),
       ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
       ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
     },
@@ -309,6 +405,7 @@ export async function moveGoatBrainDocumentForUser(input: {
       updatedAt: nowIso(),
       relations: parsed.frontmatter.relations ?? [],
       ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
+      ...(parsed.frontmatter.description ? { description: parsed.frontmatter.description } : {}),
       ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
       ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
     },
@@ -423,11 +520,13 @@ export function validateAndDeriveGoatBrainDocument(source: string): ValidatedGoa
         updatedAt: parsed.frontmatter.updatedAt ?? nowIso(),
         relations: parsed.frontmatter.relations ?? [],
         ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
+        ...(parsed.frontmatter.description ? { description: parsed.frontmatter.description } : {}),
         ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
         ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
       },
     },
     title: projection.title ?? projection.brainId,
+    ...(parsed.frontmatter.description ? { description: parsed.frontmatter.description } : {}),
     body: projection.body,
     timeline: parsed.timeline,
     relations: parsed.frontmatter.relations ?? [],
@@ -451,6 +550,7 @@ export function documentViewFromFileRow(row: GoatBrainDocumentRow): GoatBrainDoc
     folderPath: row.folderPath,
     path,
     title: row.title || parsed.title || row.brainId,
+    ...(parsed.frontmatter.description ? { description: parsed.frontmatter.description } : {}),
     content: row.content,
     body: normalizeGoatBrainCompiledTruth(row.body, row.title || parsed.title || row.brainId),
     timeline: parsed.timeline,
@@ -486,10 +586,10 @@ export async function nextAvailableGoatBrainId(brainRef: string, baseId: string)
   throw new Error("Could not allocate a unique brain id.");
 }
 
-function goatBrainIdCandidate(base: string, suffix: number): string {
+function goatBrainIdCandidate(base: string, suffix: number, maxLength = 80): string {
   if (suffix <= 1) return base;
   const ending = `-${suffix}`;
-  const prefix = base.slice(0, 80 - ending.length).replace(/-+$/g, "");
+  const prefix = base.slice(0, maxLength - ending.length).replace(/-+$/g, "");
   return `${prefix || "untitled"}${ending}`;
 }
 
@@ -563,4 +663,19 @@ function compareBrainDocuments(a: GoatBrainDocumentView, b: GoatBrainDocumentVie
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function validateGoatBrainSkillFields(input: { name: string; description: string }): string | null {
+  const name = input.name.trim();
+  const description = input.description.trim();
+  if (!name) return "Skill name cannot be empty.";
+  if (name.length > 160) return "Skill names must be 160 characters or fewer.";
+  if (!description) return "Skill description cannot be empty.";
+  if (description.length > 1_000) {
+    return "Skill descriptions must be 1,000 characters or fewer.";
+  }
+  if (description.includes("<") || description.includes(">")) {
+    return 'Skill descriptions cannot contain "<" or ">".';
+  }
+  return null;
 }

@@ -29,6 +29,14 @@ import { currentGoatUser } from "@/lib/auth";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
+  activateAndListGoatChatSessionSkills,
+  attachGoatBrainSkillsToPrompt,
+  GoatBrainSkillMentionError,
+  type GoatChatSessionSkillSnapshot,
+  readGoatBrainSkillMentionRefs,
+  resolveGoatBrainSkillMentions,
+} from "@/lib/brain-skills";
+import {
   isGoatChatCapabilitiesKilled,
   resolveGoatCapabilityUniverse,
 } from "@/lib/capabilities/registry";
@@ -69,6 +77,7 @@ import {
   type EditTaskScheduleToolOutput,
   type GoatChatMessageMetadata,
   type GoatChatUiMessage,
+  replaceGoatChatUiMessageText,
   textFromGoatChatUiMessage,
   type UseCapabilityToolOutput,
   type WebSearchToolInput,
@@ -144,6 +153,24 @@ export async function POST(request: Request): Promise<Response> {
     return new Response("Attachments are not supported in engine chats yet.", { status: 400 });
   }
 
+  const parsedSkillMentions = readGoatBrainSkillMentionRefs(
+    message.metadata?.mentions ?? body.value.mentions,
+  );
+  if (!parsedSkillMentions.ok) {
+    return new Response(parsedSkillMentions.error, { status: 400 });
+  }
+  let resolvedSkills;
+  try {
+    resolvedSkills = await resolveGoatBrainSkillMentions({
+      activeBrainRef: context.activeBrain?.id ?? null,
+      mentions: parsedSkillMentions.mentions,
+    });
+  } catch (error) {
+    if (error instanceof GoatBrainSkillMentionError) {
+      return new Response(error.message, { status: 400 });
+    }
+    throw error;
+  }
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!gatewayApiKey) {
     return new Response("Goat chat is not configured.", { status: 503 });
@@ -270,6 +297,19 @@ export async function POST(request: Request): Promise<Response> {
     finishChatTelemetry("failure", {}, error);
     throw error;
   }
+  let sessionSkills: GoatChatSessionSkillSnapshot[];
+  try {
+    sessionSkills = await activateAndListGoatChatSessionSkills({
+      chatSessionId: turn.session.id,
+      activatedMessageId: turn.userMessage.id,
+      brainRef: context.activeBrain?.id ?? "",
+      skills: resolvedSkills,
+    });
+  } catch (error) {
+    finishChatTelemetry("failure", {}, error);
+    throw error;
+  }
+  const skillsByActivationMessageId = groupSessionSkillsByActivationMessage(sessionSkills);
   after(
     generateGoatChatTitleForMessage({
       sessionId: turn.session.id,
@@ -656,7 +696,20 @@ export async function POST(request: Request): Promise<Response> {
     }),
     messages: await convertToModelMessages(
       await hydrateGoatChatAttachmentParts({
-        uiMessages: turn.messages,
+        // Match native skill runtimes: the full skill enters history on its activation message and
+        // remains available on every later turn in this chat without re-inlining it elsewhere.
+        uiMessages: turn.messages.map((uiMessage) => {
+          const activatedSkills = skillsByActivationMessageId.get(uiMessage.id) ?? [];
+          return activatedSkills.length > 0
+            ? replaceGoatChatUiMessageText(
+                uiMessage,
+                attachGoatBrainSkillsToPrompt(
+                  textFromGoatChatUiMessage(uiMessage),
+                  activatedSkills,
+                ),
+              )
+            : uiMessage;
+        }),
         storedMessages: turn.storedMessages,
         modelId: turn.session.model,
       }),
@@ -812,6 +865,24 @@ export async function POST(request: Request): Promise<Response> {
       });
     },
   });
+}
+
+function groupSessionSkillsByActivationMessage(skills: GoatChatSessionSkillSnapshot[]) {
+  const grouped = new Map<
+    string,
+    Array<{ id: string; name: string; description: string; instructions: string }>
+  >();
+  for (const skill of skills) {
+    const activated = grouped.get(skill.activatedMessageId) ?? [];
+    activated.push({
+      id: skill.skillId,
+      name: skill.name,
+      description: skill.description,
+      instructions: skill.instructions,
+    });
+    grouped.set(skill.activatedMessageId, activated);
+  }
+  return grouped;
 }
 
 async function executeChatWebSearch(input: {

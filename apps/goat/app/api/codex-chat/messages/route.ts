@@ -1,5 +1,10 @@
 import { after, NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import {
+  GoatBrainSkillMentionError,
+  readGoatBrainSkillMentionRefs,
+  resolveGoatBrainSkillMentions,
+} from "@/lib/brain-skills";
 import { parseGoatChatAttachmentsInput } from "@/lib/chat-attachments";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import { type GoatChatUiMessage, textFromGoatChatUiMessage } from "@/lib/chat-ui";
@@ -36,6 +41,22 @@ export async function POST(request: Request) {
     return new Response("Invalid Codex chat message.", { status: 400 });
   }
 
+  const parsedSkillMentions = readGoatBrainSkillMentionRefs(messageMetadata?.mentions);
+  if (!parsedSkillMentions.ok) {
+    return new Response(parsedSkillMentions.error, { status: 400 });
+  }
+  let resolvedSkills;
+  try {
+    resolvedSkills = await resolveGoatBrainSkillMentions({
+      activeBrainRef: context.activeBrain?.id ?? null,
+      mentions: parsedSkillMentions.mentions,
+    });
+  } catch (error) {
+    if (error instanceof GoatBrainSkillMentionError) {
+      return new Response(error.message, { status: 400 });
+    }
+    throw error;
+  }
   const sessionId = typeof body.value.sessionId === "string" ? body.value.sessionId.trim() : null;
   const clientMessageId =
     isUiMessage(body.value.message) && typeof body.value.message.id === "string"
@@ -46,6 +67,10 @@ export async function POST(request: Request) {
     userWorkosId: context.user.workosUserId,
     ...(sessionId ? { sessionId } : {}),
     prompt,
+    skills: resolvedSkills.map((skill) => ({
+      ...skill,
+      brainRef: context.activeBrain?.id ?? "",
+    })),
     attachments: parsedAttachments.attachments,
     ...(clientMessageId ? { clientMessageId } : {}),
     settings: body.value.settings,

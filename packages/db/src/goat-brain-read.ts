@@ -492,6 +492,13 @@ function documentFilters(
         like(goatBrainDocuments.folderPath, `${options.folder}/%`),
       ),
     );
+  } else {
+    conditions.push(
+      and(
+        ne(goatBrainDocuments.folderPath, "skills"),
+        sql`${goatBrainDocuments.folderPath} NOT LIKE 'skills/%'`,
+      ),
+    );
   }
   if (options.type) {
     conditions.push(eq(goatBrainDocuments.entityType, options.type as GoatBrainEntityType));

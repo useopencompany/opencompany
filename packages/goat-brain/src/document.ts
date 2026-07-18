@@ -5,6 +5,7 @@ import { deterministicEvidenceId, normalizeEvidenceId, normalizeTimelineAt } fro
 
 export const GOAT_BRAIN_TRUTH_HEADING = "## Compiled truth";
 export const GOAT_BRAIN_TIMELINE_HEADING = "## Timeline";
+export const GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER = "_No compiled truth yet._";
 export const GOAT_BRAIN_TIMELINE_SENTINEL =
   "<!-- TIMELINE:BELOW - append only past this marker -->";
 
@@ -147,7 +148,7 @@ export function serializeGoatBrainDocument(doc: GoatBrainDocument): string {
     `# ${title}`,
     "",
     GOAT_BRAIN_TRUTH_HEADING,
-    compiledTruth.trim() || "_No compiled truth yet._",
+    compiledTruth.trim() || GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER,
     "",
     GOAT_BRAIN_TIMELINE_SENTINEL,
     "",
@@ -184,6 +185,7 @@ export function replaceGoatBrainCompiledTruth(
           updatedAt: options.updatedAt ?? frontmatter.updatedAt,
           relations: frontmatter.relations ?? [],
           ...(frontmatter.title ? { title: frontmatter.title } : {}),
+          ...(frontmatter.description ? { description: frontmatter.description } : {}),
           ...(frontmatter.aliases ? { aliases: frontmatter.aliases } : {}),
           ...(frontmatter.sources ? { sources: frontmatter.sources } : {}),
           ...(frontmatter.mergedInto ? { mergedInto: frontmatter.mergedInto } : {}),
@@ -248,7 +250,7 @@ function replaceCompiledTruthInBody(body: string, compiledTruth: string): string
       `# ${title}`,
       "",
       GOAT_BRAIN_TRUTH_HEADING,
-      compiledTruth.trim() || "_No compiled truth yet._",
+      compiledTruth.trim() || GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER,
       "",
       GOAT_BRAIN_TIMELINE_SENTINEL,
       "",
@@ -269,7 +271,7 @@ function replaceCompiledTruthInBody(body: string, compiledTruth: string): string
         : normalized.length;
   const prefix = normalized.slice(0, contentStart).replace(/\n*$/, "\n");
   const suffix = normalized.slice(contentEnd).replace(/^\n*/, "");
-  return `${prefix}${compiledTruth.trim() || "_No compiled truth yet._"}\n\n${suffix}`;
+  return `${prefix}${compiledTruth.trim() || GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER}\n\n${suffix}`;
 }
 
 function stripSentinel(text: string): string {

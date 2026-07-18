@@ -7,6 +7,7 @@ import {
   goatChatSessions,
   goatCodexChatSessions,
 } from "@opencompany/db/goat-schema";
+import type { GoatBrainSkill } from "@opencompany/goat-brain";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
@@ -45,10 +46,13 @@ export type CodexChatMessageResult =
     }
   | { ok: false; status: number; error: string };
 
+export type GoatCodexChatSkillSnapshot = GoatBrainSkill & { brainRef: string };
+
 export async function createGoatCodexChatMessage(input: {
   userWorkosId: string;
   sessionId?: string | null;
   prompt: string;
+  skills?: GoatCodexChatSkillSnapshot[];
   attachments?: GoatChatMessageAttachment[];
   clientMessageId?: string | null;
   settings?: unknown;
@@ -56,6 +60,7 @@ export async function createGoatCodexChatMessage(input: {
 }): Promise<CodexChatMessageResult> {
   const prompt = input.prompt.trim();
   const attachments = input.attachments ?? [];
+  const skills = input.skills ?? [];
   if (!prompt && attachments.length === 0) {
     return { ok: false, status: 400, error: "Enter a message or attach a file before sending." };
   }
@@ -85,6 +90,7 @@ export async function createGoatCodexChatMessage(input: {
     result = await enqueueExistingCodexChatMessage({
       userWorkosId: input.userWorkosId,
       prompt,
+      skills,
       clientMessageId: input.clientMessageId ?? null,
       attachments,
       settings,
@@ -94,6 +100,7 @@ export async function createGoatCodexChatMessage(input: {
     result = await createFirstCodexChatTurn({
       userWorkosId: input.userWorkosId,
       prompt,
+      skills,
       clientMessageId: input.clientMessageId ?? null,
       attachments,
       settings,
@@ -222,6 +229,7 @@ async function loadCodexChatSessionForChat(input: { userWorkosId: string; chatSe
 async function createFirstCodexChatTurn(input: {
   userWorkosId: string;
   prompt: string;
+  skills: GoatCodexChatSkillSnapshot[];
   clientMessageId: string | null;
   attachments: GoatChatMessageAttachment[];
   settings: GoatCodexChatTurnSettings;
@@ -266,6 +274,24 @@ async function createFirstCodexChatTurn(input: {
         ${now}
       )
       RETURNING id
+    ),
+    activated_skills AS (
+      INSERT INTO goat.chat_session_skills (
+        chat_session_id, skill_id, brain_ref, activated_message_id,
+        name, description, instructions, created_at
+      )
+      SELECT
+        ${chatSessionId}, skill.skill_id, skill.brain_ref, ${userMessageId},
+        skill.name, skill.description, skill.instructions, ${now}
+      FROM jsonb_to_recordset(${skillsJsonbValue(input.skills)}::jsonb) AS skill(
+        skill_id text,
+        brain_ref text,
+        name text,
+        description text,
+        instructions text
+      )
+      ON CONFLICT (chat_session_id, skill_id) DO NOTHING
+      RETURNING skill_id
     ),
     inserted_assistant_message AS (
       INSERT INTO goat.chat_messages (id, session_id, role, content, debug_trace, created_at, updated_at)
@@ -321,6 +347,7 @@ async function createFirstCodexChatTurn(input: {
 async function enqueueExistingCodexChatMessage(input: {
   userWorkosId: string;
   prompt: string;
+  skills: GoatCodexChatSkillSnapshot[];
   clientMessageId: string | null;
   attachments: GoatChatMessageAttachment[];
   settings: GoatCodexChatTurnSettings;
@@ -348,6 +375,24 @@ async function enqueueExistingCodexChatMessage(input: {
         ${now}
       )
       RETURNING id
+    ),
+    activated_skills AS (
+      INSERT INTO goat.chat_session_skills (
+        chat_session_id, skill_id, brain_ref, activated_message_id,
+        name, description, instructions, created_at
+      )
+      SELECT
+        ${input.session.chatSessionId}, skill.skill_id, skill.brain_ref, ${userMessageId},
+        skill.name, skill.description, skill.instructions, ${now}
+      FROM jsonb_to_recordset(${skillsJsonbValue(input.skills)}::jsonb) AS skill(
+        skill_id text,
+        brain_ref text,
+        name text,
+        description text,
+        instructions text
+      )
+      ON CONFLICT (chat_session_id, skill_id) DO NOTHING
+      RETURNING skill_id
     ),
     inserted_assistant_message AS (
       INSERT INTO goat.chat_messages (id, session_id, role, content, debug_trace, created_at, updated_at)
@@ -423,6 +468,18 @@ function emptyAssistantDebugTrace(model: string = CODEX_CHAT_DEFAULT_MODEL) {
 
 function attachmentsJsonbValue(attachments: GoatChatMessageAttachment[]) {
   return attachments.length > 0 ? JSON.stringify(attachments) : null;
+}
+
+function skillsJsonbValue(skills: GoatCodexChatSkillSnapshot[]) {
+  return JSON.stringify(
+    skills.map((skill) => ({
+      skill_id: skill.id,
+      brain_ref: skill.brainRef,
+      name: skill.name,
+      description: skill.description,
+      instructions: skill.instructions,
+    })),
+  );
 }
 
 function safeClientMessageId(value: string | null | undefined) {

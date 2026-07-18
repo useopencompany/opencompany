@@ -418,6 +418,68 @@ describe("GoatSurface chat streaming UI", () => {
     });
   });
 
+  it("submits selected Brain skills to cloud Codex", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      void _init;
+      if (String(input) === "/api/brain/skills") {
+        return new Response(
+          JSON.stringify({
+            skills: [
+              {
+                brainRef: "goat_brain_1",
+                id: "coding-work",
+                name: "Coding work",
+                description: "How coding work should happen.",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: "goat_chat_codex_1",
+          userMessageId: "goat_chat_msg_codex_user",
+          assistantMessageId: "goat_chat_msg_codex_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+        userWorkosId="user_1"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    await user.type(textarea, "@skill/coding");
+    await user.click(await screen.findByRole("option", { name: /coding work/i }));
+    await user.type(textarea, "implement this");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    const postCall = fetchMock.mock.calls.find(([input]) => input === "/api/codex-chat/messages");
+    const body = JSON.parse(String(postCall?.[1]?.body));
+    expect(body.message).toMatchObject({
+      parts: [{ type: "text", text: "@skill/coding-work implement this" }],
+      metadata: {
+        mentions: [{ kind: "skill", brainRef: "goat_brain_1", id: "coding-work" }],
+      },
+    });
+  });
+
   it("uploads files and includes them in cloud Codex message metadata", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -829,6 +891,86 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
       text: "check repo access",
     });
+  });
+
+  it("selects, highlights, and reconciles multiple Brain skill mentions", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            skills: [
+              {
+                brainRef: "goat_brain_1",
+                id: "coding-work",
+                name: "Coding work",
+                description: "Use focused verification for code changes.",
+              },
+              {
+                brainRef: "goat_brain_1",
+                id: "writing-work",
+                name: "Writing work",
+                description: "Write clear product copy.",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    await user.type(textarea, "@verification");
+    const codingOption = await screen.findByRole("option", { name: /coding work/i });
+    await user.click(codingOption);
+    await user.type(textarea, "then @skill/writing");
+    await user.click(await screen.findByRole("option", { name: /writing work/i }));
+
+    expect(screen.getAllByTestId("selected-skill-mention")).toHaveLength(2);
+    expect(textarea).toHaveValue("@skill/coding-work then @skill/writing-work ");
+
+    fireEvent.change(textarea, { target: { value: "@skill/coding-work then continue" } });
+    expect(screen.getAllByTestId("selected-skill-mention")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "@skill/coding-work then continue",
+      metadata: {
+        mentions: [{ kind: "skill", brainRef: "goat_brain_1", id: "coding-work" }],
+      },
+    });
+  });
+
+  it("does not offer Brain skills in Local Codex mode", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        localCodexBetaEnabled
+        userWorkosId="user_1"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Local Codex"));
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "@skill/coding");
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox", { name: "Mention menu" })).not.toBeInTheDocument();
   });
 
   it("keeps a completed new chat visible while server props refresh", async () => {

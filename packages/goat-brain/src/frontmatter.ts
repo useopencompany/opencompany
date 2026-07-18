@@ -36,6 +36,8 @@ export function parseFrontmatter(yaml: string): Partial<GoatBrainFrontmatter> {
   if (folder) out.folder = folder;
   const title = readString(raw.title);
   if (title) out.title = title;
+  const description = readString(raw.description);
+  if (description) out.description = description;
   const type = normalizeBuiltInGoatBrainEntityType(readString(raw.type) ?? undefined);
   if (type) out.type = type;
   const kind = readString(raw.kind);
@@ -73,6 +75,7 @@ export function serializeFrontmatter(frontmatter: GoatBrainFrontmatter): string 
     })),
   };
   if (frontmatter.title) record.title = frontmatter.title;
+  if (frontmatter.description) record.description = frontmatter.description;
   if (frontmatter.aliases && frontmatter.aliases.length > 0) record.aliases = frontmatter.aliases;
   if (frontmatter.mergedInto) record.mergedInto = frontmatter.mergedInto;
   if (frontmatter.sources && frontmatter.sources.length > 0) {
