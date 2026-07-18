@@ -90,6 +90,7 @@ import {
   GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS,
   GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
   GOAT_BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS,
+  GOAT_CHAT_CAPTURE_INGEST_PROFILE,
   GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT,
   type GoatBrainAgentCliRunner,
   GoatBrainAgentOutcomeError,
@@ -100,6 +101,7 @@ import {
   runGoatChatCaptureAgentIngest,
   runJamieMeetingAgentIngest,
   runSlackConversationAgentIngest,
+  UPLOAD_ASSET_INGEST_PROFILE,
   validateGoatBrainAgentInvocation,
 } from "./goat-brain-agent-ingest";
 import { buildGmailThreadEvidenceWrite } from "./goat-brain-gmail-writes";
@@ -372,6 +374,23 @@ describe("validateGoatBrainAgentInvocation", () => {
         stdin: "Ada leads GTM.",
       }),
     ).toBeNull();
+  });
+});
+
+describe("capture-first ingest profiles", () => {
+  // Regression guard for the incident that motivated the profile refactor: both
+  // capture-first sources persist their content (an inbox draft, an uploaded
+  // file) before the curation job runs, so a run that writes nothing is a safe
+  // no-op. Neither may treat that as a failure — the profile makes the policy
+  // explicit and required, and this locks it.
+  it("skips (never fails) a curation run that makes no brain mutation", () => {
+    expect(GOAT_CHAT_CAPTURE_INGEST_PROFILE.noMutationOutcome).toBe("skip");
+    expect(UPLOAD_ASSET_INGEST_PROFILE.noMutationOutcome).toBe("skip");
+  });
+
+  it("attributes the captured/uploaded content to the acting user", () => {
+    expect(GOAT_CHAT_CAPTURE_INGEST_PROFILE.authorship).toBe("acting_user");
+    expect(UPLOAD_ASSET_INGEST_PROFILE.authorship).toBe("acting_user");
   });
 });
 
@@ -732,6 +751,34 @@ describe("runGmailThreadAgentIngest", () => {
     );
     expect(goatGmailMock.getGoatGmailBrainSourceInstructions).not.toHaveBeenCalled();
     expect(result).toMatchObject({ skipped: true, hadInstructions: false });
+  });
+
+  it("loads instructions from the resolved default brain", async () => {
+    goatGmailMock.getGoatGmailBrainSourceInstructions.mockResolvedValueOnce(
+      "Only investor emails.",
+    );
+    mockAgentRun({ finalText: "SKIP" });
+
+    const result = await runGmailThreadAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: null,
+        integrationId: "gint_gmail",
+        item: gmailItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(goatGmailMock.getGoatGmailBrainSourceInstructions).toHaveBeenCalledWith(
+      { integrationId: "gint_gmail", brainRef: "gbrain_default" },
+      expect.anything(),
+    );
+    expect(result).toMatchObject({
+      brainRef: "gbrain_default",
+      skipped: true,
+      hadInstructions: true,
+    });
   });
 
   it("infers a skip when a Gmail run completes cleanly without mutations", async () => {
@@ -1433,11 +1480,44 @@ describe("runGoatChatCaptureAgentIngest", () => {
     expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalled();
   });
 
-  it("keeps folder list read-only for no-write detection", async () => {
+  it("skips a read-only curation run, leaving the draft in the inbox", async () => {
     mockAgentRun({
       finalText: "Listed folders.",
       toolInvocations: [{ command: "folder", args: ["list"] }],
     });
+
+    // The capture is already persisted as a draft in the inbox before the job
+    // runs, so a curation pass that writes nothing is a safe no-op recorded as
+    // skipped — not a failure surfaced on a note the user can plainly read.
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli },
+    );
+
+    expect(result).toMatchObject({
+      skipped: true,
+      skipMode: "inferred_no_mutations",
+      mutations: 0,
+    });
+  });
+
+  it("still fails a capture when a mutating command is attempted but does not land", async () => {
+    mockAgentRun({
+      finalText: "No update made.",
+      toolInvocations: [{ command: "timeline-add", args: ["onboarding", "--body", "Ship it."] }],
+    });
+    const failingCli: GoatBrainAgentCliRunner = vi.fn(async () => ({
+      ok: false,
+      exitCode: 1,
+      stdout: "",
+      stderr: "missing page",
+      error: "goat-brain CLI failed.",
+    }));
 
     const error = await runGoatChatCaptureAgentIngest(
       {
@@ -1446,16 +1526,17 @@ describe("runGoatChatCaptureAgentIngest", () => {
         item: captureItem(),
         env: { vercelAiGatewayApiKey: "gw_test" },
       },
-      { runCli: okCli },
+      { runCli: failingCli },
     ).then(
       () => {
         throw new Error("Expected the ingest to fail.");
       },
       (thrown: unknown) => thrown,
     );
-    // Typed so the worker can retry outcome failures on the tighter budget.
+    // An attempted-but-failed write is a real outcome failure (typed so the
+    // worker retries on the tighter budget) — the skip only covers clean no-ops.
     expect(error).toBeInstanceOf(GoatBrainAgentOutcomeError);
-    expect(String(error)).toContain("finished without writing");
+    expect(String(error)).toContain("attempted 1 mutating command");
     expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
   });
 
