@@ -6,10 +6,12 @@ import type { GoatBrainDocumentView, GoatBrainFolderView } from "@/lib/brain";
 import {
   createGoatBrainDocumentAction,
   createGoatBrainFolderAction,
+  createGoatBrainSkillAction,
   deleteGoatBrainFolderAction,
   renameGoatBrainDocumentAction,
   renameGoatBrainFolderAction,
   updateGoatBrainDocumentAction,
+  updateGoatBrainSkillAction,
 } from "@/lib/brain-actions";
 import { GoatBrainView } from "./GoatBrainView";
 
@@ -101,12 +103,14 @@ vi.mock("@/components/MarkdownGoatBrainEditor", () => ({
 vi.mock("@/lib/brain-actions", () => ({
   createGoatBrainDocumentAction: vi.fn(),
   createGoatBrainFolderAction: vi.fn(),
+  createGoatBrainSkillAction: vi.fn(),
   deleteGoatBrainDocumentAction: vi.fn(),
   deleteGoatBrainFolderAction: vi.fn(),
   moveGoatBrainDocumentAction: vi.fn(),
   renameGoatBrainDocumentAction: vi.fn(),
   renameGoatBrainFolderAction: vi.fn(),
   updateGoatBrainDocumentAction: vi.fn(),
+  updateGoatBrainSkillAction: vi.fn(),
 }));
 
 afterEach(() => {
@@ -436,6 +440,7 @@ describe("GoatBrainView", () => {
       "decisions",
       "concepts",
       "partners",
+      "skills",
       "people",
       "companies",
       "evidence",
@@ -552,6 +557,88 @@ describe("GoatBrainView", () => {
       });
     });
     expect(window.location.pathname).toBe("/brain/projects/roadmap");
+  });
+
+  it("creates a formal skill from the skills folder", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createGoatBrainSkillAction).mockResolvedValueOnce({
+      ok: true,
+      path: "skills/coding-work.md",
+      document: codingWorkSkill,
+    });
+    render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={orderedFolders}
+        documents={[]}
+        initialFolderPath="skills"
+        initialBrainId={null}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("treeitem", { name: /skills/i }));
+    await user.click(screen.getByRole("menuitem", { name: "New skill" }));
+    await user.type(screen.getByLabelText("Name"), "Coding work");
+    await user.type(screen.getByLabelText("Description"), "How coding work should happen.");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(createGoatBrainSkillAction).toHaveBeenCalledWith({
+        brainRef: "goat_brain_1",
+        folderPath: "skills",
+        name: "Coding work",
+        description: "How coding work should happen.",
+      });
+    });
+    expect(screen.queryByRole("dialog", { name: "New skill" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Page title" })).toHaveValue("Coding work");
+    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
+      "How coding work should happen.",
+    );
+    expect(window.location.pathname).toBe("/brain/skills/coding-work");
+  });
+
+  it("edits skill description and instructions without timeline controls", async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateGoatBrainSkillAction).mockResolvedValueOnce({
+      ok: true,
+      path: codingWorkSkill.path,
+      document: { ...codingWorkSkill, contentHash: "skill-hash-next" },
+    });
+    render(
+      <GoatBrainView
+        brainRef="goat_brain_1"
+        brain={defaultBrain}
+        folders={orderedFolders}
+        documents={[codingWorkSkill]}
+        initialFolderPath="skills"
+        initialBrainId="coding-work"
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Toggle timeline" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
+      "How coding work should happen.",
+    );
+    await user.clear(screen.getByRole("textbox", { name: "Description" }));
+    await user.type(screen.getByRole("textbox", { name: "Description" }), "Coding workflow.");
+    await user.clear(screen.getByRole("textbox", { name: "Brain body" }));
+    await user.type(screen.getByRole("textbox", { name: "Brain body" }), "Inspect and verify.");
+
+    await waitFor(
+      () => {
+        expect(updateGoatBrainSkillAction).toHaveBeenCalledWith({
+          brainRef: "goat_brain_1",
+          documentId: "doc_coding_work",
+          name: "Coding work",
+          description: "Coding workflow.",
+          instructions: "Inspect and verify.",
+          expectedContentHash: "skill-hash",
+        });
+      },
+      { timeout: 4000 },
+    );
   });
 
   it("renames only adjustable folders", async () => {
@@ -842,6 +929,7 @@ const orderedFolders: GoatBrainFolderView[] = [
   folder("people", "system"),
   folder("companies", "system"),
   folder("inbox", "system"),
+  folder("skills", "system"),
   folder("partners", "custom"),
   folder("thoughts", "custom"),
   folder("concepts", "custom"),
@@ -905,6 +993,20 @@ const documentLinkingToAda: GoatBrainDocumentView = {
   sizeBytes: 128,
   createdAt: "2026-07-06T12:00:00.000Z",
   updatedAt: "2026-07-06T12:00:00.000Z",
+};
+
+const codingWorkSkill: GoatBrainDocumentView = {
+  ...documentLinkingToAda,
+  id: "doc_coding_work",
+  brainId: "coding-work",
+  folderPath: "skills",
+  path: "skills/coding-work.md",
+  title: "Coding work",
+  description: "How coding work should happen.",
+  content: "",
+  body: "Inspect, implement, and verify.",
+  type: "note",
+  contentHash: "skill-hash",
 };
 
 const inboxCaptureDocument: GoatBrainDocumentView = {

@@ -11,6 +11,7 @@ export * from "./pointer-copy";
 export * from "./retrieval";
 export * from "./schema";
 export * from "./schemas";
+export * from "./skills";
 export * from "./source-items";
 export * from "./source-resolvers";
 export * from "./store";

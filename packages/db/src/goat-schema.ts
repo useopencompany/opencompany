@@ -446,6 +446,9 @@ export type GoatChatMessageDebugTrace = {
     outputTokens?: number;
     totalTokens?: number;
   };
+  // Worker-side transcripts of use_capability calls (steps, tool previews),
+  // keyed by toolCallId; never part of the model-visible tool output.
+  capabilityCalls?: unknown[];
   error?: string;
 };
 
@@ -465,6 +468,7 @@ export const goatUsers = goat.table(
     timezone: text("timezone").notNull().default("UTC"),
     taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
+    chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     preferredMcpClient: text("preferred_mcp_client").$type<GoatMcpClient>(),
     // Set exactly once, when this user first completes a successful Brain query over MCP.
     mcpSetupCompletedAt: timestamp("mcp_setup_completed_at", { withTimezone: true }),
@@ -2620,6 +2624,35 @@ export const goatChatMessages = goat.table(
   }),
 );
 
+// Immutable skill snapshots activated by an explicit @skill mention in a chat. Keeping the
+// activation message lets non-Codex chat replay the skill as part of conversation history, while
+// Codex can materialize every active snapshot and invoke only the skills selected on the turn.
+export const goatChatSessionSkills = goat.table(
+  "chat_session_skills",
+  {
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    skillId: text("skill_id").notNull(),
+    // Provenance only: the immutable snapshot must survive deletion of its source Brain.
+    brainRef: text("brain_ref").notNull(),
+    activatedMessageId: text("activated_message_id")
+      .notNull()
+      .references(() => goatChatMessages.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    instructions: text("instructions").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.chatSessionId, table.skillId] }),
+    activatedMessageIdx: index("goat_chat_session_skills_activated_message_idx").on(
+      table.activatedMessageId,
+    ),
+    brainIdx: index("goat_chat_session_skills_brain_idx").on(table.brainRef),
+  }),
+);
+
 export const goatLocalBridges = goat.table(
   "local_bridges",
   {
@@ -3582,6 +3615,7 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
     references: [goatUsers.workosUserId],
   }),
   messages: many(goatChatMessages),
+  skills: many(goatChatSessionSkills),
   brainToolRuns: many(goatBrainToolRuns),
   localCodexSessions: many(goatLocalCodexSessions),
 }));
@@ -3595,11 +3629,27 @@ export const goatChatMessagesRelations = relations(goatChatMessages, ({ one, man
     fields: [goatChatMessages.taskId],
     references: [goatTasks.id],
   }),
+  activatedSkills: many(goatChatSessionSkills),
   localCodexUserTurns: many(goatLocalCodexTurns, {
     relationName: "goat_local_codex_turns_user_message",
   }),
   localCodexAssistantTurns: many(goatLocalCodexTurns, {
     relationName: "goat_local_codex_turns_assistant_message",
+  }),
+}));
+
+export const goatChatSessionSkillsRelations = relations(goatChatSessionSkills, ({ one }) => ({
+  session: one(goatChatSessions, {
+    fields: [goatChatSessionSkills.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+  brain: one(goatBrains, {
+    fields: [goatChatSessionSkills.brainRef],
+    references: [goatBrains.id],
+  }),
+  activatedMessage: one(goatChatMessages, {
+    fields: [goatChatSessionSkills.activatedMessageId],
+    references: [goatChatMessages.id],
   }),
 }));
 
@@ -3643,3 +3693,4 @@ export type GoatTaskToolUsage = typeof goatTaskToolUsage.$inferSelect;
 export type GoatTaskSandboxUsage = typeof goatTaskSandboxUsage.$inferSelect;
 export type GoatChatSession = typeof goatChatSessions.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
+export type GoatChatSessionSkill = typeof goatChatSessionSkills.$inferSelect;

@@ -1,5 +1,6 @@
 export const HARD_DEFAULT_GOAT_BRAIN_FOLDERS = [
   "inbox",
+  "skills",
   "people",
   "companies",
   "evidence",
@@ -17,6 +18,7 @@ export const ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS = [
 export const DEFAULT_GOAT_BRAIN_FOLDERS = [
   "inbox",
   ...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
+  "skills",
   "people",
   "companies",
   "evidence",
@@ -109,6 +111,7 @@ export type GoatBrainFrontmatter = {
   updatedAt: string;
   relations: GoatBrainRelation[];
   title?: string;
+  description?: string;
   aliases?: string[];
   sources?: GoatBrainSource[];
   mergedInto?: string;

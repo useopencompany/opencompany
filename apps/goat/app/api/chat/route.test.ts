@@ -1,8 +1,13 @@
-import { streamText } from "ai";
+import { convertToModelMessages, streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
+import {
+  activateAndListGoatChatSessionSkills,
+  GoatBrainSkillMentionError,
+  resolveGoatBrainSkillMentions,
+} from "@/lib/brain-skills";
 import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
@@ -36,6 +41,15 @@ vi.mock("@/lib/brain-cli", () => ({
 vi.mock("@/lib/brain-capture", () => ({
   captureToGoatBrainInbox: vi.fn(),
 }));
+
+vi.mock("@/lib/brain-skills", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/brain-skills")>();
+  return {
+    ...actual,
+    activateAndListGoatChatSessionSkills: vi.fn(),
+    resolveGoatBrainSkillMentions: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/chat", () => ({
   createDbGoatChatStore: vi.fn(() => ({})),
@@ -85,6 +99,8 @@ describe("POST /api/chat", () => {
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "test-key");
     mockListCurrentUserGoatTaskSchedules().mockResolvedValue([]);
     mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
+    vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([]);
+    vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([]);
   });
 
   it("rejects unauthenticated requests", async () => {
@@ -120,6 +136,164 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toContain("Messages can be at most");
+  });
+
+  it("activates a selected skill on its message while preserving stored content", async () => {
+    mockAuth();
+    vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "How coding work should happen.",
+        instructions: "Inspect, implement, and verify.",
+      },
+    ]);
+    mockCreateGoatChatUserTurn().mockResolvedValue({
+      session: { id: "session_1", model: "openai/gpt-5.5" },
+      userMessage: { id: "user_message_2" },
+      storedMessages: [],
+      messages: [
+        { id: "user_message_1", role: "user", parts: [{ type: "text", text: "Earlier" }] },
+        { id: "assistant_1", role: "assistant", parts: [{ type: "text", text: "Answer" }] },
+        {
+          id: "user_message_2",
+          role: "user",
+          parts: [{ type: "text", text: "Implement this" }],
+        },
+      ],
+    } as never);
+    vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([
+      {
+        chatSessionId: "session_1",
+        skillId: "coding-work",
+        brainRef: "goat_brain_user_1",
+        activatedMessageId: "user_message_2",
+        name: "Coding work",
+        description: "How coding work should happen.",
+        instructions: "Inspect, implement, and verify.",
+        createdAt: new Date("2026-07-17T00:00:00Z"),
+      },
+    ]);
+    mockStreamText().mockReturnValue({
+      toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+    } as never);
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.5",
+        message: {
+          id: "ui_user_2",
+          role: "user",
+          parts: [{ type: "text", text: "Implement this" }],
+          metadata: {
+            mentions: [{ kind: "skill", brainRef: "goat_brain_user_1", id: "coding-work" }],
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockCreateGoatChatUserTurn()).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "Implement this" }),
+      expect.anything(),
+    );
+    expect(activateAndListGoatChatSessionSkills).toHaveBeenCalledWith({
+      chatSessionId: "session_1",
+      activatedMessageId: "user_message_2",
+      brainRef: "goat_brain_user_1",
+      skills: [expect.objectContaining({ id: "coding-work" })],
+    });
+    const modelUiMessages = vi.mocked(convertToModelMessages).mock
+      .calls[0]?.[0] as unknown as Array<{
+      parts: Array<{ type: string; text?: string }>;
+    }>;
+    expect(modelUiMessages[0]?.parts[0]?.text).toBe("Earlier");
+    expect(modelUiMessages[2]?.parts[0]?.text).toContain(
+      '"instructions":"Inspect, implement, and verify."',
+    );
+    expect(modelUiMessages[2]?.parts[0]?.text).toContain('"userRequest":"Implement this"');
+  });
+
+  it("replays an activated skill from its original message on later turns", async () => {
+    mockAuth();
+    mockCreateGoatChatUserTurn().mockResolvedValue({
+      session: { id: "session_1", model: "openai/gpt-5.5" },
+      userMessage: { id: "user_message_2" },
+      storedMessages: [],
+      messages: [
+        {
+          id: "user_message_1",
+          role: "user",
+          parts: [{ type: "text", text: "@skill/coding-work Implement this" }],
+        },
+        { id: "assistant_1", role: "assistant", parts: [{ type: "text", text: "Done" }] },
+        {
+          id: "user_message_2",
+          role: "user",
+          parts: [{ type: "text", text: "Now refine it" }],
+        },
+      ],
+    } as never);
+    vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([
+      {
+        chatSessionId: "session_1",
+        skillId: "coding-work",
+        brainRef: "goat_brain_user_1",
+        activatedMessageId: "user_message_1",
+        name: "Coding work",
+        description: "How coding work should happen.",
+        instructions: "Inspect, implement, and verify.",
+        createdAt: new Date("2026-07-17T00:00:00Z"),
+      },
+    ]);
+    mockStreamText().mockReturnValue({
+      toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+    } as never);
+
+    const response = await POST(
+      jsonRequest({
+        sessionId: "session_1",
+        model: "openai/gpt-5.5",
+        message: {
+          id: "ui_user_2",
+          role: "user",
+          parts: [{ type: "text", text: "Now refine it" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const modelUiMessages = vi.mocked(convertToModelMessages).mock
+      .calls[0]?.[0] as unknown as Array<{ parts: Array<{ type: string; text?: string }> }>;
+    expect(modelUiMessages[0]?.parts[0]?.text).toContain(
+      '"instructions":"Inspect, implement, and verify."',
+    );
+    expect(modelUiMessages[2]?.parts[0]?.text).toBe("Now refine it");
+  });
+
+  it("rejects stale structured skill references before storing the turn", async () => {
+    mockAuth();
+    vi.mocked(resolveGoatBrainSkillMentions).mockRejectedValue(
+      new GoatBrainSkillMentionError("Skill is unavailable."),
+    );
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.5",
+        message: {
+          id: "ui_user_stale",
+          role: "user",
+          parts: [{ type: "text", text: "Implement this" }],
+          metadata: {
+            mentions: [{ kind: "skill", brainRef: "goat_brain_user_1", id: "missing" }],
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe("Skill is unavailable.");
+    expect(mockCreateGoatChatUserTurn()).not.toHaveBeenCalled();
   });
 
   it("wires the personal brain CLI tool into the model stream", async () => {

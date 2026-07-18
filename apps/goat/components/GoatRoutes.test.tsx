@@ -20,7 +20,7 @@ const appDataMock = vi.hoisted(() => ({
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
     workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
-    featureFlags: { taskSpawning: false, localCodexBridge: false },
+    featureFlags: { taskSpawning: false, localCodexBridge: false, chatCapabilities: false },
     integrations: {},
   },
 }));
@@ -28,6 +28,7 @@ const appDataMock = vi.hoisted(() => ({
 const userPreferencesMock = vi.hoisted(() => ({
   updateGoatLocalCodexBetaAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateGoatTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateGoatChatCapabilitiesBetaAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
 const themeMock = vi.hoisted(() => ({
@@ -105,6 +106,7 @@ vi.mock("@/components/SettingsIntegrationsPanel", () => ({
 vi.mock("@/lib/user-preferences", () => ({
   updateGoatLocalCodexBetaAction: userPreferencesMock.updateGoatLocalCodexBetaAction,
   updateGoatTaskSpawningAction: userPreferencesMock.updateGoatTaskSpawningAction,
+  updateGoatChatCapabilitiesBetaAction: userPreferencesMock.updateGoatChatCapabilitiesBetaAction,
 }));
 
 vi.mock("@/components/ThemeProvider", () => ({

@@ -9,6 +9,7 @@ import type {
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
+import type { GoatCapabilityEnvelope } from "@/lib/capabilities/types";
 import { finiteDurationMs } from "@/lib/chat-timing";
 import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 
@@ -41,6 +42,8 @@ export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
 export const SAVE_TO_BRAIN_TOOL_PART_TYPE = `tool-${SAVE_TO_BRAIN_TOOL_NAME}` as const;
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
+export const USE_CAPABILITY_TOOL_NAME = "use_capability";
+export const USE_CAPABILITY_TOOL_PART_TYPE = `tool-${USE_CAPABILITY_TOOL_NAME}` as const;
 
 export type GoatTaskCardMetadata = {
   id: string;
@@ -49,10 +52,16 @@ export type GoatTaskCardMetadata = {
   status?: GoatTaskStatus | null;
 };
 
-export type GoatChatMention = {
-  kind: "engine";
-  id: "codex";
-};
+export type GoatChatMention =
+  | {
+      kind: "engine";
+      id: "codex";
+    }
+  | {
+      kind: "skill";
+      brainRef: string;
+      id: string;
+    };
 
 // Attachment view riding on user-message metadata. The blob fields are only
 // present client → server on submit (the server re-validates them); server →
@@ -265,6 +274,17 @@ export type WebSearchToolOutput =
       error: string;
     };
 
+export type UseCapabilityToolInput = {
+  capability: string;
+  request: string;
+};
+
+// The worker's envelope plus the capability id, so the UI can label the row
+// without re-reading the input part.
+export type UseCapabilityToolOutput = GoatCapabilityEnvelope & {
+  capability: string;
+};
+
 export type GoatChatTools = {
   start_task: {
     input: StartTaskToolInput;
@@ -293,6 +313,10 @@ export type GoatChatTools = {
   web_search: {
     input: WebSearchToolInput;
     output: WebSearchToolOutput;
+  };
+  use_capability: {
+    input: UseCapabilityToolInput;
+    output: UseCapabilityToolOutput;
   };
   codex_command: {
     input: CodexCommandToolInput;
@@ -383,6 +407,23 @@ export function textFromGoatChatUiMessage(message: Pick<GoatChatUiMessage, "part
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
     .join("")
     .trim();
+}
+
+export function replaceGoatChatUiMessageText(
+  message: GoatChatUiMessage,
+  text: string,
+): GoatChatUiMessage {
+  let replaced = false;
+  const parts = message.parts.map((part) => {
+    if (part.type !== "text") return part;
+    if (replaced) return { ...part, text: "" };
+    replaced = true;
+    return { ...part, text };
+  });
+  return {
+    ...message,
+    parts: replaced ? parts : [{ type: "text", text }, ...parts],
+  };
 }
 
 export function toGoatChatUiMessage(message: GoatStoredChatMessage): GoatChatUiMessage {

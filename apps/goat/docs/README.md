@@ -86,6 +86,14 @@ recent open chat session. It passes those into `GoatSurface`.
 - `model`: the current chat model.
 - `message`: only the newest UI message.
 
+The composer can attach eligible pages from the active Brain's protected `skills/` folder with
+`@skill/<id>`. The visible token is paired with structured `{ kind: "skill", brainRef, id }`
+metadata; manually typed lookalikes stay plain text. The server resolves that metadata again under
+the current user's active-Brain access, rejects stale or cross-Brain references, and caps a turn at
+16 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable
+snapshot in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original
+version.
+
 When a stream finishes, the route attaches `sessionId` in message metadata. The client stores that
 id and calls `router.refresh()` only so persisted chat server props catch up. Persisted Goat app
 state such as tasks, task run events, integrations, and Brain documents is read through
@@ -137,6 +145,13 @@ Important runtime settings:
 
 The chat path is a normal request/response stream. It has no runner lease or durable retry. The
 durable boundary starts only when `start_task` creates a task row.
+
+Brain skills are user-authored, session-scoped context. Normal chat replays each immutable skill
+snapshot on the historical user message that activated it, so the full instructions remain in model
+history on later turns while visible chat content stays unchanged. Cloud Codex materializes every
+snapshot under `.agents/skills/<id>/SKILL.md` and sends newly activated skills to app-server as
+native `skill` inputs; Codex then keeps invoked instructions in its persistent thread. Skills are
+unavailable in Local Codex and are not copied into background, delegated, or recurring tasks.
 
 ## Local Codex Chat
 
@@ -204,6 +219,13 @@ time, the worker downloads the current turn's files into
 Image uploads are additionally passed to `turn/start` as `localImage` inputs, so screenshots are
 visible to the model rather than merely path-referenced. Keeping uploads outside the working
 directory prevents them from appearing in repository changes.
+
+Session skills are reconciled before every Cloud Codex turn under
+`/home/user/opencompany-goat/codex-chat/.agents/skills/`. The managed-skills manifest removes only
+OpenCompany-managed ids and preserves any unrelated native skills. A content fingerprint restarts
+the app-server daemon when the installed set changes, while the persistent Codex thread is resumed.
+Only skills whose first activation belongs to the current turn are included as native `skill`
+inputs; previously activated skills remain installed and in thread history.
 
 On the Goat home, open Cloud Codex sessions are projected into the unified Tasks section alongside
 background `goat.tasks`. This is a live UI projection of the chat-backed session and its
@@ -434,6 +456,8 @@ Important tables:
 - `goat.chat_messages`: persisted user and assistant chat messages. Assistant messages can point
   at a `taskId` so the UI can render a task card. Task completion notifications are also persisted
   here as synthetic assistant messages.
+- `goat.chat_session_skills`: immutable skill snapshots activated by user messages. A snapshot
+  remains available for the rest of that chat even if its source Brain changes or is deleted.
 - `goat.local_bridges`: paired local Codex bridge records with hashed tokens and heartbeat state.
 - `goat.local_codex_sessions`: per-chat local Codex runtime metadata such as repo path, worktree
   path, Codex thread id, active turn, status, and error.

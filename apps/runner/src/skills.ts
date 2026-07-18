@@ -27,6 +27,7 @@ const SANDBOX_USER = "user";
 const CODEX_MANAGED_SKILLS_MANIFEST = ".opencompany-managed-skills.json";
 type WorkspaceSkillReference = AgentExternalSkillReference & { source: AgentWorkspaceSkillSource };
 type MountedSkill = { id: string; files: AgentSkillFile[] };
+export type CodexSkillSnapshot = { id: string; files: AgentSkillFile[] };
 
 // Materialize the session's enabled skills into a read-only ./skills root. Each skill becomes
 // skills/<id>/<file> (e.g. skills/agent-self-edit/SKILL.md). Files are root-owned and
@@ -82,12 +83,33 @@ export async function materializeCodexSkillsForSession(input: {
 }): Promise<{ fingerprint: string; count: number }> {
   const layout = sandboxLayout(input.workdir);
   const root = `${layout.codexRoot}/.agents/skills`;
-  const manifestPath = `${root}/${CODEX_MANAGED_SKILLS_MANIFEST}`;
   const skills = await loadCodexSkillsForMount(input.workspaceId, input.config);
+  return materializeCodexManagedSkillTree({ sandbox: input.sandbox, root, skills });
+}
+
+export async function materializeCodexSkillSnapshotsForSession(input: {
+  sandbox: SandboxHandle;
+  codexWorkRoot: string;
+  skills: CodexSkillSnapshot[];
+}): Promise<{ fingerprint: string; count: number }> {
+  return materializeCodexManagedSkillTree({
+    sandbox: input.sandbox,
+    root: `${input.codexWorkRoot}/.agents/skills`,
+    skills: input.skills,
+  });
+}
+
+async function materializeCodexManagedSkillTree(input: {
+  sandbox: SandboxHandle;
+  root: string;
+  skills: CodexSkillSnapshot[];
+}) {
+  const manifestPath = `${input.root}/${CODEX_MANAGED_SKILLS_MANIFEST}`;
+  const skills = input.skills;
   for (const skill of skills) assertSafeSkillId(skill.id);
   const skillFiles = skills.flatMap((skill) =>
     skill.files.map((file) => ({
-      path: `${root}/${skill.id}/${file.path}`,
+      path: `${input.root}/${skill.id}/${file.path}`,
       content: file.content,
     })),
   );
@@ -95,7 +117,7 @@ export async function materializeCodexSkillsForSession(input: {
 
   await reconcileCodexManagedSkillTree({
     sandbox: input.sandbox,
-    root,
+    root: input.root,
     manifestPath,
     skillIds: currentSkillIds,
     files: skillFiles,

@@ -11,6 +11,7 @@ import {
   hashGoatUserId,
   recordGoatChatTurn,
   recordGoatCounter,
+  recordGoatHistogram,
   recordGoatModelCost,
   startGoatSpan,
 } from "@opencompany/goat-observability";
@@ -27,6 +28,20 @@ import { after } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
+import {
+  activateAndListGoatChatSessionSkills,
+  attachGoatBrainSkillsToPrompt,
+  GoatBrainSkillMentionError,
+  type GoatChatSessionSkillSnapshot,
+  readGoatBrainSkillMentionRefs,
+  resolveGoatBrainSkillMentions,
+} from "@/lib/brain-skills";
+import {
+  isGoatChatCapabilitiesKilled,
+  resolveGoatCapabilityUniverse,
+} from "@/lib/capabilities/registry";
+import type { GoatCapabilityCallDebug, ResolvedGoatCapability } from "@/lib/capabilities/types";
+import { runGoatCapabilityWorker } from "@/lib/capabilities/worker";
 import {
   createDbGoatChatStore,
   createGoatChatUserTurn,
@@ -62,7 +77,9 @@ import {
   type EditTaskScheduleToolOutput,
   type GoatChatMessageMetadata,
   type GoatChatUiMessage,
+  replaceGoatChatUiMessageText,
   textFromGoatChatUiMessage,
+  type UseCapabilityToolOutput,
   type WebSearchToolInput,
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
@@ -136,6 +153,24 @@ export async function POST(request: Request): Promise<Response> {
     return new Response("Attachments are not supported in engine chats yet.", { status: 400 });
   }
 
+  const parsedSkillMentions = readGoatBrainSkillMentionRefs(
+    message.metadata?.mentions ?? body.value.mentions,
+  );
+  if (!parsedSkillMentions.ok) {
+    return new Response(parsedSkillMentions.error, { status: 400 });
+  }
+  let resolvedSkills;
+  try {
+    resolvedSkills = await resolveGoatBrainSkillMentions({
+      activeBrainRef: context.activeBrain?.id ?? null,
+      mentions: parsedSkillMentions.mentions,
+    });
+  } catch (error) {
+    if (error instanceof GoatBrainSkillMentionError) {
+      return new Response(error.message, { status: 400 });
+    }
+    throw error;
+  }
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!gatewayApiKey) {
     return new Response("Goat chat is not configured.", { status: 503 });
@@ -160,6 +195,23 @@ export async function POST(request: Request): Promise<Response> {
   const exaApiKey = process.env.EXA_API_KEY?.trim();
   const canManageWorkspaceBrain = context.role === "admin";
   const taskToolsEnabled = context.user.taskSpawningEnabled && canManageWorkspaceBrain;
+
+  // Capability universe: resolved per request from real connection state, only
+  // when the beta flag is on and the kill switch is off. Flag off means zero
+  // extra queries and a byte-identical prompt and tool set.
+  const capabilitiesEnabled =
+    context.user.chatCapabilitiesBetaEnabled === true &&
+    !isGoatChatCapabilitiesKilled() &&
+    !requestedEngine;
+  const capabilityUniverse = capabilitiesEnabled
+    ? await resolveGoatCapabilityUniverse(context.user.workosUserId).catch((error) => {
+        logger.warn("Goat chat capability resolution failed", {
+          event: "goat.chat_capability_resolution_failed",
+          error,
+        });
+        return [] as ResolvedGoatCapability[];
+      })
+    : [];
 
   const store = createDbGoatChatStore();
   const recurringSchedules = taskToolsEnabled ? await listCurrentUserGoatTaskSchedules() : [];
@@ -245,6 +297,19 @@ export async function POST(request: Request): Promise<Response> {
     finishChatTelemetry("failure", {}, error);
     throw error;
   }
+  let sessionSkills: GoatChatSessionSkillSnapshot[];
+  try {
+    sessionSkills = await activateAndListGoatChatSessionSkills({
+      chatSessionId: turn.session.id,
+      activatedMessageId: turn.userMessage.id,
+      brainRef: context.activeBrain?.id ?? "",
+      skills: resolvedSkills,
+    });
+  } catch (error) {
+    finishChatTelemetry("failure", {}, error);
+    throw error;
+  }
+  const skillsByActivationMessageId = groupSessionSkillsByActivationMessage(sessionSkills);
   after(
     generateGoatChatTitleForMessage({
       sessionId: turn.session.id,
@@ -271,6 +336,9 @@ export async function POST(request: Request): Promise<Response> {
       activeStreamId = null;
     }
   };
+
+  let capabilityCallOrdinal = 0;
+  const capabilityDebug: Array<GoatCapabilityCallDebug & { toolCallId: string }> = [];
 
   const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
@@ -374,6 +442,48 @@ export async function POST(request: Request): Promise<Response> {
               },
               chatSpan,
             }),
+        }
+      : {}),
+    ...(capabilityUniverse.length > 0
+      ? {
+          capabilities: {
+            list: capabilityUniverse.map((capability) => ({ id: capability.id })),
+            execute: (call) => {
+              capabilityCallOrdinal += 1;
+              const capability = capabilityUniverse.find((entry) => entry.id === call.capability);
+              if (!capability) {
+                return Promise.resolve({
+                  capability: call.capability,
+                  summary: "",
+                  entities: [],
+                  error: {
+                    code: "invalid_request" as const,
+                    hint: `"${call.capability}" is not an available capability.`,
+                  },
+                });
+              }
+              return executeChatCapabilityCall({
+                capability,
+                request: call.request,
+                toolCallId: call.toolCallId,
+                ordinal: capabilityCallOrdinal,
+                gatewayApiKey,
+                signal: generationSignal,
+                currentDate,
+                user: context.user,
+                workspaceId: context.workspace.id,
+                chatSessionId: turn.session.id,
+                userMessageId: turn.userMessage.id,
+                attributes: {
+                  ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
+                  "goat.chat_session_id": turn.session.id,
+                  "goat.chat_message_id": turn.userMessage.id,
+                },
+                chatSpan,
+                capabilityDebug,
+              });
+            },
+          },
         }
       : {}),
     ...(taskToolsEnabled
@@ -503,6 +613,7 @@ export async function POST(request: Request): Promise<Response> {
       ...debugTrace,
       durationMs: elapsedChatDurationMs(),
       ...(generationSignal.aborted ? { aborted: true } : {}),
+      ...(capabilityDebug.length > 0 ? { capabilityCalls: capabilityDebug } : {}),
       error: error instanceof Error ? error.message : "Goat chat stream ended before completion.",
       finishReason,
     };
@@ -574,10 +685,31 @@ export async function POST(request: Request): Promise<Response> {
       taskToolsEnabled,
       scheduleToolsEnabled: taskToolsEnabled,
       recurringSchedules,
+      ...(capabilityUniverse.length > 0
+        ? {
+            capabilities: capabilityUniverse.map((capability) => ({
+              id: capability.id,
+              indexLine: capability.indexLine,
+            })),
+          }
+        : {}),
     }),
     messages: await convertToModelMessages(
       await hydrateGoatChatAttachmentParts({
-        uiMessages: turn.messages,
+        // Match native skill runtimes: the full skill enters history on its activation message and
+        // remains available on every later turn in this chat without re-inlining it elsewhere.
+        uiMessages: turn.messages.map((uiMessage) => {
+          const activatedSkills = skillsByActivationMessageId.get(uiMessage.id) ?? [];
+          return activatedSkills.length > 0
+            ? replaceGoatChatUiMessageText(
+                uiMessage,
+                attachGoatBrainSkillsToPrompt(
+                  textFromGoatChatUiMessage(uiMessage),
+                  activatedSkills,
+                ),
+              )
+            : uiMessage;
+        }),
         storedMessages: turn.storedMessages,
         modelId: turn.session.model,
       }),
@@ -693,6 +825,7 @@ export async function POST(request: Request): Promise<Response> {
         durationMs: elapsedChatDurationMs(),
         ...(isAborted ? { aborted: true } : {}),
         ...(responseMessage.parts.length ? { uiMessageParts: responseMessage.parts } : {}),
+        ...(capabilityDebug.length > 0 ? { capabilityCalls: capabilityDebug } : {}),
         ...(finishReasonText ? { finishReason: finishReasonText } : {}),
       };
       const assistantMessageInput = {
@@ -732,6 +865,24 @@ export async function POST(request: Request): Promise<Response> {
       });
     },
   });
+}
+
+function groupSessionSkillsByActivationMessage(skills: GoatChatSessionSkillSnapshot[]) {
+  const grouped = new Map<
+    string,
+    Array<{ id: string; name: string; description: string; instructions: string }>
+  >();
+  for (const skill of skills) {
+    const activated = grouped.get(skill.activatedMessageId) ?? [];
+    activated.push({
+      id: skill.skillId,
+      name: skill.name,
+      description: skill.description,
+      instructions: skill.instructions,
+    });
+    grouped.set(skill.activatedMessageId, activated);
+  }
+  return grouped;
 }
 
 async function executeChatWebSearch(input: {
@@ -779,6 +930,173 @@ async function executeChatWebSearch(input: {
       ok: false,
       error: error instanceof Error ? error.message : "Web search failed.",
     };
+  }
+}
+
+async function executeChatCapabilityCall(input: {
+  capability: ResolvedGoatCapability;
+  request: string;
+  toolCallId: string;
+  ordinal: number;
+  gatewayApiKey: string;
+  signal: AbortSignal;
+  currentDate: Date;
+  user: {
+    workosUserId: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    timezone: string;
+  };
+  workspaceId: string;
+  chatSessionId: string;
+  userMessageId: string;
+  attributes: Record<string, string | number | boolean | null | undefined>;
+  chatSpan: ReturnType<typeof startGoatSpan>;
+  capabilityDebug: Array<GoatCapabilityCallDebug & { toolCallId: string }>;
+}): Promise<UseCapabilityToolOutput> {
+  const startedAt = performance.now();
+  // Created inside the chat-turn span's context so it nests as a child span.
+  const capabilitySpan = input.chatSpan.runInContext(() =>
+    startGoatSpan(GOAT_SPANS.chatCapabilityCall, {
+      ...input.attributes,
+      "goat.capability": input.capability.id,
+      "goat.worker_model": input.capability.workerModel,
+    }),
+  );
+  const metricAttributes = {
+    "goat.capability": input.capability.id,
+    "goat.worker_model": input.capability.workerModel,
+  };
+
+  try {
+    const result = await runGoatCapabilityWorker({
+      capability: input.capability,
+      request: input.request,
+      context: {
+        userWorkosId: input.user.workosUserId,
+        signal: input.signal,
+        currentDate: input.currentDate,
+        userContext: {
+          email: input.user.email,
+          firstName: input.user.firstName,
+          lastName: input.user.lastName,
+          timezone: input.user.timezone,
+        },
+      },
+      gatewayApiKey: input.gatewayApiKey,
+      attribution: createGoatGatewayAttribution({
+        userWorkosId: input.user.workosUserId,
+        feature: "capability",
+        chatSessionId: input.chatSessionId,
+        tags: [`capability:${input.capability.id}`],
+      }),
+    });
+
+    input.capabilityDebug.push({ toolCallId: input.toolCallId, ...result.debug });
+    capabilitySpan.end({
+      "goat.outcome": result.debug.outcome === "error" ? "failure" : "success",
+      "goat.capability_steps": result.debug.steps,
+      "goat.capability_entity_count": result.envelope.entities.length,
+      ...(result.debug.errorCode ? { "goat.capability_error_code": result.debug.errorCode } : {}),
+    });
+    recordGoatCounter(GOAT_METRICS.chatCapabilityCallsTotal, 1, {
+      ...metricAttributes,
+      "goat.outcome": result.debug.outcome,
+    });
+    recordGoatHistogram(
+      GOAT_METRICS.chatCapabilityCallDurationMs,
+      Math.max(0, Math.round(performance.now() - startedAt)),
+      metricAttributes,
+    );
+    await recordCapabilityWorkerCost({
+      workerModel: input.capability.workerModel,
+      usage: result.usage,
+      capabilityId: input.capability.id,
+      workspaceId: input.workspaceId,
+      userWorkosId: input.user.workosUserId,
+      chatSessionId: input.chatSessionId,
+      userMessageId: input.userMessageId,
+      ordinal: input.ordinal,
+    });
+
+    return { capability: input.capability.id, ...result.envelope };
+  } catch (error) {
+    // The worker converts its own failures into envelopes; reaching here means
+    // infrastructure broke. Still return an envelope so the turn survives.
+    capabilitySpan.fail(error, metricAttributes);
+    capabilitySpan.end({ "goat.outcome": "failure" });
+    recordGoatCounter(GOAT_METRICS.chatCapabilityCallsTotal, 1, {
+      ...metricAttributes,
+      "goat.outcome": "error",
+    });
+    logger.warn("Goat chat capability call failed", {
+      event: "goat.chat_capability_call_failed",
+      capability: input.capability.id,
+      chat_session_id: input.chatSessionId,
+      error,
+    });
+    return {
+      capability: input.capability.id,
+      summary: "",
+      entities: [],
+      error: {
+        code: "internal",
+        hint: `The ${input.capability.id} lookup failed unexpectedly; suggest trying again.`,
+      },
+    };
+  }
+}
+
+// Worker LLM calls run inside tool execution, outside the main stream's
+// totalUsage, so they get their own metric surface and credit debit. The
+// ordinal keys idempotency per call within the turn.
+async function recordCapabilityWorkerCost(input: {
+  workerModel: string;
+  usage: LanguageModelUsage;
+  capabilityId: string;
+  workspaceId: string;
+  userWorkosId: string;
+  chatSessionId: string;
+  userMessageId: string;
+  ordinal: number;
+}) {
+  const cost = calculateModelUsageCost({
+    modelName: input.workerModel,
+    inputTokens: readUsageNumber(input.usage.inputTokens),
+    inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
+    inputCacheReadTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheReadTokens),
+    inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
+    outputTokens: readUsageNumber(input.usage.outputTokens),
+  });
+  recordGoatModelCost({
+    costUsdMicros: cost.totalCostUsdMicros,
+    attributes: {
+      "goat.model": input.workerModel,
+      "goat.surface": "chat_capability",
+    },
+  });
+  if (!cost.billable) return;
+  try {
+    await recordGoatCreditDebit({
+      workspaceId: input.workspaceId,
+      userWorkosId: input.userWorkosId,
+      source: "chat_model_usage",
+      idempotencyKey: `chat:${input.userMessageId}:capability:${input.ordinal}`,
+      chatSessionId: input.chatSessionId,
+      providerCostUsdMicros: cost.providerCostUsdMicros,
+      platformFeeUsdMicros: cost.platformFeeUsdMicros,
+      totalCostUsdMicros: cost.totalCostUsdMicros,
+      costBasis: cost.costBasis,
+      metadata: { kind: "capability_worker", capability: input.capabilityId },
+    });
+  } catch (error) {
+    logger.warn("Goat capability credit debit failed", {
+      event: "goat.chat_capability_credit_debit_failed",
+      workspace_id: input.workspaceId,
+      chat_session_id: input.chatSessionId,
+      error,
+    });
   }
 }
 

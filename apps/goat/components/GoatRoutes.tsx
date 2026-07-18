@@ -4,6 +4,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
+  Blocks,
   CircleUserRound,
   Code2,
   Download,
@@ -44,6 +45,7 @@ import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import {
+  updateGoatChatCapabilitiesBetaAction,
   updateGoatLocalCodexBetaAction,
   updateGoatTaskSpawningAction,
 } from "@/lib/user-preferences";
@@ -75,6 +77,7 @@ export function GoatHomeRoute({
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <GoatSurface
+        key={data.activeBrain?.id ?? "no-brain"}
         tasks={data.tasks}
         schedules={data.schedules}
         defaultModel={DEFAULT_GOAT_MODEL}
@@ -220,6 +223,13 @@ export function GoatPreferencesSettingsRoute() {
           checked={featureFlags.localCodexBridge}
           update={updateGoatLocalCodexBetaAction}
           showLocalBridgePairing
+        />
+        <BetaFeatureSwitch
+          icon={Blocks}
+          label="Chat capabilities"
+          description="Let chat query connected integrations (Slack, Linear, YouTube) directly"
+          checked={featureFlags.chatCapabilities}
+          update={updateGoatChatCapabilitiesBetaAction}
         />
       </section>
     </GoatSettingsContent>

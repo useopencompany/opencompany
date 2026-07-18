@@ -1,0 +1,70 @@
+---
+title: "Light Work and Deep Work: How We Route AI Agent Tasks"
+description: "Giving an AI assistant a lot of tools without making it slow, expensive, or dumb is the core problem of agent design. Here's why we split it into light work and deep work — and route each to the engine that's actually good at it."
+date: "2026-07-18"
+author: "Louis Morgner"
+keywords:
+  - ai agent tool use
+  - ai agent architecture
+  - deferred tool loading
+  - multi-agent delegation
+  - ai agent orchestration
+---
+
+We've been building an AI company called OpenCompany, and lately most of my time goes into one unglamorous problem: how do you let an AI assistant use a lot of tools without making it slow, expensive, or dumb.
+
+This sounds like a small problem. It isn't. It's the problem.
+
+Here's the shape of it. Every tool you connect to an AI model — Slack, Linear, your calendar, whatever — comes with a description of what it does and how to call it. The model needs that description in front of it to use the tool correctly. So the natural thing to do is paste all the descriptions into the prompt, every time, for every tool you might ever need.
+
+This works fine with five tools. It falls apart with fifty. Some people have measured this: connect a handful of real integrations and you can burn 50,000 or 100,000 tokens before the model has read a single word you typed. And it's not just slow and expensive. Past a certain point, the model actually gets worse at picking the right tool, because you've buried the right answer in a pile of a hundred plausible ones.
+
+So everyone doing this seriously has the same problem, and it turns out the two biggest labs have converged on roughly the same fix, which tells you something.
+
+## What OpenAI and Anthropic are doing
+
+Anthropic's answer, which they've written about, is to stop showing the model every tool up front. Instead the model gets one small tool called search. When it needs to do something, it searches for the right tool by name, gets back a short list of candidates, picks one, and only then does the full technical description of that one tool load into its head. Everything else stays hidden until needed. They call this deferred loading, and it cuts the token cost by something like ten times in their own tests, while — and this is the part I didn't expect — actually making the model better at picking the right tool. Having fewer things in front of you to choose from turns out to help, not just to save money.
+
+The second thing they've done is more interesting to me. Instead of having the model call one tool, look at the result, call another tool, look at that result, and so on — which is slow, and floods the model's context with a lot of raw JSON it doesn't need — they let the model write a small program that calls several tools in one shot, filters the results down, and only hands back the final answer. A task that might have taken 150,000 tokens of back-and-forth drops to 2,000. The trick is that they don't teach the model some new special language for this. They just expose the tools as ordinary typed functions and let the model write ordinary code, because writing code is something these models are already extremely good at. You don't have to invent a new skill. You just point an old one at a new problem.
+
+Both of these ideas are versions of the same idea: don't show the model everything. Show it only what it needs, right when it needs it, and let it ask for more.
+
+## Where I think this runs out of road
+
+We looked hard at doing exactly this. And for tools with a clean, predictable shape — anything that reduces neatly to "call this function with these arguments" — I think it's clearly right, and we'll probably build something like it eventually.
+
+But a lot of the tools we actually want to give people aren't like that. "Find the last messages between me and Joe about pricing" isn't really a function call. It's a small piece of judgment — who counts as "Joe," what counts as "about pricing," how far back is "last." You can wrap that in a rigid schema if you want, but you're fighting the tool's nature the whole way, and you'll be back here rewriting it every time someone phrases the request slightly differently.
+
+So we started asking a different question. What if, instead of trying to make the main model do all this work directly, we just let it delegate the way you'd delegate to a competent but junior coworker: in plain English, and let them figure out the mechanics.
+
+This is where I started thinking about the problem as two different kinds of work, not one.
+
+## Light work and deep work as two different problems
+
+Call the first kind light work. Light work is a request that's small, well-scoped, and answerable in a few steps — find something, summarize something, fetch a number. It doesn't need deep judgment about a whole codebase or a multi-hour plan. It just needs someone to go do the errand and come back with the answer.
+
+Call the second kind deep work. Deep work is everything that isn't that. Rewrite this feature. Fix this bug across ten files. Plan and carry out something with real, cascading side effects. It needs a plan, not just an errand — and it usually needs the ability to go back and forth with itself for a while, catching its own mistakes as it goes.
+
+These two kinds of work don't want the same treatment, and I think a lot of the tool-use design problem is really this classification problem in disguise. Once you see it as light work versus deep work, the rest of the architecture mostly falls out on its own.
+
+## How we handle light work
+
+For light work, here's roughly what we landed on. The main model doesn't see any tool schemas at all — not Slack's, not Linear's, nothing. It just sees a short list of one-line descriptions of what's available. "Slack — read channels and DMs. Can't send messages." That's it.
+
+When it needs one, it dispatches a plain-English request to it: "find DMs between Louis and Joe about pricing from the last two weeks." That request goes to a fresh, small, cheap model that knows nothing except how to do that one job. It has its own narrow set of tools, its own cheat sheet for how to do the job well, and a hard limit on how long it's allowed to take. It does the work, and it hands back a short, structured answer — a couple of sentences plus the specific ids of anything it found — and nothing else. The raw API responses, the tool schemas, all the mechanical detail, never touch the main model's context at all.
+
+It turns out this isn't a new idea either — Anthropic runs something close to this in their own research product, where a lead model farms work out to a swarm of smaller ones and only ever sees their conclusions. Their own numbers say it beats a single model doing everything itself by a wide margin, at a real cost: something like fifteen times the tokens of a normal conversation. That's the honest price of light-work delegation. You're not saving tokens the way the code-execution trick does. You're spending them somewhere else — on a cheap, fast, disposable model — so the expensive model in the driver's seat stays sharp and uncluttered.
+
+We think that trade is worth it for light work, and we're planning to borrow the other idea for the parts of it that need to move fast internally: inside the small worker's own head, when it does need to do several things in sequence, let it write a bit of code to do it, the same way Anthropic's model does, instead of calling one tool at a time. Get the reliability benefits of "let it write code" and the judgment benefits of "let it use plain English," each where they actually fit.
+
+## How we handle deep work
+
+Deep work gets a completely different answer, and it's a simple one: we don't try to handle it ourselves. No cheap worker model is going to rewrite a feature well, and honestly, no amount of clever prompting closes that gap. Codex and Claude Code already do this kind of work better than anything we'd build ourselves, because a huge amount of engineering has gone into making them good at exactly this.
+
+So for deep work, the main model hands the whole problem to one of these outside coding agents, wired up with the same integrations and context we already have, and the result comes back into the same chat. From where you're sitting, it should feel like one assistant. Underneath, it's routing you to whichever engine actually fits the size of the job — light work handled by our own fast, narrow workers, deep work handed off whole to a frontier harness built for exactly that.
+
+I like this because it doesn't ask us to out-engineer Anthropic or OpenAI on deep work — we just don't try to. We spend our effort on the judgment and glue: knowing what you're connected to, understanding what "about pricing" means in the context of your Slack, and telling light work apart from deep work in the first place so each gets routed to the thing that's actually good at it. That's a different problem than "build a better coding agent," and it's one we think we're actually well positioned to solve.
+
+## Where this stands
+
+I want to be honest that this is a thesis, not a result. We haven't shipped this, and I can't tell you the light work / deep work split works better than the alternatives yet — only that it seems right, and that some of the smartest people in this field, working on a related but different problem, arrived at neighboring ideas. We're building the first version now. I'll write about what we actually find.

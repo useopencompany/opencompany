@@ -23,6 +23,7 @@ describe("goat brain document", () => {
         type: "company",
         status: "active",
         title: "Acme",
+        description: "Company account context.",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-02T00:00:00.000Z",
         relations: [{ type: "employs", to: "jane-doe" }],
@@ -89,6 +90,32 @@ Original timeline body.
         body: "Original timeline body.",
       },
     ]);
+  });
+
+  it("preserves descriptions when replacing compiled truth", () => {
+    const source = serializeGoatBrainDocument({
+      frontmatter: {
+        id: "coding-work",
+        folder: "skills",
+        kind: "page",
+        type: "note",
+        status: "draft",
+        title: "Coding work",
+        description: "How coding work should happen.",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        relations: [],
+      },
+      title: "Coding work",
+      compiledTruth: "Old instructions.",
+      timeline: [],
+    });
+
+    const updated = parseGoatBrainDocument(
+      replaceGoatBrainCompiledTruth(source, "New instructions."),
+    );
+    expect(updated.frontmatter.description).toBe("How coding work should happen.");
+    expect(updated.compiledTruth).toBe("New instructions.");
   });
 
   it("preserves timeline when adding a missing compiled truth section", () => {
