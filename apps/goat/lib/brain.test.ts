@@ -150,6 +150,38 @@ describe("manual Goat brain documents", () => {
         description: " ",
       }),
     ).resolves.toEqual({ ok: false, message: "Skill description cannot be empty." });
+    await expect(
+      createGoatBrainSkillForUser({
+        brainRef: "goat_brain_1",
+        userWorkosId: "user_1",
+        folderPath: "skills",
+        name: "Coding work",
+        description: "Use <unsafe> markup.",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message: 'Skill descriptions cannot contain "<" or ">".',
+    });
+    expect(dbMocks.createGoatBrainMarkdownDocument).not.toHaveBeenCalled();
+  });
+
+  it("keeps allocated skill ids within the native 64-character limit", async () => {
+    const fullId = `s${"x".repeat(63)}`;
+    dbMocks.listGoatBrainFiles.mockResolvedValueOnce([{ brainId: fullId }]);
+
+    const result = await createGoatBrainSkillForUser({
+      brainRef: "goat_brain_1",
+      userWorkosId: "user_1",
+      folderPath: "skills",
+      name: `s${"x".repeat(100)}`,
+      description: "How coding work should happen.",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    const input = dbMocks.createGoatBrainMarkdownDocument.mock.calls[0]?.[0];
+    const id = parseGoatBrainDocument(input.content).frontmatter.id;
+    expect(id).toHaveLength(64);
+    expect(id?.endsWith("-2")).toBe(true);
   });
 
   it("preserves a skill description across rename and move rewrites", async () => {

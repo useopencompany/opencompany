@@ -166,6 +166,7 @@ export async function createGoatBrainDocumentForUser(input: {
   fileName: string;
   description?: string;
   compiledTruth?: string;
+  brainIdMaxLength?: number;
 }): Promise<BrainMutationResult> {
   const folderPath = normalizeGoatBrainFolderForV1(input.folderPath);
   if (!isValidGoatBrainFolder(folderPath)) {
@@ -183,7 +184,8 @@ export async function createGoatBrainDocumentForUser(input: {
     return { ok: false, message: "File names must be 160 characters or fewer." };
   }
 
-  const baseId = normalizeGoatBrainId(title);
+  const brainIdMaxLength = Math.min(80, Math.max(1, input.brainIdMaxLength ?? 80));
+  const baseId = normalizeGoatBrainId(title).slice(0, brainIdMaxLength).replace(/-+$/g, "");
   if (!baseId) {
     return { ok: false, message: "File names must contain at least one letter or number." };
   }
@@ -192,7 +194,7 @@ export async function createGoatBrainDocumentForUser(input: {
     const rows = await listGoatBrainFiles({ brainRef: input.brainRef }, { includeInvalid: true });
     const used = new Set(rows.map((row) => row.brainId));
     for (let suffix = 1; suffix < 1000; suffix++) {
-      const brainId = goatBrainIdCandidate(baseId, suffix);
+      const brainId = goatBrainIdCandidate(baseId, suffix, brainIdMaxLength);
       if (used.has(brainId)) continue;
       const path = goatBrainFilePathFor(folderPath, brainId);
       const row = await createGoatBrainMarkdownDocument({
@@ -240,6 +242,7 @@ export async function createGoatBrainSkillForUser(input: {
     folderPath,
     fileName: input.name,
     description: input.description.trim(),
+    brainIdMaxLength: 64,
   });
 }
 
@@ -583,10 +586,10 @@ export async function nextAvailableGoatBrainId(brainRef: string, baseId: string)
   throw new Error("Could not allocate a unique brain id.");
 }
 
-function goatBrainIdCandidate(base: string, suffix: number): string {
+function goatBrainIdCandidate(base: string, suffix: number, maxLength = 80): string {
   if (suffix <= 1) return base;
   const ending = `-${suffix}`;
-  const prefix = base.slice(0, 80 - ending.length).replace(/-+$/g, "");
+  const prefix = base.slice(0, maxLength - ending.length).replace(/-+$/g, "");
   return `${prefix || "untitled"}${ending}`;
 }
 
@@ -670,6 +673,9 @@ function validateGoatBrainSkillFields(input: { name: string; description: string
   if (!description) return "Skill description cannot be empty.";
   if (description.length > 1_000) {
     return "Skill descriptions must be 1,000 characters or fewer.";
+  }
+  if (description.includes("<") || description.includes(">")) {
+    return 'Skill descriptions cannot contain "<" or ">".';
   }
   return null;
 }
