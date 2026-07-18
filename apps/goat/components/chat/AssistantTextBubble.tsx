@@ -2,7 +2,7 @@
 
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { cn } from "@opencompany/ui/lib/utils";
-import { BookOpen } from "lucide-react";
+import { BookOpen, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Markdown } from "@/components/Markdown";
@@ -102,7 +102,7 @@ function BrainCitationChips({ citations }: { citations: BrainCitation[] }) {
   const hiddenCitations = citations.slice(clampedVisibleCount);
 
   return (
-    <div className="relative mt-2 max-w-full" aria-label="Brain sources">
+    <div className="relative mt-2 max-w-full" aria-label="Sources">
       <div ref={containerRef} className="max-w-full">
         <div className="flex max-w-full items-center gap-1 overflow-hidden whitespace-nowrap">
           {visibleCitations.map((citation, index) => (
@@ -152,13 +152,42 @@ function BrainCitationChip({ citation, index }: { citation: BrainCitation; index
   const ariaLabel = `Source ${index}: ${citation.title}`;
 
   return (
-    <Link
-      href={citation.href}
-      title={citation.title}
-      aria-label={ariaLabel}
-      className={citationChipClassName}
-    >
+    <CitationLink citation={citation} ariaLabel={ariaLabel} className={citationChipClassName}>
       <BrainCitationChipContent citation={citation} index={index} />
+    </CitationLink>
+  );
+}
+
+// External citations (capability entities: Slack messages, Linear issues, …)
+// point at provider URLs and open in a new tab; internal ones are Brain routes.
+function CitationLink({
+  citation,
+  ariaLabel,
+  className,
+  children,
+}: {
+  citation: BrainCitation;
+  ariaLabel: string;
+  className: string;
+  children: React.ReactNode;
+}) {
+  if (citation.external) {
+    return (
+      <a
+        href={citation.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={citation.title}
+        aria-label={ariaLabel}
+        className={className}
+      >
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link href={citation.href} title={citation.title} aria-label={ariaLabel} className={className}>
+      {children}
     </Link>
   );
 }
@@ -175,7 +204,7 @@ function BrainCitationOverflow({
     <Popover>
       <PopoverTrigger
         type="button"
-        aria-label={`Show ${hiddenCount} more brain ${pluralizeSource(hiddenCount)}`}
+        aria-label={`Show ${hiddenCount} more ${pluralizeSource(hiddenCount)}`}
         className={cn(
           citationChipClassName,
           "shrink-0 text-ink-subtle hover:text-ink data-[popup-open]:border-border-strong data-[popup-open]:text-ink",
@@ -193,17 +222,16 @@ function BrainCitationOverflow({
         </div>
         <div className="max-h-[260px] overflow-y-auto">
           {citations.map((citation, index) => (
-            <Link
+            <CitationLink
               key={citation.key}
-              href={citation.href}
-              title={citation.title}
-              aria-label={`Source ${startIndex + index}: ${citation.title}`}
+              citation={citation}
+              ariaLabel={`Source ${startIndex + index}: ${citation.title}`}
               className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
             >
               <BrainCitationIndex index={startIndex + index} />
-              <BookOpen size={11} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
+              <CitationIcon citation={citation} size={11} />
               <span className="min-w-0 truncate">{citation.label}</span>
-            </Link>
+            </CitationLink>
           ))}
         </div>
       </PopoverContent>
@@ -245,10 +273,15 @@ function BrainCitationChipContent({ citation, index }: { citation: BrainCitation
   return (
     <>
       <BrainCitationIndex index={index} />
-      <BookOpen size={10} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
+      <CitationIcon citation={citation} size={10} />
       <span className="min-w-0 truncate">{citation.label}</span>
     </>
   );
+}
+
+function CitationIcon({ citation, size }: { citation: BrainCitation; size: number }) {
+  const Icon = citation.external ? ExternalLink : BookOpen;
+  return <Icon size={size} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />;
 }
 
 function BrainCitationIndex({ index }: { index: number }) {

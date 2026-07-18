@@ -9,6 +9,7 @@ import {
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
   normalizeGoatBrainReadToolInput,
 } from "@/lib/brain-surface";
+import type { GoatCapabilityCallDebug } from "@/lib/capabilities/types";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
@@ -28,6 +29,9 @@ import {
   START_TASK_TOOL_NAME,
   type StartTaskToolInput,
   type StartTaskToolOutput,
+  USE_CAPABILITY_TOOL_NAME,
+  type UseCapabilityToolInput,
+  type UseCapabilityToolOutput,
   WEB_SEARCH_TOOL_NAME,
   type WebSearchToolInput,
   type WebSearchToolOutput,
@@ -55,6 +59,8 @@ import {
   START_TASK_TOOL_DESCRIPTION,
   TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
   TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
+  USE_CAPABILITY_REQUEST_DESCRIPTION,
+  USE_CAPABILITY_TOOL_DESCRIPTION,
   WEB_SEARCH_QUERY_DESCRIPTION,
   WEB_SEARCH_RECENCY_DAYS_DESCRIPTION,
   WEB_SEARCH_TOOL_DESCRIPTION,
@@ -96,6 +102,18 @@ type EditTaskScheduleRunner = (
 type DeleteTaskScheduleRunner = (
   input: DeleteTaskScheduleToolInput,
 ) => Promise<DeleteTaskScheduleToolOutput>;
+type CapabilityDispatcher = {
+  // Ids resolved server-side from real connection state; they become the
+  // dispatch enum, so a disconnected capability cannot be invoked by guessing.
+  list: readonly { id: string }[];
+  execute: (input: {
+    capability: string;
+    request: string;
+    toolCallId: string;
+  }) => Promise<UseCapabilityToolOutput>;
+};
+
+export const MAX_CAPABILITY_CALLS_PER_TURN = 4;
 
 // Main chat (and the MCP connector) get a read-only brain surface: recall and
 // inspect only. Every write path — new content and edits to existing records —
@@ -119,6 +137,9 @@ export type OpenCompanyChatAgentDebugTrace = {
     outputTokens?: number;
     totalTokens?: number;
   };
+  // Worker-side transcripts of use_capability calls, keyed by toolCallId. Kept
+  // out of tool outputs so they never enter the model context.
+  capabilityCalls?: Array<GoatCapabilityCallDebug & { toolCallId: string }>;
   error?: string;
 };
 
@@ -231,6 +252,7 @@ export function createOpenCompanyChatToolContext(input: {
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   webSearch?: WebSearchRunner;
+  capabilities?: CapabilityDispatcher;
 }) {
   let startedTask: StartedTask | null = null;
   let startTaskInFlight: Promise<StartedTask> | null = null;
@@ -238,6 +260,7 @@ export function createOpenCompanyChatToolContext(input: {
   let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
   let visibleToolActivity = false;
   let webSearchCallCount = 0;
+  let capabilityCallCount = 0;
 
   const tools: ToolSet = {
     [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
@@ -563,6 +586,79 @@ export function createOpenCompanyChatToolContext(input: {
           query,
           ...(recencyDays ? { recencyDays } : {}),
         });
+      },
+    });
+  }
+
+  const capabilities = input.capabilities;
+  if (capabilities && capabilities.list.length > 0) {
+    const capabilityIds = capabilities.list.map((capability) => capability.id);
+    tools[USE_CAPABILITY_TOOL_NAME] = tool<UseCapabilityToolInput, UseCapabilityToolOutput>({
+      description: USE_CAPABILITY_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<UseCapabilityToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          capability: {
+            type: "string",
+            enum: capabilityIds,
+            description: "Which connected capability to query.",
+          },
+          request: {
+            type: "string",
+            description: USE_CAPABILITY_REQUEST_DESCRIPTION,
+          },
+        },
+        required: ["capability", "request"],
+      }),
+      execute: async (args, executionContext) => {
+        visibleToolActivity = true;
+        const capability = typeof args.capability === "string" ? args.capability : "";
+        // Models occasionally emit values outside a schema enum; re-validate so
+        // an invented id fails as a steering envelope, not an executor error.
+        if (!capabilityIds.includes(capability)) {
+          return {
+            capability,
+            summary: "",
+            entities: [],
+            error: {
+              code: "invalid_request",
+              hint: `"${capability}" is not an available capability. Available: ${capabilityIds.join(", ")}.`,
+            },
+          };
+        }
+        const request = typeof args.request === "string" ? args.request.trim() : "";
+        if (!request) {
+          return {
+            capability,
+            summary: "",
+            entities: [],
+            error: {
+              code: "invalid_request",
+              hint: "The request was empty. Send a self-contained natural-language request.",
+            },
+          };
+        }
+        if (capabilityCallCount >= MAX_CAPABILITY_CALLS_PER_TURN) {
+          return {
+            capability,
+            summary: "",
+            entities: [],
+            error: {
+              code: "call_budget",
+              hint: `use_capability is limited to ${MAX_CAPABILITY_CALLS_PER_TURN} calls per chat turn. Summarize what you already have, or start a task for deeper work.`,
+            },
+          };
+        }
+        capabilityCallCount += 1;
+        const toolCallId =
+          executionContext &&
+          typeof executionContext === "object" &&
+          "toolCallId" in executionContext &&
+          typeof executionContext.toolCallId === "string"
+            ? executionContext.toolCallId
+            : `capability_${capabilityCallCount}`;
+        return capabilities.execute({ capability, request, toolCallId });
       },
     });
   }

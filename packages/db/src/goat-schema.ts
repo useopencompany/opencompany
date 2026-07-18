@@ -446,6 +446,9 @@ export type GoatChatMessageDebugTrace = {
     outputTokens?: number;
     totalTokens?: number;
   };
+  // Worker-side transcripts of use_capability calls (steps, tool previews),
+  // keyed by toolCallId; never part of the model-visible tool output.
+  capabilityCalls?: unknown[];
   error?: string;
 };
 
@@ -465,6 +468,7 @@ export const goatUsers = goat.table(
     timezone: text("timezone").notNull().default("UTC"),
     taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
+    chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     preferredMcpClient: text("preferred_mcp_client").$type<GoatMcpClient>(),
     // Set exactly once, when this user first completes a successful Brain query over MCP.
     mcpSetupCompletedAt: timestamp("mcp_setup_completed_at", { withTimezone: true }),
