@@ -26,6 +26,8 @@ describe("selectLinearReadTools", () => {
         "list_comments",
         "create_comment",
         "get_or_create_label",
+        "get_issue_and_archive",
+        "list_then_delete",
         "search_documentation",
         "list_my_issues",
       ]),
@@ -42,6 +44,8 @@ describe("selectLinearReadTools", () => {
     expect(names).not.toContain("create_comment");
     // Read prefix but mutation substring: excluded.
     expect(names).not.toContain("get_or_create_label");
+    expect(names).not.toContain("get_issue_and_archive");
+    expect(names).not.toContain("list_then_delete");
   });
 
   it("caps the tool set and puts preferred tools first", () => {

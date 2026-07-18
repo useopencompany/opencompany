@@ -225,9 +225,9 @@ Goat Slack ingestion app setup checklist (api.slack.com/apps → From scratch):
 
 1. OAuth & Permissions → **User Token Scopes** (no bot scopes): `channels:history`,
    `groups:history`, `im:history`, `mpim:history`, `channels:read`, `groups:read`, `im:read`,
-   `mpim:read`, `users:read`, `team:read`, plus `search:read.public`, `search:read.private`,
-   `search:read.im`, `search:read.mpim` for chat-capability keyword search (connections created
-   before the search scopes were added keep working without search until the user reconnects).
+   `mpim:read`, `users:read`, `team:read`, plus `search:read` for chat-capability keyword search
+   (connections created before the search scope was added keep working without search until the
+   user reconnects).
    Do not opt into token rotation.
 2. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack/callback`.
 3. Event Subscriptions → Request URL `${GOAT_NEXT_PUBLIC_APP_URL}/api/webhooks/slack/events`,

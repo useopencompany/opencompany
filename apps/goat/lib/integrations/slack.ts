@@ -30,7 +30,7 @@ const GOAT_SLACK_INTEGRATION_ENVS = [
 
 // User-token scopes: the app reads what the connected user can read (their
 // channels and DMs) and never gets a bot presence in the workspace. The
-// search:read.* family powers chat-capability keyword search; connections
+// search:read scope powers search.messages for the chat capability; connections
 // created before it was added keep working without search until reconnected.
 export const GOAT_SLACK_USER_SCOPES = [
   "channels:history",
@@ -43,10 +43,7 @@ export const GOAT_SLACK_USER_SCOPES = [
   "mpim:read",
   "users:read",
   "team:read",
-  "search:read.public",
-  "search:read.private",
-  "search:read.im",
-  "search:read.mpim",
+  "search:read",
 ] as const;
 
 export function isGoatSlackIntegrationConfigured() {
@@ -208,6 +205,7 @@ export async function slackApiRequest<T extends Record<string, unknown>>(input: 
   method: string;
   token?: string;
   form?: Record<string, string>;
+  signal?: AbortSignal;
 }): Promise<T> {
   const response = await fetch(`https://slack.com/api/${input.method}`, {
     method: "POST",
@@ -216,6 +214,7 @@ export async function slackApiRequest<T extends Record<string, unknown>>(input: 
       ...(input.token ? { Authorization: `Bearer ${input.token}` } : {}),
     },
     body: new URLSearchParams(input.form ?? {}).toString(),
+    ...(input.signal ? { signal: input.signal } : {}),
   });
 
   if (!response.ok) {

@@ -48,7 +48,7 @@ describe("slackCapability.resolve", () => {
   });
 
   it("advertises keyword search only when the stored scopes include it", async () => {
-    mocks.dbRows = [connectedRow(["channels:history", "search:read.public"])];
+    mocks.dbRows = [connectedRow(["channels:history", "search:read"])];
     const withSearch = await slackCapability.resolve("user_1");
     expect(withSearch?.indexLine).toContain("CAN keyword-search messages");
 
@@ -72,7 +72,7 @@ describe("slack capability tools", () => {
       payload: { access_token: "xoxp-1", team_domain: "acme" },
     });
 
-    mocks.dbRows = [connectedRow(["search:read.public"])];
+    mocks.dbRows = [connectedRow(["search:read"])];
     const withSearch = await (await slackCapability.resolve("user_1"))?.createTools(CONTEXT);
     expect(Object.keys(withSearch?.tools ?? {})).toContain("slack_search_messages");
 
@@ -113,6 +113,7 @@ describe("slack capability tools", () => {
       expect.objectContaining({
         method: "conversations.history",
         token: "xoxp-1",
+        signal: CONTEXT.signal,
         form: expect.objectContaining({
           channel: "C1",
           limit: "30",

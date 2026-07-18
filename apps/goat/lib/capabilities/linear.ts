@@ -31,7 +31,7 @@ const PREFERRED_READ_TOOLS = [
 ] as const;
 
 const READ_TOOL_PATTERN = /^(list|get|search)_/;
-const MUTATION_TOOL_PATTERN = /(create|update|delete|add|remove|archive|assign|move|set)_/;
+const MUTATION_TOOL_PATTERN = /(^|_)(create|update|delete|add|remove|archive|assign|move|set)(_|$)/;
 
 export const linearCapability: GoatCapabilityDefinition = {
   id: "linear",

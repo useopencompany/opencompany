@@ -89,7 +89,7 @@ async function loadSlackConnection(userWorkosId: string): Promise<SlackConnectio
   return {
     integrationId: row.id,
     teamName: row.connectionLabel,
-    hasSearch: (row.scopes ?? []).some((scope) => scope.startsWith("search:read")),
+    hasSearch: (row.scopes ?? []).includes("search:read"),
   };
 }
 
@@ -142,6 +142,7 @@ async function createSlackTools(context: GoatCapabilityWorkerContext, connection
         }>({
           method: "conversations.list",
           token,
+          signal: context.signal,
           form: {
             types: (args.types?.length
               ? args.types
@@ -191,6 +192,7 @@ async function createSlackTools(context: GoatCapabilityWorkerContext, connection
         const result = await slackApiRequest<{ messages?: SlackMessage[] }>({
           method: "conversations.history",
           token,
+          signal: context.signal,
           form: {
             channel: args.channel,
             limit: String(clampCount(args.limit, 20, MAX_HISTORY_MESSAGES)),
@@ -217,6 +219,7 @@ async function createSlackTools(context: GoatCapabilityWorkerContext, connection
         const result = await slackApiRequest<{ messages?: SlackMessage[] }>({
           method: "conversations.replies",
           token,
+          signal: context.signal,
           form: {
             channel: args.channel,
             ts: args.thread_ts,
@@ -248,6 +251,7 @@ async function createSlackTools(context: GoatCapabilityWorkerContext, connection
         }>({
           method: "users.list",
           token,
+          signal: context.signal,
           form: { limit: String(clampCount(args.limit, 100, MAX_LISTED_USERS)) },
         });
         return {
@@ -292,6 +296,7 @@ async function createSlackTools(context: GoatCapabilityWorkerContext, connection
         }>({
           method: "search.messages",
           token,
+          signal: context.signal,
           form: {
             query: args.query,
             count: String(clampCount(args.count, 10, MAX_SEARCH_MATCHES)),

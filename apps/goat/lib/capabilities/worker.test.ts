@@ -152,6 +152,7 @@ describe("runGoatCapabilityWorker", () => {
 
   it("returns a timeout envelope without a finalizer call when the loop aborts empty", async () => {
     const parent = new AbortController();
+    let workerSignal: AbortSignal | undefined;
     const generateObjectImpl = vi.fn();
     const generateTextImpl = vi.fn(async () => {
       parent.abort();
@@ -161,7 +162,12 @@ describe("runGoatCapabilityWorker", () => {
     });
 
     const result = await runGoatCapabilityWorker({
-      capability: makeCapability(),
+      capability: makeCapability({
+        createTools: async (context) => {
+          workerSignal = context.signal;
+          return { tools: {} };
+        },
+      }),
       request: "anything",
       context: makeContext(parent.signal),
       gatewayApiKey: "test-key",
@@ -171,6 +177,8 @@ describe("runGoatCapabilityWorker", () => {
     });
 
     expect(result.envelope.error?.code).toBe("timeout");
+    expect(workerSignal).not.toBe(parent.signal);
+    expect(workerSignal?.aborted).toBe(true);
     expect(generateObjectImpl).not.toHaveBeenCalled();
   });
 
@@ -270,13 +278,14 @@ describe("runGoatCapabilityWorker", () => {
   });
 
   it("returns a provider_error envelope when the loop fails before gathering anything", async () => {
+    const close = vi.fn(async () => {});
     const generateObjectImpl = vi.fn();
     const generateTextImpl = vi.fn(async () => {
       throw new Error("gateway exploded");
     });
 
     const result = await runGoatCapabilityWorker({
-      capability: makeCapability(),
+      capability: makeCapability({ createTools: async () => ({ tools: {}, close }) }),
       request: "anything",
       context: makeContext(),
       gatewayApiKey: "test-key",
@@ -287,6 +296,7 @@ describe("runGoatCapabilityWorker", () => {
 
     expect(result.envelope.error?.code).toBe("provider_error");
     expect(result.envelope.error?.hint).toContain("gateway exploded");
+    expect(close).toHaveBeenCalledTimes(1);
     expect(generateObjectImpl).not.toHaveBeenCalled();
   });
 

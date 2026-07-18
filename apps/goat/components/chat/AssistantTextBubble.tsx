@@ -102,7 +102,7 @@ function BrainCitationChips({ citations }: { citations: BrainCitation[] }) {
   const hiddenCitations = citations.slice(clampedVisibleCount);
 
   return (
-    <div className="relative mt-2 max-w-full" aria-label="Brain sources">
+    <div className="relative mt-2 max-w-full" aria-label="Sources">
       <div ref={containerRef} className="max-w-full">
         <div className="flex max-w-full items-center gap-1 overflow-hidden whitespace-nowrap">
           {visibleCitations.map((citation, index) => (
@@ -204,7 +204,7 @@ function BrainCitationOverflow({
     <Popover>
       <PopoverTrigger
         type="button"
-        aria-label={`Show ${hiddenCount} more brain ${pluralizeSource(hiddenCount)}`}
+        aria-label={`Show ${hiddenCount} more ${pluralizeSource(hiddenCount)}`}
         className={cn(
           citationChipClassName,
           "shrink-0 text-ink-subtle hover:text-ink data-[popup-open]:border-border-strong data-[popup-open]:text-ink",

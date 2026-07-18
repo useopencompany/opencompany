@@ -1,7 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { GOAT_BRAIN_TOOL_PART_TYPE, type GoatChatUiMessage } from "@/lib/chat-ui";
+import {
+  GOAT_BRAIN_TOOL_PART_TYPE,
+  type GoatChatUiMessage,
+  USE_CAPABILITY_TOOL_PART_TYPE,
+} from "@/lib/chat-ui";
 import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
 import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";
@@ -105,7 +109,7 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.getByText("Ada leads GTM.")).toBeInTheDocument();
     const source = screen.getByRole("link", { name: "Source 1: Ada Lovelace (team/gtm/ada)" });
     expect(source).toHaveAttribute("href", "/brain/goat_brain_1/team/gtm/ada");
-    expect(screen.getByLabelText("Brain sources")).toBeInTheDocument();
+    expect(screen.getByLabelText("Sources")).toBeInTheDocument();
   });
 
   it("cites wiki pages without their underlying evidence", () => {
@@ -151,7 +155,7 @@ describe("MessageBubble assistant errors", () => {
 
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
-    const sources = screen.getByLabelText("Brain sources");
+    const sources = screen.getByLabelText("Sources");
     expect(within(sources).getAllByRole("link")).toHaveLength(1);
     expect(
       within(sources).getByRole("link", { name: "Source 1: Ada Lovelace (team/gtm/ada)" }),
@@ -159,6 +163,45 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.queryByText("Ada was hired")).not.toBeInTheDocument();
     expect(screen.queryByText("acme/api #123")).not.toBeInTheDocument();
     expect(screen.queryByText("Hiring update")).not.toBeInTheDocument();
+  });
+
+  it("renders capability entities as external source chips", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_6",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: USE_CAPABILITY_TOOL_PART_TYPE,
+          toolCallId: "tool_capability_1",
+          state: "output-available",
+          input: { capability: "linear", request: "Find the launch issue" },
+          output: {
+            capability: "linear",
+            summary: "ENG-123 tracks the launch.",
+            entities: [
+              {
+                type: "linear_issue",
+                id: "ENG-123",
+                url: "https://linear.app/acme/issue/ENG-123",
+                title: "Launch tracking",
+              },
+            ],
+          },
+        },
+        { type: "text", text: "ENG-123 tracks the launch." },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    const source = screen.getByRole("link", {
+      name: "Source 1: Launch tracking (ENG-123)",
+    });
+    expect(source).toHaveAttribute("href", "https://linear.app/acme/issue/ENG-123");
+    expect(source).toHaveAttribute("target", "_blank");
+    expect(source).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByLabelText("Sources")).toBeInTheDocument();
   });
 });
 

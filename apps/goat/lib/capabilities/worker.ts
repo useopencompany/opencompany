@@ -138,10 +138,33 @@ export async function runGoatCapabilityWorker(input: {
     },
   });
 
+  const loopController = new AbortController();
+  const timeoutHandle = setTimeout(() => loopController.abort(), WORKER_LOOP_TIMEOUT_MS);
+  const onParentAbort = () => loopController.abort();
+  if (input.context.signal.aborted) loopController.abort();
+  else input.context.signal.addEventListener("abort", onParentAbort, { once: true });
+  const stopLoopTimer = () => {
+    clearTimeout(timeoutHandle);
+    input.context.signal.removeEventListener("abort", onParentAbort);
+  };
+
   let toolkit: Awaited<ReturnType<ResolvedGoatCapability["createTools"]>>;
   try {
-    toolkit = await input.capability.createTools(input.context);
+    toolkit = await input.capability.createTools({
+      ...input.context,
+      signal: loopController.signal,
+    });
   } catch (error) {
+    stopLoopTimer();
+    if (loopController.signal.aborted) {
+      return finish(
+        errorEnvelope(
+          "timeout",
+          `The ${input.capability.id} lookup was cancelled before its tools were ready; suggest retrying or narrowing the request.`,
+        ),
+        "error",
+      );
+    }
     const code: GoatCapabilityErrorCode =
       error instanceof GoatCapabilityAuthError ? error.code : "internal";
     return finish(
@@ -159,12 +182,6 @@ export async function runGoatCapabilityWorker(input: {
   const generateTextImpl = input.generateTextImpl ?? generateText;
   const generateObjectImpl = input.generateObjectImpl ?? generateObject;
   const providerOptions = goatGatewayProviderOptions(input.attribution);
-
-  const loopController = new AbortController();
-  const timeoutHandle = setTimeout(() => loopController.abort(), WORKER_LOOP_TIMEOUT_MS);
-  const onParentAbort = () => loopController.abort();
-  if (input.context.signal.aborted) loopController.abort();
-  else input.context.signal.addEventListener("abort", onParentAbort, { once: true });
 
   let status: WorkerRunStatus = "completed";
   let finalText = "";
@@ -192,9 +209,6 @@ export async function runGoatCapabilityWorker(input: {
     } else {
       status = "error";
       if (transcript.length === 0) {
-        await closeToolkit(toolkit);
-        clearTimeout(timeoutHandle);
-        input.context.signal.removeEventListener("abort", onParentAbort);
         return finish(
           errorEnvelope(
             "provider_error",
@@ -205,8 +219,7 @@ export async function runGoatCapabilityWorker(input: {
       }
     }
   } finally {
-    clearTimeout(timeoutHandle);
-    input.context.signal.removeEventListener("abort", onParentAbort);
+    stopLoopTimer();
     await closeToolkit(toolkit);
   }
 
