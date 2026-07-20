@@ -213,8 +213,10 @@ Entry points:
 - `apps/runner/src/codex-app-server.ts`
 
 Cloud Codex uses a persistent sandbox per Goat chat and resumes the same Codex app-server thread on
-follow-up turns. The composer accepts the same private-blob uploads as normal Goat chat. At run
-time, the worker downloads the current turn's files into
+follow-up turns. New turns remain `queued` until the runner claims them, then move through
+`starting` and `running`; the worker uses the runner-wide concurrency setting rather than a
+Cloud-Codex-specific limit. The composer accepts the same private-blob uploads as normal Goat chat.
+At run time, the worker downloads the current turn's files into
 `~/.opencompany-goat/codex-chat-attachments/<turn-id>/` and includes those paths in the user task.
 Image uploads are additionally passed to `turn/start` as `localImage` inputs, so screenshots are
 visible to the model rather than merely path-referenced. Keeping uploads outside the working

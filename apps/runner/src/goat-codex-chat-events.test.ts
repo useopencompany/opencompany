@@ -84,7 +84,7 @@ describe("createGoatCodexChatProjector", () => {
     );
   });
 
-  it("keeps the session starting until a queued follow-up turn drains", async () => {
+  it("keeps the session queued until a queued follow-up turn is claimed", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const projector = createGoatCodexChatProjector({
       target: projectorTarget(),
@@ -107,7 +107,7 @@ describe("createGoatCodexChatProjector", () => {
     expect(sessionUpdate).toContain("UPDATE goat.codex_chat_turns AS turn");
     expect(sessionUpdate).toContain("queued.status = 'queued'");
     expect(sessionUpdate).toContain("ORDER BY queued.created_at ASC, queued.id ASC");
-    expect(sessionUpdate).toContain("THEN 'starting'");
+    expect(sessionUpdate).toContain("THEN 'queued'");
     expect(sessionUpdate).toContain("ELSE idle");
   });
 });

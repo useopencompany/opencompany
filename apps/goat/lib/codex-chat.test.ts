@@ -126,6 +126,7 @@ describe("createGoatCodexChatMessage", () => {
     });
     // The whole send (session + both messages + codex session + turn) is one statement.
     expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(sqlText(mocks.execute.mock.calls[0]?.[0])).toContain("'queued'");
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
 
@@ -254,7 +255,7 @@ describe("createGoatCodexChatMessage", () => {
     "idle",
     "failed",
     "interrupted",
-  ] as const)("marks a %s session as starting and clears its previous error when retrying", async (status) => {
+  ] as const)("marks a %s session as queued and clears its previous error when retrying", async (status) => {
     mocks.selectResults.push([
       {
         codex_chat_sessions: {
@@ -275,7 +276,7 @@ describe("createGoatCodexChatMessage", () => {
     expect(result).toMatchObject({ ok: true, mode: "started" });
     const statement = sqlText(mocks.execute.mock.calls[0]?.[0]);
     expect(statement).toContain("UPDATE goat.codex_chat_sessions AS session");
-    expect(statement).toContain("ELSE 'starting'");
+    expect(statement).toContain("ELSE 'queued'");
     expect(statement).toContain("active_turn_id = CASE");
     expect(statement).toContain("error = NULL");
   });
@@ -325,13 +326,16 @@ describe("interruptGoatCodexChatSession", () => {
     expect(mocks.execute).toHaveBeenCalledTimes(3);
   });
 
-  it("settles a starting session so a pre-claim stop cannot wedge the spinner", async () => {
+  it.each([
+    "queued",
+    "starting",
+  ] as const)("settles a %s session so a pre-run stop cannot wedge the spinner", async (status) => {
     mocks.selectResults.push([
       {
         codex_chat_sessions: {
           id: "goat_codex_chat_1",
           chatSessionId: "goat_chat_1",
-          status: "starting",
+          status,
         },
       },
     ]);
@@ -344,7 +348,7 @@ describe("interruptGoatCodexChatSession", () => {
     expect(settleSql).toContain("UPDATE goat.codex_chat_sessions");
     expect(settleSql).toContain("'interrupted'");
     expect(settleSql).toContain("NOT EXISTS");
-    expect(settleSql).toContain("status IN ('starting', 'running')");
+    expect(settleSql).toContain("status IN ('queued', 'starting', 'running')");
   });
 });
 
@@ -363,7 +367,7 @@ describe("getGoatCodexChatSandboxStatus", () => {
           id: "goat_codex_chat_1",
           chatSessionId: "goat_chat_1",
           sandboxId: null,
-          status: "starting",
+          status: "queued",
         },
       },
     ]);

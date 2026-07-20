@@ -1002,6 +1002,13 @@
       "when": 1784652408000,
       "tag": "0142_goat_capabilities_beta_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1784652409000,
+      "tag": "0143_goat_codex_chat_queued_status",
+      "breakpoints": true
     }
   ]
 }

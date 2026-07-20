@@ -108,7 +108,7 @@ export type GoatCodexChatSessionRow = {
   sandbox_id: string | null;
   codex_thread_id: string | null;
   active_turn_id: string | null;
-  status: "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
+  status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
   error: string | null;
   created_at: string;
   updated_at: string;

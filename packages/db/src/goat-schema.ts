@@ -406,7 +406,7 @@ export const GOAT_LOCAL_CODEX_EVENT_TYPES = [
 ] as const;
 export type GoatLocalCodexEventType = (typeof GOAT_LOCAL_CODEX_EVENT_TYPES)[number];
 
-export type GoatCodexChatSessionStatus = GoatLocalCodexSessionStatus;
+export type GoatCodexChatSessionStatus = GoatLocalCodexSessionStatus | "queued";
 export type GoatCodexChatTurnStatus = GoatLocalCodexTurnStatus;
 export type GoatCodexChatEventType = Exclude<
   GoatLocalCodexEventType,
@@ -2869,7 +2869,7 @@ export const goatCodexChatSessions = goat.table(
     sandboxId: text("sandbox_id"),
     codexThreadId: text("codex_thread_id"),
     activeTurnId: text("active_turn_id"),
-    status: text("status").$type<GoatCodexChatSessionStatus>().notNull().default("starting"),
+    status: text("status").$type<GoatCodexChatSessionStatus>().notNull().default("queued"),
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2884,7 +2884,7 @@ export const goatCodexChatSessions = goat.table(
     ),
     statusCheck: check(
       "goat_codex_chat_sessions_status_check",
-      sql`${table.status} IN ('starting', 'idle', 'running', 'failed', 'interrupted', 'closed')`,
+      sql`${table.status} IN ('queued', 'starting', 'idle', 'running', 'failed', 'interrupted', 'closed')`,
     ),
   }),
 );

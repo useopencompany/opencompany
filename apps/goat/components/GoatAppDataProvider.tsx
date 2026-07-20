@@ -171,7 +171,9 @@ export function GoatAppDataProvider({
     );
     const activeCodexChatIds = new Set(
       ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[])
-        .filter((row) => row.status === "starting" || row.status === "running")
+        .filter(
+          (row) => row.status === "queued" || row.status === "starting" || row.status === "running",
+        )
         .map((row) => row.chat_session_id),
     );
     // Pinned chats stay visible regardless of the recency window, with separate

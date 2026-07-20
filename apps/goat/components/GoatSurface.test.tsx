@@ -677,6 +677,30 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.queryByText("Expired")).not.toBeInTheDocument();
   });
 
+  it("shows when a Codex chat is waiting for runner capacity", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        codexConnected
+        initialChat={{
+          id: "goat_chat_codex_1",
+          title: "Codex chat",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          codexRuntime: {
+            status: "queued",
+            error: null,
+            updatedAt: currentTimestamp(),
+          },
+          messages: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Codex status: Queued")).toHaveTextContent("Queued");
+  });
+
   it("restores Codex composer controls when returning to a Codex chat", async () => {
     const user = userEvent.setup();
 
@@ -1122,6 +1146,7 @@ describe("GoatSurface chat streaming UI", () => {
         defaultModel={DEFAULT_GOAT_MODEL}
         initialChat={null}
         recentChats={[
+          codexChatSummary({ id: "queued", title: "Queued task", status: "queued" }),
           codexChatSummary({ id: "starting", title: "Starting task", status: "starting" }),
           codexChatSummary({ id: "running", title: "Working task", status: "running" }),
           codexChatSummary({ id: "ready", title: "Ready task", status: "idle" }),
@@ -1139,7 +1164,7 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    for (const label of ["Starting", "Working", "Ready", "Stopped", "Connecting"]) {
+    for (const label of ["Queued", "Starting", "Working", "Ready", "Stopped", "Connecting"]) {
       expect(screen.getByRole("img", { name: `Codex task status: ${label}` })).toBeInTheDocument();
       expect(screen.getByText(new RegExp(`Codex · ${label}`))).toBeInTheDocument();
     }

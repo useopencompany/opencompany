@@ -338,7 +338,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
                     and(
                       eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
                       eq(goatCodexChatSessions.userWorkosId, input.userWorkosId),
-                      inArray(goatCodexChatSessions.status, ["starting", "running"]),
+                      inArray(goatCodexChatSessions.status, ["queued", "starting", "running"]),
                     ),
                   ),
               ),

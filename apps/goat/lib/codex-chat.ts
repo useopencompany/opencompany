@@ -162,7 +162,7 @@ export async function interruptGoatCodexChatSession(input: {
       AND message.role = 'assistant'
   `);
   // Running turns settle the session from the runner, but a stop that only cancelled queued
-  // turns has no runner to do it: without this the session would stay 'starting'/'running'
+  // turns has no runner to do it: without this the session would stay queued/starting/running
   // forever and the UI would show an eternal spinner.
   await getDb().execute(sql`
     UPDATE goat.codex_chat_sessions AS session
@@ -171,7 +171,7 @@ export async function interruptGoatCodexChatSession(input: {
         updated_at = ${now}
     WHERE session.id = ${session.id}
       AND session.user_workos_id = ${input.userWorkosId}
-      AND session.status IN ('starting', 'running')
+      AND session.status IN ('queued', 'starting', 'running')
       AND NOT EXISTS (
         SELECT 1
         FROM goat.codex_chat_turns AS turn
@@ -316,7 +316,7 @@ async function createFirstCodexChatTurn(input: {
         ${chatSessionId},
         ${codexModel},
         ${turnId},
-        'starting',
+        'queued',
         ${now},
         ${now}
       )
@@ -358,7 +358,10 @@ async function enqueueExistingCodexChatMessage(input: {
   const assistantMessageId = newGoatChatMessageId();
   const now = new Date();
   const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
-  const running = input.session.status === "running" || input.session.status === "starting";
+  const active =
+    input.session.status === "queued" ||
+    input.session.status === "starting" ||
+    input.session.status === "running";
 
   await getDb().execute(sql`
     WITH inserted_user_message AS (
@@ -430,11 +433,11 @@ async function enqueueExistingCodexChatMessage(input: {
     updated_codex_session AS (
       UPDATE goat.codex_chat_sessions AS session
       SET status = CASE
-            WHEN session.status IN ('starting', 'running') THEN session.status
-            ELSE 'starting'
+            WHEN session.status IN ('queued', 'starting', 'running') THEN session.status
+            ELSE 'queued'
           END,
           active_turn_id = CASE
-            WHEN session.status IN ('starting', 'running') THEN session.active_turn_id
+            WHEN session.status IN ('queued', 'starting', 'running') THEN session.active_turn_id
             ELSE ${turnId}
           END,
           error = NULL,
@@ -454,7 +457,7 @@ async function enqueueExistingCodexChatMessage(input: {
     sessionId: input.session.chatSessionId,
     userMessageId,
     assistantMessageId,
-    mode: running ? "queued" : "started",
+    mode: active ? "queued" : "started",
   };
 }
 

@@ -39,6 +39,7 @@ export const GOAT_METRICS = {
   chatWebSearchCostUsdMicros: "goat.chat.web_search_cost_usd_micros",
   chatCapabilityCallsTotal: "goat.chat.capability_calls_total",
   chatCapabilityCallDurationMs: "goat.chat.capability_call_duration_ms",
+  codexChatQueueWaitMs: "goat.codex_chat.queue_wait_ms",
   taskDispatchesTotal: "goat.task_dispatches_total",
   taskDispatchDurationMs: "goat.task_dispatch_duration_ms",
   taskRunsTotal: "goat.task_runs_total",
