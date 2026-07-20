@@ -154,15 +154,35 @@ function CodexQuestionRow({
     for (const question of input.questions) {
       const selectedAnswer = selected[question.id]?.trim();
       const note = custom[question.id]?.trim();
-      if ((question.options.length > 0 && !selectedAnswer) || (!selectedAnswer && !note)) {
+
+      // A question without options is pure free text: the text field is the answer itself,
+      // not an annotation on a selected option, so it must not carry the `user_note:` prefix.
+      if (question.options.length === 0) {
+        if (!note) {
+          setError("Answer each question before continuing.");
+          return;
+        }
+        answers[question.id] = { answers: [note] };
+        continue;
+      }
+
+      // "Other" is a client-side affordance, not an option Codex offered. The note describes the
+      // custom choice, so require it and send it as the answer instead of the literal "Other".
+      if (selectedAnswer === "Other") {
+        if (!note) {
+          setError("Describe your Other answer before continuing.");
+          return;
+        }
+        answers[question.id] = { answers: [note] };
+        continue;
+      }
+
+      if (!selectedAnswer) {
         setError("Answer each question before continuing.");
         return;
       }
       answers[question.id] = {
-        answers: [
-          ...(selectedAnswer ? [selectedAnswer] : []),
-          ...(note ? [`user_note: ${note}`] : []),
-        ],
+        answers: [selectedAnswer, ...(note ? [`user_note: ${note}`] : [])],
       };
     }
     setError(null);

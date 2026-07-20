@@ -298,6 +298,110 @@ describe("MessageBubble Codex interactions", () => {
     );
     expect(screen.getByRole("button", { name: "Answer sent" })).toBeDisabled();
   });
+
+  it("sends a free-text answer raw, without the user_note prefix", async () => {
+    const onCodexAction = vi.fn(async () => undefined);
+    const message: GoatChatUiMessage = {
+      id: "assistant_question",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_QUESTION_TOOL_NAME,
+          toolCallId: "question_1",
+          state: "approval-requested",
+          input: {
+            label: "Question",
+            interactionId: "goat_codex_chat_interaction_123",
+            question: "Which tests should run?",
+            questions: [
+              {
+                id: "tests",
+                header: "Tests",
+                question: "Which tests should run?",
+              },
+            ],
+          },
+        } as GoatChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onCodexAction={onCodexAction}
+      />,
+    );
+    await userEvent.type(screen.getByPlaceholderText("Your answer"), "targeted and typecheck");
+    await userEvent.click(screen.getByRole("button", { name: "Send answer" }));
+
+    await waitFor(() =>
+      expect(onCodexAction).toHaveBeenCalledWith({
+        type: "answer-question",
+        interactionId: "goat_codex_chat_interaction_123",
+        answers: { tests: { answers: ["targeted and typecheck"] } },
+      }),
+    );
+  });
+
+  it("requires a note for Other and sends the note as the answer", async () => {
+    const onCodexAction = vi.fn(async () => undefined);
+    const message: GoatChatUiMessage = {
+      id: "assistant_question",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_QUESTION_TOOL_NAME,
+          toolCallId: "question_1",
+          state: "approval-requested",
+          input: {
+            label: "Question",
+            interactionId: "goat_codex_chat_interaction_123",
+            question: "How broad should the fix be?",
+            questions: [
+              {
+                id: "scope",
+                header: "Scope",
+                question: "How broad should the fix be?",
+                isOther: true,
+                options: [{ label: "Foundational", description: "Harden the full protocol path." }],
+              },
+            ],
+          },
+        } as GoatChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onCodexAction={onCodexAction}
+      />,
+    );
+    await userEvent.click(screen.getByRole("radio", { name: "Other" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send answer" }));
+    expect(onCodexAction).not.toHaveBeenCalled();
+    expect(screen.getByText("Describe your Other answer before continuing.")).toBeInTheDocument();
+
+    await userEvent.type(
+      screen.getByPlaceholderText("Optional note or describe Other"),
+      "revert the migration",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Send answer" }));
+
+    await waitFor(() =>
+      expect(onCodexAction).toHaveBeenCalledWith({
+        type: "answer-question",
+        interactionId: "goat_codex_chat_interaction_123",
+        answers: { scope: { answers: ["revert the migration"] } },
+      }),
+    );
+  });
 });
 
 describe("getVisibleBrainCitationCount", () => {

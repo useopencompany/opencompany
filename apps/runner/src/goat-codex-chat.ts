@@ -386,7 +386,7 @@ async function waitForCodexChatInteraction(input: {
         }
         continue;
       }
-      await getDb()
+      const [canceled] = await getDb()
         .update(goatCodexChatInteractions)
         .set({ status: "canceled", resolvedAt: new Date(), updatedAt: new Date() })
         .where(
@@ -396,7 +396,11 @@ async function waitForCodexChatInteraction(input: {
             eq(goatCodexChatInteractions.status, "pending"),
             currentInteractionLeaseSql(),
           ),
-        );
+        )
+        .returning({ id: goatCodexChatInteractions.id });
+      // If the cancel claimed nothing, a user answer resolved the row in the SELECT→UPDATE
+      // window; loop so the next SELECT observes it instead of dropping the answer.
+      if (!canceled) continue;
       return null;
     }
 
