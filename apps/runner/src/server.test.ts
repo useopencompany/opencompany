@@ -3,7 +3,7 @@ import { executeGoatGoogleTool } from "./goat-google-tools";
 import { createGoatToolToken } from "./goat-tool-auth";
 import { wakeGoatTaskWorker } from "./goat-worker";
 import { enqueueRunnerJob } from "./jobs";
-import { getSandboxLifecycleStatus } from "./sandbox";
+import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
 import { createServer } from "./server";
 
 vi.mock("./agent-loop", () => ({
@@ -29,6 +29,7 @@ vi.mock("./goat-google-tools", () => ({
 
 vi.mock("./sandbox", () => ({
   getSandboxLifecycleStatus: vi.fn(async () => "running"),
+  killSandbox: vi.fn(async () => true),
 }));
 
 const env = {
@@ -179,6 +180,36 @@ describe("internal Goat Codex sandbox status endpoint", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true, status: "sleeping" });
     expect(getSandboxLifecycleStatus).toHaveBeenCalledWith("sbx_123");
+  });
+});
+
+describe("internal Goat Codex sandbox kill endpoint", () => {
+  it("kills the E2B sandbox", async () => {
+    const server = createServer(goatEnv);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "DELETE",
+      url: "/internal/goat/codex-chat/sandboxes/sbx_123",
+      headers: { authorization: `Bearer ${goatEnv.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, killed: true });
+    expect(killSandbox).toHaveBeenCalledWith("sbx_123");
+  });
+
+  it("rejects unauthenticated kills", async () => {
+    const server = createServer(goatEnv);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "DELETE",
+      url: "/internal/goat/codex-chat/sandboxes/sbx_123",
+    });
+
+    expect(response.statusCode).toBeGreaterThanOrEqual(400);
+    expect(killSandbox).not.toHaveBeenCalled();
   });
 });
 

@@ -19,7 +19,7 @@ import { verifyGoatToolToken } from "./goat-tool-auth";
 import { wakeGoatTaskWorker } from "./goat-worker";
 import { enqueueRunnerJob } from "./jobs";
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
-import { getSandboxLifecycleStatus } from "./sandbox";
+import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -133,6 +133,18 @@ export function createServer(
 
     const status = await getSandboxLifecycleStatus(sandboxId);
     reply.send({ ok: true, status });
+  });
+
+  app.delete("/internal/goat/codex-chat/sandboxes/:sandboxId", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { sandboxId } = request.params as { sandboxId: string };
+    if (!sandboxId.trim()) {
+      reply.status(400).send({ error: "sandboxId is required." });
+      return;
+    }
+
+    const killed = await killSandbox(sandboxId);
+    reply.send({ ok: true, killed });
   });
 
   app.post("/internal/goat/brain-ingest/wake", async (request, reply) => {

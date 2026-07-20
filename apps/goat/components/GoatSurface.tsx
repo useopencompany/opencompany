@@ -2360,7 +2360,15 @@ function formatCompactTokens(value: number): string {
 }
 
 type CodexRuntimeMeta = {
-  kind: "connecting" | "queued" | "starting" | "working" | "ready" | "needs-attention" | "stopped";
+  kind:
+    | "connecting"
+    | "queued"
+    | "starting"
+    | "working"
+    | "ready"
+    | "asleep"
+    | "needs-attention"
+    | "stopped";
   label: string;
   dotClass: string;
   textClass: string;
@@ -2440,7 +2448,7 @@ function CodexSessionStatusIndicator({
   optimisticStatus: "starting" | "running" | null;
   sandboxStatus: GoatCodexSandboxStatus | null;
 }) {
-  const meta = codexRuntimeMeta(
+  let meta = codexRuntimeMeta(
     optimisticStatus
       ? {
           status: optimisticStatus,
@@ -2449,6 +2457,17 @@ function CodexSessionStatusIndicator({
         }
       : runtime,
   );
+  // A ready session whose sandbox has paused shows as asleep so the green dot never reads as
+  // "still running" hours after the last turn. A deleted sandbox stays "Ready": nothing exists
+  // anymore and a fresh one starts on the next message.
+  if (meta.kind === "ready" && sandboxStatus === "sleeping") {
+    meta = {
+      kind: "asleep",
+      label: "Asleep",
+      dotClass: "bg-ink/30",
+      textClass: "text-ink-subtle",
+    };
+  }
   const sandboxDetail =
     sandboxStatus === "sleeping"
       ? " The sandbox is sleeping and will wake automatically on the next message."
