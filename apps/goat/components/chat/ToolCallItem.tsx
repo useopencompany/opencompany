@@ -15,6 +15,8 @@ import {
 import { useState } from "react";
 import {
   CODEX_COMMAND_TOOL_NAME,
+  CODEX_PLAN_TOOL_NAME,
+  CODEX_QUESTION_TOOL_NAME,
   type CodexCommandToolOutput,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
@@ -28,14 +30,296 @@ import {
   type ToolCallView,
 } from "./assistant-items";
 
-export function ToolCallItem({ tool }: { tool: ToolCallView }) {
+export type CodexToolAction =
+  | { type: "implement-plan" }
+  | { type: "continue-plan" }
+  | {
+      type: "answer-question";
+      interactionId: string;
+      answers: Record<string, { answers: string[] }>;
+    };
+
+export function ToolCallItem({
+  tool,
+  onCodexAction,
+  allowCodexPlanActions = false,
+}: {
+  tool: ToolCallView;
+  onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
+  allowCodexPlanActions?: boolean;
+}) {
   if (tool.name === GOAT_BRAIN_TOOL_NAME) {
     return <BrainToolCallRow tool={tool} />;
   }
   if (tool.name === CODEX_COMMAND_TOOL_NAME) {
     return <CodexCommandRow tool={tool} />;
   }
+  if (tool.name === CODEX_PLAN_TOOL_NAME && planImplementationAvailable(tool)) {
+    return (
+      <CodexPlanRow tool={tool} onAction={allowCodexPlanActions ? onCodexAction : undefined} />
+    );
+  }
+  if (tool.name === CODEX_QUESTION_TOOL_NAME && codexQuestionInput(tool.input)) {
+    return <CodexQuestionRow tool={tool} onAction={onCodexAction} />;
+  }
   return <ToolCallRow tool={tool} />;
+}
+
+function CodexPlanRow({
+  tool,
+  onAction,
+}: {
+  tool: ToolCallView;
+  onAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const output = isRecord(tool.output) ? tool.output : {};
+  const text = typeof output.text === "string" ? output.text.trim() : "";
+  const run = (action: CodexToolAction) => {
+    if (!onAction || submitting) return;
+    setError(null);
+    setSubmitting(true);
+    void onAction(action)
+      .catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "Could not continue from this plan.");
+      })
+      .finally(() => setSubmitting(false));
+  };
+  return (
+    <div
+      data-testid="chat-codex-plan-implementation"
+      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <div className="text-[12px] font-semibold text-ink">Implement this plan?</div>
+      {text ? (
+        <div className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap text-[12px] leading-5 text-ink-muted">
+          {text}
+        </div>
+      ) : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={!onAction || submitting}
+          onClick={() => run({ type: "implement-plan" })}
+          className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {submitting ? "Starting..." : "Implement plan"}
+        </button>
+        <button
+          type="button"
+          disabled={!onAction || submitting}
+          onClick={() => run({ type: "continue-plan" })}
+          className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
+        >
+          Keep planning
+        </button>
+      </div>
+      {error ? (
+        <p className="mt-2 text-[11px] text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+type CodexQuestion = {
+  id: string;
+  header: string;
+  question: string;
+  isSecret: boolean;
+  isOther: boolean;
+  options: Array<{ label: string; description: string }>;
+};
+
+function CodexQuestionRow({
+  tool,
+  onAction,
+}: {
+  tool: ToolCallView;
+  onAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
+}) {
+  const input = codexQuestionInput(tool.input);
+  const [selected, setSelected] = useState<Record<string, string>>({});
+  const [custom, setCustom] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!input || tool.status !== "waiting") return <ToolCallRow tool={tool} />;
+
+  const submit = () => {
+    if (!onAction || submitting || submitted) return;
+    const answers: Record<string, { answers: string[] }> = {};
+    for (const question of input.questions) {
+      const selectedAnswer = selected[question.id]?.trim();
+      const note = custom[question.id]?.trim();
+      if ((question.options.length > 0 && !selectedAnswer) || (!selectedAnswer && !note)) {
+        setError("Answer each question before continuing.");
+        return;
+      }
+      answers[question.id] = {
+        answers: [
+          ...(selectedAnswer ? [selectedAnswer] : []),
+          ...(note ? [`user_note: ${note}`] : []),
+        ],
+      };
+    }
+    setError(null);
+    setSubmitting(true);
+    void onAction({
+      type: "answer-question",
+      interactionId: input.interactionId,
+      answers,
+    })
+      .then(() => setSubmitted(true))
+      .catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "Could not send your answer.");
+      })
+      .finally(() => setSubmitting(false));
+  };
+
+  return (
+    <div
+      data-testid="chat-codex-question"
+      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <div className="text-[12px] font-semibold text-ink">Codex needs your input</div>
+      {input.autoResolutionMs !== null ? (
+        <p className="mt-1 text-[11px] text-ink-subtle">
+          Codex will continue automatically if this question expires.
+        </p>
+      ) : null}
+      <div className="mt-3 space-y-4">
+        {input.questions.map((question) => (
+          <fieldset key={question.id} className="space-y-2">
+            <legend className="text-[12px] font-medium leading-5 text-ink">
+              {question.header ? `${question.header}: ` : ""}
+              {question.question}
+            </legend>
+            {question.options.length > 0 ? (
+              <div className="grid gap-1.5">
+                {question.options.map((option) => {
+                  const checked = selected[question.id] === option.label;
+                  return (
+                    <label
+                      key={option.label}
+                      className="flex cursor-pointer items-start gap-2 rounded-lg border border-border px-2.5 py-2 text-[12px] hover:bg-surface-hover"
+                    >
+                      <input
+                        type="radio"
+                        name={`codex-question-${input.interactionId}-${question.id}`}
+                        checked={checked}
+                        onChange={() => {
+                          setSelected((current) => ({ ...current, [question.id]: option.label }));
+                        }}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="block font-medium text-ink">{option.label}</span>
+                        {option.description ? (
+                          <span className="block leading-4 text-ink-subtle">
+                            {option.description}
+                          </span>
+                        ) : null}
+                      </span>
+                    </label>
+                  );
+                })}
+                {question.isOther ? (
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border px-2.5 py-2 text-[12px] hover:bg-surface-hover">
+                    <input
+                      type="radio"
+                      name={`codex-question-${input.interactionId}-${question.id}`}
+                      checked={selected[question.id] === "Other"}
+                      onChange={() => {
+                        setSelected((current) => ({ ...current, [question.id]: "Other" }));
+                      }}
+                      className="mt-0.5"
+                    />
+                    <span className="font-medium text-ink">Other</span>
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+            <input
+              type={question.isSecret ? "password" : "text"}
+              value={custom[question.id] ?? ""}
+              onChange={(event) =>
+                setCustom((current) => ({ ...current, [question.id]: event.target.value }))
+              }
+              placeholder={
+                question.options.length > 0
+                  ? question.isOther
+                    ? "Optional note or describe Other"
+                    : "Optional note"
+                  : "Your answer"
+              }
+              maxLength={4_000}
+              autoComplete="off"
+              className="w-full rounded-lg border border-border bg-canvas px-2.5 py-2 text-[12px] text-ink outline-none focus:border-border-strong"
+            />
+          </fieldset>
+        ))}
+      </div>
+      {error ? (
+        <p className="mt-2 text-[11px] text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <button
+        type="button"
+        disabled={!onAction || submitting || submitted}
+        onClick={submit}
+        className="mt-3 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
+      >
+        {submitting ? "Sending..." : submitted ? "Answer sent" : "Send answer"}
+      </button>
+    </div>
+  );
+}
+
+function planImplementationAvailable(tool: ToolCallView) {
+  return isRecord(tool.output) && tool.output.implementationAvailable === true;
+}
+
+function codexQuestionInput(
+  value: unknown,
+): { interactionId: string; questions: CodexQuestion[]; autoResolutionMs: number | null } | null {
+  if (!isRecord(value) || typeof value.interactionId !== "string") return null;
+  const rawQuestions = Array.isArray(value.questions) ? value.questions : [];
+  const questions: CodexQuestion[] = [];
+  for (const raw of rawQuestions) {
+    if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.question !== "string") continue;
+    const options = Array.isArray(raw.options)
+      ? raw.options.filter(isRecord).flatMap((option) =>
+          typeof option.label === "string"
+            ? [
+                {
+                  label: option.label,
+                  description: typeof option.description === "string" ? option.description : "",
+                },
+              ]
+            : [],
+        )
+      : [];
+    questions.push({
+      id: raw.id,
+      header: typeof raw.header === "string" ? raw.header : "",
+      question: raw.question,
+      isSecret: raw.isSecret === true,
+      isOther: raw.isOther === true,
+      options,
+    });
+  }
+  return questions.length > 0
+    ? {
+        interactionId: value.interactionId,
+        questions,
+        autoResolutionMs:
+          typeof value.autoResolutionMs === "number" ? value.autoResolutionMs : null,
+      }
+    : null;
 }
 
 function ToolCallRow({ tool }: { tool: ToolCallView }) {

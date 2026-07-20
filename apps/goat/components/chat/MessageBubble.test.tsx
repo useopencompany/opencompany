@@ -1,6 +1,8 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/agent-runtime";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
   type GoatChatUiMessage,
@@ -202,6 +204,99 @@ describe("MessageBubble assistant errors", () => {
     expect(source).toHaveAttribute("target", "_blank");
     expect(source).toHaveAttribute("rel", "noopener noreferrer");
     expect(screen.getByLabelText("Sources")).toBeInTheDocument();
+  });
+});
+
+describe("MessageBubble Codex interactions", () => {
+  it("renders the terminal Plan-mode implementation choice", async () => {
+    const onCodexAction = vi.fn(async () => undefined);
+    const message: GoatChatUiMessage = {
+      id: "assistant_plan",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_PLAN_TOOL_NAME,
+          toolCallId: "plan_1",
+          state: "output-available",
+          input: { label: "Plan" },
+          output: {
+            status: "completed",
+            text: "1. Inspect\n2. Patch\n3. Verify",
+            implementationAvailable: true,
+          },
+        } as GoatChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onCodexAction={onCodexAction}
+        allowCodexPlanActions
+      />,
+    );
+    expect(screen.getByText("Implement this plan?")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Implement plan" }));
+    await waitFor(() => expect(onCodexAction).toHaveBeenCalledWith({ type: "implement-plan" }));
+  });
+
+  it("collects option answers and notes for an app-server question", async () => {
+    const onCodexAction = vi.fn(async () => undefined);
+    const message: GoatChatUiMessage = {
+      id: "assistant_question",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_QUESTION_TOOL_NAME,
+          toolCallId: "question_1",
+          state: "approval-requested",
+          input: {
+            label: "Question",
+            interactionId: "goat_codex_chat_interaction_123",
+            question: "How broad should the fix be?",
+            questions: [
+              {
+                id: "scope",
+                header: "Scope",
+                question: "How broad should the fix be?",
+                isOther: true,
+                options: [{ label: "Foundational", description: "Harden the full protocol path." }],
+              },
+            ],
+          },
+        } as GoatChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onCodexAction={onCodexAction}
+      />,
+    );
+    await userEvent.click(screen.getByRole("radio", { name: /Foundational/ }));
+    await userEvent.type(
+      screen.getByPlaceholderText("Optional note or describe Other"),
+      "recovery",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Send answer" }));
+
+    await waitFor(() =>
+      expect(onCodexAction).toHaveBeenCalledWith({
+        type: "answer-question",
+        interactionId: "goat_codex_chat_interaction_123",
+        answers: {
+          scope: { answers: ["Foundational", "user_note: recovery"] },
+        },
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Answer sent" })).toBeDisabled();
   });
 });
 

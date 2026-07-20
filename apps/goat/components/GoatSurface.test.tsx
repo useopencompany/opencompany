@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/agent-runtime";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -288,6 +289,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Local Codex"));
+    expect(screen.queryByRole("button", { name: "Plan mode" })).not.toBeInTheDocument();
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Inspect");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -628,6 +630,142 @@ describe("GoatSurface chat streaming UI", () => {
         "false",
       ),
     );
+  });
+
+  it("starts plan implementation as a default-mode Codex follow-up", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return Response.json(
+        {
+          ok: true,
+          sessionId: "goat_chat_codex_1",
+          userMessageId: "goat_chat_msg_implement_user",
+          assistantMessageId: "goat_chat_msg_implement_assistant",
+          mode: "started",
+        },
+        { status: 202 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        codexConnected
+        initialChat={{
+          id: "goat_chat_codex_1",
+          title: "Codex plan",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          codexComposerSettings: {
+            reasoningEffort: "high",
+            planModeEnabled: true,
+            goalMode: null,
+          },
+          messages: [
+            {
+              id: "assistant_plan",
+              role: "assistant",
+              metadata: { sessionId: "goat_chat_codex_1" },
+              parts: [
+                {
+                  type: "dynamic-tool",
+                  toolName: CODEX_PLAN_TOOL_NAME,
+                  toolCallId: "plan_1",
+                  state: "output-available",
+                  input: { label: "Plan" },
+                  output: {
+                    status: "completed",
+                    text: "1. Inspect\n2. Patch\n3. Verify",
+                    implementationAvailable: true,
+                  },
+                } as GoatChatUiMessage["parts"][number],
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Implement plan" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      sessionId: "goat_chat_codex_1",
+      message: { role: "user", parts: [{ type: "text", text: "Implement the plan." }] },
+      settings: { reasoningEffort: "high", planModeEnabled: false, goalMode: null },
+    });
+  });
+
+  it("posts an interactive Codex question answer to its durable interaction", async () => {
+    const user = userEvent.setup();
+    const interactionId = "goat_codex_chat_interaction_123e4567-e89b-12d3-a456-426614174000";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return Response.json({ ok: true }, { status: 202 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        codexConnected
+        initialChat={{
+          id: "goat_chat_codex_1",
+          title: "Codex question",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          messages: [
+            {
+              id: "assistant_question",
+              role: "assistant",
+              metadata: { sessionId: "goat_chat_codex_1" },
+              parts: [
+                {
+                  type: "dynamic-tool",
+                  toolName: CODEX_QUESTION_TOOL_NAME,
+                  toolCallId: "question_1",
+                  state: "approval-requested",
+                  input: {
+                    label: "Question",
+                    interactionId,
+                    question: "Which scope?",
+                    questions: [
+                      {
+                        id: "scope",
+                        header: "Scope",
+                        question: "Which scope?",
+                        options: [{ label: "Foundational", description: "Harden everything." }],
+                      },
+                    ],
+                  },
+                } as GoatChatUiMessage["parts"][number],
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /Foundational/ }));
+    await user.click(screen.getByRole("button", { name: "Send answer" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/codex-chat/interactions/${interactionId}`,
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      answers: { scope: { answers: ["Foundational"] } },
+    });
   });
 
   it("opens existing Codex chats in codex mode without enabling resume", () => {

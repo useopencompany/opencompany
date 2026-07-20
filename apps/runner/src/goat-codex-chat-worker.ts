@@ -250,6 +250,7 @@ async function failReclaimedTurn(input: {
       model: input.session.model,
       leaseId: input.leaseId,
       leaseOwner: input.leaseOwner,
+      planMode: Boolean(input.turn.settings?.planModeReasoningEffort),
       turnCreatedAt: input.turn.createdAt,
     },
     redact: (value) => value,
