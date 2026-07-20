@@ -17,6 +17,7 @@ import {
 } from "@opencompany/ui/components/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
 import { AnthropicIcon, MoonshotIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
@@ -2302,8 +2303,8 @@ function ChatTitleHeader({
 }
 
 // A small ring that fills to the share of the model's context window in use. The
-// exact "used / max" figure stays out of the chrome and is surfaced on hover
-// (native title), keeping the header quiet — mirrors the web app's meter.
+// exact "used / max" figure stays out of the chrome and is surfaced on hover,
+// keeping the header quiet — mirrors the web app's meter.
 function ChatContextMeter({ used, max }: { used: number; max: number }) {
   const fraction = max > 0 ? Math.min(1, used / max) : 0;
   const size = 14;
@@ -2314,35 +2315,37 @@ function ChatContextMeter({ used, max }: { used: number; max: number }) {
     fraction * 100,
   )}%`;
   return (
-    <span
-      className="flex shrink-0 items-center text-ink-muted"
-      title={detail}
-      aria-label={`Context window usage: ${detail}`}
-    >
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          strokeWidth={strokeWidth}
-          stroke="currentColor"
-          className="text-ink/15"
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          strokeWidth={strokeWidth}
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - fraction)}
-          className="text-ink/70 transition-[stroke-dashoffset] duration-500"
-        />
-      </svg>
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        className="flex shrink-0 items-center rounded-full text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        aria-label={`Context window usage: ${detail}`}
+      >
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            strokeWidth={strokeWidth}
+            stroke="currentColor"
+            className="text-ink/15"
+          />
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            strokeWidth={strokeWidth}
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference * (1 - fraction)}
+            className="text-ink/70 transition-[stroke-dashoffset] duration-500"
+          />
+        </svg>
+      </TooltipTrigger>
+      <TooltipContent>{detail}</TooltipContent>
+    </Tooltip>
   );
 }
 
