@@ -236,7 +236,7 @@ export function createGoatCodexChatProjector(input: {
         UPDATE goat.codex_chat_sessions AS session
         SET active_turn_id = (SELECT id FROM next_queued_turn),
             status = CASE
-              WHEN EXISTS (SELECT 1 FROM next_queued_turn) THEN 'starting'
+              WHEN EXISTS (SELECT 1 FROM next_queued_turn) THEN 'queued'
               ELSE ${options.sessionStatus}
             END,
             error = ${options.error},

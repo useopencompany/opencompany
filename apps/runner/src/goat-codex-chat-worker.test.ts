@@ -1,12 +1,17 @@
 import type { GoatCodexChatSession, GoatCodexChatTurn } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
-import { runClaimedTurn } from "./goat-codex-chat-worker";
+import {
+  claimNextGoatCodexChatTurn,
+  resolveGoatCodexChatWorkerConcurrency,
+  runClaimedTurn,
+} from "./goat-codex-chat-worker";
 
 const sessionRows = vi.hoisted(() => [] as GoatCodexChatSession[]);
 
 const dbMock = vi.hoisted(() => {
   const db = {
+    execute: vi.fn(),
     select: vi.fn(() => db),
     from: vi.fn(() => db),
     where: vi.fn(() => db),
@@ -18,6 +23,13 @@ const dbMock = vi.hoisted(() => {
 const chatMocks = vi.hoisted(() => ({
   runGoatCodexChatTurn: vi.fn(),
 }));
+
+const telemetry = vi.hoisted(() => ({ recordGoatHistogram: vi.fn() }));
+
+vi.mock("@opencompany/goat-observability", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opencompany/goat-observability")>();
+  return { ...actual, recordGoatHistogram: telemetry.recordGoatHistogram };
+});
 
 const eventMocks = vi.hoisted(() => ({
   fail: vi.fn(),
@@ -38,6 +50,34 @@ vi.mock("./goat-codex-chat-events", () => ({
   loadCodexChatAssistantMessageParts: eventMocks.loadCodexChatAssistantMessageParts,
 }));
 
+describe("claimNextGoatCodexChatTurn", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.execute.mockResolvedValue({ rows: [claimedTurnRow()] });
+  });
+
+  it("atomically moves the claimed session from queued to starting", async () => {
+    await expect(
+      claimNextGoatCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
+    ).resolves.toMatchObject({ id: "goat_codex_chat_turn_1", status: "running", attempts: 1 });
+
+    const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
+    expect(statement).toContain("claimed AS");
+    expect(statement).toContain("UPDATE goat.codex_chat_sessions AS session");
+    expect(statement).toContain("SET status = 'starting'");
+  });
+});
+
+describe("resolveGoatCodexChatWorkerConcurrency", () => {
+  it("uses the runner-wide concurrency by default", () => {
+    expect(resolveGoatCodexChatWorkerConcurrency({ workerConcurrency: 40 })).toBe(40);
+  });
+
+  it("honors an explicit test override", () => {
+    expect(resolveGoatCodexChatWorkerConcurrency({ workerConcurrency: 40 }, 2)).toBe(2);
+  });
+});
+
 describe("runClaimedTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -47,13 +87,29 @@ describe("runClaimedTurn", () => {
   });
 
   it("runs first attempts normally", async () => {
-    await runClaimedTurn(turn({ attempts: 1 }), env());
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T09:00:05.000Z"));
+    try {
+      await runClaimedTurn(turn({ attempts: 1 }), env());
+    } finally {
+      vi.useRealTimers();
+    }
 
     const input = chatMocks.runGoatCodexChatTurn.mock.calls[0]?.[0];
     expect(input).toEqual(
       expect.objectContaining({ turn: expect.objectContaining({ attempts: 1 }) }),
     );
     expect(input).not.toHaveProperty("recovery");
+    expect(telemetry.recordGoatHistogram).toHaveBeenCalledWith(
+      "goat.codex_chat.queue_wait_ms",
+      5_000,
+      {
+        "goat.engine": "codex",
+        "goat.model": "gpt-5.5",
+        "goat.status": "running",
+        "goat.attempt": 1,
+      },
+    );
   });
 
   it("uses durable continuation for the first reclaimed attempt", async () => {
@@ -66,6 +122,7 @@ describe("runClaimedTurn", () => {
       }),
     );
     expect(eventMocks.fail).not.toHaveBeenCalled();
+    expect(telemetry.recordGoatHistogram).not.toHaveBeenCalled();
   });
 
   it("fails cleanly when recovery is reclaimed again", async () => {
@@ -77,6 +134,48 @@ describe("runClaimedTurn", () => {
     );
   });
 });
+
+function claimedTurnRow() {
+  return {
+    id: "goat_codex_chat_turn_1",
+    user_workos_id: "user_1",
+    codex_chat_session_id: "goat_codex_chat_1",
+    chat_session_id: "goat_chat_1",
+    user_message_id: "goat_chat_msg_user",
+    assistant_message_id: "goat_chat_msg_assistant",
+    codex_turn_id: null,
+    status: "running",
+    prompt: "Fix the bug.",
+    settings: {},
+    error: null,
+    interrupt_requested_at: null,
+    attempts: 1,
+    lease_id: "lease_1",
+    lease_owner: "runner_1",
+    lease_expires_at: "2026-07-10T09:05:00.000Z",
+    completed_at: null,
+    created_at: "2026-07-10T09:00:00.000Z",
+    updated_at: "2026-07-10T09:00:00.000Z",
+  };
+}
+
+function sqlText(query: unknown): string {
+  const chunks = (query as { queryChunks?: unknown[] }).queryChunks ?? [];
+  return chunks
+    .map((chunk) => {
+      if (typeof chunk === "string") return chunk;
+      if (
+        chunk &&
+        typeof chunk === "object" &&
+        "value" in chunk &&
+        Array.isArray((chunk as { value?: unknown }).value)
+      ) {
+        return ((chunk as { value: unknown[] }).value ?? []).join("");
+      }
+      return "";
+    })
+    .join("");
+}
 
 function turn(overrides: Partial<GoatCodexChatTurn> = {}): GoatCodexChatTurn {
   const now = new Date("2026-07-10T09:00:00.000Z");

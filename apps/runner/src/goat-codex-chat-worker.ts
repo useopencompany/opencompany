@@ -5,6 +5,7 @@ import {
   type GoatCodexChatTurnSettings,
   goatCodexChatSessions,
 } from "@opencompany/db/goat-schema";
+import { GOAT_METRICS, recordGoatHistogram } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
@@ -91,17 +92,32 @@ export async function claimNextGoatCodexChatTurn(input: {
       ORDER BY turn.created_at ASC, turn.id ASC
       FOR UPDATE SKIP LOCKED
       LIMIT 1
+    ), claimed AS (
+      UPDATE goat.codex_chat_turns AS turn
+      SET status = 'running',
+          attempts = turn.attempts + 1,
+          lease_id = ${leaseId},
+          lease_owner = ${input.leaseOwner},
+          lease_expires_at = ${leaseExpiresAt},
+          updated_at = ${now}
+      FROM candidate
+      WHERE turn.id = candidate.id
+      RETURNING turn.*
+    ), started_session AS (
+      UPDATE goat.codex_chat_sessions AS session
+      SET status = 'starting',
+          active_turn_id = claimed.id,
+          error = NULL,
+          updated_at = ${now}
+      FROM claimed
+      WHERE session.id = claimed.codex_chat_session_id
+        AND session.user_workos_id = claimed.user_workos_id
+      RETURNING session.id
     )
-    UPDATE goat.codex_chat_turns AS turn
-    SET status = 'running',
-        attempts = turn.attempts + 1,
-        lease_id = ${leaseId},
-        lease_owner = ${input.leaseOwner},
-        lease_expires_at = ${leaseExpiresAt},
-        updated_at = ${now}
-    FROM candidate
-    WHERE turn.id = candidate.id
-    RETURNING turn.*
+    SELECT claimed.*
+    FROM claimed
+    INNER JOIN started_session
+      ON started_session.id = claimed.codex_chat_session_id
   `);
   const row = rowsFromExecute<ClaimedTurnRow>(result)[0];
   return row ? turnFromRow(row) : null;
@@ -143,6 +159,19 @@ export async function runClaimedTurn(turn: GoatCodexChatTurn, env: RunnerEnv) {
     )
     .limit(1);
   if (!session) throw new Error(`Codex chat session ${turn.codexChatSessionId} not found.`);
+
+  if (turn.attempts === 1) {
+    recordGoatHistogram(
+      GOAT_METRICS.codexChatQueueWaitMs,
+      Math.max(0, Date.now() - turn.createdAt.getTime()),
+      {
+        "goat.engine": "codex",
+        "goat.model": session.model,
+        "goat.status": turn.status,
+        "goat.attempt": turn.attempts,
+      },
+    );
+  }
 
   // Reclaimed attempt 2 gets one durable continuation pass. The continuation reuses the warm
   // sandbox/thread when available and asks Codex to inspect current state before side effects.
@@ -236,7 +265,7 @@ export function startGoatCodexChatWorker(
   env: RunnerEnv,
   options: { concurrency?: number; pollIntervalMs?: number } = {},
 ) {
-  const concurrency = Math.max(1, options.concurrency ?? Math.min(2, env.workerConcurrency));
+  const concurrency = resolveGoatCodexChatWorkerConcurrency(env, options.concurrency);
   const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? 1_000);
   const active = new Set<Promise<void>>();
   let stopped = false;
@@ -317,6 +346,13 @@ export function startGoatCodexChatWorker(
       await Promise.allSettled(Array.from(active));
     },
   };
+}
+
+export function resolveGoatCodexChatWorkerConcurrency(
+  env: Pick<RunnerEnv, "workerConcurrency">,
+  override?: number,
+) {
+  return Math.max(1, override ?? env.workerConcurrency);
 }
 
 function turnFromRow(row: ClaimedTurnRow): GoatCodexChatTurn {

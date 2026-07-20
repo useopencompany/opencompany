@@ -135,6 +135,7 @@ Important span attributes:
 | `goat.chat.tasks_started_total` | Counter | Chat turns that start background tasks. |
 | `goat.chat.web_searches_total` | Counter | Chat web-search calls. |
 | `goat.chat.web_search_cost_usd_micros` | Counter | Chat web-search cost in micro-USD. |
+| `goat.codex_chat.queue_wait_ms` | Histogram | Cloud Codex time from enqueue to first runner claim, by model. |
 | `goat.task_dispatches_total` | Counter | Web app task dispatch attempts. |
 | `goat.task_dispatch_duration_ms` | Histogram | Task dispatch duration. |
 | `goat.task_runs_total` | Counter | Runner task terminal outcomes. |

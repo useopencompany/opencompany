@@ -1367,7 +1367,13 @@ export function GoatSurface({
               {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
                 <ThinkingIndicator
                   startedAtMs={activeTurnTimerStartedAtMs}
-                  label={isEngineChat ? "Codex is working" : "Goat is working"}
+                  label={
+                    isEngineChat
+                      ? codexRuntime?.status === "queued"
+                        ? "Codex is queued"
+                        : "Codex is working"
+                      : "Goat is working"
+                  }
                 />
               ) : null}
             </div>
@@ -1691,7 +1697,11 @@ function isBackgroundTaskActive(task: GoatTaskView) {
 }
 
 function isCodexTaskActive(chat: GoatChatSummaryView) {
-  return chat.codexRuntime?.status === "starting" || chat.codexRuntime?.status === "running";
+  return (
+    chat.codexRuntime?.status === "queued" ||
+    chat.codexRuntime?.status === "starting" ||
+    chat.codexRuntime?.status === "running"
+  );
 }
 
 function homeTaskUpdatedAtMs(item: GoatHomeTaskItem) {
@@ -2347,7 +2357,7 @@ function formatCompactTokens(value: number): string {
 }
 
 type CodexRuntimeMeta = {
-  kind: "connecting" | "starting" | "working" | "ready" | "needs-attention" | "stopped";
+  kind: "connecting" | "queued" | "starting" | "working" | "ready" | "needs-attention" | "stopped";
   label: string;
   dotClass: string;
   textClass: string;
@@ -2360,6 +2370,14 @@ function codexRuntimeMeta(runtime: GoatCodexRuntimeView | null): CodexRuntimeMet
       label: "Connecting",
       dotClass: "bg-ink/25",
       textClass: "text-ink-subtle",
+    };
+  }
+  if (runtime.status === "queued") {
+    return {
+      kind: "queued",
+      label: "Queued",
+      dotClass: "animate-pulse bg-warning",
+      textClass: "text-warning",
     };
   }
   if (runtime.status === "starting") {
@@ -2594,7 +2612,7 @@ function LiveCodexChatSessionStatusSubscriber({
           }
         : null,
     );
-    setRunning(status === "starting" || status === "running");
+    setRunning(status === "queued" || status === "starting" || status === "running");
   }, [isLoading, row, setRunning, setRuntime, status]);
 
   useEffect(() => {
