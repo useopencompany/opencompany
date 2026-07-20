@@ -94,6 +94,38 @@ describe("goat brain file sync", () => {
     );
   });
 
+  it("preserves skill descriptions through materialization", async () => {
+    const content = createGoatBrainMarkdownContent({
+      id: "coding-work",
+      folderPath: "skills",
+      title: "Coding work",
+      description: "How coding work should happen.",
+      type: "note",
+      status: "draft",
+      compiledTruth: "Inspect, implement, and verify.",
+    });
+    const db = materializeSelectDb([
+      {
+        id: "doc_1",
+        userWorkosId: "user_1",
+        brainRef: "goat_brain_user_1",
+        brainId: "coding-work",
+        folderPath: "skills",
+        content,
+        contentHash: hashGoatBrainContent(content),
+        format: "markdown",
+      },
+    ]);
+
+    await materializeGoatBrainFilesToRoot({ brainRef: "goat_brain_user_1", root, db });
+    const files = await readGoatBrainFilesFromRoot(root);
+
+    expect(files).toEqual([{ path: "skills/coding-work.md", content }]);
+    expect(parseGoatBrainDocument(files[0]!.content).frontmatter.description).toBe(
+      "How coding work should happen.",
+    );
+  });
+
   it("projects nested legacy markdown compiled truth as body-only text", () => {
     const nested = createGoatBrainMarkdownContent({
       id: "nested-note",

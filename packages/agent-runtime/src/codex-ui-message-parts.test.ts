@@ -14,7 +14,9 @@ import {
   codexUiMessagePartsContent,
   createCodexCommandOutputAccumulator,
   finalizeCodexUiMessageParts,
+  offerCodexPlanImplementation,
   parseCodexUiMessageParts,
+  resolveCodexUiInteraction,
 } from "./codex-ui-message-parts";
 
 function events(raw: Record<string, unknown>[]) {
@@ -266,6 +268,67 @@ describe("applyCodexEventToUiMessageParts", () => {
         output: { status: "completed", text: "1. Read code\n2. Patch tests" },
       },
     ]);
+
+    const offered = offerCodexPlanImplementation(parts);
+    expect(offered.changed).toBe(true);
+    expect(offered.parts[0]).toMatchObject({
+      output: { implementationAvailable: true },
+    });
+  });
+
+  it("offers implementation only through the explicit terminal Plan-mode transition", () => {
+    const noPlan = offerCodexPlanImplementation([{ type: "text", text: "Done" }]);
+    expect(noPlan.changed).toBe(false);
+
+    const runningPlan: CodexUiMessagePart[] = [
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_PLAN_TOOL_NAME,
+        toolCallId: "plan_1",
+        state: "input-available",
+        input: { label: "Plan", text: "1. Inspect" },
+      },
+    ];
+    expect(offerCodexPlanImplementation(runningPlan).changed).toBe(false);
+  });
+
+  it("projects and resolves an interactive app-server question", () => {
+    const [event] = normalizeCodexAppServerEvent({
+      id: 42,
+      method: "item/tool/requestUserInput",
+      interactionId: "interaction_1",
+      params: {
+        threadId: "thread_1",
+        turnId: "turn_1",
+        itemId: "question_1",
+        questions: [
+          {
+            id: "scope",
+            header: "Scope",
+            question: "How broad should the fix be?",
+            options: [{ label: "Foundational", description: "Harden the full path." }],
+          },
+        ],
+      },
+    });
+    const waiting = applyCodexEventToUiMessageParts([], event!).parts;
+    expect(waiting[0]).toMatchObject({
+      toolName: CODEX_QUESTION_TOOL_NAME,
+      state: "approval-requested",
+      input: {
+        interactionId: "interaction_1",
+        question: "How broad should the fix be?",
+      },
+    });
+
+    const answered = resolveCodexUiInteraction(waiting, {
+      interactionId: "interaction_1",
+      status: "answered",
+    });
+    expect(answered.parts[0]).toMatchObject({
+      state: "output-available",
+      output: { status: "answered" },
+    });
   });
 
   it("projects file changes, MCP tool calls, and web searches as durable parts", () => {
@@ -388,7 +451,7 @@ describe("applyCodexEventToUiMessageParts", () => {
         toolName: CODEX_QUESTION_TOOL_NAME,
         toolCallId: "question_1",
         state: "approval-requested",
-        input: { label: "Question", question: "Which branch should I use?", questions: undefined },
+        input: { label: "Question", question: "Which branch should I use?" },
       },
       {
         type: "dynamic-tool",

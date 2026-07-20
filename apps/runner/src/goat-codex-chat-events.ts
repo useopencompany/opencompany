@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   applyCodexEventToUiMessageParts,
   type CodexAppServerNormalizedEvent,
@@ -5,7 +6,9 @@ import {
   createCodexCommandOutputAccumulator,
   finalizeCodexUiMessageParts,
   normalizeCodexAppServerEvent,
+  offerCodexPlanImplementation,
   parseCodexUiMessageParts,
+  resolveCodexUiInteraction,
 } from "@opencompany/agent-runtime";
 import {
   GOAT_CODEX_CHAT_EVENT_TYPES,
@@ -16,7 +19,7 @@ import {
 } from "@opencompany/db/goat-schema";
 import { captureException } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
-import type { CodexAppServerSummary } from "./codex-app-server";
+import type { CodexAppServerRequest, CodexAppServerSummary } from "./codex-app-server";
 import { getDb } from "./db";
 import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
 import { rowsFromExecute } from "./sql-exec";
@@ -38,6 +41,7 @@ export type GoatCodexChatProjectorTarget = {
   model: string;
   leaseId: string;
   leaseOwner: string;
+  planMode: boolean;
   turnCreatedAt?: Date;
 };
 
@@ -201,6 +205,66 @@ export function createGoatCodexChatProjector(input: {
     await writeAssistantMessage({ error: turnError });
   };
 
+  const cancelPendingInteractions = async () => {
+    const now = new Date();
+    const result = await getDb().execute(sql`
+      WITH canceled AS (
+        UPDATE goat.codex_chat_interactions AS interaction
+        SET status = 'canceled',
+            resolved_at = ${now},
+            updated_at = ${now}
+        WHERE interaction.codex_chat_turn_id = ${target.turnId}
+          AND interaction.user_workos_id = ${target.userWorkosId}
+          AND interaction.status = 'pending'
+          AND EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+        RETURNING interaction.id
+      ), resolved AS (
+        SELECT interaction.id, interaction.response
+        FROM goat.codex_chat_interactions AS interaction
+        WHERE interaction.codex_chat_turn_id = ${target.turnId}
+          AND interaction.user_workos_id = ${target.userWorkosId}
+          AND interaction.status = 'resolved'
+          AND EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+        FOR UPDATE
+      ), cleared_resolved AS (
+        UPDATE goat.codex_chat_interactions AS interaction
+        SET response = NULL,
+            updated_at = ${now}
+        FROM resolved
+        WHERE interaction.id = resolved.id
+        RETURNING resolved.id, resolved.response
+      )
+      SELECT canceled.id, 'canceled'::text AS status
+      FROM canceled
+      UNION ALL
+      SELECT interaction.id,
+             CASE
+               WHEN interaction.response -> 'answers' = '{}'::jsonb THEN 'auto-resolved'
+               ELSE 'resolved'
+             END AS status
+      FROM cleared_resolved AS interaction
+    `);
+    let didChange = false;
+    for (const row of rowsFromExecute<{
+      id: string;
+      status: "auto-resolved" | "canceled" | "resolved";
+    }>(result)) {
+      const projection = resolveCodexUiInteraction(parts, {
+        interactionId: row.id,
+        status:
+          row.status === "resolved"
+            ? "answered"
+            : row.status === "auto-resolved"
+              ? "auto-resolved"
+              : "canceled",
+      });
+      if (!projection.changed) continue;
+      parts = projection.parts;
+      didChange = true;
+    }
+    return didChange;
+  };
+
   const settleTurn = async (options: {
     turnStatus: "completed" | "failed" | "interrupted";
     sessionStatus: GoatCodexChatSessionStatus;
@@ -271,83 +335,184 @@ export function createGoatCodexChatProjector(input: {
       ${options.runningOnly ? sql`AND lease_turn.status = 'running'` : sql``}
   `;
 
+  // Notifications are already batched serially, but app-server requests are handled on a
+  // separate async path. Serialize every projection mutation so concurrent question/event writes
+  // cannot land out of order and overwrite newer message parts.
+  let projectionChain: Promise<void> = Promise.resolve();
+  const serializeProjection = <T>(operation: () => Promise<T>) => {
+    const result = projectionChain.then(operation, operation);
+    projectionChain = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+
   return {
-    // Serialized by the app-server notification batcher: each flush awaits this before the next.
-    async push(rawEvents: Record<string, unknown>[]) {
-      for (const raw of rawEvents) {
-        for (const event of normalizeCodexAppServerEvent(raw)) {
-          await handleEvent(event);
+    push(rawEvents: Record<string, unknown>[]) {
+      return serializeProjection(async () => {
+        for (const raw of rawEvents) {
+          for (const event of normalizeCodexAppServerEvent(raw)) {
+            await handleEvent(event);
+          }
         }
-      }
+      });
     },
 
-    async finalize(summary: CodexAppServerSummary) {
-      const completedAt = new Date();
-      const usage = summary.usage
-        ? {
-            inputTokens: summary.usage.input_tokens,
-            outputTokens: summary.usage.output_tokens,
-            totalTokens: summary.usage.input_tokens + summary.usage.output_tokens,
-          }
-        : undefined;
-      if (summary.status === "success") {
-        // Safety net: if no assistant.completed event produced a text part, fall back to the
-        // accumulator's result so the turn never ends visually empty.
-        if (!parts.some((part) => part.type === "text" && part.text.trim()) && summary.result) {
-          parts = [...parts, { type: "text", text: summary.result }];
+    requestUserInput(request: CodexAppServerRequest) {
+      return serializeProjection(async () => {
+        if (request.method !== "item/tool/requestUserInput") {
+          throw new Error(`Unsupported Codex app-server request: ${request.method}`);
         }
-        // Settle any still-waiting question/approval/status parts; the turn is over.
-        parts = finalizeCodexUiMessageParts(parts, "completed").parts;
+        if (!isValidCodexUserInputRequest(request.params)) {
+          throw new Error("Codex sent an invalid user-input request.");
+        }
+        const interactionId = `goat_codex_chat_interaction_${randomUUID()}`;
+        const rawEvent: Record<string, unknown> = { ...request, interactionId };
+        const [event] = normalizeCodexAppServerEvent(rawEvent);
+        if (!event || event.type !== "question.requested") {
+          throw new Error("Codex sent an invalid user-input request.");
+        }
+        const now = new Date();
+        assertRowsChanged(
+          await getDb().execute(sql`
+          INSERT INTO goat.codex_chat_interactions (
+            id,
+            user_workos_id,
+            codex_chat_session_id,
+            codex_chat_turn_id,
+            lease_id,
+            request_id,
+            item_id,
+            method,
+            status,
+            request,
+            created_at,
+            updated_at
+          )
+          SELECT ${interactionId},
+                 ${target.userWorkosId},
+                 ${target.codexChatSessionId},
+                 ${target.turnId},
+                 ${target.leaseId},
+                 ${String(request.id)},
+                 ${typeof request.params.itemId === "string" ? request.params.itemId : null},
+                 ${request.method},
+                 'pending',
+                 ${JSON.stringify(redactJson(request.params, redact))}::jsonb,
+                 ${now},
+                 ${now}
+          WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+          RETURNING id
+        `),
+        );
+        await insertEventRow(event);
+        const projection = applyCodexEventToUiMessageParts(parts, event);
+        if (projection.changed) {
+          parts = projection.parts;
+          await writeAssistantMessage({ error: turnError });
+        }
+        return { interactionId };
+      });
+    },
+
+    resolveInteraction(interactionId: string, status: "answered" | "auto-resolved" | "canceled") {
+      return serializeProjection(async () => {
+        const projection = resolveCodexUiInteraction(parts, { interactionId, status });
+        if (!projection.changed) return;
+        parts = projection.parts;
+        await writeAssistantMessage({ error: turnError });
+      });
+    },
+
+    cancelPendingInteractions() {
+      return serializeProjection(async () => {
+        if (await cancelPendingInteractions()) {
+          await writeAssistantMessage({ error: turnError });
+        }
+      });
+    },
+
+    finalize(summary: CodexAppServerSummary) {
+      return serializeProjection(async () => {
+        const completedAt = new Date();
+        await cancelPendingInteractions();
+        const usage = summary.usage
+          ? {
+              inputTokens: summary.usage.input_tokens,
+              outputTokens: summary.usage.output_tokens,
+              totalTokens: summary.usage.input_tokens + summary.usage.output_tokens,
+            }
+          : undefined;
+        if (summary.status === "success") {
+          // Safety net: if no assistant.completed event produced a text part, fall back to the
+          // accumulator's result so the turn never ends visually empty.
+          if (!parts.some((part) => part.type === "text" && part.text.trim()) && summary.result) {
+            parts = [...parts, { type: "text", text: summary.result }];
+          }
+          // Settle any still-waiting question/approval/status parts; the turn is over.
+          parts = finalizeCodexUiMessageParts(parts, "completed").parts;
+          if (target.planMode) {
+            parts = offerCodexPlanImplementation(parts).parts;
+          }
+          await writeAssistantMessage({
+            error: null,
+            usage,
+            durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+          });
+          await settleTurn({
+            turnStatus: "completed",
+            sessionStatus: "idle",
+            error: null,
+            completedAt,
+          });
+          return;
+        }
+        const error =
+          summary.error ?? turnError ?? `Codex finished with status: ${summary.status}.`;
+        parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
         await writeAssistantMessage({
-          error: null,
+          error,
           usage,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
         });
+        await settleTurn({ turnStatus: "failed", sessionStatus: "idle", error, completedAt });
+      });
+    },
+
+    interrupted() {
+      return serializeProjection(async () => {
+        const completedAt = new Date();
+        await cancelPendingInteractions();
+        parts = finalizeCodexUiMessageParts(parts, "interrupted").parts;
+        await writeAssistantMessage({
+          aborted: true,
+          durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+        });
         await settleTurn({
-          turnStatus: "completed",
-          sessionStatus: "idle",
+          turnStatus: "interrupted",
+          sessionStatus: "interrupted",
           error: null,
           completedAt,
         });
-        return;
-      }
-      const error = summary.error ?? turnError ?? `Codex finished with status: ${summary.status}.`;
-      parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
-      await writeAssistantMessage({
-        error,
-        usage,
-        durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
-      });
-      await settleTurn({ turnStatus: "failed", sessionStatus: "idle", error, completedAt });
-    },
-
-    async interrupted() {
-      const completedAt = new Date();
-      parts = finalizeCodexUiMessageParts(parts, "interrupted").parts;
-      await writeAssistantMessage({
-        aborted: true,
-        durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
-      });
-      await settleTurn({
-        turnStatus: "interrupted",
-        sessionStatus: "interrupted",
-        error: null,
-        completedAt,
       });
     },
 
-    async fail(error: string, options: { sessionStatus?: GoatCodexChatSessionStatus } = {}) {
-      const completedAt = new Date();
-      parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
-      await writeAssistantMessage({
-        error,
-        durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
-      });
-      await settleTurn({
-        turnStatus: "failed",
-        sessionStatus: options.sessionStatus ?? "idle",
-        error,
-        completedAt,
+    fail(error: string, options: { sessionStatus?: GoatCodexChatSessionStatus } = {}) {
+      return serializeProjection(async () => {
+        const completedAt = new Date();
+        await cancelPendingInteractions();
+        parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
+        await writeAssistantMessage({
+          error,
+          durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
+        });
+        await settleTurn({
+          turnStatus: "failed",
+          sessionStatus: options.sessionStatus ?? "idle",
+          error,
+          completedAt,
+        });
       });
     },
   };
@@ -373,6 +538,53 @@ function databaseErrorCode(error: unknown): string | undefined {
     current = "cause" in current ? current.cause : undefined;
   }
   return undefined;
+}
+
+function isValidCodexUserInputRequest(params: Record<string, unknown>) {
+  if (
+    typeof params.threadId !== "string" ||
+    !params.threadId ||
+    typeof params.turnId !== "string" ||
+    !params.turnId ||
+    typeof params.itemId !== "string" ||
+    !params.itemId ||
+    !Array.isArray(params.questions) ||
+    params.questions.length === 0 ||
+    params.questions.length > 3
+  ) {
+    return false;
+  }
+  if (
+    params.autoResolutionMs != null &&
+    (typeof params.autoResolutionMs !== "number" ||
+      !Number.isSafeInteger(params.autoResolutionMs) ||
+      params.autoResolutionMs < 0)
+  ) {
+    return false;
+  }
+  const ids = new Set<string>();
+  for (const value of params.questions) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const question = value as Record<string, unknown>;
+    if (
+      typeof question.id !== "string" ||
+      !question.id ||
+      ids.has(question.id) ||
+      typeof question.header !== "string" ||
+      typeof question.question !== "string" ||
+      !question.question.trim()
+    ) {
+      return false;
+    }
+    ids.add(question.id);
+    if (question.options != null && !Array.isArray(question.options)) return false;
+    for (const option of Array.isArray(question.options) ? question.options : []) {
+      if (!option || typeof option !== "object" || Array.isArray(option)) return false;
+      const record = option as Record<string, unknown>;
+      if (typeof record.label !== "string" || typeof record.description !== "string") return false;
+    }
+  }
+  return true;
 }
 
 export async function loadCodexChatAssistantMessageParts(assistantMessageId: string) {

@@ -236,6 +236,40 @@ describe("normalizeCodexAppServerEvent", () => {
   it("maps user questions and approval requests", () => {
     expect(
       normalizeCodexAppServerEvent({
+        id: "request_7",
+        method: "item/tool/requestUserInput",
+        interactionId: "goat_codex_chat_interaction_1",
+        params: {
+          threadId: "thread_1",
+          turnId: "turn_1",
+          itemId: "question_1",
+          autoResolutionMs: 15_000,
+          questions: [
+            {
+              id: "branch",
+              header: "Branch",
+              question: "Which branch should I use?",
+              options: [{ label: "main", description: "Use the default branch." }],
+            },
+          ],
+        },
+      })[0],
+    ).toMatchObject({
+      type: "question.requested",
+      payload: {
+        requestId: "request_7",
+        method: "item/tool/requestUserInput",
+        interactionId: "goat_codex_chat_interaction_1",
+        threadId: "thread_1",
+        turnId: "turn_1",
+        itemId: "question_1",
+        question: "Which branch should I use?",
+        autoResolutionMs: 15_000,
+      },
+    });
+
+    expect(
+      normalizeCodexAppServerEvent({
         method: "userInput/requested",
         params: { itemId: "question_1", question: "Which branch?" },
       })[0],
