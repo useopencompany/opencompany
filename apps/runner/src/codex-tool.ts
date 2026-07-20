@@ -17,6 +17,7 @@ import {
 } from "@opencompany/db/codex-auth";
 import { agentSessionArtifacts } from "@opencompany/db/schema";
 import { loadGitHubWorkRepository, loadGitHubWorkRepositoryByFullName } from "./amp-tool";
+import { CODEX_CLI_PACKAGE, CODEX_CLI_VERSION_OUTPUT } from "./codex-version";
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
@@ -54,7 +55,7 @@ import {
 } from "./sandbox";
 
 const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
-export const CODEX_FALLBACK_NPM_PACKAGE = "@openai/codex@0.144.5";
+export const CODEX_FALLBACK_NPM_PACKAGE = CODEX_CLI_PACKAGE;
 const CODEX_PROVIDER_ID = "opencompany";
 const CODEX_PROVIDER_NAME = "OpenCompany";
 const CODEX_DIRECT_BASE_URL = "https://api.openai.com/v1";
@@ -98,13 +99,18 @@ export type CodexCliAuth =
 
 export async function ensureCodexInstalled(sandbox: SandboxHandle) {
   const check = await sandbox.commands.run(
-    `command -v codex || test -x "$HOME/.codex/bin/codex" && echo found || true`,
+    `export PATH=${CODEX_BIN_PATH}:"$PATH" && codex --version 2>/dev/null || true`,
     { timeoutMs: 30_000 },
   );
-  if (String(check.stdout ?? "").trim()) return;
-  await sandbox.commands.run(`npm install -g ${shellQuote(CODEX_FALLBACK_NPM_PACKAGE)}`, {
-    timeoutMs: 180_000,
-  });
+  if (String(check.stdout ?? "").trim() === CODEX_CLI_VERSION_OUTPUT) return;
+  await sandbox.commands.run(
+    [
+      `npm install -g --prefix "$HOME/.codex" ${shellQuote(CODEX_FALLBACK_NPM_PACKAGE)}`,
+      `export PATH=${CODEX_BIN_PATH}:"$PATH"`,
+      `test "$(codex --version)" = ${shellQuote(CODEX_CLI_VERSION_OUTPUT)}`,
+    ].join(" && "),
+    { timeoutMs: 180_000 },
+  );
 }
 
 export async function runCodexCoderTool(input: {
