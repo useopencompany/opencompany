@@ -36,6 +36,8 @@ export function useGoatCreditBalance() {
     }
   }, []);
   useEffect(() => {
+    // The state update happens asynchronously after the balance request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refetch();
   }, [refetch]);
   return { balance, refetch };

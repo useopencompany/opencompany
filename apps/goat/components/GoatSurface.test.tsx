@@ -698,9 +698,7 @@ describe("GoatSurface chat streaming UI", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
     );
-    const [, init] = fetchMock.mock.calls.find(
-      ([url]) => url === "/api/codex-chat/messages",
-    )!;
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
       sessionId: "goat_chat_codex_1",
       message: { role: "user", parts: [{ type: "text", text: "Implement the plan." }] },
