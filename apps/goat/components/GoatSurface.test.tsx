@@ -677,6 +677,35 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.queryByText("Expired")).not.toBeInTheDocument();
   });
 
+  it("shows the context token usage in a tooltip", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { contextTokens: 14_200 },
+              parts: [{ type: "text", text: "Done." }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const contextMeter = screen.getByLabelText("Context window usage: 14k / 1M context · 1%");
+    await user.hover(contextMeter);
+
+    expect(await screen.findByText("14k / 1M context · 1%")).toBeVisible();
+  });
+
   it("shows when a Codex chat is waiting for runner capacity", () => {
     render(
       <GoatSurface
