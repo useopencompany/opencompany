@@ -8,7 +8,6 @@ import {
   appendGoatBrainAssetTextBlock,
   defaultGoatBrainFolderManifestEntries,
   deriveGoatBrainEdges,
-  GOAT_BRAIN_ENTRY_SCHEMA_VERSION,
   GOAT_BRAIN_FOLDER_MANIFEST_PATH,
   type GoatBrainDocumentFormat,
   type GoatBrainEntityType,
@@ -44,6 +43,8 @@ import {
   replaceGoatBrainCompiledTruth,
   serializeGoatBrainDocument,
   serializeGoatBrainFolderManifest,
+  serializeGoatBrainPayload,
+  serializeGoatBrainSidecar,
   serializeLegacyGoatBrainEntry,
   stripGoatBrainAssetTextBlock,
   validateGoatBrainDocument,
@@ -976,39 +977,10 @@ export async function materializeGoatBrainFilesToRoot(input: {
       continue;
     }
 
-    const payload = entry.body;
+    const payload = serializeGoatBrainPayload(entry);
     const sidecarPath = goatBrainSidecarRelativePath(row.folderPath, row.brainId);
     await writeRootFile(input.root, payloadPath, payload);
-    await writeRootFile(
-      input.root,
-      sidecarPath,
-      JSON.stringify(
-        {
-          schemaVersion: GOAT_BRAIN_ENTRY_SCHEMA_VERSION,
-          id: entry.id,
-          folder: entry.folder,
-          title: entry.title,
-          format: entry.format,
-          mimeType: entry.mimeType,
-          createdAt: entry.createdAt,
-          updatedAt: entry.updatedAt,
-          relations: entry.relations,
-          sources: entry.sources,
-          kind: entry.kind,
-          type: entry.type,
-          status: entry.status,
-          ...(entry.aliases.length > 0 ? { aliases: entry.aliases } : {}),
-          timeline: entry.timeline,
-          payload: {
-            path: payloadPath,
-            sha256: hashGoatBrainContent(payload),
-            sizeBytes: Buffer.byteLength(payload, "utf8"),
-          },
-        },
-        null,
-        2,
-      ),
-    );
+    await writeRootFile(input.root, sidecarPath, serializeGoatBrainSidecar(entry));
   }
   if (input.cliSource)
     await writeFile(path.join(input.root, "goat-brain.mjs"), input.cliSource, "utf8");
