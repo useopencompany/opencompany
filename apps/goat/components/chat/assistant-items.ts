@@ -180,16 +180,26 @@ export function toolCallViewFromPart(
         : codexItemOutcome === "interrupted"
           ? "stopped"
           : toolStatusFromState(state, stopped);
-  // Questions/approvals have no response channel in this chat: a settled part means the
-  // prompt went unanswered, not that it succeeded.
-  const unansweredCodexPrompt =
+  const codexPromptOutcome =
     (name === CODEX_QUESTION_TOOL_NAME || name === CODEX_APPROVAL_TOOL_NAME) &&
-    state === "output-available";
+    state === "output-available" &&
+    isRecord(output)
+      ? readString(output.status)
+      : null;
   return {
     name,
     label: name === USE_CAPABILITY_TOOL_NAME ? capabilityToolLabel(part.input) : toolLabel(name),
     status,
-    statusText: unansweredCodexPrompt ? "Unanswered" : toolStatusText(status, state),
+    statusText:
+      codexPromptOutcome === "answered"
+        ? "Answered"
+        : codexPromptOutcome === "auto-resolved"
+          ? "Auto-resolved"
+          : codexPromptOutcome === "unanswered" || codexPromptOutcome === "canceled"
+            ? codexPromptOutcome === "canceled"
+              ? "Canceled"
+              : "Unanswered"
+            : toolStatusText(status, state),
     detail: toolDetail(name, part, status),
     input: part.input,
     output: part.output,
@@ -442,13 +452,9 @@ function codexStateToolDetail(name: string, part: Record<string, unknown>) {
       name === CODEX_QUESTION_TOOL_NAME
         ? readString(input.question)
         : (readString(input.title) ?? readString(input.action));
-    // There is no way to reply to Codex prompts in this chat; say so instead of implying
-    // the user should act.
     const fallback =
       name === CODEX_QUESTION_TOOL_NAME ? "Codex asked for input" : "Codex asked for approval";
-    return truncateToolPreview(
-      `${prompt ?? fallback} (replies can't be sent to Codex in this chat)`,
-    );
+    return truncateToolPreview(prompt ?? fallback);
   }
   if (name === CODEX_FILE_CHANGE_TOOL_NAME) {
     const paths = codexFileChangePaths(output.changes) ?? codexFileChangePaths(input.changes);

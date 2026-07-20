@@ -6,7 +6,7 @@ import { type ChatTaskLookup, getOrderedAssistantItems } from "./assistant-items
 import { ReasoningItem } from "./ReasoningItem";
 import { TaskCard } from "./TaskCard";
 import { TurnDuration } from "./ThinkingIndicator";
-import { ToolCallItem } from "./ToolCallItem";
+import { type CodexToolAction, ToolCallItem } from "./ToolCallItem";
 import { UserMessageBubble } from "./UserMessageBubble";
 
 export function MessageBubble({
@@ -14,11 +14,15 @@ export function MessageBubble({
   taskLookup,
   stopped = false,
   durationMs,
+  onCodexAction,
+  allowCodexPlanActions = false,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
   stopped?: boolean;
   durationMs?: number | null | undefined;
+  onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
+  allowCodexPlanActions?: boolean;
 }) {
   if (message.role === "user") {
     return <UserMessageBubble message={message} />;
@@ -29,6 +33,8 @@ export function MessageBubble({
       taskLookup={taskLookup}
       stopped={stopped}
       durationMs={durationMs}
+      onCodexAction={onCodexAction}
+      allowCodexPlanActions={allowCodexPlanActions}
     />
   );
 }
@@ -38,11 +44,15 @@ function AssistantTurn({
   taskLookup,
   stopped,
   durationMs,
+  onCodexAction,
+  allowCodexPlanActions,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
   stopped: boolean;
   durationMs?: number | null | undefined;
+  onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
+  allowCodexPlanActions: boolean;
 }) {
   const error = message.metadata?.error;
   const items = getOrderedAssistantItems(
@@ -69,7 +79,14 @@ function AssistantTurn({
         }
         if (item.type === "reasoning") return <ReasoningItem key={item.key} text={item.text} />;
         if (item.type === "task") return <TaskCard key={item.key} task={item.task} />;
-        return <ToolCallItem key={item.key} tool={item.tool} />;
+        return (
+          <ToolCallItem
+            key={item.key}
+            tool={item.tool}
+            onCodexAction={onCodexAction}
+            allowCodexPlanActions={allowCodexPlanActions}
+          />
+        );
       })}
       {showStandaloneError && error ? <AssistantTextBubble text={error} error={error} /> : null}
       {typeof durationMs === "number" ? <TurnDuration durationMs={durationMs} /> : null}

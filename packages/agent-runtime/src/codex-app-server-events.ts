@@ -40,6 +40,23 @@ export function normalizeCodexAppServerEvent(
     itemId: firstString(params?.itemId, item?.id),
   };
 
+  if (method === "item/tool/requestUserInput") {
+    const questions = Array.isArray(params?.questions) ? params.questions : [];
+    const firstQuestion = readRecord(questions[0]);
+    return [
+      normalized("question.requested", event, {
+        ...base,
+        requestId: jsonRpcRequestId(event.id),
+        method,
+        interactionId: firstString(event.interactionId),
+        question: firstString(firstQuestion?.question),
+        questions,
+        autoResolutionMs:
+          typeof params?.autoResolutionMs === "number" ? params.autoResolutionMs : undefined,
+      }),
+    ];
+  }
+
   if (method === "item/agentMessage/delta") {
     const delta = rawString(params?.delta);
     return [
@@ -234,6 +251,9 @@ export function normalizeCodexAppServerEvent(
     return [
       normalized("question.requested", event, {
         ...base,
+        requestId: jsonRpcRequestId(event.id),
+        method,
+        interactionId: firstString(event.interactionId),
         question: firstString(params?.question, stringFromPath(params, ["prompt", "question"])),
         questions: Array.isArray(params?.questions) ? params.questions : undefined,
       }),
@@ -244,8 +264,10 @@ export function normalizeCodexAppServerEvent(
     return [
       normalized("approval.requested", event, {
         ...base,
+        requestId: jsonRpcRequestId(event.id),
+        method,
         title: firstString(params?.title, params?.message),
-        action: firstString(params?.action, params?.command),
+        action: firstString(params?.action, params?.command, params?.reason),
       }),
     ];
   }
@@ -407,4 +429,8 @@ function firstString(...values: unknown[]) {
 
 function rawString(value: unknown) {
   return typeof value === "string" ? value : null;
+}
+
+function jsonRpcRequestId(value: unknown) {
+  return typeof value === "string" || typeof value === "number" ? String(value) : undefined;
 }

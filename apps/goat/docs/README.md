@@ -202,6 +202,11 @@ output and running/interrupt state update live.
 While a local Codex turn is running, the composer stays enabled. Submitting more text queues
 `turn/steer`; the dedicated stop control queues `turn/interrupt`.
 
+Local Codex does not expose the Plan control yet. The bridge recognizes server-initiated
+app-server requests and returns an explicit unsupported-request error instead of silently treating
+them as client responses, but its command-polling transport does not yet have a durable path for a
+browser answer to reach the blocked local process.
+
 ## Cloud Codex Chat
 
 Entry points:
@@ -228,6 +233,26 @@ OpenCompany-managed ids and preserves any unrelated native skills. A content fin
 the app-server daemon when the installed set changes, while the persistent Codex thread is resumed.
 Only skills whose first activation belongs to the current turn are included as native `skill`
 inputs; previously activated skills remain installed and in thread history.
+
+The Cloud Codex Plan control starts the turn with app-server's experimental
+`collaborationMode.mode = "plan"`; `plan_mode_reasoning_effort` configures the mode's reasoning
+effort but does not activate Plan mode by itself. A successful Plan turn that produced a proposed
+plan ends with an **Implement plan** choice. That action sends the same `Implement the plan.`
+follow-up used by Codex's reference TUI and starts it in default collaboration mode. Keeping the
+plan editable is a client-side choice rather than a special app-server approval RPC.
+
+App-server user questions arrive as server-initiated `item/tool/requestUserInput` JSON-RPC
+requests. The runner persists each request and its short-lived response in
+`goat.codex_chat_interactions`, projects an
+interactive question card into the Electric-synced assistant message, and waits while maintaining
+the turn lease. The authenticated answer endpoint atomically resolves only a pending interaction
+owned by the current user and running turn; the runner then returns the exact app-server response
+shape. Timed questions auto-resolve with an empty answer map, matching the Codex TUI without
+inventing a selection. Turn completion, interruption, timeout, and lease recovery cancel pending
+interactions so stale cards cannot answer dead proxy connections. Cloud execution continues to use
+`approvalPolicy: "never"` inside the isolated workspace-write sandbox; unexpected command or file
+approval requests are declined rather than surfaced as misleading UI. Terminal and recovered turns
+clear stored answer bodies after settling the UI, including answers to questions marked secret.
 
 On the Goat home, open Cloud Codex sessions are projected into the unified Tasks section alongside
 background `goat.tasks`. This is a live UI projection of the chat-backed session and its
@@ -466,6 +491,10 @@ Important tables:
 - `goat.local_codex_turns`: local Codex user and assistant message linkage plus Codex turn status.
 - `goat.local_codex_commands`: queued bridge commands for start, steer, interrupt, and close.
 - `goat.local_codex_events`: raw app-server notifications plus normalized event type and payload.
+- `goat.codex_chat_sessions`: persistent cloud sandbox, app-server thread, active turn, and status.
+- `goat.codex_chat_turns`: leased Cloud Codex turn queue and message linkage.
+- `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
+- `goat.codex_chat_events`: normalized Cloud Codex event audit rows.
 - `goat.tasks`: durable background task queue, status, stage, result, error, lease, harness spec,
   debug trace, and sandbox id.
 - `goat.task_messages`: durable task transcript rows for user, assistant, and tool messages.

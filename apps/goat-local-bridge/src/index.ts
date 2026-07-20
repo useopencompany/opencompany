@@ -53,6 +53,12 @@ type CodexSessionRuntime = {
   eventBatcher: CodexEventBatcher;
 };
 
+type CodexAppServerRequest = {
+  id: number | string;
+  method: string;
+  params: Record<string, unknown>;
+};
+
 const sessions = new Map<string, CodexSessionRuntime>();
 let shuttingDown = false;
 
@@ -189,6 +195,7 @@ async function startTurn(options: BridgeOptions, command: BridgeCommand) {
     cwd: runtime.worktreePath,
     model,
     effort: codexSettings.reasoningEffort,
+    collaborationMode: codexCollaborationMode(model, codexSettings),
   });
   const turnId = readStringPath(turnResult, ["turn", "id"]) ?? readStringPath(turnResult, ["id"]);
   runtime.activeTurnId = turnId;
@@ -230,6 +237,12 @@ async function createSessionRuntime(
   let runtime: CodexSessionRuntime | null = null;
   const appServer = new CodexAppServerClient({
     cwd: worktree,
+    onServerRequest: async (request) => {
+      eventBatcher.push(request);
+      throw new Error(
+        `Codex app-server request "${request.method}" is not supported by Local Codex yet.`,
+      );
+    },
     onNotification: (event) => {
       if (event.method === "turn/started") {
         const turnId =
@@ -303,6 +316,7 @@ class CodexAppServerClient {
 
   constructor(input: {
     cwd: string;
+    onServerRequest: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
     onNotification: (event: Record<string, unknown>) => void;
   }) {
     this.proc = spawn("codex", buildCodexAppServerArgs(), {
@@ -326,6 +340,25 @@ class CodexAppServerClient {
       try {
         message = JSON.parse(trimmed) as Record<string, unknown>;
       } catch {
+        return;
+      }
+      if (
+        (typeof message.id === "number" || typeof message.id === "string") &&
+        typeof message.method === "string"
+      ) {
+        void input
+          .onServerRequest({
+            id: message.id,
+            method: message.method,
+            params: isRecord(message.params) ? message.params : {},
+          })
+          .then((result) => this.respond(message.id as number | string, result))
+          .catch((error) =>
+            this.respond(message.id as number | string, undefined, {
+              code: -32000,
+              message: errorMessage(error),
+            }),
+          );
         return;
       }
       if (typeof message.id === "number") {
@@ -368,6 +401,16 @@ class CodexAppServerClient {
 
   notify(method: string, params: Record<string, unknown>) {
     this.proc.stdin.write(`${JSON.stringify({ method, params })}\n`);
+  }
+
+  private respond(
+    id: number | string,
+    result?: Record<string, unknown>,
+    error?: { code: number; message: string },
+  ) {
+    this.proc.stdin.write(
+      `${JSON.stringify(error ? { id, error } : { id, result: result ?? {} })}\n`,
+    );
   }
 
   close() {
@@ -527,6 +570,17 @@ function reasoningConfig(settings: CodexSettings) {
     ...(settings.planModeReasoningEffort
       ? { plan_mode_reasoning_effort: settings.planModeReasoningEffort }
       : {}),
+  };
+}
+
+function codexCollaborationMode(model: string, settings: CodexSettings) {
+  return {
+    mode: settings.planModeReasoningEffort ? "plan" : "default",
+    settings: {
+      model,
+      reasoning_effort: settings.planModeReasoningEffort ?? settings.reasoningEffort,
+      developer_instructions: null,
+    },
   };
 }
 

@@ -77,7 +77,7 @@ type AppServerState = {
 };
 
 type JsonRpcResponse = {
-  id: number;
+  id: number | string;
   result?: unknown;
   error?: { code?: number; message?: string };
 };
@@ -85,6 +85,12 @@ type JsonRpcResponse = {
 type JsonRpcNotification = {
   method: string;
   params?: Record<string, unknown>;
+};
+
+export type CodexAppServerRequest = {
+  id: number | string;
+  method: string;
+  params: Record<string, unknown>;
 };
 
 export function buildCodexAppServerCommandPlan(input: {
@@ -158,6 +164,7 @@ export async function runCodexAppServerTurn(input: {
   timeoutMs: number;
   checkAbort: () => Promise<void>;
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
+  onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
   onActivity: (activity: string) => Promise<void>;
 }) {
   const plan = buildCodexAppServerCommandPlan({
@@ -275,6 +282,7 @@ async function runTurnThroughProxy(input: {
   timeoutMs: number;
   checkAbort: () => Promise<void>;
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
+  onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
   onActivity: (activity: string) => Promise<void>;
   plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
 }): Promise<CodexAppServerSummary> {
@@ -285,11 +293,23 @@ async function runTurnThroughProxy(input: {
       if (activity) await input.onActivity(activity);
     },
   });
+  const onServerRequest = input.onServerRequest;
   const client = new AppServerProxyClient({
     sandbox: input.sandbox,
     command: input.plan.proxyCommand,
     envs: input.plan.codexEnv,
     timeoutMs: input.timeoutMs,
+    ...(onServerRequest
+      ? {
+          onServerRequest: async (request: CodexAppServerRequest) => {
+            // A request is ordered after every notification already read from the socket. Flush
+            // those notifications before surfacing the interaction so the durable UI projection
+            // cannot show older streamed parts after the question card.
+            await notificationBatcher.flush();
+            return onServerRequest(request);
+          },
+        }
+      : {}),
     onNotification: (notification) => {
       const activity = accumulator.push(notification);
       notificationBatcher.push(notification, activity);
@@ -332,6 +352,11 @@ async function runTurnThroughProxy(input: {
       cwd: input.plan.codexWorkRoot,
       model: input.model,
       effort: input.reasoningEffort,
+      collaborationMode: codexCollaborationMode({
+        model: input.model,
+        reasoningEffort: input.reasoningEffort,
+        planModeReasoningEffort: input.planModeReasoningEffort,
+      }),
       approvalPolicy: "never",
       sandboxPolicy: {
         type: "workspaceWrite",
@@ -575,6 +600,21 @@ function reasoningConfig(
   };
 }
 
+export function codexCollaborationMode(input: {
+  model: string;
+  reasoningEffort: CodexReasoningEffort;
+  planModeReasoningEffort: CodexReasoningEffort | null;
+}) {
+  return {
+    mode: input.planModeReasoningEffort ? "plan" : "default",
+    settings: {
+      model: input.model,
+      reasoning_effort: input.planModeReasoningEffort ?? input.reasoningEffort,
+      developer_instructions: null,
+    },
+  };
+}
+
 class AppServerProxyClient {
   private buffer = "";
   private nextId = 1;
@@ -596,6 +636,7 @@ class AppServerProxyClient {
       command: string;
       envs: Record<string, string>;
       timeoutMs: number;
+      onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
       onNotification: (notification: JsonRpcNotification) => void;
     },
   ) {}
@@ -704,6 +745,17 @@ class AppServerProxyClient {
       return;
     }
     if (!isRecord(message)) return;
+    if (
+      (typeof message.id === "number" || typeof message.id === "string") &&
+      typeof message.method === "string"
+    ) {
+      void this.handleServerRequest({
+        id: message.id,
+        method: message.method,
+        params: isRecord(message.params) ? message.params : {},
+      });
+      return;
+    }
     if (typeof message.id === "number") {
       this.resolveResponse(message as JsonRpcResponse);
       return;
@@ -713,7 +765,26 @@ class AppServerProxyClient {
     }
   }
 
+  private async handleServerRequest(request: CodexAppServerRequest) {
+    try {
+      if (!this.input.onServerRequest) {
+        throw new Error(`Codex app-server request "${request.method}" is not supported here.`);
+      }
+      const result = await this.input.onServerRequest(request);
+      await this.send({ id: request.id, result });
+    } catch (error) {
+      await this.send({
+        id: request.id,
+        error: {
+          code: -32000,
+          message: error instanceof Error ? error.message : "Codex client request failed.",
+        },
+      }).catch(() => undefined);
+    }
+  }
+
   private resolveResponse(response: JsonRpcResponse) {
+    if (typeof response.id !== "number") return;
     const pending = this.pending.get(response.id);
     if (!pending) return;
     this.pending.delete(response.id);
