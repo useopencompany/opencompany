@@ -67,6 +67,7 @@ import {
 } from "@/components/chat/ChatComposerAttachments";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
+import type { CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainSkillCatalogItem } from "@/lib/brain-skills";
@@ -600,6 +601,12 @@ export function GoatSurface({
     const overlay = messages.filter((message) => !persistedIds.has(message.id));
     return overlay.length > 0 ? [...persistedMessages, ...overlay] : persistedMessages;
   }, [messages, persistedMessages]);
+  const latestAssistantMessageId = useMemo(() => {
+    for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
+      if (chatMessages[index]?.role === "assistant") return chatMessages[index]?.id ?? null;
+    }
+    return null;
+  }, [chatMessages]);
   const hasMessages = chatMessages.length > 0;
   const isEngineWorking = isEngineChat && (engineRunning || engineSubmitting);
   const isAgentWorking = isGenerating || isEngineWorking;
@@ -1084,6 +1091,84 @@ export function GoatSurface({
     });
   };
 
+  const handleCodexToolAction = async (action: CodexToolAction) => {
+    if (action.type === "answer-question") {
+      const response = await fetch(
+        `/api/codex-chat/interactions/${encodeURIComponent(action.interactionId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ answers: action.answers }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error((await response.text()) || "Could not send your answer to Codex.");
+      }
+      return;
+    }
+
+    if (action.type === "continue-plan") {
+      setCodexPlanModeEnabled(true);
+      inputRef.current?.focus();
+      return;
+    }
+
+    if (engineSubmitting || engineRunning) {
+      throw new Error("Wait for the current Codex turn to finish.");
+    }
+    const engine = activeEngineChat?.engine;
+    const sessionId = activeEngineChat?.chatSessionId;
+    if (!engine || !sessionId) throw new Error("This Codex session is no longer available.");
+    const config = ENGINE_CHAT_CONFIG[engine];
+    const prompt = "Implement the plan.";
+    const settings: CodexComposerSettings = {
+      reasoningEffort: codexReasoningEffort,
+      planModeEnabled: false,
+      goalMode: null,
+    };
+    const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
+
+    clearError();
+    beginActiveTurn();
+    setEngineSubmitting(true);
+    try {
+      const result = await sendEngineChatMessage({
+        endpoint: config.messagesEndpoint,
+        errorLabel: config.label,
+        prompt,
+        sessionId,
+        settings,
+        userMessageId,
+        attachments: [],
+        mentions: [],
+      });
+      setChatSessionId(result.sessionId);
+      activeTurnAssistantMessageIdRef.current = result.assistantMessageId;
+      setEngineRunning(true);
+      setCodexPlanModeEnabled(false);
+      setCodexComposerStateByChatId((current) => {
+        const next = new Map(current);
+        next.set(result.sessionId, codexComposerUiStateFromSettings(settings));
+        return next;
+      });
+      setMessages((current) =>
+        appendEngineOptimisticMessages(current, {
+          sessionId: result.sessionId,
+          userMessageId: result.userMessageId,
+          assistantMessageId: result.assistantMessageId,
+          prompt,
+          attachments: [],
+        }),
+      );
+      router.refresh();
+    } catch (error) {
+      clearActiveTurn();
+      throw error;
+    } finally {
+      if (mountedRef.current) setEngineSubmitting(false);
+    }
+  };
+
   const closeChat = useCallback(() => {
     if (isGenerating) void stop();
     openChat(null);
@@ -1359,6 +1444,8 @@ export function GoatSurface({
                   taskLookup={chatTaskLookup}
                   stopped={locallyStoppedAssistantMessageIds.has(message.id)}
                   durationMs={chatMessageDurationMs(message, optimisticTurnDurations)}
+                  onCodexAction={handleCodexToolAction}
+                  allowCodexPlanActions={message.id === latestAssistantMessageId}
                 />
               ))}
               {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
@@ -1600,6 +1687,7 @@ export function GoatSurface({
                   model={activeEngine === "codex" ? codexModel : null}
                   reasoningEffort={codexReasoningEffort}
                   planModeEnabled={codexPlanModeEnabled}
+                  planModeAvailable={activeEngine === "codex"}
                   goalModeEnabled={codexGoalModeEnabled}
                   goalObjective={codexGoalObjective}
                   goalTokenBudget={codexGoalTokenBudget}
@@ -2111,6 +2199,7 @@ function CodexComposerControls({
   model,
   reasoningEffort,
   planModeEnabled,
+  planModeAvailable,
   goalModeEnabled,
   goalObjective,
   goalTokenBudget,
@@ -2126,6 +2215,7 @@ function CodexComposerControls({
   model: CodexChatModelId | null;
   reasoningEffort: CodexReasoningEffort;
   planModeEnabled: boolean;
+  planModeAvailable: boolean;
   goalModeEnabled: boolean;
   goalObjective: string;
   goalTokenBudget: string;
@@ -2155,22 +2245,24 @@ function CodexComposerControls({
         <ReasoningBars effort={reasoningEffort} size={12} />
         <span className="hidden sm:inline">{reasoningLabel}</span>
       </button>
-      <button
-        type="button"
-        aria-label="Plan mode"
-        aria-pressed={planModeEnabled}
-        title="Plan mode for the next message"
-        disabled={disabled}
-        onClick={() => onPlanModeEnabledChange(!planModeEnabled)}
-        className={cn(
-          "flex h-7 items-center rounded-lg px-2 text-[12px] font-medium leading-none transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50",
-          planModeEnabled
-            ? "bg-ink text-canvas hover:bg-ink/90"
-            : "text-ink-muted hover:bg-surface-hover hover:text-ink",
-        )}
-      >
-        Plan
-      </button>
+      {planModeAvailable ? (
+        <button
+          type="button"
+          aria-label="Plan mode"
+          aria-pressed={planModeEnabled}
+          title="Plan mode for the next message"
+          disabled={disabled}
+          onClick={() => onPlanModeEnabledChange(!planModeEnabled)}
+          className={cn(
+            "flex h-7 items-center rounded-lg px-2 text-[12px] font-medium leading-none transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50",
+            planModeEnabled
+              ? "bg-ink text-canvas hover:bg-ink/90"
+              : "text-ink-muted hover:bg-surface-hover hover:text-ink",
+          )}
+        >
+          Plan
+        </button>
+      ) : null}
       <Popover>
         <PopoverTrigger
           type="button"

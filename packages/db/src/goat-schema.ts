@@ -427,6 +427,8 @@ export type GoatCodexChatTurnSettings = {
   } | null;
 };
 
+export type GoatCodexChatInteractionStatus = "pending" | "resolved" | "canceled";
+
 export type GoatChatMessageDebugTrace = {
   schemaVersion?:
     | "opencompany.chat.debug.v1"
@@ -2943,6 +2945,51 @@ export const goatCodexChatTurns = goat.table(
   }),
 );
 
+export const goatCodexChatInteractions = goat.table(
+  "codex_chat_interactions",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    codexChatSessionId: text("codex_chat_session_id")
+      .notNull()
+      .references(() => goatCodexChatSessions.id, { onDelete: "cascade" }),
+    codexChatTurnId: text("codex_chat_turn_id")
+      .notNull()
+      .references(() => goatCodexChatTurns.id, { onDelete: "cascade" }),
+    leaseId: text("lease_id").notNull(),
+    requestId: text("request_id").notNull(),
+    itemId: text("item_id"),
+    method: text("method").notNull(),
+    status: text("status").$type<GoatCodexChatInteractionStatus>().notNull().default("pending"),
+    request: jsonb("request").$type<Record<string, unknown>>().notNull(),
+    response: jsonb("response").$type<Record<string, unknown>>(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionStatusIdx: index("goat_codex_chat_interactions_session_status_idx").on(
+      table.codexChatSessionId,
+      table.status,
+      table.createdAt,
+    ),
+    turnCreatedIdx: index("goat_codex_chat_interactions_turn_created_idx").on(
+      table.codexChatTurnId,
+      table.createdAt,
+    ),
+    statusCheck: check(
+      "goat_codex_chat_interactions_status_check",
+      sql`${table.status} IN ('pending', 'resolved', 'canceled')`,
+    ),
+    methodCheck: check(
+      "goat_codex_chat_interactions_method_check",
+      sql`${table.method} = 'item/tool/requestUserInput'`,
+    ),
+  }),
+);
+
 export const goatCodexChatEvents = goat.table(
   "codex_chat_events",
   {
@@ -3361,6 +3408,7 @@ export const goatCodexChatSessionsRelations = relations(goatCodexChatSessions, (
     references: [goatChatSessions.id],
   }),
   turns: many(goatCodexChatTurns),
+  interactions: many(goatCodexChatInteractions),
   events: many(goatCodexChatEvents),
 }));
 
@@ -3387,8 +3435,27 @@ export const goatCodexChatTurnsRelations = relations(goatCodexChatTurns, ({ one,
     references: [goatChatMessages.id],
     relationName: "goat_codex_chat_turns_assistant_message",
   }),
+  interactions: many(goatCodexChatInteractions),
   events: many(goatCodexChatEvents),
 }));
+
+export const goatCodexChatInteractionsRelations = relations(
+  goatCodexChatInteractions,
+  ({ one }) => ({
+    user: one(goatUsers, {
+      fields: [goatCodexChatInteractions.userWorkosId],
+      references: [goatUsers.workosUserId],
+    }),
+    codexChatSession: one(goatCodexChatSessions, {
+      fields: [goatCodexChatInteractions.codexChatSessionId],
+      references: [goatCodexChatSessions.id],
+    }),
+    codexChatTurn: one(goatCodexChatTurns, {
+      fields: [goatCodexChatInteractions.codexChatTurnId],
+      references: [goatCodexChatTurns.id],
+    }),
+  }),
+);
 
 export const goatCodexChatEventsRelations = relations(goatCodexChatEvents, ({ one }) => ({
   user: one(goatUsers, {
@@ -3676,6 +3743,7 @@ export type GoatLocalCodexCommand = typeof goatLocalCodexCommands.$inferSelect;
 export type GoatLocalCodexEvent = typeof goatLocalCodexEvents.$inferSelect;
 export type GoatCodexChatSession = typeof goatCodexChatSessions.$inferSelect;
 export type GoatCodexChatTurn = typeof goatCodexChatTurns.$inferSelect;
+export type GoatCodexChatInteraction = typeof goatCodexChatInteractions.$inferSelect;
 export type GoatCodexChatEvent = typeof goatCodexChatEvents.$inferSelect;
 export type GoatIntegration = typeof goatIntegrations.$inferSelect;
 export type GoatIntegrationCredential = typeof goatIntegrationCredentials.$inferSelect;
