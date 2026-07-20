@@ -22,6 +22,9 @@ export type SandboxLatencyObservation = {
   errorName?: string;
 };
 
+// Must stay >= the longest agent turn cap (RUNNER_CODEX_TIMEOUT_MS defaults to the same 1h):
+// this timeout is armed once at create/connect and e2b pauses the sandbox when it elapses, so a
+// turn outliving it would be frozen mid-command until autoResume wakes the sandbox.
 const ACTIVE_SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 const SANDBOX_REQUEST_TIMEOUT_MS = 30_000;
 const SANDBOX_USER = "user";

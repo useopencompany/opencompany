@@ -8,7 +8,7 @@ import {
   goatCodexChatSessions,
 } from "@opencompany/db/goat-schema";
 import type { GoatBrainSkill } from "@opencompany/goat-brain";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, notInArray, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
@@ -24,6 +24,7 @@ import { toGoatTaskTitle } from "@/lib/task-display";
 import {
   type GoatCodexSandboxStatus,
   getGoatCodexSandboxStatus,
+  killGoatCodexSandbox,
   triggerGoatCodexChatWake,
 } from "@/lib/task-runner";
 
@@ -208,6 +209,37 @@ export async function getGoatCodexChatSandboxStatus(input: {
       error: error instanceof Error ? error.message : "Unable to load Codex sandbox status.",
     };
   }
+}
+
+// Settles the engine session and kills its e2b sandbox after the parent chat is closed.
+// A session with in-flight work (queued/starting/running) is left alone: the runner settles it
+// and the sandbox idle timeout pauses the sandbox regardless, so nothing keeps running either way.
+export async function closeGoatCodexChatSessionForChat(input: {
+  userWorkosId: string;
+  chatSessionId: string;
+}) {
+  const [session] = await getDb()
+    .update(goatCodexChatSessions)
+    .set({ status: "closed", activeTurnId: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(goatCodexChatSessions.chatSessionId, input.chatSessionId),
+        eq(goatCodexChatSessions.userWorkosId, input.userWorkosId),
+        notInArray(goatCodexChatSessions.status, ["queued", "starting", "running", "closed"]),
+      ),
+    )
+    .returning({ sandboxId: goatCodexChatSessions.sandboxId });
+  if (!session?.sandboxId) return;
+
+  // Best-effort: a paused sandbox that outlives the kill only costs storage until e2b's
+  // retention window deletes it.
+  await killGoatCodexSandbox(session.sandboxId).catch((error) => {
+    console.warn("Goat codex sandbox kill on chat close failed.", {
+      event: "goat.codex_chat_close_sandbox_kill_failed",
+      chat_session_id: input.chatSessionId,
+      error,
+    });
+  });
 }
 
 async function loadCodexChatSessionForChat(input: { userWorkosId: string; chatSessionId: string }) {

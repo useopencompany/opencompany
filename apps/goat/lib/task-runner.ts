@@ -206,6 +206,40 @@ export async function getGoatCodexSandboxStatus(
   return body.status;
 }
 
+export async function killGoatCodexSandbox(sandboxId: string): Promise<boolean> {
+  const baseUrl = runnerInternalBaseUrl();
+  const token = runnerToken();
+  if (!baseUrl || !token) {
+    throw new Error("Goat runner is not configured.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(
+      `${baseUrl}/internal/goat/codex-chat/sandboxes/${encodeURIComponent(sandboxId)}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        signal: controller.signal,
+      },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Goat codex sandbox kill failed with ${response.status}: ${details}`);
+  }
+
+  const body = (await response.json()) as { killed?: unknown };
+  return body.killed === true;
+}
+
 export async function triggerGoatBrainIngestWake() {
   const baseUrl = runnerInternalBaseUrl();
   const token = runnerToken();
