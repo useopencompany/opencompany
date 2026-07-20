@@ -34,10 +34,12 @@ import {
   Code2,
   FileText,
   LoaderCircle,
+  MessageSquare,
   MessageSquarePlus,
   Pause,
   Play,
   Plus,
+  RotateCcw,
   Settings,
   Sparkles,
   Square,
@@ -69,7 +71,7 @@ import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainSkillCatalogItem } from "@/lib/brain-skills";
-import { closeGoatChatSessionAction } from "@/lib/chat-actions";
+import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import {
   compareGoatChatMessageOrder,
@@ -220,6 +222,7 @@ export function GoatSurface({
   defaultModel,
   initialChat,
   recentChats = [],
+  archivedChats = [],
   codexConnected = false,
   localCodexBetaEnabled = false,
   taskSpawningEnabled = false,
@@ -232,6 +235,7 @@ export function GoatSurface({
   defaultModel: string;
   initialChat: GoatChatSessionView | null;
   recentChats?: readonly GoatChatSummaryView[];
+  archivedChats?: readonly GoatChatSummaryView[];
   codexConnected?: boolean;
   localCodexBetaEnabled?: boolean;
   taskSpawningEnabled?: boolean;
@@ -321,6 +325,7 @@ export function GoatSurface({
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [newChatPrompt, setNewChatPrompt] = useState("");
+  const [restoringChatId, setRestoringChatId] = useState<string | null>(null);
   const [backgroundChatCount, setBackgroundChatCount] = useState(0);
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
     ReadonlySet<string>
@@ -611,10 +616,11 @@ export function GoatSurface({
     [chatMessages],
   );
   const activeTurnTimerStartedAtMs = activeTurnStartedAtMs ?? latestActiveTurnStartedAtMs;
+  const paletteRecentChats = useMemo(
+    () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
+    [optimisticallyArchivedChatIds, recentChats],
+  );
   const trimmedNewChatPrompt = newChatPrompt.trim();
-  const newChatPromptValid =
-    trimmedNewChatPrompt.length > 0 &&
-    trimmedNewChatPrompt.length <= BACKGROUND_CHAT_PROMPT_MAX_LENGTH;
   const showCodexComposerControls = isEngineChat && !localCodexFeatureDisabledForChat;
 
   useEffect(() => {
@@ -900,6 +906,41 @@ export function GoatSurface({
       toast.error(result.error ?? "Could not archive chat.");
     });
   };
+
+  const closeCommandPalette = useCallback(() => {
+    setNewChatCommandOpen(false);
+    setNewChatPrompt("");
+  }, []);
+
+  const jumpToChat = useCallback(
+    (chat: GoatChatSummaryView) => {
+      closeCommandPalette();
+      router.push(chatHref(chat.id));
+    },
+    [closeCommandPalette, router],
+  );
+
+  const restoreAndOpenChat = useCallback(
+    (chat: GoatChatSummaryView) => {
+      if (restoringChatId) return;
+      setRestoringChatId(chat.id);
+      closeCommandPalette();
+      startArchiveTransition(async () => {
+        // The chat route only serves open sessions, so the archived chat must be
+        // reopened before we navigate — otherwise the page would render empty.
+        const result = await reopenGoatChatSessionAction(chat.id);
+        if (result.ok) {
+          router.push(chatHref(chat.id));
+          router.refresh();
+          setRestoringChatId(null);
+          return;
+        }
+        setRestoringChatId(null);
+        toast.error(result.error ?? "Could not restore that chat.");
+      });
+    },
+    [closeCommandPalette, restoringChatId, router, startArchiveTransition],
+  );
 
   const startBackgroundChat = useCallback(
     (prompt: string) => {
@@ -1219,29 +1260,21 @@ export function GoatSurface({
     <div className="relative flex min-h-0 flex-1 flex-col items-center overflow-hidden">
       <CommandDialog
         open={newChatCommandOpen}
-        onOpenChange={setNewChatCommandOpen}
-        title="New Goat Chat"
-        description="Create a new Goat chat in the background."
+        onOpenChange={(open) => (open ? setNewChatCommandOpen(true) : closeCommandPalette())}
+        title="Search Goat chats"
+        description="Search chats, reopen archived ones, or start a new chat."
         className="top-[22%] max-w-xl translate-y-0 border-border bg-surface p-0 text-ink shadow-[0_18px_60px_rgba(15,15,15,0.18)]"
       >
         <CommandInput
           value={newChatPrompt}
           onValueChange={setNewChatPrompt}
-          placeholder={
-            taskSpawningEnabled ? "Describe the new chat or task..." : "Describe the new chat..."
-          }
-          onKeyDown={(event) => {
-            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-            event.preventDefault();
-            startBackgroundChat(newChatPrompt);
-          }}
+          placeholder="Search chats or describe a new one..."
         />
         <CommandList>
-          <CommandEmpty>Type what Goat should do.</CommandEmpty>
+          <CommandEmpty>No matching chats. Press Enter to start a new one.</CommandEmpty>
           <CommandGroup heading="Actions">
             <CommandItem
               value={`Create new chat ${newChatPrompt}`}
-              disabled={!newChatPromptValid}
               onSelect={() => startBackgroundChat(newChatPrompt)}
               className="gap-3"
             >
@@ -1265,6 +1298,54 @@ export function GoatSurface({
               <CommandShortcut>Enter</CommandShortcut>
             </CommandItem>
           </CommandGroup>
+          {paletteRecentChats.length > 0 ? (
+            <CommandGroup heading="Chats">
+              {paletteRecentChats.map((chat) => (
+                <CommandItem
+                  key={chat.id}
+                  value={`chat ${chat.title} ${chat.id}`}
+                  onSelect={() => jumpToChat(chat)}
+                  className="gap-3"
+                >
+                  <MessageSquare size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-medium text-ink">{chat.title}</p>
+                    <p className="truncate text-[12px] text-ink-subtle">{chat.preview}</p>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : null}
+          {archivedChats.length > 0 ? (
+            <CommandGroup heading="Archived">
+              {archivedChats.map((chat) => (
+                <CommandItem
+                  key={chat.id}
+                  value={`archived ${chat.title} ${chat.id}`}
+                  onSelect={() => restoreAndOpenChat(chat)}
+                  className="gap-3"
+                >
+                  {restoringChatId === chat.id ? (
+                    <LoaderCircle
+                      size={16}
+                      strokeWidth={2}
+                      className="shrink-0 animate-spin text-ink-subtle"
+                    />
+                  ) : (
+                    <Archive size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-medium text-ink">{chat.title}</p>
+                    <p className="truncate text-[12px] text-ink-subtle">Archived chat</p>
+                  </div>
+                  <CommandShortcut className="flex items-center gap-1">
+                    <RotateCcw size={12} strokeWidth={2} />
+                    Restore
+                  </CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : null}
         </CommandList>
       </CommandDialog>
 

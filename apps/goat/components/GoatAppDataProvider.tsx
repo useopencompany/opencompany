@@ -74,7 +74,15 @@ export type GoatAppInitialData = {
 
 type GoatAppData = GoatAppInitialData & {
   taskRows: GoatTaskRow[];
+  // Closed (archived) chats, surfaced in the command palette so the user can
+  // search and restore them. Derived from the same live query as recentChats —
+  // closed rows already stream to the client, they're just hidden elsewhere.
+  archivedChats: GoatChatSummaryView[];
 };
+
+// Keeps the command palette responsive; older archived chats are still
+// reachable by narrowing the search (which re-filters this bounded list).
+const GOAT_ARCHIVED_CHAT_LIMIT = 50;
 
 const GoatAppDataContext = createContext<GoatAppData | null>(null);
 
@@ -202,6 +210,31 @@ export function GoatAppDataProvider({
     return [...pinned, ...activeCodex, ...recent];
   }, [chatSessionRows, chatsLoading, codexChatSessionRows, initialData.recentChats]);
 
+  const archivedChats = useMemo<GoatChatSummaryView[]>(() => {
+    const codexRuntimeByChatId = new Map(
+      ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[]).map((row) => [
+        row.chat_session_id,
+        { status: row.status, error: row.error, updatedAt: row.updated_at },
+      ]),
+    );
+    return ((chatSessionRows ?? []) as GoatChatSessionRow[])
+      .filter((row) => row.closed_at)
+      .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, GOAT_ARCHIVED_CHAT_LIMIT)
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        model: row.model as AgentModelId,
+        engine: row.engine,
+        codexComposerSettings: null,
+        codexRuntime: row.engine === "codex" ? (codexRuntimeByChatId.get(row.id) ?? null) : null,
+        preview: "Archived",
+        updatedAt: row.updated_at,
+        pinnedAt: null,
+        archived: true,
+      }));
+  }, [chatSessionRows, codexChatSessionRows]);
+
   const integrations = useMemo(() => {
     if (integrationsLoading && !integrationRows?.length) return initialData.integrations;
     const liveIntegrations = goatIntegrationStateFromRows(
@@ -225,10 +258,11 @@ export function GoatAppDataProvider({
       tasks,
       schedules,
       recentChats,
+      archivedChats,
       integrations,
       taskRows: initialData.featureFlags.taskSpawning ? ((taskRows ?? []) as GoatTaskRow[]) : [],
     }),
-    [initialData, integrations, recentChats, schedules, taskRows, tasks],
+    [archivedChats, initialData, integrations, recentChats, schedules, taskRows, tasks],
   );
 
   return <GoatAppDataContext.Provider value={value}>{children}</GoatAppDataContext.Provider>;

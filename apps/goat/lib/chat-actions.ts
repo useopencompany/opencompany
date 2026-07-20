@@ -2,7 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
-import { closeGoatChatSessionForUser, setGoatChatSessionPinnedForUser } from "@/lib/chat";
+import {
+  closeGoatChatSessionForUser,
+  reopenGoatChatSessionForUser,
+  setGoatChatSessionPinnedForUser,
+} from "@/lib/chat";
 
 export type CloseGoatChatResult = {
   ok: boolean;
@@ -22,6 +26,25 @@ export async function closeGoatChatSessionAction(
   });
   if (!closed) {
     return { ok: false, error: "Could not close that chat." };
+  }
+
+  revalidatePath("/");
+  return { ok: true, error: null };
+}
+
+export async function reopenGoatChatSessionAction(
+  sessionId: string | null,
+): Promise<CloseGoatChatResult> {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return { ok: false, error: "Could not restore that chat." };
+
+  const { user } = await currentGoatUser();
+  const reopened = await reopenGoatChatSessionForUser({
+    userWorkosId: user.workosUserId,
+    sessionId: trimmed,
+  });
+  if (!reopened) {
+    return { ok: false, error: "Could not restore that chat." };
   }
 
   revalidatePath("/");

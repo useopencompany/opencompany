@@ -658,6 +658,19 @@ function createInMemoryChatStore(
       return true;
     },
 
+    async reopenSession(input) {
+      const session = sessions.find(
+        (item) =>
+          item.id === input.sessionId &&
+          item.userWorkosId === input.userWorkosId &&
+          Boolean(item.closedAt),
+      );
+      if (!session) return false;
+      session.closedAt = null;
+      session.updatedAt = input.now;
+      return true;
+    },
+
     async setSessionPinned(input) {
       const session = sessions.find(
         (item) =>

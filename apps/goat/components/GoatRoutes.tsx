@@ -83,6 +83,7 @@ export function GoatHomeRoute({
         defaultModel={DEFAULT_GOAT_MODEL}
         initialChat={initialChat}
         recentChats={data.recentChats}
+        archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
         localCodexBetaEnabled={data.featureFlags.localCodexBridge}
         taskSpawningEnabled={data.featureFlags.taskSpawning}
