@@ -1002,6 +1002,51 @@ describe("GoatSurface chat streaming UI", () => {
     });
   });
 
+  it("retries the Brain skill catalog on the next mention-menu open after a failed fetch", async () => {
+    const user = userEvent.setup();
+    let catalogCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/brain/skills") {
+        catalogCalls += 1;
+        if (catalogCalls === 1) return new Response("nope", { status: 500 });
+        return new Response(
+          JSON.stringify({
+            skills: [
+              {
+                brainRef: "goat_brain_1",
+                id: "coding-work",
+                name: "Coding work",
+                description: "Use focused verification for code changes.",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    await user.type(textarea, "@coding");
+    await waitFor(() => expect(catalogCalls).toBe(1));
+    expect(screen.queryByRole("option", { name: /coding work/i })).not.toBeInTheDocument();
+
+    await user.clear(textarea);
+    await user.type(textarea, "@coding");
+    await screen.findByRole("option", { name: /coding work/i });
+    expect(catalogCalls).toBe(2);
+  });
+
   it("does not offer Brain skills in Local Codex mode", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn();

@@ -264,7 +264,6 @@ export function GoatSurface({
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
   const [skillCatalog, setSkillCatalog] = useState<GoatBrainSkillCatalogItem[]>([]);
-  const [skillCatalogLoaded, setSkillCatalogLoaded] = useState(false);
   const [mentionOptionIndex, setMentionOptionIndex] = useState(0);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
@@ -551,36 +550,33 @@ export function GoatSurface({
     ...(activeEngine === "codex" ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES } : {}),
   });
 
+  // Refetch the skill catalog on every mention-menu open (not once per mount): skills
+  // created or edited since the last open must appear, and a transient fetch failure
+  // must not blank the menu for the rest of the session — keep the previous catalog
+  // and let the next open retry.
+  const skillMentionMenuOpen = Boolean(
+    userWorkosId && mentionToken && activeEngine !== "local_codex",
+  );
   useEffect(() => {
-    if (!userWorkosId || skillCatalogLoaded || !mentionToken || activeEngine === "local_codex") {
-      return;
-    }
+    if (!skillMentionMenuOpen) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       void fetch("/api/brain/skills", { signal: controller.signal })
         .then(async (response) => {
-          if (!response.ok) return [];
+          if (!response.ok) throw new Error(`Skill catalog request failed (${response.status})`);
           const payload = (await response.json()) as { skills?: unknown };
           return Array.isArray(payload.skills)
             ? payload.skills.filter(isGoatBrainSkillCatalogItem)
             : [];
         })
-        .then((skills) => {
-          setSkillCatalog(skills);
-          setSkillCatalogLoaded(true);
-        })
-        .catch((error) => {
-          if (!(error instanceof DOMException && error.name === "AbortError")) {
-            setSkillCatalog([]);
-            setSkillCatalogLoaded(true);
-          }
-        });
+        .then(setSkillCatalog)
+        .catch(() => {});
     }, 80);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [activeEngine, mentionToken, skillCatalogLoaded, userWorkosId]);
+  }, [skillMentionMenuOpen]);
 
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   // Render list: Electric-synced rows are the source of truth for persisted
