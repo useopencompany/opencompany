@@ -111,7 +111,6 @@ const LOCAL_RUNNER_REQUIRED_ENV_KEYS = [
 const STRIPE_ENV_KEYS = ["STRIPE_SECRET_KEY"];
 const STRIPE_OPTIONAL_ENV_KEYS = [
   "GOAT_STRIPE_API_KEY",
-  "GOAT_STRIPE_PRO_PRICE_ID",
   "GOAT_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
   "STRIPE_LISTEN_DISABLED",
@@ -120,14 +119,9 @@ const STRIPE_OPTIONAL_ENV_KEYS = [
 ];
 const GOAT_BILLING_LOCAL_ENV_KEYS = [
   "GOAT_STRIPE_API_KEY",
-  "GOAT_STRIPE_PRO_PRICE_ID",
   "GOAT_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
 ];
-// Bumped from "goat_pro_monthly_usd" (flat USD 99) when Pro moved back to
-// per-seat pricing (USD 17/seat/month); a fresh key avoids tripping the
-// terms-mismatch guard on Stripe accounts that still hold the old test Price.
-const GOAT_PRO_PRICE_LOOKUP_KEY = "goat_pro_seat_monthly_usd";
 const OBSERVABILITY_ENV_KEYS = [
   "BETTER_STACK_ERRORS_DSN",
   "OBSERVABILITY_ENABLED",
@@ -219,7 +213,6 @@ const GOAT_LOCAL_ENV_KEYS = [
   "RUNNER_INTERNAL_URL",
   "RUNNER_INTERNAL_TOKEN",
   "GOAT_STRIPE_API_KEY",
-  "GOAT_STRIPE_PRO_PRICE_ID",
   "GOAT_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
   ...GITHUB_WORK_INTEGRATION_ENV_KEYS,
@@ -526,88 +519,6 @@ function runStripeCliJson(args) {
   } catch {
     return { ok: false, message: "Stripe CLI returned an unexpected response." };
   }
-}
-
-function isExpectedGoatProPrice(price) {
-  return (
-    price?.active === true &&
-    price.currency === "usd" &&
-    price.unit_amount === 1_700 &&
-    price.tax_behavior === "exclusive" &&
-    price.recurring?.interval === "month" &&
-    price.recurring?.interval_count === 1 &&
-    price.recurring?.usage_type === "licensed"
-  );
-}
-
-function ensureGoatProTestPrice() {
-  const listed = runStripeCliJson([
-    "prices",
-    "list",
-    "--lookup-keys",
-    GOAT_PRO_PRICE_LOOKUP_KEY,
-    "--limit",
-    "10",
-  ]);
-  if (!listed.ok) return listed;
-
-  const existing = listed.value?.data?.find(
-    (price) => price.lookup_key === GOAT_PRO_PRICE_LOOKUP_KEY,
-  );
-  if (existing) {
-    if (!isExpectedGoatProPrice(existing)) {
-      return {
-        ok: false,
-        message:
-          `Stripe test Price lookup key "${GOAT_PRO_PRICE_LOOKUP_KEY}" already exists with unexpected billing terms. ` +
-          "Inspect it in Stripe before continuing.",
-      };
-    }
-    return { ok: true, priceId: existing.id, created: false };
-  }
-
-  const product = runStripeCliJson([
-    "products",
-    "create",
-    "--name",
-    "OpenCompany Pro",
-    "--description",
-    "Per seat per month; 300 ingested items per paid seat, pooled per workspace.",
-    "-d",
-    "metadata[billingProduct]=goat",
-    "-d",
-    "metadata[plan]=pro",
-    "--confirm",
-  ]);
-  if (!product.ok) return product;
-
-  const price = runStripeCliJson([
-    "prices",
-    "create",
-    "--currency",
-    "usd",
-    "--unit-amount",
-    "1700",
-    "--product",
-    product.value.id,
-    "--nickname",
-    "OpenCompany Pro per seat monthly",
-    "--tax-behavior",
-    "exclusive",
-    "--lookup-key",
-    GOAT_PRO_PRICE_LOOKUP_KEY,
-    "-d",
-    "recurring[interval]=month",
-    "-d",
-    "recurring[usage_type]=licensed",
-    "-d",
-    "metadata[billingProduct]=goat",
-    "-d",
-    "metadata[plan]=pro",
-    "--confirm",
-  ]);
-  if (!price.ok) return price;
-  return { ok: true, priceId: price.value.id, created: true };
 }
 
 async function ensureEnvFile(state) {
@@ -962,22 +873,6 @@ async function ensureStripe(state) {
     }
   } else {
     ok("GOAT_STRIPE_API_KEY is set");
-  }
-
-  if (isPlaceholder(env.GOAT_STRIPE_PRO_PRICE_ID)) {
-    const result = ensureGoatProTestPrice();
-    if (result.ok) {
-      updates.GOAT_STRIPE_PRO_PRICE_ID = result.priceId;
-      ok(
-        result.created
-          ? "Created the OpenCompany Pro test Price"
-          : "Found the OpenCompany Pro test Price",
-      );
-    } else {
-      warn(`GOAT_STRIPE_PRO_PRICE_ID is missing: ${result.message}`);
-    }
-  } else {
-    ok("GOAT_STRIPE_PRO_PRICE_ID is set");
   }
 
   if (isPlaceholder(env.GOAT_STRIPE_CHECKOUT_ENABLED)) {

@@ -25,8 +25,8 @@ describe("calculateModelUsageCost", () => {
     });
 
     expect(cost.providerCostUsdMicros).toBe(3_900);
-    expect(cost.platformFeeUsdMicros).toBe(390);
-    expect(cost.totalCostUsdMicros).toBe(4_290);
+    expect(cost.platformFeeUsdMicros).toBe(780);
+    expect(cost.totalCostUsdMicros).toBe(4_680);
   });
 
   it("prices Anthropic cache writes at the prompt-cache write rate", () => {
@@ -40,7 +40,7 @@ describe("calculateModelUsageCost", () => {
     });
 
     expect(cost.providerCostUsdMicros).toBe(19_050);
-    expect(cost.platformFeeUsdMicros).toBe(1_905);
+    expect(cost.platformFeeUsdMicros).toBe(3_810);
   });
 
   it.each([
@@ -192,8 +192,8 @@ describe("calculateModelUsageCost", () => {
 });
 
 describe("fees and hosted tools", () => {
-  it("adds a 10% platform fee", () => {
-    expect(calculatePlatformFeeUsdMicros(12_345)).toBe(1_235);
+  it("adds a 20% platform fee", () => {
+    expect(calculatePlatformFeeUsdMicros(12_345)).toBe(2_469);
   });
 
   it("prices hosted tools from provider-reported micros plus platform fee", () => {
@@ -205,8 +205,8 @@ describe("fees and hosted tools", () => {
       }),
     ).toMatchObject({
       providerCostUsdMicros: 7_000,
-      platformFeeUsdMicros: 700,
-      totalCostUsdMicros: 7_700,
+      platformFeeUsdMicros: 1_400,
+      totalCostUsdMicros: 8_400,
       costBasis: {
         costSource: "provider_reported",
         pricingVersion: "provider-reported.2026-05-22",
@@ -246,8 +246,8 @@ describe("fees and hosted tools", () => {
       }),
     ).toMatchObject({
       providerCostUsdMicros: 1_000_000,
-      platformFeeUsdMicros: 100_000,
-      totalCostUsdMicros: 1_100_000,
+      platformFeeUsdMicros: 200_000,
+      totalCostUsdMicros: 1_200_000,
       costBasis: {
         costSource: "broker_metered",
         pricingVersion: "2026-05-22.standard",
@@ -269,8 +269,8 @@ describe("calculateSandboxUsageCost", () => {
     });
 
     expect(cost.providerCostUsdMicros).toBe(1_815);
-    expect(cost.platformFeeUsdMicros).toBe(182);
-    expect(cost.totalCostUsdMicros).toBe(1_997);
+    expect(cost.platformFeeUsdMicros).toBe(363);
+    expect(cost.totalCostUsdMicros).toBe(2_178);
     expect(cost.billable).toBe(true);
     expect(cost.costBasis).toMatchObject({
       kind: "sandbox_usage",

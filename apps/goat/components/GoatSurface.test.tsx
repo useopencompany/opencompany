@@ -295,7 +295,7 @@ describe("GoatSurface chat streaming UI", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/local-codex/messages", expect.any(Object)),
     );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    const [, init] = fetchMock.mock.calls[0]!;
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/local-codex/messages")!;
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
       message: {
         id: expect.stringMatching(/^goat_chat_msg_/),
@@ -401,7 +401,7 @@ describe("GoatSurface chat streaming UI", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
     );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    const [, init] = fetchMock.mock.calls[0]!;
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
       message: {
         id: expect.stringMatching(/^goat_chat_msg_/),
@@ -519,8 +519,12 @@ describe("GoatSurface chat streaming UI", () => {
     await screen.findByText("PDF");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    const body = JSON.parse(
+      String(fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")?.[1]?.body),
+    );
     expect(body.message.metadata.attachments).toEqual([
       expect.objectContaining({
         kind: "pdf",
@@ -611,7 +615,7 @@ describe("GoatSurface chat streaming UI", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
     );
-    const [, init] = fetchMock.mock.calls[0]!;
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
       settings: {
         reasoningEffort: "high",
@@ -1066,7 +1070,11 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "@skill/coding");
 
     await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(fetchMock).not.toHaveBeenCalled();
+    // The credit-balance hook fetches on mount; no skill-catalog request may fire.
+    const skillCatalogCalls = fetchMock.mock.calls.filter(
+      ([url]) => !String(url).startsWith("/api/billing/balance"),
+    );
+    expect(skillCatalogCalls).toHaveLength(0);
     expect(screen.queryByRole("listbox", { name: "Mention menu" })).not.toBeInTheDocument();
   });
 

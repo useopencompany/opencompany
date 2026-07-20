@@ -1,16 +1,13 @@
+import type { GoatSpendBreakdownRow } from "@opencompany/db/goat-credits";
 import { AlertCircle, DatabaseZap } from "lucide-react";
+import Link from "next/link";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 
-export type GoatIngestionUsageData = {
-  plan: "free" | "pro";
-  used: number;
-  limit: number;
-  seatQuantity: number;
-  perSeatAllowance: number;
-  overageUnits: number;
-  overageUsdMicros: number;
+export type GoatUsageData = {
+  breakdown: GoatSpendBreakdownRow[];
+  ingestedThisMonth: number;
   pending: number;
-  resetAt: string;
+  creditBalanceUsdMicros: number;
   providers: Array<{ provider: string; count: number }>;
   recent: Array<{
     id: string;
@@ -21,74 +18,79 @@ export type GoatIngestionUsageData = {
   }>;
 };
 
-export function GoatIngestionUsagePanel({ data }: { data: GoatIngestionUsageData }) {
-  const percent = data.limit > 0 ? Math.min(100, Math.round((data.used / data.limit) * 100)) : 0;
+const CATEGORY_LABELS: Record<GoatSpendBreakdownRow["category"], string> = {
+  chat: "Chat",
+  ingestion: "Ingestion",
+  other: "Other",
+};
+
+export function GoatUsagePanel({ data }: { data: GoatUsageData }) {
+  const days = groupByDay(data.breakdown);
+  const totalSpend = data.breakdown.reduce((sum, row) => sum + row.spendUsdMicros, 0);
+  const totalProviderCost = data.breakdown.reduce((sum, row) => sum + row.providerCostUsdMicros, 0);
+  const totalFees = data.breakdown.reduce((sum, row) => sum + row.platformFeeUsdMicros, 0);
+
   return (
     <GoatSettingsContent
       title="Usage"
-      description="Track the raw events ingested for this workspace."
+      description="What this workspace spent over the last 30 days, split into model cost and platform fees."
     >
       {data.pending > 0 ? (
         <div className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
           <AlertCircle size={15} className="mt-0.5 shrink-0" />
           <span>
-            You&apos;ve used your monthly allowance, so {data.pending} event
-            {data.pending === 1 ? " is" : "s are"} paused. They resume oldest-first when the
-            allowance resets {formatReset(data.resetAt)}
-            {data.plan === "free"
-              ? " — or sooner if the workspace upgrades to Pro."
-              : " — or sooner once the workspace has credits to cover the overage."}
+            Ingestion is paused — {data.pending} event{data.pending === 1 ? " is" : "s are"}{" "}
+            waiting.{" "}
+            <Link href="/settings/workspace/billing" className="font-medium underline">
+              Top up to resume
+            </Link>
+            ; paused work runs oldest-first as soon as the balance is positive.
           </span>
         </div>
       ) : null}
 
-      <section className="flex flex-col gap-3">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <div className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-              {data.plan === "pro" ? "Monthly Pro allowance" : "Monthly Free allowance"}
-            </div>
-            <div className="mt-1 text-[24px] font-semibold tracking-tight text-ink">
-              {data.used}{" "}
-              <span className="text-[14px] font-normal text-ink-subtle">
-                of {data.limit.toLocaleString()}
-              </span>
-            </div>
-            {data.plan === "pro" ? (
-              <div className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
-                {data.perSeatAllowance.toLocaleString()} items × {data.seatQuantity} seat
-                {data.seatQuantity === 1 ? "" : "s"}, pooled across the workspace
-              </div>
-            ) : null}
-            {data.overageUnits > 0 ? (
-              <div className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
-                Plus {data.overageUnits.toLocaleString()} overage item
-                {data.overageUnits === 1 ? "" : "s"} ({formatUsdMicros(data.overageUsdMicros)} from
-                credits)
-              </div>
-            ) : null}
-          </div>
-          <div className="text-right text-[11.5px] leading-4 text-ink-subtle">
-            Resets {formatReset(data.resetAt)}
-          </div>
-        </div>
-        <div
-          className="h-2 overflow-hidden rounded-full bg-surface-muted"
-          role="progressbar"
-          aria-valuenow={percent}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
-          <div
-            className="h-full rounded-full bg-ink transition-[width]"
-            style={{ width: `${percent}%` }}
-          />
-        </div>
+      <section className="grid gap-2 sm:grid-cols-3">
+        <StatTile label="Spent (30 days)" value={formatUsdMicros(totalSpend)} />
+        <StatTile label="Model cost" value={formatUsdMicros(totalProviderCost)} />
+        <StatTile label="Platform fees" value={formatUsdMicros(totalFees)} />
       </section>
 
       <section className="flex flex-col gap-2">
         <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-          By source
+          Daily spend
+        </h2>
+        {days.length ? (
+          days.map((day) => (
+            <div key={day.day} className="rounded-lg border border-border bg-canvas px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[13px] font-medium text-ink">{formatDay(day.day)}</span>
+                <span className="text-[13px] tabular-nums text-ink">
+                  {formatUsdMicros(day.total)}
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
+                {day.rows.map((row) => (
+                  <span
+                    key={row.category}
+                    className="text-[11.5px] leading-4 tabular-nums text-ink-subtle"
+                  >
+                    {CATEGORY_LABELS[row.category]}: {formatUsdMicros(row.spendUsdMicros)}
+                    {" ("}
+                    {formatUsdMicros(row.providerCostUsdMicros)} model +{" "}
+                    {formatUsdMicros(row.platformFeeUsdMicros)} fee{")"}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))
+        ) : (
+          <p className="text-[12.5px] text-ink-subtle">No spend in the last 30 days.</p>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Ingestions by source ({data.ingestedThisMonth.toLocaleString()} this month)
         </h2>
         {data.providers.length ? (
           data.providers.map((provider) => (
@@ -101,7 +103,7 @@ export function GoatIngestionUsagePanel({ data }: { data: GoatIngestionUsageData
             </div>
           ))
         ) : (
-          <p className="text-[12.5px] text-ink-subtle">No ingestions in this allowance window.</p>
+          <p className="text-[12.5px] text-ink-subtle">No ingestions this month.</p>
         )}
       </section>
 
@@ -133,6 +135,33 @@ export function GoatIngestionUsagePanel({ data }: { data: GoatIngestionUsageData
   );
 }
 
+function StatTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-canvas p-3">
+      <div className="text-[11px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+        {label}
+      </div>
+      <div className="mt-1 text-[17px] font-semibold tracking-tight text-ink">{value}</div>
+    </div>
+  );
+}
+
+function groupByDay(rows: GoatSpendBreakdownRow[]) {
+  const byDay = new Map<string, GoatSpendBreakdownRow[]>();
+  for (const row of rows) {
+    const entry = byDay.get(row.day);
+    if (entry) entry.push(row);
+    else byDay.set(row.day, [row]);
+  }
+  return [...byDay.entries()]
+    .sort(([a], [b]) => (a < b ? 1 : -1))
+    .map(([day, dayRows]) => ({
+      day,
+      rows: dayRows,
+      total: dayRows.reduce((sum, row) => sum + row.spendUsdMicros, 0),
+    }));
+}
+
 function formatUsdMicros(usdMicros: number) {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -142,14 +171,12 @@ function formatUsdMicros(usdMicros: number) {
   }).format(usdMicros / 1_000_000);
 }
 
-function formatReset(value: string) {
+function formatDay(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(new Date(value));
+    timeZone: "UTC",
+  }).format(new Date(`${value}T00:00:00.000Z`));
 }
 
 function formatProvider(provider: string) {
