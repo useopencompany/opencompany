@@ -12,7 +12,7 @@ import { workspaceCodexDeviceAuthFlows } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, inArray } from "drizzle-orm";
 import { Sandbox } from "e2b";
-import { CODEX_FALLBACK_NPM_PACKAGE } from "./codex-tool";
+import { ensureCodexInstalled } from "./codex-tool";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { killSandbox, type SandboxHandle } from "./sandbox";
@@ -716,12 +716,10 @@ async function spawnCodexDeviceLogin(sandbox: SandboxHandle) {
     CODEX_LOGIN_EXIT,
   )} ${shellQuote(CODEX_LOGIN_PID)}`;
   await sandbox.commands.run(clearState, { timeoutMs: 30_000 });
-  const installIfNeeded = `command -v codex >/dev/null 2>&1 || test -x "$HOME/.codex/bin/codex" || npm install -g ${shellQuote(
-    CODEX_FALLBACK_NPM_PACKAGE,
-  )}`;
+  await ensureCodexInstalled(sandbox);
   const backgroundTask = `cd ${shellQuote(
     CODEX_AUTH_HOME,
-  )} && export PATH=${CODEX_BIN_PATH}:"$PATH" && (((${installIfNeeded}) && CODEX_HOME=${shellQuote(
+  )} && export PATH=${CODEX_BIN_PATH}:"$PATH" && ((CODEX_HOME=${shellQuote(
     CODEX_AUTH_HOME,
   )} codex login --device-auth) > ${shellQuote(CODEX_LOGIN_LOG)} 2>&1; echo $? > ${shellQuote(
     CODEX_LOGIN_EXIT,

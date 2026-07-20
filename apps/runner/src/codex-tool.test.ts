@@ -2,17 +2,19 @@ import { execFileSync, execSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildCodexCommand,
   buildCodexConfig,
   buildCodexConfigForAuth,
   buildCodexHome,
   buildCodexWorkRoot,
+  CODEX_FALLBACK_NPM_PACKAGE,
   codexHostedToolUsage,
   codexIntentToAddCommand,
   codexRuntimeEventsFromJsonEvent,
   createCodexStreamAccumulator,
+  ensureCodexInstalled,
   resolveCodexTarget,
 } from "./codex-tool";
 
@@ -21,6 +23,32 @@ const repo = {
   fullName: "opencompany/web",
   defaultBranch: "main",
 };
+
+describe("ensureCodexInstalled", () => {
+  it("keeps the expected Codex CLI version", async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: "codex-cli 0.144.6\n" });
+
+    await ensureCodexInstalled({ commands: { run } } as never);
+
+    expect(CODEX_FALLBACK_NPM_PACKAGE).toBe("@openai/codex@0.144.6");
+    expect(run).toHaveBeenCalledOnce();
+    expect(run.mock.calls[0]?.[0]).toContain("codex --version");
+  });
+
+  it("replaces a mismatched Codex CLI in the active home prefix", async () => {
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "codex-cli 0.144.5\n" })
+      .mockResolvedValueOnce({ stdout: "" });
+
+    await ensureCodexInstalled({ commands: { run } } as never);
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1]?.[0]).toContain('npm install -g --prefix "$HOME/.codex"');
+    expect(run.mock.calls[1]?.[0]).toContain("@openai/codex@0.144.6");
+    expect(run.mock.calls[1]?.[0]).toContain("codex-cli 0.144.6");
+  });
+});
 
 describe("resolveCodexTarget", () => {
   it("uses the only attached repository by default", () => {

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   activeFlows: [] as Array<{ id: string; sandboxId: string }>,
   inserts: [] as Record<string, unknown>[],
   order: [] as string[],
+  ensureCodexInstalled: vi.fn(),
   sandboxCreate: vi.fn(),
   killSandbox: vi.fn(),
   updates: [] as Record<string, unknown>[],
@@ -19,7 +20,7 @@ vi.mock("e2b", () => ({
 }));
 
 vi.mock("./codex-tool", () => ({
-  CODEX_FALLBACK_NPM_PACKAGE: "@openai/codex",
+  ensureCodexInstalled: mocks.ensureCodexInstalled,
 }));
 
 vi.mock("./db", () => ({
@@ -93,6 +94,7 @@ describe("startGoatCodexDeviceAuthFlow", () => {
     mocks.inserts.length = 0;
     mocks.order.length = 0;
     mocks.updates.length = 0;
+    mocks.ensureCodexInstalled.mockResolvedValue(undefined);
     mocks.killSandbox.mockImplementation(async (sandboxId: string) => {
       mocks.order.push(`kill:${sandboxId}`);
       return true;
@@ -129,6 +131,7 @@ describe("startGoatCodexDeviceAuthFlow", () => {
       timeoutMs: 20 * 60 * 1000,
       lifecycle: { onTimeout: "kill" },
     });
+    expect(mocks.ensureCodexInstalled).toHaveBeenCalledOnce();
     expect(mocks.inserts).toHaveLength(1);
   });
 
