@@ -1,8 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { executeExaSearchRequest, goatTaskRunSessionId } from "@opencompany/agent-runtime";
-import { calculateModelUsageCost } from "@opencompany/billing";
+import {
+  calculateHostedToolUsageCost,
+  calculateModelUsageCost,
+  calculateSandboxUsageCost,
+} from "@opencompany/billing";
 import { listGoatBrainFiles } from "@opencompany/db/goat-brain-files";
-import type { GoatTask } from "@opencompany/db/goat-schema";
+import type {
+  GoatIntegrationProvider,
+  GoatTask,
+  GoatTaskToolName,
+} from "@opencompany/db/goat-schema";
+import { goatIntegrations } from "@opencompany/db/goat-schema";
 import {
   getDefaultGoatBrainForUser,
   listGoatWorkspacesForUser,
@@ -29,11 +38,14 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import * as ai from "ai";
 import { createGateway, type LanguageModelUsage, type ModelMessage, stepCountIs } from "ai";
-import { sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb as getRunnerDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
+import type { GoatGitHubSandboxUsage } from "./goat-github-tools";
+import { buildGoatTaskToolRuntime } from "./goat-tools";
 import { createDbGoatTaskStore, GOAT_TASK_LEASE_TTL_MS, type GoatTaskStore } from "./goat-worker";
+import type { HostedToolUsage } from "./hosted-tools";
 import { rowsFromExecute } from "./sql-exec";
 import { normalizeModelUsage } from "./usage";
 
@@ -208,54 +220,68 @@ async function runGoatTaskSessionTurns(input: {
   signal: AbortSignal;
 }): Promise<{ finalText: string }> {
   const { task, env, sessionId, guard, signal } = input;
-  const runtime = await buildTaskSessionRuntime({ task, env, signal });
+  const runtime = await buildTaskSessionRuntime({ task, env, guard, signal });
   let finalText = "";
 
-  for (let turn = 0; turn < MAX_DRAIN_TURNS; turn++) {
-    const history = await listSessionMessages(sessionId);
-    const lastRow = history[history.length - 1];
-    const modelMessages = toModelMessages(history);
-    if (modelMessages.length === 0) {
-      throw new Error("Goat task run session has no messages.");
-    }
-    if (modelMessages[modelMessages.length - 1]?.role === "assistant") {
-      modelMessages.push({ role: "user", content: GOAT_RECOVERY_INSTRUCTION });
-    }
+  try {
+    for (let turn = 0; turn < MAX_DRAIN_TURNS; turn++) {
+      const history = await listSessionMessages(sessionId);
+      const lastRow = history[history.length - 1];
+      const modelMessages = toModelMessages(history);
+      if (modelMessages.length === 0) {
+        throw new Error("Goat task run session has no messages.");
+      }
+      if (modelMessages[modelMessages.length - 1]?.role === "assistant") {
+        modelMessages.push({ role: "user", content: GOAT_RECOVERY_INSTRUCTION });
+      }
 
-    const turnResult = await runSingleSessionTurn({
-      task,
-      env,
-      sessionId,
-      guard,
-      signal,
-      runtime,
-      modelMessages,
-    });
-    finalText = turnResult.text || finalText;
+      const turnResult = await runSingleSessionTurn({
+        task,
+        env,
+        sessionId,
+        guard,
+        signal,
+        runtime,
+        modelMessages,
+      });
+      finalText = turnResult.text || finalText;
 
-    // Steering: user messages that arrived while this turn ran start another
-    // turn with full history; otherwise the run is done.
-    const pending = lastRow ? await countUserMessagesAfter(sessionId, lastRow) : 0;
-    if (pending === 0) return { finalText };
+      // Steering: user messages that arrived while this turn ran start another
+      // turn with full history; otherwise the run is done.
+      const pending = lastRow ? await countUserMessagesAfter(sessionId, lastRow) : 0;
+      if (pending === 0) return { finalText };
+    }
+    return { finalText };
+  } finally {
+    // Tear down runner-native tool sessions (e2b browser/github sandboxes) once
+    // the whole run — including any steering drain turns — is done.
+    await runtime.cleanup();
   }
-  return { finalText };
 }
 
 type TaskSessionRuntime = {
   tools: ai.ToolSet;
   system: string;
+  // Assistant chat message id for the turn currently streaming. Tool/sandbox
+  // usage rows key on it (message_id is a plain text pointer now, no FK), so the
+  // driver sets it before each turn and the tool lifecycle reads it at write time.
+  setCurrentMessageId: (messageId: string | null) => void;
+  // Tears down runner-native tool sessions (browser/github e2b sandboxes).
+  cleanup: () => Promise<void>;
 };
 
 async function buildTaskSessionRuntime(input: {
   task: GoatTask;
   env: RunnerEnv;
+  guard: LeaseGuard;
   signal: AbortSignal;
 }): Promise<TaskSessionRuntime> {
-  const { task, env, signal } = input;
-  const [brain, workspaces, user] = await Promise.all([
+  const { task, env, guard, signal } = input;
+  const [brain, workspaces, user, harnessToolNames] = await Promise.all([
     getDefaultGoatBrainForUser(task.userWorkosId),
     listGoatWorkspacesForUser(task.userWorkosId),
     loadGoatUser(task.userWorkosId),
+    getAvailableTaskToolNames({ userWorkosId: task.userWorkosId, env }),
   ]);
   const workspaceEntry = workspaces[0] ?? null;
   const canManageBrain = workspaceEntry?.role === "admin";
@@ -330,6 +356,61 @@ async function buildTaskSessionRuntime(input: {
       : {}),
   });
 
+  // Current-turn assistant message id, updated by the driver before each turn.
+  // Tool/sandbox usage writes read it lazily so a single tool runtime, built once
+  // and reused across steering drain turns, still attributes usage to the right
+  // assistant message.
+  let currentMessageId: string | null = null;
+  const getCurrentMessageId = () => currentMessageId;
+
+  // Merge the runner-native harness tools (Gmail/Calendar/browser/GitHub) that
+  // lapsed in the runs-as-sessions refactor back into the chat ToolSet. Each is
+  // already gated on the user's real integration availability upstream, so an
+  // empty list means the user has nothing connected and we skip the runtime
+  // entirely (no idle github session, no cleanup work).
+  const harnessRuntime =
+    harnessToolNames.length > 0
+      ? buildGoatTaskToolRuntime({
+          selectedTools: harnessToolNames,
+          taskId: task.id,
+          userWorkosId: task.userWorkosId,
+          env,
+          signal,
+          lifecycle: {
+            onToolCompleted: async (event) => {
+              if (!event.usage) return;
+              await recordTaskToolUsage({
+                task,
+                guard,
+                messageId: event.messageId ?? getCurrentMessageId(),
+                toolCallId: event.toolCallId,
+                toolName: event.toolName,
+                usage: event.usage,
+              }).catch((error) => {
+                captureException(error, {
+                  event: "opencompany.goat_task_tool_usage_write_failed",
+                  task_id: task.id,
+                });
+              });
+            },
+          },
+          recordSandboxUsage: (usage) =>
+            recordTaskSandboxUsage({
+              task,
+              guard,
+              messageId: usage.messageId ?? getCurrentMessageId(),
+              usage,
+            }).catch((error) => {
+              captureException(error, {
+                event: "opencompany.goat_task_sandbox_usage_write_failed",
+                task_id: task.id,
+              });
+            }),
+        })
+      : null;
+
+  const tools: ai.ToolSet = { ...toolContext.tools, ...(harnessRuntime?.tools ?? {}) };
+
   const system = createOpenCompanyChatSystemPrompt({
     currentDate: new Date(),
     ...(user
@@ -344,6 +425,7 @@ async function buildTaskSessionRuntime(input: {
       : {}),
     webSearchEnabled: Boolean(exaApiKey),
     brainCaptureEnabled: Boolean(brain && canManageBrain),
+    connectedTaskTools: describeConnectedTaskTools(harnessToolNames),
     activeBrain:
       brain && workspaceEntry
         ? {
@@ -356,7 +438,98 @@ async function buildTaskSessionRuntime(input: {
     scheduleToolsEnabled: false,
   });
 
-  return { tools: toolContext.tools, system };
+  return {
+    tools,
+    system,
+    setCurrentMessageId: (messageId) => {
+      currentMessageId = messageId;
+    },
+    cleanup: async () => {
+      await harnessRuntime?.cleanup();
+    },
+  };
+}
+
+// Runner-native availability query mirroring the app-side
+// getGoatAvailableHarnessTools (apps/goat/lib/integrations/google-data.ts): the
+// runner cannot import app modules, so it reads the same integration rows here.
+// exa_search is intentionally omitted — the session already exposes web_search
+// (Exa-backed) and a second web-search tool only confuses the model.
+const GOAT_BROWSER_TASK_TOOLS = [
+  "browser_open",
+  "browser_snapshot",
+  "browser_click",
+  "browser_fill",
+  "browser_wait",
+  "browser_read",
+  "browser_get",
+  "browser_find",
+  "browser_scroll",
+  "browser_screenshot",
+  "browser_close",
+] as const satisfies readonly GoatTaskToolName[];
+
+async function getAvailableTaskToolNames(input: {
+  userWorkosId: string;
+  env: RunnerEnv;
+}): Promise<GoatTaskToolName[]> {
+  const providers: GoatIntegrationProvider[] = ["gmail", "google_calendar", "github"];
+  const rows = await getRunnerDb()
+    .select({ provider: goatIntegrations.provider, status: goatIntegrations.status })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.userWorkosId, input.userWorkosId),
+        inArray(goatIntegrations.provider, providers),
+      ),
+    );
+  const connected = new Set(
+    rows.filter((row) => row.status === "connected").map((row) => row.provider),
+  );
+
+  const tools: GoatTaskToolName[] = [];
+  if (input.env.goatBrowserEnabled) {
+    tools.push(...GOAT_BROWSER_TASK_TOOLS);
+  }
+  if (connected.has("gmail")) {
+    tools.push("gmail_search", "gmail_get_message", "gmail_list_threads", "gmail_get_thread");
+  }
+  if (connected.has("google_calendar")) {
+    tools.push(
+      "calendar_list_calendars",
+      "calendar_list_events",
+      "calendar_get_event",
+      "calendar_get_freebusy",
+    );
+  }
+  if (connected.has("github")) {
+    tools.push(
+      "github_clone_repository",
+      "github_shell",
+      "github_status",
+      "github_open_pull_request",
+    );
+  }
+  return tools;
+}
+
+// Short capability labels for the system prompt so the agent knows which
+// runner-native tools are live this run (see createOpenCompanyChatSystemPrompt).
+function describeConnectedTaskTools(toolNames: readonly GoatTaskToolName[]): string[] {
+  const labels: string[] = [];
+  if (toolNames.some((name) => name.startsWith("browser_"))) {
+    labels.push("a headless web browser (browser_* tools, read/research only)");
+  }
+  if (toolNames.some((name) => name.startsWith("gmail_"))) {
+    labels.push("connected Gmail (read-only)");
+  }
+  if (toolNames.some((name) => name.startsWith("calendar_"))) {
+    labels.push("connected Google Calendar (read-only)");
+  }
+  if (toolNames.some((name) => name.startsWith("github_"))) {
+    labels.push("connected GitHub repositories (clone, shell, open a pull request when asked)");
+  }
+  return labels;
 }
 
 async function runSingleSessionTurn(input: {
@@ -370,6 +543,9 @@ async function runSingleSessionTurn(input: {
 }): Promise<{ text: string }> {
   const { task, env, sessionId, guard, signal, runtime, modelMessages } = input;
   const placeholderId = await insertAssistantPlaceholder({ guard, sessionId, model: task.model });
+  // Tool/sandbox usage rows written by the merged runner-native tools attribute
+  // to this turn's assistant message.
+  runtime.setCurrentMessageId(placeholderId);
   const gateway = createGateway({ apiKey: env.vercelAiGatewayApiKey });
   const { streamText } = getBraintrustAISDK(ai);
   const attribution = createGoatGatewayAttribution({
@@ -764,6 +940,69 @@ async function recordTaskModelUsage(input: {
       ${usage.outputTokens}, ${usage.totalTokens}, ${JSON.stringify(usage.rawUsage)}::jsonb,
       ${cost.providerCostUsdMicros}, ${cost.platformFeeUsdMicros}, ${cost.totalCostUsdMicros}, ${JSON.stringify(cost.costBasis)}::jsonb,
       ${input.providerCreatedAt}, ${now}
+    WHERE ${leaseExistsSql(input.guard)}
+  `);
+}
+
+async function recordTaskToolUsage(input: {
+  task: GoatTask;
+  guard: LeaseGuard;
+  messageId: string | null;
+  toolCallId: string;
+  toolName: GoatTaskToolName;
+  usage: HostedToolUsage;
+}) {
+  const cost = calculateHostedToolUsageCost({
+    provider: input.usage.provider,
+    operation: input.usage.operation,
+    providerCostUsdMicros: input.usage.costUsdMicros,
+    ...(input.usage.costSource ? { costSource: input.usage.costSource } : {}),
+  });
+  const now = new Date();
+  await getRunnerDb().execute(sql`
+    INSERT INTO goat.task_tool_usage (
+      task_id, user_workos_id, message_id, run_lease_id, tool_call_id, tool_name,
+      provider, operation, provider_request_id,
+      provider_cost_usd_micros, platform_fee_usd_micros, total_cost_usd_micros,
+      raw_usage, cost_basis, created_at
+    )
+    SELECT
+      ${input.task.id}, ${input.task.userWorkosId}, ${input.messageId}, ${input.guard.leaseId},
+      ${input.toolCallId}, ${input.toolName},
+      ${input.usage.provider}, ${input.usage.operation}, ${input.usage.providerRequestId ?? null},
+      ${cost.providerCostUsdMicros}, ${cost.platformFeeUsdMicros}, ${cost.totalCostUsdMicros},
+      ${JSON.stringify(input.usage.rawUsage)}::jsonb, ${JSON.stringify(cost.costBasis)}::jsonb, ${now}
+    WHERE ${leaseExistsSql(input.guard)}
+  `);
+}
+
+async function recordTaskSandboxUsage(input: {
+  task: GoatTask;
+  guard: LeaseGuard;
+  messageId: string | null;
+  usage: GoatGitHubSandboxUsage;
+}) {
+  const { usage } = input;
+  const cost = calculateSandboxUsageCost({
+    template: usage.template,
+    vcpu: usage.vcpu ?? 0,
+    ramMiB: usage.ramMib ?? 0,
+    activeMs: usage.activeMs,
+  });
+  const now = new Date();
+  await getRunnerDb().execute(sql`
+    INSERT INTO goat.task_sandbox_usage (
+      task_id, user_workos_id, message_id, run_lease_id, sandbox_id, template,
+      vcpu, ram_mib, started_at, ended_at, active_ms,
+      provider_cost_usd_micros, platform_fee_usd_micros, total_cost_usd_micros,
+      raw_metrics, cost_basis, created_at
+    )
+    SELECT
+      ${input.task.id}, ${input.task.userWorkosId}, ${input.messageId}, ${input.guard.leaseId},
+      ${usage.sandboxId}, ${usage.template},
+      ${usage.vcpu}, ${usage.ramMib}, ${usage.startedAt}, ${usage.endedAt}, ${usage.activeMs},
+      ${cost.providerCostUsdMicros}, ${cost.platformFeeUsdMicros}, ${cost.totalCostUsdMicros},
+      ${JSON.stringify(usage.rawMetrics ?? {})}::jsonb, ${JSON.stringify(cost.costBasis)}::jsonb, ${now}
     WHERE ${leaseExistsSql(input.guard)}
   `);
 }

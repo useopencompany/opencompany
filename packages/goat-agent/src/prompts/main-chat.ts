@@ -86,6 +86,11 @@ export function createOpenCompanyChatSystemPrompt(
     brainCaptureEnabled?: boolean;
     taskToolsEnabled?: boolean;
     scheduleToolsEnabled?: boolean;
+    // Short human-readable labels for runner-native tools the caller has wired
+    // into the ToolSet for this run (task sessions gate these on the user's real
+    // integration availability). When present, the prompt tells the agent it can
+    // use them directly instead of describing the work.
+    connectedTaskTools?: readonly string[];
     activeBrain?: { name: string; workspaceName: string; readOnly?: boolean } | null;
     recurringSchedules?: readonly {
       id: string;
@@ -135,9 +140,17 @@ export function createOpenCompanyChatSystemPrompt(
           ]
         : []),
       ...(capabilities.length > 0 ? formatCapabilityBehaviorLines({ taskToolsEnabled }) : []),
+      ...formatConnectedTaskToolLines(input.connectedTaskTools),
     ]),
     OPENCOMPANY_CHAT_SOUL,
   ].join("\n\n");
+}
+
+function formatConnectedTaskToolLines(labels: readonly string[] | undefined) {
+  if (!labels?.length) return [];
+  return [
+    `You have direct access to these connected tools during this run: ${labels.join(", ")}. Use them to gather real data or do the work yourself rather than describing what you would do. Do not claim to have used one unless the tool call succeeded, and keep read-only tools read-only.`,
+  ];
 }
 
 function formatCapabilityBehaviorLines(input: { taskToolsEnabled: boolean }) {
