@@ -1427,7 +1427,10 @@ describe("GoatSurface chat streaming UI", () => {
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
     await user.keyboard("{Meta>}k{/Meta}");
-    await user.type(screen.getByPlaceholderText("Describe the new chat..."), "Research Q3");
+    await user.type(
+      screen.getByPlaceholderText("Search chats or describe a new one..."),
+      "Research Q3",
+    );
     await user.keyboard("{Enter}");
 
     const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
@@ -1453,7 +1456,9 @@ describe("GoatSurface chat streaming UI", () => {
     });
     expect(body.message.id).toMatch(/^ui_background_/);
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
-    expect(screen.queryByPlaceholderText("Describe the new chat...")).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("Search chats or describe a new one..."),
+    ).not.toBeInTheDocument();
   });
 
   it("updates the URL when a new chat returns a session id", async () => {
