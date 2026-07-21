@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   linearResolve: vi.fn(),
   youtubeResolve: vi.fn(),
   attioResolve: vi.fn(),
+  googleCalendarResolve: vi.fn(),
 }));
 
 vi.mock("@/lib/capabilities/slack", () => ({
@@ -35,6 +36,13 @@ vi.mock("@/lib/capabilities/attio", () => ({
     resolve: mocks.attioResolve,
   },
 }));
+vi.mock("@/lib/capabilities/google-calendar", () => ({
+  googleCalendarCapability: {
+    id: "google_calendar",
+    workerModel: "openai/gpt-5.4-mini",
+    resolve: mocks.googleCalendarResolve,
+  },
+}));
 
 import {
   isGoatChatCapabilitiesKilled,
@@ -53,6 +61,11 @@ const RESOLVED_WRITE = {
   operations: ["read", "write"] as const,
 };
 
+const RESOLVED_CREATE_WRITE = {
+  ...RESOLVED,
+  operations: ["read", "create", "write"] as const,
+};
+
 afterEach(() => {
   vi.clearAllMocks();
   delete process.env.GOAT_CHAT_CAPABILITIES_KILL_SWITCH;
@@ -64,6 +77,7 @@ describe("resolveGoatCapabilityUniverse", () => {
     mocks.linearResolve.mockResolvedValue(null);
     mocks.youtubeResolve.mockResolvedValue(RESOLVED);
     mocks.attioResolve.mockResolvedValue(null);
+    mocks.googleCalendarResolve.mockResolvedValue(null);
 
     const universe = await resolveGoatCapabilityUniverse("user_1");
     expect(universe.map((capability) => capability.id)).toEqual(["slack", "youtube_transcript"]);
@@ -77,6 +91,7 @@ describe("resolveGoatCapabilityUniverse", () => {
     mocks.linearResolve.mockResolvedValue(RESOLVED_WRITE);
     mocks.youtubeResolve.mockResolvedValue(null);
     mocks.attioResolve.mockResolvedValue(null);
+    mocks.googleCalendarResolve.mockResolvedValue(null);
 
     const universe = await resolveGoatCapabilityUniverse("user_1");
     expect(universe.map((capability) => capability.id)).toEqual(["linear"]);
@@ -88,8 +103,21 @@ describe("resolveGoatCapabilityUniverse", () => {
     mocks.linearResolve.mockResolvedValue(null);
     mocks.youtubeResolve.mockResolvedValue(null);
     mocks.attioResolve.mockResolvedValue(null);
+    mocks.googleCalendarResolve.mockResolvedValue(null);
 
     expect(await resolveGoatCapabilityUniverse("user_1")).toEqual([]);
+  });
+
+  it("allows the explicitly approved Calendar mutation operations", async () => {
+    mocks.slackResolve.mockResolvedValue(null);
+    mocks.linearResolve.mockResolvedValue(null);
+    mocks.youtubeResolve.mockResolvedValue(null);
+    mocks.attioResolve.mockResolvedValue(null);
+    mocks.googleCalendarResolve.mockResolvedValue(RESOLVED_CREATE_WRITE);
+
+    const universe = await resolveGoatCapabilityUniverse("user_1");
+    expect(universe.map((capability) => capability.id)).toEqual(["google_calendar"]);
+    expect(universe[0]?.operations).toEqual(["read", "create", "write"]);
   });
 });
 

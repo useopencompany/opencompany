@@ -83,7 +83,7 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   },
   google_calendar: {
     label: "Google Calendar",
-    description: "Give Goat visibility into your schedule and events.",
+    description: "Let Goat view and update your schedule and events.",
     Icon: GoogleCalendarIcon,
     tileClass: "bg-[#1A73E8] text-white",
   },
@@ -477,7 +477,12 @@ function IntegrationProviderGroupCard({
           ))}
         </div>
       }
-      footer={<ConnectLink href={connectHref} label="Add account" />}
+      footer={
+        <ConnectLink
+          href={connectHref}
+          label={provider === "google_calendar" ? "Reconnect or add" : "Add account"}
+        />
+      }
     />
   );
 }

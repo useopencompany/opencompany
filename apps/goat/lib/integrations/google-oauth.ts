@@ -32,7 +32,7 @@ export const GOAT_GOOGLE_PROVIDER_CONFIG: Record<
     displayName: "Google Calendar",
     scopes: [
       "https://www.googleapis.com/auth/calendar.readonly",
-      "https://www.googleapis.com/auth/calendar.events.readonly",
+      "https://www.googleapis.com/auth/calendar.events",
       "https://www.googleapis.com/auth/calendar.freebusy",
       ...OPENID_SCOPES,
     ],
