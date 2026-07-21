@@ -250,7 +250,6 @@ export function GoatSurface({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const pathnameRef = useRef(pathname);
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const inputOverlayRef = useRef<HTMLDivElement>(null);
@@ -499,24 +498,13 @@ export function GoatSurface({
       recordOptimisticTurnDuration(message.id);
       const sessionId = message.metadata?.sessionId;
       const pendingNewSessionId = pendingNewSessionIdRef.current;
-      const ownsRoute = Boolean(
-        sessionId &&
-          (routedChatSessionIdRef.current === sessionId ||
-            (pendingNewSessionId && routedChatSessionIdRef.current === pendingNewSessionId)),
-      );
+      const ownsRoute = Boolean(sessionId && routedChatSessionIdRef.current === sessionId);
       if (sessionId && ownsRoute) {
         setChatSessionId(sessionId);
-        routedChatSessionIdRef.current = sessionId;
-        if (pendingNewSessionId) {
+        if (pendingNewSessionId === sessionId) {
           pendingNewSessionIdRef.current = null;
         }
       }
-      if (!sessionId || !ownsRoute || !isGoatChatSurfacePath(pathnameRef.current)) {
-        if (sessionId && pathnameRef.current === "/") router.refresh();
-        return;
-      }
-      if (sessionId) router.replace(chatHref(sessionId));
-      router.refresh();
     },
     onError: (error) => {
       if (error.message?.includes(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE)) {
@@ -669,10 +657,6 @@ export function GoatSurface({
       releaseAllOptimisticAttachmentPreviews();
     };
   }, [releaseAllOptimisticAttachmentPreviews]);
-
-  useLayoutEffect(() => {
-    pathnameRef.current = pathname;
-  }, [pathname]);
 
   useEffect(() => {
     if (isAgentWorking) {
@@ -1124,7 +1108,7 @@ export function GoatSurface({
         pendingNewSessionIdRef.current = newSessionId;
         routedChatSessionIdRef.current = newSessionId;
         setChatSessionId(newSessionId);
-        router.replace(chatHref(newSessionId));
+        window.history.replaceState(null, "", chatHref(newSessionId));
       }
       beginActiveTurn();
       setEngineSubmitting(true);
@@ -1144,15 +1128,11 @@ export function GoatSurface({
       })
         .then((result) => {
           const pendingNewSessionId = pendingNewSessionIdRef.current;
-          const ownsRoute = Boolean(
-            routedChatSessionIdRef.current === result.sessionId ||
-              (pendingNewSessionId && routedChatSessionIdRef.current === pendingNewSessionId),
-          );
+          const ownsRoute = routedChatSessionIdRef.current === result.sessionId;
           if (ownsRoute) {
             trackOptimisticAttachmentPreviews(result.userMessageId, attachmentsMetadata);
             setChatSessionId(result.sessionId);
-            routedChatSessionIdRef.current = result.sessionId;
-            if (pendingNewSessionId) pendingNewSessionIdRef.current = null;
+            if (pendingNewSessionId === result.sessionId) pendingNewSessionIdRef.current = null;
             setEngineChatSession({ engine, chatSessionId: result.sessionId });
             activeTurnAssistantMessageIdRef.current = result.assistantMessageId;
             setEngineRunning(true);
@@ -1174,12 +1154,6 @@ export function GoatSurface({
                 attachments: attachmentsMetadata,
               }),
             );
-          }
-          if (ownsRoute && isGoatChatSurfacePath(pathnameRef.current)) {
-            router.replace(chatHref(result.sessionId));
-            router.refresh();
-          } else if (pathnameRef.current === "/") {
-            router.refresh();
           }
         })
         .catch((error) => {
@@ -1218,7 +1192,7 @@ export function GoatSurface({
       pendingNewSessionIdRef.current = newSessionId;
       routedChatSessionIdRef.current = newSessionId;
       setChatSessionId(newSessionId);
-      router.replace(chatHref(newSessionId));
+      window.history.replaceState(null, "", chatHref(newSessionId));
     }
     beginActiveTurn();
     // Clear without revoking previews: the optimistic bubble still shows them.
@@ -1943,10 +1917,6 @@ function mentionsFromMessageMetadata(metadata: GoatChatMessageMetadata | undefin
 
 function chatHref(sessionId: string) {
   return `/chat/${encodeURIComponent(sessionId)}`;
-}
-
-function isGoatChatSurfacePath(pathname: string) {
-  return pathname === "/" || pathname.startsWith("/chat/");
 }
 
 function visibleHomeChats(
