@@ -10,14 +10,14 @@ import {
 } from "@/lib/brain-skills";
 
 describe("Goat Brain chat skills", () => {
-  it("returns only complete eligible skills in the safe catalog shape", async () => {
+  it("includes eligible skills without descriptions in the safe catalog shape", async () => {
     const db = selectDb([
       { brainId: "coding-work", folderPath: "skills", format: "markdown", content: skillContent() },
       {
-        brainId: "incomplete",
+        brainId: "name-only",
         folderPath: "skills",
         format: "markdown",
-        content: skillContent({ id: "incomplete", description: "" }),
+        content: skillContent({ id: "name-only", description: "" }),
       },
       {
         brainId: "archived",
@@ -39,6 +39,12 @@ describe("Goat Brain chat skills", () => {
         id: "coding-work",
         name: "Coding work",
         description: "How coding work should happen.",
+      },
+      {
+        brainRef: "brain_1",
+        id: "name-only",
+        name: "Coding work",
+        description: "",
       },
     ]);
   });

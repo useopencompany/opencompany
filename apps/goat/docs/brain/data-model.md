@@ -135,15 +135,15 @@ meeting [[evidence:ev-jamie-abc123]].
 ## Skills
 
 Markdown pages in `skills/` or a descendant are formal, Brain-owned skills. Their stable `id` is
-the document slug; `name` is the editable document title; required `description` is stored in
-frontmatter; and `instructions` are the compiled truth. Draft and active pages are attachable once
-description and instructions are non-empty. Archived, merged, binary, and incomplete pages are not
+the document slug; `name` is the editable document title; optional `description` is stored in
+frontmatter when present; and `instructions` are the compiled truth. Draft and active pages are
+attachable once instructions are non-empty. Archived, merged, binary, and incomplete pages are not
 listed or resolved as skills.
 
 `serializeGoatBrainSkillMarkdown` materializes an eligible page as a standard single-file
 `SKILL.md`. The stable document id becomes the native lowercase/hyphenated `name`; the editable
-title remains Goat display metadata. Descriptions follow the cross-runtime 1,024-character,
-no-XML contract. Default Brain `list` and `query` retrieval
+title remains Goat display metadata. When present, descriptions follow the cross-runtime
+1,024-character, no-XML contract. Default Brain `list` and `query` retrieval
 exclude the skills zone; callers must explicitly pass `folder=skills` (or a descendant). Direct
 lookup by document id remains available.
 
