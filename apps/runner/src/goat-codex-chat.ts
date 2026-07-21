@@ -26,7 +26,7 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { getGitHubWorkInstallationToken } from "./github";
 import { loadGoatCodexCliAuth, persistRefreshedGoatCodexAuth } from "./goat-codex";
-import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
+import { GoatCodexChatHandoffError, GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
 import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
@@ -45,6 +45,7 @@ const CODEX_CHAT_WORKDIR = "/home/user/opencompany-goat/codex-chat";
 const CODEX_CHAT_ATTACHMENTS_ROOT = "/home/user/.opencompany-goat/codex-chat-attachments";
 const INTERRUPT_POLL_INTERVAL_MS = 2_000;
 const INTERACTION_POLL_INTERVAL_MS = 500;
+const CODEX_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat" });
 
@@ -64,7 +65,7 @@ export async function runGoatCodexChatTurn(input: {
   env: RunnerEnv;
   recovery?: { reason: "lease_reclaimed" };
   shouldAbort?: () => Error | null;
-}) {
+}): Promise<"settled" | "handed_off"> {
   const { turn, session, env, shouldAbort } = input;
   const settings = normalizeTurnSettings(turn.settings);
   const planMode = settings.planModeReasoningEffort !== null;
@@ -96,7 +97,7 @@ export async function runGoatCodexChatTurn(input: {
   const auth = await loadGoatCodexCliAuth(turn.userWorkosId);
   if (!auth) {
     await (await bareProjector()).fail(GOAT_CODEX_CHAT_REAUTH_MESSAGE, { sessionStatus: "failed" });
-    return;
+    return "settled";
   }
 
   let sandbox;
@@ -114,7 +115,7 @@ export async function runGoatCodexChatTurn(input: {
     await (await bareProjector()).fail(
       `Codex sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`,
     );
-    return;
+    return "settled";
   }
 
   if (sandbox.sandboxId !== session.sandboxId) {
@@ -153,12 +154,14 @@ export async function runGoatCodexChatTurn(input: {
     initialParts,
   });
 
+  let recoveryHadPendingInteraction = false;
   if (input.recovery) {
     // A server request belongs to the dead proxy connection and cannot be resumed. Settle it
     // before starting the recovery turn so a stale card cannot accept an unusable answer.
-    await projector.cancelPendingInteractions();
+    recoveryHadPendingInteraction = await projector.cancelPendingInteractions();
   }
 
+  let outcome: "settled" | "handed_off" = "settled";
   try {
     const attachments = await loadGoatCodexChatAttachments(turn);
     await sandbox.commands.run(
@@ -231,6 +234,9 @@ export async function runGoatCodexChatTurn(input: {
       planModeReasoningEffort: settings.planModeReasoningEffort,
       goalMode: settings.goalMode,
       existingEngineSessionId: session.codexThreadId,
+      existingEngineTurnId: input.recovery ? turn.codexTurnId : null,
+      reattachExistingTurn: Boolean(input.recovery),
+      forceRestartForRecovery: recoveryHadPendingInteraction,
       auth,
       githubAuth: {
         githubToken: github?.githubToken ?? null,
@@ -238,7 +244,18 @@ export async function runGoatCodexChatTurn(input: {
       },
       timeoutMs: env.codexTimeoutMs,
       checkAbort,
+      detachOnAbort: (error) => error instanceof GoatCodexChatHandoffError,
       onRuntimeEvents: (events) => projector.push(events),
+      onEngineSessionId: (codexThreadId) =>
+        updateCodexChatSessionIfLeaseHeld({
+          turn,
+          leaseId,
+          leaseOwner,
+          setSql: sql`codex_thread_id = ${codexThreadId}, updated_at = ${new Date()}`,
+        }),
+      onEngineTurnId: (codexTurnId) =>
+        persistCodexChatEngineTurnId({ turn, leaseId, leaseOwner, codexTurnId }),
+      onRecoveryStart: () => claimCodexChatRecovery({ turn, leaseId, leaseOwner }),
       onServerRequest: async (request) => {
         if (request.method === "item/commandExecution/requestApproval") {
           return { decision: "decline" };
@@ -290,7 +307,16 @@ export async function runGoatCodexChatTurn(input: {
     });
     await projector.finalize(summary);
   } catch (error) {
-    if (error instanceof GoatCodexChatInterruptedError) {
+    if (error instanceof GoatCodexChatHandoffError) {
+      outcome = "handed_off";
+      await projector.cancelPendingInteractions();
+      await persistRefreshedGoatCodexAuth({
+        sandbox,
+        userWorkosId: turn.userWorkosId,
+        auth,
+        codexHome: CODEX_CHAT_HOME,
+      }).catch(() => undefined);
+    } else if (error instanceof GoatCodexChatInterruptedError) {
       await persistRefreshedGoatCodexAuth({
         sandbox,
         userWorkosId: turn.userWorkosId,
@@ -307,8 +333,34 @@ export async function runGoatCodexChatTurn(input: {
   } finally {
     // The sandbox outlives the turn: arm the chat idle timeout instead of killing it, so the
     // next message reconnects to warm files and a reusable app-server daemon.
-    await armSandboxIdleTimeout(sandbox, env.goatCodexChatIdleTimeoutMs).catch(() => undefined);
+    const idleTimeoutMs =
+      outcome === "handed_off"
+        ? Math.max(CODEX_CHAT_HANDOFF_TIMEOUT_MS, env.jobLeaseTtlMs * 2)
+        : env.goatCodexChatIdleTimeoutMs;
+    try {
+      const armed = await armSandboxIdleTimeout(sandbox, idleTimeoutMs);
+      if (armed && outcome === "settled") {
+        await markCodexChatSandboxTimeoutArmed({
+          sessionId: session.id,
+          userWorkosId: turn.userWorkosId,
+          sandboxId: sandbox.sandboxId,
+        });
+      }
+    } catch (error) {
+      captureException(error, {
+        event: "opencompany.goat_codex_chat_sandbox_parking_failed",
+        turn_id: turn.id,
+        codex_chat_session_id: session.id,
+      });
+      logger.warn("Failed to park Goat Codex chat sandbox", {
+        event: "opencompany.goat_codex_chat_sandbox_parking_failed",
+        turn_id: turn.id,
+        codex_chat_session_id: session.id,
+        error,
+      });
+    }
   }
+  return outcome;
 }
 
 async function waitForCodexChatInteraction(input: {
@@ -528,6 +580,64 @@ async function updateCodexChatSessionIfLeaseHeld(input: {
   if (rowsFromExecute(result).length === 0) {
     throw new GoatCodexChatLeaseLostError();
   }
+}
+
+async function markCodexChatSandboxTimeoutArmed(input: {
+  sessionId: string;
+  userWorkosId: string;
+  sandboxId: string;
+}) {
+  await getDb().execute(sql`
+    UPDATE goat.codex_chat_sessions
+    SET sandbox_timeout_armed_at = ${new Date()}
+    WHERE id = ${input.sessionId}
+      AND user_workos_id = ${input.userWorkosId}
+      AND sandbox_id = ${input.sandboxId}
+      AND status IN ('idle', 'failed', 'interrupted', 'closed')
+  `);
+}
+
+async function persistCodexChatEngineTurnId(input: {
+  turn: GoatCodexChatTurn;
+  leaseId: string;
+  leaseOwner: string;
+  codexTurnId: string;
+}) {
+  const result = await getDb().execute(sql`
+    UPDATE goat.codex_chat_turns AS turn
+    SET codex_turn_id = ${input.codexTurnId},
+        updated_at = ${new Date()}
+    WHERE turn.id = ${input.turn.id}
+      AND turn.user_workos_id = ${input.turn.userWorkosId}
+      AND turn.lease_id = ${input.leaseId}
+      AND turn.lease_owner = ${input.leaseOwner}
+      AND turn.status = 'running'
+    RETURNING turn.id
+  `);
+  if (rowsFromExecute(result).length === 0) throw new GoatCodexChatLeaseLostError();
+}
+
+async function claimCodexChatRecovery(input: {
+  turn: GoatCodexChatTurn;
+  leaseId: string;
+  leaseOwner: string;
+}) {
+  const result = await getDb().execute(sql`
+    UPDATE goat.codex_chat_turns AS turn
+    SET recovery_attempts = turn.recovery_attempts + 1,
+        updated_at = ${new Date()}
+    WHERE turn.id = ${input.turn.id}
+      AND turn.user_workos_id = ${input.turn.userWorkosId}
+      AND turn.lease_id = ${input.leaseId}
+      AND turn.lease_owner = ${input.leaseOwner}
+      AND turn.status = 'running'
+      AND turn.recovery_attempts < 1
+    RETURNING turn.id
+  `);
+  if (rowsFromExecute(result).length > 0) return;
+  throw new Error(
+    "Codex could not resume the original turn after another runner restart. Send your message again to continue.",
+  );
 }
 
 function createTurnAbortCheck(input: {

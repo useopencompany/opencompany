@@ -20,7 +20,11 @@ import { loadEnv } from "./env";
 import { startGoatAttioFlushWorker } from "./goat-attio-flush-worker";
 import { setGoatBrainImportWakeup, startGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
-import { setGoatCodexChatWakeup, startGoatCodexChatWorker } from "./goat-codex-chat-worker";
+import {
+  setGoatCodexChatWakeup,
+  startGoatCodexChatWorker,
+  sweepTerminalGoatCodexChatSandboxes,
+} from "./goat-codex-chat-worker";
 import { startGoatFathomPollWorker } from "./goat-fathom-poll-worker";
 import { startGoatGmailFlushWorker } from "./goat-gmail-flush-worker";
 import { startGoatGmailPollWorker } from "./goat-gmail-poll-worker";
@@ -53,6 +57,8 @@ const logger = createLogger({
 // (bounded below), the stream flush, and the pool close to land before the hard kill.
 const RENDER_SHUTDOWN_INTERRUPT_AFTER_MS = 240_000;
 const RENDER_SHUTDOWN_POST_INTERRUPT_WAIT_MS = 30_000;
+const GOAT_CODEX_CHAT_HANDOFF_AFTER_MS = 5_000;
+const GOAT_CODEX_CHAT_POST_HANDOFF_WAIT_MS = 30_000;
 
 initializeExceptionReporting();
 registerGoatNodeObservability({ serviceName: "opencompany-runner-goat" });
@@ -106,7 +112,14 @@ const jobWorker = startRunnerJobWorker(env, {
   },
 });
 const goatTaskWorker = env.goatTaskWorkerEnabled ? startGoatTaskWorker(env) : null;
-const goatCodexChatWorker = env.goatTaskWorkerEnabled ? startGoatCodexChatWorker(env) : null;
+const goatCodexChatWorker = env.goatTaskWorkerEnabled
+  ? startGoatCodexChatWorker(env, {
+      sandboxSweep: () =>
+        sweepTerminalGoatCodexChatSandboxes({
+          idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
+        }),
+    })
+  : null;
 const goatBrainIngestWorker = env.goatTaskWorkerEnabled ? startGoatBrainIngestWorker(env) : null;
 const goatBrainImportWorker = env.goatTaskWorkerEnabled ? startGoatBrainImportWorker(env) : null;
 const goatSlackFlushWorker = env.goatTaskWorkerEnabled ? startGoatSlackFlushWorker() : null;
@@ -160,6 +173,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       active_goat_brain_ingest_count: goatBrainIngestWorker?.activeCount() ?? 0,
       active_goat_google_drive_sync_count: goatGoogleDriveSyncWorker?.activeCount() ?? 0,
       active_goat_brain_import_count: goatBrainImportWorker?.activeCount() ?? 0,
+      active_goat_codex_chat_count: goatCodexChatWorker?.activeCount() ?? 0,
       active_run_count: listActiveRuns().length,
     });
     // Stop accepting work and drain in-flight jobs/requests first, flush any pending
@@ -185,7 +199,16 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       }),
       goatTaskScheduleWorker?.stop() ?? Promise.resolve(),
       goatTaskWorker?.stop() ?? Promise.resolve(),
-      goatCodexChatWorker?.stop() ?? Promise.resolve(),
+      goatCodexChatWorker?.stop({
+        handoffAfterMs: GOAT_CODEX_CHAT_HANDOFF_AFTER_MS,
+        postHandoffWaitMs: GOAT_CODEX_CHAT_POST_HANDOFF_WAIT_MS,
+        onHandoff: (activeCount) => {
+          logger.info("Runner shutdown handing off Goat Codex chat turns", {
+            event: "opencompany.runner_shutdown_handing_off_goat_codex_chat",
+            active_goat_codex_chat_count: activeCount,
+          });
+        },
+      }) ?? Promise.resolve(),
       goatBrainIngestWorker?.stop() ?? Promise.resolve(),
       goatBrainImportWorker?.stop() ?? Promise.resolve(),
       goatSlackFlushWorker?.stop() ?? Promise.resolve(),

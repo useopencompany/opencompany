@@ -252,6 +252,41 @@ export async function armSandboxIdleTimeout(sandbox: SandboxHandle, idleTimeoutM
   }
 }
 
+// Static E2B lifecycle calls do not resume a paused sandbox. This is used by terminal-state
+// reconciliation after a runner hard-kill, where connecting just to shorten the timeout would
+// unnecessarily wake an already-paused workspace.
+export async function armSandboxIdleTimeoutById(sandboxId: string, idleTimeoutMs: number) {
+  try {
+    const info = await Sandbox.getInfo(sandboxId, {
+      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+    });
+    if (info.state === "paused") return true;
+    if (info.lifecycle?.onTimeout !== "pause") {
+      await Sandbox.pause(sandboxId, { requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });
+      return true;
+    }
+    await Sandbox.setTimeout(sandboxId, idleTimeoutMs, {
+      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+    });
+    return true;
+  } catch (error) {
+    if (isSandboxNotFound(error)) return false;
+    throw error;
+  }
+}
+
+export async function armSandboxActiveTimeoutById(sandboxId: string) {
+  try {
+    await Sandbox.setTimeout(sandboxId, ACTIVE_SANDBOX_TIMEOUT_MS, {
+      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+    });
+    return true;
+  } catch (error) {
+    if (isSandboxNotFound(error)) return false;
+    throw error;
+  }
+}
+
 export async function killSandbox(sandboxId: string) {
   try {
     return await Sandbox.kill(sandboxId, { requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });

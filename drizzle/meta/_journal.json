@@ -1023,6 +1023,13 @@
       "when": 1784652411000,
       "tag": "0145_goat_billing_v4",
       "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 1784652412000,
+      "tag": "0146_goat_codex_chat_handoff",
+      "breakpoints": true
     }
   ]
 }

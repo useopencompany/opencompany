@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  type GoatCodexChatSession,
   type GoatCodexChatTurn,
   type GoatCodexChatTurnSettings,
   goatCodexChatSessions,
@@ -11,15 +10,12 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { runGoatCodexChatTurn } from "./goat-codex-chat";
-import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
-import {
-  createGoatCodexChatProjector,
-  loadCodexChatAssistantMessageParts,
-} from "./goat-codex-chat-events";
+import { GoatCodexChatHandoffError, GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
+import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat-worker" });
-const GOAT_CODEX_CHAT_RECOVERY_ATTEMPT = 2;
+const GOAT_CODEX_CHAT_SANDBOX_SWEEP_INTERVAL_MS = 60_000;
 
 let registeredWakeup: (() => void) | null = null;
 
@@ -45,6 +41,7 @@ type ClaimedTurnRow = {
   error: string | null;
   interrupt_requested_at: Date | string | null;
   attempts: number;
+  recovery_attempts: number;
   lease_id: string | null;
   lease_owner: string | null;
   lease_expires_at: Date | string | null;
@@ -108,6 +105,7 @@ export async function claimNextGoatCodexChatTurn(input: {
       SET status = 'starting',
           active_turn_id = claimed.id,
           error = NULL,
+          sandbox_timeout_armed_at = NULL,
           updated_at = ${now}
       FROM claimed
       WHERE session.id = claimed.codex_chat_session_id
@@ -143,7 +141,11 @@ export async function heartbeatGoatCodexChatTurn(input: {
   return rowsFromExecute<{ id: string }>(result).length > 0;
 }
 
-export async function runClaimedTurn(turn: GoatCodexChatTurn, env: RunnerEnv) {
+export async function runClaimedTurn(
+  turn: GoatCodexChatTurn,
+  env: RunnerEnv,
+  options: { handoffSignal?: AbortSignal } = {},
+) {
   const leaseId = turn.leaseId;
   const leaseOwner = turn.leaseOwner;
   if (!leaseId || !leaseOwner) throw new Error(`Claimed turn ${turn.id} is missing its lease.`);
@@ -173,20 +175,16 @@ export async function runClaimedTurn(turn: GoatCodexChatTurn, env: RunnerEnv) {
     );
   }
 
-  // Reclaimed attempt 2 gets one durable continuation pass. The continuation reuses the warm
-  // sandbox/thread when available and asks Codex to inspect current state before side effects.
-  // If recovery is reclaimed again, surface a terminal failure instead of looping forever.
-  if (turn.attempts > GOAT_CODEX_CHAT_RECOVERY_ATTEMPT) {
-    await failReclaimedTurn({ turn, session, leaseId, leaseOwner });
-    return;
-  }
-  if (turn.attempts === GOAT_CODEX_CHAT_RECOVERY_ATTEMPT) {
-    logger.info("Recovering reclaimed Goat Codex chat turn", {
-      event: "opencompany.goat_codex_chat_turn_recovery_started",
+  if (turn.attempts > 1) {
+    logger.info("Reattaching reclaimed Goat Codex chat turn", {
+      event: "opencompany.goat_codex_chat_turn_reattach_started",
       turn_id: turn.id,
       codex_chat_session_id: session.id,
       has_sandbox: Boolean(session.sandboxId),
       has_codex_thread: Boolean(session.codexThreadId),
+      has_codex_turn: Boolean(turn.codexTurnId),
+      lease_claim: turn.attempts,
+      recovery_attempts: turn.recoveryAttempts,
     });
   }
 
@@ -219,57 +217,130 @@ export async function runClaimedTurn(turn: GoatCodexChatTurn, env: RunnerEnv) {
     },
     Math.max(5_000, Math.floor(env.jobLeaseTtlMs / 3)),
   );
+  let handedOff = false;
   try {
-    await runGoatCodexChatTurn({
+    const outcome = await runGoatCodexChatTurn({
       turn,
       session,
       env,
-      ...(turn.attempts === GOAT_CODEX_CHAT_RECOVERY_ATTEMPT
-        ? { recovery: { reason: "lease_reclaimed" as const } }
-        : {}),
-      shouldAbort: () => heartbeatAbort,
+      ...(turn.attempts > 1 ? { recovery: { reason: "lease_reclaimed" as const } } : {}),
+      shouldAbort: () =>
+        options.handoffSignal?.aborted ? new GoatCodexChatHandoffError() : heartbeatAbort,
     });
+    handedOff = outcome === "handed_off";
   } finally {
     clearInterval(heartbeat);
   }
+  if (handedOff) {
+    await releaseGoatCodexChatTurnForHandoff({ turnId: turn.id, leaseId, leaseOwner });
+  }
 }
 
-async function failReclaimedTurn(input: {
-  turn: GoatCodexChatTurn;
-  session: GoatCodexChatSession;
+export async function releaseGoatCodexChatTurnForHandoff(input: {
+  turnId: string;
   leaseId: string;
   leaseOwner: string;
 }) {
-  const projector = createGoatCodexChatProjector({
-    target: {
-      userWorkosId: input.turn.userWorkosId,
-      codexChatSessionId: input.session.id,
-      chatSessionId: input.session.chatSessionId,
-      turnId: input.turn.id,
-      assistantMessageId: input.turn.assistantMessageId,
-      model: input.session.model,
-      leaseId: input.leaseId,
-      leaseOwner: input.leaseOwner,
-      planMode: Boolean(input.turn.settings?.planModeReasoningEffort),
-      turnCreatedAt: input.turn.createdAt,
-    },
-    redact: (value) => value,
-    // Keep whatever partial parts the dead worker already streamed; only finalize them.
-    initialParts: await loadCodexChatAssistantMessageParts(input.turn.assistantMessageId),
-  });
-  await projector.fail(
-    "Codex was interrupted by a runner restart. Send your message again to continue.",
-  );
+  const now = new Date();
+  const result = await getDb().execute(sql`
+    UPDATE goat.codex_chat_turns
+    SET lease_id = NULL,
+        lease_owner = NULL,
+        lease_expires_at = ${new Date(now.getTime() - 1)},
+        updated_at = ${now}
+    WHERE id = ${input.turnId}
+      AND lease_id = ${input.leaseId}
+      AND lease_owner = ${input.leaseOwner}
+      AND status = 'running'
+    RETURNING id
+  `);
+  if (rowsFromExecute<{ id: string }>(result).length === 0) {
+    throw new GoatCodexChatLeaseLostError();
+  }
+}
+
+export async function sweepTerminalGoatCodexChatSandboxes(input: {
+  idleTimeoutMs: number;
+  limit?: number;
+}) {
+  const result = await getDb().execute(sql`
+    SELECT id, sandbox_id, updated_at
+    FROM goat.codex_chat_sessions
+    WHERE sandbox_id IS NOT NULL
+      AND status IN ('idle', 'failed', 'interrupted', 'closed')
+      AND (
+        sandbox_timeout_armed_at IS NULL
+        OR sandbox_timeout_armed_at < updated_at
+      )
+    ORDER BY updated_at ASC, id ASC
+    LIMIT ${Math.max(1, input.limit ?? 25)}
+  `);
+  let reconciled = 0;
+  for (const row of rowsFromExecute<{
+    id: string;
+    sandbox_id: string;
+    updated_at: Date | string;
+  }>(result)) {
+    try {
+      const armed = await armSandboxIdleTimeoutById(row.sandbox_id, input.idleTimeoutMs);
+      const now = new Date();
+      const marked = await getDb().execute(sql`
+        UPDATE goat.codex_chat_sessions
+        SET sandbox_id = CASE WHEN ${armed} THEN sandbox_id ELSE NULL END,
+            sandbox_timeout_armed_at = ${now}
+        WHERE id = ${row.id}
+          AND sandbox_id = ${row.sandbox_id}
+          AND status IN ('idle', 'failed', 'interrupted', 'closed')
+          AND updated_at = ${row.updated_at}
+        RETURNING id
+      `);
+      if (rowsFromExecute(marked).length === 0 && armed) {
+        const current = await getDb().execute(sql`
+          SELECT status
+          FROM goat.codex_chat_sessions
+          WHERE id = ${row.id}
+            AND sandbox_id = ${row.sandbox_id}
+          LIMIT 1
+        `);
+        const status = rowsFromExecute<{ status: string }>(current)[0]?.status;
+        if (status === "queued" || status === "starting" || status === "running") {
+          await armSandboxActiveTimeoutById(row.sandbox_id);
+        }
+      }
+      reconciled += 1;
+    } catch (error) {
+      captureException(error, {
+        event: "opencompany.goat_codex_chat_sandbox_sweep_item_failed",
+        codex_chat_session_id: row.id,
+      });
+      logger.warn("Failed to reconcile terminal Goat Codex chat sandbox", {
+        event: "opencompany.goat_codex_chat_sandbox_sweep_item_failed",
+        codex_chat_session_id: row.id,
+        error,
+      });
+    }
+  }
+  return reconciled;
 }
 
 export function startGoatCodexChatWorker(
   env: RunnerEnv,
-  options: { concurrency?: number; pollIntervalMs?: number } = {},
+  options: {
+    concurrency?: number;
+    pollIntervalMs?: number;
+    sandboxSweep?: () => Promise<number>;
+    sandboxSweepIntervalMs?: number;
+  } = {},
 ) {
   const concurrency = resolveGoatCodexChatWorkerConcurrency(env, options.concurrency);
   const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? 1_000);
-  const active = new Set<Promise<void>>();
+  const active = new Map<Promise<void>, AbortController>();
+  const sandboxSweepIntervalMs = Math.max(
+    1_000,
+    options.sandboxSweepIntervalMs ?? GOAT_CODEX_CHAT_SANDBOX_SWEEP_INTERVAL_MS,
+  );
   let stopped = false;
+  let lastSandboxSweepAt = 0;
   let pendingWake = false;
   let wake: (() => void) | null = null;
 
@@ -302,13 +373,29 @@ export function startGoatCodexChatWorker(
   const runLoop = async () => {
     while (!stopped) {
       try {
+        const nowMs = Date.now();
+        if (options.sandboxSweep && nowMs - lastSandboxSweepAt >= sandboxSweepIntervalMs) {
+          lastSandboxSweepAt = nowMs;
+          void options.sandboxSweep().catch((error) => {
+            captureException(error, {
+              event: "opencompany.goat_codex_chat_sandbox_sweep_failed",
+            });
+            logger.warn("Goat Codex chat sandbox sweep failed", {
+              event: "opencompany.goat_codex_chat_sandbox_sweep_failed",
+              error,
+            });
+          });
+        }
         while (!stopped && active.size < concurrency) {
           const turn = await claimNextGoatCodexChatTurn({
             leaseOwner: env.instanceId,
             leaseTtlMs: env.jobLeaseTtlMs,
           });
           if (!turn) break;
-          const running = runClaimedTurn(turn, env)
+          const handoffController = new AbortController();
+          const running = runClaimedTurn(turn, env, {
+            handoffSignal: handoffController.signal,
+          })
             .catch((error) => {
               if (error instanceof GoatCodexChatLeaseLostError) return;
               captureException(error, {
@@ -322,7 +409,7 @@ export function startGoatCodexChatWorker(
               });
             })
             .finally(() => active.delete(running));
-          active.add(running);
+          active.set(running, handoffController);
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_codex_chat_worker_failed" });
@@ -340,11 +427,33 @@ export function startGoatCodexChatWorker(
   return {
     notify,
     activeCount: () => active.size,
-    stop: async () => {
+    stop: async (options?: {
+      handoffAfterMs?: number;
+      onHandoff?: (activeCount: number) => Promise<void> | void;
+      postHandoffWaitMs?: number;
+    }) => {
       stopped = true;
       notify();
       await loop;
-      await Promise.allSettled(Array.from(active));
+      if (active.size === 0) return;
+      if (options?.handoffAfterMs === undefined) {
+        await Promise.allSettled(Array.from(active.keys()));
+        return;
+      }
+      const drained = await Promise.race([
+        Promise.allSettled(Array.from(active.keys())).then(() => true),
+        sleep(options.handoffAfterMs).then(() => false),
+      ]);
+      if (drained) return;
+
+      await options.onHandoff?.(active.size);
+      for (const controller of active.values()) controller.abort();
+      if (options.postHandoffWaitMs !== undefined) {
+        await Promise.race([
+          Promise.allSettled(Array.from(active.keys())),
+          sleep(options.postHandoffWaitMs),
+        ]);
+      }
     },
   };
 }
@@ -371,6 +480,7 @@ function turnFromRow(row: ClaimedTurnRow): GoatCodexChatTurn {
     error: row.error,
     interruptRequestedAt: dateFromRow(row.interrupt_requested_at),
     attempts: row.attempts,
+    recoveryAttempts: row.recovery_attempts,
     leaseId: row.lease_id,
     leaseOwner: row.lease_owner,
     leaseExpiresAt: dateFromRow(row.lease_expires_at),
@@ -383,4 +493,11 @@ function turnFromRow(row: ClaimedTurnRow): GoatCodexChatTurn {
 function dateFromRow(value: Date | string | null): Date | null {
   if (!value) return null;
   return value instanceof Date ? value : new Date(value);
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
 }
