@@ -250,7 +250,6 @@ export function GoatSurface({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const pathnameRef = useRef(pathname);
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const inputOverlayRef = useRef<HTMLDivElement>(null);
@@ -276,6 +275,9 @@ export function GoatSurface({
   const [mentionOptionIndex, setMentionOptionIndex] = useState(0);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
+  const [persistedChatSessionId, setPersistedChatSessionId] = useState<string | null>(
+    initialChat?.id ?? null,
+  );
   // Keyed useChat instance: changes only when the user opens a different chat,
   // NOT when a new session gets its server id mid-turn (that would discard the
   // in-flight stream state).
@@ -499,24 +501,14 @@ export function GoatSurface({
       recordOptimisticTurnDuration(message.id);
       const sessionId = message.metadata?.sessionId;
       const pendingNewSessionId = pendingNewSessionIdRef.current;
-      const ownsRoute = Boolean(
-        sessionId &&
-          (routedChatSessionIdRef.current === sessionId ||
-            (pendingNewSessionId && routedChatSessionIdRef.current === pendingNewSessionId)),
-      );
+      const ownsRoute = Boolean(sessionId && routedChatSessionIdRef.current === sessionId);
       if (sessionId && ownsRoute) {
         setChatSessionId(sessionId);
-        routedChatSessionIdRef.current = sessionId;
-        if (pendingNewSessionId) {
+        setPersistedChatSessionId(sessionId);
+        if (pendingNewSessionId === sessionId) {
           pendingNewSessionIdRef.current = null;
         }
       }
-      if (!sessionId || !ownsRoute || !isGoatChatSurfacePath(pathnameRef.current)) {
-        if (sessionId && pathnameRef.current === "/") router.refresh();
-        return;
-      }
-      if (sessionId) router.replace(chatHref(sessionId));
-      router.refresh();
     },
     onError: (error) => {
       if (error.message?.includes(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE)) {
@@ -670,10 +662,6 @@ export function GoatSurface({
     };
   }, [releaseAllOptimisticAttachmentPreviews]);
 
-  useLayoutEffect(() => {
-    pathnameRef.current = pathname;
-  }, [pathname]);
-
   useEffect(() => {
     if (isAgentWorking) {
       wasAgentWorkingRef.current = true;
@@ -774,6 +762,7 @@ export function GoatSurface({
       routedChatSessionIdRef.current = chat?.id ?? null;
       pendingNewSessionIdRef.current = null;
       setChatSessionId(chat?.id ?? null);
+      setPersistedChatSessionId(chat?.id ?? null);
       setChatInstanceKey(chat?.id ?? `goat-chat-main-${crypto.randomUUID()}`);
       setChatModel(
         engineTarget === "local_codex"
@@ -1124,7 +1113,8 @@ export function GoatSurface({
         pendingNewSessionIdRef.current = newSessionId;
         routedChatSessionIdRef.current = newSessionId;
         setChatSessionId(newSessionId);
-        router.replace(chatHref(newSessionId));
+        setPersistedChatSessionId(null);
+        window.history.replaceState(null, "", chatHref(newSessionId));
       }
       beginActiveTurn();
       setEngineSubmitting(true);
@@ -1144,15 +1134,12 @@ export function GoatSurface({
       })
         .then((result) => {
           const pendingNewSessionId = pendingNewSessionIdRef.current;
-          const ownsRoute = Boolean(
-            routedChatSessionIdRef.current === result.sessionId ||
-              (pendingNewSessionId && routedChatSessionIdRef.current === pendingNewSessionId),
-          );
+          const ownsRoute = routedChatSessionIdRef.current === result.sessionId;
           if (ownsRoute) {
             trackOptimisticAttachmentPreviews(result.userMessageId, attachmentsMetadata);
             setChatSessionId(result.sessionId);
-            routedChatSessionIdRef.current = result.sessionId;
-            if (pendingNewSessionId) pendingNewSessionIdRef.current = null;
+            setPersistedChatSessionId(result.sessionId);
+            if (pendingNewSessionId === result.sessionId) pendingNewSessionIdRef.current = null;
             setEngineChatSession({ engine, chatSessionId: result.sessionId });
             activeTurnAssistantMessageIdRef.current = result.assistantMessageId;
             setEngineRunning(true);
@@ -1174,12 +1161,6 @@ export function GoatSurface({
                 attachments: attachmentsMetadata,
               }),
             );
-          }
-          if (ownsRoute && isGoatChatSurfacePath(pathnameRef.current)) {
-            router.replace(chatHref(result.sessionId));
-            router.refresh();
-          } else if (pathnameRef.current === "/") {
-            router.refresh();
           }
         })
         .catch((error) => {
@@ -1218,7 +1199,8 @@ export function GoatSurface({
       pendingNewSessionIdRef.current = newSessionId;
       routedChatSessionIdRef.current = newSessionId;
       setChatSessionId(newSessionId);
-      router.replace(chatHref(newSessionId));
+      setPersistedChatSessionId(null);
+      window.history.replaceState(null, "", chatHref(newSessionId));
     }
     beginActiveTurn();
     // Clear without revoking previews: the optimistic bubble still shows them.
@@ -1652,7 +1634,7 @@ export function GoatSurface({
         </div>
       )}
 
-      {mode === "chat" && chatSessionId ? (
+      {mode === "chat" && chatSessionId && persistedChatSessionId === chatSessionId ? (
         <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
       ) : null}
       {mode === "chat" && activeEngineChat?.engine === "local_codex" ? (
@@ -1943,10 +1925,6 @@ function mentionsFromMessageMetadata(metadata: GoatChatMessageMetadata | undefin
 
 function chatHref(sessionId: string) {
   return `/chat/${encodeURIComponent(sessionId)}`;
-}
-
-function isGoatChatSurfacePath(pathname: string) {
-  return pathname === "/" || pathname.startsWith("/chat/");
 }
 
 function visibleHomeChats(

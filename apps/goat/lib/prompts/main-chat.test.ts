@@ -3,7 +3,14 @@ import { createOpenCompanyChatSystemPrompt } from "@/lib/prompts/main-chat";
 
 const CAPABILITIES = [
   { id: "slack", indexLine: "slack — CAN read history. CANNOT post." },
-  { id: "youtube_transcript", indexLine: "youtube_transcript — fetches transcripts." },
+  {
+    id: "linear",
+    indexLine: "linear — CAN read and create issues. CANNOT update.",
+  },
+  {
+    id: "youtube_transcript",
+    indexLine: "youtube_transcript — fetches transcripts.",
+  },
 ];
 
 describe("createOpenCompanyChatSystemPrompt capabilities", () => {
@@ -16,12 +23,23 @@ describe("createOpenCompanyChatSystemPrompt capabilities", () => {
   });
 
   it("renders the index block and behavior lines when capabilities are present", () => {
-    const prompt = createOpenCompanyChatSystemPrompt({ capabilities: CAPABILITIES });
+    const prompt = createOpenCompanyChatSystemPrompt({
+      capabilities: CAPABILITIES,
+    });
     expect(prompt).toContain("<capabilities>");
     expect(prompt).toContain("- slack — CAN read history. CANNOT post.");
     expect(prompt).toContain("- youtube_transcript — fetches transcripts.");
-    expect(prompt).toContain("query with the use_capability tool");
+    expect(prompt).toContain("use with the use_capability tool");
+    expect(prompt).toContain("use_capability tool for quick work");
+    expect(prompt).toContain('Select operation "read" for retrieval');
+    expect(prompt).toContain('Select "create" or "write" only when the latest user message');
+    expect(prompt).toContain("exactly one successful creation");
+    expect(prompt).toContain("Only perform changes the capability says it CAN perform");
     expect(prompt).toContain("fully self-contained");
+    expect(prompt).toContain("latest user message explicitly and unambiguously asks");
+    expect(prompt).toContain(
+      "Ask a concise follow-up instead of guessing a material mutation target",
+    );
     expect(prompt).toContain("Choose the lightest path");
     expect(prompt).toContain("start a task for deep, multi-step, or cross-source work");
     expect(prompt).toContain("follow its hint");

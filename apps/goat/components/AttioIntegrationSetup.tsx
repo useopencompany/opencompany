@@ -159,16 +159,17 @@ export function AttioIntegrationSetup({
         <ol className="list-decimal space-y-2 pl-6 text-[13px] leading-5 text-ink-subtle">
           <li>In Attio, open Workspace settings and go to Developers.</li>
           <li>
-            Create an integration and generate an access token with read access to records, notes,
-            and object configuration plus read-write access to webhooks.
+            Create an integration and generate an access token with these scopes:{" "}
+            <code>object_configuration:read</code>, <code>record_permission:read-write</code>,{" "}
+            <code>note:read-write</code>, and <code>webhook:read-write</code>.
           </li>
           <li>Copy the token, paste it here, and save it.</li>
           <li>Enable Attio from a brain&apos;s Sources settings to route CRM activity.</li>
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
           Saving the key registers an Attio webhook so new and updated people, companies, deals, and
-          notes flow into the brain as they happen. Activity on a record is batched and ingested
-          once the record has been quiet for a few minutes.
+          notes flow into the brain as they happen. The same connection also lets Chat retrieve
+          those standard records and, when you explicitly ask, create one record or note per action.
         </p>
       </section>
     </div>

@@ -1,11 +1,12 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ToolSet } from "ai";
 
-export type GoatCapabilityId = "slack" | "linear" | "youtube_transcript";
+export type GoatCapabilityId = "slack" | "linear" | "youtube_transcript" | "attio";
 
-// v1 registers read-class capabilities only; widening this union is a product
-// decision (writes need an approval flow), not a code convenience.
-export type GoatCapabilitySideEffect = "read";
+// Capabilities advertise their permitted operations after resolving the
+// user's connection. This keeps scope-dependent creation out of read workers
+// while retaining Linear's existing, explicitly requested write mode.
+export type GoatCapabilityOperation = "read" | "create" | "write";
 
 export type GoatCapabilityEntity = {
   type: string;
@@ -55,15 +56,18 @@ export type GoatCapabilityToolkit = {
 // (team domain, scope-dependent tools, ...) already bound in.
 export type ResolvedGoatCapability = {
   id: GoatCapabilityId;
+  operations: readonly GoatCapabilityOperation[];
   workerModel: AgentModelId;
   indexLine: string;
   recipeLines: readonly string[];
-  createTools: (context: GoatCapabilityWorkerContext) => Promise<GoatCapabilityToolkit>;
+  createTools: (
+    context: GoatCapabilityWorkerContext,
+    operation: GoatCapabilityOperation,
+  ) => Promise<GoatCapabilityToolkit>;
 };
 
 export type GoatCapabilityDefinition = {
   id: GoatCapabilityId;
-  sideEffect: GoatCapabilitySideEffect;
   workerModel: AgentModelId;
   // Returns null when the capability is unavailable for this user (not
   // connected, env key missing). Unavailable capabilities are absent from both
@@ -82,6 +86,7 @@ export type GoatCapabilityTranscriptEntry = {
 
 export type GoatCapabilityCallDebug = {
   capability: string;
+  operation: GoatCapabilityOperation;
   workerModel: string;
   steps: number;
   durationMs: number;

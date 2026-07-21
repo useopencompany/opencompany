@@ -96,10 +96,12 @@ snapshot in `goat.chat_session_skills`; re-mentioning the same id keeps that ses
 version.
 
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
-matching `/chat/<id>` route immediately; the server persists that exact id. When the stream finishes,
-the route also attaches `sessionId` in message metadata so the client can confirm the route and call
-`router.refresh()` for persisted server props. Persisted Goat app state such as tasks, task run events,
-integrations, and Brain documents is read through TanStack DB collections backed by Electric shapes.
+matching `/chat/<id>` URL immediately with the native History API, without starting a server
+navigation; the server persists that exact id. The stream attaches `sessionId` in message metadata so
+the client can confirm ownership and start the authorized message subscription. Persisted chat
+sessions and messages then arrive through TanStack DB collections backed by Electric shapes. Other
+persisted Goat app state such as tasks, task run events, integrations, and Brain documents uses the
+same live-data path.
 
 Stopping generation calls `stop()`, which aborts the HTTP request. Closing chat clears local state,
 optionally stops the active stream, and marks the chat session closed through
@@ -129,6 +131,13 @@ The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, 
 structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
 timezone. `goat_brain` is always available and `web_search` is available when Exa is configured.
+Connected chat capabilities are dispatched through `use_capability` with an explicit operation:
+`read` for retrieval, or an advertised `create` or `write` for mutations. Slack and YouTube remain
+read-only. Linear advertises `write`; its read calls receive only read tools, while an explicitly
+requested write call additionally receives bounded `create_issue` access. Attio advertises
+scope-dependent `create` access for standard people, companies, deals, and notes, with one
+successful creation per call. Linear updates, comments, deletes, and every other unlisted mutation
+remain unavailable, as do Attio updates and deletes.
 `start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The
