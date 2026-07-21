@@ -9,11 +9,7 @@ import {
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
   normalizeGoatBrainReadToolInput,
 } from "@/lib/brain-surface";
-import type {
-  GoatCapabilityCallDebug,
-  GoatCapabilityOperation,
-  GoatCapabilitySideEffect,
-} from "@/lib/capabilities/types";
+import type { GoatCapabilityCallDebug, GoatCapabilityOperation } from "@/lib/capabilities/types";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
@@ -110,7 +106,10 @@ type DeleteTaskScheduleRunner = (
 type CapabilityDispatcher = {
   // Ids resolved server-side from real connection state; they become the
   // dispatch enum, so a disconnected capability cannot be invoked by guessing.
-  list: readonly { id: string; sideEffect: GoatCapabilitySideEffect }[];
+  list: readonly {
+    id: string;
+    operations: readonly GoatCapabilityOperation[];
+  }[];
   execute: (input: {
     capability: string;
     operation: GoatCapabilityOperation;
@@ -390,7 +389,10 @@ export function createOpenCompanyChatToolContext(input: {
             ]
           : [];
         if (!content && attachmentIds.length === 0) {
-          return { ok: false, error: "save_to_brain needs content or attachmentIds." };
+          return {
+            ok: false,
+            error: "save_to_brain needs content or attachmentIds.",
+          };
         }
         const title = typeof args.title === "string" ? args.title.trim() : "";
         const intent = typeof args.intent === "string" ? args.intent.trim() : "";
@@ -599,11 +601,10 @@ export function createOpenCompanyChatToolContext(input: {
   const capabilities = input.capabilities;
   if (capabilities && capabilities.list.length > 0) {
     const capabilityIds = capabilities.list.map((capability) => capability.id);
-    const capabilityOperations: GoatCapabilityOperation[] = capabilities.list.some(
-      (capability) => capability.sideEffect === "write",
-    )
-      ? ["read", "write"]
-      : ["read"];
+    const operationOrder: readonly GoatCapabilityOperation[] = ["read", "create", "write"];
+    const capabilityOperations = operationOrder.filter((operation) =>
+      capabilities.list.some((capability) => capability.operations.includes(operation)),
+    );
     tools[USE_CAPABILITY_TOOL_NAME] = tool<UseCapabilityToolInput, UseCapabilityToolOutput>({
       description: USE_CAPABILITY_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<UseCapabilityToolInput>({
@@ -644,7 +645,9 @@ export function createOpenCompanyChatToolContext(input: {
           };
         }
         const operation =
-          args.operation === "read" || args.operation === "write" ? args.operation : null;
+          args.operation === "read" || args.operation === "create" || args.operation === "write"
+            ? args.operation
+            : null;
         if (!operation) {
           return {
             capability,
@@ -652,19 +655,19 @@ export function createOpenCompanyChatToolContext(input: {
             entities: [],
             error: {
               code: "invalid_request",
-              hint: 'The operation must be either "read" or "write".',
+              hint: 'The operation must be "read", "create", or "write".',
             },
           };
         }
         const selectedCapability = capabilities.list.find((entry) => entry.id === capability);
-        if (operation === "write" && selectedCapability?.sideEffect !== "write") {
+        if (!selectedCapability?.operations.includes(operation)) {
           return {
             capability,
             summary: "",
             entities: [],
             error: {
               code: "invalid_request",
-              hint: `The ${capability} capability does not support write operations.`,
+              hint: `${capability} does not permit ${operation} operations for this connection. Use an advertised operation or reconnect with the required permissions.`,
             },
           };
         }
@@ -699,7 +702,12 @@ export function createOpenCompanyChatToolContext(input: {
           typeof executionContext.toolCallId === "string"
             ? executionContext.toolCallId
             : `capability_${capabilityCallCount}`;
-        return capabilities.execute({ capability, operation, request, toolCallId });
+        return capabilities.execute({
+          capability,
+          operation,
+          request,
+          toolCallId,
+        });
       },
     });
   }

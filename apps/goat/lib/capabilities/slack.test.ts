@@ -6,7 +6,9 @@ const mocks = vi.hoisted(() => ({
   dbRows: [] as unknown[],
 }));
 
-vi.mock("@/lib/integrations/slack", () => ({ slackApiRequest: mocks.slackApiRequest }));
+vi.mock("@/lib/integrations/slack", () => ({
+  slackApiRequest: mocks.slackApiRequest,
+}));
 vi.mock("@opencompany/db/goat-integrations", () => ({
   loadGoatIntegrationCredential: mocks.loadCredential,
 }));
@@ -32,8 +34,12 @@ const CONTEXT: GoatCapabilityWorkerContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
-  operation: "read",
-  userContext: { email: "ada@example.com", firstName: "Ada", lastName: null, timezone: "UTC" },
+  userContext: {
+    email: "ada@example.com",
+    firstName: "Ada",
+    lastName: null,
+    timezone: "UTC",
+  },
 };
 
 function connectedRow(scopes: string[]) {
@@ -65,7 +71,9 @@ describe("slack capability tools", () => {
     mocks.dbRows = [connectedRow([])];
     mocks.loadCredential.mockResolvedValueOnce(null);
     const resolved = await slackCapability.resolve("user_1");
-    await expect(resolved?.createTools(CONTEXT)).rejects.toBeInstanceOf(GoatCapabilityAuthError);
+    await expect(resolved?.createTools(CONTEXT, "read")).rejects.toBeInstanceOf(
+      GoatCapabilityAuthError,
+    );
   });
 
   it("registers the search tool only for search-scoped connections", async () => {
@@ -74,11 +82,17 @@ describe("slack capability tools", () => {
     });
 
     mocks.dbRows = [connectedRow(["search:read"])];
-    const withSearch = await (await slackCapability.resolve("user_1"))?.createTools(CONTEXT);
+    const withSearch = await (await slackCapability.resolve("user_1"))?.createTools(
+      CONTEXT,
+      "read",
+    );
     expect(Object.keys(withSearch?.tools ?? {})).toContain("slack_search_messages");
 
     mocks.dbRows = [connectedRow(["channels:history"])];
-    const withoutSearch = await (await slackCapability.resolve("user_1"))?.createTools(CONTEXT);
+    const withoutSearch = await (await slackCapability.resolve("user_1"))?.createTools(
+      CONTEXT,
+      "read",
+    );
     expect(Object.keys(withoutSearch?.tools ?? {})).toEqual([
       "slack_list_conversations",
       "slack_fetch_history",
@@ -96,7 +110,7 @@ describe("slack capability tools", () => {
       messages: [{ ts: "1234.5678", user: "U1", text: "y".repeat(900) }],
     });
 
-    const toolkit = await (await slackCapability.resolve("user_1"))?.createTools(CONTEXT);
+    const toolkit = await (await slackCapability.resolve("user_1"))?.createTools(CONTEXT, "read");
     const history = toolkit?.tools.slack_fetch_history as {
       execute: (
         args: unknown,

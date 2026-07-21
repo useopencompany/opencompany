@@ -54,8 +54,8 @@ const OPENCOMPANY_CHAT_WEB_SEARCH_CHAT_FALLBACK =
   "If web_search fails or is unavailable, say that briefly and explain what information is still missing.";
 
 const OPENCOMPANY_CHAT_CAPABILITY_BEHAVIOR_LINES = [
-  "Use the use_capability tool for quick work against the capabilities listed in <capabilities>: recent messages, issue status, a specific transcript, or an explicitly requested change the capability says it CAN perform. Set operation to read for lookups. Set it to write only when the latest user message explicitly and unambiguously asks for that external change; never infer write permission from optional suggestions or older context. Answer directly from the result.",
-  "Each capability request must be fully self-contained — the worker sees none of this conversation — so resolve names, channels, issue keys, absolute dates, and exact requested write content before dispatching. Ask a concise follow-up instead of guessing a material write target or value. Independent read lookups may be dispatched in parallel in one step.",
+  'Use the use_capability tool for quick work against the capabilities listed in <capabilities>. Select operation "read" for retrieval. Select "create" or "write" only when the latest user message explicitly and unambiguously asks for that external change and the capability advertises that exact operation. Never infer mutation permission from a lookup, suggestion, or older context. Only perform changes the capability says it CAN perform.',
+  "Each capability request must be fully self-contained — the worker sees none of this conversation — so resolve names, channels, issue keys, record ids, absolute dates, and exact requested mutation content before dispatching. Ask a concise follow-up instead of guessing a material mutation target or value. A create call may perform exactly one successful creation; split multiple requested creations across separate calls. Independent read lookups may be dispatched in parallel in one step.",
   "Choose the lightest path: answer directly when you already know; use use_capability for a quick supported lookup or explicit change in a connected capability; start a task for deep, multi-step, or cross-source work.",
   "If a use_capability result carries an error, follow its hint (for example suggesting the user reconnect an integration in Settings → Integrations) instead of retrying the same call, and say briefly what happened.",
 ];
@@ -87,7 +87,11 @@ export function createOpenCompanyChatSystemPrompt(
     brainCaptureEnabled?: boolean;
     taskToolsEnabled?: boolean;
     scheduleToolsEnabled?: boolean;
-    activeBrain?: { name: string; workspaceName: string; readOnly?: boolean } | null;
+    activeBrain?: {
+      name: string;
+      workspaceName: string;
+      readOnly?: boolean;
+    } | null;
     recurringSchedules?: readonly {
       id: string;
       name: string;

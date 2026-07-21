@@ -30,7 +30,17 @@ export type GoatAttioWorkspaceIdentity = {
   workspaceId: string;
   workspaceName: string | null;
   workspaceSlug: string | null;
+  scopes: string[];
 };
+
+export function parseGoatAttioScopes(value: unknown): string[] {
+  const values = Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : typeof value === "string"
+      ? value.split(/\s+/)
+      : [];
+  return [...new Set(values.map((scope) => scope.trim()).filter(Boolean))].sort();
+}
 
 // Attio publishes no key format; only reject strings that are clearly not a
 // pasted key (whitespace, absurd lengths) and let the API call be the judge.
@@ -65,6 +75,7 @@ export async function validateGoatAttioApiKey(apiKey: string): Promise<GoatAttio
     workspace_id?: string;
     workspace_name?: string;
     workspace_slug?: string;
+    scope?: string | string[];
   } | null;
   if (!body?.active || typeof body.workspace_id !== "string" || !body.workspace_id) {
     return { ok: false, error: "Attio reports this API key as inactive." };
@@ -75,6 +86,7 @@ export async function validateGoatAttioApiKey(apiKey: string): Promise<GoatAttio
       workspaceId: body.workspace_id,
       workspaceName: typeof body.workspace_name === "string" ? body.workspace_name : null,
       workspaceSlug: typeof body.workspace_slug === "string" ? body.workspace_slug : null,
+      scopes: parseGoatAttioScopes(body.scope),
     },
   };
 }
@@ -197,7 +209,7 @@ export async function connectGoatAttioIntegration(input: {
       accountType: "attio_api_key",
       status: "connected",
       statusReason: null,
-      scopes: [],
+      scopes: input.identity.scopes,
       lastSyncedAt: now,
       updatedAt: now,
     })
@@ -215,6 +227,7 @@ export async function connectGoatAttioIntegration(input: {
         accountType: "attio_api_key",
         status: "connected",
         statusReason: null,
+        scopes: input.identity.scopes,
         lastSyncedAt: now,
         updatedAt: now,
       },

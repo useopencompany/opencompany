@@ -3,6 +3,7 @@ import { jsonSchema, type ToolExecutionOptions, type ToolSet } from "ai";
 import {
   GoatCapabilityAuthError,
   type GoatCapabilityDefinition,
+  type GoatCapabilityOperation,
   type GoatCapabilityWorkerContext,
 } from "@/lib/capabilities/types";
 import {
@@ -64,9 +65,15 @@ const LINEAR_LIST_ISSUES_INPUT_SCHEMA = jsonSchema<Record<string, unknown>>({
   additionalProperties: false,
   properties: {
     limit: { type: "number", minimum: 1, maximum: 250 },
-    cursor: { type: "string", description: "Next page cursor. Omit on the first page." },
+    cursor: {
+      type: "string",
+      description: "Next page cursor. Omit on the first page.",
+    },
     orderBy: { type: "string", enum: ["createdAt", "updatedAt"] },
-    query: { type: "string", description: "Search issue title or description." },
+    query: {
+      type: "string",
+      description: "Search issue title or description.",
+    },
     team: { type: "string", description: "Team name or ID." },
     state: { type: "string", description: "State type, name, or ID." },
     cycle: { type: "string", description: "Cycle name, number, or ID." },
@@ -95,21 +102,30 @@ const LINEAR_LIST_ISSUES_INPUT_SCHEMA = jsonSchema<Record<string, unknown>>({
         "Set true only when the request explicitly asks for issues with no priority. Omit otherwise.",
     },
     parentId: { type: "string", description: "Parent issue ID or identifier." },
-    createdAt: { type: "string", description: "Created-after ISO-8601 date or duration." },
-    updatedAt: { type: "string", description: "Updated-after ISO-8601 date or duration." },
-    includeArchived: { type: "boolean", description: "Whether to include archived issues." },
+    createdAt: {
+      type: "string",
+      description: "Created-after ISO-8601 date or duration.",
+    },
+    updatedAt: {
+      type: "string",
+      description: "Updated-after ISO-8601 date or duration.",
+    },
+    includeArchived: {
+      type: "boolean",
+      description: "Whether to include archived issues.",
+    },
   },
 });
 
 export const linearCapability: GoatCapabilityDefinition = {
   id: "linear",
-  sideEffect: "write",
   workerModel: "openai/gpt-5.4-mini",
   async resolve(userWorkosId) {
     const state = await getGoatLinearIntegrationState(userWorkosId);
     if (!state.connected) return null;
 
     return {
+      operations: ["read", "write"],
       indexLine:
         "linear — reads the user's Linear workspace and creates issues on explicit request. CAN list and look up issues, projects, teams, users, comments, and documents; CAN create issues. CANNOT update issues, add comments, or delete anything.",
       recipeLines: [
@@ -125,7 +141,10 @@ export const linearCapability: GoatCapabilityDefinition = {
   },
 };
 
-async function createLinearTools(context: GoatCapabilityWorkerContext) {
+async function createLinearTools(
+  context: GoatCapabilityWorkerContext,
+  operation: GoatCapabilityOperation,
+) {
   const connection = await loadGoatLinearMcpWorkerConnection({
     userWorkosId: context.userWorkosId,
     onAuthorizationRequired: () => {
@@ -153,10 +172,12 @@ async function createLinearTools(context: GoatCapabilityWorkerContext) {
   });
 
   try {
-    const definitions = await client.listTools({ options: { signal: context.signal } });
+    const definitions = await client.listTools({
+      options: { signal: context.signal },
+    });
     const rawTools = client.toolsFromDefinitions(definitions) as ToolSet;
     return {
-      tools: selectLinearWorkerTools(rawTools, context.operation),
+      tools: selectLinearWorkerTools(rawTools, operation),
       close: async () => {
         await client.close().catch(() => {});
       },
@@ -176,7 +197,7 @@ export function selectLinearReadTools(rawTools: ToolSet): ToolSet {
 
 export function selectLinearWorkerTools(
   rawTools: ToolSet,
-  operation: GoatCapabilityWorkerContext["operation"],
+  operation: GoatCapabilityOperation,
 ): ToolSet {
   const readNames = Object.keys(rawTools).filter(
     (name) => READ_TOOL_PATTERN.test(name) && !MUTATION_TOOL_PATTERN.test(name),

@@ -514,7 +514,10 @@ describe("runOpenCompanyChatAgent", () => {
 
     const result = await runOpenCompanyChatAgent({
       messages: [
-        { role: "user", content: "save this reference: https://example.com/pricing-teardown" },
+        {
+          role: "user",
+          content: "save this reference: https://example.com/pricing-teardown",
+        },
       ],
       model: DEFAULT_GOAT_MODEL,
       gatewayApiKey: "test-key",
@@ -672,14 +675,15 @@ describe("use_capability tool", () => {
       runBrainCli: vi.fn(),
       capabilities: {
         list: [
-          { id: "slack", sideEffect: "read" },
-          { id: "linear", sideEffect: "write" },
+          { id: "slack", operations: ["read"] },
+          { id: "linear", operations: ["read", "write"] },
+          { id: "attio", operations: ["read", "create"] },
         ],
         execute: vi.fn(),
       },
     });
-    expect(extractUseCapabilityEnum(context.tools)).toEqual(["slack", "linear"]);
-    expect(extractUseCapabilityOperationEnum(context.tools)).toEqual(["read", "write"]);
+    expect(extractUseCapabilityEnum(context.tools)).toEqual(["slack", "linear", "attio"]);
+    expect(extractUseCapabilityOperationEnum(context.tools)).toEqual(["read", "create", "write"]);
   });
 
   it("dispatches valid calls and steers invalid or over-budget ones", async () => {
@@ -687,7 +691,7 @@ describe("use_capability tool", () => {
     const context = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
-      capabilities: { list: [{ id: "slack", sideEffect: "read" }], execute },
+      capabilities: { list: [{ id: "slack", operations: ["read"] }], execute },
     });
 
     const valid = await executeUseCapabilityTool(context.tools, {
@@ -734,26 +738,35 @@ describe("use_capability tool", () => {
     expect(execute).toHaveBeenCalledTimes(MAX_CAPABILITY_CALLS_PER_TURN);
   });
 
-  it("dispatches explicit writes only to write-capable workers", async () => {
+  it("dispatches mutations only to capabilities that advertise the operation", async () => {
     const execute = vi.fn(async ({ capability }: { capability: string }) => okEnvelope(capability));
     const context = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
       capabilities: {
         list: [
-          { id: "slack", sideEffect: "read" },
-          { id: "linear", sideEffect: "write" },
+          { id: "attio", operations: ["read"] },
+          { id: "slack", operations: ["read"] },
+          { id: "linear", operations: ["read", "write"] },
         ],
         execute,
       },
     });
 
-    const rejected = await executeUseCapabilityTool(context.tools, {
+    const rejectedCreate = await executeUseCapabilityTool(context.tools, {
+      capability: "attio",
+      operation: "create",
+      request: "Create a person named Ada Lovelace.",
+    });
+    expect(rejectedCreate.error?.code).toBe("invalid_request");
+    expect(rejectedCreate.error?.hint).toContain("does not permit create");
+
+    const rejectedWrite = await executeUseCapabilityTool(context.tools, {
       capability: "slack",
       operation: "write",
       request: "Post hello in #general.",
     });
-    expect(rejected.error?.code).toBe("invalid_request");
+    expect(rejectedWrite.error?.code).toBe("invalid_request");
     expect(execute).not.toHaveBeenCalled();
 
     const created = await executeUseCapabilityTool(context.tools, {
@@ -773,12 +786,16 @@ function extractSystemPrompt(options: unknown) {
 }
 
 function extractStartTaskToolDescription(options: unknown) {
-  type ToolOptions = { tools?: Record<typeof START_TASK_TOOL_NAME, { description?: string }> };
+  type ToolOptions = {
+    tools?: Record<typeof START_TASK_TOOL_NAME, { description?: string }>;
+  };
   return (options as ToolOptions).tools?.[START_TASK_TOOL_NAME]?.description ?? "";
 }
 
 function extractGoatBrainToolDescription(options: unknown) {
-  type ToolOptions = { tools?: Record<typeof GOAT_BRAIN_TOOL_NAME, { description?: string }> };
+  type ToolOptions = {
+    tools?: Record<typeof GOAT_BRAIN_TOOL_NAME, { description?: string }>;
+  };
   return (options as ToolOptions).tools?.[GOAT_BRAIN_TOOL_NAME]?.description ?? "";
 }
 
@@ -801,7 +818,9 @@ function extractGoatBrainCommandEnum(options: unknown) {
 }
 
 function extractWebSearchToolDescription(options: unknown) {
-  type ToolOptions = { tools?: Record<typeof WEB_SEARCH_TOOL_NAME, { description?: string }> };
+  type ToolOptions = {
+    tools?: Record<typeof WEB_SEARCH_TOOL_NAME, { description?: string }>;
+  };
   return (options as ToolOptions).tools?.[WEB_SEARCH_TOOL_NAME]?.description ?? "";
 }
 
@@ -812,9 +831,16 @@ function extractLastUserMessage(options: unknown) {
 
 async function executeStartTaskTool(
   options: unknown,
-  input: { prompt: string; name: string; reason: string; engine?: "opencompany" | "codex" },
+  input: {
+    prompt: string;
+    name: string;
+    reason: string;
+    engine?: "opencompany" | "codex";
+  },
 ) {
-  type ToolOptions = { tools?: Record<typeof START_TASK_TOOL_NAME, { execute?: unknown }> };
+  type ToolOptions = {
+    tools?: Record<typeof START_TASK_TOOL_NAME, { execute?: unknown }>;
+  };
   const tool = (options as ToolOptions).tools?.[START_TASK_TOOL_NAME];
   if (typeof tool?.execute !== "function") {
     throw new Error(`${START_TASK_TOOL_NAME} execute function was not configured.`);
@@ -823,7 +849,9 @@ async function executeStartTaskTool(
 }
 
 async function executeGoatBrainTool(options: unknown, input: Record<string, unknown>) {
-  type ToolOptions = { tools?: Record<typeof GOAT_BRAIN_TOOL_NAME, { execute?: unknown }> };
+  type ToolOptions = {
+    tools?: Record<typeof GOAT_BRAIN_TOOL_NAME, { execute?: unknown }>;
+  };
   const tool = (options as ToolOptions).tools?.[GOAT_BRAIN_TOOL_NAME];
   if (typeof tool?.execute !== "function") {
     throw new Error(`${GOAT_BRAIN_TOOL_NAME} execute function was not configured.`);
@@ -832,12 +860,16 @@ async function executeGoatBrainTool(options: unknown, input: Record<string, unkn
 }
 
 function extractSaveToBrainToolDescription(options: unknown) {
-  type ToolOptions = { tools?: Record<typeof SAVE_TO_BRAIN_TOOL_NAME, { description?: string }> };
+  type ToolOptions = {
+    tools?: Record<typeof SAVE_TO_BRAIN_TOOL_NAME, { description?: string }>;
+  };
   return (options as ToolOptions).tools?.[SAVE_TO_BRAIN_TOOL_NAME]?.description ?? "";
 }
 
 async function executeSaveToBrainTool(options: unknown, input: SaveToBrainToolInput) {
-  type ToolOptions = { tools?: Record<typeof SAVE_TO_BRAIN_TOOL_NAME, { execute?: unknown }> };
+  type ToolOptions = {
+    tools?: Record<typeof SAVE_TO_BRAIN_TOOL_NAME, { execute?: unknown }>;
+  };
   const tool = (options as ToolOptions).tools?.[SAVE_TO_BRAIN_TOOL_NAME];
   if (typeof tool?.execute !== "function") {
     throw new Error(`${SAVE_TO_BRAIN_TOOL_NAME} execute function was not configured.`);
@@ -846,7 +878,9 @@ async function executeSaveToBrainTool(options: unknown, input: SaveToBrainToolIn
 }
 
 async function executeWebSearchTool(options: unknown, input: WebSearchToolInput) {
-  type ToolOptions = { tools?: Record<typeof WEB_SEARCH_TOOL_NAME, { execute?: unknown }> };
+  type ToolOptions = {
+    tools?: Record<typeof WEB_SEARCH_TOOL_NAME, { execute?: unknown }>;
+  };
   const tool = (options as ToolOptions).tools?.[WEB_SEARCH_TOOL_NAME];
   if (typeof tool?.execute !== "function") {
     throw new Error(`${WEB_SEARCH_TOOL_NAME} execute function was not configured.`);

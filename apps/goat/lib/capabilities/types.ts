@@ -1,13 +1,12 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ToolSet } from "ai";
 
-export type GoatCapabilityId = "slack" | "linear" | "youtube_transcript";
+export type GoatCapabilityId = "slack" | "linear" | "youtube_transcript" | "attio";
 
-// The maximum side effect a capability may perform. A write-capable
-// capability still supports read calls, but write tools are exposed only when
-// the dispatcher explicitly selects a write operation.
-export type GoatCapabilitySideEffect = "read" | "write";
-export type GoatCapabilityOperation = GoatCapabilitySideEffect;
+// Capabilities advertise their permitted operations after resolving the
+// user's connection. This keeps scope-dependent creation out of read workers
+// while retaining Linear's existing, explicitly requested write mode.
+export type GoatCapabilityOperation = "read" | "create" | "write";
 
 export type GoatCapabilityEntity = {
   type: string;
@@ -39,7 +38,6 @@ export type GoatCapabilityWorkerContext = {
   userWorkosId: string;
   signal: AbortSignal;
   currentDate: Date;
-  operation: GoatCapabilityOperation;
   userContext: {
     email: string;
     firstName: string | null;
@@ -58,23 +56,25 @@ export type GoatCapabilityToolkit = {
 // (team domain, scope-dependent tools, ...) already bound in.
 export type ResolvedGoatCapability = {
   id: GoatCapabilityId;
-  sideEffect: GoatCapabilitySideEffect;
+  operations: readonly GoatCapabilityOperation[];
   workerModel: AgentModelId;
   indexLine: string;
   recipeLines: readonly string[];
-  createTools: (context: GoatCapabilityWorkerContext) => Promise<GoatCapabilityToolkit>;
+  createTools: (
+    context: GoatCapabilityWorkerContext,
+    operation: GoatCapabilityOperation,
+  ) => Promise<GoatCapabilityToolkit>;
 };
 
 export type GoatCapabilityDefinition = {
   id: GoatCapabilityId;
-  sideEffect: GoatCapabilitySideEffect;
   workerModel: AgentModelId;
   // Returns null when the capability is unavailable for this user (not
   // connected, env key missing). Unavailable capabilities are absent from both
   // the prompt index and the dispatch enum — they don't exist to the model.
   resolve: (
     userWorkosId: string,
-  ) => Promise<Omit<ResolvedGoatCapability, "id" | "sideEffect" | "workerModel"> | null>;
+  ) => Promise<Omit<ResolvedGoatCapability, "id" | "workerModel"> | null>;
 };
 
 export type GoatCapabilityTranscriptEntry = {

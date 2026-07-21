@@ -109,7 +109,9 @@ describe("MessageBubble assistant errors", () => {
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
     expect(screen.getByText("Ada leads GTM.")).toBeInTheDocument();
-    const source = screen.getByRole("link", { name: "Source 1: Ada Lovelace (team/gtm/ada)" });
+    const source = screen.getByRole("link", {
+      name: "Source 1: Ada Lovelace (team/gtm/ada)",
+    });
     expect(source).toHaveAttribute("href", "/brain/goat_brain_1/team/gtm/ada");
     expect(screen.getByLabelText("Sources")).toBeInTheDocument();
   });
@@ -145,7 +147,12 @@ describe("MessageBubble assistant errors", () => {
                   title: "Ada was hired",
                   folder: "evidence",
                   kind: "evidence",
-                  sources: [{ ref: "slack:channel:message:456", title: "Hiring update" }],
+                  sources: [
+                    {
+                      ref: "slack:channel:message:456",
+                      title: "Hiring update",
+                    },
+                  ],
                 },
               ],
             },
@@ -160,14 +167,16 @@ describe("MessageBubble assistant errors", () => {
     const sources = screen.getByLabelText("Sources");
     expect(within(sources).getAllByRole("link")).toHaveLength(1);
     expect(
-      within(sources).getByRole("link", { name: "Source 1: Ada Lovelace (team/gtm/ada)" }),
+      within(sources).getByRole("link", {
+        name: "Source 1: Ada Lovelace (team/gtm/ada)",
+      }),
     ).toHaveAttribute("href", "/brain/goat_brain_1/team/gtm/ada");
     expect(screen.queryByText("Ada was hired")).not.toBeInTheDocument();
     expect(screen.queryByText("acme/api #123")).not.toBeInTheDocument();
     expect(screen.queryByText("Hiring update")).not.toBeInTheDocument();
   });
 
-  it("renders capability entities as external source chips", () => {
+  it("renders historical capability parts without operation as external source chips", () => {
     const message: GoatChatUiMessage = {
       id: "assistant_6",
       role: "assistant",
@@ -177,7 +186,7 @@ describe("MessageBubble assistant errors", () => {
           type: USE_CAPABILITY_TOOL_PART_TYPE,
           toolCallId: "tool_capability_1",
           state: "output-available",
-          input: { capability: "linear", operation: "read", request: "Find the launch issue" },
+          input: { capability: "linear", request: "Find the launch issue" },
           output: {
             capability: "linear",
             summary: "ENG-123 tracks the launch.",
@@ -265,7 +274,12 @@ describe("MessageBubble Codex interactions", () => {
                 header: "Scope",
                 question: "How broad should the fix be?",
                 isOther: true,
-                options: [{ label: "Foundational", description: "Harden the full protocol path." }],
+                options: [
+                  {
+                    label: "Foundational",
+                    description: "Harden the full protocol path.",
+                  },
+                ],
               },
             ],
           },
@@ -368,7 +382,12 @@ describe("MessageBubble Codex interactions", () => {
                 header: "Scope",
                 question: "How broad should the fix be?",
                 isOther: true,
-                options: [{ label: "Foundational", description: "Harden the full protocol path." }],
+                options: [
+                  {
+                    label: "Foundational",
+                    description: "Harden the full protocol path.",
+                  },
+                ],
               },
             ],
           },

@@ -103,7 +103,10 @@ import { createGoatTaskForUser } from "@/lib/tasks";
 export const maxDuration = 240;
 export const runtime = "nodejs";
 
-const logger = createLogger({ service: "opencompany-goat", runtime: "goat-chat" });
+const logger = createLogger({
+  service: "opencompany-goat",
+  runtime: "goat-chat",
+});
 
 type ChatRequestBody = {
   sessionId?: unknown;
@@ -164,7 +167,9 @@ export async function POST(request: Request): Promise<Response> {
       ? "codex"
       : undefined;
   if (requestedEngine && attachments.length > 0) {
-    return new Response("Attachments are not supported in engine chats yet.", { status: 400 });
+    return new Response("Attachments are not supported in engine chats yet.", {
+      status: 400,
+    });
   }
 
   const parsedSkillMentions = readGoatBrainSkillMentionRefs(
@@ -464,7 +469,7 @@ export async function POST(request: Request): Promise<Response> {
           capabilities: {
             list: capabilityUniverse.map((capability) => ({
               id: capability.id,
-              sideEffect: capability.sideEffect,
+              operations: capability.operations,
             })),
             execute: (call) => {
               capabilityCallOrdinal += 1;
@@ -477,6 +482,17 @@ export async function POST(request: Request): Promise<Response> {
                   error: {
                     code: "invalid_request" as const,
                     hint: `"${call.capability}" is not an available capability.`,
+                  },
+                });
+              }
+              if (!capability.operations.includes(call.operation)) {
+                return Promise.resolve({
+                  capability: call.capability,
+                  summary: "",
+                  entities: [],
+                  error: {
+                    code: "invalid_request" as const,
+                    hint: `${call.capability} does not permit ${call.operation} operations for this connection.`,
                   },
                 });
               }
@@ -889,7 +905,12 @@ export async function POST(request: Request): Promise<Response> {
 function groupSessionSkillsByActivationMessage(skills: GoatChatSessionSkillSnapshot[]) {
   const grouped = new Map<
     string,
-    Array<{ id: string; name: string; description: string; instructions: string }>
+    Array<{
+      id: string;
+      name: string;
+      description: string;
+      instructions: string;
+    }>
   >();
   for (const skill of skills) {
     const activated = grouped.get(skill.activatedMessageId) ?? [];
@@ -994,12 +1015,12 @@ async function executeChatCapabilityCall(input: {
   try {
     const result = await runGoatCapabilityWorker({
       capability: input.capability,
+      operation: input.operation,
       request: input.request,
       context: {
         userWorkosId: input.user.workosUserId,
         signal: input.signal,
         currentDate: input.currentDate,
-        operation: input.operation,
         userContext: {
           email: input.user.email,
           firstName: input.user.firstName,
@@ -1016,7 +1037,10 @@ async function executeChatCapabilityCall(input: {
       }),
     });
 
-    input.capabilityDebug.push({ toolCallId: input.toolCallId, ...result.debug });
+    input.capabilityDebug.push({
+      toolCallId: input.toolCallId,
+      ...result.debug,
+    });
     capabilitySpan.end({
       "goat.outcome": result.debug.outcome === "error" ? "failure" : "success",
       "goat.capability_steps": result.debug.steps,
@@ -1229,7 +1253,11 @@ function resolveChatScheduleTarget(
   input: { scheduleId?: string; scheduleName?: string },
 ):
   | { ok: true; schedule: GoatTaskScheduleView }
-  | { ok: false; error: string; status: "not_found" | "ambiguous" | "invalid" } {
+  | {
+      ok: false;
+      error: string;
+      status: "not_found" | "ambiguous" | "invalid";
+    } {
   const scheduleId = input.scheduleId?.trim();
   if (scheduleId) {
     const schedule = schedules.find((candidate) => candidate.id === scheduleId);

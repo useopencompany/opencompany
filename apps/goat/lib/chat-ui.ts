@@ -276,7 +276,9 @@ export type WebSearchToolOutput =
 
 export type UseCapabilityToolInput = {
   capability: string;
-  operation: GoatCapabilityOperation;
+  // Optional only so persisted tool parts from before operation modes continue
+  // to render. The live tool schema requires this field for every new call.
+  operation?: GoatCapabilityOperation;
   request: string;
 };
 
