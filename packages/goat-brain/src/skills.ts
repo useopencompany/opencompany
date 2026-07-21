@@ -35,7 +35,7 @@ export function goatBrainSkillFromDocument(
   if (
     !isValidGoatBrainSkillId(id) ||
     !name ||
-    !isValidGoatBrainSkillDescription(description) ||
+    !isValidOptionalGoatBrainSkillDescription(description) ||
     !instructions ||
     instructions === GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER
   ) {
@@ -50,7 +50,7 @@ export function serializeGoatBrainSkillMarkdown(skill: GoatBrainSkill): string {
     // Native skill runtimes use the frontmatter name as the invocation id. Keep the human title
     // in Goat's catalog, but materialize the stable, cross-runtime-safe Brain id here.
     `name: ${JSON.stringify(skill.id)}`,
-    `description: ${JSON.stringify(skill.description)}`,
+    ...(skill.description ? [`description: ${JSON.stringify(skill.description)}`] : []),
     "---",
     "",
     skill.instructions.trim(),
@@ -62,9 +62,8 @@ export function isValidGoatBrainSkillId(value: unknown): value is string {
   return isValidGoatBrainId(value) && value.length <= GOAT_BRAIN_SKILL_NAME_MAX_LENGTH;
 }
 
-function isValidGoatBrainSkillDescription(value: string) {
+function isValidOptionalGoatBrainSkillDescription(value: string) {
   return (
-    value.length > 0 &&
     value.length <= GOAT_BRAIN_SKILL_DESCRIPTION_MAX_LENGTH &&
     !value.includes("<") &&
     !value.includes(">")

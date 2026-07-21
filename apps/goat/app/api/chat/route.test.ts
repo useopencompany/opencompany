@@ -138,6 +138,53 @@ describe("POST /api/chat", () => {
     await expect(response.text()).resolves.toContain("Messages can be at most");
   });
 
+  it("forwards a valid browser-reserved id to new chat persistence", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockStreamText().mockReturnValue({
+      toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+    } as never);
+    const newSessionId = "goat_chat_123e4567-e89b-42d3-a456-426614174000";
+
+    const response = await POST(
+      jsonRequest({
+        newSessionId,
+        model: "openai/gpt-5.5",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "Start immediately" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockCreateGoatChatUserTurn()).toHaveBeenCalledWith(
+      expect.objectContaining({ newSessionId }),
+      expect.anything(),
+    );
+  });
+
+  it("rejects an invalid browser-reserved id", async () => {
+    mockAuth();
+
+    const response = await POST(
+      jsonRequest({
+        newSessionId: "goat_chat_invalid",
+        model: "openai/gpt-5.5",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "Start" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe("Invalid new chat session id.");
+    expect(mockCreateGoatChatUserTurn()).not.toHaveBeenCalled();
+  });
+
   it("activates a selected skill on its message while preserving stored content", async () => {
     mockAuth();
     vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([

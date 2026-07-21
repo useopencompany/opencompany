@@ -559,12 +559,12 @@ describe("GoatBrainView", () => {
     expect(window.location.pathname).toBe("/brain/projects/roadmap");
   });
 
-  it("creates a formal skill from the skills folder", async () => {
+  it("creates a formal skill with only a name from the skills folder", async () => {
     const user = userEvent.setup();
     vi.mocked(createGoatBrainSkillAction).mockResolvedValueOnce({
       ok: true,
       path: "skills/coding-work.md",
-      document: codingWorkSkill,
+      document: { ...codingWorkSkill, description: "" },
     });
     render(
       <GoatBrainView
@@ -580,7 +580,6 @@ describe("GoatBrainView", () => {
     fireEvent.contextMenu(screen.getByRole("treeitem", { name: /skills/i }));
     await user.click(screen.getByRole("menuitem", { name: "New skill" }));
     await user.type(screen.getByLabelText("Name"), "Coding work");
-    await user.type(screen.getByLabelText("Description"), "How coding work should happen.");
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => {
@@ -588,14 +587,12 @@ describe("GoatBrainView", () => {
         brainRef: "goat_brain_1",
         folderPath: "skills",
         name: "Coding work",
-        description: "How coding work should happen.",
+        description: "",
       });
     });
     expect(screen.queryByRole("dialog", { name: "New skill" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Page title" })).toHaveValue("Coding work");
-    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
-      "How coding work should happen.",
-    );
+    expect(screen.getByRole("textbox", { name: "Description (optional)" })).toHaveValue("");
     expect(window.location.pathname).toBe("/brain/skills/coding-work");
   });
 
@@ -618,11 +615,14 @@ describe("GoatBrainView", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Toggle timeline" })).not.toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
+    expect(screen.getByRole("textbox", { name: "Description (optional)" })).toHaveValue(
       "How coding work should happen.",
     );
-    await user.clear(screen.getByRole("textbox", { name: "Description" }));
-    await user.type(screen.getByRole("textbox", { name: "Description" }), "Coding workflow.");
+    await user.clear(screen.getByRole("textbox", { name: "Description (optional)" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Description (optional)" }),
+      "Coding workflow.",
+    );
     await user.clear(screen.getByRole("textbox", { name: "Brain body" }));
     await user.type(screen.getByRole("textbox", { name: "Brain body" }), "Inspect and verify.");
 

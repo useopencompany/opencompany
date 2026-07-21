@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
+import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
   type GoatChatMessageMetadata,
@@ -217,6 +218,63 @@ describe("GoatSurface chat streaming UI", () => {
     expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
   });
 
+  it("routes a new chat immediately with the session id sent to the server", async () => {
+    const user = userEvent.setup();
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start now");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const optimisticHref = routerMock.replace.mock.calls[0]?.[0];
+    expect(optimisticHref).toMatch(
+      /^\/chat\/goat_chat_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    const optimisticSessionId = String(optimisticHref).slice("/chat/".length);
+    expect(chatMock.preparedRequestBodies[0]).toMatchObject({
+      sessionId: null,
+      newSessionId: optimisticSessionId,
+      model: DEFAULT_GOAT_MODEL,
+    });
+  });
+
+  it("resets and focuses the blank composer immediately when Home is requested", async () => {
+    const user = userEvent.setup();
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [],
+        }}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Unsent draft");
+    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+
+    const composer = screen.getByPlaceholderText("Ask Goat anything...");
+    expect(composer).toHaveValue("");
+    expect(composer).toHaveFocus();
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+  });
+
+  it("does not reopen a new chat when its response arrives after Home was clicked", async () => {
+    const user = userEvent.setup();
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+    act(() => chatMock.finishWithSessionId?.("goat_chat_returned_late"));
+
+    expect(screen.getByPlaceholderText("Ask Goat anything...")).toHaveFocus();
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(routerMock.replace).not.toHaveBeenCalledWith("/chat/goat_chat_returned_late");
+  });
+
   it("keeps the painted composer overlay aligned with textarea scrolling", async () => {
     const user = userEvent.setup();
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
@@ -299,6 +357,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/local-codex/messages")!;
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      newSessionId: expect.stringMatching(/^goat_chat_/),
       message: {
         id: expect.stringMatching(/^goat_chat_msg_/),
         role: "user",
@@ -405,6 +464,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      newSessionId: expect.stringMatching(/^goat_chat_/),
       message: {
         id: expect.stringMatching(/^goat_chat_msg_/),
         role: "user",
@@ -990,6 +1050,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies).toHaveLength(2);
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       sessionId: null,
+      newSessionId: expect.stringMatching(/^goat_chat_/),
       model: DEFAULT_GOAT_MODEL,
     });
     expect(chatMock.preparedRequestBodies[1]).toMatchObject({

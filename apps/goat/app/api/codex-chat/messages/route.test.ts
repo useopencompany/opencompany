@@ -96,6 +96,38 @@ describe("POST /api/codex-chat/messages", () => {
     expect(mockGenerateGoatChatTitleForMessage()).not.toHaveBeenCalled();
   });
 
+  it("forwards a valid browser-reserved id for a new chat", async () => {
+    const newSessionId = "goat_chat_123e4567-e89b-42d3-a456-426614174000";
+    const response = await POST(
+      jsonRequest({
+        newSessionId,
+        message: {
+          id: "client_msg_1",
+          role: "user",
+          parts: [{ type: "text", text: "hello" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith(
+      expect.objectContaining({ newSessionId }),
+    );
+  });
+
+  it("rejects an invalid browser-reserved id", async () => {
+    const response = await POST(
+      jsonRequest({
+        newSessionId: "goat_chat_invalid",
+        message: { role: "user", parts: [{ type: "text", text: "hello" }] },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe("Invalid new chat session id.");
+    expect(mockCreateGoatCodexChatMessage()).not.toHaveBeenCalled();
+  });
+
   it("validates and forwards uploaded files, including attachment-only messages", async () => {
     const response = await POST(
       jsonRequest({

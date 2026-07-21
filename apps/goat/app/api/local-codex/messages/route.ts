@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import { parseOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
 import { type GoatChatUiMessage, textFromGoatChatUiMessage } from "@/lib/chat-ui";
 import { goatFeatureFlagsFromUser, LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { createOrSteerLocalCodexMessage } from "@/lib/local-codex";
@@ -8,6 +9,7 @@ export const runtime = "nodejs";
 
 type LocalCodexMessageBody = {
   sessionId?: unknown;
+  newSessionId?: unknown;
   prompt?: unknown;
   message?: unknown;
   settings?: unknown;
@@ -27,6 +29,13 @@ export async function POST(request: Request) {
   if (!prompt) return new Response("Invalid local Codex message.", { status: 400 });
 
   const sessionId = typeof body.value.sessionId === "string" ? body.value.sessionId.trim() : null;
+  const parsedNewSessionId = parseOptimisticGoatChatSessionId(body.value.newSessionId);
+  if (!parsedNewSessionId.ok) return new Response(parsedNewSessionId.error, { status: 400 });
+  if (sessionId && parsedNewSessionId.sessionId) {
+    return new Response("A chat request cannot continue and create a session at the same time.", {
+      status: 400,
+    });
+  }
   const clientMessageId =
     isUiMessage(body.value.message) && typeof body.value.message.id === "string"
       ? body.value.message.id
@@ -35,6 +44,7 @@ export async function POST(request: Request) {
   const result = await createOrSteerLocalCodexMessage({
     userWorkosId: context.user.workosUserId,
     ...(sessionId ? { sessionId } : {}),
+    ...(parsedNewSessionId.sessionId ? { newSessionId: parsedNewSessionId.sessionId } : {}),
     prompt,
     ...(clientMessageId ? { clientMessageId } : {}),
     settings: body.value.settings,

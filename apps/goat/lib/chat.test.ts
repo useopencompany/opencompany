@@ -146,6 +146,24 @@ describe("createGoatChatUserTurn", () => {
     ).toEqual([["user", "what do you think of x?"]]);
   });
 
+  it("persists a client-reserved id for an optimistic new-chat route", async () => {
+    const { store, sessions } = createInMemoryChatStore();
+    const newSessionId = "goat_chat_123e4567-e89b-42d3-a456-426614174000";
+
+    const result = await createGoatChatUserTurn(
+      {
+        userWorkosId: "user_1",
+        prompt: "open this chat immediately",
+        model: DEFAULT_GOAT_MODEL,
+        newSessionId,
+      },
+      store,
+    );
+
+    expect(result.session.id).toBe(newSessionId);
+    expect(sessions[0]?.id).toBe(newSessionId);
+  });
+
   it("reuses an existing open session when a session id is provided", async () => {
     const { store, sessions, messages } = createInMemoryChatStore();
 
@@ -591,7 +609,7 @@ function createInMemoryChatStore(
     async createSession(input) {
       const now = new Date();
       const session: GoatChatSession = {
-        id: `session_${++sessionCount}`,
+        id: input.id ?? `session_${++sessionCount}`,
         userWorkosId: input.userWorkosId,
         title: input.title,
         model: input.model,
