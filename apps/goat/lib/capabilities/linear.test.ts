@@ -11,6 +11,7 @@ import {
   linearCapability,
   normalizeLinearListIssuesInput,
   selectLinearReadTools,
+  selectLinearWorkerTools,
 } from "@/lib/capabilities/linear";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
@@ -65,6 +66,62 @@ describe("selectLinearReadTools", () => {
     expect(selected[0]).toBe("list_issues");
     expect(selected[1]).toBe("get_issue");
     expect(selected[2]).toBe("list_projects");
+  });
+
+  it("exposes only issue creation for write calls and keeps read calls mutation-free", async () => {
+    const createIssue = vi.fn(async () => ({ identifier: "G-123" }));
+    const catalog = {
+      ...fakeCatalog([
+        "list_issues",
+        "get_issue",
+        "update_issue",
+        "create_comment",
+        "delete_issue",
+      ]),
+      create_issue: { description: "Create issue", execute: createIssue },
+    } as unknown as ToolSet;
+
+    expect(Object.keys(selectLinearWorkerTools(catalog, "read"))).not.toContain("create_issue");
+
+    const writeTools = selectLinearWorkerTools(catalog, "write");
+    expect(Object.keys(writeTools)).toContain("create_issue");
+    expect(Object.keys(writeTools)).not.toContain("update_issue");
+    expect(Object.keys(writeTools)).not.toContain("create_comment");
+    expect(Object.keys(writeTools)).not.toContain("delete_issue");
+
+    for (let index = 0; index < 10; index += 1) {
+      await writeTools.create_issue?.execute?.(
+        { title: `Issue ${index}` },
+        { toolCallId: `call_${index}`, messages: [] },
+      );
+    }
+    await expect(
+      writeTools.create_issue?.execute?.(
+        { title: "Issue 11" },
+        { toolCallId: "call_11", messages: [] },
+      ),
+    ).rejects.toThrow("at most 10 issues");
+    expect(createIssue).toHaveBeenCalledTimes(10);
+  });
+
+  it("does not retry issue creation after an ambiguous provider failure", async () => {
+    const createIssue = vi.fn(async () => {
+      throw new Error("connection reset");
+    });
+    const tools = selectLinearWorkerTools(
+      {
+        create_issue: { description: "Create issue", execute: createIssue },
+      } as unknown as ToolSet,
+      "write",
+    );
+
+    await expect(
+      tools.create_issue?.execute?.({ title: "Fix login" }, { toolCallId: "call_1", messages: [] }),
+    ).rejects.toThrow("connection reset");
+    await expect(
+      tools.create_issue?.execute?.({ title: "Fix login" }, { toolCallId: "call_2", messages: [] }),
+    ).rejects.toThrow("will not be retried");
+    expect(createIssue).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes list_issues arguments before calling Linear", async () => {
@@ -166,7 +223,8 @@ describe("linearCapability.resolve", () => {
     const resolved = await linearCapability.resolve("user_1");
     expect(resolved).not.toBeNull();
     expect(resolved?.indexLine).toContain("CAN list and look up issues");
-    expect(resolved?.indexLine).toContain("CANNOT create, update");
+    expect(resolved?.indexLine).toContain("CAN create issues");
+    expect(resolved?.indexLine).toContain("CANNOT update issues");
     expect(resolved?.indexLine.length).toBeLessThan(400);
   });
 });

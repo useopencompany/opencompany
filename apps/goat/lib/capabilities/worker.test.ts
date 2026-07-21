@@ -34,6 +34,7 @@ function makeContext(signal?: AbortSignal): GoatCapabilityWorkerContext {
     userWorkosId: "user_1",
     signal: signal ?? new AbortController().signal,
     currentDate: new Date("2026-07-18T12:00:00.000Z"),
+    operation: "read",
     userContext: {
       email: "ada@example.com",
       firstName: "Ada",
@@ -46,6 +47,7 @@ function makeContext(signal?: AbortSignal): GoatCapabilityWorkerContext {
 function makeCapability(overrides: Partial<ResolvedGoatCapability> = {}): ResolvedGoatCapability {
   return {
     id: "slack",
+    sideEffect: "read",
     workerModel: "openai/gpt-5.4-mini",
     indexLine: "slack — reads things.",
     recipeLines: ["Use the fake tool once."],
@@ -121,10 +123,60 @@ describe("runGoatCapabilityWorker", () => {
     expect(result.usage.inputTokens).toBe(13);
     expect(result.usage.outputTokens).toBe(7);
     expect(result.debug.outcome).toBe("success");
+    expect(result.debug.operation).toBe("read");
     expect(result.debug.steps).toBe(1);
     expect(result.debug.transcript).toHaveLength(1);
     expect(result.debug.transcript[0]?.tool).toBe("fake_tool");
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives write workers a narrow authorization prompt", async () => {
+    const generateTextImpl = vi.fn(async (options: never) => {
+      const opts = options as { system: string };
+      expect(opts.system).toContain("one explicitly requested change");
+      expect(opts.system).toContain("only the exact external changes stated in the request");
+      expect(opts.system).toContain("Never retry a mutation");
+      expect(opts.system).not.toContain("All tools are read-only");
+      return { text: "Created G-123.", finishReason: "stop", steps: [] };
+    });
+    const generateObjectImpl = vi.fn(async () => ({
+      object: {
+        summary: "Created G-123.",
+        entities: [{ type: "linear_issue", id: "G-123" }],
+      },
+      usage: makeUsage(1, 1),
+    }));
+
+    const result = await runGoatCapabilityWorker({
+      capability: makeCapability({ id: "linear", sideEffect: "write" }),
+      request: "Create one issue named Fix login.",
+      context: { ...makeContext(), operation: "write" },
+      gatewayApiKey: "test-key",
+      attribution: ATTRIBUTION,
+      generateTextImpl: generateTextImpl as never,
+      generateObjectImpl: generateObjectImpl as never,
+    });
+
+    expect(result.envelope.summary).toBe("Created G-123.");
+    expect(result.debug.operation).toBe("write");
+  });
+
+  it("rejects a write operation before creating tools for a read-only capability", async () => {
+    const createTools = vi.fn(async () => ({ tools: {} }));
+    const generateTextImpl = vi.fn();
+
+    const result = await runGoatCapabilityWorker({
+      capability: makeCapability({ createTools }),
+      request: "Post a message.",
+      context: { ...makeContext(), operation: "write" },
+      gatewayApiKey: "test-key",
+      attribution: ATTRIBUTION,
+      generateTextImpl: generateTextImpl as never,
+    });
+
+    expect(result.envelope.error?.code).toBe("invalid_request");
+    expect(createTools).not.toHaveBeenCalled();
+    expect(generateTextImpl).not.toHaveBeenCalled();
   });
 
   it("maps auth errors from tool creation to an error envelope without model calls", async () => {

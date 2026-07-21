@@ -32,6 +32,7 @@ const CONTEXT: GoatCapabilityWorkerContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
+  operation: "read",
   userContext: { email: "ada@example.com", firstName: "Ada", lastName: null, timezone: "UTC" },
 };
 

@@ -671,11 +671,15 @@ describe("use_capability tool", () => {
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
       capabilities: {
-        list: [{ id: "slack" }, { id: "linear" }],
+        list: [
+          { id: "slack", sideEffect: "read" },
+          { id: "linear", sideEffect: "write" },
+        ],
         execute: vi.fn(),
       },
     });
     expect(extractUseCapabilityEnum(context.tools)).toEqual(["slack", "linear"]);
+    expect(extractUseCapabilityOperationEnum(context.tools)).toEqual(["read", "write"]);
   });
 
   it("dispatches valid calls and steers invalid or over-budget ones", async () => {
@@ -683,29 +687,33 @@ describe("use_capability tool", () => {
     const context = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
-      capabilities: { list: [{ id: "slack" }], execute },
+      capabilities: { list: [{ id: "slack", sideEffect: "read" }], execute },
     });
 
     const valid = await executeUseCapabilityTool(context.tools, {
       capability: "slack",
+      operation: "read",
       request: "Messages in #general since 2026-07-17.",
     });
     expect(valid.summary).toBe("found it");
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
         capability: "slack",
+        operation: "read",
         request: "Messages in #general since 2026-07-17.",
       }),
     );
 
     const unknown = await executeUseCapabilityTool(context.tools, {
       capability: "github",
+      operation: "read",
       request: "anything",
     });
     expect(unknown.error?.code).toBe("invalid_request");
 
     const empty = await executeUseCapabilityTool(context.tools, {
       capability: "slack",
+      operation: "read",
       request: "   ",
     });
     expect(empty.error?.code).toBe("invalid_request");
@@ -713,15 +721,50 @@ describe("use_capability tool", () => {
     for (let call = 1; call < MAX_CAPABILITY_CALLS_PER_TURN; call += 1) {
       await executeUseCapabilityTool(context.tools, {
         capability: "slack",
+        operation: "read",
         request: `lookup ${call}`,
       });
     }
     const overBudget = await executeUseCapabilityTool(context.tools, {
       capability: "slack",
+      operation: "read",
       request: "one too many",
     });
     expect(overBudget.error?.code).toBe("call_budget");
     expect(execute).toHaveBeenCalledTimes(MAX_CAPABILITY_CALLS_PER_TURN);
+  });
+
+  it("dispatches explicit writes only to write-capable workers", async () => {
+    const execute = vi.fn(async ({ capability }: { capability: string }) => okEnvelope(capability));
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      capabilities: {
+        list: [
+          { id: "slack", sideEffect: "read" },
+          { id: "linear", sideEffect: "write" },
+        ],
+        execute,
+      },
+    });
+
+    const rejected = await executeUseCapabilityTool(context.tools, {
+      capability: "slack",
+      operation: "write",
+      request: "Post hello in #general.",
+    });
+    expect(rejected.error?.code).toBe("invalid_request");
+    expect(execute).not.toHaveBeenCalled();
+
+    const created = await executeUseCapabilityTool(context.tools, {
+      capability: "linear",
+      operation: "write",
+      request: "Create an issue named Fix login in the Goat team.",
+    });
+    expect(created.summary).toBe("found it");
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ capability: "linear", operation: "write" }),
+    );
   });
 });
 
@@ -821,6 +864,20 @@ function extractUseCapabilityEnum(tools: unknown) {
   return (
     inputSchema?.properties?.capability?.enum ??
     inputSchema?.jsonSchema?.properties?.capability?.enum ??
+    []
+  );
+}
+
+function extractUseCapabilityOperationEnum(tools: unknown) {
+  type CapabilitySchema = { properties?: { operation?: { enum?: string[] } } };
+  type Tools = Record<
+    typeof USE_CAPABILITY_TOOL_NAME,
+    { inputSchema?: CapabilitySchema & { jsonSchema?: CapabilitySchema } }
+  >;
+  const inputSchema = (tools as Tools)[USE_CAPABILITY_TOOL_NAME]?.inputSchema;
+  return (
+    inputSchema?.properties?.operation?.enum ??
+    inputSchema?.jsonSchema?.properties?.operation?.enum ??
     []
   );
 }
