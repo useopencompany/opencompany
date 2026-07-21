@@ -58,6 +58,7 @@ export type GoatChatStore = {
     updatedAfter?: Date;
   }): Promise<GoatChatSession[]>;
   createSession(input: {
+    id?: string;
     userWorkosId: string;
     model: AgentModelId;
     title: string;
@@ -200,6 +201,7 @@ export async function createGoatChatUserTurn(
     prompt: string;
     model: AgentModelId;
     sessionId?: string | null;
+    newSessionId?: string | null;
     messageId?: string | null;
     attachments?: GoatChatMessageAttachment[] | null;
     attachmentTexts?: Record<string, string> | null;
@@ -210,6 +212,7 @@ export async function createGoatChatUserTurn(
     store,
     userWorkosId: input.userWorkosId,
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+    ...(input.newSessionId ? { newSessionId: input.newSessionId } : {}),
     model: input.model,
     prompt: input.prompt,
     firstAttachmentName: input.attachments?.[0]?.filename ?? null,
@@ -372,7 +375,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
       const [session] = await db
         .insert(goatChatSessions)
         .values({
-          id: newGoatChatSessionId(),
+          id: input.id ?? newGoatChatSessionId(),
           userWorkosId: input.userWorkosId,
           title: input.title,
           model: input.model,
@@ -616,6 +619,7 @@ async function findOrCreateOpenSession(input: {
   store: GoatChatStore;
   userWorkosId: string;
   sessionId?: string | null;
+  newSessionId?: string | null;
   model: AgentModelId;
   prompt: string;
   firstAttachmentName?: string | null;
@@ -628,7 +632,16 @@ async function findOrCreateOpenSession(input: {
     if (existing) return existing;
   }
 
+  if (input.newSessionId) {
+    const existing = await input.store.findOpenSession({
+      userWorkosId: input.userWorkosId,
+      sessionId: input.newSessionId,
+    });
+    if (existing) return existing;
+  }
+
   return input.store.createSession({
+    ...(input.newSessionId ? { id: input.newSessionId } : {}),
     userWorkosId: input.userWorkosId,
     model: input.model,
     title: titleFromPrompt(input.prompt, input.firstAttachmentName ?? null),

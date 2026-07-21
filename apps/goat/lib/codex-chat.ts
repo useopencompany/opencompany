@@ -52,6 +52,7 @@ export type GoatCodexChatSkillSnapshot = GoatBrainSkill & { brainRef: string };
 export async function createGoatCodexChatMessage(input: {
   userWorkosId: string;
   sessionId?: string | null;
+  newSessionId?: string | null;
   prompt: string;
   skills?: GoatCodexChatSkillSnapshot[];
   attachments?: GoatChatMessageAttachment[];
@@ -99,6 +100,7 @@ export async function createGoatCodexChatMessage(input: {
     });
   } else {
     result = await createFirstCodexChatTurn({
+      chatSessionId: input.newSessionId ?? null,
       userWorkosId: input.userWorkosId,
       prompt,
       skills,
@@ -259,6 +261,7 @@ async function loadCodexChatSessionForChat(input: { userWorkosId: string; chatSe
 }
 
 async function createFirstCodexChatTurn(input: {
+  chatSessionId: string | null;
   userWorkosId: string;
   prompt: string;
   skills: GoatCodexChatSkillSnapshot[];
@@ -267,7 +270,7 @@ async function createFirstCodexChatTurn(input: {
   settings: GoatCodexChatTurnSettings;
   modelId: CodexChatModelId;
 }): Promise<CodexChatMessageResult> {
-  const chatSessionId = `goat_chat_${randomUUID()}`;
+  const chatSessionId = input.chatSessionId ?? `goat_chat_${randomUUID()}`;
   const codexChatSessionId = `goat_codex_chat_${randomUUID()}`;
   const turnId = `goat_codex_chat_turn_${randomUUID()}`;
   const userMessageId = safeClientMessageId(input.clientMessageId) ?? newGoatChatMessageId();
