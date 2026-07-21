@@ -2,6 +2,7 @@ import {
   AGENT_MODEL_CATALOG,
   CODEX_AGENT_MODEL_IDS,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
+  GOAT_DEFAULT_MODEL_ID,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 
@@ -25,7 +26,7 @@ export const CODEX_MODELS = CODEX_AGENT_MODEL_IDS.map((id) =>
 
 export type GoatModelOption = (typeof GOAT_MODELS)[number];
 
-export const DEFAULT_GOAT_MODEL: AgentModelId = "anthropic/claude-sonnet-5";
+export const DEFAULT_GOAT_MODEL: AgentModelId = GOAT_DEFAULT_MODEL_ID;
 
 export function normalizeGoatModel(value: unknown): AgentModelId {
   if (typeof value === "string" && GOAT_MODEL_ID_SET.has(value)) {

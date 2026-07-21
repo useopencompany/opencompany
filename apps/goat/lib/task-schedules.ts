@@ -6,12 +6,13 @@ import {
   nextCronRunAt,
   normalizeScheduleTimezone,
 } from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
-import type { GoatHarnessSpec, GoatTaskScheduleRunStatus } from "@opencompany/db/goat-schema";
+import type { GoatTaskScheduleRunStatus } from "@opencompany/db/goat-schema";
 import { goatTaskScheduleRuns, goatTaskSchedules, goatUsers } from "@opencompany/db/goat-schema";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
-import { planGoatTaskHarness } from "@/lib/task-runner";
+import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { createGoatTaskForUser } from "@/lib/tasks";
 
 const GOAT_TASK_SCHEDULE_PROMPT_MAX_LENGTH = 10_000;
@@ -55,7 +56,7 @@ export async function createGoatTaskScheduleForUser(input: {
   cron: string;
   timezone?: string | null;
   prompt: string;
-  plannedHarnessSpec?: GoatHarnessSpec;
+  model?: AgentModelId | null;
   now?: Date;
 }) {
   const parsed = parseTaskScheduleInput(input);
@@ -66,12 +67,6 @@ export async function createGoatTaskScheduleForUser(input: {
     throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
   }
   const now = input.now ?? new Date();
-  const plannedHarnessSpec =
-    input.plannedHarnessSpec ??
-    (await planGoatTaskHarness({
-      userWorkosId: input.userWorkosId,
-      prompt: parsed.value.prompt,
-    }));
   const nextRunAt = nextCronRunAt(parsed.value.cron, parsed.value.timezone, now);
   if (!nextRunAt) {
     throw new Error("Recurring task schedule could not compute a next run.");
@@ -98,7 +93,7 @@ export async function createGoatTaskScheduleForUser(input: {
         cron: parsed.value.cron,
         timezone: parsed.value.timezone,
         prompt: parsed.value.prompt,
-        plannedHarnessSpec,
+        model: input.model ?? null,
         enabled: true,
         nextRunAt,
         updatedAt: now,
@@ -109,6 +104,36 @@ export async function createGoatTaskScheduleForUser(input: {
 
   if (!schedule) throw new Error("Unable to create recurring task.");
   return schedule;
+}
+
+export async function createGoatTaskScheduleAction(input: {
+  name?: string;
+  cron: string;
+  timezone?: string | null;
+  prompt: string;
+  sourceDescription?: string;
+}) {
+  const { user } = await currentGoatUser();
+  if (!user.taskSpawningEnabled) {
+    return { ok: false, error: "Background tasks are disabled." } as const;
+  }
+  try {
+    const schedule = await createGoatTaskScheduleForUser({
+      userWorkosId: user.workosUserId,
+      name: input.name ?? "",
+      ...(input.sourceDescription ? { sourceDescription: input.sourceDescription } : {}),
+      cron: input.cron,
+      timezone: input.timezone ?? null,
+      prompt: input.prompt,
+      model: DEFAULT_GOAT_MODEL,
+    });
+    return { ok: true, schedule: { id: schedule.id, name: schedule.name } } as const;
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not create recurring task.",
+    } as const;
+  }
 }
 
 export async function setGoatTaskScheduleEnabledAction(scheduleId: string, enabled: boolean) {
@@ -188,11 +213,6 @@ export async function updateGoatTaskScheduleAction(
     return { ok: false, error: "Recurring task schedule could not compute a next run." } as const;
   }
 
-  const plannedHarnessSpec = await planGoatTaskHarness({
-    userWorkosId: user.workosUserId,
-    prompt: parsed.value.prompt,
-  });
-
   const [updated] = await getDb()
     .update(goatTaskSchedules)
     .set({
@@ -201,7 +221,6 @@ export async function updateGoatTaskScheduleAction(
       cron: parsed.value.cron,
       timezone: parsed.value.timezone,
       prompt: parsed.value.prompt,
-      plannedHarnessSpec,
       nextRunAt,
       updatedAt: now,
     })
@@ -271,8 +290,7 @@ export async function runGoatTaskScheduleNowAction(scheduleId: string) {
     userWorkosId: user.workosUserId,
     prompt: schedule.prompt,
     name: schedule.name,
-    model: schedule.plannedHarnessSpec.model,
-    harnessSpec: schedule.plannedHarnessSpec,
+    model: schedule.model ?? DEFAULT_GOAT_MODEL,
     scheduleId: schedule.id,
     scheduledFor,
   });

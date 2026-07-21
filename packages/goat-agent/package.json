@@ -1,0 +1,66 @@
+{
+  "name": "@opencompany/goat-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./brain-capture": {
+      "types": "./src/brain-capture.ts",
+      "default": "./src/brain-capture.ts"
+    },
+    "./brain-read-tool": {
+      "types": "./src/brain-read-tool.ts",
+      "default": "./src/brain-read-tool.ts"
+    },
+    "./brain-surface": {
+      "types": "./src/brain-surface.ts",
+      "default": "./src/brain-surface.ts"
+    },
+    "./capabilities": {
+      "types": "./src/capabilities.ts",
+      "default": "./src/capabilities.ts"
+    },
+    "./chat-agent": {
+      "types": "./src/chat-agent.ts",
+      "default": "./src/chat-agent.ts"
+    },
+    "./chat-tools": {
+      "types": "./src/chat-tools.ts",
+      "default": "./src/chat-tools.ts"
+    },
+    "./prompts": {
+      "types": "./src/prompts/index.ts",
+      "default": "./src/prompts/index.ts"
+    },
+    "./prompts/main-chat": {
+      "types": "./src/prompts/main-chat.ts",
+      "default": "./src/prompts/main-chat.ts"
+    },
+    "./prompts/tool-descriptions": {
+      "types": "./src/prompts/tool-descriptions.ts",
+      "default": "./src/prompts/tool-descriptions.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@opencompany/agent-runtime": "workspace:*",
+    "@opencompany/analytics": "workspace:*",
+    "@opencompany/db": "workspace:*",
+    "@opencompany/goat-brain": "workspace:*",
+    "@opencompany/goat-observability": "workspace:*",
+    "ai": "^6.0.189",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

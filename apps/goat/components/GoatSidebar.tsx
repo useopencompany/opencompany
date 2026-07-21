@@ -13,6 +13,7 @@ import {
   Pin,
   PlugZap,
   Settings,
+  SquareKanban,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -99,12 +100,13 @@ export function GoatSidebar({
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
-  const { mcpSetup, user } = useGoatAppData();
+  const { featureFlags, mcpSetup, user } = useGoatAppData();
   const pathname = usePathname();
   const mcpSetupActive = !mcpSetup.completedAt && pathname === "/settings/mcp";
   const settingsActive =
     (pathname === "/settings" || pathname.startsWith("/settings/")) && !mcpSetupActive;
   const homeActive = pathname === "/";
+  const tasksActive = pathname === "/tasks" || pathname.startsWith("/tasks/");
 
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
@@ -154,6 +156,9 @@ export function GoatSidebar({
               window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT));
             }}
           />
+          {featureFlags.taskSpawning ? (
+            <SidebarNavRow href="/tasks" icon={SquareKanban} label="Tasks" active={tasksActive} />
+          ) : null}
           {!mcpSetup.completedAt ? (
             <SidebarNavRow
               href="/settings/mcp"

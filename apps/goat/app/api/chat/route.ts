@@ -45,6 +45,7 @@ import { runGoatCapabilityWorker } from "@/lib/capabilities/worker";
 import {
   createDbGoatChatStore,
   createGoatChatUserTurn,
+  GoatTaskSessionConflictError,
   newGoatChatMessageId,
   persistGoatChatAssistantMessage,
 } from "@/lib/chat";
@@ -304,6 +305,10 @@ export async function POST(request: Request): Promise<Response> {
       "goat.model": turn.session.model,
     });
   } catch (error) {
+    if (error instanceof GoatTaskSessionConflictError) {
+      finishChatTelemetry("failure", { "goat.failure_category": "task_session_conflict" });
+      return new Response(error.message, { status: 409 });
+    }
     finishChatTelemetry("failure", {}, error);
     throw error;
   }
@@ -533,6 +538,7 @@ export async function POST(request: Request): Promise<Response> {
               cron: schedule.cron,
               timezone: schedule.timezone ?? context.user.timezone,
               prompt: schedule.prompt,
+              model: turn.session.model,
             });
             return {
               scheduleId: created.id,

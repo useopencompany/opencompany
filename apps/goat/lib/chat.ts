@@ -195,6 +195,15 @@ export async function listRecentGoatChatsForUser(
   return summaries;
 }
 
+// Task-run sessions are runner-driven; an in-process /api/chat turn against
+// one would compete with the runner's loop. Callers map this to a 409.
+export class GoatTaskSessionConflictError extends Error {
+  constructor() {
+    super("This session belongs to a task run. Send messages through the task instead.");
+    this.name = "GoatTaskSessionConflictError";
+  }
+}
+
 export async function createGoatChatUserTurn(
   input: {
     userWorkosId: string;
@@ -217,6 +226,7 @@ export async function createGoatChatUserTurn(
     prompt: input.prompt,
     firstAttachmentName: input.attachments?.[0]?.filename ?? null,
   });
+  if (session.taskId) throw new GoatTaskSessionConflictError();
   const previousMessages = await store.listMessages(session.id);
   const userMessage = await store.insertMessage({
     ...(input.messageId ? { id: input.messageId } : {}),
@@ -288,6 +298,8 @@ type GoatChatDb = ReturnType<typeof getDb>;
 export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
   return {
     async findOpenSession(input) {
+      // By id resolves task-run sessions too (the task page opens them); the
+      // "current chat" lookup without an id must never surface one.
       const where = input.sessionId?.trim()
         ? and(
             eq(goatChatSessions.id, input.sessionId.trim()),
@@ -297,6 +309,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
         : and(
             eq(goatChatSessions.userWorkosId, input.userWorkosId),
             isNull(goatChatSessions.closedAt),
+            isNull(goatChatSessions.taskId),
           );
 
       const [session] = await db
@@ -320,6 +333,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
             and(
               eq(goatChatSessions.userWorkosId, input.userWorkosId),
               isNull(goatChatSessions.closedAt),
+              isNull(goatChatSessions.taskId),
               isNotNull(goatChatSessions.pinnedAt),
             ),
           )
@@ -332,6 +346,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
             and(
               eq(goatChatSessions.userWorkosId, input.userWorkosId),
               isNull(goatChatSessions.closedAt),
+              isNull(goatChatSessions.taskId),
               isNull(goatChatSessions.pinnedAt),
               exists(
                 db
@@ -355,6 +370,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
             and(
               eq(goatChatSessions.userWorkosId, input.userWorkosId),
               isNull(goatChatSessions.closedAt),
+              isNull(goatChatSessions.taskId),
               isNull(goatChatSessions.pinnedAt),
               ...(input.updatedAfter ? [gte(goatChatSessions.updatedAt, input.updatedAfter)] : []),
             ),
@@ -552,6 +568,7 @@ function toChatSessionView(
     title: session.title,
     model: session.model,
     engine: session.engine,
+    taskId: session.taskId,
     codexComposerSettings,
     codexRuntime,
     messages: messages.map(toGoatChatUiMessage),

@@ -416,6 +416,7 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     model: "openai/gpt-5.4-mini",
     scheduleId: null,
     scheduledFor: null,
+    engine: "opencompany",
     status: "running",
     stage: "planning",
     result: null,

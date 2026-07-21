@@ -310,6 +310,13 @@ export type GoatTaskMessageRole = "user" | "assistant" | "tool";
 export type GoatTaskMessageStatus = "created" | "running" | "completed" | "failed";
 export type GoatTaskModelUsagePhase = "planner" | "execution";
 
+export type GoatTaskCommentAuthor = "agent" | "user";
+export type GoatTaskCommentKind = "status" | "result" | "comment";
+export type GoatTaskCommentMetadata = {
+  status?: "started" | "failed" | "retrying" | "canceled";
+  error?: string;
+};
+
 export type GoatTaskEventType =
   | "task.status"
   | "harness.planned"
@@ -2192,7 +2199,10 @@ export const goatTaskSchedules = goat.table(
     cron: text("cron").notNull(),
     timezone: text("timezone").notNull().default("UTC"),
     prompt: text("prompt").notNull(),
-    plannedHarnessSpec: jsonb("planned_harness_spec").$type<GoatHarnessSpec>().notNull(),
+    // Legacy harness pre-planning; unused since runs became chat sessions.
+    plannedHarnessSpec: jsonb("planned_harness_spec").$type<GoatHarnessSpec>(),
+    // Model for spawned occurrences; falls back to the app default when null.
+    model: text("model").$type<AgentModelId>(),
     enabled: boolean("enabled").notNull().default(true),
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
@@ -2235,6 +2245,7 @@ export const goatTasks = goat.table(
       onDelete: "set null",
     }),
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
+    engine: text("engine").$type<GoatHarnessEngine>().notNull().default("opencompany"),
     status: text("status").$type<GoatTaskStatus>().notNull().default("queued"),
     stage: text("stage").$type<GoatTaskStage>().notNull().default("queued"),
     result: text("result"),
@@ -2279,6 +2290,48 @@ export const goatTasks = goat.table(
     stageCheck: check(
       "goat_tasks_stage_check",
       sql`${table.stage} IN ('queued', 'planning', 'sandboxing', 'running', 'completed', 'failed', 'canceled')`,
+    ),
+    engineCheck: check("goat_tasks_engine_check", sql`${table.engine} IN ('opencompany', 'codex')`),
+  }),
+);
+
+// Linear-style activity feed on a task. V1 writes agent-authored entries only
+// (status transitions and the final result); author stays flexible for future
+// user comments.
+export const goatTaskComments = goat.table(
+  "task_comments",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => goatTasks.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    author: text("author").$type<GoatTaskCommentAuthor>().notNull().default("agent"),
+    kind: text("kind").$type<GoatTaskCommentKind>().notNull().default("comment"),
+    content: text("content").notNull().default(""),
+    metadata: jsonb("metadata")
+      .$type<GoatTaskCommentMetadata>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    taskCreatedIdx: index("goat_task_comments_task_created_idx").on(table.taskId, table.createdAt),
+    userTaskCreatedIdx: index("goat_task_comments_user_task_created_idx").on(
+      table.userWorkosId,
+      table.taskId,
+      table.createdAt,
+    ),
+    authorCheck: check(
+      "goat_task_comments_author_check",
+      sql`${table.author} IN ('agent', 'user')`,
+    ),
+    kindCheck: check(
+      "goat_task_comments_kind_check",
+      sql`${table.kind} IN ('status', 'result', 'comment')`,
     ),
   }),
 );
@@ -2402,9 +2455,8 @@ export const goatTaskModelUsage = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    messageId: text("message_id").references(() => goatTaskMessages.id, {
-      onDelete: "set null",
-    }),
+    // Plain pointer (no FK): holds chat_messages ids for session-backed runs.
+    messageId: text("message_id"),
     runLeaseId: text("run_lease_id"),
     phase: text("phase").$type<GoatTaskModelUsagePhase>().notNull(),
     stepIndex: integer("step_index").notNull().default(0),
@@ -2470,9 +2522,8 @@ export const goatTaskToolUsage = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    messageId: text("message_id").references(() => goatTaskMessages.id, {
-      onDelete: "set null",
-    }),
+    // Plain pointer (no FK): holds chat_messages ids for session-backed runs.
+    messageId: text("message_id"),
     runLeaseId: text("run_lease_id"),
     toolCallId: text("tool_call_id").notNull(),
     toolName: text("tool_name").$type<GoatTaskToolName>().notNull(),
@@ -2523,9 +2574,8 @@ export const goatTaskSandboxUsage = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    messageId: text("message_id").references(() => goatTaskMessages.id, {
-      onDelete: "set null",
-    }),
+    // Plain pointer (no FK): holds chat_messages ids for session-backed runs.
+    messageId: text("message_id"),
     runLeaseId: text("run_lease_id"),
     sandboxId: text("sandbox_id").notNull(),
     template: text("template"),
@@ -2578,6 +2628,9 @@ export const goatChatSessions = goat.table(
     title: text("title").notNull().default("New chat"),
     model: text("model").$type<AgentModelId>().notNull(),
     engine: text("engine").$type<GoatChatEngine>().notNull().default("opencompany"),
+    // Set when this session is a task's run. Doubles as the discriminator that
+    // hides run sessions from chat surfaces (recent chats, open-session lookup).
+    taskId: text("task_id").references(() => goatTasks.id, { onDelete: "cascade" }),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     pinnedAt: timestamp("pinned_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2589,6 +2642,10 @@ export const goatChatSessions = goat.table(
       table.closedAt,
       table.updatedAt,
     ),
+    // One run session per task.
+    taskIdx: uniqueIndex("goat_chat_sessions_task_idx")
+      .on(table.taskId)
+      .where(sql`${table.taskId} IS NOT NULL`),
     engineCheck: check(
       "goat_chat_sessions_engine_check",
       sql`${table.engine} IN ('opencompany', 'local_codex', 'codex')`,
@@ -3754,6 +3811,7 @@ export type GoatCodexDeviceAuthFlow = typeof goatCodexDeviceAuthFlows.$inferSele
 export type GoatTaskSchedule = typeof goatTaskSchedules.$inferSelect;
 export type GoatTaskScheduleRun = typeof goatTaskScheduleRuns.$inferSelect;
 export type GoatTask = typeof goatTasks.$inferSelect;
+export type GoatTaskComment = typeof goatTaskComments.$inferSelect;
 export type GoatTaskMessage = typeof goatTaskMessages.$inferSelect;
 export type GoatTaskEvent = typeof goatTaskEvents.$inferSelect;
 export type GoatTaskModelUsage = typeof goatTaskModelUsage.$inferSelect;

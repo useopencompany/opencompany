@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
+import { TaskActivitySection } from "@/components/TaskActivityFeed";
 import { TaskHarnessRunView } from "@/components/TaskHarnessRunView";
 import { TaskRunLiveProvider } from "@/components/TaskRunPanel";
 import { formatUsdMicros } from "@/lib/cost-format";
@@ -66,24 +67,40 @@ function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
         <DetailRow label="Cost" value={formatUsdMicros(run.cost.totalCostUsdMicros)} icon="cost" />
       </section>
 
-      <HarnessConfigSection config={run.harnessConfig} />
-
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-            Run
-          </h2>
-          <Link
-            href={`/tasks/${task.displayId}/run`}
-            prefetch
-            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[11.5px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-          >
-            <TerminalSquare size={12} strokeWidth={1.8} />
-            Full run
-          </Link>
-        </div>
-        <TaskHarnessRunView run={run} />
+      <section className="flex flex-col gap-2">
+        <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Description
+        </h2>
+        <p className="whitespace-pre-wrap px-2 text-[13px] leading-6 text-ink-muted">
+          {task.prompt}
+        </p>
       </section>
+
+      <TaskActivitySection
+        taskId={task.id}
+        isActive={isActive}
+        legacy={
+          <>
+            <HarnessConfigSection config={run.harnessConfig} />
+            <section className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                  Run
+                </h2>
+                <Link
+                  href={`/tasks/${task.displayId}/run`}
+                  prefetch
+                  className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-[11.5px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                >
+                  <TerminalSquare size={12} strokeWidth={1.8} />
+                  Full run
+                </Link>
+              </div>
+              <TaskHarnessRunView run={run} />
+            </section>
+          </>
+        }
+      />
     </>
   );
 }

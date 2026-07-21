@@ -26,6 +26,7 @@ const nextConfig = {
   transpilePackages: [
     "@opencompany/agent-runtime",
     "@opencompany/db",
+    "@opencompany/goat-agent",
     "@opencompany/goat-brain",
     "@opencompany/ui",
   ],

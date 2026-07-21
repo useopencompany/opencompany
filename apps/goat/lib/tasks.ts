@@ -1,9 +1,10 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import { goatTaskRunSessionId } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
-import type { GoatHarnessEngine, GoatHarnessSpec, GoatTask } from "@opencompany/db/goat-schema";
+import type { GoatHarnessEngine, GoatTask } from "@opencompany/db/goat-schema";
 import {
   goatTaskEvents,
   goatTaskMessages,
@@ -16,14 +17,44 @@ import {
 import { and, asc, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import { goatHomeActivityCutoff } from "@/lib/home-activity";
-import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
+import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import type { GoatTaskView } from "@/lib/task-board";
 import { normalizeGoatTaskName } from "@/lib/task-display";
 import { triggerGoatTaskRun } from "@/lib/task-runner";
+import { validateGoatTaskInput } from "@/lib/task-validation";
 
 export type ArchiveTaskResult = {
   ok: boolean;
   error: string | null;
 };
+
+export type CreateTaskResult = { ok: true; task: GoatTaskView } | { ok: false; error: string };
+
+export async function createGoatTaskAction(input: {
+  name?: string;
+  prompt: string;
+}): Promise<CreateTaskResult> {
+  const { user } = await currentGoatUser();
+  if (!user.taskSpawningEnabled) {
+    return { ok: false, error: "Background tasks are disabled." };
+  }
+  const validated = validateGoatTaskInput({ prompt: input.prompt, model: DEFAULT_GOAT_MODEL });
+  if (!validated.ok) return { ok: false, error: validated.error };
+  try {
+    const task = await createGoatTaskForUser({
+      userWorkosId: user.workosUserId,
+      prompt: validated.value.prompt,
+      model: validated.value.model,
+      ...(input.name?.trim() ? { name: input.name } : {}),
+    });
+    return { ok: true, task: goatTaskToBoardView(task) };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not create task.",
+    };
+  }
+}
 
 export type CancelTaskResult = {
   ok: boolean;
@@ -173,6 +204,8 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
 
   const { user } = await currentGoatUser();
   const now = new Date();
+  // Clearing the lease makes the runner's next lease-guarded write fail, which
+  // aborts the in-flight run.
   const result = await getDb().execute(sql`
     WITH canceled_task AS (
       UPDATE goat.tasks AS task
@@ -188,55 +221,32 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
         AND task.status IN ('queued', 'running')
       RETURNING task.id, task.user_workos_id
     ),
-    canceled_messages AS (
-      UPDATE goat.task_messages AS message
-      SET status = 'failed',
-          model_message = COALESCE(
-            message.model_message,
-            jsonb_build_object(
-              'role',
-              message.role,
-              'content',
-              message.content,
-              'error',
-              'Stopped by user.'
-            )
-          ),
-          updated_at = ${now},
-          completed_at = ${now}
-      FROM canceled_task AS task
-      WHERE message.task_id = task.id
-        AND message.user_workos_id = task.user_workos_id
-        AND message.status = 'running'
-      RETURNING message.id
-    ),
-    inserted_event AS (
-      INSERT INTO goat.task_events (
+    canceled_comment AS (
+      INSERT INTO goat.task_comments (
+        id,
         task_id,
         user_workos_id,
-        message_id,
-        type,
-        payload,
-        created_at
+        author,
+        kind,
+        content,
+        metadata,
+        created_at,
+        updated_at
       )
       SELECT
+        ${`goat_task_comment_${randomUUID()}`},
         task.id,
         task.user_workos_id,
-        NULL,
-        'task.status',
-        ${JSON.stringify({
-          status: "canceled",
-          stage: "canceled",
-          error: "Stopped by user.",
-        })}::jsonb,
+        'agent',
+        'status',
+        'Stopped by user.',
+        ${JSON.stringify({ status: "canceled" })}::jsonb,
+        ${now},
         ${now}
       FROM canceled_task AS task
       RETURNING id
     )
-    SELECT task.id
-    FROM canceled_task AS task
-    CROSS JOIN (SELECT count(*) FROM canceled_messages) AS message_updates
-    WHERE EXISTS (SELECT 1 FROM inserted_event)
+    SELECT task.id FROM canceled_task AS task
   `);
 
   if (rowsFromExecute<{ id: string }>(result).length === 0) {
@@ -246,13 +256,85 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
   return { ok: true, error: null };
 }
 
+export type RetryTaskResult = { ok: true } | { ok: false; error: string };
+
+// Requeues a failed or canceled task on its existing run session; the driver
+// continues the same conversation on the next claim.
+export async function retryGoatTaskAction(taskId: string): Promise<RetryTaskResult> {
+  if (!taskId.trim()) {
+    return { ok: false, error: "Could not retry task." };
+  }
+
+  const { user } = await currentGoatUser();
+  if (!user.taskSpawningEnabled) {
+    return { ok: false, error: "Background tasks are disabled." };
+  }
+  const now = new Date();
+  const result = await getDb().execute(sql`
+    WITH retried_task AS (
+      UPDATE goat.tasks AS task
+      SET status = 'queued',
+          stage = 'queued',
+          error = NULL,
+          next_run_at = ${now},
+          updated_at = ${now}
+      WHERE task.id = ${taskId}
+        AND task.user_workos_id = ${user.workosUserId}
+        AND task.status IN ('failed', 'canceled')
+      RETURNING task.id, task.user_workos_id
+    ),
+    retry_comment AS (
+      INSERT INTO goat.task_comments (
+        id,
+        task_id,
+        user_workos_id,
+        author,
+        kind,
+        content,
+        metadata,
+        created_at,
+        updated_at
+      )
+      SELECT
+        ${`goat_task_comment_${randomUUID()}`},
+        task.id,
+        task.user_workos_id,
+        'agent',
+        'status',
+        'Retry requested.',
+        ${JSON.stringify({ status: "retrying" })}::jsonb,
+        ${now},
+        ${now}
+      FROM retried_task AS task
+      RETURNING id
+    )
+    SELECT task.id FROM retried_task AS task
+  `);
+
+  const retried = rowsFromExecute<{ id: string }>(result)[0];
+  if (!retried) return { ok: false, error: "Could not retry task." };
+
+  try {
+    await triggerGoatTaskRun(retried.id, {
+      task_id: retried.id,
+      event: "goat.runner_task_retry_dispatch",
+    });
+  } catch (error) {
+    console.warn("Goat runner retry dispatch failed; the task remains queued for polling.", {
+      event: "goat.runner_task_retry_dispatch_failed",
+      task_id: retried.id,
+      error,
+    });
+  }
+  return { ok: true };
+}
+
 export async function createGoatTaskForUser(input: {
   userWorkosId: string;
   prompt: string;
   model: AgentModelId;
   name?: string;
   engine?: GoatHarnessEngine;
-  harnessSpec?: GoatHarnessSpec;
   scheduleId?: string;
   scheduledFor?: Date;
 }) {
@@ -265,22 +347,17 @@ export async function createGoatTaskForUser(input: {
   }
 
   const id = `goat_task_${randomUUID()}`;
-  const userMessageId = `goat_task_msg_${randomUUID()}`;
+  const sessionId = goatTaskRunSessionId(id);
+  const openingMessageId = `goat_chat_msg_${randomUUID()}`;
   const now = new Date();
   const name = normalizeGoatTaskName(input.name, input.prompt);
-  const tools = input.harnessSpec ? [] : await getGoatAvailableHarnessTools(input.userWorkosId);
-  const harnessSpec: GoatHarnessSpec = input.harnessSpec ?? {
-    schemaVersion: "goat.harness.v1",
-    engine: input.engine ?? "opencompany",
-    model: input.model,
-    systemPrompt: "",
-    initialUserMessage: input.prompt,
-    tools,
-    skills: [],
-    maxModelSteps: 16,
-    resultMode: "assistant_final",
-  };
-  const modelMessage = { role: "user", content: input.prompt };
+  // Codex-engine tasks are not unified with codex chat sessions yet; every run
+  // uses the opencompany session driver until that lands.
+  void input.engine;
+  const engine: GoatHarnessEngine = "opencompany";
+  // The run session carries the task's transcript; the opening user message is
+  // the task description. Its id is deterministic so creation and the runner's
+  // crash-recovery ensure step stay idempotent.
   const task = rowsFromExecute<GoatTaskRow>(
     await getDb().execute(sql`
       WITH created_task AS (
@@ -290,59 +367,75 @@ export async function createGoatTaskForUser(input: {
           user_workos_id,
           prompt,
           model,
+          engine,
           schedule_id,
           scheduled_for,
           status,
           stage,
           next_run_at,
           created_at,
-          updated_at,
-          harness_spec
+          updated_at
         )
         SELECT
           ${id},
           ${name},
           ${input.userWorkosId},
           ${input.prompt},
-          ${harnessSpec.model},
+          ${input.model},
+          ${engine},
           ${input.scheduleId ?? null},
           ${input.scheduledFor ?? null},
           'queued',
           'queued',
           ${now},
           ${now},
-          ${now},
-          ${JSON.stringify(harnessSpec)}::jsonb
+          ${now}
         FROM goat.users AS "user"
         WHERE "user".workos_user_id = ${input.userWorkosId}
           AND "user".task_spawning_enabled = true
         RETURNING *
       ),
-      inserted_user_message AS (
-        INSERT INTO goat.task_messages (
+      run_session AS (
+        INSERT INTO goat.chat_sessions (
           id,
-          task_id,
           user_workos_id,
-          role,
-          status,
-          content,
-          model_message,
+          title,
+          model,
+          engine,
+          task_id,
           created_at,
-          updated_at,
-          completed_at
+          updated_at
         )
         SELECT
-          ${userMessageId},
-          task.id,
+          ${sessionId},
           task.user_workos_id,
-          'user',
-          'completed',
-          task.prompt,
-          ${JSON.stringify(modelMessage)}::jsonb,
-          ${now},
+          task.name,
+          task.model,
+          'opencompany',
+          task.id,
           ${now},
           ${now}
         FROM created_task AS task
+        RETURNING id
+      ),
+      inserted_user_message AS (
+        INSERT INTO goat.chat_messages (
+          id,
+          session_id,
+          role,
+          content,
+          created_at,
+          updated_at
+        )
+        SELECT
+          ${openingMessageId},
+          run_session.id,
+          'user',
+          task.prompt,
+          ${now},
+          ${now}
+        FROM created_task AS task
+        CROSS JOIN run_session
         RETURNING id
       )
       SELECT
@@ -354,6 +447,7 @@ export async function createGoatTaskForUser(input: {
         task.model AS "model",
         task.schedule_id AS "scheduleId",
         task.scheduled_for AS "scheduledFor",
+        task.engine AS "engine",
         task.status AS "status",
         task.stage AS "stage",
         task.result AS "result",
@@ -422,6 +516,25 @@ type GoatTaskRow = Omit<
   createdAt: Date | string;
   updatedAt: Date | string;
 };
+
+function goatTaskToBoardView(task: GoatTask): GoatTaskView {
+  return {
+    id: task.id,
+    displayId: task.displayId,
+    name: task.name,
+    prompt: task.prompt,
+    model: task.model,
+    scheduleId: task.scheduleId,
+    scheduledFor: task.scheduledFor ? task.scheduledFor.toISOString() : null,
+    status: task.status,
+    stage: task.stage,
+    result: task.result,
+    error: task.error,
+    archivedAt: task.archivedAt ? task.archivedAt.toISOString() : null,
+    createdAt: task.createdAt.toISOString(),
+    updatedAt: task.updatedAt.toISOString(),
+  };
+}
 
 function goatTaskFromRow(row: GoatTaskRow): GoatTask {
   return {

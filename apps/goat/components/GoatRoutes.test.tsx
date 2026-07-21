@@ -3,7 +3,12 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatBrainView } from "@/components/GoatBrainView";
-import { GoatBrainRoute, GoatPreferencesSettingsRoute, GoatUsageSettingsRoute } from "./GoatRoutes";
+import {
+  GoatBrainRoute,
+  GoatPreferencesSettingsRoute,
+  GoatTasksBoardRoute,
+  GoatUsageSettingsRoute,
+} from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -93,6 +98,14 @@ vi.mock("@/components/TaskDetailPanel", () => ({
 
 vi.mock("@/components/TaskRunPanel", () => ({
   TaskRunPanel: () => null,
+}));
+
+vi.mock("@/components/TasksBoard", () => ({
+  TasksBoard: () => <div data-testid="tasks-board" />,
+}));
+
+vi.mock("@/components/TaskScheduleDetailPanel", () => ({
+  TaskScheduleDetailPanel: () => null,
 }));
 
 vi.mock("@/components/GoatAppDataProvider", () => ({
@@ -226,6 +239,26 @@ describe("GoatSettingsRoute", () => {
     render(<GoatUsageSettingsRoute />);
 
     expect(screen.getByTestId("spend-overview")).toBeInTheDocument();
+  });
+});
+
+describe("GoatTasksBoardRoute", () => {
+  beforeEach(() => {
+    appDataMock.value.featureFlags.taskSpawning = false;
+  });
+
+  it("shows the disabled state when the task beta flag is off", () => {
+    render(<GoatTasksBoardRoute />);
+
+    expect(screen.getByText("Background tasks are disabled")).toBeInTheDocument();
+    expect(screen.queryByTestId("tasks-board")).not.toBeInTheDocument();
+  });
+
+  it("renders the board when the task beta flag is on", () => {
+    appDataMock.value.featureFlags.taskSpawning = true;
+    render(<GoatTasksBoardRoute />);
+
+    expect(screen.getByTestId("tasks-board")).toBeInTheDocument();
   });
 });
 

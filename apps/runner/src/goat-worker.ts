@@ -34,6 +34,7 @@ import {
   type GoatTaskExecutorResult,
 } from "./goat-harness";
 import { getGoatAvailableGitHubRepositoryNamesForRunner } from "./goat-harness-planner";
+import { runClaimedGoatTaskSession } from "./goat-task-session";
 import { rowsFromExecute } from "./sql-exec";
 import { type NormalizedModelUsage, normalizeModelUsage } from "./usage";
 
@@ -218,6 +219,7 @@ export function createDbGoatTaskStore(): GoatTaskStore {
             ON "user".workos_user_id = task.user_workos_id
           WHERE
             "user".task_spawning_enabled = true
+            AND task.engine = 'opencompany'
             AND (
               (task.status = 'queued' AND task.next_run_at <= ${input.now})
               OR (task.status = 'running' AND task.lease_expires_at < ${input.now})
@@ -228,7 +230,7 @@ export function createDbGoatTaskStore(): GoatTaskStore {
         )
         UPDATE goat.tasks AS task
         SET status = 'running',
-            stage = 'planning',
+            stage = 'running',
             attempts = task.attempts + 1,
             lease_id = ${input.leaseId},
             lease_owner = ${input.leaseOwner},
@@ -665,6 +667,7 @@ export function createDbGoatTaskStore(): GoatTaskStore {
           INNER JOIN goat.chat_sessions AS session ON session.id = message.session_id
           INNER JOIN completed_task AS task ON task.id = message.task_id
           WHERE session.closed_at IS NULL
+            AND session.task_id IS NULL
           ORDER BY message.created_at ASC
           LIMIT 1
         ),
@@ -781,6 +784,7 @@ async function insertGoatTaskFailureNotification(input: {
       INNER JOIN goat.chat_sessions AS session ON session.id = message.session_id
       WHERE message.task_id = ${input.taskId}
         AND session.closed_at IS NULL
+        AND session.task_id IS NULL
       ORDER BY message.created_at ASC
       LIMIT 1
     ),
@@ -1487,7 +1491,7 @@ export function startGoatTaskWorker(
             leaseTtlMs: env.jobLeaseTtlMs,
           });
           if (!task) break;
-          const running = runClaimedGoatTask({ task, env, store, executor })
+          const running = runClaimedGoatTaskSession({ task, env, store })
             .catch((error) => {
               captureException(error, {
                 event: "opencompany.goat_task_failed",

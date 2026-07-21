@@ -1142,6 +1142,7 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     model,
     scheduleId: null,
     scheduledFor: null,
+    engine: "opencompany",
     status: "running",
     stage: "planning",
     result: null,

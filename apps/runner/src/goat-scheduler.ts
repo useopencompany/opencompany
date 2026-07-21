@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { latestCronRunAt, nextCronRunAt } from "@opencompany/agent-runtime";
-import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
+import {
+  GOAT_DEFAULT_MODEL_ID,
+  goatTaskRunSessionId,
+  latestCronRunAt,
+  nextCronRunAt,
+} from "@opencompany/agent-runtime";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 
@@ -13,7 +17,7 @@ type DueScheduleRow = {
   cron: string;
   timezone: string;
   prompt: string;
-  plannedHarnessSpec: GoatHarnessSpec;
+  model: string | null;
   nextRunAt: Date | string;
 };
 
@@ -108,7 +112,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
           cron,
           timezone,
           prompt,
-          planned_harness_spec AS "plannedHarnessSpec",
+          model,
           next_run_at AS "nextRunAt"
         FROM goat.task_schedules AS schedule
         INNER JOIN goat.users AS "user"
@@ -175,9 +179,9 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
     }
 
     const taskId = `goat_task_${randomUUID()}`;
-    const userMessageId = `goat_task_msg_${randomUUID()}`;
-    const modelMessage = { role: "user", content: schedule.prompt };
-    const harnessSpec = schedule.plannedHarnessSpec;
+    const sessionId = goatTaskRunSessionId(taskId);
+    const openingMessageId = `goat_chat_msg_${randomUUID()}`;
+    const model = schedule.model ?? GOAT_DEFAULT_MODEL_ID;
 
     await tx.execute(sql`
       WITH created_task AS (
@@ -187,57 +191,72 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
           user_workos_id,
           prompt,
           model,
+          engine,
           schedule_id,
           scheduled_for,
           status,
           stage,
           next_run_at,
           created_at,
-          updated_at,
-          harness_spec
+          updated_at
         )
         VALUES (
           ${taskId},
           ${schedule.name},
           ${schedule.userWorkosId},
           ${schedule.prompt},
-          ${harnessSpec.model},
+          ${model},
+          'opencompany',
           ${schedule.id},
           ${scheduledFor},
           'queued',
           'queued',
           ${now},
           ${now},
-          ${now},
-          ${JSON.stringify(harnessSpec)}::jsonb
+          ${now}
         )
         RETURNING id
       ),
-      inserted_message AS (
-        INSERT INTO goat.task_messages (
+      run_session AS (
+        INSERT INTO goat.chat_sessions (
           id,
-          task_id,
           user_workos_id,
-          role,
-          status,
-          content,
-          model_message,
+          title,
+          model,
+          engine,
+          task_id,
           created_at,
-          updated_at,
-          completed_at
+          updated_at
         )
         SELECT
-          ${userMessageId},
-          task.id,
+          ${sessionId},
           ${schedule.userWorkosId},
-          'user',
-          'completed',
-          ${schedule.prompt},
-          ${JSON.stringify(modelMessage)}::jsonb,
-          ${now},
+          ${schedule.name},
+          ${model},
+          'opencompany',
+          task.id,
           ${now},
           ${now}
         FROM created_task AS task
+        RETURNING id
+      ),
+      inserted_message AS (
+        INSERT INTO goat.chat_messages (
+          id,
+          session_id,
+          role,
+          content,
+          created_at,
+          updated_at
+        )
+        SELECT
+          ${openingMessageId},
+          run_session.id,
+          'user',
+          ${schedule.prompt},
+          ${now},
+          ${now}
+        FROM run_session
       )
       UPDATE goat.task_schedule_runs
       SET status = 'created',

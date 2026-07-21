@@ -15,6 +15,9 @@ const workspaceRoleMock = vi.hoisted(() => ({
   value: "admin" as "admin" | "member",
 }));
 const mcpSetupMock = vi.hoisted(() => ({ completedAt: null as string | null }));
+const featureFlagsMock = vi.hoisted(() => ({
+  value: { taskSpawning: false, localCodexBridge: false, chatCapabilities: false },
+}));
 const recentChatsMock = vi.hoisted(() => ({
   value: [] as Array<{
     id: string;
@@ -76,6 +79,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       visibility: "workspace",
     },
     recentChats: recentChatsMock.value,
+    featureFlags: featureFlagsMock.value,
     mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
   }),
 }));
@@ -87,6 +91,33 @@ describe("GoatSidebar", () => {
     workspaceRoleMock.value = "admin";
     mcpSetupMock.completedAt = null;
     recentChatsMock.value = [];
+    featureFlagsMock.value = {
+      taskSpawning: false,
+      localCodexBridge: false,
+      chatCapabilities: false,
+    };
+  });
+
+  it("hides the Tasks row when the task beta flag is off", () => {
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const nav = screen.getByRole("navigation", { name: "Goat primary" });
+    expect(within(nav).queryByRole("link", { name: "Tasks" })).not.toBeInTheDocument();
+  });
+
+  it("shows the Tasks row with active state when the task beta flag is on", () => {
+    featureFlagsMock.value = {
+      taskSpawning: true,
+      localCodexBridge: false,
+      chatCapabilities: false,
+    };
+    pathnameMock.value = "/tasks";
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const nav = screen.getByRole("navigation", { name: "Goat primary" });
+    const tasks = within(nav).getByRole("link", { name: "Tasks" });
+    expect(tasks).toHaveAttribute("href", "/tasks");
+    expect(tasks).toHaveAttribute("aria-current", "page");
   });
 
   it("renders home, the brain list, and settings in the account footer", () => {

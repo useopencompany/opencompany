@@ -37,6 +37,8 @@ import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { TaskRunPanel } from "@/components/TaskRunPanel";
+import { TaskScheduleDetailPanel } from "@/components/TaskScheduleDetailPanel";
+import { TasksBoard } from "@/components/TasksBoard";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import type { GoatBrainSnapshot } from "@/lib/brain";
 import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
@@ -452,6 +454,35 @@ function GoatBrainSettingsRoute({ brain }: { brain: GoatBrainSummaryView }) {
   );
 }
 
+export function GoatTasksBoardRoute() {
+  const { featureFlags } = useGoatAppData();
+
+  if (!featureFlags.taskSpawning) return <TasksDisabledRoute />;
+
+  return (
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+      <TasksBoard />
+    </main>
+  );
+}
+
+export function GoatTaskScheduleDetailRoute({ scheduleId }: { scheduleId: string }) {
+  const { featureFlags } = useGoatAppData();
+
+  if (!featureFlags.taskSpawning) return <TasksDisabledRoute />;
+
+  return (
+    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
+      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
+        <div className="flex w-full max-w-[720px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
+          <BackLink href="/tasks" label="Tasks" />
+          <TaskScheduleDetailPanel scheduleId={scheduleId} />
+        </div>
+      </div>
+    </main>
+  );
+}
+
 export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
   const { featureFlags } = useGoatAppData();
@@ -462,7 +493,7 @@ export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
         <div className="flex w-full max-w-[720px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
-          <BackLink href="/" label="Tasks" />
+          <BackLink href="/tasks" label="Tasks" />
           {run ? <TaskDetailPanel initialRun={run} /> : <TaskRouteSkeleton label="Loading task" />}
         </div>
       </div>
@@ -473,7 +504,7 @@ export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
 export function GoatTaskRunRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
   const { featureFlags } = useGoatAppData();
-  const detailHref = run ? `/tasks/${encodeURIComponent(run.task.displayId)}` : "/";
+  const detailHref = run ? `/tasks/${encodeURIComponent(run.task.displayId)}` : "/tasks";
 
   if (!featureFlags.taskSpawning) return <TasksDisabledRoute />;
 
@@ -484,7 +515,7 @@ export function GoatTaskRunRoute({ taskId }: { taskId: string }) {
           <nav className="flex flex-wrap items-center gap-2">
             <BackLink href={detailHref} label="Task detail" />
             <Link
-              href="/"
+              href="/tasks"
               prefetch
               className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
             >

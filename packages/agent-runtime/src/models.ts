@@ -44,6 +44,7 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
 } satisfies ModelProviderOptions;
 
 export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.6-sol";
+export const GOAT_DEFAULT_MODEL_ID: AgentModelId = "anthropic/claude-sonnet-5";
 export const CODEX_AGENT_MODEL_IDS = [
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",

@@ -6,6 +6,9 @@ import type {
   GoatChatMessageAttachment,
   GoatIntegrationProvider,
   GoatIntegrationStatus,
+  GoatTaskCommentAuthor,
+  GoatTaskCommentKind,
+  GoatTaskCommentMetadata,
   GoatTaskEventType,
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
@@ -52,6 +55,7 @@ export type GoatTaskScheduleRow = {
   timezone: string;
   prompt: string;
   planned_harness_spec: unknown;
+  model: string | null;
   enabled: boolean;
   last_run_at: string | null;
   next_run_at: string;
@@ -148,6 +152,18 @@ export type GoatTaskEventRow = {
   type: GoatTaskEventType;
   payload: Record<string, unknown>;
   created_at: string;
+};
+
+export type GoatTaskCommentRow = {
+  id: string;
+  task_id: string;
+  user_workos_id: string;
+  author: GoatTaskCommentAuthor;
+  kind: GoatTaskCommentKind;
+  content: string;
+  metadata: GoatTaskCommentMetadata;
+  created_at: string;
+  updated_at: string;
 };
 
 export type GoatTaskModelUsageRow = {
@@ -404,6 +420,12 @@ function createTaskRunCollections(taskId: string) {
     sandboxUsage: createGoatElectricCollection<GoatTaskSandboxUsageRow>({
       id: `goat:task_sandbox_usage:${taskId}`,
       table: "goat.task_sandbox_usage",
+      params: { task_id: taskId },
+      getKey: (row) => row.id,
+    }),
+    comments: createGoatElectricCollection<GoatTaskCommentRow>({
+      id: `goat:task_comments:${taskId}`,
+      table: "goat.task_comments",
       params: { task_id: taskId },
       getKey: (row) => row.id,
     }),

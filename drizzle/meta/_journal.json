@@ -1016,6 +1016,13 @@
       "when": 1784652410000,
       "tag": "0144_goat_codex_chat_interactions",
       "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 1784652412000,
+      "tag": "0146_goat_task_board_sessions",
+      "breakpoints": true
     }
   ]
 }

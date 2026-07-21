@@ -124,6 +124,14 @@ const SHAPE_SCOPES = {
     table: "goat.task_events",
     where: scopedTaskWhere,
   },
+  task_comments: {
+    table: "goat.task_comments",
+    where: scopedTaskWhere,
+  },
+  "goat.task_comments": {
+    table: "goat.task_comments",
+    where: scopedTaskWhere,
+  },
   task_model_usage: {
     table: "goat.task_model_usage",
     where: scopedTaskWhere,
@@ -420,8 +428,9 @@ function scopedBrainWhere(
 }
 
 function scopedOpenChatSessionWhere(userWorkosId: string): ShapeWhere {
+  // task_id IS NULL keeps runner-driven task-run sessions out of chat surfaces.
   return {
-    clause: `"user_workos_id" = $1 AND "closed_at" IS NULL`,
+    clause: `"user_workos_id" = $1 AND "closed_at" IS NULL AND "task_id" IS NULL`,
     params: [userWorkosId],
   };
 }

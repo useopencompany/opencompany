@@ -238,8 +238,8 @@ describe("cancelGoatTaskAction", () => {
     });
 
     expect(mocks.execute).toHaveBeenCalledTimes(1);
-    expect(sqlTextFromExecuteCall(0)).toContain("UPDATE goat.task_messages AS message");
-    expect(sqlTextFromExecuteCall(0)).toContain("message.status = 'running'");
+    expect(sqlTextFromExecuteCall(0)).toContain("UPDATE goat.tasks AS task");
+    expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.task_comments");
     expect(sqlTextFromExecuteCall(0)).toContain("'Stopped by user.'");
   });
 

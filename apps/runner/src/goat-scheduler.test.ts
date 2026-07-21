@@ -1,4 +1,3 @@
-import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sweepDueGoatTaskSchedules } from "./goat-scheduler";
 
@@ -11,18 +10,6 @@ vi.mock("./db", () => ({
     transaction: mocks.transaction,
   }),
 }));
-
-const harnessSpec: GoatHarnessSpec = {
-  schemaVersion: "goat.harness.v1",
-  engine: "opencompany",
-  model: "moonshotai/kimi-k2.6",
-  systemPrompt: "Run this recurring task.",
-  initialUserMessage: "Send a daily briefing.",
-  tools: ["exa_search"],
-  skills: [],
-  maxModelSteps: 8,
-  resultMode: "assistant_final",
-};
 
 describe("sweepDueGoatTaskSchedules", () => {
   beforeEach(() => {
@@ -40,7 +27,7 @@ describe("sweepDueGoatTaskSchedules", () => {
           cron: "0 9 * * *",
           timezone: "UTC",
           prompt: "Send a daily briefing.",
-          plannedHarnessSpec: harnessSpec,
+          model: "moonshotai/kimi-k2.6",
           nextRunAt: new Date("2026-06-01T09:00:00.000Z"),
         },
       ])
@@ -61,7 +48,8 @@ describe("sweepDueGoatTaskSchedules", () => {
     expect(onTaskCreated).toHaveBeenCalledOnce();
     expect(sqlTextFromExecuteCall(execute, 0)).toContain("task_spawning_enabled");
     expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.tasks");
-    expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.task_messages");
+    expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.chat_sessions");
+    expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.chat_messages");
   });
 
   it("skips duplicate schedule runs without creating another task", async () => {
@@ -75,7 +63,7 @@ describe("sweepDueGoatTaskSchedules", () => {
           cron: "0 9 * * *",
           timezone: "UTC",
           prompt: "Send a daily briefing.",
-          plannedHarnessSpec: harnessSpec,
+          model: "moonshotai/kimi-k2.6",
           nextRunAt: new Date("2026-06-01T09:00:00.000Z"),
         },
       ])

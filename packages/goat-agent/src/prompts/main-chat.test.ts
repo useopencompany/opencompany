@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createOpenCompanyChatSystemPrompt } from "@/lib/prompts/main-chat";
+import { createOpenCompanyChatSystemPrompt } from "./main-chat";
 
 const CAPABILITIES = [
   { id: "slack", indexLine: "slack — CAN read history. CANNOT post." },

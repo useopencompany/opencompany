@@ -46,6 +46,21 @@ describe("buildGoatElectricOriginUrl", () => {
     expect(url?.searchParams.get("params[2]")).toBe("goat_task_1");
   });
 
+  it("scopes goat.task_comments to the user and trusted task id", () => {
+    const url = buildGoatElectricOriginUrl({
+      electricUrl: "https://electric.example.com",
+      requestUrl: new URL(
+        "https://goat.example.com/api/electric/v1/shape?table=goat.task_comments&task_id=goat_task_1",
+      ),
+      userWorkosId: "user_123",
+    });
+
+    expect(url?.searchParams.get("table")).toBe("goat.task_comments");
+    expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1 AND "task_id" = $2');
+    expect(url?.searchParams.get("params[1]")).toBe("user_123");
+    expect(url?.searchParams.get("params[2]")).toBe("goat_task_1");
+  });
+
   it("scopes goat.task_events to the user when no task id is requested", () => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com",
@@ -97,7 +112,9 @@ describe("buildGoatElectricOriginUrl", () => {
     });
 
     expect(url?.searchParams.get("table")).toBe("goat.chat_sessions");
-    expect(url?.searchParams.get("where")).toBe(`"user_workos_id" = $1 AND "closed_at" IS NULL`);
+    expect(url?.searchParams.get("where")).toBe(
+      `"user_workos_id" = $1 AND "closed_at" IS NULL AND "task_id" IS NULL`,
+    );
     expect(url?.searchParams.get("params[1]")).toBe("user_123");
     expect(url?.searchParams.get("params[2]")).toBeNull();
     expect(url?.searchParams.get("where")).not.toBe("1=1");

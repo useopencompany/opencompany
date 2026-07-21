@@ -4,11 +4,11 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 import { useLiveQuery } from "@tanstack/react-db";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
-import type { GoatTaskView } from "@/components/GoatSurface";
 import { GOAT_PINNED_CHAT_LIMIT, type GoatChatSummaryView } from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
+import { type GoatTaskView, taskRowToView } from "@/lib/task-board";
 import {
   createGoatCollections,
   type GoatChatSessionRow,
@@ -244,25 +244,6 @@ export function useGoatAppData() {
 // the settings sidebar in isolated component tests).
 export function useGoatAppDataOptional() {
   return useContext(GoatAppDataContext);
-}
-
-function taskRowToView(row: GoatTaskRow): GoatTaskView {
-  return {
-    id: row.id,
-    displayId: row.display_id,
-    name: row.name,
-    prompt: row.prompt,
-    model: row.model,
-    scheduleId: row.schedule_id,
-    scheduledFor: row.scheduled_for,
-    status: row.status,
-    stage: row.stage,
-    result: row.result,
-    error: row.error,
-    archivedAt: row.archived_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
 }
 
 function taskScheduleRowToView(row: GoatTaskScheduleRow): GoatTaskScheduleView {

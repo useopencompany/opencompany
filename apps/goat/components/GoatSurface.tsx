@@ -4,7 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import type { AgentModelId } from "@opencompany/agent-runtime";
 import { CODEX_REASONING_EFFORTS } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
-import type { GoatChatEngine, GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import type { GoatChatEngine } from "@opencompany/db/goat-schema";
 import {
   Command,
   CommandDialog,
@@ -23,17 +23,13 @@ import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import { DefaultChatTransport } from "ai";
 import {
-  AlertCircle,
   Archive,
   ArrowUp,
   CalendarClock,
   Check,
-  CheckCircle2,
   ChevronDown,
-  CircleDotDashed,
   Clock,
   Code2,
-  FileText,
   LoaderCircle,
   MessageSquarePlus,
   Pause,
@@ -44,7 +40,6 @@ import {
   Square,
   Target,
   Trash2,
-  X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -107,13 +102,20 @@ import {
   normalizeGoatModel,
 } from "@/lib/model-options";
 import {
+  firstLine,
+  formatRelativeTime,
+  formatScheduleNextRun,
+  type GoatTaskView,
+  getTaskMeta,
+  taskRowToView,
+} from "@/lib/task-board";
+import {
   createGoatCollections,
   type GoatChatMessageRow,
   type GoatCodexChatSessionRow,
   type GoatLocalCodexSessionRow,
   type GoatTaskRow,
 } from "@/lib/task-collections";
-import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
 import type { GoatCodexSandboxStatus } from "@/lib/task-runner";
 import {
   deleteGoatTaskScheduleAction,
@@ -196,22 +198,7 @@ function engineChatKindFromChat(
   return null;
 }
 
-export type GoatTaskView = {
-  id: string;
-  displayId: string;
-  name: string;
-  prompt: string;
-  model: string;
-  scheduleId?: string | null;
-  scheduledFor?: string | null;
-  status: GoatTaskStatus;
-  stage: GoatTaskStage;
-  result: string | null;
-  error: string | null;
-  archivedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
+export type { GoatTaskView } from "@/lib/task-board";
 
 type GoatHomeTaskItem =
   | { kind: "background"; task: GoatTaskView }
@@ -271,6 +258,10 @@ export function GoatSurface({
   const [mentionOptionIndex, setMentionOptionIndex] = useState(0);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
+  // Task-run sessions are runner-driven; the composer steers them through the
+  // task messages endpoint instead of starting an in-process chat turn.
+  const taskSessionTaskId =
+    initialChat?.taskId && chatSessionId === initialChat.id ? initialChat.taskId : null;
   // Keyed useChat instance: changes only when the user opens a different chat,
   // NOT when a new session gets its server id mid-turn (that would discard the
   // in-flight stream state).
@@ -1006,6 +997,30 @@ export function GoatSurface({
     }
     if (composerAttachments.hasFailed) {
       toast.error("Remove failed attachments before sending.");
+      return;
+    }
+    // Task-run sessions are runner-driven: the message goes through the task
+    // steering endpoint and Electric delivers the transcript updates.
+    if (taskSessionTaskId) {
+      if (!prompt) return;
+      clearError();
+      isPinnedAtBottomRef.current = true;
+      setInput("");
+      void fetch(`/api/tasks/${encodeURIComponent(taskSessionTaskId)}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ prompt }),
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error((await response.text()) || "Could not send the message.");
+          }
+        })
+        .catch((error) => {
+          setInput(prompt);
+          toast.error(error instanceof Error ? error.message : "Could not send the message.");
+        });
       return;
     }
     const mentions = activeSelectedMentions.filter((mention) =>
@@ -3138,17 +3153,6 @@ function ScheduleRow({ schedule }: { schedule: GoatTaskScheduleView }) {
   );
 }
 
-function formatScheduleNextRun(value: string) {
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return "Next run unknown";
-  const minutes = Math.max(1, Math.ceil((timestamp - Date.now()) / 60_000));
-  if (minutes < 60) return `Next in ${minutes}m`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 36) return `Next in ${hours}h`;
-  const days = Math.round(minutes / 1440);
-  return `Next in ${days}d`;
-}
-
 function HomeTaskRows({
   items,
   onArchiveTask,
@@ -3172,25 +3176,6 @@ function HomeTaskRows({
       />
     ),
   );
-}
-
-function taskRowToView(row: GoatTaskRow): GoatTaskView {
-  return {
-    id: row.id,
-    displayId: row.display_id,
-    name: row.name,
-    prompt: row.prompt,
-    model: row.model,
-    scheduleId: row.schedule_id,
-    scheduledFor: row.scheduled_for,
-    status: row.status,
-    stage: row.stage,
-    result: row.result,
-    error: row.error,
-    archivedAt: row.archived_at,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
 }
 
 function chatMessageRowToUiMessage(row: GoatChatMessageRow): GoatChatUiMessage {
@@ -3628,77 +3613,4 @@ function newBackgroundChatMessageId() {
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   return `ui_background_${randomId}`;
-}
-
-function getTaskMeta(task: GoatTaskView): {
-  icon: typeof FileText;
-  className: string;
-  detail: string;
-  spin: boolean;
-} {
-  const recurringPrefix = task.scheduleId ? "Recurring - " : "";
-  if (task.status === "failed") {
-    return {
-      icon: AlertCircle,
-      className: "text-danger",
-      detail: `${recurringPrefix}${task.error ?? GOAT_STATUS_COPY.failed}`,
-      spin: false,
-    };
-  }
-  if (task.status === "canceled") {
-    return {
-      icon: X,
-      className: "text-ink-subtle",
-      detail: `${recurringPrefix}${task.error ?? GOAT_STATUS_COPY.canceled}`,
-      spin: false,
-    };
-  }
-  if (task.status === "succeeded") {
-    return {
-      icon: CheckCircle2,
-      className: "text-emerald-600",
-      detail: `${recurringPrefix}${firstLine(task.result) ?? GOAT_STATUS_COPY.succeeded}`,
-      spin: false,
-    };
-  }
-  if (task.status === "queued") {
-    return {
-      icon: Clock,
-      className: "text-ink-subtle",
-      detail: `${recurringPrefix}${GOAT_STAGE_COPY[task.stage]}`,
-      spin: false,
-    };
-  }
-  return {
-    icon: CircleDotDashed,
-    className: "text-amber-500",
-    detail: `${recurringPrefix}${GOAT_STAGE_COPY[task.stage]}`,
-    spin: true,
-  };
-}
-
-function firstLine(value: string | null) {
-  const line = value?.trim().split(/\r?\n/, 1)[0]?.trim();
-  if (!line) return null;
-  return line.length > 72 ? `${line.slice(0, 72).trimEnd()}...` : line;
-}
-
-function formatRelativeTime(value: string) {
-  const timestamp = new Date(value).getTime();
-  const elapsedMs = Date.now() - timestamp;
-  if (!Number.isFinite(timestamp) || elapsedMs < 30_000) return "just now";
-
-  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
-  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 24) return `${elapsedHours}h ago`;
-
-  const elapsedDays = Math.floor(elapsedHours / 24);
-  if (elapsedDays < 7) return `${elapsedDays}d ago`;
-
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-  }).format(timestamp);
 }

@@ -1,10 +1,8 @@
-import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createGoatTaskScheduleForUser } from "@/lib/task-schedules";
 
 const mocks = vi.hoisted(() => ({
   insert: vi.fn(),
-  planGoatTaskHarness: vi.fn(),
   select: vi.fn(),
   transaction: vi.fn(),
 }));
@@ -20,26 +18,9 @@ vi.mock("@/lib/auth", () => ({
   currentGoatUser: vi.fn(),
 }));
 
-vi.mock("@/lib/task-runner", () => ({
-  planGoatTaskHarness: mocks.planGoatTaskHarness,
-}));
-
-const harnessSpec: GoatHarnessSpec = {
-  schemaVersion: "goat.harness.v1",
-  engine: "opencompany",
-  model: "moonshotai/kimi-k2.6",
-  systemPrompt: "Run this recurring task.",
-  initialUserMessage: "Send a daily briefing.",
-  tools: ["exa_search"],
-  skills: [],
-  maxModelSteps: 8,
-  resultMode: "assistant_final",
-};
-
 describe("createGoatTaskScheduleForUser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.planGoatTaskHarness.mockResolvedValue(harnessSpec);
     mocks.transaction.mockImplementation(async (callback) =>
       callback({ insert: mocks.insert, select: mocks.select }),
     );
@@ -70,7 +51,8 @@ describe("createGoatTaskScheduleForUser", () => {
             cron: "0 9 * * *",
             timezone: "America/Los_Angeles",
             prompt: "Send a daily briefing.",
-            plannedHarnessSpec: harnessSpec,
+            plannedHarnessSpec: null,
+            model: "anthropic/claude-sonnet-5",
             enabled: true,
             lastRunAt: null,
             nextRunAt: new Date("2026-06-01T16:00:00.000Z"),
@@ -83,7 +65,7 @@ describe("createGoatTaskScheduleForUser", () => {
     });
   });
 
-  it("plans and stores a recurring task schedule", async () => {
+  it("stores a recurring task schedule with its occurrence model", async () => {
     const schedule = await createGoatTaskScheduleForUser({
       userWorkosId: "user_1",
       name: "Daily briefing",
@@ -91,17 +73,14 @@ describe("createGoatTaskScheduleForUser", () => {
       cron: "0 9 * * *",
       timezone: "America/Los_Angeles",
       prompt: "Send a daily briefing.",
+      model: "anthropic/claude-sonnet-5",
       now: new Date("2026-06-01T15:00:00.000Z"),
     });
 
-    expect(mocks.planGoatTaskHarness).toHaveBeenCalledWith({
-      userWorkosId: "user_1",
-      prompt: "Send a daily briefing.",
-    });
     expect(mocks.insert).toHaveBeenCalledOnce();
     expect(schedule).toMatchObject({
       id: "goat_task_schedule_1",
-      plannedHarnessSpec: harnessSpec,
+      model: "anthropic/claude-sonnet-5",
       nextRunAt: new Date("2026-06-01T16:00:00.000Z"),
     });
   });
@@ -116,7 +95,7 @@ describe("createGoatTaskScheduleForUser", () => {
         prompt: "Run.",
       }),
     ).rejects.toThrow("valid 5-field cron");
-    expect(mocks.planGoatTaskHarness).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
   });
 
   it("rejects schedule creation when background tasks are disabled", async () => {
@@ -138,7 +117,6 @@ describe("createGoatTaskScheduleForUser", () => {
         prompt: "Send a daily briefing.",
       }),
     ).rejects.toThrow("Background tasks are disabled");
-    expect(mocks.planGoatTaskHarness).not.toHaveBeenCalled();
     expect(mocks.insert).not.toHaveBeenCalled();
   });
 
@@ -171,7 +149,6 @@ describe("createGoatTaskScheduleForUser", () => {
         prompt: "Send a daily briefing.",
       }),
     ).rejects.toThrow("Background tasks are disabled");
-    expect(mocks.planGoatTaskHarness).toHaveBeenCalledOnce();
     expect(mocks.insert).not.toHaveBeenCalled();
   });
 });
