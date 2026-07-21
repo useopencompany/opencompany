@@ -7,7 +7,11 @@ vi.mock("@/lib/integrations/linear-mcp", () => ({
   loadGoatLinearMcpWorkerConnection: vi.fn(),
 }));
 
-import { linearCapability, selectLinearReadTools } from "@/lib/capabilities/linear";
+import {
+  linearCapability,
+  normalizeLinearListIssuesInput,
+  selectLinearReadTools,
+} from "@/lib/capabilities/linear";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
 function fakeCatalog(names: string[]): ToolSet {
@@ -61,6 +65,89 @@ describe("selectLinearReadTools", () => {
     expect(selected[0]).toBe("list_issues");
     expect(selected[1]).toBe("get_issue");
     expect(selected[2]).toBe("list_projects");
+  });
+
+  it("normalizes list_issues arguments before calling Linear", async () => {
+    const execute = vi.fn(async () => ({ ok: true }));
+    const tools = selectLinearReadTools({
+      list_issues: {
+        description: "List issues",
+        inputSchema: { type: "object" },
+        execute,
+      },
+    } as never);
+
+    await tools.list_issues?.execute?.(
+      {
+        team: " Goat ",
+        state: "Todo",
+        project: "",
+        cursor: "",
+        priority: 0,
+        assignee: null,
+        unassigned: false,
+        unprioritized: false,
+        includeArchived: false,
+      },
+      { toolCallId: "call_1", messages: [] },
+    );
+
+    expect(execute).toHaveBeenCalledWith(
+      { team: "Goat", state: "Todo", includeArchived: false },
+      expect.objectContaining({ toolCallId: "call_1" }),
+    );
+  });
+});
+
+describe("normalizeLinearListIssuesInput", () => {
+  it("drops model placeholder values that Linear treats as active filters", () => {
+    expect(
+      normalizeLinearListIssuesInput({
+        limit: 100,
+        cursor: "",
+        orderBy: "updatedAt",
+        query: "",
+        team: "Goat",
+        state: "Todo",
+        cycle: "",
+        label: "",
+        assignee: null,
+        delegate: "",
+        project: "company brain",
+        release: "",
+        priority: 0,
+        parentId: "",
+        createdAt: "",
+        updatedAt: "",
+        includeArchived: false,
+      }),
+    ).toEqual({
+      limit: 100,
+      orderBy: "updatedAt",
+      team: "Goat",
+      state: "Todo",
+      project: "company brain",
+      includeArchived: false,
+    });
+  });
+
+  it("maps explicit unassigned and no-priority filters to Linear sentinels", () => {
+    expect(
+      normalizeLinearListIssuesInput({
+        team: "Goat",
+        unassigned: true,
+        unprioritized: true,
+      }),
+    ).toEqual({ team: "Goat", assignee: null, priority: 0 });
+  });
+
+  it("rejects contradictory explicit filters", () => {
+    expect(() => normalizeLinearListIssuesInput({ assignee: "me", unassigned: true })).toThrow(
+      "Choose either an assignee or unassigned issues",
+    );
+    expect(() => normalizeLinearListIssuesInput({ priority: 2, unprioritized: true })).toThrow(
+      "Choose either a priority or unprioritized issues",
+    );
   });
 });
 
