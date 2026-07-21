@@ -6,9 +6,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@opencompany/ui/components/dialog";
-
-const LAUNCH_VIDEO_URL =
-  "https://www.youtube-nocookie.com/embed/heM1a-KZHVw?rel=0&modestbranding=1&controls=1";
+import { LAUNCH_VIDEO_URL } from "./launch-video";
 
 export function LaunchVideoDialog() {
   return (
