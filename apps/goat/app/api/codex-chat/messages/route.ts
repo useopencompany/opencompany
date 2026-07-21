@@ -6,6 +6,7 @@ import {
   resolveGoatBrainSkillMentions,
 } from "@/lib/brain-skills";
 import { parseGoatChatAttachmentsInput } from "@/lib/chat-attachments";
+import { parseOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import { type GoatChatUiMessage, textFromGoatChatUiMessage } from "@/lib/chat-ui";
 import { createGoatCodexChatMessage } from "@/lib/codex-chat";
@@ -14,6 +15,7 @@ export const runtime = "nodejs";
 
 type CodexChatMessageBody = {
   sessionId?: unknown;
+  newSessionId?: unknown;
   prompt?: unknown;
   message?: unknown;
   settings?: unknown;
@@ -58,6 +60,13 @@ export async function POST(request: Request) {
     throw error;
   }
   const sessionId = typeof body.value.sessionId === "string" ? body.value.sessionId.trim() : null;
+  const parsedNewSessionId = parseOptimisticGoatChatSessionId(body.value.newSessionId);
+  if (!parsedNewSessionId.ok) return new Response(parsedNewSessionId.error, { status: 400 });
+  if (sessionId && parsedNewSessionId.sessionId) {
+    return new Response("A chat request cannot continue and create a session at the same time.", {
+      status: 400,
+    });
+  }
   const clientMessageId =
     isUiMessage(body.value.message) && typeof body.value.message.id === "string"
       ? body.value.message.id
@@ -66,6 +75,7 @@ export async function POST(request: Request) {
   const result = await createGoatCodexChatMessage({
     userWorkosId: context.user.workosUserId,
     ...(sessionId ? { sessionId } : {}),
+    ...(parsedNewSessionId.sessionId ? { newSessionId: parsedNewSessionId.sessionId } : {}),
     prompt,
     skills: resolvedSkills.map((skill) => ({
       ...skill,

@@ -83,6 +83,7 @@ recent open chat session. It passes those into `GoatSurface`.
 `DefaultChatTransport` posts to `/api/chat` and sends:
 
 - `sessionId`: the open chat session if one exists.
+- `newSessionId`: a browser-reserved UUID when the message starts a new chat.
 - `model`: the current chat model.
 - `message`: only the newest UI message.
 
@@ -94,10 +95,11 @@ the current user's active-Brain access, rejects stale or cross-Brain references,
 snapshot in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original
 version.
 
-When a stream finishes, the route attaches `sessionId` in message metadata. The client stores that
-id and calls `router.refresh()` only so persisted chat server props catch up. Persisted Goat app
-state such as tasks, task run events, integrations, and Brain documents is read through
-TanStack DB collections backed by Electric shapes.
+When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
+matching `/chat/<id>` route immediately; the server persists that exact id. When the stream finishes,
+the route also attaches `sessionId` in message metadata so the client can confirm the route and call
+`router.refresh()` for persisted server props. Persisted Goat app state such as tasks, task run events,
+integrations, and Brain documents is read through TanStack DB collections backed by Electric shapes.
 
 Stopping generation calls `stop()`, which aborts the HTTP request. Closing chat clears local state,
 optionally stops the active stream, and marks the chat session closed through

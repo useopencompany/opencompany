@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
 import { GoatSidebar } from "./GoatSidebar";
 
 const pathnameMock = vi.hoisted(() => ({ value: "/" }));
@@ -111,6 +112,18 @@ describe("GoatSidebar", () => {
 
     const settings = screen.getByRole("link", { name: /Ada Lovelace/ });
     expect(settings).toHaveAttribute("href", "/settings");
+  });
+
+  it("requests an immediate home reset on a normal Home click", async () => {
+    const user = userEvent.setup();
+    const homeNavigation = vi.fn();
+    window.addEventListener(GOAT_HOME_NAVIGATION_EVENT, homeNavigation);
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("link", { name: "Home" }));
+
+    expect(homeNavigation).toHaveBeenCalledOnce();
+    window.removeEventListener(GOAT_HOME_NAVIGATION_EVENT, homeNavigation);
   });
 
   it("does not mark home active on nested brain routes", () => {
