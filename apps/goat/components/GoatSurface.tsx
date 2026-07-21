@@ -69,6 +69,7 @@ import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type { CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
+import { useGoatCreditBalance } from "@/components/chat/useGoatCreditBalance";
 import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainSkillCatalogItem } from "@/lib/brain-skills";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
@@ -466,6 +467,7 @@ export function GoatSurface({
       }),
     [prepareSendMessagesRequest],
   );
+  const { balance: creditBalance, refetch: refetchCreditBalance } = useGoatCreditBalance();
   const {
     messages,
     setMessages,
@@ -488,6 +490,7 @@ export function GoatSurface({
     transport,
     onFinish: ({ message }) => {
       if (!mountedRef.current) return;
+      void refetchCreditBalance();
       recordOptimisticTurnDuration(message.id);
       const sessionId = message.metadata?.sessionId;
       const pendingNewSessionId = pendingNewSessionIdRef.current;
@@ -512,6 +515,7 @@ export function GoatSurface({
     },
     onError: (error) => {
       if (error.message?.includes(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE)) {
+        void refetchCreditBalance();
         toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
           action: {
             label: "Add credits",
@@ -542,6 +546,17 @@ export function GoatSurface({
       : null;
   const activeEngine = activeEngineChat?.engine ?? selectedEngine;
   const isEngineChat = activeEngine !== null;
+  // Hard stop: with enforcement on and an empty balance, block new sends
+  // before they 402. Codex-engine chats stay exempt, matching the server gate.
+  const outOfCredits = Boolean(
+    creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
+  );
+  const chatSendBlocked = outOfCredits && !isEngineChat;
+  const lowCreditBalance = Boolean(
+    creditBalance &&
+      creditBalance.balanceUsdMicros > 0 &&
+      creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
+  );
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") return codexConnected;
@@ -985,6 +1000,15 @@ export function GoatSurface({
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isGenerating || engineSubmitting) return;
+    if (chatSendBlocked) {
+      toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
+        action: {
+          label: "Add credits",
+          onClick: () => router.push("/settings/workspace/billing"),
+        },
+      });
+      return;
+    }
 
     const prompt = input.trim();
     const pendingAttachments = composerAttachments.attachments;
@@ -1574,6 +1598,36 @@ export function GoatSurface({
         className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
       >
         <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
+          {chatSendBlocked ? (
+            <p
+              className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-4 text-ink shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+              role="alert"
+            >
+              Your workspace is out of credits — chat is paused.{" "}
+              <button
+                type="button"
+                onClick={() => router.push("/settings/workspace/billing")}
+                className="font-medium underline"
+              >
+                Top up to continue
+              </button>
+            </p>
+          ) : lowCreditBalance && creditBalance ? (
+            <p
+              className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+              role="status"
+            >
+              {formatCreditBalance(creditBalance.balanceUsdMicros)} in credits left.{" "}
+              <button
+                type="button"
+                onClick={() => router.push("/settings/workspace/billing")}
+                className="font-medium text-ink underline"
+              >
+                Add credits
+              </button>{" "}
+              to keep chat and ingestion running.
+            </p>
+          ) : null}
           {chatError ? (
             <p
               className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
@@ -1717,7 +1771,8 @@ export function GoatSurface({
                     )) ||
                   composerAttachments.isUploading ||
                   engineSubmitting ||
-                  localCodexFeatureDisabledForChat
+                  localCodexFeatureDisabledForChat ||
+                  chatSendBlocked
                 }
                 isGenerating={isGenerating}
                 onStop={stopGeneration}
@@ -1789,6 +1844,15 @@ export function GoatSurface({
       </form>
     </div>
   );
+}
+
+function formatCreditBalance(usdMicros: number) {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(usdMicros / 1_000_000);
 }
 
 function mentionsFromMessageMetadata(metadata: GoatChatMessageMetadata | undefined) {

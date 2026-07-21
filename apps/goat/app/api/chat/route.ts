@@ -26,6 +26,7 @@ import {
 } from "ai";
 import { after } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
@@ -1194,6 +1195,9 @@ async function recordChatModelCost(input: {
       totalCostUsdMicros: cost.totalCostUsdMicros,
       costBasis: cost.costBasis,
     });
+    // Fire-and-forget: charge the saved card when the balance dropped below
+    // the auto-refill threshold. The cron sweep covers runner-side debits.
+    void maybeTriggerGoatAutoRefill(input.workspaceId);
   } catch (error) {
     logger.warn("Goat chat credit debit failed", {
       event: "goat.chat_credit_debit_failed",

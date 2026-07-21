@@ -48,10 +48,10 @@ export async function hasPositiveGoatCreditBalance(workspaceId: string, db?: DbL
 export type GoatCreditDebitInput = {
   workspaceId: string;
   userWorkosId?: string | null;
-  source: Extract<
-    GoatCreditLedgerSource,
-    "chat_model_usage" | "frontier_ingest" | "ingest_overage"
-  >;
+  // v4 debit sources only; "frontier_ingest"/"ingest_overage" are legacy
+  // read-only history and "ingest_fee" is written by the admission CTE in
+  // ./goat-billing, never through this function.
+  source: Extract<GoatCreditLedgerSource, "chat_model_usage" | "ingest_model_usage">;
   idempotencyKey: string;
   providerCostUsdMicros: number;
   platformFeeUsdMicros: number;
@@ -333,6 +333,114 @@ export async function fulfillGoatTopUpCheckoutSession(
   }>(result);
   if (!rows[0]) return { ok: false as const, reason: "already_fulfilled_or_missing" as const };
   return { ok: true as const, ...rows[0] };
+}
+
+// Off-session auto-refill fulfillment. The unique idempotency key on the
+// PaymentIntent id makes the synchronous confirm path and the
+// payment_intent.succeeded webhook safe to both run.
+export async function recordGoatAutoRefillCredit(input: {
+  workspaceId: string;
+  amountCents: number;
+  paymentIntentId: string;
+  db?: DbLike;
+}) {
+  const db = input.db ?? getDb();
+  const result = await db.execute(sql`
+    WITH ledger AS (
+      INSERT INTO goat.credit_ledger (
+        workspace_id,
+        amount_cents,
+        amount_usd_micros,
+        source,
+        idempotency_key,
+        metadata
+      )
+      VALUES (
+        ${input.workspaceId},
+        ${input.amountCents},
+        ${input.amountCents}::bigint * ${GOAT_USD_MICROS_PER_CENT},
+        'stripe_topup',
+        ${`pi:${input.paymentIntentId}`},
+        jsonb_build_object('kind', 'auto_refill', 'stripePaymentIntentId', ${input.paymentIntentId})
+      )
+      ON CONFLICT DO NOTHING
+      RETURNING id, workspace_id, amount_cents, amount_usd_micros
+    ),
+    balance AS (
+      INSERT INTO goat.credit_balances (workspace_id, balance_cents, balance_usd_micros, updated_at)
+      SELECT workspace_id, amount_cents, amount_usd_micros, now()
+      FROM ledger
+      ON CONFLICT (workspace_id) DO UPDATE
+      SET balance_cents = goat.credit_balances.balance_cents + excluded.balance_cents,
+          balance_usd_micros = goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros,
+          updated_at = now()
+      RETURNING workspace_id, balance_usd_micros
+    )
+    SELECT ledger.id AS "ledgerId", balance.balance_usd_micros AS "balanceUsdMicros"
+    FROM ledger
+    JOIN balance ON balance.workspace_id = ledger.workspace_id
+  `);
+  const rows = rowsFromExecute<{ ledgerId: number; balanceUsdMicros: number | string }>(result);
+  if (!rows[0]) return { ok: false as const, reason: "duplicate" as const };
+  return {
+    ok: true as const,
+    ledgerId: Number(rows[0].ledgerId),
+    balanceUsdMicros: Number(rows[0].balanceUsdMicros),
+  };
+}
+
+export type GoatSpendCategory = "chat" | "ingestion" | "other";
+
+export type GoatSpendBreakdownRow = {
+  day: string;
+  category: GoatSpendCategory;
+  spendUsdMicros: number;
+  providerCostUsdMicros: number;
+  platformFeeUsdMicros: number;
+};
+
+// Daily debit totals by category with the raw-model-cost vs platform-fee
+// split, for the usage dashboard. Legacy v3 sources map into "ingestion" so
+// history stays visible.
+export async function loadGoatSpendBreakdown(
+  workspaceId: string,
+  options: { days?: number; now?: Date; db?: DbLike } = {},
+): Promise<GoatSpendBreakdownRow[]> {
+  const db = options.db ?? getDb();
+  const now = options.now ?? new Date();
+  const since = new Date(now.getTime() - (options.days ?? 30) * 24 * 60 * 60 * 1000);
+  since.setUTCHours(0, 0, 0, 0);
+  const result = await db.execute(sql`
+    SELECT
+      to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS "day",
+      CASE
+        WHEN source = 'chat_model_usage' THEN 'chat'
+        WHEN source IN ('ingest_model_usage', 'ingest_fee', 'frontier_ingest', 'ingest_overage') THEN 'ingestion'
+        ELSE 'other'
+      END AS "category",
+      -SUM(amount_usd_micros) AS "spendUsdMicros",
+      SUM(provider_cost_usd_micros) AS "providerCostUsdMicros",
+      SUM(platform_fee_usd_micros) AS "platformFeeUsdMicros"
+    FROM goat.credit_ledger
+    WHERE workspace_id = ${workspaceId}
+      AND amount_usd_micros < 0
+      AND created_at >= ${since.toISOString()}
+    GROUP BY 1, 2
+    ORDER BY 1 DESC, 2 ASC
+  `);
+  return rowsFromExecute<{
+    day: string;
+    category: GoatSpendCategory;
+    spendUsdMicros: number | string;
+    providerCostUsdMicros: number | string;
+    platformFeeUsdMicros: number | string;
+  }>(result).map((row) => ({
+    day: row.day,
+    category: row.category,
+    spendUsdMicros: Number(row.spendUsdMicros),
+    providerCostUsdMicros: Number(row.providerCostUsdMicros),
+    platformFeeUsdMicros: Number(row.platformFeeUsdMicros),
+  }));
 }
 
 export type GoatCreditLedgerEntryView = {
