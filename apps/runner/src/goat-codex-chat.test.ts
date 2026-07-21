@@ -2,6 +2,7 @@ import { CODEX_COMMAND_TOOL_PART_TYPE, type CodexUiMessagePart } from "@opencomp
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import { runGoatCodexChatTurn, summarizeCodexChatRecoveryProgress } from "./goat-codex-chat";
+import { GoatCodexChatHandoffError } from "./goat-codex-chat-errors";
 
 const appServerMocks = vi.hoisted(() => ({
   runCodexAppServerTurn: vi.fn(),
@@ -104,6 +105,7 @@ describe("runGoatCodexChatTurn", () => {
       finalize: vi.fn(async () => undefined),
       fail: vi.fn(async () => undefined),
       interrupted: vi.fn(async () => undefined),
+      cancelPendingInteractions: vi.fn(async () => false),
     });
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
@@ -258,8 +260,84 @@ describe("runGoatCodexChatTurn", () => {
         codexWorkRoot: "/home/user/opencompany-goat/codex-chat",
       }),
     );
-    expect(dbMocks.execute).not.toHaveBeenCalled();
+    expect(dbMocks.execute).toHaveBeenCalledOnce();
+    expect(sqlText(dbMocks.execute.mock.calls[0]?.[0])).toContain("SET sandbox_timeout_armed_at");
     expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
+  });
+
+  it("detaches without settling the turn and keeps the sandbox alive for handoff", async () => {
+    dbMocks.selectRows.push([]);
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new GoatCodexChatHandoffError());
+
+    await expect(
+      runGoatCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("handed_off");
+
+    const projector = eventMocks.createGoatCodexChatProjector.mock.results[0]?.value;
+    expect(projector.cancelPendingInteractions).toHaveBeenCalledOnce();
+    expect(projector.finalize).not.toHaveBeenCalled();
+    expect(projector.fail).not.toHaveBeenCalled();
+    expect(projector.interrupted).not.toHaveBeenCalled();
+    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 600_000);
+  });
+
+  it("persists first-turn engine ids before a handoff can detach the proxy", async () => {
+    dbMocks.selectRows.push([]);
+    appServerMocks.runCodexAppServerTurn.mockImplementationOnce(
+      async (input: {
+        onEngineSessionId?: (threadId: string) => Promise<void>;
+        onEngineTurnId?: (turnId: string) => Promise<void>;
+      }) => {
+        await input.onEngineSessionId?.("thread_new");
+        await input.onEngineTurnId?.("turn_new");
+        throw new GoatCodexChatHandoffError();
+      },
+    );
+
+    await expect(
+      runGoatCodexChatTurn({
+        turn: codexTurn(),
+        session: { ...codexSession(), codexThreadId: null },
+        env: env(),
+      }),
+    ).resolves.toBe("handed_off");
+
+    const statements = dbMocks.execute.mock.calls.map(([query]) => sqlText(query));
+    expect(statements).toContainEqual(expect.stringContaining("codex_thread_id"));
+    expect(statements).toContainEqual(expect.stringContaining("codex_turn_id"));
+  });
+
+  it("restarts the daemon before recovery when a dead proxy owned a user question", async () => {
+    dbMocks.selectRows.push([]);
+    const projector = {
+      push: vi.fn(async () => undefined),
+      finalize: vi.fn(async () => undefined),
+      fail: vi.fn(async () => undefined),
+      interrupted: vi.fn(async () => undefined),
+      cancelPendingInteractions: vi.fn(async () => true),
+    };
+    eventMocks.createGoatCodexChatProjector.mockReturnValueOnce(projector);
+
+    await runGoatCodexChatTurn({
+      turn: { ...codexTurn(), attempts: 2, codexTurnId: "turn_existing" },
+      session: codexSession(),
+      env: env(),
+      recovery: { reason: "lease_reclaimed" },
+    });
+
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingEngineTurnId: "turn_existing",
+        reattachExistingTurn: true,
+        forceRestartForRecovery: true,
+      }),
+    );
   });
 });
 
@@ -318,6 +396,21 @@ function queryBuilder(rows: unknown[][], execute: ReturnType<typeof vi.fn>) {
   return builder;
 }
 
+function sqlText(query: unknown): string {
+  const chunks = (query as { queryChunks?: unknown[] }).queryChunks ?? [];
+  return chunks
+    .map((chunk) => {
+      if (typeof chunk === "string") return chunk;
+      if (chunk && typeof chunk === "object" && "value" in chunk) {
+        const value = (chunk as { value?: unknown }).value;
+        return Array.isArray(value) ? value.join("") : String(value ?? "");
+      }
+      if (chunk && typeof chunk === "object" && "queryChunks" in chunk) return sqlText(chunk);
+      return "";
+    })
+    .join("");
+}
+
 function fakeSandbox(sandboxId: string) {
   return {
     sandboxId,
@@ -343,6 +436,7 @@ function codexSession() {
     activeTurnId: "goat_codex_turn_1",
     status: "running",
     error: null,
+    sandboxTimeoutArmedAt: null,
     createdAt: now,
     updatedAt: now,
   } as const;
@@ -364,6 +458,7 @@ function codexTurn() {
     error: null,
     interruptRequestedAt: null,
     attempts: 1,
+    recoveryAttempts: 0,
     leaseId: "lease_1",
     leaseOwner: "runner_1",
     leaseExpiresAt: new Date("2026-07-10T12:05:00Z"),

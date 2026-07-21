@@ -2888,6 +2888,7 @@ export const goatCodexChatSessions = goat.table(
     activeTurnId: text("active_turn_id"),
     status: text("status").$type<GoatCodexChatSessionStatus>().notNull().default("queued"),
     error: text("error"),
+    sandboxTimeoutArmedAt: timestamp("sandbox_timeout_armed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2899,6 +2900,16 @@ export const goatCodexChatSessions = goat.table(
       table.userWorkosId,
       table.updatedAt,
     ),
+    terminalSandboxSweepIdx: index("goat_codex_chat_sessions_terminal_sandbox_sweep_idx")
+      .on(table.updatedAt, table.id)
+      .where(sql`
+        ${table.sandboxId} IS NOT NULL
+        AND ${table.status} IN ('idle', 'failed', 'interrupted', 'closed')
+        AND (
+          ${table.sandboxTimeoutArmedAt} IS NULL
+          OR ${table.sandboxTimeoutArmedAt} < ${table.updatedAt}
+        )
+      `),
     statusCheck: check(
       "goat_codex_chat_sessions_status_check",
       sql`${table.status} IN ('queued', 'starting', 'idle', 'running', 'failed', 'interrupted', 'closed')`,
@@ -2937,6 +2948,7 @@ export const goatCodexChatTurns = goat.table(
       withTimezone: true,
     }),
     attempts: integer("attempts").notNull().default(0),
+    recoveryAttempts: integer("recovery_attempts").notNull().default(0),
     leaseId: text("lease_id"),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
@@ -3018,6 +3030,7 @@ export const goatCodexChatEvents = goat.table(
     codexChatTurnId: text("codex_chat_turn_id").references(() => goatCodexChatTurns.id, {
       onDelete: "set null",
     }),
+    eventKey: text("event_key"),
     type: text("type").$type<GoatCodexChatEventType>().notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
     rawEvent: jsonb("raw_event").$type<Record<string, unknown>>(),
@@ -3032,6 +3045,9 @@ export const goatCodexChatEvents = goat.table(
       table.codexChatTurnId,
       table.createdAt,
     ),
+    turnEventKeyIdx: uniqueIndex("goat_codex_chat_events_turn_event_key_idx")
+      .on(table.codexChatTurnId, table.eventKey)
+      .where(sql`${table.eventKey} IS NOT NULL`),
     typeCheck: check(
       "goat_codex_chat_events_type_check",
       sql`${table.type} IN (${sql.join(

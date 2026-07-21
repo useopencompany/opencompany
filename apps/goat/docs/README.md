@@ -238,6 +238,16 @@ Image uploads are additionally passed to `turn/start` as `localImage` inputs, so
 visible to the model rather than merely path-referenced. Keeping uploads outside the working
 directory prevents them from appearing in repository changes.
 
+The Codex app-server daemon runs behind its Unix-socket control transport inside E2B and outlives
+the runner-side proxy. A runner shutdown detaches that proxy, releases the delivery lease, and lets
+the next worker `thread/resume` the same stored Codex turn id. The reconnect reconciles completed
+items and a terminal turn that landed while no runner was attached; stable per-item event keys make
+that replay idempotent. Lease claims count infrastructure ownership changes, while
+`recovery_attempts` increments only when the original Codex turn is missing or was interrupted and
+the worker must start one guarded continuation. A dead proxy with a pending user-input request
+forces that guarded continuation because server-initiated requests cannot move between client
+connections.
+
 Session skills are reconciled before every Cloud Codex turn under
 `/home/user/opencompany-goat/codex-chat/.agents/skills/`. The managed-skills manifest removes only
 OpenCompany-managed ids and preserves any unrelated native skills. A content fingerprint restarts

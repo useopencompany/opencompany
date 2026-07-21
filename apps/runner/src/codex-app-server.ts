@@ -7,9 +7,10 @@ import { buildGitHubCommandEnv, truncateText } from "./coding-agent-shared";
 import type { SandboxHandle } from "./sandbox";
 
 const CODEX_BIN_PATH = '"$HOME/.codex/bin"';
-const CODEX_APP_SERVER_ENDPOINT = "ws://127.0.0.1:47345";
+const CODEX_APP_SERVER_SOCKET = "app-server.sock";
 const CODEX_APP_SERVER_STATE = "app-server-state.json";
 const CODEX_APP_SERVER_PROXY = "app-server-proxy.mjs";
+const CODEX_APP_SERVER_PROXY_STATE = "app-server-proxy-state.json";
 const CODEX_APP_SERVER_DAEMON_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 const CODEX_APP_SERVER_REQUEST_TIMEOUT_MS = 30_000;
 const CODEX_APP_SERVER_NOTIFICATION_FLUSH_MS = 100;
@@ -100,9 +101,10 @@ export function buildCodexAppServerCommandPlan(input: {
   auth: CodexCliAuth;
   githubAuth: CodexGitHubAuth;
 }) {
-  const socketPath = CODEX_APP_SERVER_ENDPOINT;
+  const socketPath = `${input.codexHome}/${CODEX_APP_SERVER_SOCKET}`;
   const statePath = `${input.codexHome}/${CODEX_APP_SERVER_STATE}`;
   const proxyPath = `${input.codexHome}/${CODEX_APP_SERVER_PROXY}`;
+  const proxyStatePath = `${input.codexHome}/${CODEX_APP_SERVER_PROXY_STATE}`;
   const config = buildCodexConfigForAuth(input.auth);
   const codexEnv = {
     CODEX_HOME: input.codexHome,
@@ -118,7 +120,7 @@ export function buildCodexAppServerCommandPlan(input: {
   const daemonCommand = [
     `cd ${shellQuote(input.codexWorkRoot)}`,
     `export PATH=${CODEX_BIN_PATH}:"$PATH"`,
-    `codex app-server --listen ${shellQuote(socketPath)}`,
+    `codex app-server --listen ${shellQuote(`unix://${socketPath}`)}`,
   ].join(" && ");
   const proxyCommand = [
     `cd ${shellQuote(input.codexWorkRoot)}`,
@@ -132,6 +134,7 @@ export function buildCodexAppServerCommandPlan(input: {
     socketPath,
     statePath,
     proxyPath,
+    proxyStatePath,
     codexEnv,
     config,
     daemonCommand,
@@ -159,21 +162,29 @@ export async function runCodexAppServerTurn(input: {
   planModeReasoningEffort: CodexReasoningEffort | null;
   goalMode?: CodexGoalModeInput | null;
   existingEngineSessionId: string | null;
+  existingEngineTurnId?: string | null;
+  reattachExistingTurn?: boolean;
+  forceRestartForRecovery?: boolean;
   auth: CodexCliAuth;
   githubAuth: CodexGitHubAuth;
   timeoutMs: number;
   checkAbort: () => Promise<void>;
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
+  onEngineSessionId?: (threadId: string) => Promise<void>;
+  onEngineTurnId?: (turnId: string) => Promise<void>;
+  onRecoveryStart?: () => Promise<void>;
   onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
   onActivity: (activity: string) => Promise<void>;
+  detachOnAbort?: (error: unknown) => boolean;
 }) {
-  const plan = buildCodexAppServerCommandPlan({
+  const basePlan = buildCodexAppServerCommandPlan({
     codexWorkRoot: input.codexWorkRoot,
     codexHome: input.codexHome,
     skillFingerprint: input.skillFingerprint,
     auth: input.auth,
     githubAuth: input.githubAuth,
   });
+  const plan = input.forceRestartForRecovery ? { ...basePlan, forceRestart: true } : basePlan;
 
   await ensureCodexAppServerDaemon({ sandbox: input.sandbox, plan });
   try {
@@ -279,11 +290,18 @@ async function runTurnThroughProxy(input: {
   planModeReasoningEffort: CodexReasoningEffort | null;
   goalMode?: CodexGoalModeInput | null;
   existingEngineSessionId: string | null;
+  existingEngineTurnId?: string | null;
+  reattachExistingTurn?: boolean;
+  forceRestartForRecovery?: boolean;
   timeoutMs: number;
   checkAbort: () => Promise<void>;
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
+  onEngineSessionId?: (threadId: string) => Promise<void>;
+  onEngineTurnId?: (turnId: string) => Promise<void>;
+  onRecoveryStart?: () => Promise<void>;
   onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
   onActivity: (activity: string) => Promise<void>;
+  detachOnAbort?: (error: unknown) => boolean;
   plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
 }): Promise<CodexAppServerSummary> {
   const accumulator = createCodexAppServerAccumulator({ goalMode: Boolean(input.goalMode) });
@@ -297,6 +315,7 @@ async function runTurnThroughProxy(input: {
   const client = new AppServerProxyClient({
     sandbox: input.sandbox,
     command: input.plan.proxyCommand,
+    statePath: input.plan.proxyStatePath,
     envs: input.plan.codexEnv,
     timeoutMs: input.timeoutMs,
     ...(onServerRequest
@@ -316,9 +335,9 @@ async function runTurnThroughProxy(input: {
     },
   });
 
-  await client.start();
   let turnId: string | null = null;
   try {
+    await client.start();
     await client.request("initialize", {
       clientInfo: {
         name: CODEX_APP_SERVER_CLIENT_NAME,
@@ -329,44 +348,76 @@ async function runTurnThroughProxy(input: {
     });
     await client.notify("initialized", {});
 
-    const threadId = await startOrResumeThread({ client, input });
+    const thread = await startOrResumeThread({ client, input });
+    const threadId = thread.id;
+    if (threadId !== input.existingEngineSessionId) {
+      await input.onEngineSessionId?.(threadId);
+    }
     if (input.goalMode) {
-      const goal = await setThreadGoal({ client, threadId, goalMode: input.goalMode });
+      const goal = input.reattachExistingTurn
+        ? await getThreadGoal({ client, threadId })
+        : await setThreadGoal({ client, threadId, goalMode: input.goalMode });
       accumulator.setGoal(goal);
     }
-    const turn = await client.request("turn/start", {
-      threadId,
-      input: [
-        { type: "text", text: input.task, text_elements: [] },
-        ...(input.skills ?? []).map((skill) => ({
-          type: "skill",
-          name: skill.name,
-          path: skill.path,
-        })),
-        ...(input.localImages ?? []).map((image) => ({
-          type: "localImage",
-          path: image.path,
-          ...(image.detail ? { detail: image.detail } : {}),
-        })),
-      ],
-      cwd: input.plan.codexWorkRoot,
-      model: input.model,
-      effort: input.reasoningEffort,
-      collaborationMode: codexCollaborationMode({
+    const existingTurn = input.reattachExistingTurn
+      ? findThreadTurn(thread.value, input.existingEngineTurnId ?? null)
+      : null;
+    if (existingTurn && !isInterruptedTurn(existingTurn)) {
+      turnId = firstString(existingTurn.id);
+      if (!turnId) throw new Error("Codex app-server returned a turn without an id.");
+      if (turnId !== input.existingEngineTurnId) await input.onEngineTurnId?.(turnId);
+      replayThreadTurn({
+        threadId,
+        turn: existingTurn,
+        onNotification: (notification) => {
+          const activity = accumulator.push(notification);
+          notificationBatcher.push(notification, activity);
+        },
+      });
+      logger.info("Reattached to Codex app-server turn", {
+        event: "opencompany.codex_app_server_turn_reattached",
+        thread_id: threadId,
+        turn_id: turnId,
+        turn_status: firstString(existingTurn.status),
+      });
+    } else {
+      if (input.reattachExistingTurn) await input.onRecoveryStart?.();
+      const turn = await client.request("turn/start", {
+        threadId,
+        input: [
+          { type: "text", text: input.task, text_elements: [] },
+          ...(input.skills ?? []).map((skill) => ({
+            type: "skill",
+            name: skill.name,
+            path: skill.path,
+          })),
+          ...(input.localImages ?? []).map((image) => ({
+            type: "localImage",
+            path: image.path,
+            ...(image.detail ? { detail: image.detail } : {}),
+          })),
+        ],
+        cwd: input.plan.codexWorkRoot,
         model: input.model,
-        reasoningEffort: input.reasoningEffort,
-        planModeReasoningEffort: input.planModeReasoningEffort,
-      }),
-      approvalPolicy: "never",
-      sandboxPolicy: {
-        type: "workspaceWrite",
-        writableRoots: [input.plan.codexWorkRoot],
-        networkAccess: true,
-        excludeTmpdirEnvVar: false,
-        excludeSlashTmp: false,
-      },
-    });
-    turnId = stringFromPath(turn, ["turn", "id"]);
+        effort: input.reasoningEffort,
+        collaborationMode: codexCollaborationMode({
+          model: input.model,
+          reasoningEffort: input.reasoningEffort,
+          planModeReasoningEffort: input.planModeReasoningEffort,
+        }),
+        approvalPolicy: "never",
+        sandboxPolicy: {
+          type: "workspaceWrite",
+          writableRoots: [input.plan.codexWorkRoot],
+          networkAccess: true,
+          excludeTmpdirEnvVar: false,
+          excludeSlashTmp: false,
+        },
+      });
+      turnId = stringFromPath(turn, ["turn", "id"]);
+      if (!turnId) throw new Error("Codex app-server did not return a turn id.");
+      await input.onEngineTurnId?.(turnId);
+    }
     const completion = await waitForTurnCompletion({
       promise: accumulator.completed,
       checkAbort: async () => {
@@ -381,6 +432,7 @@ async function runTurnThroughProxy(input: {
               () => undefined,
             )
           : Promise.resolve(),
+      ...(input.detachOnAbort ? { detachOnAbort: input.detachOnAbort } : {}),
     });
     await notificationBatcher.flush();
     const summary = accumulator.summary();
@@ -413,6 +465,11 @@ async function setThreadGoal(input: {
   return goalFromValue(response) ?? goalFromValue(params);
 }
 
+async function getThreadGoal(input: { client: AppServerProxyClient; threadId: string }) {
+  const response = await input.client.request("thread/goal/get", { threadId: input.threadId });
+  return goalFromValue(response);
+}
+
 async function startOrResumeThread(input: {
   client: AppServerProxyClient;
   input: {
@@ -432,7 +489,10 @@ async function startOrResumeThread(input: {
       approvalPolicy: "never",
       config: reasoningConfig(input.input.reasoningEffort, input.input.planModeReasoningEffort),
     });
-    return stringFromPath(resumed, ["thread", "id"]) ?? input.input.existingEngineSessionId;
+    return {
+      id: stringFromPath(resumed, ["thread", "id"]) ?? input.input.existingEngineSessionId,
+      value: isRecord(resumed) && isRecord(resumed.thread) ? resumed.thread : {},
+    };
   }
 
   const started = await input.client.request("thread/start", {
@@ -444,7 +504,67 @@ async function startOrResumeThread(input: {
   });
   const threadId = stringFromPath(started, ["thread", "id"]);
   if (!threadId) throw new Error("Codex app-server did not return a thread id.");
-  return threadId;
+  return {
+    id: threadId,
+    value: isRecord(started) && isRecord(started.thread) ? started.thread : {},
+  };
+}
+
+function findThreadTurn(thread: Record<string, unknown>, turnId: string | null) {
+  const turns = Array.isArray(thread.turns) ? thread.turns : [];
+  let activeTurn: Record<string, unknown> | null = null;
+  for (const value of turns) {
+    if (!isRecord(value)) continue;
+    if (turnId && firstString(value.id) === turnId) return value;
+    if (!isTerminalTurn(value)) activeTurn = value;
+  }
+  return activeTurn;
+}
+
+function isInterruptedTurn(turn: Record<string, unknown>) {
+  return firstString(turn.status) === "interrupted";
+}
+
+function replayThreadTurn(input: {
+  threadId: string;
+  turn: Record<string, unknown>;
+  onNotification: (notification: JsonRpcNotification) => void;
+}) {
+  const turnId = firstString(input.turn.id);
+  if (!turnId) throw new Error("Codex app-server returned a turn without an id.");
+  input.onNotification({
+    method: "turn/started",
+    params: { threadId: input.threadId, turn: input.turn },
+  });
+  for (const value of Array.isArray(input.turn.items) ? input.turn.items : []) {
+    if (!isRecord(value)) continue;
+    input.onNotification({
+      method: "item/started",
+      params: { threadId: input.threadId, turnId, item: value },
+    });
+    if (!isActiveItem(value)) {
+      input.onNotification({
+        method: "item/completed",
+        params: { threadId: input.threadId, turnId, item: value },
+      });
+    }
+  }
+  if (isTerminalTurn(input.turn)) {
+    input.onNotification({
+      method: "turn/completed",
+      params: { threadId: input.threadId, turn: input.turn },
+    });
+  }
+}
+
+function isActiveItem(item: Record<string, unknown>) {
+  const status = firstString(item.status)?.toLowerCase();
+  return status === "inprogress" || status === "running" || status === "pending";
+}
+
+function isTerminalTurn(turn: Record<string, unknown>) {
+  const status = firstString(turn.status)?.toLowerCase();
+  return status === "completed" || status === "failed" || status === "interrupted";
 }
 
 function createCodexAppServerNotificationBatcher(input: {
@@ -634,6 +754,7 @@ class AppServerProxyClient {
     private readonly input: {
       sandbox: SandboxHandle;
       command: string;
+      statePath: string;
       envs: Record<string, string>;
       timeoutMs: number;
       onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
@@ -645,6 +766,7 @@ class AppServerProxyClient {
     logger.info("Starting Codex app-server proxy", {
       event: "opencompany.codex_app_server_proxy_starting",
     });
+    await stopOrphanedAppServerProxy(this.input.sandbox, this.input.statePath);
     this.handle = await this.input.sandbox.commands.run(this.input.command, {
       background: true,
       stdin: true,
@@ -661,11 +783,16 @@ class AppServerProxyClient {
       event: "opencompany.codex_app_server_proxy_started",
       pid: commandHandlePid(this.handle),
     });
+    const pid = commandHandlePid(this.handle);
+    if (pid != null) {
+      await this.input.sandbox.files.write(this.input.statePath, JSON.stringify({ pid }));
+    }
   }
 
   async stop() {
     const pid = commandHandlePid(this.handle);
     if (pid != null) await this.input.sandbox.commands.kill(pid).catch(() => false);
+    await clearAppServerProxyState(this.input.sandbox, this.input.statePath, pid);
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
       pending.reject(new Error("Codex app-server proxy stopped before responding."));
@@ -956,6 +1083,7 @@ async function waitForTurnCompletion(input: {
   checkAbort: () => Promise<void>;
   timeoutMs: number;
   interrupt: () => Promise<void>;
+  detachOnAbort?: (error: unknown) => boolean;
 }) {
   const deadline = Date.now() + input.timeoutMs;
   while (true) {
@@ -972,7 +1100,7 @@ async function waitForTurnCompletion(input: {
     try {
       await input.checkAbort();
     } catch (error) {
-      await input.interrupt();
+      if (!input.detachOnAbort?.(error)) await input.interrupt();
       throw error;
     }
   }
@@ -980,7 +1108,7 @@ async function waitForTurnCompletion(input: {
 
 async function appServerProcessReady(sandbox: SandboxHandle, state: AppServerState) {
   const result = await sandbox.commands
-    .run(`kill -0 ${state.pid} && ${websocketProbeCommand(state.socketPath)}`, {
+    .run(`kill -0 ${state.pid} && test -S ${shellQuote(state.socketPath)}`, {
       timeoutMs: CODEX_APP_SERVER_REQUEST_TIMEOUT_MS,
     })
     .catch(() => null);
@@ -989,62 +1117,166 @@ async function appServerProcessReady(sandbox: SandboxHandle, state: AppServerSta
 
 async function waitForEndpoint(sandbox: SandboxHandle, endpoint: string) {
   await sandbox.commands.run(
-    `for i in $(seq 1 100); do ${websocketProbeCommand(endpoint)} && exit 0; sleep 0.1; done; exit 1`,
+    `for i in $(seq 1 100); do test -S ${shellQuote(endpoint)} && exit 0; sleep 0.1; done; exit 1`,
     { timeoutMs: CODEX_APP_SERVER_REQUEST_TIMEOUT_MS },
   );
 }
 
-function websocketProbeCommand(endpoint: string) {
-  const script = `
-const endpoint = ${JSON.stringify(endpoint)};
-const ws = new WebSocket(endpoint);
-const timer = setTimeout(() => process.exit(1), 500);
-ws.onopen = () => {
-  clearTimeout(timer);
-  ws.close();
-  process.exit(0);
-};
-ws.onerror = () => {
-  clearTimeout(timer);
-  process.exit(1);
-};
-`;
-  return `bun -e ${shellQuote(script)}`;
-}
+export function codexAppServerProxyScript() {
+  // Codex documents the Unix-socket transport as its supported local control plane. This small
+  // adapter keeps the runner-facing stream JSONL while speaking the required WebSocket framing
+  // over the Unix socket inside E2B.
+  return `import { createHash, randomBytes } from "node:crypto";
+import { createConnection } from "node:net";
 
-function codexAppServerProxyScript() {
-  return `const endpoint = process.argv[2];
-if (!endpoint) {
-  console.error("missing app-server endpoint");
+const socketPath = process.argv[2];
+if (!socketPath) {
+  console.error("missing app-server socket path");
   process.exit(1);
 }
 
-const ws = new WebSocket(endpoint);
-let inputClosed = false;
-
+const socket = createConnection({ path: socketPath });
 await new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error("timed out connecting to app-server")), 30_000);
-  ws.onopen = () => {
+  socket.once("connect", () => {
     clearTimeout(timer);
     resolve(undefined);
-  };
-  ws.onerror = () => {
+  });
+  socket.once("error", (error) => {
     clearTimeout(timer);
-    reject(new Error("failed to connect to app-server"));
-  };
+    reject(error);
+  });
 });
 
-ws.onmessage = (event) => {
-  process.stdout.write(String(event.data) + "\\n");
-};
-ws.onclose = () => {
-  if (!inputClosed) process.exit(0);
-};
-ws.onerror = () => {
-  console.error("app-server websocket error");
-  process.exit(1);
-};
+const key = randomBytes(16).toString("base64");
+const expectedAccept = createHash("sha1")
+  .update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+  .digest("base64");
+socket.write([
+  "GET / HTTP/1.1",
+  "Host: localhost",
+  "Upgrade: websocket",
+  "Connection: Upgrade",
+  "Sec-WebSocket-Key: " + key,
+  "Sec-WebSocket-Version: 13",
+  "",
+  "",
+].join("\\r\\n"));
 
+let upgraded = false;
+let incoming = Buffer.alloc(0);
+let fragmentedOpcode = null;
+let fragments = [];
+let resolveUpgrade;
+let rejectUpgrade;
+const upgrade = new Promise((resolve, reject) => {
+  resolveUpgrade = resolve;
+  rejectUpgrade = reject;
+});
+
+socket.on("data", (chunk) => {
+  try {
+    incoming = Buffer.concat([incoming, chunk]);
+    if (!upgraded) {
+      const boundary = incoming.indexOf("\\r\\n\\r\\n");
+      if (boundary < 0) return;
+      const headers = incoming.subarray(0, boundary).toString("utf8");
+      if (!/^HTTP\\/1\\.1 101 /i.test(headers)) throw new Error("app-server upgrade failed");
+      const accept = headers.match(/^Sec-WebSocket-Accept:\\s*(.+)$/im)?.[1]?.trim();
+      if (accept !== expectedAccept) throw new Error("app-server upgrade response was invalid");
+      incoming = incoming.subarray(boundary + 4);
+      upgraded = true;
+      resolveUpgrade();
+    }
+    consumeFrames();
+  } catch (error) {
+    rejectUpgrade(error);
+    socket.destroy(error);
+  }
+});
+socket.on("error", (error) => {
+  rejectUpgrade(error);
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});
+socket.on("close", () => process.exit(0));
+
+function consumeFrames() {
+  while (incoming.length >= 2) {
+    const first = incoming[0];
+    const second = incoming[1];
+    const final = (first & 0x80) !== 0;
+    const opcode = first & 0x0f;
+    const masked = (second & 0x80) !== 0;
+    let length = second & 0x7f;
+    let offset = 2;
+    if (length === 126) {
+      if (incoming.length < 4) return;
+      length = incoming.readUInt16BE(2);
+      offset = 4;
+    } else if (length === 127) {
+      if (incoming.length < 10) return;
+      const wideLength = incoming.readBigUInt64BE(2);
+      if (wideLength > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("app-server frame too large");
+      length = Number(wideLength);
+      offset = 10;
+    }
+    const maskLength = masked ? 4 : 0;
+    if (incoming.length < offset + maskLength + length) return;
+    const mask = masked ? incoming.subarray(offset, offset + 4) : null;
+    offset += maskLength;
+    const payload = Buffer.from(incoming.subarray(offset, offset + length));
+    incoming = incoming.subarray(offset + length);
+    if (mask) {
+      for (let index = 0; index < payload.length; index += 1) payload[index] ^= mask[index % 4];
+    }
+    if (opcode === 0x8) {
+      socket.end();
+      return;
+    }
+    if (opcode === 0x9) {
+      sendFrame(payload, 0x0a);
+      continue;
+    }
+    if (opcode === 0x0a) continue;
+    if (opcode === 0x1 || opcode === 0x2) {
+      fragmentedOpcode = opcode;
+      fragments = [payload];
+    } else if (opcode === 0x0 && fragmentedOpcode != null) {
+      fragments.push(payload);
+    } else {
+      continue;
+    }
+    if (!final) continue;
+    if (fragmentedOpcode === 0x1) process.stdout.write(Buffer.concat(fragments).toString("utf8") + "\\n");
+    fragmentedOpcode = null;
+    fragments = [];
+  }
+}
+
+function sendFrame(value, opcode = 0x1) {
+  const payload = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  const mask = randomBytes(4);
+  let header;
+  if (payload.length <= 125) {
+    header = Buffer.from([0x80 | opcode, 0x80 | payload.length]);
+  } else if (payload.length <= 65_535) {
+    header = Buffer.alloc(4);
+    header[0] = 0x80 | opcode;
+    header[1] = 0x80 | 126;
+    header.writeUInt16BE(payload.length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x80 | opcode;
+    header[1] = 0x80 | 127;
+    header.writeBigUInt64BE(BigInt(payload.length), 2);
+  }
+  const masked = Buffer.alloc(payload.length);
+  for (let index = 0; index < payload.length; index += 1) masked[index] = payload[index] ^ mask[index % 4];
+  socket.write(Buffer.concat([header, mask, masked]));
+}
+
+await upgrade;
 const decoder = new TextDecoder();
 let buffer = "";
 for await (const chunk of Bun.stdin.stream()) {
@@ -1053,13 +1285,47 @@ for await (const chunk of Bun.stdin.stream()) {
   buffer = lines.pop() ?? "";
   for (const line of lines) {
     const trimmed = line.trim();
-    if (trimmed) ws.send(trimmed);
+    if (trimmed) sendFrame(trimmed);
   }
 }
-inputClosed = true;
 const trailing = buffer.trim();
-if (trailing) ws.send(trailing);
+if (trailing) sendFrame(trailing);
+sendFrame(Buffer.alloc(0), 0x08);
+socket.end();
 `;
+}
+
+async function stopOrphanedAppServerProxy(sandbox: SandboxHandle, statePath: string) {
+  const pid = await readAppServerProxyPid(sandbox, statePath);
+  if (pid != null) await sandbox.commands.kill(pid).catch(() => false);
+  await sandbox.commands
+    .run(`rm -f ${shellQuote(statePath)}`, { timeoutMs: CODEX_APP_SERVER_REQUEST_TIMEOUT_MS })
+    .catch(() => undefined);
+}
+
+async function clearAppServerProxyState(
+  sandbox: SandboxHandle,
+  statePath: string,
+  expectedPid: number | null,
+) {
+  if (expectedPid == null) return;
+  const storedPid = await readAppServerProxyPid(sandbox, statePath);
+  if (storedPid !== expectedPid) return;
+  await sandbox.commands
+    .run(`rm -f ${shellQuote(statePath)}`, { timeoutMs: CODEX_APP_SERVER_REQUEST_TIMEOUT_MS })
+    .catch(() => undefined);
+}
+
+async function readAppServerProxyPid(sandbox: SandboxHandle, statePath: string) {
+  try {
+    const content = await sandbox.files.read(statePath);
+    const parsed = JSON.parse(
+      typeof content === "string" ? content : new TextDecoder().decode(content),
+    );
+    return isRecord(parsed) && typeof parsed.pid === "number" ? parsed.pid : null;
+  } catch {
+    return null;
+  }
 }
 
 async function readAppServerState(sandbox: SandboxHandle, path: string) {
