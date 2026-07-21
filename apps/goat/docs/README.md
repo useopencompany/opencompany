@@ -12,8 +12,9 @@ Goat has four LLM paths:
 
 1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
    This agent answers directly, calls `goat_brain`, or calls `start_task`.
-2. **Background task:** a durable row in `goat.tasks` claimed by `apps/runner`, planned into a
-   `goat.harness.v1` config, then executed by an AI SDK model loop in the runner process.
+2. **Background task:** a durable row in `goat.tasks` whose transcript is a linked
+   `goat.chat_sessions` conversation. OpenCompany tasks are claimed by `apps/runner` and executed
+   by the task-session driver; Codex tasks are queued through the Cloud Codex chat worker.
 3. **Local Codex chat:** a Goat chat engine mode that queues commands for a user-run local bridge.
    The bridge creates a clean session folder under `~/.opencompany/goat/sessions`, runs
    `codex app-server`, and posts normalized Codex events back into the Goat chat.
@@ -21,14 +22,11 @@ Goat has four LLM paths:
    app-server thread. Uploaded images, PDFs, Word files, and Excel files are materialized into that
    sandbox; images are also sent to Codex as native local-image inputs.
 
-The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
-infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
-does not yet use `agent_sessions`, `.agent` files, Brain mounts, skills, approvals, or
-`delegate_to_agent`. It does expose selected user-scoped MCP integrations through the Goat
-task harness, starting with Linear.
+The Goat task path is a chat session, not a full OpenCompany `.agent` session. It reuses runner
+infrastructure, Vercel AI Gateway, leases, observability, Brain access, and server-side tools, but
+does not use `agent_sessions`, `.agent` files, approvals, or `delegate_to_agent`.
 
-The wider OpenCompany runner does have a full multi-agent session loop. Goat can either keep its
-lighter task harness and grow it, or move durable Goat work onto that full session substrate.
+The wider OpenCompany runner has a separate full multi-agent session loop.
 
 ## High-Level Flow
 
@@ -54,11 +52,11 @@ Browser
 Runner
   Goat task worker wakes/polls
     claim queued task with lease
-    plan harness spec with Gateway planner model
-    create durable assistant task message
-    streamText with Gateway, Exa, Gmail, Calendar, and Linear MCP tools
-      append durable message and tool events
-    use final assistant message as the task result
+    load the deterministic task chat session
+    streamText with the shared Goat chat agent prompt and task tools
+      persist user, assistant, and steering turns in goat.chat_messages
+      persist status and result entries in goat.task_comments
+    use final assistant text as the task result
     mark task succeeded, failed, or canceled
 
 Goat UI
@@ -268,25 +266,16 @@ Entry points:
 
 - `apps/goat/lib/tasks.ts`
 - `apps/goat/lib/task-runner.ts`
-- `apps/goat/lib/integrations/google-data.ts`
 
 `createGoatTaskForUser` creates the task row. It:
 
 - Generates a `goat_task_*` id.
 - Normalizes a short display name.
-- Computes available harness tools.
-- Inserts `goat.tasks` with `status: "queued"`, `stage: "queued"`, `nextRunAt: now`, and an
-  initial `harnessSpec`.
-- Inserts the durable initial `goat.task_messages` user row in the same transaction.
+- Inserts `goat.tasks` with `status: "queued"` and `nextRunAt: now`.
+- Creates a deterministic run session using `goatTaskRunSessionId(taskId)` and inserts the opening
+  user message into `goat.chat_messages` in the same transaction.
+- For Codex tasks, also creates the Cloud Codex session, assistant placeholder, and queued turn.
 - Best-effort dispatches the runner through `triggerGoatTaskRun`.
-
-Available task harness tools are user-specific:
-
-- `exa_search` is always available.
-- Gmail operation tools are included only when the user has a connected Gmail integration.
-- Calendar operation tools are included only when the user has a connected Google Calendar
-  integration.
-- Linear MCP meta-tools are included only when the user has a connected Linear integration.
 
 `triggerGoatTaskRun` calls:
 
@@ -304,7 +293,7 @@ Entry points:
 - `apps/runner/src/index.ts`
 - `apps/runner/src/server.ts`
 - `apps/runner/src/goat-worker.ts`
-- `apps/runner/src/goat-harness.ts`
+- `apps/runner/src/goat-task-session.ts`
 
 The runner process starts a normal session job worker and a Goat task worker. The HTTP route
 `/internal/goat/tasks/:taskId/run` does not claim that exact task directly. It authenticates the
@@ -316,127 +305,59 @@ The worker loop:
 - Runs with bounded concurrency, defaulting to `min(2, env.workerConcurrency)`.
 - Claims the next eligible task using `FOR UPDATE SKIP LOCKED`.
 - Reclaims `running` tasks whose lease has expired.
-- Sets `status: "running"`, `stage: "planning"`, increments `attempts`, and writes a lease id,
-  lease owner, and lease expiry.
+- Sets `status: "running"`, increments `attempts`, and writes a lease id, lease owner, and lease
+  expiry.
 - Heartbeats every 5 seconds while the executor runs.
-- Aborts the executor if the lease is lost.
+- Aborts the model stream if the lease is lost.
+- Ensures the deterministic run session and opening message exist for crash recovery.
+- Drains steering messages as additional turns in the same conversation.
 
 On success it writes:
 
 - `status: "succeeded"`
-- `stage: "completed"`
-- `result`, copied from the final assistant task message
-- final `harnessSpec`
-- merged `debugTrace`
+- `result`, copied from the final assistant chat message
+- a result row in `goat.task_comments`
 
 On failure it writes:
 
 - `status: "failed"`
-- `stage: "failed"`
 - `error`
-- optional debug trace from the harness error
+- a failed status row in `goat.task_comments`
 
 On user stop it writes:
 
 - `status: "canceled"`
-- `stage: "canceled"`
 - `error: "Stopped by user."`
 - clears the active lease
+- a canceled status row in `goat.task_comments`
 
-During the run it also writes lease-owned rows in `goat.task_messages` and `goat.task_events` for
-assistant content, tool starts/completions/failures, and task status milestones.
+The task transcript lives only in `goat.chat_messages`. Model, hosted-tool, and sandbox costs remain
+in the task usage tables. The task detail UI reads the `goat.tasks` row and `goat.task_comments`
+through Electric and links to the run session for the full transcript and steering.
 
 Failed and canceled tasks are not automatically retried by this worker. Only stale `running` tasks are reclaimed.
 
-## Harness Planning
-
-`executeGoatTask` first calls `planGoatHarnessForTask`.
-
-The planner is a separate AI SDK `generateObject` Gateway call using:
-
-- Model: `anthropic/claude-sonnet-4.6`
-- strict JSON schema
-- Structured prompt blocks from `apps/runner/src/prompts/goat-harness-creation.ts`
-- Execution engine options: `opencompany` by default, or `codex` for sandboxed Codex CLI coding
-  tasks.
-- Execution model options: `moonshotai/kimi-k2.6` by default for most work and deep research,
-  `zai/glm-5.2` for very large-context or long source-set synthesis, `anthropic/claude-sonnet-5`
-  as the premium fallback for explicit Claude/Sonnet, maximum-quality, polished writing, vision, or
-  file-input cases, and `openai/gpt-5.5` for coding, Codex, or sharper analysis.
-
-The planner returns a `GoatHarnessSpec`:
-
-```ts
-type GoatHarnessSpec = {
-  schemaVersion: "goat.harness.v1";
-  engine: "opencompany" | "codex";
-  model: AgentModelId;
-  systemPrompt: string;
-  initialUserMessage: string;
-  tools: GoatTaskToolName[];
-  skills: GoatTaskSkillId[];
-  maxModelSteps: number;
-  resultMode: "assistant_final" | "brain_markdown_report";
-  codex?: {
-    repository?: string | null;
-    createPullRequest?: boolean;
-    reasoningEffort?: "low" | "medium" | "high" | "xhigh";
-    goalMode?: {
-      objective: string;
-      tokenBudget?: number | null;
-    };
-  };
-};
-```
-
-Normalization is intentionally conservative:
-
-- Tool names are operation-level only.
-- Skills are reasoning/operating guidance only, selected from the planner's available skill list
-  (`first-principles`, `yc-office-hours`) and injected into the execution system prompt.
-- `maxModelSteps` is a runaway ceiling, not a difficulty estimate. The planner default is 16,
-  browser-capable tasks are normalized to at least 16, and the runner reserves the final step for
-  a no-tool answer.
-- Gmail, Calendar, and Linear operations are selected only if both available to the user and chosen
-  by the planner.
-- The execution engine must be `opencompany` or `codex`. Missing legacy values normalize to
-  `opencompany`.
-- The execution model must be one of the planner's allowed model options.
-- `systemPrompt` must be non-empty; there is no fallback task system prompt.
-- `resultMode` is `assistant_final` for ordinary tasks and `brain_markdown_report` for deep
-  research/report deliverables that should be saved as Brain artifacts.
-- Codex engine runs use `codex.repository` for a Goat-connected GitHub repository and only open a
-  draft PR when `codex.createPullRequest` is true.
-- Codex engine runs may use `codex.goalMode` for iterative coding tasks with a clear finish line
-  and verification surface. Objectives are trimmed to Codex's 4,000-character limit, omitted token
-  budgets default to `200000`, and v1 goal-mode tasks run within one Goat worker execution.
-
-The planner request and response content are stored in `debugTrace.planner`.
-
-## Task Model Execution
+## Task Session Execution
 
 Entry points:
 
-- `apps/runner/src/goat-harness.ts`
-- `apps/runner/src/goat-codex.ts`
+- `apps/runner/src/goat-task-session.ts`
 - `apps/runner/src/goat-tools.ts`
 - `apps/runner/src/goat-google-tools.ts`
+- `packages/goat-agent`
 
-After planning, the task reports `stage: "running"` and calls AI SDK `streamText` in the runner
-process. The runner:
+OpenCompany tasks call AI SDK `streamText` in the runner process. The driver:
 
-1. Creates a running assistant `goat.task_messages` row.
-2. Builds AI SDK tools from the planned operation names.
-3. Streams model text into the assistant row on a short throttle and at step boundaries for
-   `assistant_final` runs. For `brain_markdown_report`, the report body is buffered instead.
-4. Appends `tool.started`, `tool.completed`, and `tool.failed` events durably.
-5. Returns recoverable tool failures to the model as tool results.
-6. Completes with the trimmed final assistant message content, or saves the final Markdown report
-   into the `research/` Brain folder and completes with an artifact link.
+1. Loads the linked chat transcript and appends a recoverable continuation instruction when needed.
+2. Uses the shared Goat chat system prompt and tool context from `packages/goat-agent`.
+3. Streams each assistant turn into `goat.chat_messages` on a short throttle.
+4. Records model, hosted-tool, and sandbox usage against the task lease.
+5. Drains queued steering messages into follow-up turns.
+6. Completes with the trimmed final assistant content and mirrors it to `goat.tasks.result`.
 
 If the final assistant content is empty, the task fails. There is no `goat_result` tool.
 
-Available task harness tools:
+Available task tools are resolved from the user's integrations and runtime configuration, including:
 
 - `exa_search`: runs in the runner process against Exa.
 - `gmail_search`
@@ -449,11 +370,13 @@ Available task harness tools:
 - `calendar_get_freebusy`
 - `linear_search_tools`
 - `linear_use_tool`
-- The Google tools run server-side in the runner and resolve encrypted OAuth credentials from the
-  database.
+- Brain read/save tools.
+- GitHub and browser tools when their runtime dependencies are available.
+- Google tools run server-side in the runner and resolve encrypted OAuth credentials from the
+  database. The authenticated `/goat/tools/:taskId` endpoint remains available to Codex sandboxes.
 
-E2B remains available elsewhere in the runner as a future tool backend; new Goat task runs do not
-depend on `/tmp/goat-harness.mjs`, `GOAT_OUTPUT_PATH`, progress stdout parsing, or a sandbox bridge.
+Codex tasks use the Cloud Codex chat worker. `goat-codex-task-settle.ts` mirrors the terminal turn
+onto the task row and activity feed after no queued or running steering turn remains.
 
 ## Google Tools
 
@@ -497,27 +420,27 @@ Important tables:
 - `goat.codex_chat_turns`: leased Cloud Codex turn queue and message linkage.
 - `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
 - `goat.codex_chat_events`: normalized Cloud Codex event audit rows.
-- `goat.tasks`: durable background task queue, status, stage, result, error, lease, harness spec,
-  debug trace, and sandbox id.
-- `goat.task_messages`: durable task transcript rows for user, assistant, and tool messages.
-- `goat.task_events`: durable task timeline rows for harness planning, message lifecycle, and tool
-  lifecycle events.
+- `goat.tasks`: durable background task queue, engine, status, result, error, schedule linkage, and
+  lease state.
+- `goat.task_comments`: status, result, and comment activity for task detail pages.
+- `goat.task_model_usage`, `goat.task_tool_usage`, and `goat.task_sandbox_usage`: per-task cost and
+  usage records whose message pointers refer to the linked chat transcript without foreign keys.
 - `goat.integrations`: connected Gmail, Google Calendar, and Linear accounts.
 - `goat.integration_credentials`: encrypted OAuth token payloads.
 
 Task state is deliberately simple:
 
 ```text
-queued -> running/planning -> running/running
-  -> succeeded/completed
-  -> failed/failed
+queued -> running -> succeeded
+                  -> failed
+       -> canceled
 ```
 
 The UI maps this to Tasks rows and task detail pages. Goat task pages subscribe to TanStack DB
-collections backed by Electric shapes for `goat.tasks`, `goat.task_messages`, and
-`goat.task_events`, scoped by `user_workos_id`. The active chat also subscribes to scoped
-`goat.chat_messages` rows so persisted task completion notifications appear without a manual
-refresh.
+collections backed by Electric shapes for `goat.tasks` and `goat.task_comments`, scoped by
+`user_workos_id`. Opening the deterministic run session subscribes to its `goat.chat_messages`
+shape and enables steering. The active origin chat also receives persisted task completion
+notifications without a manual refresh.
 
 Settings and Brain use the same pattern for `goat.integrations`, `goat.brain_folders`, and
 `goat.brain_documents`. Server props are initial render fallbacks; after hydration, live Electric
@@ -563,7 +486,7 @@ Key files:
 - `apps/runner/src/delegation.ts`
 - `apps/runner/src/tool-dispatcher.ts`
 
-That path works differently from Goat tasks:
+That path remains distinct from Goat task chat sessions:
 
 - Sessions are rows in `agent_sessions`.
 - The runtime config is compiled from a `.agent` file plus bundle context.
@@ -577,16 +500,16 @@ That path works differently from Goat tasks:
 - Runs can suspend for approvals, user questions, or child-agent waits.
 - Brain and agent bundle changes are synced back after turns.
 
-In other words, the current Goat task harness is a small specialized LLM worker. The full runner is
-the general multi-agent substrate.
+The Goat task-session driver is a specialized single-agent worker. The full runner is the general
+multi-agent substrate.
 
 ## What "Multi-Agent" Means Today
 
-For Goat specifically, there are multiple LLM roles but not yet multiple durable agents:
+For Goat specifically, there are multiple execution surfaces but not yet multiple durable agents:
 
 - Foreground chat model: triages the user's input and may start a task.
-- Harness planner model: selects the execution harness spec.
-- Harness execution model: performs the task with tools.
+- OpenCompany task-session model: performs the task with shared Goat prompts and tools.
+- Cloud Codex task session: performs Codex-engine tasks through the Codex app-server worker.
 - Runner-hosted tools: execute private Google API calls and Exa search in the runner process.
 
 For the broader platform, multi-agent means actual nested agent sessions:
@@ -613,18 +536,18 @@ Common changes and where they belong:
 - Change task creation defaults: `createGoatTaskForUser` in `apps/goat/lib/tasks.ts`.
 - Change runner dispatch: `apps/goat/lib/task-runner.ts` and the Goat route in
   `apps/runner/src/server.ts`.
-- Change planner behavior or harness spec schema: `planGoatHarnessForTask` in
-  `apps/runner/src/goat-harness.ts` and prompt blocks in
-  `apps/runner/src/prompts/goat-harness-creation.ts`.
 - Change Goat Codex subscription auth: `apps/goat/lib/codex-auth.ts`,
   `apps/runner/src/codex-auth.ts`, and `packages/db/src/goat-codex-auth.ts`.
-- Change Goat Codex execution: `apps/runner/src/goat-codex.ts`.
-- Change fallback task harness instructions: `apps/runner/src/prompts/goat-task-harness.ts`.
-- Add or change harness tools: `apps/runner/src/goat-tools.ts`, implementation files like
+- Change Goat Codex execution: `apps/runner/src/goat-codex-chat.ts` and
+  `apps/runner/src/goat-codex-task-settle.ts`.
+- Change the OpenCompany task prompt or agent tools: `packages/goat-agent` and
+  `apps/runner/src/goat-task-session.ts`.
+- Add or change sandbox-facing task tools: `apps/runner/src/goat-tools.ts`, implementation files like
   `apps/runner/src/goat-google-tools.ts`, and `GoatTaskToolName` in
   `packages/db/src/goat-schema.ts`.
-- Change the task model loop: `executeGoatTask` in `apps/runner/src/goat-harness.ts`.
-- Move Goat onto full multi-agent sessions: start from `apps/runner/src/agent-loop.ts`,
+- Change the task model loop: `runClaimedGoatTaskSession` in
+  `apps/runner/src/goat-task-session.ts`.
+- Move Goat tasks onto full multi-agent sessions: start from `apps/runner/src/agent-loop.ts`,
   `apps/runner/src/session-lifecycle.ts`, `apps/runner/src/delegation.ts`, and
   `docs/agent-file.md`.
 
@@ -634,9 +557,9 @@ Common changes and where they belong:
 - Goat tasks are text-result only. They do not persist files or artifacts from task tools.
 - Gateway and Exa keys are used in the Goat route and runner process. Google credentials stay
   server-side.
-- Debug traces can contain prompts, tool arguments, snippets, and truncated private Google results.
-  Treat them as sensitive application data.
+- Chat message debug traces can contain prompts, tool arguments, snippets, and truncated private
+  results. Treat them as sensitive application data.
 - The task worker reclaims expired running work, but failed tasks are terminal unless a future
   feature explicitly requeues them.
-- Goat's current harness has no built-in child-agent delegation. Adding true multi-agent behavior
+- Goat's task-session driver has no built-in child-agent delegation. Adding true multi-agent behavior
   means either adopting the full agent session runner or designing a task-local child-agent model.

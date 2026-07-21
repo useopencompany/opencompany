@@ -13,8 +13,6 @@ import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { wakeGoatCodexChatWorker } from "./goat-codex-chat-worker";
 import { wakeGoatGoogleDriveSyncWorker } from "./goat-google-drive-sync-worker";
 import { executeGoatGoogleTool, isGoatGoogleToolName } from "./goat-google-tools";
-import { planGoatHarnessForTask } from "./goat-harness";
-import { getGoatHarnessPlannerContextForRunner } from "./goat-harness-planner";
 import { verifyGoatToolToken } from "./goat-tool-auth";
 import { wakeGoatTaskWorker } from "./goat-worker";
 import { enqueueRunnerJob } from "./jobs";
@@ -175,36 +173,6 @@ export function createServer(
     }
     wakeGoatBrainImportWorker();
     reply.status(202).send({ ok: true });
-  });
-
-  app.post("/internal/goat/task-harness/plan", async (request, reply) => {
-    requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.goatTaskWorkerEnabled) {
-      reply.status(503).send({ error: "Goat task worker is disabled." });
-      return;
-    }
-
-    const body = request.body as { userWorkosId?: unknown; prompt?: unknown } | undefined;
-    const userWorkosId = typeof body?.userWorkosId === "string" ? body.userWorkosId.trim() : "";
-    const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
-    if (!userWorkosId || !prompt) {
-      reply.status(400).send({ error: "userWorkosId and prompt are required." });
-      return;
-    }
-
-    const plannerContext = await getGoatHarnessPlannerContextForRunner(userWorkosId, {
-      browserEnabled: env.goatBrowserEnabled,
-    });
-    const planned = await planGoatHarnessForTask({
-      prompt,
-      model: "moonshotai/kimi-k2.6",
-      availableTools: plannerContext.availableTools,
-      githubRepositories: plannerContext.githubRepositories,
-      gatewayApiKey: env.vercelAiGatewayApiKey,
-      userWorkosId,
-      signal: new AbortController().signal,
-    });
-    reply.send({ ok: true, harnessSpec: planned.harnessSpec });
   });
 
   app.post("/goat/tools/:taskId", async (request, reply) => {

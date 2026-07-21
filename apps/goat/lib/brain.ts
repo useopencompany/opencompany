@@ -574,17 +574,7 @@ export function documentViewFromFileRow(row: GoatBrainDocumentRow): GoatBrainDoc
   };
 }
 
-export async function nextAvailableGoatBrainId(brainRef: string, baseId: string): Promise<string> {
-  const base = isValidGoatBrainId(baseId) ? baseId : "untitled";
-  const rows = await listGoatBrainFiles({ brainRef }, { includeInvalid: true });
-  const used = new Set(rows.map((row) => row.brainId));
-  if (!used.has(base)) return base;
-  for (let suffix = 2; suffix < 1000; suffix++) {
-    const candidate = goatBrainIdCandidate(base, suffix);
-    if (!used.has(candidate)) return candidate;
-  }
-  throw new Error("Could not allocate a unique brain id.");
-}
+export { nextAvailableGoatBrainId } from "@opencompany/goat-agent";
 
 function goatBrainIdCandidate(base: string, suffix: number, maxLength = 80): string {
   if (suffix <= 1) return base;

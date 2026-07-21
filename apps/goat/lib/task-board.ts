@@ -1,7 +1,7 @@
-import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import type { GoatHarnessEngine, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import { AlertCircle, CheckCircle2, CircleDotDashed, Clock, type FileText, X } from "lucide-react";
 import type { GoatTaskRow } from "@/lib/task-collections";
-import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
+import { GOAT_STATUS_COPY } from "@/lib/task-display";
 
 export type GoatTaskView = {
   id: string;
@@ -11,8 +11,8 @@ export type GoatTaskView = {
   model: string;
   scheduleId?: string | null;
   scheduledFor?: string | null;
+  engine: GoatHarnessEngine;
   status: GoatTaskStatus;
-  stage: GoatTaskStage;
   result: string | null;
   error: string | null;
   archivedAt: string | null;
@@ -29,8 +29,8 @@ export function taskRowToView(row: GoatTaskRow): GoatTaskView {
     model: row.model,
     scheduleId: row.schedule_id,
     scheduledFor: row.scheduled_for,
+    engine: row.engine,
     status: row.status,
-    stage: row.stage,
     result: row.result,
     error: row.error,
     archivedAt: row.archived_at,
@@ -95,14 +95,14 @@ export function getTaskMeta(task: GoatTaskView): {
     return {
       icon: Clock,
       className: "text-ink-subtle",
-      detail: `${recurringPrefix}${GOAT_STAGE_COPY[task.stage]}`,
+      detail: `${recurringPrefix}${GOAT_STATUS_COPY.queued}`,
       spin: false,
     };
   }
   return {
     icon: CircleDotDashed,
     className: "text-amber-500",
-    detail: `${recurringPrefix}${GOAT_STAGE_COPY[task.stage]}`,
+    detail: `${recurringPrefix}${GOAT_STATUS_COPY.running}`,
     spin: true,
   };
 }

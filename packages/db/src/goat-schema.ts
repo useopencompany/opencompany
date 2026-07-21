@@ -40,14 +40,6 @@ export type GoatTaskStatus = "queued" | "running" | "succeeded" | "failed" | "ca
 
 export type GoatHarnessEngine = "opencompany" | "codex";
 
-export type GoatTaskStage =
-  | "queued"
-  | "planning"
-  | "sandboxing"
-  | "running"
-  | "completed"
-  | "failed"
-  | "canceled";
 export type GoatTaskScheduleRunStatus = "pending" | "created" | "failed";
 
 export type GoatIntegrationProvider =
@@ -221,29 +213,6 @@ export type GoatTaskToolName =
   | "github_status"
   | "github_open_pull_request";
 
-export type GoatTaskSkillId = "first-principles" | "yc-office-hours";
-
-export type GoatHarnessSpec = {
-  schemaVersion: "goat.harness.v1";
-  engine: GoatHarnessEngine;
-  model: AgentModelId;
-  systemPrompt: string;
-  initialUserMessage: string;
-  tools: GoatTaskToolName[];
-  skills: GoatTaskSkillId[];
-  maxModelSteps: number;
-  resultMode: "assistant_final" | "brain_markdown_report";
-  codex?: {
-    repository?: string | null;
-    createPullRequest?: boolean;
-    reasoningEffort?: CodexReasoningEffort;
-    goalMode?: {
-      objective: string;
-      tokenBudget?: number | null;
-    };
-  };
-};
-
 export type GoatWorkspaceRole = "admin" | "member";
 export type GoatMcpClient = "claude" | "chatgpt" | "cursor";
 export type GoatWorkspacePlan = "free" | "pro";
@@ -306,8 +275,6 @@ export type GoatBrainTimelineEntryRow = {
 };
 export type GoatBrainDocumentVersionOperation = "overwrite" | "delete";
 
-export type GoatTaskMessageRole = "user" | "assistant" | "tool";
-export type GoatTaskMessageStatus = "created" | "running" | "completed" | "failed";
 export type GoatTaskModelUsagePhase = "planner" | "execution";
 
 export type GoatTaskCommentAuthor = "agent" | "user";
@@ -315,47 +282,6 @@ export type GoatTaskCommentKind = "status" | "result" | "comment";
 export type GoatTaskCommentMetadata = {
   status?: "started" | "failed" | "retrying" | "canceled";
   error?: string;
-};
-
-export type GoatTaskEventType =
-  | "task.status"
-  | "harness.planned"
-  | "artifact.created"
-  | "assistant.delta"
-  | "reasoning.completed"
-  | "message.created"
-  | "message.completed"
-  | "message.failed"
-  | "tool.started"
-  | "tool.completed"
-  | "tool.failed";
-
-export type GoatTaskEventPayload = Record<string, unknown>;
-
-export type GoatTaskDebugTrace = {
-  schemaVersion?: "goat.debug.v1";
-  planner?: {
-    model?: string;
-    request?: {
-      messages?: Array<{ role: string; content: string }>;
-      responseFormat?: unknown;
-    };
-    response?: {
-      content?: string | null;
-    };
-  };
-  harness?: {
-    model?: string;
-    systemPrompt?: string;
-    toolsSentToModel?: unknown[];
-    toolChoice?: string;
-    turns?: Array<{
-      step: number;
-      requestMessages?: unknown[];
-      responseMessage?: unknown;
-      toolResults?: unknown[];
-    }>;
-  };
 };
 
 export type GoatChatRole = "user" | "assistant";
@@ -2199,8 +2125,6 @@ export const goatTaskSchedules = goat.table(
     cron: text("cron").notNull(),
     timezone: text("timezone").notNull().default("UTC"),
     prompt: text("prompt").notNull(),
-    // Legacy harness pre-planning; unused since runs became chat sessions.
-    plannedHarnessSpec: jsonb("planned_harness_spec").$type<GoatHarnessSpec>(),
     // Model for spawned occurrences; falls back to the app default when null.
     model: text("model").$type<AgentModelId>(),
     enabled: boolean("enabled").notNull().default(true),
@@ -2247,16 +2171,8 @@ export const goatTasks = goat.table(
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
     engine: text("engine").$type<GoatHarnessEngine>().notNull().default("opencompany"),
     status: text("status").$type<GoatTaskStatus>().notNull().default("queued"),
-    stage: text("stage").$type<GoatTaskStage>().notNull().default("queued"),
     result: text("result"),
     error: text("error"),
-    harnessSpec: jsonb("harness_spec").$type<GoatHarnessSpec>().notNull().default(sql`'{}'::jsonb`),
-    debugTrace: jsonb("debug_trace")
-      .$type<GoatTaskDebugTrace>()
-      .notNull()
-      .default(sql`'{}'::jsonb`),
-    codexEngineSessionId: text("codex_engine_session_id"),
-    sandboxId: text("sandbox_id"),
     attempts: integer("attempts").notNull().default(0),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
     leaseId: text("lease_id"),
@@ -2286,10 +2202,6 @@ export const goatTasks = goat.table(
     statusCheck: check(
       "goat_tasks_status_check",
       sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed', 'canceled')`,
-    ),
-    stageCheck: check(
-      "goat_tasks_stage_check",
-      sql`${table.stage} IN ('queued', 'planning', 'sandboxing', 'running', 'completed', 'failed', 'canceled')`,
     ),
     engineCheck: check("goat_tasks_engine_check", sql`${table.engine} IN ('opencompany', 'codex')`),
   }),
@@ -2369,79 +2281,6 @@ export const goatTaskScheduleRuns = goat.table(
       "goat_task_schedule_runs_status_check",
       sql`${table.status} IN ('pending', 'created', 'failed')`,
     ),
-  }),
-);
-
-export const goatTaskMessages = goat.table(
-  "task_messages",
-  {
-    id: text("id").primaryKey(),
-    taskId: text("task_id")
-      .notNull()
-      .references(() => goatTasks.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    role: text("role").$type<GoatTaskMessageRole>().notNull(),
-    status: text("status").$type<GoatTaskMessageStatus>().notNull().default("created"),
-    content: text("content").notNull().default(""),
-    modelMessage: jsonb("model_message").$type<unknown>(),
-    toolName: text("tool_name").$type<GoatTaskToolName>(),
-    toolCallId: text("tool_call_id"),
-    responseToMessageId: text("response_to_message_id"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-  },
-  (table) => ({
-    userTaskCreatedAtIdx: index("goat_task_messages_user_task_created_at_idx").on(
-      table.userWorkosId,
-      table.taskId,
-      table.createdAt,
-    ),
-    taskCreatedAtIdx: index("goat_task_messages_task_created_at_idx").on(
-      table.taskId,
-      table.createdAt,
-    ),
-    taskResponseToMessageIdx: uniqueIndex("goat_task_messages_task_response_to_message_idx").on(
-      table.taskId,
-      table.responseToMessageId,
-    ),
-    roleCheck: check(
-      "goat_task_messages_role_check",
-      sql`${table.role} IN ('user', 'assistant', 'tool')`,
-    ),
-    statusCheck: check(
-      "goat_task_messages_status_check",
-      sql`${table.status} IN ('created', 'running', 'completed', 'failed')`,
-    ),
-  }),
-);
-
-export const goatTaskEvents = goat.table(
-  "task_events",
-  {
-    id: serial("id").primaryKey(),
-    taskId: text("task_id")
-      .notNull()
-      .references(() => goatTasks.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    messageId: text("message_id").references(() => goatTaskMessages.id, {
-      onDelete: "set null",
-    }),
-    type: text("type").$type<GoatTaskEventType>().notNull(),
-    payload: jsonb("payload").$type<GoatTaskEventPayload>().notNull().default(sql`'{}'::jsonb`),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    userTaskIdIdx: index("goat_task_events_user_task_id_idx").on(
-      table.userWorkosId,
-      table.taskId,
-      table.id,
-    ),
-    taskIdIdx: index("goat_task_events_task_id_idx").on(table.taskId, table.id),
   }),
 );
 
@@ -3199,8 +3038,6 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   taskSchedules: many(goatTaskSchedules),
   taskScheduleRuns: many(goatTaskScheduleRuns),
   tasks: many(goatTasks),
-  taskMessages: many(goatTaskMessages),
-  taskEvents: many(goatTaskEvents),
   taskModelUsage: many(goatTaskModelUsage),
   taskToolUsage: many(goatTaskToolUsage),
   taskSandboxUsage: many(goatTaskSandboxUsage),
@@ -3625,8 +3462,6 @@ export const goatTasksRelations = relations(goatTasks, ({ one, many }) => ({
     fields: [goatTasks.scheduleId],
     references: [goatTaskSchedules.id],
   }),
-  taskMessages: many(goatTaskMessages),
-  taskEvents: many(goatTaskEvents),
   modelUsage: many(goatTaskModelUsage),
   toolUsage: many(goatTaskToolUsage),
   sandboxUsage: many(goatTaskSandboxUsage),
@@ -3658,36 +3493,6 @@ export const goatTaskScheduleRunsRelations = relations(goatTaskScheduleRuns, ({ 
   }),
 }));
 
-export const goatTaskMessagesRelations = relations(goatTaskMessages, ({ one, many }) => ({
-  user: one(goatUsers, {
-    fields: [goatTaskMessages.userWorkosId],
-    references: [goatUsers.workosUserId],
-  }),
-  task: one(goatTasks, {
-    fields: [goatTaskMessages.taskId],
-    references: [goatTasks.id],
-  }),
-  events: many(goatTaskEvents),
-  modelUsage: many(goatTaskModelUsage),
-  toolUsage: many(goatTaskToolUsage),
-  sandboxUsage: many(goatTaskSandboxUsage),
-}));
-
-export const goatTaskEventsRelations = relations(goatTaskEvents, ({ one }) => ({
-  user: one(goatUsers, {
-    fields: [goatTaskEvents.userWorkosId],
-    references: [goatUsers.workosUserId],
-  }),
-  task: one(goatTasks, {
-    fields: [goatTaskEvents.taskId],
-    references: [goatTasks.id],
-  }),
-  message: one(goatTaskMessages, {
-    fields: [goatTaskEvents.messageId],
-    references: [goatTaskMessages.id],
-  }),
-}));
-
 export const goatTaskModelUsageRelations = relations(goatTaskModelUsage, ({ one }) => ({
   user: one(goatUsers, {
     fields: [goatTaskModelUsage.userWorkosId],
@@ -3696,10 +3501,6 @@ export const goatTaskModelUsageRelations = relations(goatTaskModelUsage, ({ one 
   task: one(goatTasks, {
     fields: [goatTaskModelUsage.taskId],
     references: [goatTasks.id],
-  }),
-  message: one(goatTaskMessages, {
-    fields: [goatTaskModelUsage.messageId],
-    references: [goatTaskMessages.id],
   }),
 }));
 
@@ -3712,10 +3513,6 @@ export const goatTaskToolUsageRelations = relations(goatTaskToolUsage, ({ one })
     fields: [goatTaskToolUsage.taskId],
     references: [goatTasks.id],
   }),
-  message: one(goatTaskMessages, {
-    fields: [goatTaskToolUsage.messageId],
-    references: [goatTaskMessages.id],
-  }),
 }));
 
 export const goatTaskSandboxUsageRelations = relations(goatTaskSandboxUsage, ({ one }) => ({
@@ -3726,10 +3523,6 @@ export const goatTaskSandboxUsageRelations = relations(goatTaskSandboxUsage, ({ 
   task: one(goatTasks, {
     fields: [goatTaskSandboxUsage.taskId],
     references: [goatTasks.id],
-  }),
-  message: one(goatTaskMessages, {
-    fields: [goatTaskSandboxUsage.messageId],
-    references: [goatTaskMessages.id],
   }),
 }));
 
@@ -3812,8 +3605,6 @@ export type GoatTaskSchedule = typeof goatTaskSchedules.$inferSelect;
 export type GoatTaskScheduleRun = typeof goatTaskScheduleRuns.$inferSelect;
 export type GoatTask = typeof goatTasks.$inferSelect;
 export type GoatTaskComment = typeof goatTaskComments.$inferSelect;
-export type GoatTaskMessage = typeof goatTaskMessages.$inferSelect;
-export type GoatTaskEvent = typeof goatTaskEvents.$inferSelect;
 export type GoatTaskModelUsage = typeof goatTaskModelUsage.$inferSelect;
 export type GoatTaskToolUsage = typeof goatTaskToolUsage.$inferSelect;
 export type GoatTaskSandboxUsage = typeof goatTaskSandboxUsage.$inferSelect;

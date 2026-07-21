@@ -51,7 +51,6 @@ describe("createGoatTaskScheduleForUser", () => {
             cron: "0 9 * * *",
             timezone: "America/Los_Angeles",
             prompt: "Send a daily briefing.",
-            plannedHarnessSpec: null,
             model: "anthropic/claude-sonnet-5",
             enabled: true,
             lastRunAt: null,

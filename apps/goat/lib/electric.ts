@@ -108,22 +108,6 @@ const SHAPE_SCOPES = {
     table: "goat.task_schedules",
     where: scopedUserWhere,
   },
-  task_messages: {
-    table: "goat.task_messages",
-    where: scopedTaskWhere,
-  },
-  "goat.task_messages": {
-    table: "goat.task_messages",
-    where: scopedTaskWhere,
-  },
-  task_events: {
-    table: "goat.task_events",
-    where: scopedTaskWhere,
-  },
-  "goat.task_events": {
-    table: "goat.task_events",
-    where: scopedTaskWhere,
-  },
   task_comments: {
     table: "goat.task_comments",
     where: scopedTaskWhere,

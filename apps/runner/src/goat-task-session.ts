@@ -5,7 +5,6 @@ import {
   calculateModelUsageCost,
   calculateSandboxUsageCost,
 } from "@opencompany/billing";
-import { listGoatBrainFiles } from "@opencompany/db/goat-brain-files";
 import type {
   GoatIntegrationProvider,
   GoatTask,
@@ -20,12 +19,12 @@ import {
   captureToGoatBrainInbox,
   createOpenCompanyChatSystemPrompt,
   createOpenCompanyChatToolContext,
+  nextAvailableGoatBrainId,
   OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
   runGoatBrainToolForUser,
   type WebSearchToolInput,
   type WebSearchToolOutput,
 } from "@opencompany/goat-agent";
-import { isValidGoatBrainId } from "@opencompany/goat-brain/schema";
 import {
   createGoatGatewayAttribution,
   GOAT_SPANS,
@@ -747,22 +746,6 @@ async function executeTaskWebSearch(input: {
   };
 }
 
-// Duplicated from apps/goat/lib/brain.ts (app-only module); both build on the
-// shared listGoatBrainFiles. Consolidate when the app copy moves to a package.
-async function nextAvailableGoatBrainId(brainRef: string, baseId: string): Promise<string> {
-  const base = isValidGoatBrainId(baseId) ? baseId : "untitled";
-  const rows = await listGoatBrainFiles({ brainRef }, { includeInvalid: true });
-  const used = new Set(rows.map((row) => row.brainId));
-  if (!used.has(base)) return base;
-  for (let suffix = 2; suffix < 1000; suffix++) {
-    const ending = `-${suffix}`;
-    const prefix = base.slice(0, 80 - ending.length).replace(/-+$/g, "");
-    const candidate = `${prefix || "untitled"}${ending}`;
-    if (!used.has(candidate)) return candidate;
-  }
-  throw new Error("Could not allocate a unique brain id.");
-}
-
 type LeaseGuard = { taskId: string; leaseId: string; leaseOwner: string };
 
 function leaseExistsSql(guard: LeaseGuard) {
@@ -1018,7 +1001,6 @@ async function completeTaskSession(input: { guard: LeaseGuard; result: string; n
     WITH completed_task AS (
       UPDATE goat.tasks AS task
       SET status = 'succeeded',
-          stage = 'completed',
           result = ${input.result},
           error = NULL,
           lease_id = NULL,
@@ -1099,7 +1081,6 @@ async function failTaskSession(input: { guard: LeaseGuard; error: string; now: D
     WITH failed_task AS (
       UPDATE goat.tasks AS task
       SET status = 'failed',
-          stage = 'failed',
           error = ${input.error},
           lease_id = NULL,
           lease_owner = NULL,

@@ -63,7 +63,6 @@ Local repo files inspected:
 
 - `apps/goat/docs/README.md`
 - `packages/db/src/goat-schema.ts`
-- `apps/runner/src/goat-harness.ts`
 - `apps/runner/src/goat-codex.ts`
 - `apps/runner/src/codex-session.ts`
 - `apps/runner/src/codex-app-server.ts`

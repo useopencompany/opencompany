@@ -1023,6 +1023,13 @@
       "when": 1784652412000,
       "tag": "0146_goat_task_board_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1784652413000,
+      "tag": "0147_remove_goat_task_harness",
+      "breakpoints": true
     }
   ]
 }

@@ -5,16 +5,8 @@ import { codexCliModelNameForModelId, goatTaskRunSessionId } from "@opencompany/
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import type { GoatHarnessEngine, GoatTask } from "@opencompany/db/goat-schema";
-import {
-  goatTaskEvents,
-  goatTaskMessages,
-  goatTaskModelUsage,
-  goatTaskSandboxUsage,
-  goatTasks,
-  goatTaskToolUsage,
-  goatUsers,
-} from "@opencompany/db/goat-schema";
-import { and, asc, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { goatTasks, goatUsers } from "@opencompany/db/goat-schema";
+import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
@@ -101,75 +93,6 @@ export async function getCurrentUserGoatTask(taskId: string) {
   return task ?? null;
 }
 
-export async function getCurrentUserGoatTaskRun(taskId: string) {
-  const { user } = await currentGoatUser();
-  const normalizedTaskId = taskId.trim().toUpperCase();
-  const [task] = await getDb()
-    .select()
-    .from(goatTasks)
-    .where(
-      and(
-        eq(goatTasks.userWorkosId, user.workosUserId),
-        or(eq(goatTasks.id, taskId), eq(goatTasks.displayId, normalizedTaskId)),
-      ),
-    )
-    .limit(1);
-
-  if (!task) return null;
-
-  const [messages, events, modelUsage, toolUsage, sandboxUsage] = await Promise.all([
-    getDb()
-      .select()
-      .from(goatTaskMessages)
-      .where(
-        and(
-          eq(goatTaskMessages.userWorkosId, user.workosUserId),
-          eq(goatTaskMessages.taskId, task.id),
-        ),
-      )
-      .orderBy(asc(goatTaskMessages.createdAt)),
-    getDb()
-      .select()
-      .from(goatTaskEvents)
-      .where(
-        and(eq(goatTaskEvents.userWorkosId, user.workosUserId), eq(goatTaskEvents.taskId, task.id)),
-      )
-      .orderBy(asc(goatTaskEvents.id)),
-    getDb()
-      .select()
-      .from(goatTaskModelUsage)
-      .where(
-        and(
-          eq(goatTaskModelUsage.userWorkosId, user.workosUserId),
-          eq(goatTaskModelUsage.taskId, task.id),
-        ),
-      )
-      .orderBy(asc(goatTaskModelUsage.createdAt), asc(goatTaskModelUsage.id)),
-    getDb()
-      .select()
-      .from(goatTaskToolUsage)
-      .where(
-        and(
-          eq(goatTaskToolUsage.userWorkosId, user.workosUserId),
-          eq(goatTaskToolUsage.taskId, task.id),
-        ),
-      )
-      .orderBy(asc(goatTaskToolUsage.createdAt), asc(goatTaskToolUsage.id)),
-    getDb()
-      .select()
-      .from(goatTaskSandboxUsage)
-      .where(
-        and(
-          eq(goatTaskSandboxUsage.userWorkosId, user.workosUserId),
-          eq(goatTaskSandboxUsage.taskId, task.id),
-        ),
-      )
-      .orderBy(asc(goatTaskSandboxUsage.createdAt), asc(goatTaskSandboxUsage.id)),
-  ]);
-
-  return { task, messages, events, modelUsage, toolUsage, sandboxUsage };
-}
-
 export async function archiveGoatTaskAction(taskId: string): Promise<ArchiveTaskResult> {
   if (!taskId.trim()) {
     return { ok: false, error: "Could not archive task." };
@@ -213,7 +136,6 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
     WITH canceled_task AS (
       UPDATE goat.tasks AS task
       SET status = 'canceled',
-          stage = 'canceled',
           error = 'Stopped by user.',
           lease_id = NULL,
           lease_owner = NULL,
@@ -287,7 +209,6 @@ export async function retryGoatTaskAction(taskId: string): Promise<RetryTaskResu
     WITH retried_task AS (
       UPDATE goat.tasks AS task
       SET status = 'queued',
-          stage = 'queued',
           error = NULL,
           next_run_at = ${now},
           updated_at = ${now}
@@ -453,7 +374,6 @@ async function insertOpenCompanyTaskRunGraph(input: CreateGoatTaskGraphInput) {
           schedule_id,
           scheduled_for,
           status,
-          stage,
           next_run_at,
           created_at,
           updated_at
@@ -467,7 +387,6 @@ async function insertOpenCompanyTaskRunGraph(input: CreateGoatTaskGraphInput) {
           'opencompany',
           ${input.scheduleId ?? null},
           ${input.scheduledFor ?? null},
-          'queued',
           'queued',
           ${now},
           ${now},
@@ -531,13 +450,8 @@ async function insertOpenCompanyTaskRunGraph(input: CreateGoatTaskGraphInput) {
         task.scheduled_for AS "scheduledFor",
         task.engine AS "engine",
         task.status AS "status",
-        task.stage AS "stage",
         task.result AS "result",
         task.error AS "error",
-        task.harness_spec AS "harnessSpec",
-        task.debug_trace AS "debugTrace",
-        task.codex_engine_session_id AS "codexEngineSessionId",
-        task.sandbox_id AS "sandboxId",
         task.attempts AS "attempts",
         task.next_run_at AS "nextRunAt",
         task.lease_id AS "leaseId",
@@ -586,7 +500,6 @@ async function insertCodexTaskRunGraph(input: CreateGoatTaskGraphInput) {
           schedule_id,
           scheduled_for,
           status,
-          stage,
           next_run_at,
           created_at,
           updated_at
@@ -600,7 +513,6 @@ async function insertCodexTaskRunGraph(input: CreateGoatTaskGraphInput) {
           'codex',
           ${input.scheduleId ?? null},
           ${input.scheduledFor ?? null},
-          'queued',
           'queued',
           ${now},
           ${now},
@@ -740,13 +652,8 @@ async function insertCodexTaskRunGraph(input: CreateGoatTaskGraphInput) {
         task.scheduled_for AS "scheduledFor",
         task.engine AS "engine",
         task.status AS "status",
-        task.stage AS "stage",
         task.result AS "result",
         task.error AS "error",
-        task.harness_spec AS "harnessSpec",
-        task.debug_trace AS "debugTrace",
-        task.codex_engine_session_id AS "codexEngineSessionId",
-        task.sandbox_id AS "sandboxId",
         task.attempts AS "attempts",
         task.next_run_at AS "nextRunAt",
         task.lease_id AS "leaseId",
@@ -791,8 +698,8 @@ function goatTaskToBoardView(task: GoatTask): GoatTaskView {
     model: task.model,
     scheduleId: task.scheduleId,
     scheduledFor: task.scheduledFor ? task.scheduledFor.toISOString() : null,
+    engine: task.engine,
     status: task.status,
-    stage: task.stage,
     result: task.result,
     error: task.error,
     archivedAt: task.archivedAt ? task.archivedAt.toISOString() : null,

@@ -29,7 +29,6 @@ describe("settleTaskForCodexSession", () => {
     const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
     expect(statement).toContain("UPDATE goat.tasks AS task");
     expect(statement).toContain("status = 'succeeded'");
-    expect(statement).toContain("stage = 'completed'");
     expect(statement).toContain("result = final_message.content");
     expect(statement).toContain("task.status IN ('queued', 'running')");
     expect(statement).toContain("INSERT INTO goat.task_comments");
@@ -67,7 +66,6 @@ describe("settleTaskForCodexSession", () => {
 
     const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
     expect(statement).toContain("status = 'failed'");
-    expect(statement).toContain("stage = 'failed'");
     expect(statement).toContain("goat_task_comment_goat_codex_chat_turn_1_failed");
     expect(statement).toContain(
       JSON.stringify({ status: "failed", error: "Codex sandbox could not be started." }),

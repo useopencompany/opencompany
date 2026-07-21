@@ -96,10 +96,6 @@ vi.mock("@/components/TaskDetailPanel", () => ({
   TaskDetailPanel: () => null,
 }));
 
-vi.mock("@/components/TaskRunPanel", () => ({
-  TaskRunPanel: () => null,
-}));
-
 vi.mock("@/components/TasksBoard", () => ({
   TasksBoard: () => <div data-testid="tasks-board" />,
 }));

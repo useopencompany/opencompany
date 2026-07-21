@@ -1526,8 +1526,8 @@ describe("GoatSurface chat streaming UI", () => {
             name: "Run market report",
             prompt: "Write a report",
             model: DEFAULT_GOAT_MODEL,
+            engine: "opencompany",
             status: "succeeded",
-            stage: "completed",
             result: "Done",
             error: null,
             archivedAt: null,
@@ -2040,7 +2040,6 @@ describe("GoatSurface chat streaming UI", () => {
             displayId: "TASK-42",
             name: "Research market",
             status: "failed",
-            stage: "failed",
             error: "Runner failed.",
           }),
         ]}
@@ -2092,7 +2091,6 @@ describe("GoatSurface chat streaming UI", () => {
             displayId: "TASK-42",
             name: "Research market",
             status: "succeeded",
-            stage: "completed",
           }),
         ]}
         defaultModel={DEFAULT_GOAT_MODEL}
@@ -2502,8 +2500,8 @@ function taskView(overrides: Partial<GoatTaskView> = {}): GoatTaskView {
     name: "Summarize latest email",
     prompt: "Summarize latest email",
     model: DEFAULT_GOAT_MODEL,
+    engine: "opencompany",
     status: "succeeded",
-    stage: "completed",
     result: "Done.",
     error: null,
     archivedAt: null,

@@ -1,4 +1,5 @@
 export * from "./brain-capture";
+export * from "./brain-id";
 export * from "./brain-read-tool";
 export * from "./brain-surface";
 export * from "./capabilities";

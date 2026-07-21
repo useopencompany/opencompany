@@ -25,12 +25,10 @@ export async function settleTaskForCodexSession(input: {
   const commentId = `goat_task_comment_${input.turnId}_${succeeded ? "result" : "failed"}`;
   const taskUpdateSql = succeeded
     ? sql`status = 'succeeded',
-          stage = 'completed',
           result = final_message.content,
           error = NULL,
           updated_at = ${now}`
     : sql`status = 'failed',
-          stage = 'failed',
           error = ${error},
           updated_at = ${now}`;
   const notificationContent = succeeded

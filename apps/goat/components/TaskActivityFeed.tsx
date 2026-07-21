@@ -12,43 +12,21 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useMemo } from "react";
+import { useMemo } from "react";
 import { Markdown } from "@/components/Markdown";
 import { useHydrated } from "@/components/useHydrated";
 import { formatRelativeTime } from "@/lib/task-board";
 import { createGoatCollections, type GoatTaskCommentRow } from "@/lib/task-collections";
 
-// Renders the Linear-style activity feed for session-backed tasks. Legacy
-// harness tasks have no comments, so the provided legacy content stays visible
-// for them (and while the comments shape is still loading).
-export function TaskActivitySection({
-  taskId,
-  isActive,
-  legacy,
-}: {
-  taskId: string;
-  isActive: boolean;
-  legacy: ReactNode;
-}) {
+export function TaskActivitySection({ taskId, isActive }: { taskId: string; isActive: boolean }) {
   const hydrated = useHydrated();
-  if (!hydrated) return legacy;
-  return <LiveTaskActivitySection taskId={taskId} isActive={isActive} legacy={legacy} />;
+  if (!hydrated) return <TaskActivityFeed taskId={taskId} isActive={isActive} comments={[]} />;
+  return <LiveTaskActivitySection taskId={taskId} isActive={isActive} />;
 }
 
-function LiveTaskActivitySection({
-  taskId,
-  isActive,
-  legacy,
-}: {
-  taskId: string;
-  isActive: boolean;
-  legacy: ReactNode;
-}) {
+function LiveTaskActivitySection({ taskId, isActive }: { taskId: string; isActive: boolean }) {
   const collections = useMemo(() => createGoatCollections(), []);
-  const comments = useMemo(
-    () => collections.taskRunCollections(taskId).comments,
-    [collections, taskId],
-  );
+  const comments = useMemo(() => collections.taskComments(taskId), [collections, taskId]);
   const { data: commentRows } = useLiveQuery((q) => q.from({ comment: comments }));
   const sorted = useMemo(
     () =>
@@ -58,8 +36,18 @@ function LiveTaskActivitySection({
     [commentRows],
   );
 
-  if (sorted.length === 0) return legacy;
+  return <TaskActivityFeed taskId={taskId} isActive={isActive} comments={sorted} />;
+}
 
+function TaskActivityFeed({
+  taskId,
+  isActive,
+  comments,
+}: {
+  taskId: string;
+  isActive: boolean;
+  comments: readonly GoatTaskCommentRow[];
+}) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -75,11 +63,17 @@ function LiveTaskActivitySection({
           {isActive ? "Open session · steer the run" : "Open session"}
         </Link>
       </div>
-      <ol className="flex flex-col gap-1">
-        {sorted.map((comment) => (
-          <ActivityEntry key={comment.id} comment={comment} />
-        ))}
-      </ol>
+      {comments.length > 0 ? (
+        <ol className="flex flex-col gap-1">
+          {comments.map((comment) => (
+            <ActivityEntry key={comment.id} comment={comment} />
+          ))}
+        </ol>
+      ) : (
+        <p className="px-2 text-[13px] leading-5 text-ink-subtle">
+          {isActive ? "Activity will appear as the run progresses." : "No activity recorded."}
+        </p>
+      )}
     </section>
   );
 }

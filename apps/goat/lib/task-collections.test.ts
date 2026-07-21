@@ -26,17 +26,14 @@ describe("createGoatCollections", () => {
     expect(other.documents).not.toBe(first.documents);
   });
 
-  it("reuses task-scoped Electric collections for the same task id", () => {
+  it("reuses task comment collections for the same task id", () => {
     const collections = createGoatCollections();
 
-    const first = collections.taskRunCollections("goat_task_1");
-    const second = collections.taskRunCollections("goat_task_1");
-    const other = collections.taskRunCollections("goat_task_2");
+    const first = collections.taskComments("goat_task_1");
+    const second = collections.taskComments("goat_task_1");
+    const other = collections.taskComments("goat_task_2");
 
     expect(second).toBe(first);
-    expect(second.messages).toBe(first.messages);
-    expect(second.events).toBe(first.events);
     expect(other).not.toBe(first);
-    expect(other.messages).not.toBe(first.messages);
   });
 });

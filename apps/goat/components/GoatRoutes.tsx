@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type KeyboardEvent, useEffect, useMemo, useState, useTransition } from "react";
+import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
 import { AttioIntegrationSetup } from "@/components/AttioIntegrationSetup";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import {
@@ -36,7 +36,6 @@ import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
-import { TaskRunPanel } from "@/components/TaskRunPanel";
 import { TaskScheduleDetailPanel } from "@/components/TaskScheduleDetailPanel";
 import { TasksBoard } from "@/components/TasksBoard";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
@@ -45,7 +44,7 @@ import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
 import type { GoatChatSessionView } from "@/lib/chat-ui";
 import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
+import { taskRowToView } from "@/lib/task-board";
 import {
   updateGoatChatCapabilitiesBetaAction,
   updateGoatLocalCodexBetaAction,
@@ -484,7 +483,7 @@ export function GoatTaskScheduleDetailRoute({ scheduleId }: { scheduleId: string
 }
 
 export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
-  const run = useTaskRun(taskId);
+  const task = useTaskView(taskId);
   const { featureFlags } = useGoatAppData();
 
   if (!featureFlags.taskSpawning) return <TasksDisabledRoute />;
@@ -494,106 +493,20 @@ export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
         <div className="flex w-full max-w-[720px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
           <BackLink href="/tasks" label="Tasks" />
-          {run ? <TaskDetailPanel initialRun={run} /> : <TaskRouteSkeleton label="Loading task" />}
+          {task ? <TaskDetailPanel task={task} /> : <TaskRouteSkeleton label="Loading task" />}
         </div>
       </div>
     </main>
   );
 }
 
-export function GoatTaskRunRoute({ taskId }: { taskId: string }) {
-  const run = useTaskRun(taskId);
-  const { featureFlags } = useGoatAppData();
-  const detailHref = run ? `/tasks/${encodeURIComponent(run.task.displayId)}` : "/tasks";
-
-  if (!featureFlags.taskSpawning) return <TasksDisabledRoute />;
-
-  return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-5">
-        <div className="flex w-full max-w-[880px] flex-col gap-8 pb-24 pt-14 sm:pt-20">
-          <nav className="flex flex-wrap items-center gap-2">
-            <BackLink href={detailHref} label="Task detail" />
-            <Link
-              href="/tasks"
-              prefetch
-              className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-            >
-              Tasks
-            </Link>
-          </nav>
-
-          {run ? (
-            <>
-              <header className="flex flex-col gap-3">
-                <div className="flex flex-col gap-2">
-                  <h1 className="text-[34px] font-semibold leading-tight tracking-normal text-ink">
-                    {run.task.name}
-                  </h1>
-                  <div className="text-[12.5px] leading-5 text-ink-muted">Task run</div>
-                </div>
-              </header>
-
-              <TaskRunPanel initialRun={run} />
-            </>
-          ) : (
-            <TaskRouteSkeleton label="Loading run" />
-          )}
-        </div>
-      </div>
-    </main>
-  );
-}
-
-function useTaskRun(taskId: string) {
-  const { featureFlags, tasks, taskRows } = useGoatAppData();
-  const [serverState, setServerState] = useState<{
-    taskId: string;
-    run: GoatHarnessRunViewModel | null;
-    notFound: boolean;
-  } | null>(null);
+function useTaskView(taskId: string) {
+  const { taskRows } = useGoatAppData();
   const normalizedTaskId = taskId.trim().toUpperCase();
-  const liveTask = useMemo(
-    () =>
-      taskRows.find((task) => task.id === taskId || task.display_id === normalizedTaskId) ??
-      tasks.find((task) => task.id === taskId || task.displayId === normalizedTaskId) ??
-      null,
-    [normalizedTaskId, taskId, taskRows, tasks],
-  );
-  const placeholderRun = useMemo(
-    () => (liveTask ? buildGoatHarnessRun({ task: liveTask, messages: [], events: [] }) : null),
-    [liveTask],
-  );
-
-  useEffect(() => {
-    if (!featureFlags.taskSpawning) return;
-    const controller = new AbortController();
-    void fetch(`/api/tasks/${encodeURIComponent(taskId)}/run`, {
-      cache: "no-store",
-      credentials: "same-origin",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (response.status === 404) {
-          setServerState({ taskId, run: null, notFound: true });
-          return null;
-        }
-        if (!response.ok) throw new Error("Could not load task run.");
-        return (await response.json()) as GoatHarnessRunViewModel;
-      })
-      .then((run) => {
-        if (run) setServerState({ taskId, run, notFound: false });
-      })
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-      });
-    return () => controller.abort();
-  }, [featureFlags.taskSpawning, taskId]);
-
-  const currentServerState = serverState?.taskId === taskId ? serverState : null;
-  if (currentServerState?.run) return currentServerState.run;
-  if (currentServerState?.notFound && !placeholderRun) return null;
-  return placeholderRun;
+  return useMemo(() => {
+    const row = taskRows.find((task) => task.id === taskId || task.display_id === normalizedTaskId);
+    return row ? taskRowToView(row) : null;
+  }, [normalizedTaskId, taskId, taskRows]);
 }
 
 function TasksDisabledRoute() {

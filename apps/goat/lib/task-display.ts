@@ -1,14 +1,4 @@
-import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
-
-export const GOAT_STAGE_COPY: Record<GoatTaskStage, string> = {
-  queued: "Waiting for runner",
-  planning: "Planning task",
-  sandboxing: "Preparing task",
-  running: "Running task",
-  completed: "Completed",
-  failed: "Failed",
-  canceled: "Canceled",
-};
+import type { GoatTaskStatus } from "@opencompany/db/goat-schema";
 
 export const GOAT_STATUS_COPY: Record<GoatTaskStatus, string> = {
   queued: "Queued",

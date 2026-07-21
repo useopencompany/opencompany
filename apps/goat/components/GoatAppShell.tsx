@@ -1,4 +1,4 @@
-import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import type { GoatTaskStatus } from "@opencompany/db/goat-schema";
 import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import type { ReactNode } from "react";
 import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatAppDataProvider";
@@ -91,8 +91,8 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       model: task.model,
       scheduleId: task.scheduleId,
       scheduledFor: task.scheduledFor?.toISOString() ?? null,
+      engine: task.engine,
       status: task.status as GoatTaskStatus,
-      stage: task.stage as GoatTaskStage,
       result: task.result,
       error: task.error,
       archivedAt: task.archivedAt?.toISOString() ?? null,

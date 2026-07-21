@@ -61,24 +61,12 @@ describe("createGoatTaskForUser", () => {
         name: "Research x",
         prompt: "Research x",
         model: DEFAULT_GOAT_MODEL,
+        scheduleId: null,
+        scheduledFor: null,
+        engine: "opencompany",
         status: "queued",
-        stage: "queued",
         result: null,
         error: null,
-        harnessSpec: {
-          schemaVersion: "goat.harness.v1",
-          engine: "opencompany",
-          model: DEFAULT_GOAT_MODEL,
-          systemPrompt: "",
-          initialUserMessage: "Research x",
-          tools: ["exa_search", "gmail_search"],
-          skills: [],
-          maxModelSteps: 16,
-          resultMode: "assistant_final",
-        },
-        debugTrace: {},
-        codexEngineSessionId: null,
-        sandboxId: null,
         attempts: 0,
         nextRunAt: "2026-01-01T00:00:00.000Z",
         leaseId: null,
@@ -105,7 +93,7 @@ describe("createGoatTaskForUser", () => {
       model: DEFAULT_GOAT_MODEL,
     });
 
-    expect(task).toMatchObject({ id: "task_1", status: "queued", stage: "queued" });
+    expect(task).toMatchObject({ id: "task_1", status: "queued" });
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.triggerGoatTaskRun).toHaveBeenCalledWith(
       expect.stringMatching(/^goat_task_/),
