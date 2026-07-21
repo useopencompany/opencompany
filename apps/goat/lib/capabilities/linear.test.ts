@@ -69,7 +69,7 @@ describe("selectLinearReadTools", () => {
   });
 
   it("exposes only issue creation for write calls and keeps read calls mutation-free", async () => {
-    const createIssue = vi.fn(async () => ({ identifier: "G-123" }));
+    const saveIssue = vi.fn(async () => ({ identifier: "G-123" }));
     const catalog = {
       ...fakeCatalog([
         "list_issues",
@@ -78,50 +78,101 @@ describe("selectLinearReadTools", () => {
         "create_comment",
         "delete_issue",
       ]),
-      create_issue: { description: "Create issue", execute: createIssue },
+      save_issue: {
+        description: "Create or update issue",
+        inputSchema: {
+          jsonSchema: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              title: { type: "string" },
+              team: { type: "string" },
+              description: { type: "string" },
+              removeBlocks: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+        execute: saveIssue,
+      },
     } as unknown as ToolSet;
 
     expect(Object.keys(selectLinearWorkerTools(catalog, "read"))).not.toContain("create_issue");
+    expect(Object.keys(selectLinearWorkerTools(catalog, "read"))).not.toContain("save_issue");
 
     const writeTools = selectLinearWorkerTools(catalog, "write");
     expect(Object.keys(writeTools)).toContain("create_issue");
+    expect(Object.keys(writeTools)).not.toContain("save_issue");
     expect(Object.keys(writeTools)).not.toContain("update_issue");
     expect(Object.keys(writeTools)).not.toContain("create_comment");
     expect(Object.keys(writeTools)).not.toContain("delete_issue");
 
     for (let index = 0; index < 10; index += 1) {
       await writeTools.create_issue?.execute?.(
-        { title: `Issue ${index}` },
+        { title: ` Issue ${index} `, team: " Goat " },
         { toolCallId: `call_${index}`, messages: [] },
       );
     }
     await expect(
       writeTools.create_issue?.execute?.(
-        { title: "Issue 11" },
+        { title: "Issue 11", team: "Goat" },
         { toolCallId: "call_11", messages: [] },
       ),
     ).rejects.toThrow("at most 10 issues");
-    expect(createIssue).toHaveBeenCalledTimes(10);
+    expect(saveIssue).toHaveBeenCalledTimes(10);
+    expect(saveIssue).toHaveBeenLastCalledWith(
+      { title: "Issue 9", team: "Goat" },
+      expect.objectContaining({ toolCallId: "call_9" }),
+    );
+
+    const schema = (writeTools.create_issue as unknown as { inputSchema: { jsonSchema: object } })
+      .inputSchema.jsonSchema;
+    expect(schema).toMatchObject({ required: ["title", "team"] });
+    expect(schema).not.toHaveProperty("properties.id");
+    expect(schema).not.toHaveProperty("properties.removeBlocks");
   });
 
-  it("does not retry issue creation after an ambiguous provider failure", async () => {
-    const createIssue = vi.fn(async () => {
-      throw new Error("connection reset");
-    });
+  it("rejects update-shaped save_issue input before calling Linear", async () => {
+    const saveIssue = vi.fn(async () => ({ identifier: "G-123" }));
     const tools = selectLinearWorkerTools(
       {
-        create_issue: { description: "Create issue", execute: createIssue },
+        save_issue: { description: "Save issue", execute: saveIssue },
       } as unknown as ToolSet,
       "write",
     );
 
     await expect(
-      tools.create_issue?.execute?.({ title: "Fix login" }, { toolCallId: "call_1", messages: [] }),
+      tools.create_issue?.execute?.(
+        { id: "G-123", title: "Rename", team: "Goat" },
+        { toolCallId: "call_1", messages: [] },
+      ),
+    ).rejects.toThrow("update-only field `id`");
+    expect(saveIssue).not.toHaveBeenCalled();
+  });
+
+  it("does not retry issue creation after an ambiguous provider failure", async () => {
+    const saveIssue = vi.fn(async () => {
+      throw new Error("connection reset");
+    });
+    const tools = selectLinearWorkerTools(
+      {
+        save_issue: { description: "Save issue", execute: saveIssue },
+      } as unknown as ToolSet,
+      "write",
+    );
+
+    await expect(
+      tools.create_issue?.execute?.(
+        { title: "Fix login", team: "Goat" },
+        { toolCallId: "call_1", messages: [] },
+      ),
     ).rejects.toThrow("connection reset");
     await expect(
-      tools.create_issue?.execute?.({ title: "Fix login" }, { toolCallId: "call_2", messages: [] }),
+      tools.create_issue?.execute?.(
+        { title: "Fix login", team: "Goat" },
+        { toolCallId: "call_2", messages: [] },
+      ),
     ).rejects.toThrow("will not be retried");
-    expect(createIssue).toHaveBeenCalledTimes(1);
+    expect(saveIssue).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes list_issues arguments before calling Linear", async () => {

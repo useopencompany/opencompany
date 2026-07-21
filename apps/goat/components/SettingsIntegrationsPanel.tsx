@@ -249,10 +249,7 @@ function IntegrationCards({
             provider="google_drive"
             accounts={integrations.personalAccounts.google_drive}
           />
-          <IntegrationProviderGroupCard
-            provider="linear"
-            accounts={integrations.personalAccounts.linear}
-          />
+          <IntegrationCardRow integration={integrations.linear} />
           <IntegrationProviderGroupCard
             provider="slack"
             accounts={integrations.personalAccounts.slack}
