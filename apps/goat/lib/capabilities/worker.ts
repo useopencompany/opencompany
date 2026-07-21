@@ -129,6 +129,7 @@ export async function runGoatCapabilityWorker(input: {
     usage,
     debug: {
       capability: input.capability.id,
+      operation: input.context.operation,
       workerModel: input.capability.workerModel,
       steps,
       durationMs: Date.now() - startedAt,
@@ -137,6 +138,16 @@ export async function runGoatCapabilityWorker(input: {
       transcript,
     },
   });
+
+  if (input.context.operation === "write" && input.capability.sideEffect !== "write") {
+    return finish(
+      errorEnvelope(
+        "invalid_request",
+        `The ${input.capability.id} capability does not support write operations.`,
+      ),
+      "error",
+    );
+  }
 
   const loopController = new AbortController();
   const timeoutHandle = setTimeout(() => loopController.abort(), WORKER_LOOP_TIMEOUT_MS);
@@ -280,11 +291,22 @@ function workerSystemPrompt(
 ) {
   const user = context.userContext;
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || "unknown";
+  const operationLines =
+    context.operation === "write"
+      ? [
+          `You are a focused worker executing one explicitly requested change against the ${capability.id} capability.`,
+          "This call is authorized for writes, but only the exact external changes stated in the request. Do not add, broaden, or infer other mutations.",
+          "If a material target or value is ambiguous, do not mutate it. State what is missing in your answer; no one can answer questions inside this worker run.",
+          "Never retry a mutation after an error or an ambiguous result. Report each completed change with its provider id and url.",
+        ]
+      : [
+          `You are a focused read-only worker executing one request against the ${capability.id} capability.`,
+          "All tools are read-only; you cannot change anything.",
+        ];
   return [
-    `You are a focused read-only worker executing one request against the ${capability.id} capability.`,
+    ...operationLines,
     `You have at most ${WORKER_MAX_STEPS} tool steps; prefer the fewest calls that answer the request.`,
     "Never ask questions — no one will answer. Make the best reasonable interpretation of the request.",
-    "All tools are read-only; you cannot change anything.",
     "When you have what you need, stop calling tools and write your findings as plain text: the direct answer first, then the provider ids and urls of everything you cited.",
     "<recipes>",
     ...capability.recipeLines,
@@ -299,6 +321,7 @@ function workerSystemPrompt(
 const FINALIZER_SYSTEM_PROMPT = [
   "You compact a worker agent's findings into a structured result for the assistant that dispatched it.",
   "The summary must answer the original request from the findings — do not invent anything the transcript does not support.",
+  "When the request changed provider state, say exactly what was created or changed and do not claim success without a successful tool result.",
   "List every provider object the summary relies on in entities, with stable ids and urls taken verbatim from the transcript.",
   "If the run was cut off (status step_cap or timeout), summarize what WAS found and set error to that status code with a hint saying the result is partial.",
   "If the findings do not answer the request, set error code empty_result with a hint about what would help.",

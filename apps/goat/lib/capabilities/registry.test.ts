@@ -17,7 +17,7 @@ vi.mock("@/lib/capabilities/slack", () => ({
 vi.mock("@/lib/capabilities/linear", () => ({
   linearCapability: {
     id: "linear",
-    sideEffect: "read",
+    sideEffect: "write",
     workerModel: "openai/gpt-5.4-mini",
     resolve: mocks.linearResolve,
   },
@@ -56,6 +56,7 @@ describe("resolveGoatCapabilityUniverse", () => {
     const universe = await resolveGoatCapabilityUniverse("user_1");
     expect(universe.map((capability) => capability.id)).toEqual(["slack", "youtube_transcript"]);
     expect(universe[0]?.workerModel).toBe("openai/gpt-5.4-mini");
+    expect(universe[0]?.sideEffect).toBe("read");
     expect(universe[0]?.indexLine).toBe(RESOLVED.indexLine);
   });
 
@@ -66,6 +67,7 @@ describe("resolveGoatCapabilityUniverse", () => {
 
     const universe = await resolveGoatCapabilityUniverse("user_1");
     expect(universe.map((capability) => capability.id)).toEqual(["linear"]);
+    expect(universe[0]?.sideEffect).toBe("write");
   });
 
   it("returns an empty universe when nothing is connected", async () => {

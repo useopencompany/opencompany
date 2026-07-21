@@ -41,7 +41,11 @@ import {
   isGoatChatCapabilitiesKilled,
   resolveGoatCapabilityUniverse,
 } from "@/lib/capabilities/registry";
-import type { GoatCapabilityCallDebug, ResolvedGoatCapability } from "@/lib/capabilities/types";
+import type {
+  GoatCapabilityCallDebug,
+  GoatCapabilityOperation,
+  ResolvedGoatCapability,
+} from "@/lib/capabilities/types";
 import { runGoatCapabilityWorker } from "@/lib/capabilities/worker";
 import {
   createDbGoatChatStore,
@@ -458,7 +462,10 @@ export async function POST(request: Request): Promise<Response> {
     ...(capabilityUniverse.length > 0
       ? {
           capabilities: {
-            list: capabilityUniverse.map((capability) => ({ id: capability.id })),
+            list: capabilityUniverse.map((capability) => ({
+              id: capability.id,
+              sideEffect: capability.sideEffect,
+            })),
             execute: (call) => {
               capabilityCallOrdinal += 1;
               const capability = capabilityUniverse.find((entry) => entry.id === call.capability);
@@ -475,6 +482,7 @@ export async function POST(request: Request): Promise<Response> {
               }
               return executeChatCapabilityCall({
                 capability,
+                operation: call.operation,
                 request: call.request,
                 toolCallId: call.toolCallId,
                 ordinal: capabilityCallOrdinal,
@@ -946,6 +954,7 @@ async function executeChatWebSearch(input: {
 
 async function executeChatCapabilityCall(input: {
   capability: ResolvedGoatCapability;
+  operation: GoatCapabilityOperation;
   request: string;
   toolCallId: string;
   ordinal: number;
@@ -972,11 +981,13 @@ async function executeChatCapabilityCall(input: {
     startGoatSpan(GOAT_SPANS.chatCapabilityCall, {
       ...input.attributes,
       "goat.capability": input.capability.id,
+      "goat.capability_operation": input.operation,
       "goat.worker_model": input.capability.workerModel,
     }),
   );
   const metricAttributes = {
     "goat.capability": input.capability.id,
+    "goat.capability_operation": input.operation,
     "goat.worker_model": input.capability.workerModel,
   };
 
@@ -988,6 +999,7 @@ async function executeChatCapabilityCall(input: {
         userWorkosId: input.user.workosUserId,
         signal: input.signal,
         currentDate: input.currentDate,
+        operation: input.operation,
         userContext: {
           email: input.user.email,
           firstName: input.user.firstName,

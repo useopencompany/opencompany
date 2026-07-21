@@ -70,7 +70,10 @@ export const WEB_SEARCH_RECENCY_DAYS_DESCRIPTION =
   "Optional freshness window for latest/recent requests. Use 7 for very recent news, 30 for recent updates, and 90 for broader current context.";
 
 export const USE_CAPABILITY_TOOL_DESCRIPTION =
-  "Fetch live data from one of the user's connected capabilities listed in <capabilities>. A fresh worker agent handles each call with only that capability's tools and returns a compact summary plus entity references. Strictly read-only: it can never post, edit, or delete anything. Prefer one well-scoped call per capability; independent lookups across capabilities may be dispatched in parallel in the same step.";
+  "Use one of the user's connected capabilities listed in <capabilities>. A fresh worker agent handles each call with only that capability's allowed tools and returns a compact summary plus entity references. Use read for lookups. Use write only when the user explicitly requested a change that the capability says it CAN perform. Prefer one well-scoped call per capability; independent read lookups may be dispatched in parallel in the same step.";
+
+export const USE_CAPABILITY_OPERATION_DESCRIPTION =
+  "Operation class. Use read for any lookup. Use write only when the latest user message explicitly and unambiguously asks for an external change supported by the selected capability; otherwise ask the user for the missing detail instead of calling the tool.";
 
 export const USE_CAPABILITY_REQUEST_DESCRIPTION =
-  "A fully self-contained natural-language request for the worker, which sees none of this conversation. Resolve pronouns and references into concrete names, emails, channel names, issue keys, or URLs from chat context, and convert relative dates like 'yesterday' or 'last week' into absolute dates. State the desired detail, e.g. 'the 5 most recent'. Do not include instructions about which tools to use or how to format output.";
+  "A fully self-contained natural-language request for the worker, which sees none of this conversation. Resolve pronouns and references into concrete names, emails, channel names, issue keys, or URLs from chat context, and convert relative dates like 'yesterday' or 'last week' into absolute dates. For writes, include the exact requested changes and targets without inventing missing values. State the desired detail, e.g. 'the 5 most recent'. Do not include instructions about which tools to use or how to format output.";

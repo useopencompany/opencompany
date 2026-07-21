@@ -11,7 +11,9 @@ import {
   loadGoatLinearMcpWorkerConnection,
 } from "@/lib/integrations/linear-mcp";
 
-const MAX_LINEAR_WORKER_TOOLS = 12;
+const MAX_LINEAR_READ_TOOLS = 12;
+const MAX_LINEAR_WRITE_TOOLS = 13;
+const MAX_LINEAR_ISSUE_CREATES_PER_CALL = 10;
 
 // Verified against the live catalog during manual testing; anything the server
 // renames simply falls back to the prefix allowlist below.
@@ -29,6 +31,11 @@ const PREFERRED_READ_TOOLS = [
   "list_documents",
   "get_document",
 ] as const;
+
+// Keep the first write release deliberately narrow. Linear's MCP server also
+// exposes broader mutations, but the foreground worker currently supports only
+// creating issues that the user explicitly requested.
+const ALLOWED_WRITE_TOOLS = ["create_issue"] as const;
 
 const READ_TOOL_PATTERN = /^(list|get|search)_/;
 const MUTATION_TOOL_PATTERN = /(^|_)(create|update|delete|add|remove|archive|assign|move|set)(_|$)/;
@@ -96,7 +103,7 @@ const LINEAR_LIST_ISSUES_INPUT_SCHEMA = jsonSchema<Record<string, unknown>>({
 
 export const linearCapability: GoatCapabilityDefinition = {
   id: "linear",
-  sideEffect: "read",
+  sideEffect: "write",
   workerModel: "openai/gpt-5.4-mini",
   async resolve(userWorkosId) {
     const state = await getGoatLinearIntegrationState(userWorkosId);
@@ -104,11 +111,13 @@ export const linearCapability: GoatCapabilityDefinition = {
 
     return {
       indexLine:
-        "linear — reads the user's Linear workspace. CAN list and look up issues, projects, teams, users, comments, and documents. CANNOT create, update, comment on, or delete anything.",
+        "linear — reads the user's Linear workspace and creates issues on explicit request. CAN list and look up issues, projects, teams, users, comments, and documents; CAN create issues. CANNOT update issues, add comments, or delete anything.",
       recipeLines: [
         "To find issues, use list_issues with its filters (team, assignee, state, updatedAt ranges); do not use documentation search for workspace issues.",
         "Omit unused list_issues filters. Use unassigned=true only for explicitly unassigned work and unprioritized=true only for explicitly no-priority work.",
         "Resolve people or teams first when a filter needs an id the request only names.",
+        "For an explicitly requested issue creation, resolve the team and named project or status only as needed, then call create_issue once for each requested issue. Preserve the requested title and description details.",
+        "Before creating, search the target project for an exact-title match and reuse it instead of creating a duplicate. Never retry create_issue after an ambiguous provider error.",
         'Cite each issue you rely on as an entity: type "linear_issue", id set to the issue identifier (for example ENG-123), url set to the issue URL from the tool output.',
       ],
       createTools: createLinearTools,
@@ -147,7 +156,7 @@ async function createLinearTools(context: GoatCapabilityWorkerContext) {
     const definitions = await client.listTools({ options: { signal: context.signal } });
     const rawTools = client.toolsFromDefinitions(definitions) as ToolSet;
     return {
-      tools: selectLinearReadTools(rawTools),
+      tools: selectLinearWorkerTools(rawTools, context.operation),
       close: async () => {
         await client.close().catch(() => {});
       },
@@ -158,22 +167,46 @@ async function createLinearTools(context: GoatCapabilityWorkerContext) {
   }
 }
 
-// The Linear MCP catalog is not split by side effect, so the read-only
-// guarantee lives here: mutations are excluded by name, and only prefix-safe
-// read tools pass, preferred ones first.
+// The Linear MCP catalog is not split by side effect, so selection is the
+// security boundary: read calls receive only prefix-safe reads; write calls add
+// the explicit write allowlist and no other mutation.
 export function selectLinearReadTools(rawTools: ToolSet): ToolSet {
+  return selectLinearWorkerTools(rawTools, "read");
+}
+
+export function selectLinearWorkerTools(
+  rawTools: ToolSet,
+  operation: GoatCapabilityWorkerContext["operation"],
+): ToolSet {
   const readNames = Object.keys(rawTools).filter(
     (name) => READ_TOOL_PATTERN.test(name) && !MUTATION_TOOL_PATTERN.test(name),
   );
+  const allowedNames = [
+    ...readNames,
+    ...(operation === "write"
+      ? ALLOWED_WRITE_TOOLS.filter((name) => Object.hasOwn(rawTools, name))
+      : []),
+  ];
+  const preferredNames = [...PREFERRED_READ_TOOLS, ...ALLOWED_WRITE_TOOLS];
   const ordered = [
-    ...PREFERRED_READ_TOOLS.filter((name) => readNames.includes(name)),
-    ...readNames.filter((name) => !(PREFERRED_READ_TOOLS as readonly string[]).includes(name)),
-  ].slice(0, MAX_LINEAR_WORKER_TOOLS);
+    ...preferredNames.filter((name) => allowedNames.includes(name)),
+    ...allowedNames.filter((name) => !(preferredNames as readonly string[]).includes(name)),
+  ].slice(0, operation === "write" ? MAX_LINEAR_WRITE_TOOLS : MAX_LINEAR_READ_TOOLS);
 
   const tools: ToolSet = {};
+  let issueCreateCount = 0;
   for (const name of ordered) {
     const entry = rawTools[name];
-    if (entry) tools[name] = name === "list_issues" ? safeLinearListIssuesTool(entry) : entry;
+    if (!entry) continue;
+    tools[name] =
+      name === "list_issues"
+        ? safeLinearListIssuesTool(entry)
+        : name === "create_issue"
+          ? limitedLinearCreateIssueTool(entry, () => {
+              issueCreateCount += 1;
+              return issueCreateCount;
+            })
+          : entry;
   }
   return tools;
 }
@@ -233,6 +266,38 @@ function safeLinearListIssuesTool(rawTool: ToolSet[string]): ToolSet[string] {
     inputSchema: LINEAR_LIST_ISSUES_INPUT_SCHEMA,
     execute: (input: unknown, options: ToolExecutionOptions) =>
       execute(normalizeLinearListIssuesInput(input), options),
+  } as unknown as ToolSet[string];
+}
+
+function limitedLinearCreateIssueTool(
+  rawTool: ToolSet[string],
+  nextCount: () => number,
+): ToolSet[string] {
+  const executableTool = rawTool as unknown as LinearWorkerTool;
+  const execute = executableTool.execute?.bind(executableTool);
+  if (!execute) return rawTool;
+  let previousAttemptFailed = false;
+
+  return {
+    ...executableTool,
+    execute: async (input: unknown, options: ToolExecutionOptions) => {
+      if (previousAttemptFailed) {
+        throw new Error(
+          "A previous create_issue attempt had an ambiguous failure, so it will not be retried.",
+        );
+      }
+      if (nextCount() > MAX_LINEAR_ISSUE_CREATES_PER_CALL) {
+        throw new Error(
+          `A Linear worker call can create at most ${MAX_LINEAR_ISSUE_CREATES_PER_CALL} issues.`,
+        );
+      }
+      try {
+        return await execute(input, options);
+      } catch (error) {
+        previousAttemptFailed = true;
+        throw error;
+      }
+    },
   } as unknown as ToolSet[string];
 }
 

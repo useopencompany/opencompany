@@ -1,6 +1,10 @@
 import { linearCapability } from "@/lib/capabilities/linear";
 import { slackCapability } from "@/lib/capabilities/slack";
-import type { GoatCapabilityDefinition, ResolvedGoatCapability } from "@/lib/capabilities/types";
+import type {
+  GoatCapabilityDefinition,
+  GoatCapabilityId,
+  ResolvedGoatCapability,
+} from "@/lib/capabilities/types";
 import { youtubeTranscriptCapability } from "@/lib/capabilities/youtube-transcript";
 
 const GOAT_CAPABILITY_REGISTRY: readonly GoatCapabilityDefinition[] = [
@@ -9,11 +13,13 @@ const GOAT_CAPABILITY_REGISTRY: readonly GoatCapabilityDefinition[] = [
   youtubeTranscriptCapability,
 ];
 
+const WRITE_CAPABILITY_IDS = new Set<GoatCapabilityId>(["linear"]);
+
 for (const definition of GOAT_CAPABILITY_REGISTRY) {
-  // v1 is read-only end to end; a non-read capability slipping in here would
-  // silently widen what a worker model can do with user credentials.
-  if (definition.sideEffect !== "read") {
-    throw new Error(`Capability ${definition.id} is not read-class; v1 registers read tools only.`);
+  // Write-capable workers require an explicit registry decision. This prevents
+  // widening a read integration merely by changing its local definition.
+  if (definition.sideEffect === "write" && !WRITE_CAPABILITY_IDS.has(definition.id)) {
+    throw new Error(`Capability ${definition.id} is not approved for foreground writes.`);
   }
 }
 
@@ -32,6 +38,7 @@ export async function resolveGoatCapabilityUniverse(
       if (!availability) return null;
       return {
         id: definition.id,
+        sideEffect: definition.sideEffect,
         workerModel: definition.workerModel,
         ...availability,
       } satisfies ResolvedGoatCapability;
