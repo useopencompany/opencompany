@@ -275,6 +275,9 @@ export function GoatSurface({
   const [mentionOptionIndex, setMentionOptionIndex] = useState(0);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
+  const [persistedChatSessionId, setPersistedChatSessionId] = useState<string | null>(
+    initialChat?.id ?? null,
+  );
   // Keyed useChat instance: changes only when the user opens a different chat,
   // NOT when a new session gets its server id mid-turn (that would discard the
   // in-flight stream state).
@@ -501,6 +504,7 @@ export function GoatSurface({
       const ownsRoute = Boolean(sessionId && routedChatSessionIdRef.current === sessionId);
       if (sessionId && ownsRoute) {
         setChatSessionId(sessionId);
+        setPersistedChatSessionId(sessionId);
         if (pendingNewSessionId === sessionId) {
           pendingNewSessionIdRef.current = null;
         }
@@ -758,6 +762,7 @@ export function GoatSurface({
       routedChatSessionIdRef.current = chat?.id ?? null;
       pendingNewSessionIdRef.current = null;
       setChatSessionId(chat?.id ?? null);
+      setPersistedChatSessionId(chat?.id ?? null);
       setChatInstanceKey(chat?.id ?? `goat-chat-main-${crypto.randomUUID()}`);
       setChatModel(
         engineTarget === "local_codex"
@@ -1108,6 +1113,7 @@ export function GoatSurface({
         pendingNewSessionIdRef.current = newSessionId;
         routedChatSessionIdRef.current = newSessionId;
         setChatSessionId(newSessionId);
+        setPersistedChatSessionId(null);
         window.history.replaceState(null, "", chatHref(newSessionId));
       }
       beginActiveTurn();
@@ -1132,6 +1138,7 @@ export function GoatSurface({
           if (ownsRoute) {
             trackOptimisticAttachmentPreviews(result.userMessageId, attachmentsMetadata);
             setChatSessionId(result.sessionId);
+            setPersistedChatSessionId(result.sessionId);
             if (pendingNewSessionId === result.sessionId) pendingNewSessionIdRef.current = null;
             setEngineChatSession({ engine, chatSessionId: result.sessionId });
             activeTurnAssistantMessageIdRef.current = result.assistantMessageId;
@@ -1192,6 +1199,7 @@ export function GoatSurface({
       pendingNewSessionIdRef.current = newSessionId;
       routedChatSessionIdRef.current = newSessionId;
       setChatSessionId(newSessionId);
+      setPersistedChatSessionId(null);
       window.history.replaceState(null, "", chatHref(newSessionId));
     }
     beginActiveTurn();
@@ -1626,7 +1634,7 @@ export function GoatSurface({
         </div>
       )}
 
-      {mode === "chat" && chatSessionId ? (
+      {mode === "chat" && chatSessionId && persistedChatSessionId === chatSessionId ? (
         <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
       ) : null}
       {mode === "chat" && activeEngineChat?.engine === "local_codex" ? (
