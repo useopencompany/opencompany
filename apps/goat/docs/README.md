@@ -134,16 +134,18 @@ timezone. `goat_brain` is always available and `web_search` is available when Ex
 Connected chat capabilities are dispatched through `use_capability` with an explicit operation:
 `read` for retrieval, or an advertised `create` or `write` for mutations. Slack and YouTube remain
 read-only. Linear advertises `write`; its read calls receive only read tools, while an explicitly
-requested write call additionally receives bounded `create_issue` access. Attio advertises
-scope-dependent `create` access for standard people, companies, deals, and notes, with one
-successful creation per call. Google Calendar advertises `create` and `write` only for accounts
-connected with the `calendar.events` scope. Calendar read workers can list events and free/busy
+requested write call additionally receives bounded `create_issue` access. Attio advertises read
+access for available standard records, interaction-recency queries, workspace lists and their
+entries, and notes. It advertises scope-dependent `create` access for standard people, companies,
+enabled deals, and notes, with one successful creation per call. Google Calendar advertises `create`
+and `write` only for accounts connected with the `calendar.events` scope. Calendar read workers can
+list events and free/busy
 windows; create workers receive one event-create tool, while write workers receive event-update and
 event-delete tools. A Calendar worker can make at most one mutation attempt and never changes
 attendees or sends invitations. Existing read-only Calendar connections must be reconnected before
 the mutation operations are advertised by using **Reconnect or add** and selecting the same Google
-account. Linear updates, comments, deletes, and every other
-unlisted mutation remain unavailable, as do Attio updates and deletes.
+account. Linear updates, comments, deletes, and every other unlisted mutation remain unavailable, as
+do Attio updates and deletes.
 `start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The

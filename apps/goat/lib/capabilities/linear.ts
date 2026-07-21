@@ -1,5 +1,5 @@
 import { createMCPClient } from "@ai-sdk/mcp";
-import { jsonSchema, type ToolExecutionOptions, type ToolSet } from "ai";
+import { type JSONSchema7, jsonSchema, type ToolExecutionOptions, type ToolSet } from "ai";
 import {
   GoatCapabilityAuthError,
   type GoatCapabilityDefinition,
@@ -36,7 +36,29 @@ const PREFERRED_READ_TOOLS = [
 // Keep the first write release deliberately narrow. Linear's MCP server also
 // exposes broader mutations, but the foreground worker currently supports only
 // creating issues that the user explicitly requested.
-const ALLOWED_WRITE_TOOLS = ["create_issue"] as const;
+const LINEAR_CREATE_ISSUE_TOOL = {
+  name: "create_issue",
+  remoteName: "save_issue",
+} as const;
+
+const LINEAR_UPDATE_ONLY_ISSUE_FIELDS = [
+  "id",
+  "removeReleases",
+  "removeBlocks",
+  "removeBlockedBy",
+  "removeRelatedTo",
+] as const;
+
+const LINEAR_CREATE_ISSUE_FALLBACK_INPUT_SCHEMA = jsonSchema<Record<string, unknown>>({
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "team"],
+  properties: {
+    title: { type: "string", minLength: 1, description: "Issue title" },
+    team: { type: "string", minLength: 1, description: "Team name or ID" },
+    description: { type: "string", description: "Issue description as Markdown" },
+  },
+});
 
 const READ_TOOL_PATTERN = /^(list|get|search)_/;
 const MUTATION_TOOL_PATTERN = /(^|_)(create|update|delete|add|remove|archive|assign|move|set)(_|$)/;
@@ -204,11 +226,11 @@ export function selectLinearWorkerTools(
   );
   const allowedNames = [
     ...readNames,
-    ...(operation === "write"
-      ? ALLOWED_WRITE_TOOLS.filter((name) => Object.hasOwn(rawTools, name))
+    ...(operation === "write" && Object.hasOwn(rawTools, LINEAR_CREATE_ISSUE_TOOL.remoteName)
+      ? [LINEAR_CREATE_ISSUE_TOOL.name]
       : []),
   ];
-  const preferredNames = [...PREFERRED_READ_TOOLS, ...ALLOWED_WRITE_TOOLS];
+  const preferredNames = [...PREFERRED_READ_TOOLS, LINEAR_CREATE_ISSUE_TOOL.name];
   const ordered = [
     ...preferredNames.filter((name) => allowedNames.includes(name)),
     ...allowedNames.filter((name) => !(preferredNames as readonly string[]).includes(name)),
@@ -217,13 +239,16 @@ export function selectLinearWorkerTools(
   const tools: ToolSet = {};
   let issueCreateCount = 0;
   for (const name of ordered) {
-    const entry = rawTools[name];
+    const entry =
+      name === LINEAR_CREATE_ISSUE_TOOL.name
+        ? rawTools[LINEAR_CREATE_ISSUE_TOOL.remoteName]
+        : rawTools[name];
     if (!entry) continue;
     tools[name] =
       name === "list_issues"
         ? safeLinearListIssuesTool(entry)
-        : name === "create_issue"
-          ? limitedLinearCreateIssueTool(entry, () => {
+        : name === LINEAR_CREATE_ISSUE_TOOL.name
+          ? createOnlyLinearIssueTool(entry, () => {
               issueCreateCount += 1;
               return issueCreateCount;
             })
@@ -273,7 +298,9 @@ export function normalizeLinearListIssuesInput(input: unknown): Record<string, u
 }
 
 type LinearWorkerTool = {
+  description?: string;
   execute?: (input: unknown, options: ToolExecutionOptions) => unknown | Promise<unknown>;
+  inputSchema?: unknown;
   [key: string]: unknown;
 };
 
@@ -290,7 +317,7 @@ function safeLinearListIssuesTool(rawTool: ToolSet[string]): ToolSet[string] {
   } as unknown as ToolSet[string];
 }
 
-function limitedLinearCreateIssueTool(
+function createOnlyLinearIssueTool(
   rawTool: ToolSet[string],
   nextCount: () => number,
 ): ToolSet[string] {
@@ -301,25 +328,64 @@ function limitedLinearCreateIssueTool(
 
   return {
     ...executableTool,
+    description:
+      "Create a Linear issue. This tool cannot update an existing issue. A title and team are required.",
+    inputSchema: linearCreateIssueInputSchema(executableTool.inputSchema),
     execute: async (input: unknown, options: ToolExecutionOptions) => {
       if (previousAttemptFailed) {
         throw new Error(
           "A previous create_issue attempt had an ambiguous failure, so it will not be retried.",
         );
       }
+      const normalized = normalizeLinearCreateIssueInput(input);
       if (nextCount() > MAX_LINEAR_ISSUE_CREATES_PER_CALL) {
         throw new Error(
           `A Linear worker call can create at most ${MAX_LINEAR_ISSUE_CREATES_PER_CALL} issues.`,
         );
       }
       try {
-        return await execute(input, options);
+        return await execute(normalized, options);
       } catch (error) {
         previousAttemptFailed = true;
         throw error;
       }
     },
   } as unknown as ToolSet[string];
+}
+
+function linearCreateIssueInputSchema(inputSchema: unknown) {
+  if (!isRecord(inputSchema) || !isRecord(inputSchema.jsonSchema)) {
+    return LINEAR_CREATE_ISSUE_FALLBACK_INPUT_SCHEMA;
+  }
+
+  const sourceSchema = inputSchema.jsonSchema;
+  if (!isRecord(sourceSchema.properties)) return LINEAR_CREATE_ISSUE_FALLBACK_INPUT_SCHEMA;
+
+  const properties = { ...sourceSchema.properties };
+  for (const field of LINEAR_UPDATE_ONLY_ISSUE_FIELDS) delete properties[field];
+
+  return jsonSchema<Record<string, unknown>>({
+    ...sourceSchema,
+    type: "object",
+    properties,
+    required: ["title", "team"],
+    additionalProperties: false,
+  } as JSONSchema7);
+}
+
+function normalizeLinearCreateIssueInput(input: unknown) {
+  if (!isRecord(input)) throw new Error("create_issue requires an object input.");
+  for (const field of LINEAR_UPDATE_ONLY_ISSUE_FIELDS) {
+    if (Object.hasOwn(input, field)) {
+      throw new Error(`create_issue does not accept the update-only field \`${field}\`.`);
+    }
+  }
+
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  const team = typeof input.team === "string" ? input.team.trim() : "";
+  if (!title) throw new Error("create_issue requires a non-empty title.");
+  if (!team) throw new Error("create_issue requires a non-empty team.");
+  return { ...input, title, team };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
