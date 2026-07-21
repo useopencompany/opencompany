@@ -3,9 +3,11 @@ import type { ToolSet } from "ai";
 
 export type GoatCapabilityId = "slack" | "linear" | "youtube_transcript";
 
-// v1 registers read-class capabilities only; widening this union is a product
-// decision (writes need an approval flow), not a code convenience.
-export type GoatCapabilitySideEffect = "read";
+// The maximum side effect a capability may perform. A write-capable
+// capability still supports read calls, but write tools are exposed only when
+// the dispatcher explicitly selects a write operation.
+export type GoatCapabilitySideEffect = "read" | "write";
+export type GoatCapabilityOperation = GoatCapabilitySideEffect;
 
 export type GoatCapabilityEntity = {
   type: string;
@@ -37,6 +39,7 @@ export type GoatCapabilityWorkerContext = {
   userWorkosId: string;
   signal: AbortSignal;
   currentDate: Date;
+  operation: GoatCapabilityOperation;
   userContext: {
     email: string;
     firstName: string | null;
@@ -55,6 +58,7 @@ export type GoatCapabilityToolkit = {
 // (team domain, scope-dependent tools, ...) already bound in.
 export type ResolvedGoatCapability = {
   id: GoatCapabilityId;
+  sideEffect: GoatCapabilitySideEffect;
   workerModel: AgentModelId;
   indexLine: string;
   recipeLines: readonly string[];
@@ -70,7 +74,7 @@ export type GoatCapabilityDefinition = {
   // the prompt index and the dispatch enum — they don't exist to the model.
   resolve: (
     userWorkosId: string,
-  ) => Promise<Omit<ResolvedGoatCapability, "id" | "workerModel"> | null>;
+  ) => Promise<Omit<ResolvedGoatCapability, "id" | "sideEffect" | "workerModel"> | null>;
 };
 
 export type GoatCapabilityTranscriptEntry = {
@@ -82,6 +86,7 @@ export type GoatCapabilityTranscriptEntry = {
 
 export type GoatCapabilityCallDebug = {
   capability: string;
+  operation: GoatCapabilityOperation;
   workerModel: string;
   steps: number;
   durationMs: number;

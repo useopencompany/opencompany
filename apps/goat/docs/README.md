@@ -129,6 +129,10 @@ The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, 
 structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
 timezone. `goat_brain` is always available and `web_search` is available when Exa is configured.
+Connected chat capabilities are dispatched through `use_capability` with an explicit `read` or
+`write` operation. Slack and YouTube remain read-only. Linear read calls receive only read tools;
+an explicitly requested Linear write call additionally receives `create_issue`, while updates,
+comments, deletes, and every other Linear mutation remain unavailable to the foreground worker.
 `start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The

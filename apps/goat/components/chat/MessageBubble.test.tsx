@@ -177,7 +177,7 @@ describe("MessageBubble assistant errors", () => {
           type: USE_CAPABILITY_TOOL_PART_TYPE,
           toolCallId: "tool_capability_1",
           state: "output-available",
-          input: { capability: "linear", request: "Find the launch issue" },
+          input: { capability: "linear", operation: "read", request: "Find the launch issue" },
           output: {
             capability: "linear",
             summary: "ENG-123 tracks the launch.",
