@@ -671,11 +671,15 @@ describe("use_capability tool", () => {
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
       capabilities: {
-        list: [{ id: "slack" }, { id: "linear" }],
+        list: [
+          { id: "slack", operations: ["read"] },
+          { id: "linear", operations: ["read"] },
+        ],
         execute: vi.fn(),
       },
     });
     expect(extractUseCapabilityEnum(context.tools)).toEqual(["slack", "linear"]);
+    expect(extractUseCapabilityOperationEnum(context.tools)).toEqual(["read", "create"]);
   });
 
   it("dispatches valid calls and steers invalid or over-budget ones", async () => {
@@ -683,29 +687,33 @@ describe("use_capability tool", () => {
     const context = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
-      capabilities: { list: [{ id: "slack" }], execute },
+      capabilities: { list: [{ id: "slack", operations: ["read"] }], execute },
     });
 
     const valid = await executeUseCapabilityTool(context.tools, {
       capability: "slack",
+      operation: "read",
       request: "Messages in #general since 2026-07-17.",
     });
     expect(valid.summary).toBe("found it");
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
         capability: "slack",
+        operation: "read",
         request: "Messages in #general since 2026-07-17.",
       }),
     );
 
     const unknown = await executeUseCapabilityTool(context.tools, {
       capability: "github",
+      operation: "read",
       request: "anything",
     });
     expect(unknown.error?.code).toBe("invalid_request");
 
     const empty = await executeUseCapabilityTool(context.tools, {
       capability: "slack",
+      operation: "read",
       request: "   ",
     });
     expect(empty.error?.code).toBe("invalid_request");
@@ -713,15 +721,38 @@ describe("use_capability tool", () => {
     for (let call = 1; call < MAX_CAPABILITY_CALLS_PER_TURN; call += 1) {
       await executeUseCapabilityTool(context.tools, {
         capability: "slack",
+        operation: "read",
         request: `lookup ${call}`,
       });
     }
     const overBudget = await executeUseCapabilityTool(context.tools, {
       capability: "slack",
+      operation: "read",
       request: "one too many",
     });
     expect(overBudget.error?.code).toBe("call_budget");
     expect(execute).toHaveBeenCalledTimes(MAX_CAPABILITY_CALLS_PER_TURN);
+  });
+
+  it("rejects create mode before dispatch when the connection is read-only", async () => {
+    const execute = vi.fn();
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      capabilities: {
+        list: [{ id: "attio", operations: ["read"] }],
+        execute,
+      },
+    });
+
+    const output = await executeUseCapabilityTool(context.tools, {
+      capability: "attio",
+      operation: "create",
+      request: "Create a person named Ada Lovelace.",
+    });
+    expect(output.error?.code).toBe("invalid_request");
+    expect(output.error?.hint).toContain("does not permit create");
+    expect(execute).not.toHaveBeenCalled();
   });
 });
 
@@ -821,6 +852,20 @@ function extractUseCapabilityEnum(tools: unknown) {
   return (
     inputSchema?.properties?.capability?.enum ??
     inputSchema?.jsonSchema?.properties?.capability?.enum ??
+    []
+  );
+}
+
+function extractUseCapabilityOperationEnum(tools: unknown) {
+  type CapabilitySchema = { properties?: { operation?: { enum?: string[] } } };
+  type Tools = Record<
+    typeof USE_CAPABILITY_TOOL_NAME,
+    { inputSchema?: CapabilitySchema & { jsonSchema?: CapabilitySchema } }
+  >;
+  const inputSchema = (tools as Tools)[USE_CAPABILITY_TOOL_NAME]?.inputSchema;
+  return (
+    inputSchema?.properties?.operation?.enum ??
+    inputSchema?.jsonSchema?.properties?.operation?.enum ??
     []
   );
 }

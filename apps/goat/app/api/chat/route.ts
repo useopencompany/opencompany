@@ -457,7 +457,10 @@ export async function POST(request: Request): Promise<Response> {
     ...(capabilityUniverse.length > 0
       ? {
           capabilities: {
-            list: capabilityUniverse.map((capability) => ({ id: capability.id })),
+            list: capabilityUniverse.map((capability) => ({
+              id: capability.id,
+              operations: capability.operations,
+            })),
             execute: (call) => {
               capabilityCallOrdinal += 1;
               const capability = capabilityUniverse.find((entry) => entry.id === call.capability);
@@ -472,8 +475,20 @@ export async function POST(request: Request): Promise<Response> {
                   },
                 });
               }
+              if (!capability.operations.includes(call.operation)) {
+                return Promise.resolve({
+                  capability: call.capability,
+                  summary: "",
+                  entities: [],
+                  error: {
+                    code: "invalid_request" as const,
+                    hint: `${call.capability} does not permit ${call.operation} operations for this connection.`,
+                  },
+                });
+              }
               return executeChatCapabilityCall({
                 capability,
+                operation: call.operation,
                 request: call.request,
                 toolCallId: call.toolCallId,
                 ordinal: capabilityCallOrdinal,
@@ -945,6 +960,7 @@ async function executeChatWebSearch(input: {
 
 async function executeChatCapabilityCall(input: {
   capability: ResolvedGoatCapability;
+  operation: "read" | "create";
   request: string;
   toolCallId: string;
   ordinal: number;
@@ -971,17 +987,20 @@ async function executeChatCapabilityCall(input: {
     startGoatSpan(GOAT_SPANS.chatCapabilityCall, {
       ...input.attributes,
       "goat.capability": input.capability.id,
+      "goat.capability_operation": input.operation,
       "goat.worker_model": input.capability.workerModel,
     }),
   );
   const metricAttributes = {
     "goat.capability": input.capability.id,
+    "goat.capability_operation": input.operation,
     "goat.worker_model": input.capability.workerModel,
   };
 
   try {
     const result = await runGoatCapabilityWorker({
       capability: input.capability,
+      operation: input.operation,
       request: input.request,
       context: {
         userWorkosId: input.user.workosUserId,

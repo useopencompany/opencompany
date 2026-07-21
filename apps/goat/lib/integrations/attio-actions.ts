@@ -46,7 +46,7 @@ export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnec
     return {
       ok: false,
       error:
-        "Could not connect Attio. Make sure the key has record, note, and webhook scopes, then try again.",
+        "Could not connect Attio. Make sure the key has object_configuration:read, record_permission:read-write, note:read-write, and webhook:read-write, then try again.",
     };
   }
 }

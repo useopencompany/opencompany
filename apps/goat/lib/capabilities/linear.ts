@@ -35,13 +35,13 @@ const MUTATION_TOOL_PATTERN = /(^|_)(create|update|delete|add|remove|archive|ass
 
 export const linearCapability: GoatCapabilityDefinition = {
   id: "linear",
-  sideEffect: "read",
   workerModel: "openai/gpt-5.4-mini",
   async resolve(userWorkosId) {
     const state = await getGoatLinearIntegrationState(userWorkosId);
     if (!state.connected) return null;
 
     return {
+      operations: ["read"],
       indexLine:
         "linear — reads the user's Linear workspace. CAN list and look up issues, projects, teams, users, comments, and documents. CANNOT create, update, comment on, or delete anything.",
       recipeLines: [

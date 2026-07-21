@@ -9,7 +9,7 @@ import {
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
   normalizeGoatBrainReadToolInput,
 } from "@/lib/brain-surface";
-import type { GoatCapabilityCallDebug } from "@/lib/capabilities/types";
+import type { GoatCapabilityCallDebug, GoatCapabilityOperation } from "@/lib/capabilities/types";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
@@ -59,6 +59,7 @@ import {
   START_TASK_TOOL_DESCRIPTION,
   TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
   TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
+  USE_CAPABILITY_OPERATION_DESCRIPTION,
   USE_CAPABILITY_REQUEST_DESCRIPTION,
   USE_CAPABILITY_TOOL_DESCRIPTION,
   WEB_SEARCH_QUERY_DESCRIPTION,
@@ -105,9 +106,10 @@ type DeleteTaskScheduleRunner = (
 type CapabilityDispatcher = {
   // Ids resolved server-side from real connection state; they become the
   // dispatch enum, so a disconnected capability cannot be invoked by guessing.
-  list: readonly { id: string }[];
+  list: readonly { id: string; operations: readonly GoatCapabilityOperation[] }[];
   execute: (input: {
     capability: string;
+    operation: GoatCapabilityOperation;
     request: string;
     toolCallId: string;
   }) => Promise<UseCapabilityToolOutput>;
@@ -604,12 +606,17 @@ export function createOpenCompanyChatToolContext(input: {
             enum: capabilityIds,
             description: "Which connected capability to query.",
           },
+          operation: {
+            type: "string",
+            enum: ["read", "create"],
+            description: USE_CAPABILITY_OPERATION_DESCRIPTION,
+          },
           request: {
             type: "string",
             description: USE_CAPABILITY_REQUEST_DESCRIPTION,
           },
         },
-        required: ["capability", "request"],
+        required: ["capability", "operation", "request"],
       }),
       execute: async (args, executionContext) => {
         visibleToolActivity = true;
@@ -624,6 +631,30 @@ export function createOpenCompanyChatToolContext(input: {
             error: {
               code: "invalid_request",
               hint: `"${capability}" is not an available capability. Available: ${capabilityIds.join(", ")}.`,
+            },
+          };
+        }
+        if (args.operation !== "read" && args.operation !== "create") {
+          return {
+            capability,
+            summary: "",
+            entities: [],
+            error: {
+              code: "invalid_request",
+              hint: 'operation must be either "read" or "create".',
+            },
+          };
+        }
+        const operation = args.operation;
+        const resolvedCapability = capabilities.list.find((entry) => entry.id === capability);
+        if (!resolvedCapability?.operations.includes(operation)) {
+          return {
+            capability,
+            summary: "",
+            entities: [],
+            error: {
+              code: "invalid_request",
+              hint: `${capability} does not permit ${operation} operations for this connection. Use an advertised operation or reconnect with the required permissions.`,
             },
           };
         }
@@ -658,7 +689,7 @@ export function createOpenCompanyChatToolContext(input: {
           typeof executionContext.toolCallId === "string"
             ? executionContext.toolCallId
             : `capability_${capabilityCallCount}`;
-        return capabilities.execute({ capability, request, toolCallId });
+        return capabilities.execute({ capability, operation, request, toolCallId });
       },
     });
   }

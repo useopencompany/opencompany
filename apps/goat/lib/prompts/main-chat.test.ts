@@ -20,7 +20,11 @@ describe("createOpenCompanyChatSystemPrompt capabilities", () => {
     expect(prompt).toContain("<capabilities>");
     expect(prompt).toContain("- slack — CAN read history. CANNOT post.");
     expect(prompt).toContain("- youtube_transcript — fetches transcripts.");
-    expect(prompt).toContain("query with the use_capability tool");
+    expect(prompt).toContain("use_capability tool for quick work");
+    expect(prompt).toContain('Select operation "read" for retrieval');
+    expect(prompt).toContain('Select operation "create" only when the user');
+    expect(prompt).toContain("exactly one successful creation");
+    expect(prompt).toContain("Updates and deletes are unsupported");
     expect(prompt).toContain("fully self-contained");
     expect(prompt).toContain("Choose the lightest path");
     expect(prompt).toContain("start a task for deep, multi-step, or cross-source work");

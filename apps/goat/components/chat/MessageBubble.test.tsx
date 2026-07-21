@@ -167,7 +167,7 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.queryByText("Hiring update")).not.toBeInTheDocument();
   });
 
-  it("renders capability entities as external source chips", () => {
+  it("renders historical capability parts without operation as external source chips", () => {
     const message: GoatChatUiMessage = {
       id: "assistant_6",
       role: "assistant",

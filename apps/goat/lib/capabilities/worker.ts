@@ -17,6 +17,7 @@ import {
   type GoatCapabilityCallDebug,
   type GoatCapabilityEnvelope,
   type GoatCapabilityErrorCode,
+  type GoatCapabilityOperation,
   type GoatCapabilityTranscriptEntry,
   type GoatCapabilityWorkerContext,
   type ResolvedGoatCapability,
@@ -109,6 +110,7 @@ const ENVELOPE_JSON_SCHEMA = jsonSchema<GoatCapabilityEnvelope>({
 
 export async function runGoatCapabilityWorker(input: {
   capability: ResolvedGoatCapability;
+  operation: GoatCapabilityOperation;
   request: string;
   context: GoatCapabilityWorkerContext;
   gatewayApiKey: string;
@@ -129,6 +131,7 @@ export async function runGoatCapabilityWorker(input: {
     usage,
     debug: {
       capability: input.capability.id,
+      operation: input.operation,
       workerModel: input.capability.workerModel,
       steps,
       durationMs: Date.now() - startedAt,
@@ -150,17 +153,20 @@ export async function runGoatCapabilityWorker(input: {
 
   let toolkit: Awaited<ReturnType<ResolvedGoatCapability["createTools"]>>;
   try {
-    toolkit = await input.capability.createTools({
-      ...input.context,
-      signal: loopController.signal,
-    });
+    toolkit = await input.capability.createTools(
+      {
+        ...input.context,
+        signal: loopController.signal,
+      },
+      input.operation,
+    );
   } catch (error) {
     stopLoopTimer();
     if (loopController.signal.aborted) {
       return finish(
         errorEnvelope(
           "timeout",
-          `The ${input.capability.id} lookup was cancelled before its tools were ready; suggest retrying or narrowing the request.`,
+          `The ${input.capability.id} request was cancelled before its tools were ready; suggest retrying or narrowing the request.`,
         ),
         "error",
       );
@@ -188,7 +194,7 @@ export async function runGoatCapabilityWorker(input: {
   try {
     const result = await generateTextImpl({
       model: gateway(input.capability.workerModel),
-      system: workerSystemPrompt(input.capability, input.context),
+      system: workerSystemPrompt(input.capability, input.context, input.operation),
       prompt: input.request,
       tools: withTranscript(toolkit.tools, transcript),
       stopWhen: stepCountIs(WORKER_MAX_STEPS),
@@ -206,13 +212,15 @@ export async function runGoatCapabilityWorker(input: {
   } catch (error) {
     if (loopController.signal.aborted) {
       status = "timeout";
+    } else if (error instanceof GoatCapabilityAuthError) {
+      return finish(errorEnvelope(error.code, error.message), "error");
     } else {
       status = "error";
       if (transcript.length === 0) {
         return finish(
           errorEnvelope(
             "provider_error",
-            `The ${input.capability.id} lookup failed before it could gather anything (${errorMessage(error)}); a retry or a narrower request may work.`,
+            `The ${input.capability.id} request failed before it could gather anything (${errorMessage(error)}); a retry or a narrower request may work.`,
           ),
           "error",
         );
@@ -229,8 +237,8 @@ export async function runGoatCapabilityWorker(input: {
       errorEnvelope(
         status === "timeout" ? "timeout" : "empty_result",
         status === "timeout"
-          ? `The ${input.capability.id} lookup timed out before gathering anything; suggest retrying or narrowing the request.`
-          : `The ${input.capability.id} lookup produced nothing; the request may need to be more specific.`,
+          ? `The ${input.capability.id} request timed out before gathering anything; suggest retrying or narrowing the request.`
+          : `The ${input.capability.id} request produced nothing; it may need to be more specific.`,
       ),
       "error",
     );
@@ -239,7 +247,10 @@ export async function runGoatCapabilityWorker(input: {
   // The chat turn itself is gone — skip the finalizer model call.
   if (input.context.signal.aborted) {
     return finish(
-      errorEnvelope("timeout", "The chat turn was aborted before this lookup finished."),
+      errorEnvelope(
+        "timeout",
+        "The chat turn was aborted before this capability request finished.",
+      ),
       "error",
     );
   }
@@ -267,7 +278,7 @@ export async function runGoatCapabilityWorker(input: {
     return finish(
       errorEnvelope(
         status === "timeout" ? "timeout" : status === "step_cap" ? "step_cap" : "provider_error",
-        `The ${input.capability.id} lookup gathered data but could not summarize it (${errorMessage(error)}); suggest retrying with a narrower request.`,
+        `The ${input.capability.id} request gathered data but could not summarize it (${errorMessage(error)}); suggest retrying with a narrower request.`,
       ),
       "error",
     );
@@ -277,14 +288,20 @@ export async function runGoatCapabilityWorker(input: {
 function workerSystemPrompt(
   capability: ResolvedGoatCapability,
   context: GoatCapabilityWorkerContext,
+  operation: GoatCapabilityOperation,
 ) {
   const user = context.userContext;
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || "unknown";
   return [
-    `You are a focused read-only worker executing one request against the ${capability.id} capability.`,
+    `You are a focused ${operation} worker executing one request against the ${capability.id} capability.`,
     `You have at most ${WORKER_MAX_STEPS} tool steps; prefer the fewest calls that answer the request.`,
     "Never ask questions — no one will answer. Make the best reasonable interpretation of the request.",
-    "All tools are read-only; you cannot change anything.",
+    ...(operation === "read"
+      ? ["All tools are read-only; you cannot change anything."]
+      : [
+          "The user explicitly requested a creation. Read tools may be used to resolve references before creating.",
+          "Creation tools are limited to one successful mutation in this worker invocation. Once one succeeds, stop and report exactly what was created; never attempt an update, retry it as a new creation, or create another object.",
+        ]),
     "When you have what you need, stop calling tools and write your findings as plain text: the direct answer first, then the provider ids and urls of everything you cited.",
     "<recipes>",
     ...capability.recipeLines,
@@ -299,7 +316,7 @@ function workerSystemPrompt(
 const FINALIZER_SYSTEM_PROMPT = [
   "You compact a worker agent's findings into a structured result for the assistant that dispatched it.",
   "The summary must answer the original request from the findings — do not invent anything the transcript does not support.",
-  "List every provider object the summary relies on in entities, with stable ids and urls taken verbatim from the transcript.",
+  "List every provider object the summary relies on or created in entities, with stable ids and urls taken verbatim from the transcript.",
   "If the run was cut off (status step_cap or timeout), summarize what WAS found and set error to that status code with a hint saying the result is partial.",
   "If the findings do not answer the request, set error code empty_result with a hint about what would help.",
 ].join("\n");
@@ -330,8 +347,9 @@ function finalizerPrompt(
 }
 
 // Tool wrapper: records a bounded transcript for the finalizer + debug trace,
-// and converts tool failures into error results so one bad call doesn't kill
-// the loop.
+// and converts ordinary tool failures into error results so one bad call
+// doesn't kill the loop. Authentication failures remain terminal so a revoked
+// credential produces deterministic reconnect guidance.
 function withTranscript(tools: ToolSet, transcript: GoatCapabilityTranscriptEntry[]): ToolSet {
   const wrapped: ToolSet = {};
   for (const [name, definition] of Object.entries(tools)) {
@@ -361,6 +379,7 @@ function withTranscript(tools: ToolSet, transcript: GoatCapabilityTranscriptEntr
             inputPreview: preview(args),
             outputPreview: preview(failure),
           });
+          if (error instanceof GoatCapabilityAuthError) throw error;
           return failure;
         }
       },
@@ -393,7 +412,7 @@ export function clampEnvelope(
     // A capped run is partial even when the finalizer forgot to say so.
     error = {
       code: status,
-      hint: "The lookup hit its budget; this summary covers only what was gathered in time.",
+      hint: "The capability request hit its budget; this summary covers only what finished in time.",
     };
   }
 

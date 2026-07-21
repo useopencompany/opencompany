@@ -46,6 +46,7 @@ function makeContext(signal?: AbortSignal): GoatCapabilityWorkerContext {
 function makeCapability(overrides: Partial<ResolvedGoatCapability> = {}): ResolvedGoatCapability {
   return {
     id: "slack",
+    operations: ["read"],
     workerModel: "openai/gpt-5.4-mini",
     indexLine: "slack — reads things.",
     recipeLines: ["Use the fake tool once."],
@@ -84,7 +85,7 @@ describe("runGoatCapabilityWorker", () => {
         tools: Record<string, { execute: (args: unknown, o: unknown) => Promise<unknown> }>;
         onStepFinish?: (step: { usage: LanguageModelUsage }) => void;
       };
-      expect(opts.system).toContain("read-only worker");
+      expect(opts.system).toContain("focused read worker");
       expect(opts.system).toContain("Use the fake tool once.");
       expect(opts.system).toContain("Ada Lovelace (ada@example.com)");
       expect(opts.system).toContain("Current date: 2026-07-18");
@@ -107,6 +108,7 @@ describe("runGoatCapabilityWorker", () => {
 
     const result = await runGoatCapabilityWorker({
       capability,
+      operation: "read",
       request: "find pricing messages",
       context: makeContext(),
       gatewayApiKey: "test-key",
@@ -137,6 +139,7 @@ describe("runGoatCapabilityWorker", () => {
 
     const result = await runGoatCapabilityWorker({
       capability,
+      operation: "read",
       request: "anything",
       context: makeContext(),
       gatewayApiKey: "test-key",
@@ -148,6 +151,51 @@ describe("runGoatCapabilityWorker", () => {
     expect(result.envelope.error?.hint).toContain("not connected");
     expect(result.debug.outcome).toBe("error");
     expect(generateTextImpl).not.toHaveBeenCalled();
+  });
+
+  it("terminates with auth_expired when a provider rejects a tool call", async () => {
+    const close = vi.fn(async () => {});
+    const generateObjectImpl = vi.fn();
+    const capability = makeCapability({
+      createTools: async () => ({
+        tools: {
+          revoked_tool: {
+            description: "A provider tool with a revoked credential.",
+            inputSchema: jsonSchema({ type: "object" }),
+            execute: async () => {
+              throw new GoatCapabilityAuthError("auth_expired", "Reconnect the integration.");
+            },
+          },
+        },
+        close,
+      }),
+    });
+    const generateTextImpl = vi.fn(async (options: never) => {
+      const opts = options as {
+        tools: Record<string, { execute: (args: unknown, o: unknown) => Promise<unknown> }>;
+      };
+      await opts.tools.revoked_tool?.execute({}, { toolCallId: "t1", messages: [] });
+      throw new Error("unreachable");
+    });
+
+    const result = await runGoatCapabilityWorker({
+      capability,
+      operation: "read",
+      request: "anything",
+      context: makeContext(),
+      gatewayApiKey: "test-key",
+      attribution: ATTRIBUTION,
+      generateTextImpl: generateTextImpl as never,
+      generateObjectImpl: generateObjectImpl as never,
+    });
+
+    expect(result.envelope).toMatchObject({
+      summary: "",
+      error: { code: "auth_expired", hint: "Reconnect the integration." },
+    });
+    expect(result.debug.transcript[0]?.outputPreview).toContain("Reconnect the integration");
+    expect(generateObjectImpl).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   it("returns a timeout envelope without a finalizer call when the loop aborts empty", async () => {
@@ -168,6 +216,7 @@ describe("runGoatCapabilityWorker", () => {
           return { tools: {} };
         },
       }),
+      operation: "read",
       request: "anything",
       context: makeContext(parent.signal),
       gatewayApiKey: "test-key",
@@ -198,6 +247,7 @@ describe("runGoatCapabilityWorker", () => {
 
     const result = await runGoatCapabilityWorker({
       capability: makeCapability(),
+      operation: "read",
       request: "anything",
       context: makeContext(parent.signal),
       gatewayApiKey: "test-key",
@@ -229,6 +279,7 @@ describe("runGoatCapabilityWorker", () => {
 
     const result = await runGoatCapabilityWorker({
       capability: makeCapability(),
+      operation: "read",
       request: "transcribe the video",
       context: makeContext(),
       gatewayApiKey: "test-key",
@@ -264,6 +315,7 @@ describe("runGoatCapabilityWorker", () => {
 
     const result = await runGoatCapabilityWorker({
       capability: makeCapability(),
+      operation: "read",
       request: "anything",
       context: makeContext(),
       gatewayApiKey: "test-key",
@@ -286,6 +338,7 @@ describe("runGoatCapabilityWorker", () => {
 
     const result = await runGoatCapabilityWorker({
       capability: makeCapability({ createTools: async () => ({ tools: {}, close }) }),
+      operation: "read",
       request: "anything",
       context: makeContext(),
       gatewayApiKey: "test-key",
@@ -333,6 +386,7 @@ describe("runGoatCapabilityWorker", () => {
 
     const result = await runGoatCapabilityWorker({
       capability,
+      operation: "read",
       request: "anything",
       context: makeContext(),
       gatewayApiKey: "test-key",

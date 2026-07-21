@@ -9,7 +9,7 @@ import type {
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
-import type { GoatCapabilityEnvelope } from "@/lib/capabilities/types";
+import type { GoatCapabilityEnvelope, GoatCapabilityOperation } from "@/lib/capabilities/types";
 import { finiteDurationMs } from "@/lib/chat-timing";
 import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 
@@ -276,6 +276,9 @@ export type WebSearchToolOutput =
 
 export type UseCapabilityToolInput = {
   capability: string;
+  // Optional only so persisted tool parts from before operation modes continue
+  // to render. The live tool schema requires this field for every new call.
+  operation?: GoatCapabilityOperation;
   request: string;
 };
 
