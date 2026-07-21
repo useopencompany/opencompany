@@ -356,6 +356,7 @@ export type GoatChatSummaryView = {
   preview: string;
   updatedAt: string;
   pinnedAt?: string | null;
+  archived?: boolean;
 };
 
 export const GOAT_PINNED_CHAT_LIMIT = 20;
