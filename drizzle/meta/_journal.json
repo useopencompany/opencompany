@@ -1018,17 +1018,38 @@
       "breakpoints": true
     },
     {
+      "idx": 145,
+      "version": "7",
+      "when": 1784652411000,
+      "tag": "0145_goat_billing_v4",
+      "breakpoints": true
+    },
+    {
       "idx": 146,
       "version": "7",
       "when": 1784652412000,
-      "tag": "0146_goat_task_board_sessions",
+      "tag": "0146_goat_codex_chat_handoff",
       "breakpoints": true
     },
     {
       "idx": 147,
       "version": "7",
       "when": 1784652413000,
-      "tag": "0147_remove_goat_task_harness",
+      "tag": "0147_goat_task_board_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1784652414000,
+      "tag": "0148_remove_goat_task_harness",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1784652415000,
+      "tag": "0149_reconcile_goat_merge_migrations",
       "breakpoints": true
     }
   ]

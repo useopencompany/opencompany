@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
 import { SettingsIntegrationsPanel } from "./SettingsIntegrationsPanel";
@@ -37,10 +37,11 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    const entry = screen.getByRole("link", { name: /Goat MCP/ });
-    expect(entry).toHaveAttribute("href", "/settings/mcp");
-    expect(entry).toHaveTextContent("Set up");
-    expect(entry).toHaveTextContent("Claude, ChatGPT, or Cursor");
+    // The MCP card shows its title + client hint; its CTA links to the setup page.
+    expect(screen.getByText("Goat MCP")).toBeInTheDocument();
+    expect(screen.getByText("Claude, ChatGPT, or Cursor")).toBeInTheDocument();
+    const cta = screen.getByRole("link", { name: "Set up" });
+    expect(cta).toHaveAttribute("href", "/settings/mcp");
   });
 
   it("reports the verified connection and remembered client", () => {
@@ -55,8 +56,46 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    const entry = screen.getByRole("link", { name: /Goat MCP/ });
-    expect(entry).toHaveTextContent("Connected with Cursor");
-    expect(entry).toHaveTextContent("Connected");
+    expect(screen.getByText("Goat MCP")).toBeInTheDocument();
+    expect(screen.getByText("Connected with Cursor")).toBeInTheDocument();
+    const cta = screen.getByRole("link", { name: "Manage" });
+    expect(cta).toHaveAttribute("href", "/settings/mcp");
+  });
+
+  it("renders the Linear MCP connection instead of the separate brain-source accounts", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_linear_mcp",
+        provider: "linear",
+        externalId: "linear_mcp",
+        accountName: "Linear",
+        status: "connected",
+      },
+      {
+        id: "gint_linear_source",
+        provider: "linear",
+        externalId: "linear_org_1",
+        accountName: "Source workspace",
+        status: "connected",
+      },
+    ]) as GoatIntegrationState;
+
+    render(
+      <SettingsIntegrationsPanel
+        initialIntegrations={integrations}
+        isWorkspaceAdmin
+        mcpSetup={{ preferredClient: null, completedAt: null }}
+      />,
+    );
+
+    const linearCard = screen
+      .getByText("Connect issues, projects, and comments from Linear.")
+      .closest("div.rounded-2xl");
+    expect(linearCard).not.toBeNull();
+    expect(within(linearCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    expect(
+      within(linearCard as HTMLElement).queryByText("Source workspace"),
+    ).not.toBeInTheDocument();
+    expect(within(linearCard as HTMLElement).queryByRole("link", { name: "Connect" })).toBeNull();
   });
 });

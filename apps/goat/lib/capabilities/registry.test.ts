@@ -4,12 +4,12 @@ const mocks = vi.hoisted(() => ({
   slackResolve: vi.fn(),
   linearResolve: vi.fn(),
   youtubeResolve: vi.fn(),
+  attioResolve: vi.fn(),
 }));
 
 vi.mock("@/lib/capabilities/slack", () => ({
   slackCapability: {
     id: "slack",
-    sideEffect: "read",
     workerModel: "openai/gpt-5.4-mini",
     resolve: mocks.slackResolve,
   },
@@ -17,7 +17,6 @@ vi.mock("@/lib/capabilities/slack", () => ({
 vi.mock("@/lib/capabilities/linear", () => ({
   linearCapability: {
     id: "linear",
-    sideEffect: "read",
     workerModel: "openai/gpt-5.4-mini",
     resolve: mocks.linearResolve,
   },
@@ -25,9 +24,15 @@ vi.mock("@/lib/capabilities/linear", () => ({
 vi.mock("@/lib/capabilities/youtube-transcript", () => ({
   youtubeTranscriptCapability: {
     id: "youtube_transcript",
-    sideEffect: "read",
     workerModel: "openai/gpt-5.4-mini",
     resolve: mocks.youtubeResolve,
+  },
+}));
+vi.mock("@/lib/capabilities/attio", () => ({
+  attioCapability: {
+    id: "attio",
+    workerModel: "openai/gpt-5.4-mini",
+    resolve: mocks.attioResolve,
   },
 }));
 
@@ -37,9 +42,15 @@ import {
 } from "@/lib/capabilities/registry";
 
 const RESOLVED = {
+  operations: ["read"] as const,
   indexLine: "x — CAN read. CANNOT write.",
   recipeLines: ["recipe"],
   createTools: async () => ({ tools: {} }),
+};
+
+const RESOLVED_WRITE = {
+  ...RESOLVED,
+  operations: ["read", "write"] as const,
 };
 
 afterEach(() => {
@@ -52,26 +63,31 @@ describe("resolveGoatCapabilityUniverse", () => {
     mocks.slackResolve.mockResolvedValue(RESOLVED);
     mocks.linearResolve.mockResolvedValue(null);
     mocks.youtubeResolve.mockResolvedValue(RESOLVED);
+    mocks.attioResolve.mockResolvedValue(null);
 
     const universe = await resolveGoatCapabilityUniverse("user_1");
     expect(universe.map((capability) => capability.id)).toEqual(["slack", "youtube_transcript"]);
     expect(universe[0]?.workerModel).toBe("openai/gpt-5.4-mini");
+    expect(universe[0]?.operations).toEqual(["read"]);
     expect(universe[0]?.indexLine).toBe(RESOLVED.indexLine);
   });
 
   it("treats resolver failures as unavailable instead of failing the turn", async () => {
     mocks.slackResolve.mockRejectedValue(new Error("db down"));
-    mocks.linearResolve.mockResolvedValue(RESOLVED);
+    mocks.linearResolve.mockResolvedValue(RESOLVED_WRITE);
     mocks.youtubeResolve.mockResolvedValue(null);
+    mocks.attioResolve.mockResolvedValue(null);
 
     const universe = await resolveGoatCapabilityUniverse("user_1");
     expect(universe.map((capability) => capability.id)).toEqual(["linear"]);
+    expect(universe[0]?.operations).toEqual(["read", "write"]);
   });
 
   it("returns an empty universe when nothing is connected", async () => {
     mocks.slackResolve.mockResolvedValue(null);
     mocks.linearResolve.mockResolvedValue(null);
     mocks.youtubeResolve.mockResolvedValue(null);
+    mocks.attioResolve.mockResolvedValue(null);
 
     expect(await resolveGoatCapabilityUniverse("user_1")).toEqual([]);
   });

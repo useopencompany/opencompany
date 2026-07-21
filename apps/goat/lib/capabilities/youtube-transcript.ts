@@ -5,12 +5,12 @@ const MAX_TRANSCRIPT_CHARS = 24_000;
 
 export const youtubeTranscriptCapability: GoatCapabilityDefinition = {
   id: "youtube_transcript",
-  sideEffect: "read",
   workerModel: "openai/gpt-5.4-mini",
   async resolve() {
     if (!process.env.SUPADATA_API_KEY?.trim()) return null;
 
     return {
+      operations: ["read"],
       indexLine:
         "youtube_transcript — fetches the transcript of a public YouTube video given its URL or video id. CANNOT search YouTube, list videos, or access private videos.",
       recipeLines: [

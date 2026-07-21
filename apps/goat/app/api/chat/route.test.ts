@@ -8,6 +8,11 @@ import {
   GoatBrainSkillMentionError,
   resolveGoatBrainSkillMentions,
 } from "@/lib/brain-skills";
+import {
+  isGoatChatCapabilitiesKilled,
+  resolveGoatCapabilityUniverse,
+} from "@/lib/capabilities/registry";
+import { runGoatCapabilityWorker } from "@/lib/capabilities/worker";
 import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
@@ -19,6 +24,7 @@ import {
   SAVE_TO_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
   START_TASK_TOOL_NAME,
+  USE_CAPABILITY_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
@@ -81,6 +87,15 @@ vi.mock("@/lib/task-schedules", () => ({
   updateGoatTaskScheduleAction: vi.fn(),
 }));
 
+vi.mock("@/lib/capabilities/registry", () => ({
+  isGoatChatCapabilitiesKilled: vi.fn(),
+  resolveGoatCapabilityUniverse: vi.fn(),
+}));
+
+vi.mock("@/lib/capabilities/worker", () => ({
+  runGoatCapabilityWorker: vi.fn(),
+}));
+
 vi.mock("ai", () => ({
   convertToModelMessages: vi.fn(async () => []),
   createGateway: vi.fn(() => (model: string) => ({ model })),
@@ -99,6 +114,8 @@ describe("POST /api/chat", () => {
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "test-key");
     mockListCurrentUserGoatTaskSchedules().mockResolvedValue([]);
     mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
+    mockIsGoatChatCapabilitiesKilled().mockReturnValue(false);
+    mockResolveGoatCapabilityUniverse().mockResolvedValue([]);
     vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([]);
     vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([]);
   });
@@ -136,6 +153,154 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toContain("Messages can be at most");
+  });
+
+  it("does not resolve or expose capabilities when the beta is disabled", async () => {
+    mockAuth({ chatCapabilitiesBetaEnabled: false });
+    mockCreateTurn();
+    mockStreamText().mockImplementation((options: unknown) => {
+      expect(
+        (options as { tools?: Record<string, unknown> }).tools?.[USE_CAPABILITY_TOOL_NAME],
+      ).toBeUndefined();
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Read Attio"));
+    expect(response.status).toBe(200);
+    expect(resolveGoatCapabilityUniverse).not.toHaveBeenCalled();
+  });
+
+  it("honors the capability kill switch even when the beta is enabled", async () => {
+    mockAuth({ chatCapabilitiesBetaEnabled: true });
+    mockIsGoatChatCapabilitiesKilled().mockReturnValue(true);
+    mockCreateTurn();
+    mockStreamText().mockReturnValue({
+      toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+    } as never);
+
+    const response = await POST(validChatRequest("Read Attio"));
+    expect(response.status).toBe(200);
+    expect(resolveGoatCapabilityUniverse).not.toHaveBeenCalled();
+  });
+
+  it("forwards capability operations and persists worker debug metadata", async () => {
+    mockAuth({ chatCapabilitiesBetaEnabled: true });
+    mockCreateTurn();
+    mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
+    const capability = {
+      id: "attio" as const,
+      operations: ["read", "create"] as const,
+      workerModel: "openai/gpt-5.4-mini" as const,
+      indexLine: "attio — CAN read and explicitly create one item.",
+      recipeLines: ["Use typed tools."],
+      createTools: vi.fn(),
+    };
+    mockResolveGoatCapabilityUniverse().mockResolvedValue([capability]);
+    mockRunGoatCapabilityWorker().mockResolvedValue({
+      envelope: {
+        summary: "Created Ada Lovelace.",
+        entities: [
+          {
+            type: "attio_record",
+            id: "people:rec_ada",
+            url: "https://app.attio.com/acme/people/rec_ada",
+            title: "Ada Lovelace",
+          },
+        ],
+      },
+      debug: {
+        capability: "attio",
+        operation: "create",
+        workerModel: "openai/gpt-5.4-mini",
+        steps: 1,
+        durationMs: 25,
+        outcome: "success",
+        transcript: [
+          {
+            tool: "attio_create_person",
+            durationMs: 10,
+            inputPreview: '{"fullName":"Ada Lovelace"}',
+            outputPreview: '{"id":"rec_ada"}',
+          },
+        ],
+      },
+      usage: emptyUsage(),
+    });
+    let capabilityOutput: unknown;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const capabilityTool = (options as { tools?: Record<string, { execute?: unknown }> }).tools?.[
+        USE_CAPABILITY_TOOL_NAME
+      ];
+      if (typeof capabilityTool?.execute !== "function") {
+        throw new Error("use_capability was not configured.");
+      }
+      const execution = capabilityTool.execute(
+        {
+          capability: "attio",
+          operation: "create",
+          request: "Create a person named Ada Lovelace with email ada@example.com.",
+        },
+        { toolCallId: "cap_call_1", messages: [] },
+      ) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(
+          async (responseOptions: {
+            onFinish: (event: {
+              responseMessage: {
+                id: string;
+                role: "assistant";
+                parts: Array<{ type: "text"; text: string }>;
+              };
+              finishReason: string;
+              isAborted: boolean;
+            }) => Promise<void>;
+          }) => {
+            capabilityOutput = await execution;
+            await responseOptions.onFinish({
+              responseMessage: {
+                id: "assistant_1",
+                role: "assistant",
+                parts: [{ type: "text", text: "Created Ada Lovelace." }],
+              },
+              finishReason: "stop",
+              isAborted: false,
+            });
+            return new Response(null, { status: 200 });
+          },
+        ),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Create Ada Lovelace in Attio"));
+    expect(response.status).toBe(200);
+    expect(resolveGoatCapabilityUniverse).toHaveBeenCalledWith("user_1");
+    expect(runGoatCapabilityWorker).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capability,
+        operation: "create",
+        request: "Create a person named Ada Lovelace with email ada@example.com.",
+      }),
+    );
+    expect(capabilityOutput).toEqual(
+      expect.objectContaining({ capability: "attio", summary: "Created Ada Lovelace." }),
+    );
+    expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        debugTrace: expect.objectContaining({
+          capabilityCalls: [
+            expect.objectContaining({
+              toolCallId: "cap_call_1",
+              capability: "attio",
+              operation: "create",
+              outcome: "success",
+            }),
+          ],
+        }),
+      }),
+      expect.anything(),
+    );
   });
 
   it("forwards a valid browser-reserved id to new chat persistence", async () => {
@@ -1290,6 +1455,7 @@ function mockAuth(
     timezone: string;
     taskSpawningEnabled: boolean;
     role: "admin" | "member";
+    chatCapabilitiesBetaEnabled: boolean;
   }> = {},
 ) {
   const user = {
@@ -1313,6 +1479,7 @@ function mockAuth(
       timezone: user.timezone,
       taskSpawningEnabled: overrides.taskSpawningEnabled ?? true,
       localCodexBetaEnabled: false,
+      chatCapabilitiesBetaEnabled: overrides.chatCapabilitiesBetaEnabled ?? false,
       onboardedAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1416,4 +1583,37 @@ function mockDeleteGoatTaskScheduleAction() {
 
 function mockStreamText() {
   return vi.mocked(streamText);
+}
+
+function mockResolveGoatCapabilityUniverse() {
+  return vi.mocked(resolveGoatCapabilityUniverse);
+}
+
+function mockIsGoatChatCapabilitiesKilled() {
+  return vi.mocked(isGoatChatCapabilitiesKilled);
+}
+
+function mockRunGoatCapabilityWorker() {
+  return vi.mocked(runGoatCapabilityWorker);
+}
+
+function validChatRequest(text: string) {
+  return jsonRequest({
+    model: "openai/gpt-5.5",
+    message: {
+      id: "ui_user_1",
+      role: "user",
+      parts: [{ type: "text", text }],
+    },
+  });
+}
+
+function emptyUsage() {
+  return {
+    inputTokens: 0,
+    inputTokenDetails: { noCacheTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    outputTokens: 0,
+    outputTokenDetails: { textTokens: 0, reasoningTokens: 0 },
+    totalTokens: 0,
+  };
 }

@@ -84,6 +84,7 @@ export type GoatChatStore = {
   }): Promise<GoatChatMessage>;
   touchSession(input: { sessionId: string; now: Date }): Promise<void>;
   closeSession(input: { userWorkosId: string; sessionId: string; now: Date }): Promise<boolean>;
+  reopenSession(input: { userWorkosId: string; sessionId: string; now: Date }): Promise<boolean>;
   setSessionPinned(input: {
     userWorkosId: string;
     sessionId: string;
@@ -275,6 +276,17 @@ export async function closeGoatChatSessionForUser(
   store: GoatChatStore = createDbGoatChatStore(),
 ) {
   return store.closeSession({
+    userWorkosId: input.userWorkosId,
+    sessionId: input.sessionId,
+    now: new Date(),
+  });
+}
+
+export async function reopenGoatChatSessionForUser(
+  input: { userWorkosId: string; sessionId: string },
+  store: GoatChatStore = createDbGoatChatStore(),
+) {
+  return store.reopenSession({
     userWorkosId: input.userWorkosId,
     sessionId: input.sessionId,
     now: new Date(),
@@ -504,6 +516,21 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
             eq(goatChatSessions.id, input.sessionId),
             eq(goatChatSessions.userWorkosId, input.userWorkosId),
             isNull(goatChatSessions.closedAt),
+          ),
+        )
+        .returning({ id: goatChatSessions.id });
+      return Boolean(session);
+    },
+
+    async reopenSession(input) {
+      const [session] = await db
+        .update(goatChatSessions)
+        .set({ closedAt: null, updatedAt: input.now })
+        .where(
+          and(
+            eq(goatChatSessions.id, input.sessionId),
+            eq(goatChatSessions.userWorkosId, input.userWorkosId),
+            isNotNull(goatChatSessions.closedAt),
           ),
         )
         .returning({ id: goatChatSessions.id });

@@ -1,7 +1,7 @@
--- 0146 shared a migration clock value with an already-applied dev migration, so
--- some databases recorded that timestamp without receiving the session-backed
--- task schema. Repair those additive primitives idempotently before removing
--- the legacy harness columns and tables.
+-- The original task-board migration shared a migration clock value with an
+-- already-applied dev migration, so some databases recorded that timestamp
+-- without receiving the session-backed task schema. Repair those additive
+-- primitives idempotently before removing the legacy harness columns and tables.
 ALTER TABLE "goat"."chat_sessions" ADD COLUMN IF NOT EXISTS "task_id" text;--> statement-breakpoint
 DO $$
 BEGIN
@@ -52,15 +52,15 @@ CREATE TABLE IF NOT EXISTS "goat"."task_comments" (
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "goat_task_comments_task_created_idx" ON "goat"."task_comments" USING btree ("task_id","created_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "goat_task_comments_user_task_created_idx" ON "goat"."task_comments" USING btree ("user_workos_id","task_id","created_at");--> statement-breakpoint
-ALTER TABLE "goat"."tasks" DROP CONSTRAINT "goat_tasks_stage_check";--> statement-breakpoint
-ALTER TABLE "goat"."tasks" DROP COLUMN "stage";--> statement-breakpoint
-ALTER TABLE "goat"."tasks" DROP COLUMN "harness_spec";--> statement-breakpoint
-ALTER TABLE "goat"."tasks" DROP COLUMN "debug_trace";--> statement-breakpoint
-ALTER TABLE "goat"."tasks" DROP COLUMN "sandbox_id";--> statement-breakpoint
-ALTER TABLE "goat"."tasks" DROP COLUMN "codex_engine_session_id";--> statement-breakpoint
-ALTER TABLE "goat"."task_schedules" DROP COLUMN "planned_harness_spec";--> statement-breakpoint
+ALTER TABLE "goat"."tasks" DROP CONSTRAINT IF EXISTS "goat_tasks_stage_check";--> statement-breakpoint
+ALTER TABLE "goat"."tasks" DROP COLUMN IF EXISTS "stage";--> statement-breakpoint
+ALTER TABLE "goat"."tasks" DROP COLUMN IF EXISTS "harness_spec";--> statement-breakpoint
+ALTER TABLE "goat"."tasks" DROP COLUMN IF EXISTS "debug_trace";--> statement-breakpoint
+ALTER TABLE "goat"."tasks" DROP COLUMN IF EXISTS "sandbox_id";--> statement-breakpoint
+ALTER TABLE "goat"."tasks" DROP COLUMN IF EXISTS "codex_engine_session_id";--> statement-breakpoint
+ALTER TABLE "goat"."task_schedules" DROP COLUMN IF EXISTS "planned_harness_spec";--> statement-breakpoint
 ALTER TABLE "goat"."task_model_usage" DROP CONSTRAINT IF EXISTS "task_model_usage_message_id_task_messages_id_fk";--> statement-breakpoint
 ALTER TABLE "goat"."task_tool_usage" DROP CONSTRAINT IF EXISTS "task_tool_usage_message_id_task_messages_id_fk";--> statement-breakpoint
 ALTER TABLE "goat"."task_sandbox_usage" DROP CONSTRAINT IF EXISTS "task_sandbox_usage_message_id_task_messages_id_fk";--> statement-breakpoint
-DROP TABLE "goat"."task_events";--> statement-breakpoint
-DROP TABLE "goat"."task_messages";
+DROP TABLE IF EXISTS "goat"."task_events";--> statement-breakpoint
+DROP TABLE IF EXISTS "goat"."task_messages";

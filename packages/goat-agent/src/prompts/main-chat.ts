@@ -54,8 +54,9 @@ const OPENCOMPANY_CHAT_WEB_SEARCH_CHAT_FALLBACK =
   "If web_search fails or is unavailable, say that briefly and explain what information is still missing.";
 
 const OPENCOMPANY_CHAT_CAPABILITY_BEHAVIOR_LINES = [
-  "Use the use_capability tool for quick read-only lookups against the capabilities listed in <capabilities>: recent messages, issue status, a specific transcript. Answer directly from the result. Each request must be fully self-contained — the worker sees none of this conversation — so resolve names, channels, issue keys, and absolute dates before dispatching. Independent lookups may be dispatched in parallel in one step.",
-  "Choose the lightest path: answer directly when you already know; use use_capability for a quick factual lookup in a connected capability; start a task for deep, multi-step, or cross-source work. use_capability is read-only — anything that posts, edits, or deletes must go another way.",
+  'Use the use_capability tool for quick work against the capabilities listed in <capabilities>. Select operation "read" for retrieval. Select "create" or "write" only when the latest user message explicitly and unambiguously asks for that external change and the capability advertises that exact operation. Never infer mutation permission from a lookup, suggestion, or older context. Only perform changes the capability says it CAN perform.',
+  "Each capability request must be fully self-contained — the worker sees none of this conversation — so resolve names, channels, issue keys, record ids, absolute dates, and exact requested mutation content before dispatching. Ask a concise follow-up instead of guessing a material mutation target or value. A create call may perform exactly one successful creation; split multiple requested creations across separate calls. Independent read lookups may be dispatched in parallel in one step.",
+  "Choose the lightest path: answer directly when you already know; use use_capability for a quick supported lookup or explicit change in a connected capability; start a task for deep, multi-step, or cross-source work.",
   "If a use_capability result carries an error, follow its hint (for example suggesting the user reconnect an integration in Settings → Integrations) instead of retrying the same call, and say briefly what happened.",
 ];
 
@@ -120,7 +121,7 @@ export function createOpenCompanyChatSystemPrompt(
     ...(capabilities.length > 0
       ? [
           promptBlock("capabilities", [
-            "Connected capabilities you can query with the use_capability tool. Each line states what that capability can and cannot do:",
+            "Connected capabilities you can use with the use_capability tool. Each line states what that capability can and cannot do:",
             ...capabilities.map((capability) => `- ${capability.indexLine}`),
           ]),
         ]
@@ -158,7 +159,7 @@ function formatCapabilityBehaviorLines(input: { taskToolsEnabled: boolean }) {
   // Without task tools, the routing line cannot point at start_task.
   return OPENCOMPANY_CHAT_CAPABILITY_BEHAVIOR_LINES.map((line) =>
     line.startsWith("Choose the lightest path")
-      ? "Choose the lightest path: answer directly when you already know; use use_capability for a quick factual lookup in a connected capability. use_capability is read-only — anything that posts, edits, or deletes must go another way."
+      ? "Choose the lightest path: answer directly when you already know; use use_capability for a quick supported lookup or explicit change in a connected capability."
       : line,
   );
 }

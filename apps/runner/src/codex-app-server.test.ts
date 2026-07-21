@@ -1,7 +1,9 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildCodexAppServerCommandPlan,
   coalesceCodexAppServerNotifications,
+  codexAppServerProxyScript,
   createCodexAppServerAccumulator,
   runCodexAppServerTurn,
 } from "./codex-app-server";
@@ -35,17 +37,28 @@ describe("buildCodexAppServerCommandPlan", () => {
       GH_TOKEN: "github_token_123",
       GIT_CONFIG_VALUE_0: "Authorization: Basic github_basic_secret",
     });
-    expect(plan.socketPath).toBe("ws://127.0.0.1:47345");
+    expect(plan.socketPath).toBe(`${codexHome}/app-server.sock`);
     expect(plan.statePath).toBe(`${codexHome}/app-server-state.json`);
     expect(plan.proxyPath).toBe(`${codexHome}/app-server-proxy.mjs`);
+    expect(plan.proxyStatePath).toBe(`${codexHome}/app-server-proxy-state.json`);
     expect(plan.daemonCommand).toContain("codex app-server --listen");
-    expect(plan.daemonCommand).toContain("ws://127.0.0.1:47345");
+    expect(plan.daemonCommand).toContain("unix://");
+    expect(plan.daemonCommand).toContain(`${codexHome}/app-server.sock`);
     expect(plan.proxyCommand).toContain("bun");
     expect(plan.proxyCommand).toContain(`${codexHome}/app-server-proxy.mjs`);
     expect(plan.daemonCommand).not.toContain("codex_secret_123");
     expect(plan.daemonCommand).not.toContain("github_token_123");
     expect(plan.proxyCommand).not.toContain("codex_secret_123");
     expect(plan.forceRestart).toBe(false);
+  });
+
+  it("generates a syntactically valid Unix-socket WebSocket proxy", () => {
+    expect(() =>
+      execFileSync(process.execPath, ["--input-type=module", "--check"], {
+        input: codexAppServerProxyScript(),
+        stdio: ["pipe", "pipe", "pipe"],
+      }),
+    ).not.toThrow();
   });
 
   it("forces daemon restart for brokered auth", () => {
@@ -331,6 +344,7 @@ describe("runCodexAppServerTurn", () => {
   it("starts a thread for a first turn and streams completion", async () => {
     const sandbox = fakeSandbox();
     const runtimeEvents: Record<string, unknown>[] = [];
+    const persistedEngineIds: string[] = [];
 
     const summary = await runCodexAppServerTurn({
       sandbox: sandbox as never,
@@ -355,6 +369,12 @@ describe("runCodexAppServerTurn", () => {
       checkAbort: async () => undefined,
       onRuntimeEvents: async (events) => {
         runtimeEvents.push(...events);
+      },
+      onEngineSessionId: async (threadId) => {
+        persistedEngineIds.push(`thread:${threadId}`);
+      },
+      onEngineTurnId: async (turnId) => {
+        persistedEngineIds.push(`turn:${turnId}`);
       },
       onActivity: async () => undefined,
     });
@@ -414,6 +434,7 @@ describe("runCodexAppServerTurn", () => {
       result: "Codex completed.",
     });
     expect(runtimeEvents.map((event) => event.method)).toContain("turn/completed");
+    expect(persistedEngineIds).toEqual(["thread:thread_started", "turn:turn_1"]);
   });
 
   it("resumes an existing thread id on follow-up turns", async () => {
@@ -472,6 +493,167 @@ describe("runCodexAppServerTurn", () => {
       },
     );
     expect(summary.sessionId).toBe("thread_existing");
+  });
+
+  it("reattaches to the original active turn without starting a duplicate", async () => {
+    const sandbox = fakeSandbox({ resumedTurn: "active" });
+
+    const summary = await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "recovery fallback only",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: null,
+      existingEngineSessionId: "thread_existing",
+      existingEngineTurnId: "turn_existing",
+      reattachExistingTurn: true,
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async () => undefined,
+      onActivity: async () => undefined,
+    });
+
+    expect(sandbox.sentMethods()).toEqual(["initialize", "initialized", "thread/resume"]);
+    expect(summary).toMatchObject({ status: "success", result: "Codex completed." });
+  });
+
+  it("reconciles a completion missed while no runner was connected", async () => {
+    const sandbox = fakeSandbox({ resumedTurn: "completed" });
+
+    const summary = await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "recovery fallback only",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: null,
+      existingEngineSessionId: "thread_existing",
+      existingEngineTurnId: "turn_existing",
+      reattachExistingTurn: true,
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async () => undefined,
+      onActivity: async () => undefined,
+    });
+
+    expect(sandbox.sentMethods()).toEqual(["initialize", "initialized", "thread/resume"]);
+    expect(summary).toMatchObject({ status: "success", result: "Already finished." });
+  });
+
+  it("reads rather than resets goal state while reattaching", async () => {
+    const sandbox = fakeSandbox({ resumedTurn: "completed" });
+
+    const summary = await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "finish the goal",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: null,
+      goalMode: { objective: "Finish the goal" },
+      existingEngineSessionId: "thread_existing",
+      existingEngineTurnId: "turn_existing",
+      reattachExistingTurn: true,
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async () => undefined,
+      onActivity: async () => undefined,
+    });
+
+    expect(sandbox.sentMethods()).toEqual([
+      "initialize",
+      "initialized",
+      "thread/resume",
+      "thread/goal/get",
+    ]);
+    expect(summary).toMatchObject({
+      status: "success",
+      goal: { objective: "Finish the goal", status: "complete" },
+    });
+  });
+
+  it("starts one guarded recovery only when the original turn is unavailable", async () => {
+    const sandbox = fakeSandbox();
+    const onRecoveryStart = vi.fn(async () => undefined);
+
+    await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "inspect state before continuing",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: null,
+      existingEngineSessionId: "thread_existing",
+      existingEngineTurnId: "turn_missing",
+      reattachExistingTurn: true,
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async () => undefined,
+      onRecoveryStart,
+      onActivity: async () => undefined,
+    });
+
+    expect(onRecoveryStart).toHaveBeenCalledOnce();
+    expect(sandbox.sentMethods()).toEqual([
+      "initialize",
+      "initialized",
+      "thread/resume",
+      "turn/start",
+    ]);
+  });
+
+  it("detaches from a handed-off turn without interrupting Codex", async () => {
+    vi.useFakeTimers();
+    const sandbox = fakeSandbox({ completeTurn: false });
+    const handoff = new Error("runner handoff");
+    try {
+      const running = runCodexAppServerTurn({
+        sandbox: sandbox as never,
+        codexWorkRoot,
+        codexHome,
+        skillFingerprint: "skills_a",
+        task: "keep running",
+        model: "gpt-5.5",
+        reasoningEffort: "high",
+        planModeReasoningEffort: null,
+        existingEngineSessionId: null,
+        auth: apiAuth,
+        githubAuth: { githubToken: null, githubAuthHeader: null },
+        timeoutMs: 60_000,
+        checkAbort: async () => {
+          throw handoff;
+        },
+        detachOnAbort: (error) => error === handoff,
+        onRuntimeEvents: async () => undefined,
+        onActivity: async () => undefined,
+      });
+      const rejection = running.then(
+        () => null,
+        (error) => error,
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(rejection).resolves.toBe(handoff);
+      expect(sandbox.sentMethods()).not.toContain("turn/interrupt");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("handles server-initiated user-input requests and returns the answer", async () => {
@@ -629,6 +811,7 @@ type FakeSandboxOptions = {
   completeTurn?: boolean;
   completeGoalDelayMs?: number;
   requestUserInput?: boolean;
+  resumedTurn?: "active" | "completed";
 };
 
 function fakeSandbox(options: FakeSandboxOptions = {}) {
@@ -710,12 +893,30 @@ async function respondToProxyMessage(
     return;
   }
   if (message.method === "thread/resume") {
+    const resumedTurn =
+      options.resumedTurn === "active"
+        ? { id: "turn_existing", status: "inProgress", items: [] }
+        : options.resumedTurn === "completed"
+          ? {
+              id: "turn_existing",
+              status: "completed",
+              items: [{ id: "item_existing", type: "agentMessage", text: "Already finished." }],
+            }
+          : null;
     await onStdout(
       `${JSON.stringify({
         id: message.id,
-        result: { thread: { id: "thread_existing" } },
+        result: {
+          thread: {
+            id: "thread_existing",
+            ...(resumedTurn ? { turns: [resumedTurn] } : {}),
+          },
+        },
       })}\n`,
     );
+    if (options.resumedTurn === "active") {
+      await completeFakeTurn(onStdout, "thread_existing", "turn_existing");
+    }
     return;
   }
   if (message.method === "thread/goal/set") {
@@ -727,6 +928,20 @@ async function respondToProxyMessage(
             objective: "Fix tests and verify they pass.",
             status: "active",
             tokenBudget: 200_000,
+          },
+        },
+      })}\n`,
+    );
+    return;
+  }
+  if (message.method === "thread/goal/get") {
+    await onStdout(
+      `${JSON.stringify({
+        id: message.id,
+        result: {
+          goal: {
+            objective: "Finish the goal",
+            status: "complete",
           },
         },
       })}\n`,
@@ -800,17 +1015,18 @@ async function respondToProxyMessage(
 async function completeFakeTurn(
   onStdout: (data: string) => void | Promise<void>,
   threadId: string,
+  turnId = "turn_1",
 ) {
   await onStdout(
     `${JSON.stringify({
       method: "item/agentMessage/delta",
-      params: { threadId, turnId: "turn_1", itemId: "item_1", delta: "Codex completed." },
+      params: { threadId, turnId, itemId: "item_1", delta: "Codex completed." },
     })}\n`,
   );
   await onStdout(
     `${JSON.stringify({
       method: "turn/completed",
-      params: { threadId, turn: { id: "turn_1", status: "completed" } },
+      params: { threadId, turn: { id: turnId, status: "completed" } },
     })}\n`,
   );
 }

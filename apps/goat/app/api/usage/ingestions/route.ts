@@ -9,16 +9,7 @@ export async function GET() {
   const overview = await loadGoatBillingOverview(context.workspace.id);
   return Response.json(
     {
-      plan: overview.plan,
-      period: {
-        start: overview.window.start.toISOString(),
-        resetAt: overview.window.resetAt.toISOString(),
-      },
-      used: overview.used,
-      limit: overview.window.limit,
-      seatQuantity: overview.seatQuantity,
-      overageUnits: overview.overageUnitsThisWindow,
-      overageUsdMicros: overview.overageUsdMicrosThisWindow,
+      ingestedThisMonth: overview.ingestedThisMonth,
       creditBalanceUsdMicros: overview.creditBalanceUsdMicros,
       pending: overview.pending,
       providers: overview.providers,

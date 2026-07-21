@@ -227,12 +227,17 @@ export type GoatStripeSubscriptionStatus =
   | "paused";
 export type GoatIngestionReservationStatus = "pending" | "consumed";
 export type GoatBrainIntelligence = "basic" | "frontier";
+// "frontier_ingest" and "ingest_overage" are legacy v3 sources kept for
+// historical rows; v4 writes "ingest_model_usage" (per attempt, all tiers)
+// and "ingest_fee" (flat per-item fee at reservation admission).
 export type GoatCreditLedgerSource =
   | "starter_grant"
   | "stripe_topup"
   | "chat_model_usage"
   | "frontier_ingest"
   | "ingest_overage"
+  | "ingest_model_usage"
+  | "ingest_fee"
   | "adjustment";
 export type GoatCheckoutSessionStatus = "pending" | "open" | "fulfilled" | "failed";
 export type GoatBrainVisibility = "workspace" | "restricted";
@@ -491,8 +496,10 @@ export const goatWorkspaceMembers = goat.table(
   }),
 );
 
-// Stripe is authoritative for subscription lifecycle; this row is the local
-// entitlement projection used by Goat's latency-sensitive quota checks.
+// Billing v4: this row is the wallet's Stripe home (customer id + auto-refill
+// state). plan/seat/subscription columns are orphaned v3 leftovers — no code
+// writes them anymore; a cleanup migration drops them once prod confirms zero
+// live goat subscriptions.
 export const goatWorkspaceBilling = goat.table(
   "workspace_billing",
   {
@@ -506,13 +513,20 @@ export const goatWorkspaceBilling = goat.table(
     stripeSubscriptionItemId: text("stripe_subscription_item_id"),
     stripePriceId: text("stripe_price_id"),
     subscriptionStatus: text("subscription_status").$type<GoatStripeSubscriptionStatus>(),
-    // Projected from the Stripe subscription item quantity ($18/seat). The
-    // pooled Pro ingestion allowance is 300 x seat_quantity per month.
     seatQuantity: integer("seat_quantity").notNull().default(1),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     paymentNeedsAttention: boolean("payment_needs_attention").notNull().default(false),
     lastStripeEventCreated: timestamp("last_stripe_event_created", { withTimezone: true }),
+    // Auto-refill: card saved during top-up Checkout, charged off-session when
+    // the balance drops below the threshold. in_flight_at is a lease so
+    // concurrent triggers charge at most once.
+    autoRefillEnabled: boolean("auto_refill_enabled").notNull().default(false),
+    autoRefillAmountCents: integer("auto_refill_amount_cents").notNull().default(2000),
+    autoRefillPaymentMethodId: text("auto_refill_payment_method_id"),
+    autoRefillInFlightAt: timestamp("auto_refill_in_flight_at", { withTimezone: true }),
+    autoRefillLastAttemptAt: timestamp("auto_refill_last_attempt_at", { withTimezone: true }),
+    autoRefillLastError: text("auto_refill_last_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -540,9 +554,10 @@ export const goatStripeWebhookEvents = goat.table("stripe_webhook_events", {
   processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// USD credit balance per workspace. Funds usage-based chat, frontier-ingest
-// cost pass-through, and Pro ingestion overage. Mirrors the web app's
-// workspace_credit_balances, scoped to goat workspaces.
+// USD credit balance per workspace — the billing v4 wallet. Funds every
+// metered surface: chat turns, ingestion model cost (all tiers), and the flat
+// per-item ingestion fee. Mirrors the web app's workspace_credit_balances,
+// scoped to goat workspaces.
 export const goatCreditBalances = goat.table("credit_balances", {
   workspaceId: text("workspace_id")
     .primaryKey()
@@ -647,7 +662,7 @@ export const goatCreditLedger = goat.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'stripe_topup', 'chat_model_usage', 'frontier_ingest', 'ingest_overage', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'stripe_topup', 'chat_model_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );
@@ -2769,6 +2784,7 @@ export const goatCodexChatSessions = goat.table(
     activeTurnId: text("active_turn_id"),
     status: text("status").$type<GoatCodexChatSessionStatus>().notNull().default("queued"),
     error: text("error"),
+    sandboxTimeoutArmedAt: timestamp("sandbox_timeout_armed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2780,6 +2796,16 @@ export const goatCodexChatSessions = goat.table(
       table.userWorkosId,
       table.updatedAt,
     ),
+    terminalSandboxSweepIdx: index("goat_codex_chat_sessions_terminal_sandbox_sweep_idx")
+      .on(table.updatedAt, table.id)
+      .where(sql`
+        ${table.sandboxId} IS NOT NULL
+        AND ${table.status} IN ('idle', 'failed', 'interrupted', 'closed')
+        AND (
+          ${table.sandboxTimeoutArmedAt} IS NULL
+          OR ${table.sandboxTimeoutArmedAt} < ${table.updatedAt}
+        )
+      `),
     statusCheck: check(
       "goat_codex_chat_sessions_status_check",
       sql`${table.status} IN ('queued', 'starting', 'idle', 'running', 'failed', 'interrupted', 'closed')`,
@@ -2818,6 +2844,7 @@ export const goatCodexChatTurns = goat.table(
       withTimezone: true,
     }),
     attempts: integer("attempts").notNull().default(0),
+    recoveryAttempts: integer("recovery_attempts").notNull().default(0),
     leaseId: text("lease_id"),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
@@ -2899,6 +2926,7 @@ export const goatCodexChatEvents = goat.table(
     codexChatTurnId: text("codex_chat_turn_id").references(() => goatCodexChatTurns.id, {
       onDelete: "set null",
     }),
+    eventKey: text("event_key"),
     type: text("type").$type<GoatCodexChatEventType>().notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
     rawEvent: jsonb("raw_event").$type<Record<string, unknown>>(),
@@ -2913,6 +2941,9 @@ export const goatCodexChatEvents = goat.table(
       table.codexChatTurnId,
       table.createdAt,
     ),
+    turnEventKeyIdx: uniqueIndex("goat_codex_chat_events_turn_event_key_idx")
+      .on(table.codexChatTurnId, table.eventKey)
+      .where(sql`${table.eventKey} IS NOT NULL`),
     typeCheck: check(
       "goat_codex_chat_events_type_check",
       sql`${table.type} IN (${sql.join(

@@ -1,4 +1,5 @@
 import { Cta } from "./Cta";
+import { LaunchVideoDialog } from "./LaunchVideoDialog";
 import { MindVisual } from "./MindVisual";
 
 export function Hero() {
@@ -40,9 +41,7 @@ export function Hero() {
             </p>
             <div className="mt-9 flex items-center gap-2">
               <Cta>Join early beta</Cta>
-              <Cta href="#how-it-works" variant="secondary">
-                See how it works
-              </Cta>
+              <LaunchVideoDialog />
             </div>
           </div>
 

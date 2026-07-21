@@ -17,6 +17,7 @@ import {
   type GoatCapabilityCallDebug,
   type GoatCapabilityEnvelope,
   type GoatCapabilityErrorCode,
+  type GoatCapabilityOperation,
   type GoatCapabilityTranscriptEntry,
   type GoatCapabilityWorkerContext,
   type ResolvedGoatCapability,
@@ -78,7 +79,10 @@ const ENVELOPE_JSON_SCHEMA = jsonSchema<GoatCapabilityEnvelope>({
             type: "string",
             description: 'Entity kind, e.g. "slack_message", "linear_issue", "youtube_video".',
           },
-          id: { type: "string", description: "Stable provider id (channel:ts, issue key, …)." },
+          id: {
+            type: "string",
+            description: "Stable provider id (channel:ts, issue key, …).",
+          },
           url: {
             type: ["string", "null"],
             description: "Direct link to the entity, or null when unknown.",
@@ -109,6 +113,7 @@ const ENVELOPE_JSON_SCHEMA = jsonSchema<GoatCapabilityEnvelope>({
 
 export async function runGoatCapabilityWorker(input: {
   capability: ResolvedGoatCapability;
+  operation: GoatCapabilityOperation;
   request: string;
   context: GoatCapabilityWorkerContext;
   gatewayApiKey: string;
@@ -129,6 +134,7 @@ export async function runGoatCapabilityWorker(input: {
     usage,
     debug: {
       capability: input.capability.id,
+      operation: input.operation,
       workerModel: input.capability.workerModel,
       steps,
       durationMs: Date.now() - startedAt,
@@ -138,11 +144,24 @@ export async function runGoatCapabilityWorker(input: {
     },
   });
 
+  if (!input.capability.operations.includes(input.operation)) {
+    return finish(
+      errorEnvelope(
+        "invalid_request",
+        `The ${input.capability.id} capability does not permit ${input.operation} operations.`,
+      ),
+      "error",
+    );
+  }
+
   const loopController = new AbortController();
   const timeoutHandle = setTimeout(() => loopController.abort(), WORKER_LOOP_TIMEOUT_MS);
   const onParentAbort = () => loopController.abort();
   if (input.context.signal.aborted) loopController.abort();
-  else input.context.signal.addEventListener("abort", onParentAbort, { once: true });
+  else
+    input.context.signal.addEventListener("abort", onParentAbort, {
+      once: true,
+    });
   const stopLoopTimer = () => {
     clearTimeout(timeoutHandle);
     input.context.signal.removeEventListener("abort", onParentAbort);
@@ -150,17 +169,20 @@ export async function runGoatCapabilityWorker(input: {
 
   let toolkit: Awaited<ReturnType<ResolvedGoatCapability["createTools"]>>;
   try {
-    toolkit = await input.capability.createTools({
-      ...input.context,
-      signal: loopController.signal,
-    });
+    toolkit = await input.capability.createTools(
+      {
+        ...input.context,
+        signal: loopController.signal,
+      },
+      input.operation,
+    );
   } catch (error) {
     stopLoopTimer();
     if (loopController.signal.aborted) {
       return finish(
         errorEnvelope(
           "timeout",
-          `The ${input.capability.id} lookup was cancelled before its tools were ready; suggest retrying or narrowing the request.`,
+          `The ${input.capability.id} request was cancelled before its tools were ready; suggest retrying or narrowing the request.`,
         ),
         "error",
       );
@@ -188,7 +210,7 @@ export async function runGoatCapabilityWorker(input: {
   try {
     const result = await generateTextImpl({
       model: gateway(input.capability.workerModel),
-      system: workerSystemPrompt(input.capability, input.context),
+      system: workerSystemPrompt(input.capability, input.context, input.operation),
       prompt: input.request,
       tools: withTranscript(toolkit.tools, transcript),
       stopWhen: stepCountIs(WORKER_MAX_STEPS),
@@ -206,13 +228,15 @@ export async function runGoatCapabilityWorker(input: {
   } catch (error) {
     if (loopController.signal.aborted) {
       status = "timeout";
+    } else if (error instanceof GoatCapabilityAuthError) {
+      return finish(errorEnvelope(error.code, error.message), "error");
     } else {
       status = "error";
       if (transcript.length === 0) {
         return finish(
           errorEnvelope(
             "provider_error",
-            `The ${input.capability.id} lookup failed before it could gather anything (${errorMessage(error)}); a retry or a narrower request may work.`,
+            `The ${input.capability.id} request failed before it could gather anything (${errorMessage(error)}); a retry or a narrower request may work.`,
           ),
           "error",
         );
@@ -229,8 +253,8 @@ export async function runGoatCapabilityWorker(input: {
       errorEnvelope(
         status === "timeout" ? "timeout" : "empty_result",
         status === "timeout"
-          ? `The ${input.capability.id} lookup timed out before gathering anything; suggest retrying or narrowing the request.`
-          : `The ${input.capability.id} lookup produced nothing; the request may need to be more specific.`,
+          ? `The ${input.capability.id} request timed out before gathering anything; suggest retrying or narrowing the request.`
+          : `The ${input.capability.id} request produced nothing; it may need to be more specific.`,
       ),
       "error",
     );
@@ -239,7 +263,10 @@ export async function runGoatCapabilityWorker(input: {
   // The chat turn itself is gone — skip the finalizer model call.
   if (input.context.signal.aborted) {
     return finish(
-      errorEnvelope("timeout", "The chat turn was aborted before this lookup finished."),
+      errorEnvelope(
+        "timeout",
+        "The chat turn was aborted before this capability request finished.",
+      ),
       "error",
     );
   }
@@ -267,7 +294,7 @@ export async function runGoatCapabilityWorker(input: {
     return finish(
       errorEnvelope(
         status === "timeout" ? "timeout" : status === "step_cap" ? "step_cap" : "provider_error",
-        `The ${input.capability.id} lookup gathered data but could not summarize it (${errorMessage(error)}); suggest retrying with a narrower request.`,
+        `The ${input.capability.id} request gathered data but could not summarize it (${errorMessage(error)}); suggest retrying with a narrower request.`,
       ),
       "error",
     );
@@ -277,14 +304,33 @@ export async function runGoatCapabilityWorker(input: {
 function workerSystemPrompt(
   capability: ResolvedGoatCapability,
   context: GoatCapabilityWorkerContext,
+  operation: GoatCapabilityOperation,
 ) {
   const user = context.userContext;
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || "unknown";
+  const operationLines =
+    operation === "write"
+      ? [
+          `You are a focused worker executing one explicitly requested change against the ${capability.id} capability.`,
+          "This call is authorized for writes, but only the exact external changes stated in the request. Do not add, broaden, or infer other mutations.",
+          "If a material target or value is ambiguous, do not mutate it. State what is missing in your answer; no one can answer questions inside this worker run.",
+          "Never retry a mutation after an error or an ambiguous result. Report each completed change with its provider id and url.",
+        ]
+      : operation === "create"
+        ? [
+            `You are a focused create worker executing one explicitly requested creation against the ${capability.id} capability.`,
+            "Read tools may be used to resolve references before creating, but only the exact creation stated in the request is authorized.",
+            "Creation tools are limited to one successful mutation in this worker invocation. Once one succeeds, stop and report exactly what was created; never attempt an update, retry it as a new creation, or create another object.",
+            "If a material target or value is ambiguous, do not mutate it. State what is missing in your answer; no one can answer questions inside this worker run.",
+          ]
+        : [
+            `You are a focused read worker executing one request against the ${capability.id} capability.`,
+            "All tools are read-only; you cannot change anything.",
+          ];
   return [
-    `You are a focused read-only worker executing one request against the ${capability.id} capability.`,
+    ...operationLines,
     `You have at most ${WORKER_MAX_STEPS} tool steps; prefer the fewest calls that answer the request.`,
     "Never ask questions — no one will answer. Make the best reasonable interpretation of the request.",
-    "All tools are read-only; you cannot change anything.",
     "When you have what you need, stop calling tools and write your findings as plain text: the direct answer first, then the provider ids and urls of everything you cited.",
     "<recipes>",
     ...capability.recipeLines,
@@ -299,7 +345,8 @@ function workerSystemPrompt(
 const FINALIZER_SYSTEM_PROMPT = [
   "You compact a worker agent's findings into a structured result for the assistant that dispatched it.",
   "The summary must answer the original request from the findings — do not invent anything the transcript does not support.",
-  "List every provider object the summary relies on in entities, with stable ids and urls taken verbatim from the transcript.",
+  "When the request changed provider state, say exactly what was created or changed and do not claim success without a successful tool result.",
+  "List every provider object the summary relies on or created in entities, with stable ids and urls taken verbatim from the transcript.",
   "If the run was cut off (status step_cap or timeout), summarize what WAS found and set error to that status code with a hint saying the result is partial.",
   "If the findings do not answer the request, set error code empty_result with a hint about what would help.",
 ].join("\n");
@@ -330,8 +377,9 @@ function finalizerPrompt(
 }
 
 // Tool wrapper: records a bounded transcript for the finalizer + debug trace,
-// and converts tool failures into error results so one bad call doesn't kill
-// the loop.
+// and converts ordinary tool failures into error results so one bad call
+// doesn't kill the loop. Authentication failures remain terminal so a revoked
+// credential produces deterministic reconnect guidance.
 function withTranscript(tools: ToolSet, transcript: GoatCapabilityTranscriptEntry[]): ToolSet {
   const wrapped: ToolSet = {};
   for (const [name, definition] of Object.entries(tools)) {
@@ -361,6 +409,7 @@ function withTranscript(tools: ToolSet, transcript: GoatCapabilityTranscriptEntr
             inputPreview: preview(args),
             outputPreview: preview(failure),
           });
+          if (error instanceof GoatCapabilityAuthError) throw error;
           return failure;
         }
       },
@@ -388,12 +437,15 @@ export function clampEnvelope(
     const code = (MODEL_ERROR_CODES as readonly string[]).includes(error.code)
       ? error.code
       : "provider_error";
-    error = { code: code as GoatCapabilityErrorCode, hint: truncate(error.hint ?? "", 400) };
+    error = {
+      code: code as GoatCapabilityErrorCode,
+      hint: truncate(error.hint ?? "", 400),
+    };
   } else if (status === "step_cap" || status === "timeout") {
     // A capped run is partial even when the finalizer forgot to say so.
     error = {
       code: status,
-      hint: "The lookup hit its budget; this summary covers only what was gathered in time.",
+      hint: "The capability request hit its budget; this summary covers only what finished in time.",
     };
   }
 
@@ -418,7 +470,11 @@ async function closeToolkit(toolkit: { close?: () => Promise<void> }) {
 function createEmptyUsage(): LanguageModelUsage {
   return {
     inputTokens: 0,
-    inputTokenDetails: { noCacheTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    inputTokenDetails: {
+      noCacheTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
     outputTokens: 0,
     outputTokenDetails: { textTokens: 0, reasoningTokens: 0 },
     totalTokens: 0,

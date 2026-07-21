@@ -38,10 +38,6 @@ export type UpsertGoatBrainSourceItemResult = {
 
 export type GoatIngestionQuotaUpdate = {
   workspaceId: string;
-  plan: "free" | "pro";
-  usedBefore: number;
-  usedAfter: number;
-  limit: number;
   pendingUnits: number;
   paused: boolean;
 };
@@ -253,10 +249,6 @@ export async function upsertGoatBrainSourceItemAndEnqueue(input: {
     .filter((reservation) => reservation.created)
     .map((reservation) => ({
       workspaceId: reservation.reservation.workspaceId,
-      plan: reservation.window.plan,
-      usedBefore: reservation.consumedBefore,
-      usedAfter: reservation.usedAfter,
-      limit: reservation.window.limit,
       pendingUnits: reservation.pendingUnits,
       paused: reservation.paused,
     }));

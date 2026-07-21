@@ -9,7 +9,7 @@ import {
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
   normalizeGoatBrainReadToolInput,
 } from "./brain-surface";
-import type { GoatCapabilityCallDebug } from "./capabilities";
+import type { GoatCapabilityCallDebug, GoatCapabilityOperation } from "./capabilities";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
@@ -59,6 +59,7 @@ import {
   START_TASK_TOOL_DESCRIPTION,
   TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
   TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
+  USE_CAPABILITY_OPERATION_DESCRIPTION,
   USE_CAPABILITY_REQUEST_DESCRIPTION,
   USE_CAPABILITY_TOOL_DESCRIPTION,
   WEB_SEARCH_QUERY_DESCRIPTION,
@@ -105,9 +106,13 @@ type DeleteTaskScheduleRunner = (
 type CapabilityDispatcher = {
   // Ids resolved server-side from real connection state; they become the
   // dispatch enum, so a disconnected capability cannot be invoked by guessing.
-  list: readonly { id: string }[];
+  list: readonly {
+    id: string;
+    operations: readonly GoatCapabilityOperation[];
+  }[];
   execute: (input: {
     capability: string;
+    operation: GoatCapabilityOperation;
     request: string;
     toolCallId: string;
   }) => Promise<UseCapabilityToolOutput>;
@@ -593,6 +598,10 @@ export function createOpenCompanyChatToolContext(input: {
   const capabilities = input.capabilities;
   if (capabilities && capabilities.list.length > 0) {
     const capabilityIds = capabilities.list.map((capability) => capability.id);
+    const operationOrder: readonly GoatCapabilityOperation[] = ["read", "create", "write"];
+    const capabilityOperations = operationOrder.filter((operation) =>
+      capabilities.list.some((capability) => capability.operations.includes(operation)),
+    );
     tools[USE_CAPABILITY_TOOL_NAME] = tool<UseCapabilityToolInput, UseCapabilityToolOutput>({
       description: USE_CAPABILITY_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<UseCapabilityToolInput>({
@@ -602,14 +611,19 @@ export function createOpenCompanyChatToolContext(input: {
           capability: {
             type: "string",
             enum: capabilityIds,
-            description: "Which connected capability to query.",
+            description: "Which connected capability to use.",
+          },
+          operation: {
+            type: "string",
+            enum: capabilityOperations,
+            description: USE_CAPABILITY_OPERATION_DESCRIPTION,
           },
           request: {
             type: "string",
             description: USE_CAPABILITY_REQUEST_DESCRIPTION,
           },
         },
-        required: ["capability", "request"],
+        required: ["capability", "operation", "request"],
       }),
       execute: async (args, executionContext) => {
         visibleToolActivity = true;
@@ -624,6 +638,33 @@ export function createOpenCompanyChatToolContext(input: {
             error: {
               code: "invalid_request",
               hint: `"${capability}" is not an available capability. Available: ${capabilityIds.join(", ")}.`,
+            },
+          };
+        }
+        const operation =
+          args.operation === "read" || args.operation === "create" || args.operation === "write"
+            ? args.operation
+            : null;
+        if (!operation) {
+          return {
+            capability,
+            summary: "",
+            entities: [],
+            error: {
+              code: "invalid_request",
+              hint: 'The operation must be "read", "create", or "write".',
+            },
+          };
+        }
+        const selectedCapability = capabilities.list.find((entry) => entry.id === capability);
+        if (!selectedCapability?.operations.includes(operation)) {
+          return {
+            capability,
+            summary: "",
+            entities: [],
+            error: {
+              code: "invalid_request",
+              hint: `${capability} does not permit ${operation} operations for this connection. Use an advertised operation or reconnect with the required permissions.`,
             },
           };
         }
@@ -658,7 +699,12 @@ export function createOpenCompanyChatToolContext(input: {
           typeof executionContext.toolCallId === "string"
             ? executionContext.toolCallId
             : `capability_${capabilityCallCount}`;
-        return capabilities.execute({ capability, request, toolCallId });
+        return capabilities.execute({
+          capability,
+          operation,
+          request,
+          toolCallId,
+        });
       },
     });
   }

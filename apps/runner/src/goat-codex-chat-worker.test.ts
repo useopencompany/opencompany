@@ -1,10 +1,13 @@
 import type { GoatCodexChatSession, GoatCodexChatTurn } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
+import { GoatCodexChatHandoffError } from "./goat-codex-chat-errors";
 import {
   claimNextGoatCodexChatTurn,
   resolveGoatCodexChatWorkerConcurrency,
   runClaimedTurn,
+  startGoatCodexChatWorker,
+  sweepTerminalGoatCodexChatSandboxes,
 } from "./goat-codex-chat-worker";
 
 const sessionRows = vi.hoisted(() => [] as GoatCodexChatSession[]);
@@ -25,6 +28,10 @@ const chatMocks = vi.hoisted(() => ({
 }));
 
 const telemetry = vi.hoisted(() => ({ recordGoatHistogram: vi.fn() }));
+const sandboxMocks = vi.hoisted(() => ({
+  armSandboxActiveTimeoutById: vi.fn(),
+  armSandboxIdleTimeoutById: vi.fn(),
+}));
 
 vi.mock("@opencompany/goat-observability", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/goat-observability")>();
@@ -37,16 +44,8 @@ const eventMocks = vi.hoisted(() => ({
   loadCodexChatAssistantMessageParts: vi.fn(async () => []),
 }));
 
-const settleMocks = vi.hoisted(() => ({
-  settleTaskForCodexSession: vi.fn(async () => false),
-}));
-
 vi.mock("./db", () => ({
   getDb: () => dbMock,
-}));
-
-vi.mock("./goat-codex-task-settle", () => ({
-  settleTaskForCodexSession: settleMocks.settleTaskForCodexSession,
 }));
 
 vi.mock("./goat-codex-chat", () => ({
@@ -56,6 +55,11 @@ vi.mock("./goat-codex-chat", () => ({
 vi.mock("./goat-codex-chat-events", () => ({
   createGoatCodexChatProjector: eventMocks.createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts: eventMocks.loadCodexChatAssistantMessageParts,
+}));
+
+vi.mock("./sandbox", () => ({
+  armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
+  armSandboxIdleTimeoutById: sandboxMocks.armSandboxIdleTimeoutById,
 }));
 
 describe("claimNextGoatCodexChatTurn", () => {
@@ -86,12 +90,123 @@ describe("resolveGoatCodexChatWorkerConcurrency", () => {
   });
 });
 
+describe("Goat Codex chat worker shutdown", () => {
+  it("bounds shutdown and hands active turns to the next worker", async () => {
+    vi.clearAllMocks();
+    let claimed = false;
+    dbMock.execute.mockImplementation(async (query) => {
+      const statement = sqlText(query);
+      if (statement.includes("WITH candidate AS")) {
+        if (claimed) return { rows: [] };
+        claimed = true;
+        return { rows: [claimedTurnRow()] };
+      }
+      return { rows: [{ id: "updated" }] };
+    });
+    sessionRows.length = 0;
+    sessionRows.push(session());
+    chatMocks.runGoatCodexChatTurn.mockImplementationOnce(async (input) => {
+      while (!input.shouldAbort()) await new Promise((resolve) => setTimeout(resolve, 1));
+      expect(input.shouldAbort()).toBeInstanceOf(GoatCodexChatHandoffError);
+      return "handed_off";
+    });
+    const onHandoff = vi.fn();
+    const worker = startGoatCodexChatWorker(env(), { concurrency: 1, pollIntervalMs: 50 });
+
+    await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledOnce());
+    await worker.stop({
+      handoffAfterMs: 1,
+      postHandoffWaitMs: 1_000,
+      onHandoff,
+    });
+
+    expect(onHandoff).toHaveBeenCalledWith(1);
+    expect(sqlText(dbMock.execute.mock.calls.at(-1)?.[0])).toContain("SET lease_id = NULL");
+  });
+
+  it("returns after the post-handoff deadline even when setup has not reached an abort check", async () => {
+    vi.clearAllMocks();
+    let claimed = false;
+    dbMock.execute.mockImplementation(async (query) => {
+      if (sqlText(query).includes("WITH candidate AS")) {
+        if (claimed) return { rows: [] };
+        claimed = true;
+        return { rows: [claimedTurnRow()] };
+      }
+      return { rows: [{ id: "updated" }] };
+    });
+    sessionRows.length = 0;
+    sessionRows.push(session());
+    let finishTurn: (() => void) | undefined;
+    chatMocks.runGoatCodexChatTurn.mockImplementationOnce(
+      () =>
+        new Promise<"settled">((resolve) => {
+          finishTurn = () => resolve("settled");
+        }),
+    );
+    const worker = startGoatCodexChatWorker(env(), { concurrency: 1, pollIntervalMs: 50 });
+
+    await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledOnce());
+    await expect(worker.stop({ handoffAfterMs: 1, postHandoffWaitMs: 1 })).resolves.toBeUndefined();
+    expect(worker.activeCount()).toBe(1);
+
+    finishTurn?.();
+    await vi.waitFor(() => expect(worker.activeCount()).toBe(0));
+  });
+});
+
+describe("terminal Goat Codex sandbox reconciliation", () => {
+  it("parks a terminal sandbox left active by a hard runner stop", async () => {
+    vi.clearAllMocks();
+    dbMock.execute
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: "session_1",
+            sandbox_id: "sbx_1",
+            updated_at: "2026-07-10T12:00:00.000Z",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: "session_1" }] });
+    sandboxMocks.armSandboxIdleTimeoutById.mockResolvedValueOnce(true);
+
+    await expect(sweepTerminalGoatCodexChatSandboxes({ idleTimeoutMs: 300_000 })).resolves.toBe(1);
+
+    expect(sandboxMocks.armSandboxIdleTimeoutById).toHaveBeenCalledWith("sbx_1", 300_000);
+    expect(sqlText(dbMock.execute.mock.calls[1]?.[0])).toContain("sandbox_timeout_armed_at");
+  });
+
+  it("restores the active timeout when a new turn wins the reconciliation race", async () => {
+    vi.clearAllMocks();
+    dbMock.execute
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: "session_1",
+            sandbox_id: "sbx_1",
+            updated_at: "2026-07-10T12:00:00.000Z",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ status: "running" }] });
+    sandboxMocks.armSandboxIdleTimeoutById.mockResolvedValueOnce(true);
+    sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValueOnce(true);
+
+    await expect(sweepTerminalGoatCodexChatSandboxes({ idleTimeoutMs: 300_000 })).resolves.toBe(1);
+
+    expect(sandboxMocks.armSandboxActiveTimeoutById).toHaveBeenCalledWith("sbx_1");
+  });
+});
+
 describe("runClaimedTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionRows.length = 0;
     sessionRows.push(session());
     chatMocks.runGoatCodexChatTurn.mockResolvedValue(undefined);
+    dbMock.execute.mockResolvedValue({ rows: [{ id: "updated" }] });
   });
 
   it("runs first attempts normally", async () => {
@@ -133,29 +248,32 @@ describe("runClaimedTurn", () => {
     expect(telemetry.recordGoatHistogram).not.toHaveBeenCalled();
   });
 
-  it("fails cleanly when recovery is reclaimed again", async () => {
+  it("reattaches after repeated lease claims instead of exhausting recovery", async () => {
     await runClaimedTurn(turn({ attempts: 3 }), env());
 
-    expect(chatMocks.runGoatCodexChatTurn).not.toHaveBeenCalled();
-    expect(eventMocks.fail).toHaveBeenCalledWith(
-      "Codex was interrupted by a runner restart. Send your message again to continue.",
+    expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turn: expect.objectContaining({ attempts: 3 }),
+        recovery: { reason: "lease_reclaimed" },
+      }),
     );
-    // Task-backed sessions mirror the terminal failure onto the goat.tasks row.
-    expect(settleMocks.settleTaskForCodexSession).toHaveBeenCalledWith({
-      chatSessionId: "goat_chat_1",
-      userWorkosId: "user_1",
-      turnId: "goat_codex_chat_turn_1",
-      assistantMessageId: "goat_chat_msg_assistant",
-      outcome: "failed",
-      error: "Codex was interrupted by a runner restart. Send your message again to continue.",
-    });
+    expect(eventMocks.fail).not.toHaveBeenCalled();
   });
 
-  it("swallows settle failures after a reclaimed turn is failed", async () => {
-    settleMocks.settleTaskForCodexSession.mockRejectedValueOnce(new Error("db down"));
+  it("releases its lease only after the Codex proxy reports a handoff", async () => {
+    const handoff = new AbortController();
+    handoff.abort();
+    chatMocks.runGoatCodexChatTurn.mockImplementationOnce(async (input) => {
+      expect(input.shouldAbort()).toBeInstanceOf(GoatCodexChatHandoffError);
+      return "handed_off";
+    });
 
-    await expect(runClaimedTurn(turn({ attempts: 3 }), env())).resolves.toBeUndefined();
-    expect(eventMocks.fail).toHaveBeenCalled();
+    await runClaimedTurn(turn(), env(), { handoffSignal: handoff.signal });
+
+    const release = sqlText(dbMock.execute.mock.calls.at(-1)?.[0]);
+    expect(release).toContain("SET lease_id = NULL");
+    expect(release).toContain("lease_owner = NULL");
+    expect(release).toContain("status = 'running'");
   });
 });
 
@@ -174,6 +292,7 @@ function claimedTurnRow() {
     error: null,
     interrupt_requested_at: null,
     attempts: 1,
+    recovery_attempts: 0,
     lease_id: "lease_1",
     lease_owner: "runner_1",
     lease_expires_at: "2026-07-10T09:05:00.000Z",
@@ -217,6 +336,7 @@ function turn(overrides: Partial<GoatCodexChatTurn> = {}): GoatCodexChatTurn {
     error: null,
     interruptRequestedAt: null,
     attempts: 1,
+    recoveryAttempts: 0,
     leaseId: "lease_1",
     leaseOwner: "runner_1",
     leaseExpiresAt: new Date("2026-07-10T09:05:00.000Z"),
@@ -239,6 +359,7 @@ function session(overrides: Partial<GoatCodexChatSession> = {}): GoatCodexChatSe
     activeTurnId: "goat_codex_chat_turn_1",
     status: "running",
     error: null,
+    sandboxTimeoutArmedAt: null,
     createdAt: now,
     updatedAt: now,
     ...overrides,

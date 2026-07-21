@@ -11,6 +11,8 @@ const e2bMocks = vi.hoisted(() => ({
   create: vi.fn(),
   getInfo: vi.fn(),
   kill: vi.fn(),
+  pause: vi.fn(),
+  setTimeout: vi.fn(),
 }));
 
 vi.mock("e2b", () => ({
@@ -18,7 +20,9 @@ vi.mock("e2b", () => ({
 }));
 
 import {
+  armSandboxActiveTimeoutById,
   armSandboxIdleTimeout,
+  armSandboxIdleTimeoutById,
   cloneGitHubRepositoryIntoWorkdir,
   commandExitResult,
   connectSandbox,
@@ -295,6 +299,47 @@ describe("armSandboxIdleTimeout", () => {
 
     expect(sandbox.pause).toHaveBeenCalledWith({ requestTimeoutMs: 30_000 });
     expect(sandbox.setTimeout).not.toHaveBeenCalledWith(30_000, {
+      requestTimeoutMs: 30_000,
+    });
+  });
+});
+
+describe("armSandboxIdleTimeoutById", () => {
+  it("shortens a running auto-pause sandbox without reconnecting to it", async () => {
+    e2bMocks.getInfo.mockResolvedValue({
+      state: "running",
+      lifecycle: { onTimeout: "pause", autoResume: true },
+    });
+    e2bMocks.setTimeout.mockResolvedValue(undefined);
+
+    await expect(armSandboxIdleTimeoutById("sbx_running", 30_000)).resolves.toBe(true);
+
+    expect(e2bMocks.setTimeout).toHaveBeenCalledWith("sbx_running", 30_000, {
+      requestTimeoutMs: 30_000,
+    });
+    expect(e2bMocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("leaves an already-paused sandbox asleep", async () => {
+    e2bMocks.getInfo.mockResolvedValue({
+      state: "paused",
+      lifecycle: { onTimeout: "pause", autoResume: true },
+    });
+
+    await expect(armSandboxIdleTimeoutById("sbx_paused", 30_000)).resolves.toBe(true);
+
+    expect(e2bMocks.setTimeout).not.toHaveBeenCalled();
+    expect(e2bMocks.pause).not.toHaveBeenCalled();
+  });
+});
+
+describe("armSandboxActiveTimeoutById", () => {
+  it("restores the one-hour execution timeout after a reconciliation race", async () => {
+    e2bMocks.setTimeout.mockResolvedValue(undefined);
+
+    await expect(armSandboxActiveTimeoutById("sbx_running")).resolves.toBe(true);
+
+    expect(e2bMocks.setTimeout).toHaveBeenCalledWith("sbx_running", 3_600_000, {
       requestTimeoutMs: 30_000,
     });
   });

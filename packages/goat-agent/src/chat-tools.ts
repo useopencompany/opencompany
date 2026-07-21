@@ -1,6 +1,6 @@
 import type { CodexCommandToolInput, CodexCommandToolOutput } from "@opencompany/agent-runtime";
 import type { GoatHarnessEngine } from "@opencompany/db/goat-schema";
-import type { GoatCapabilityEnvelope } from "./capabilities";
+import type { GoatCapabilityEnvelope, GoatCapabilityOperation } from "./capabilities";
 
 export const START_TASK_TOOL_NAME = "start_task";
 export const START_TASK_TOOL_PART_TYPE = `tool-${START_TASK_TOOL_NAME}` as const;
@@ -198,6 +198,9 @@ export type WebSearchToolOutput =
 
 export type UseCapabilityToolInput = {
   capability: string;
+  // Optional only so persisted tool parts from before operation modes continue
+  // to render. The live tool schema requires this field for every new call.
+  operation?: GoatCapabilityOperation;
   request: string;
 };
 

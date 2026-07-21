@@ -21,7 +21,6 @@ import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { syncGoatWorkspaceSeatQuantity } from "@/lib/billing/seat-sync";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
 
@@ -94,24 +93,13 @@ async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
       userId: authUser.id,
       statuses: ["active"],
     });
-    const adopted = await adoptGoatWorkspaceMembershipsFromOrgs({
+    await adoptGoatWorkspaceMembershipsFromOrgs({
       userWorkosId: authUser.id,
       memberships: memberships.data.map((membership) => ({
         organizationId: membership.organizationId,
         role: membership.role?.slug === "admin" ? ("admin" as const) : ("member" as const),
       })),
     });
-    if (adopted > 0) {
-      // An accepted invite is a new paid seat on Pro. Fire-and-forget: the
-      // hourly reconcile repairs a missed push, and sign-in never blocks on
-      // Stripe. The adoption path deliberately does not enforce the seat cap
-      // (blocking here would strand an accepted invite); over-cap workspaces
-      // are billed for the real count and flagged in the members panel.
-      const workspaces = await listGoatWorkspacesForUser(authUser.id);
-      for (const entry of workspaces) {
-        void syncGoatWorkspaceSeatQuantity(entry.workspace.id);
-      }
-    }
   } catch (error) {
     console.error("[goat] Failed to adopt WorkOS organization memberships", error);
   }

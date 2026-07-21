@@ -1,17 +1,16 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
-  applyGoatStripeInvoicePaymentState,
-  applyGoatStripeSubscriptionProjection,
-  findGoatWorkspaceIdForStripeSubscription,
-  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
+  releasePendingForWorkspace,
+  setGoatAutoRefillPaymentMethod,
+  settleGoatAutoRefill,
 } from "@opencompany/db/goat-billing";
 import {
   fulfillGoatTopUpCheckoutSession,
   markGoatCheckoutRecordFailed,
+  recordGoatAutoRefillCredit,
 } from "@opencompany/db/goat-credits";
-import type { GoatStripeSubscriptionStatus } from "@opencompany/db/goat-schema";
 import { after, NextResponse } from "next/server";
-import Stripe from "stripe";
+import type Stripe from "stripe";
 import {
   completeAutoRefillSetup,
   handleAutoRefillPaymentIntentFailed,
@@ -65,14 +64,22 @@ export async function POST(request: Request) {
       const result = await fulfillGoatTopUpCheckoutSession(session, { eventId: event.id });
       if (result.ok) {
         const workspaceId = session.metadata?.goatWorkspaceId ?? "";
-        after(() =>
-          captureServerEvent("goat_billing_topup_completed", workspaceId, {
+        after(async () => {
+          // Resume balance-paused ingestion immediately and save the card for
+          // auto-refill; both are best-effort against the fulfilled credit.
+          await releasePendingForWorkspace(workspaceId).catch((error) => {
+            console.error(`Failed to release paused ingestion for ${workspaceId}.`, error);
+          });
+          await captureGoatTopUpPaymentMethod(session).catch((error) => {
+            console.error(`Failed to capture the Goat top-up payment method.`, error);
+          });
+          await captureServerEvent("goat_billing_topup_completed", workspaceId, {
             workspace_id: workspaceId,
             checkout_record_id: result.checkoutRecordId,
             amount_cents: result.amountCents,
             balance_cents: result.balanceCents,
-          }),
-        );
+          });
+        });
       }
       return NextResponse.json({ received: true });
     }
@@ -81,10 +88,9 @@ export async function POST(request: Request) {
     if (event.type !== "checkout.session.completed") {
       return NextResponse.json({ received: true });
     }
-    if (session.mode === "subscription" && session.metadata?.billingProduct === "goat") {
-      // The subscription lifecycle events carry the complete item/status data
-      // and project the entitlement. Checkout completion is intentionally a
-      // no-op here so event ordering cannot grant access from partial data.
+    if (session.metadata?.billingProduct === "goat") {
+      // Legacy goat seat subscriptions (billing v3) are retired; a straggler
+      // event for one must fall through harmlessly.
       return NextResponse.json({ received: true });
     }
     // Setup-mode checkouts save a card for auto-refill; payment-mode checkouts are
@@ -107,104 +113,69 @@ export async function POST(request: Request) {
         );
       }
     }
-  } else if (
-    event.type === "customer.subscription.created" ||
-    event.type === "customer.subscription.updated" ||
-    event.type === "customer.subscription.deleted"
-  ) {
-    await handleGoatSubscriptionEvent(event);
-  } else if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
-    await handleGoatInvoiceEvent(event);
   } else if (event.type === "payment_intent.succeeded") {
-    await handleAutoRefillPaymentIntentSucceeded(event.data.object, event.id);
+    const intent = event.data.object;
+    if (intent.metadata?.billingProduct === "goat_auto_refill") {
+      await handleGoatAutoRefillPaymentIntentSucceeded(intent);
+    } else {
+      await handleAutoRefillPaymentIntentSucceeded(intent, event.id);
+    }
   } else if (event.type === "payment_intent.payment_failed") {
-    await handleAutoRefillPaymentIntentFailed(event.data.object);
+    const intent = event.data.object;
+    if (intent.metadata?.billingProduct === "goat_auto_refill") {
+      await handleGoatAutoRefillPaymentIntentFailed(intent);
+    } else {
+      await handleAutoRefillPaymentIntentFailed(intent);
+    }
   }
+  // Goat seat-subscription lifecycle events (customer.subscription.*,
+  // invoice.*) are no longer handled — billing v4 has no subscriptions. Any
+  // straggler falls through to the 200 below so the shared webhook never 500s.
 
   return NextResponse.json({ received: true });
 }
 
-async function handleGoatSubscriptionEvent(
-  event:
-    | Stripe.CustomerSubscriptionCreatedEvent
-    | Stripe.CustomerSubscriptionUpdatedEvent
-    | Stripe.CustomerSubscriptionDeletedEvent,
-) {
-  const subscription = event.data.object;
-  const metadata = subscription.metadata;
-  let workspaceId = metadata.goatWorkspaceId?.trim() || null;
-  if (!workspaceId) {
-    workspaceId = await findGoatWorkspaceIdForStripeSubscription(subscription.id);
-  }
-  if (metadata.billingProduct !== "goat" && !workspaceId) return;
-  if (!workspaceId) return;
-  const item = subscription.items.data[0] ?? null;
-  const customerId = stripeObjectId(subscription.customer);
-  if (!customerId) throw new Error("Goat Stripe subscription is missing its customer id.");
-  const projection = await applyGoatStripeSubscriptionProjection({
-    eventId: event.id,
-    eventType: event.type,
-    eventCreatedAt: new Date(event.created * 1_000),
+// The webhook is the durable path for goat auto-refill charges: the pi:{id}
+// ledger idempotency key means this and the synchronous confirm path can both
+// credit without double-counting, and a crash after PaymentIntent creation
+// still lands the credit here.
+async function handleGoatAutoRefillPaymentIntentSucceeded(intent: Stripe.PaymentIntent) {
+  const workspaceId = intent.metadata?.goatWorkspaceId;
+  const amountCents = Number(intent.metadata?.amountCents);
+  if (!workspaceId || !Number.isSafeInteger(amountCents) || amountCents <= 0) return;
+  await recordGoatAutoRefillCredit({
     workspaceId,
-    customerId,
-    subscriptionId: subscription.id,
-    subscriptionItemId: item?.id ?? null,
-    priceId: item ? stripeObjectId(item.price) : null,
-    seatQuantity: item?.quantity ?? null,
-    status: subscription.status as GoatStripeSubscriptionStatus,
-    cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    currentPeriodEnd: item?.current_period_end ? new Date(item.current_period_end * 1_000) : null,
+    amountCents,
+    paymentIntentId: intent.id,
   });
-  if (!projection.applied) return;
-  if (projection.planChanged) {
-    await captureServerEvent("goat_billing_plan_changed", workspaceId, {
-      workspace_id: workspaceId,
-      plan: projection.plan,
-      subscription_status: subscription.status,
-    });
-    if (projection.plan === "pro") {
-      await captureServerEvent("goat_billing_checkout_completed", workspaceId, {
-        workspace_id: workspaceId,
-        seat_quantity: item?.quantity ?? 1,
-        seat_monthly_price_usd_cents: GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
-      });
-    }
-  }
-  if (projection.cancellationScheduled) {
-    await captureServerEvent("goat_billing_cancellation_scheduled", workspaceId, {
-      workspace_id: workspaceId,
-      current_period_end: item?.current_period_end
-        ? new Date(item.current_period_end * 1_000).toISOString()
-        : null,
-    });
-  }
+  await settleGoatAutoRefill({ workspaceId }).catch(() => undefined);
+  await releasePendingForWorkspace(workspaceId).catch((error) => {
+    console.error(`Failed to release paused ingestion for ${workspaceId}.`, error);
+  });
 }
 
-async function handleGoatInvoiceEvent(
-  event: Stripe.InvoicePaidEvent | Stripe.InvoicePaymentFailedEvent,
-) {
-  const invoice = event.data.object;
-  const parent = invoice.parent?.subscription_details?.subscription;
-  const legacySubscription = (
-    invoice as Stripe.Invoice & { subscription?: string | Stripe.Subscription | null }
-  ).subscription;
-  const subscriptionId = stripeObjectId(parent) ?? stripeObjectId(legacySubscription);
-  if (!subscriptionId) return;
-  const workspaceId = await findGoatWorkspaceIdForStripeSubscription(subscriptionId);
+async function handleGoatAutoRefillPaymentIntentFailed(intent: Stripe.PaymentIntent) {
+  const workspaceId = intent.metadata?.goatWorkspaceId;
   if (!workspaceId) return;
-  const applied = await applyGoatStripeInvoicePaymentState({
-    eventId: event.id,
-    eventType: event.type,
-    eventCreatedAt: new Date(event.created * 1_000),
-    subscriptionId,
-    needsAttention: event.type === "invoice.payment_failed",
+  await settleGoatAutoRefill({
+    workspaceId,
+    disable: true,
+    error:
+      intent.last_payment_error?.message ?? "Stripe reported that the auto-refill charge failed.",
   });
-  if (applied && event.type === "invoice.payment_failed") {
-    await captureServerEvent("goat_billing_payment_failed", workspaceId, {
-      workspace_id: workspaceId,
-      subscription_id: subscriptionId,
-    });
-  }
+}
+
+// The card used for a successful top-up becomes the auto-refill payment
+// method (latest top-up wins). setup_future_usage on the Checkout payment
+// intent already attached it to the customer for off-session use.
+async function captureGoatTopUpPaymentMethod(session: Stripe.Checkout.Session) {
+  const workspaceId = session.metadata?.goatWorkspaceId;
+  const paymentIntentId = stripeObjectId(session.payment_intent);
+  if (!workspaceId || !paymentIntentId) return;
+  const intent = await getStripe().paymentIntents.retrieve(paymentIntentId);
+  const paymentMethodId = stripeObjectId(intent.payment_method);
+  if (!paymentMethodId) return;
+  await setGoatAutoRefillPaymentMethod({ workspaceId, paymentMethodId });
 }
 
 function stripeObjectId(value: string | { id: string } | null | undefined) {

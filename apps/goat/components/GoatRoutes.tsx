@@ -29,7 +29,6 @@ import {
 import { GoatBrainSettings } from "@/components/GoatBrainSettings";
 import { GoatBrainView } from "@/components/GoatBrainView";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
-import { GoatSpendOverview } from "@/components/GoatSpendOverview";
 import { GoatSurface } from "@/components/GoatSurface";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
@@ -84,6 +83,7 @@ export function GoatHomeRoute({
         defaultModel={DEFAULT_GOAT_MODEL}
         initialChat={initialChat}
         recentChats={data.recentChats}
+        archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
         localCodexBetaEnabled={data.featureFlags.localCodexBridge}
         taskSpawningEnabled={data.featureFlags.taskSpawning}
@@ -179,17 +179,6 @@ export function GoatMcpSettingsRoute() {
         initialCompletedAt={mcpSetup.completedAt}
         hideHeader
       />
-    </GoatSettingsContent>
-  );
-}
-
-export function GoatUsageSettingsRoute() {
-  return (
-    <GoatSettingsContent
-      title="Usage"
-      description="Track accumulated workspace spend across chat, tasks, and brain ingestion."
-    >
-      <GoatSpendOverview />
     </GoatSettingsContent>
   );
 }

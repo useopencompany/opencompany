@@ -35,7 +35,6 @@ type SlackMessage = {
 
 export const slackCapability: GoatCapabilityDefinition = {
   id: "slack",
-  sideEffect: "read",
   workerModel: "openai/gpt-5.4-mini",
   async resolve(userWorkosId) {
     const connection = await loadSlackConnection(userWorkosId);
@@ -47,6 +46,7 @@ export const slackCapability: GoatCapabilityDefinition = {
       : `slack — reads the user's Slack workspace${workspaceLabel}. CAN list the user's channels and DMs, read channel and thread history, and look up workspace members. CANNOT keyword-search the workspace (reconnecting Slack in Settings → Integrations enables search), read channels the user is not in, or post or edit anything.`;
 
     return {
+      operations: ["read"],
       indexLine,
       recipeLines: slackRecipeLines(connection.hasSearch),
       createTools: (context) => createSlackTools(context, connection),

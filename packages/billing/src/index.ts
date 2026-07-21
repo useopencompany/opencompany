@@ -3,7 +3,9 @@ import { type SQLWrapper, sql } from "drizzle-orm";
 
 export const USD_MICROS_PER_CENT = 10_000;
 export const USD_MICROS_PER_DOLLAR = 1_000_000;
-export const PLATFORM_FEE_BPS = 1000;
+// 20% fee on raw provider cost, applied to every metered surface (goat chat,
+// goat ingestion, legacy web usage debits).
+export const PLATFORM_FEE_BPS = 2000;
 
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;
@@ -67,6 +69,11 @@ export type WorkspaceUsageDebitInput = {
   metadata?: Record<string, unknown>;
 };
 
+// This table is the single cost basis for every metered surface (goat chat,
+// goat ingestion, legacy web usage). Keep it current with provider list
+// prices: when verifying or changing an entry, note it as
+// `// verified YYYY-MM-DD` on the entry and bump the pricingVersion below —
+// a stale entry silently misprices real debits.
 const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
   "openai/gpt-5.6-sol": {
     model: "openai/gpt-5.6-sol",
