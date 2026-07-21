@@ -3,6 +3,7 @@ import { goatTaskRunSessionId } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { goatTasks } from "@opencompany/db/goat-schema";
 import { and, eq, or, sql } from "drizzle-orm";
+import { createGoatCodexChatMessage } from "@/lib/codex-chat";
 import { triggerGoatTaskRun } from "@/lib/task-runner";
 
 export type GoatTaskSteeringResult =
@@ -39,7 +40,23 @@ export async function sendGoatTaskSteeringMessage(input: {
     return { ok: false, status: 409, error: "This task is no longer running." };
   }
   if (task.engine === "codex") {
-    return { ok: false, status: 409, error: "Codex tasks cannot be steered yet." };
+    // Codex tasks are driven by the codex chat worker: steering enqueues
+    // another codex turn on the task's run session (with its own assistant
+    // placeholder) instead of inserting a bare user message. The enqueue path
+    // wakes the codex chat worker itself.
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: input.userWorkosId,
+      sessionId: goatTaskRunSessionId(task.id),
+      prompt: input.prompt,
+    });
+    if (!result.ok) {
+      return {
+        ok: false,
+        status: result.status === 404 ? 404 : 409,
+        error: result.error,
+      };
+    }
+    return { ok: true, taskId: task.id, messageId: result.userMessageId };
   }
 
   const sessionId = goatTaskRunSessionId(task.id);

@@ -37,8 +37,16 @@ const eventMocks = vi.hoisted(() => ({
   loadCodexChatAssistantMessageParts: vi.fn(async () => []),
 }));
 
+const settleMocks = vi.hoisted(() => ({
+  settleTaskForCodexSession: vi.fn(async () => false),
+}));
+
 vi.mock("./db", () => ({
   getDb: () => dbMock,
+}));
+
+vi.mock("./goat-codex-task-settle", () => ({
+  settleTaskForCodexSession: settleMocks.settleTaskForCodexSession,
 }));
 
 vi.mock("./goat-codex-chat", () => ({
@@ -132,6 +140,22 @@ describe("runClaimedTurn", () => {
     expect(eventMocks.fail).toHaveBeenCalledWith(
       "Codex was interrupted by a runner restart. Send your message again to continue.",
     );
+    // Task-backed sessions mirror the terminal failure onto the goat.tasks row.
+    expect(settleMocks.settleTaskForCodexSession).toHaveBeenCalledWith({
+      chatSessionId: "goat_chat_1",
+      userWorkosId: "user_1",
+      turnId: "goat_codex_chat_turn_1",
+      assistantMessageId: "goat_chat_msg_assistant",
+      outcome: "failed",
+      error: "Codex was interrupted by a runner restart. Send your message again to continue.",
+    });
+  });
+
+  it("swallows settle failures after a reclaimed turn is failed", async () => {
+    settleMocks.settleTaskForCodexSession.mockRejectedValueOnce(new Error("db down"));
+
+    await expect(runClaimedTurn(turn({ attempts: 3 }), env())).resolves.toBeUndefined();
+    expect(eventMocks.fail).toHaveBeenCalled();
   });
 });
 

@@ -31,6 +31,7 @@ import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
+import { settleTaskForCodexSession } from "./goat-codex-task-settle";
 import {
   armSandboxIdleTimeout,
   createOrConnectSandbox,
@@ -74,6 +75,32 @@ export async function runGoatCodexChatTurn(input: {
     throw new Error(`Claimed codex chat turn ${turn.id} is missing its lease.`);
   }
 
+  // Task-backed sessions mirror the turn outcome onto the goat.tasks row; the
+  // call no-ops for ordinary codex chats. A settle failure must not resurface
+  // as a turn failure (the turn itself already settled), so log and move on.
+  const settleTaskForTurn = async (outcome: "succeeded" | "failed", error?: string) => {
+    try {
+      await settleTaskForCodexSession({
+        chatSessionId: session.chatSessionId,
+        userWorkosId: turn.userWorkosId,
+        turnId: turn.id,
+        assistantMessageId: turn.assistantMessageId,
+        outcome,
+        ...(error ? { error } : {}),
+      });
+    } catch (settleError) {
+      captureException(settleError, {
+        event: "opencompany.goat_codex_task_settle_failed",
+        turn_id: turn.id,
+      });
+      logger.error("Goat codex task settle failed", {
+        event: "opencompany.goat_codex_task_settle_failed",
+        turn_id: turn.id,
+        error: settleError,
+      });
+    }
+  };
+
   const initialParts = await loadCodexChatAssistantMessageParts(turn.assistantMessageId);
   const bareProjector = async () =>
     createGoatCodexChatProjector({
@@ -96,6 +123,7 @@ export async function runGoatCodexChatTurn(input: {
   const auth = await loadGoatCodexCliAuth(turn.userWorkosId);
   if (!auth) {
     await (await bareProjector()).fail(GOAT_CODEX_CHAT_REAUTH_MESSAGE, { sessionStatus: "failed" });
+    await settleTaskForTurn("failed", GOAT_CODEX_CHAT_REAUTH_MESSAGE);
     return;
   }
 
@@ -111,9 +139,9 @@ export async function runGoatCodexChatTurn(input: {
       idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
     });
   } catch (error) {
-    await (await bareProjector()).fail(
-      `Codex sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`,
-    );
+    const sandboxError = `Codex sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`;
+    await (await bareProjector()).fail(sandboxError);
+    await settleTaskForTurn("failed", sandboxError);
     return;
   }
 
@@ -289,6 +317,14 @@ export async function runGoatCodexChatTurn(input: {
       });
     });
     await projector.finalize(summary);
+    if (summary.status === "success") {
+      await settleTaskForTurn("succeeded");
+    } else {
+      await settleTaskForTurn(
+        "failed",
+        summary.error ?? `Codex finished with status: ${summary.status}.`,
+      );
+    }
   } catch (error) {
     if (error instanceof GoatCodexChatInterruptedError) {
       await persistRefreshedGoatCodexAuth({
@@ -302,7 +338,9 @@ export async function runGoatCodexChatTurn(input: {
       // Another worker owns the turn now; leave all rows to it.
       throw error;
     } else {
-      await projector.fail(redact(errorMessage(error)));
+      const failure = redact(errorMessage(error));
+      await projector.fail(failure);
+      await settleTaskForTurn("failed", failure);
     }
   } finally {
     // The sandbox outlives the turn: arm the chat idle timeout instead of killing it, so the

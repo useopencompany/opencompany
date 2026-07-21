@@ -35,6 +35,10 @@ const sandboxMocks = vi.hoisted(() => ({
   createOrConnectSandbox: vi.fn(),
 }));
 
+const settleMocks = vi.hoisted(() => ({
+  settleTaskForCodexSession: vi.fn(async () => false),
+}));
+
 vi.mock("./codex-app-server", () => ({
   runCodexAppServerTurn: appServerMocks.runCodexAppServerTurn,
 }));
@@ -68,6 +72,10 @@ vi.mock("./goat-codex", () => ({
 vi.mock("./goat-codex-chat-events", () => ({
   createGoatCodexChatProjector: eventMocks.createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts: eventMocks.loadCodexChatAssistantMessageParts,
+}));
+
+vi.mock("./goat-codex-task-settle", () => ({
+  settleTaskForCodexSession: settleMocks.settleTaskForCodexSession,
 }));
 
 vi.mock("./sandbox", () => ({
@@ -260,6 +268,61 @@ describe("runGoatCodexChatTurn", () => {
     );
     expect(dbMocks.execute).not.toHaveBeenCalled();
     expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
+  });
+
+  it("settles a backing task as succeeded after a successful turn", async () => {
+    dbMocks.selectRows.push([]);
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      env: env(),
+    });
+
+    expect(settleMocks.settleTaskForCodexSession).toHaveBeenCalledWith({
+      chatSessionId: "goat_chat_1",
+      userWorkosId: "user_1",
+      turnId: "goat_codex_turn_1",
+      assistantMessageId: "goat_msg_assistant_1",
+      outcome: "succeeded",
+    });
+  });
+
+  it("settles a backing task as failed when the turn errors", async () => {
+    dbMocks.selectRows.push([]);
+    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new Error("codex exploded"));
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      env: env(),
+    });
+
+    expect(settleMocks.settleTaskForCodexSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatSessionId: "goat_chat_1",
+        outcome: "failed",
+        error: "codex exploded",
+      }),
+    );
+  });
+
+  it("settles a backing task as failed when Codex auth is missing", async () => {
+    codexAuthMocks.loadGoatCodexCliAuth.mockResolvedValueOnce(null);
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      env: env(),
+    });
+
+    expect(sandboxMocks.createOrConnectSandbox).not.toHaveBeenCalled();
+    expect(settleMocks.settleTaskForCodexSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "failed",
+        error: expect.stringContaining("Codex is disconnected"),
+      }),
+    );
   });
 });
 

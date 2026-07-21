@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => {
     execute: vi.fn(),
     select: vi.fn(),
     triggerGoatTaskRun: vi.fn(),
+    triggerGoatCodexChatWake: vi.fn(),
+    isGoatCodexConnectedForUser: vi.fn(),
   };
 });
 
@@ -20,6 +22,11 @@ vi.mock("@opencompany/db/client", () => ({
 
 vi.mock("@/lib/task-runner", () => ({
   triggerGoatTaskRun: mocks.triggerGoatTaskRun,
+  triggerGoatCodexChatWake: mocks.triggerGoatCodexChatWake,
+}));
+
+vi.mock("@/lib/codex-auth", () => ({
+  isGoatCodexConnectedForUser: mocks.isGoatCodexConnectedForUser,
 }));
 
 vi.mock("@/lib/integrations/google-data", () => ({
@@ -156,6 +163,64 @@ describe("createGoatTaskForUser", () => {
       }),
     ).rejects.toThrow("Background tasks are disabled");
     expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
+  });
+
+  it("rejects codex tasks when Codex is not connected", async () => {
+    mocks.isGoatCodexConnectedForUser.mockResolvedValue(false);
+
+    await expect(
+      createGoatTaskForUser({
+        userWorkosId: "user_1",
+        prompt: "Research x",
+        model: DEFAULT_GOAT_MODEL,
+        engine: "codex",
+      }),
+    ).rejects.toThrow("Connect Codex in Goat settings before starting a Codex task.");
+
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
+    expect(mocks.triggerGoatCodexChatWake).not.toHaveBeenCalled();
+  });
+
+  it("creates a codex task with its run session, codex session, and queued turn", async () => {
+    mocks.isGoatCodexConnectedForUser.mockResolvedValue(true);
+    mocks.triggerGoatCodexChatWake.mockResolvedValue(undefined);
+
+    const task = await createGoatTaskForUser({
+      userWorkosId: "user_1",
+      prompt: "Research x",
+      model: DEFAULT_GOAT_MODEL,
+      engine: "codex",
+    });
+
+    expect(task).toMatchObject({ id: "task_1", status: "queued" });
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    const statement = sqlTextFromExecuteCall(0);
+    expect(statement).toContain("task_spawning_enabled = true");
+    expect(statement).toContain("'codex'");
+    expect(statement).toContain("INSERT INTO goat.codex_chat_sessions");
+    expect(statement).toContain("INSERT INTO goat.codex_chat_turns");
+    expect(statement).toContain("EXISTS (SELECT 1 FROM inserted_turn)");
+    expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledTimes(1);
+    expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
+  });
+
+  it("leaves a codex task queued for polling when the codex chat wake fails", async () => {
+    mocks.isGoatCodexConnectedForUser.mockResolvedValue(true);
+    mocks.triggerGoatCodexChatWake.mockRejectedValue(new Error("runner unavailable"));
+
+    const task = await createGoatTaskForUser({
+      userWorkosId: "user_1",
+      prompt: "Research x",
+      model: DEFAULT_GOAT_MODEL,
+      engine: "codex",
+    });
+
+    expect(task).toMatchObject({ id: "task_1", status: "queued" });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Goat codex chat wake failed; the task turn waits for polling.",
+      expect.objectContaining({ event: "goat.codex_chat_wake_failed" }),
+    );
   });
 
   it("reports an unknown user separately from a disabled preference", async () => {

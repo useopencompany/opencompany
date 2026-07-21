@@ -1,7 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { goatTaskRunSessionId } from "@opencompany/agent-runtime";
+import { codexCliModelNameForModelId, goatTaskRunSessionId } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import type { GoatHarnessEngine, GoatTask } from "@opencompany/db/goat-schema";
@@ -16,11 +16,14 @@ import {
 } from "@opencompany/db/goat-schema";
 import { and, asc, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
+import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
+import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
+import { normalizeCodexChatModelId } from "@/lib/codex-chat-constants";
 import { goatHomeActivityCutoff } from "@/lib/home-activity";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import type { GoatTaskView } from "@/lib/task-board";
 import { normalizeGoatTaskName } from "@/lib/task-display";
-import { triggerGoatTaskRun } from "@/lib/task-runner";
+import { triggerGoatCodexChatWake, triggerGoatTaskRun } from "@/lib/task-runner";
 import { validateGoatTaskInput } from "@/lib/task-validation";
 
 export type ArchiveTaskResult = {
@@ -269,6 +272,16 @@ export async function retryGoatTaskAction(taskId: string): Promise<RetryTaskResu
   if (!user.taskSpawningEnabled) {
     return { ok: false, error: "Background tasks are disabled." };
   }
+  // Codex tasks are driven by the codex chat worker; requeueing one for the
+  // task worker would strand it as a zombie the worker never claims.
+  const [existing] = await getDb()
+    .select({ engine: goatTasks.engine })
+    .from(goatTasks)
+    .where(and(eq(goatTasks.id, taskId), eq(goatTasks.userWorkosId, user.workosUserId)))
+    .limit(1);
+  if (existing?.engine === "codex") {
+    return { ok: false, error: "Codex tasks cannot be retried yet. Start a new task instead." };
+  }
   const now = new Date();
   const result = await getDb().execute(sql`
     WITH retried_task AS (
@@ -346,19 +359,88 @@ export async function createGoatTaskForUser(input: {
     throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
   }
 
+  const engine: GoatHarnessEngine = input.engine ?? "opencompany";
+  if (engine === "codex" && !(await isGoatCodexConnectedForUser(input.userWorkosId))) {
+    throw new Error("Connect Codex in Goat settings before starting a Codex task.");
+  }
+
   const id = `goat_task_${randomUUID()}`;
   const sessionId = goatTaskRunSessionId(id);
   const openingMessageId = `goat_chat_msg_${randomUUID()}`;
   const now = new Date();
   const name = normalizeGoatTaskName(input.name, input.prompt);
-  // Codex-engine tasks are not unified with codex chat sessions yet; every run
-  // uses the opencompany session driver until that lands.
-  void input.engine;
-  const engine: GoatHarnessEngine = "opencompany";
   // The run session carries the task's transcript; the opening user message is
-  // the task description. Its id is deterministic so creation and the runner's
-  // crash-recovery ensure step stay idempotent.
-  const task = rowsFromExecute<GoatTaskRow>(
+  // the task description. The session id is deterministic so creation, the
+  // runner's crash-recovery ensure step, and every task-to-session link stay
+  // idempotent. Codex tasks are driven by the codex chat worker via a queued
+  // codex turn; opencompany tasks are claimed by the task worker.
+  const task =
+    engine === "codex"
+      ? await insertCodexTaskRunGraph({ ...input, id, sessionId, openingMessageId, now, name })
+      : await insertOpenCompanyTaskRunGraph({
+          ...input,
+          id,
+          sessionId,
+          openingMessageId,
+          now,
+          name,
+        });
+
+  if (!task) {
+    const currentTaskSpawningState = await loadGoatTaskSpawningState(input.userWorkosId);
+    if (currentTaskSpawningState === null) {
+      throw new Error("Unable to create a Goat task for an unknown user.");
+    }
+    if (!currentTaskSpawningState) {
+      throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
+    }
+    throw new Error("Unable to create Goat task.");
+  }
+
+  if (engine === "codex") {
+    // Best-effort nudge; the codex chat worker's poll loop picks the turn up regardless.
+    await triggerGoatCodexChatWake().catch((error) => {
+      console.warn("Goat codex chat wake failed; the task turn waits for polling.", {
+        event: "goat.codex_chat_wake_failed",
+        task_id: id,
+        error,
+      });
+    });
+    return task;
+  }
+
+  try {
+    await triggerGoatTaskRun(id, {
+      task_id: id,
+      event: "goat.runner_task_created_dispatch",
+    });
+  } catch (error) {
+    console.warn("Goat runner dispatch failed; the task remains queued for polling.", {
+      event: "goat.runner_task_created_dispatch_failed",
+      task_id: id,
+      error,
+    });
+  }
+
+  return task;
+}
+
+type CreateGoatTaskGraphInput = {
+  id: string;
+  sessionId: string;
+  openingMessageId: string;
+  now: Date;
+  name: string;
+  userWorkosId: string;
+  prompt: string;
+  model: AgentModelId;
+  scheduleId?: string;
+  scheduledFor?: Date;
+};
+
+async function insertOpenCompanyTaskRunGraph(input: CreateGoatTaskGraphInput) {
+  const { id, sessionId, openingMessageId, now, name } = input;
+  return rowsFromExecute<GoatTaskRow>(
     await getDb().execute(sql`
       WITH created_task AS (
         INSERT INTO goat.tasks (
@@ -382,7 +464,7 @@ export async function createGoatTaskForUser(input: {
           ${input.userWorkosId},
           ${input.prompt},
           ${input.model},
-          ${engine},
+          'opencompany',
           ${input.scheduleId ?? null},
           ${input.scheduledFor ?? null},
           'queued',
@@ -468,32 +550,215 @@ export async function createGoatTaskForUser(input: {
       WHERE EXISTS (SELECT 1 FROM inserted_user_message)
     `),
   ).map(goatTaskFromRow)[0];
+}
 
-  if (!task) {
-    const currentTaskSpawningState = await loadGoatTaskSpawningState(input.userWorkosId);
-    if (currentTaskSpawningState === null) {
-      throw new Error("Unable to create a Goat task for an unknown user.");
-    }
-    if (!currentTaskSpawningState) {
-      throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
-    }
-    throw new Error("Unable to create Goat task.");
-  }
+// Mirrors the CTE shape of createFirstCodexChatTurn in @/lib/codex-chat: the
+// run session doubles as a codex chat session with the opening user message,
+// an empty assistant placeholder, and one queued codex turn seeded with the
+// task prompt. The codex chat worker claims the turn and streams into the
+// placeholder; the runner's settle hook mirrors the outcome onto the task.
+async function insertCodexTaskRunGraph(input: CreateGoatTaskGraphInput) {
+  const { id, sessionId, openingMessageId, now, name } = input;
+  const codexChatSessionId = `goat_codex_chat_${randomUUID()}`;
+  const turnId = `goat_codex_chat_turn_${randomUUID()}`;
+  const assistantMessageId = `goat_chat_msg_${randomUUID()}`;
+  const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
+  const modelId = normalizeCodexChatModelId(input.model);
+  const codexModel = codexCliModelNameForModelId(modelId);
+  if (!codexModel) throw new Error(`Unsupported Codex model: ${modelId}`);
+  // Same placeholder trace shape createFirstCodexChatTurn writes.
+  const assistantDebugTrace = {
+    schemaVersion: "goat.codex_chat.debug.v1",
+    model: codexModel,
+    uiMessageParts: [],
+  };
 
-  try {
-    await triggerGoatTaskRun(id, {
-      task_id: id,
-      event: "goat.runner_task_created_dispatch",
-    });
-  } catch (error) {
-    console.warn("Goat runner dispatch failed; the task remains queued for polling.", {
-      event: "goat.runner_task_created_dispatch_failed",
-      task_id: id,
-      error,
-    });
-  }
-
-  return task;
+  return rowsFromExecute<GoatTaskRow>(
+    await getDb().execute(sql`
+      WITH created_task AS (
+        INSERT INTO goat.tasks (
+          id,
+          name,
+          user_workos_id,
+          prompt,
+          model,
+          engine,
+          schedule_id,
+          scheduled_for,
+          status,
+          stage,
+          next_run_at,
+          created_at,
+          updated_at
+        )
+        SELECT
+          ${id},
+          ${name},
+          ${input.userWorkosId},
+          ${input.prompt},
+          ${modelId},
+          'codex',
+          ${input.scheduleId ?? null},
+          ${input.scheduledFor ?? null},
+          'queued',
+          'queued',
+          ${now},
+          ${now},
+          ${now}
+        FROM goat.users AS "user"
+        WHERE "user".workos_user_id = ${input.userWorkosId}
+          AND "user".task_spawning_enabled = true
+        RETURNING *
+      ),
+      run_session AS (
+        INSERT INTO goat.chat_sessions (
+          id,
+          user_workos_id,
+          title,
+          model,
+          engine,
+          task_id,
+          created_at,
+          updated_at
+        )
+        SELECT
+          ${sessionId},
+          task.user_workos_id,
+          task.name,
+          task.model,
+          'codex',
+          task.id,
+          ${now},
+          ${assistantCreatedAt}
+        FROM created_task AS task
+        RETURNING id
+      ),
+      inserted_user_message AS (
+        INSERT INTO goat.chat_messages (
+          id,
+          session_id,
+          role,
+          content,
+          created_at,
+          updated_at
+        )
+        SELECT
+          ${openingMessageId},
+          run_session.id,
+          'user',
+          task.prompt,
+          ${now},
+          ${now}
+        FROM created_task AS task
+        CROSS JOIN run_session
+        RETURNING id
+      ),
+      inserted_assistant_message AS (
+        INSERT INTO goat.chat_messages (
+          id,
+          session_id,
+          role,
+          content,
+          debug_trace,
+          created_at,
+          updated_at
+        )
+        SELECT
+          ${assistantMessageId},
+          run_session.id,
+          'assistant',
+          '',
+          ${JSON.stringify(assistantDebugTrace)}::jsonb,
+          ${assistantCreatedAt},
+          ${assistantCreatedAt}
+        FROM run_session
+        RETURNING id
+      ),
+      inserted_codex_session AS (
+        INSERT INTO goat.codex_chat_sessions (
+          id,
+          user_workos_id,
+          chat_session_id,
+          model,
+          active_turn_id,
+          status,
+          created_at,
+          updated_at
+        )
+        SELECT
+          ${codexChatSessionId},
+          task.user_workos_id,
+          run_session.id,
+          ${codexModel},
+          ${turnId},
+          'queued',
+          ${now},
+          ${now}
+        FROM created_task AS task
+        CROSS JOIN run_session
+        RETURNING id
+      ),
+      inserted_turn AS (
+        INSERT INTO goat.codex_chat_turns (
+          id,
+          user_workos_id,
+          codex_chat_session_id,
+          chat_session_id,
+          user_message_id,
+          assistant_message_id,
+          status,
+          prompt,
+          settings,
+          created_at,
+          updated_at
+        )
+        SELECT
+          ${turnId},
+          task.user_workos_id,
+          codex_session.id,
+          run_session.id,
+          ${openingMessageId},
+          ${assistantMessageId},
+          'queued',
+          task.prompt,
+          '{}'::jsonb,
+          ${now},
+          ${now}
+        FROM created_task AS task
+        CROSS JOIN run_session
+        CROSS JOIN inserted_codex_session AS codex_session
+        RETURNING id
+      )
+      SELECT
+        task.id AS "id",
+        task.display_id AS "displayId",
+        task.name AS "name",
+        task.user_workos_id AS "userWorkosId",
+        task.prompt AS "prompt",
+        task.model AS "model",
+        task.schedule_id AS "scheduleId",
+        task.scheduled_for AS "scheduledFor",
+        task.engine AS "engine",
+        task.status AS "status",
+        task.stage AS "stage",
+        task.result AS "result",
+        task.error AS "error",
+        task.harness_spec AS "harnessSpec",
+        task.debug_trace AS "debugTrace",
+        task.codex_engine_session_id AS "codexEngineSessionId",
+        task.sandbox_id AS "sandboxId",
+        task.attempts AS "attempts",
+        task.next_run_at AS "nextRunAt",
+        task.lease_id AS "leaseId",
+        task.lease_owner AS "leaseOwner",
+        task.lease_expires_at AS "leaseExpiresAt",
+        task.archived_at AS "archivedAt",
+        task.created_at AS "createdAt",
+        task.updated_at AS "updatedAt"
+      FROM created_task AS task
+      WHERE EXISTS (SELECT 1 FROM inserted_turn)
+    `),
+  ).map(goatTaskFromRow)[0];
 }
 
 async function loadGoatTaskSpawningState(userWorkosId: string): Promise<boolean | null> {

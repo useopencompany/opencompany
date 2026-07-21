@@ -16,6 +16,7 @@ import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
+import { settleTaskForCodexSession } from "./goat-codex-task-settle";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat-worker" });
@@ -257,9 +258,29 @@ async function failReclaimedTurn(input: {
     // Keep whatever partial parts the dead worker already streamed; only finalize them.
     initialParts: await loadCodexChatAssistantMessageParts(input.turn.assistantMessageId),
   });
-  await projector.fail(
-    "Codex was interrupted by a runner restart. Send your message again to continue.",
-  );
+  const restartError =
+    "Codex was interrupted by a runner restart. Send your message again to continue.";
+  await projector.fail(restartError);
+  // Task-backed sessions mirror the terminal failure onto the goat.tasks row;
+  // no-op for ordinary codex chats. Log-only on failure: the turn is settled.
+  await settleTaskForCodexSession({
+    chatSessionId: input.session.chatSessionId,
+    userWorkosId: input.turn.userWorkosId,
+    turnId: input.turn.id,
+    assistantMessageId: input.turn.assistantMessageId,
+    outcome: "failed",
+    error: restartError,
+  }).catch((error) => {
+    captureException(error, {
+      event: "opencompany.goat_codex_task_settle_failed",
+      turn_id: input.turn.id,
+    });
+    logger.error("Goat codex task settle failed", {
+      event: "opencompany.goat_codex_task_settle_failed",
+      turn_id: input.turn.id,
+      error,
+    });
+  });
 }
 
 export function startGoatCodexChatWorker(
