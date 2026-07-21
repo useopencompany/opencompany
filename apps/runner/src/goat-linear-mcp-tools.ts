@@ -17,6 +17,7 @@ import { getDb } from "./db";
 export type GoatLinearMcpToolName = "linear_search_tools" | "linear_use_tool";
 
 const LINEAR_ENDPOINT_URL = "https://mcp.linear.app/mcp";
+const LINEAR_OAUTH_SCOPE = "read write";
 const LINEAR_PROVIDER = "linear" as const;
 const LINEAR_CREDENTIAL_KIND = "oauth_token" as const;
 
@@ -174,6 +175,7 @@ function createLinearOAuthProvider(input: {
         redirect_uris: [linearCallbackUrl()],
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
+        scope: LINEAR_OAUTH_SCOPE,
       };
     },
     clientInformation: () => payload.clientInformation,

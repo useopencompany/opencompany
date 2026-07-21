@@ -16,6 +16,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { getGoatAppUrl } from "@/lib/workos";
 
 export const GOAT_LINEAR_MCP_ENDPOINT_URL = "https://mcp.linear.app/mcp";
+const GOAT_LINEAR_MCP_SCOPE = "read write";
 const GOAT_LINEAR_PROVIDER = "linear" as const;
 const GOAT_LINEAR_CREDENTIAL_KIND = "oauth_token" as const;
 const LINEAR_EXTERNAL_ID = "linear_mcp";
@@ -335,6 +336,7 @@ function createLinearClientProvider(input: {
         redirect_uris: [`${getGoatAppUrl()}/api/integrations/linear/callback`],
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
+        scope: GOAT_LINEAR_MCP_SCOPE,
       };
     },
     clientInformation: () => payload.clientInformation,
