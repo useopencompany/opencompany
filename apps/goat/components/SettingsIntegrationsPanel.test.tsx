@@ -37,10 +37,11 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    const entry = screen.getByRole("link", { name: /Goat MCP/ });
-    expect(entry).toHaveAttribute("href", "/settings/mcp");
-    expect(entry).toHaveTextContent("Set up");
-    expect(entry).toHaveTextContent("Claude, ChatGPT, or Cursor");
+    // The MCP card shows its title + client hint; its CTA links to the setup page.
+    expect(screen.getByText("Goat MCP")).toBeInTheDocument();
+    expect(screen.getByText("Claude, ChatGPT, or Cursor")).toBeInTheDocument();
+    const cta = screen.getByRole("link", { name: "Set up" });
+    expect(cta).toHaveAttribute("href", "/settings/mcp");
   });
 
   it("reports the verified connection and remembered client", () => {
@@ -55,8 +56,9 @@ describe("SettingsIntegrationsPanel", () => {
       />,
     );
 
-    const entry = screen.getByRole("link", { name: /Goat MCP/ });
-    expect(entry).toHaveTextContent("Connected with Cursor");
-    expect(entry).toHaveTextContent("Connected");
+    expect(screen.getByText("Goat MCP")).toBeInTheDocument();
+    expect(screen.getByText("Connected with Cursor")).toBeInTheDocument();
+    const cta = screen.getByRole("link", { name: "Manage" });
+    expect(cta).toHaveAttribute("href", "/settings/mcp");
   });
 });
