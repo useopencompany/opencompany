@@ -9,6 +9,7 @@ import {
   createGoatBrainSkillForUser,
   moveGoatBrainDocumentForUser,
   renameGoatBrainDocumentForUser,
+  updateGoatBrainSkillForUser,
 } from "@/lib/brain";
 
 const dbMocks = vi.hoisted(() => ({
@@ -104,7 +105,7 @@ describe("manual Goat brain documents", () => {
     });
   });
 
-  it("creates a stable skill id with required description frontmatter", async () => {
+  it("creates a stable skill id with provided description frontmatter", async () => {
     const result = await createGoatBrainSkillForUser({
       brainRef: "goat_brain_1",
       userWorkosId: "user_1",
@@ -131,7 +132,57 @@ describe("manual Goat brain documents", () => {
     });
   });
 
-  it("rejects incomplete skills and skill creation outside skills", async () => {
+  it("creates a skill with only a name", async () => {
+    const result = await createGoatBrainSkillForUser({
+      brainRef: "goat_brain_1",
+      userWorkosId: "user_1",
+      folderPath: "skills",
+      name: "Coding work",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      path: "skills/coding-work.md",
+      document: {
+        brainId: "coding-work",
+        title: "Coding work",
+      },
+    });
+    const input = dbMocks.createGoatBrainMarkdownDocument.mock.calls[0]?.[0];
+    expect(parseGoatBrainDocument(input.content).frontmatter).not.toHaveProperty("description");
+  });
+
+  it("removes an optional description when updating a skill", async () => {
+    await createGoatBrainSkillForUser({
+      brainRef: "goat_brain_1",
+      userWorkosId: "user_1",
+      folderPath: "skills",
+      name: "Coding work",
+      description: "How coding work should happen.",
+    });
+    const existing = await dbMocks.createGoatBrainMarkdownDocument.mock.results[0]?.value;
+    dbMocks.getGoatBrainFile.mockResolvedValue(existing);
+    dbMocks.updateGoatBrainFileContent.mockImplementation(async (input) => ({
+      ...existing,
+      ...deriveGoatBrainFileProjection({ path: "skills/coding-work.md", content: input.content }),
+      updatedAt: new Date("2026-07-13T12:05:00.000Z"),
+    }));
+
+    await expect(
+      updateGoatBrainSkillForUser({
+        brainRef: "goat_brain_1",
+        userWorkosId: "user_1",
+        documentId: existing.id,
+        name: "Coding work",
+        description: "",
+        instructions: "Inspect, implement, and verify.",
+      }),
+    ).resolves.toMatchObject({ ok: true, document: { title: "Coding work" } });
+    const input = dbMocks.updateGoatBrainFileContent.mock.calls[0]?.[0];
+    expect(parseGoatBrainDocument(input.content).frontmatter).not.toHaveProperty("description");
+  });
+
+  it("rejects invalid descriptions and skill creation outside skills", async () => {
     await expect(
       createGoatBrainSkillForUser({
         brainRef: "goat_brain_1",
@@ -141,15 +192,6 @@ describe("manual Goat brain documents", () => {
         description: "How coding work should happen.",
       }),
     ).resolves.toEqual({ ok: false, message: 'Skills must live in the "skills" folder.' });
-    await expect(
-      createGoatBrainSkillForUser({
-        brainRef: "goat_brain_1",
-        userWorkosId: "user_1",
-        folderPath: "skills",
-        name: "Coding work",
-        description: " ",
-      }),
-    ).resolves.toEqual({ ok: false, message: "Skill description cannot be empty." });
     await expect(
       createGoatBrainSkillForUser({
         brainRef: "goat_brain_1",
