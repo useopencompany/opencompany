@@ -96,10 +96,12 @@ snapshot in `goat.chat_session_skills`; re-mentioning the same id keeps that ses
 version.
 
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
-matching `/chat/<id>` route immediately; the server persists that exact id. When the stream finishes,
-the route also attaches `sessionId` in message metadata so the client can confirm the route and call
-`router.refresh()` for persisted server props. Persisted Goat app state such as tasks, task run events,
-integrations, and Brain documents is read through TanStack DB collections backed by Electric shapes.
+matching `/chat/<id>` URL immediately with the native History API, without starting a server
+navigation; the server persists that exact id. The stream attaches `sessionId` in message metadata so
+the client can confirm ownership and start the authorized message subscription. Persisted chat
+sessions and messages then arrive through TanStack DB collections backed by Electric shapes. Other
+persisted Goat app state such as tasks, task run events, integrations, and Brain documents uses the
+same live-data path.
 
 Stopping generation calls `stop()`, which aborts the HTTP request. Closing chat clears local state,
 optionally stops the active stream, and marks the chat session closed through
