@@ -182,6 +182,66 @@ export function applyCodexEventToUiMessageParts(
   }
 }
 
+export function resolveCodexUiInteraction(
+  parts: readonly CodexUiMessagePart[],
+  input: {
+    interactionId: string;
+    status: "answered" | "auto-resolved" | "canceled";
+  },
+): CodexUiMessageProjection {
+  let didChange = false;
+  const next = parts.map((part): CodexUiMessagePart => {
+    if (
+      part.type !== "dynamic-tool" ||
+      part.toolName !== CODEX_QUESTION_TOOL_NAME ||
+      part.state !== "approval-requested" ||
+      readString(part.input.interactionId) !== input.interactionId
+    ) {
+      return part;
+    }
+    didChange = true;
+    return {
+      type: "dynamic-tool",
+      toolName: part.toolName,
+      toolCallId: part.toolCallId,
+      state: "output-available",
+      input: part.input,
+      output: { status: input.status },
+    };
+  });
+  return didChange ? changed(next) : unchanged(parts);
+}
+
+// The Codex TUI offers implementation only after a successful Plan-mode turn, not as soon as
+// the proposed-plan item arrives. Keeping this as an explicit terminal transition prevents an
+// actionable card from appearing while the runner is still streaming the turn.
+export function offerCodexPlanImplementation(
+  parts: readonly CodexUiMessagePart[],
+): CodexUiMessageProjection {
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if (
+      !part ||
+      part.type !== "dynamic-tool" ||
+      part.toolName !== CODEX_PLAN_TOOL_NAME ||
+      part.state !== "output-available" ||
+      !isRecord(part.output) ||
+      readString(part.output.status) !== "completed" ||
+      !readString(part.output.text)?.trim()
+    ) {
+      continue;
+    }
+    if (part.output.implementationAvailable === true) return unchanged(parts);
+    const next = [...parts];
+    next[index] = {
+      ...part,
+      output: { ...part.output, implementationAvailable: true },
+    };
+    return changed(next);
+  }
+  return unchanged(parts);
+}
+
 // Settles non-terminal parts when a turn ends, so a reloaded chat never shows an eternal
 // spinner (dangling commands) or an eternal "Waiting" (questions/approvals nobody can answer)
 // for a turn that is over. Commands are only touched on abnormal outcomes; status parts are
@@ -530,12 +590,18 @@ function goalStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPart
 }
 
 function questionStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+  const interactionId = readString(event.payload.interactionId);
+  const questions = Array.isArray(event.payload.questions) ? event.payload.questions : null;
+  const autoResolutionMs =
+    typeof event.payload.autoResolutionMs === "number" ? event.payload.autoResolutionMs : null;
   return {
     state: "approval-requested",
     input: {
       label: "Question",
       question: readString(event.payload.question),
-      questions: Array.isArray(event.payload.questions) ? event.payload.questions : undefined,
+      ...(interactionId ? { interactionId } : {}),
+      ...(questions ? { questions } : {}),
+      ...(autoResolutionMs !== null ? { autoResolutionMs } : {}),
     },
   };
 }

@@ -110,6 +110,68 @@ describe("createGoatCodexChatProjector", () => {
     expect(sessionUpdate).toContain("THEN 'queued'");
     expect(sessionUpdate).toContain("ELSE idle");
   });
+
+  it("durably projects and resolves an app-server user-input request", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const projector = createGoatCodexChatProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+    });
+
+    const interaction = await projector.requestUserInput(userInputRequest());
+    expect(interaction.interactionId).toMatch(/^goat_codex_chat_interaction_/);
+    expect(mocks.execute.mock.calls.map(([query]) => sqlText(query))).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("INSERT INTO goat.codex_chat_interactions"),
+        expect.stringContaining("INSERT INTO goat.codex_chat_events"),
+        expect.stringContaining("UPDATE goat.chat_messages AS message"),
+      ]),
+    );
+
+    await projector.resolveInteraction(interaction.interactionId, "answered");
+    expect(mocks.execute).toHaveBeenCalledTimes(4);
+  });
+
+  it("rejects malformed user-input requests before persistence", async () => {
+    const projector = createGoatCodexChatProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+    });
+
+    await expect(
+      projector.requestUserInput({
+        ...userInputRequest(),
+        params: { questions: [] },
+      }),
+    ).rejects.toThrow("invalid user-input request");
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("serializes notification and server-request projection writes", async () => {
+    let releaseFirst: (value: { rows: Array<{ id: string }> }) => void = (_value) => {
+      throw new Error("Deferred database call was not initialized.");
+    };
+    mocks.execute
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ rows: Array<{ id: string }> }>((resolve) => {
+            releaseFirst = resolve;
+          }),
+      )
+      .mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const projector = createGoatCodexChatProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+    });
+
+    const first = projector.push([fileChangeStartedEvent("file_change_1")]);
+    const second = projector.push([fileChangeStartedEvent("file_change_2")]);
+    await vi.waitFor(() => expect(mocks.execute).toHaveBeenCalledTimes(1));
+    releaseFirst({ rows: [{ id: "event_1" }] });
+    await Promise.all([first, second]);
+
+    expect(mocks.execute).toHaveBeenCalledTimes(4);
+  });
 });
 
 function projectorTarget() {
@@ -122,18 +184,39 @@ function projectorTarget() {
     model: "gpt-5.5",
     leaseId: "goat_codex_chat_lease_1",
     leaseOwner: "runner_1",
+    planMode: false,
   };
 }
 
-function fileChangeStartedEvent() {
+function fileChangeStartedEvent(id = "file_change_1") {
   return {
     method: "item/started",
     params: {
       item: {
-        id: "file_change_1",
+        id,
         type: "fileChange",
         changes: [{ path: "src/index.ts", kind: "edit" }],
       },
+    },
+  };
+}
+
+function userInputRequest() {
+  return {
+    id: "request_1",
+    method: "item/tool/requestUserInput",
+    params: {
+      threadId: "thread_1",
+      turnId: "turn_1",
+      itemId: "question_1",
+      questions: [
+        {
+          id: "scope",
+          header: "Scope",
+          question: "How broad should the fix be?",
+          options: [{ label: "Foundational", description: "Harden the full path." }],
+        },
+      ],
     },
   };
 }

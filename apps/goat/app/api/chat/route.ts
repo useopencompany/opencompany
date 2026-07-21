@@ -26,6 +26,7 @@ import {
 } from "ai";
 import { after } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
@@ -63,6 +64,7 @@ import {
   hydrateGoatChatAttachmentParts,
   parseGoatChatAttachmentsInput,
 } from "@/lib/chat-attachments";
+import { parseOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
 import {
   clearActiveGoatChatStream,
   getGoatChatStreamContext,
@@ -101,6 +103,7 @@ const logger = createLogger({ service: "opencompany-goat", runtime: "goat-chat" 
 
 type ChatRequestBody = {
   sessionId?: unknown;
+  newSessionId?: unknown;
   model?: unknown;
   message?: unknown;
   mentions?: unknown;
@@ -132,6 +135,13 @@ export async function POST(request: Request): Promise<Response> {
     hasAttachments: attachments.length > 0,
   });
   if (!parsed.ok) return new Response(parsed.error, { status: 400 });
+  const parsedNewSessionId = parseOptimisticGoatChatSessionId(body.value.newSessionId);
+  if (!parsedNewSessionId.ok) return new Response(parsedNewSessionId.error, { status: 400 });
+  if (parsed.value.sessionId && parsedNewSessionId.sessionId) {
+    return new Response("A chat request cannot continue and create a session at the same time.", {
+      status: 400,
+    });
+  }
 
   const attachmentCapabilities = modelSupportsAttachments(parsed.value.model);
   if (
@@ -282,6 +292,7 @@ export async function POST(request: Request): Promise<Response> {
         prompt: parsed.value.prompt,
         model: parsed.value.model,
         sessionId: parsed.value.sessionId,
+        newSessionId: parsedNewSessionId.sessionId,
         messageId: safeClientMessageId(message.id),
         attachments: attachments.length > 0 ? attachments : null,
         attachmentTexts,
@@ -1184,6 +1195,9 @@ async function recordChatModelCost(input: {
       totalCostUsdMicros: cost.totalCostUsdMicros,
       costBasis: cost.costBasis,
     });
+    // Fire-and-forget: charge the saved card when the balance dropped below
+    // the auto-refill threshold. The cron sweep covers runner-side debits.
+    void maybeTriggerGoatAutoRefill(input.workspaceId);
   } catch (error) {
     logger.warn("Goat chat credit debit failed", {
       event: "goat.chat_credit_debit_failed",

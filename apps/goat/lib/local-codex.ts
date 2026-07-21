@@ -157,6 +157,7 @@ export async function heartbeatLocalCodexBridge(input: {
 export async function createOrSteerLocalCodexMessage(input: {
   userWorkosId: string;
   sessionId?: string | null;
+  newSessionId?: string | null;
   prompt: string;
   clientMessageId?: string | null;
   settings?: unknown;
@@ -198,6 +199,7 @@ export async function createOrSteerLocalCodexMessage(input: {
   }
 
   return createFirstLocalCodexTurn({
+    chatSessionId: input.newSessionId ?? null,
     userWorkosId: input.userWorkosId,
     prompt,
     repositoryPath: null,
@@ -553,6 +555,7 @@ async function loadLocalCodexCommandForBridgeSession(input: {
 }
 
 async function createFirstLocalCodexTurn(input: {
+  chatSessionId: string | null;
   userWorkosId: string;
   prompt: string;
   repositoryPath: string | null;
@@ -560,7 +563,7 @@ async function createFirstLocalCodexTurn(input: {
   settings: GoatCodexChatTurnSettings;
   bridge: GoatLocalBridge;
 }): Promise<LocalCodexMessageResult> {
-  const chatSessionId = `goat_chat_${randomUUID()}`;
+  const chatSessionId = input.chatSessionId ?? `goat_chat_${randomUUID()}`;
   const localCodexSessionId = `goat_local_codex_${randomUUID()}`;
   const turnId = `goat_local_codex_turn_${randomUUID()}`;
   const commandId = `goat_local_codex_cmd_${randomUUID()}`;

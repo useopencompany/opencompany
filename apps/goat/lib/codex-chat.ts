@@ -8,7 +8,7 @@ import {
   goatCodexChatSessions,
 } from "@opencompany/db/goat-schema";
 import type { GoatBrainSkill } from "@opencompany/goat-brain";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, notInArray, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
@@ -24,6 +24,7 @@ import { toGoatTaskTitle } from "@/lib/task-display";
 import {
   type GoatCodexSandboxStatus,
   getGoatCodexSandboxStatus,
+  killGoatCodexSandbox,
   triggerGoatCodexChatWake,
 } from "@/lib/task-runner";
 
@@ -51,6 +52,7 @@ export type GoatCodexChatSkillSnapshot = GoatBrainSkill & { brainRef: string };
 export async function createGoatCodexChatMessage(input: {
   userWorkosId: string;
   sessionId?: string | null;
+  newSessionId?: string | null;
   prompt: string;
   skills?: GoatCodexChatSkillSnapshot[];
   attachments?: GoatChatMessageAttachment[];
@@ -98,6 +100,7 @@ export async function createGoatCodexChatMessage(input: {
     });
   } else {
     result = await createFirstCodexChatTurn({
+      chatSessionId: input.newSessionId ?? null,
       userWorkosId: input.userWorkosId,
       prompt,
       skills,
@@ -210,6 +213,37 @@ export async function getGoatCodexChatSandboxStatus(input: {
   }
 }
 
+// Settles the engine session and kills its e2b sandbox after the parent chat is closed.
+// A session with in-flight work (queued/starting/running) is left alone: the runner settles it
+// and the sandbox idle timeout pauses the sandbox regardless, so nothing keeps running either way.
+export async function closeGoatCodexChatSessionForChat(input: {
+  userWorkosId: string;
+  chatSessionId: string;
+}) {
+  const [session] = await getDb()
+    .update(goatCodexChatSessions)
+    .set({ status: "closed", activeTurnId: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(goatCodexChatSessions.chatSessionId, input.chatSessionId),
+        eq(goatCodexChatSessions.userWorkosId, input.userWorkosId),
+        notInArray(goatCodexChatSessions.status, ["queued", "starting", "running", "closed"]),
+      ),
+    )
+    .returning({ sandboxId: goatCodexChatSessions.sandboxId });
+  if (!session?.sandboxId) return;
+
+  // Best-effort: a paused sandbox that outlives the kill only costs storage until e2b's
+  // retention window deletes it.
+  await killGoatCodexSandbox(session.sandboxId).catch((error) => {
+    console.warn("Goat codex sandbox kill on chat close failed.", {
+      event: "goat.codex_chat_close_sandbox_kill_failed",
+      chat_session_id: input.chatSessionId,
+      error,
+    });
+  });
+}
+
 async function loadCodexChatSessionForChat(input: { userWorkosId: string; chatSessionId: string }) {
   const [row] = await getDb()
     .select()
@@ -227,6 +261,7 @@ async function loadCodexChatSessionForChat(input: { userWorkosId: string; chatSe
 }
 
 async function createFirstCodexChatTurn(input: {
+  chatSessionId: string | null;
   userWorkosId: string;
   prompt: string;
   skills: GoatCodexChatSkillSnapshot[];
@@ -235,7 +270,7 @@ async function createFirstCodexChatTurn(input: {
   settings: GoatCodexChatTurnSettings;
   modelId: CodexChatModelId;
 }): Promise<CodexChatMessageResult> {
-  const chatSessionId = `goat_chat_${randomUUID()}`;
+  const chatSessionId = input.chatSessionId ?? `goat_chat_${randomUUID()}`;
   const codexChatSessionId = `goat_codex_chat_${randomUUID()}`;
   const turnId = `goat_codex_chat_turn_${randomUUID()}`;
   const userMessageId = safeClientMessageId(input.clientMessageId) ?? newGoatChatMessageId();

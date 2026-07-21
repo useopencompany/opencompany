@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildCodexAppServerCommandPlan,
   coalesceCodexAppServerNotifications,
@@ -378,6 +378,14 @@ describe("runCodexAppServerTurn", () => {
     expect(sandbox.sentMessages().find((message) => message.method === "turn/start")).toMatchObject(
       {
         params: {
+          collaborationMode: {
+            mode: "plan",
+            settings: {
+              model: "gpt-5.5",
+              reasoning_effort: "xhigh",
+              developer_instructions: null,
+            },
+          },
           input: [
             { type: "text", text: "implement the request", text_elements: [] },
             {
@@ -449,7 +457,77 @@ describe("runCodexAppServerTurn", () => {
       .sentMessages()
       .find((message) => message.method === "thread/resume");
     expect(JSON.stringify(resumeMessage?.params)).not.toContain("plan_mode_reasoning_effort");
+    expect(sandbox.sentMessages().find((message) => message.method === "turn/start")).toMatchObject(
+      {
+        params: {
+          collaborationMode: {
+            mode: "default",
+            settings: {
+              model: "gpt-5.5",
+              reasoning_effort: "medium",
+              developer_instructions: null,
+            },
+          },
+        },
+      },
+    );
     expect(summary.sessionId).toBe("thread_existing");
+  });
+
+  it("handles server-initiated user-input requests and returns the answer", async () => {
+    const sandbox = fakeSandbox({ requestUserInput: true });
+    const callOrder: string[] = [];
+    const onServerRequest = vi.fn(async () => {
+      callOrder.push("request");
+      return {
+        answers: { scope: { answers: ["Foundational"] } },
+      };
+    });
+
+    const summary = await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "trace plan mode",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: "high",
+      existingEngineSessionId: null,
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async () => {
+        callOrder.push("events");
+      },
+      onServerRequest,
+      onActivity: async () => undefined,
+    });
+
+    expect(onServerRequest).toHaveBeenCalledWith({
+      id: "server_question_1",
+      method: "item/tool/requestUserInput",
+      params: {
+        threadId: "thread_started",
+        turnId: "turn_1",
+        itemId: "question_1",
+        questions: [
+          {
+            id: "scope",
+            header: "Scope",
+            question: "How broad should the fix be?",
+            options: [{ label: "Foundational", description: "Harden the full path." }],
+          },
+        ],
+      },
+    });
+    expect(sandbox.sentMessages()).toContainEqual({
+      id: "server_question_1",
+      result: { answers: { scope: { answers: ["Foundational"] } } },
+    });
+    expect(callOrder.slice(0, 2)).toEqual(["events", "request"]);
+    expect(summary).toMatchObject({ status: "success", result: "Codex completed." });
   });
 
   it("sets a Codex goal after materializing the thread and before starting the turn", async () => {
@@ -539,12 +617,26 @@ describe("runCodexAppServerTurn", () => {
   });
 });
 
-function fakeSandbox(options: { completeTurn?: boolean; completeGoalDelayMs?: number } = {}) {
+type FakeProxyMessage = {
+  method?: string;
+  params?: unknown;
+  id?: number | string;
+  result?: unknown;
+  error?: unknown;
+};
+
+type FakeSandboxOptions = {
+  completeTurn?: boolean;
+  completeGoalDelayMs?: number;
+  requestUserInput?: boolean;
+};
+
+function fakeSandbox(options: FakeSandboxOptions = {}) {
   const files = new Map<string, string>();
   let proxyStdout: ((data: string) => void | Promise<void>) | null = null;
   let nextPid = 100;
   const commands: string[] = [];
-  const messages: Array<{ method: string; params?: unknown; id?: number }> = [];
+  const messages: FakeProxyMessage[] = [];
 
   const sandbox = {
     files: {
@@ -579,14 +671,14 @@ function fakeSandbox(options: { completeTurn?: boolean; completeGoalDelayMs?: nu
       sendStdin: async (_pid: number, data: string) => {
         for (const line of data.split("\n")) {
           if (!line.trim()) continue;
-          const message = JSON.parse(line) as { method: string; params?: unknown; id?: number };
+          const message = JSON.parse(line) as FakeProxyMessage;
           messages.push(message);
           await respondToProxyMessage(message, proxyStdout, options);
         }
       },
       kill: async () => true,
     },
-    sentMethods: () => messages.map((message) => message.method),
+    sentMethods: () => messages.flatMap((message) => (message.method ? [message.method] : [])),
     sentMessages: () => messages,
     startedCommands: () => commands,
   };
@@ -595,11 +687,15 @@ function fakeSandbox(options: { completeTurn?: boolean; completeGoalDelayMs?: nu
 }
 
 async function respondToProxyMessage(
-  message: { method: string; params?: unknown; id?: number },
+  message: FakeProxyMessage,
   onStdout: ((data: string) => void | Promise<void>) | null,
-  options: { completeTurn?: boolean; completeGoalDelayMs?: number },
+  options: FakeSandboxOptions,
 ) {
   if (!onStdout || message.id == null) return;
+  if (message.id === "server_question_1" && options.requestUserInput) {
+    await completeFakeTurn(onStdout, "thread_started");
+    return;
+  }
   if (message.method === "initialize") {
     await onStdout(`${JSON.stringify({ id: message.id, result: { userAgent: "test" } })}\n`);
     return;
@@ -647,18 +743,35 @@ async function respondToProxyMessage(
         : "thread_started";
     await onStdout(`${JSON.stringify({ id: message.id, result: { turn: { id: "turn_1" } } })}\n`);
     if (options.completeTurn === false) return;
-    await onStdout(
-      `${JSON.stringify({
-        method: "item/agentMessage/delta",
-        params: { threadId, turnId: "turn_1", itemId: "item_1", delta: "Codex completed." },
-      })}\n`,
-    );
-    await onStdout(
-      `${JSON.stringify({
-        method: "turn/completed",
-        params: { threadId, turn: { id: "turn_1", status: "completed" } },
-      })}\n`,
-    );
+    if (options.requestUserInput) {
+      await onStdout(
+        `${JSON.stringify({
+          method: "item/plan/delta",
+          params: { threadId, turnId: "turn_1", itemId: "plan_1", delta: "1. Inspect" },
+        })}\n`,
+      );
+      await onStdout(
+        `${JSON.stringify({
+          id: "server_question_1",
+          method: "item/tool/requestUserInput",
+          params: {
+            threadId,
+            turnId: "turn_1",
+            itemId: "question_1",
+            questions: [
+              {
+                id: "scope",
+                header: "Scope",
+                question: "How broad should the fix be?",
+                options: [{ label: "Foundational", description: "Harden the full path." }],
+              },
+            ],
+          },
+        })}\n`,
+      );
+      return;
+    }
+    await completeFakeTurn(onStdout, threadId);
     if (options.completeGoalDelayMs != null) {
       await new Promise((resolve) => setTimeout(resolve, options.completeGoalDelayMs));
       await onStdout(
@@ -682,4 +795,22 @@ async function respondToProxyMessage(
   if (message.method === "turn/interrupt") {
     await onStdout(`${JSON.stringify({ id: message.id, result: {} })}\n`);
   }
+}
+
+async function completeFakeTurn(
+  onStdout: (data: string) => void | Promise<void>,
+  threadId: string,
+) {
+  await onStdout(
+    `${JSON.stringify({
+      method: "item/agentMessage/delta",
+      params: { threadId, turnId: "turn_1", itemId: "item_1", delta: "Codex completed." },
+    })}\n`,
+  );
+  await onStdout(
+    `${JSON.stringify({
+      method: "turn/completed",
+      params: { threadId, turn: { id: "turn_1", status: "completed" } },
+    })}\n`,
+  );
 }

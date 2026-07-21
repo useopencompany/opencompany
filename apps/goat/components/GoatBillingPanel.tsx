@@ -1,51 +1,61 @@
 "use client";
 
 import { toast } from "@opencompany/ui/components/sonner";
-import { CalendarDays, Check, CreditCard, DatabaseZap, Loader2, Wallet } from "lucide-react";
-import { type ReactNode, useTransition } from "react";
+import { CreditCard, Loader2, RefreshCw, Wallet } from "lucide-react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import {
   createGoatBillingPortalAction,
   createGoatCreditTopUpAction,
-  createGoatProCheckoutAction,
+  setGoatAutoRefillAction,
 } from "@/lib/billing/actions";
 
 export type GoatBillingPanelData = {
-  plan: "free" | "pro";
-  subscriptionStatus: string | null;
-  cancelAtPeriodEnd: boolean;
-  currentPeriodEnd: string | null;
-  paymentNeedsAttention: boolean;
-  seatMonthlyPriceUsdCents: number;
-  seatQuantity: number;
-  memberCount: number;
-  freeMaxMembers: number;
-  proMaxMembers: number;
-  monthlyIngestionsUsed: number;
-  monthlyIngestionLimit: number;
-  freeMonthlyLimit: number;
-  proMonthlyPerSeat: number;
-  overageUnits: number;
-  overageUsdMicros: number;
-  overageCentsPer100: number;
   creditBalanceUsdMicros: number;
+  spendThisMonthUsdMicros: number;
+  lowBalanceWarnUsdMicros: number;
   topUpAmountsCents: number[];
-  monthStartedAt: string;
-  monthResetAt: string;
+  defaultTopUpCents: number;
+  minTopUpCents: number;
+  maxTopUpCents: number;
+  autoRefill: {
+    enabled: boolean;
+    amountCents: number;
+    hasPaymentMethod: boolean;
+    lastError: string | null;
+  };
+  platformFeePercent: number;
+  ingestFeeUsdCentsPer50: number;
+  hasStripeCustomer: boolean;
   isAdmin: boolean;
 };
 
-export function GoatBillingPanel({ data }: { data: GoatBillingPanelData }) {
+export function GoatBillingPanel({
+  data,
+  topupResult,
+}: {
+  data: GoatBillingPanelData;
+  topupResult: "success" | "cancelled" | null;
+}) {
   const [isPending, startTransition] = useTransition();
-  const isPro = data.plan === "pro";
-  const isActivating =
-    data.subscriptionStatus === "incomplete" || data.subscriptionStatus === "trialing";
-  const hasManagedSubscription =
-    Boolean(data.subscriptionStatus) &&
-    data.subscriptionStatus !== "canceled" &&
-    data.subscriptionStatus !== "incomplete_expired";
-  const formattedSeatPrice = formatUsd(data.seatMonthlyPriceUsdCents);
-  const overagePer100 = formatUsd(data.overageCentsPer100);
+  const [customAmount, setCustomAmount] = useState(String(data.defaultTopUpCents / 100));
+  const [autoRefillEnabled, setAutoRefillEnabled] = useState(data.autoRefill.enabled);
+  const [autoRefillAmount, setAutoRefillAmount] = useState(
+    String(data.autoRefill.amountCents / 100),
+  );
+  const announcedTopupResult = useRef(false);
+
+  useEffect(() => {
+    if (!topupResult || announcedTopupResult.current) return;
+    announcedTopupResult.current = true;
+    if (topupResult === "success") {
+      toast.success("Credits added. Your balance updates as soon as Stripe confirms the payment.");
+    } else {
+      toast("Top-up cancelled — no payment was made.");
+    }
+  }, [topupResult]);
+
+  const lowBalance = data.creditBalanceUsdMicros < data.lowBalanceWarnUsdMicros;
 
   function run(action: () => Promise<{ ok: false; error: string }>) {
     startTransition(async () => {
@@ -54,259 +64,206 @@ export function GoatBillingPanel({ data }: { data: GoatBillingPanelData }) {
     });
   }
 
+  const topUpCustom = () => {
+    const dollars = Number(customAmount);
+    if (!Number.isFinite(dollars)) {
+      toast.error("Enter an amount in dollars.");
+      return;
+    }
+    const cents = Math.round(dollars * 100);
+    if (cents < data.minTopUpCents || cents > data.maxTopUpCents) {
+      toast.error(
+        `Top-ups must be between ${formatUsd(data.minTopUpCents)} and ${formatUsd(data.maxTopUpCents)}.`,
+      );
+      return;
+    }
+    run(() => createGoatCreditTopUpAction(cents));
+  };
+
+  const saveAutoRefill = (enabled: boolean) => {
+    const dollars = Number(autoRefillAmount);
+    const cents = Math.round(dollars * 100);
+    if (!Number.isFinite(dollars) || cents < data.minTopUpCents || cents > data.maxTopUpCents) {
+      toast.error(
+        `Auto-refill amounts must be between ${formatUsd(data.minTopUpCents)} and ${formatUsd(data.maxTopUpCents)}.`,
+      );
+      return;
+    }
+    startTransition(async () => {
+      const result = await setGoatAutoRefillAction({ enabled, amountCents: cents });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setAutoRefillEnabled(enabled);
+      toast.success(enabled ? "Auto-refill is on." : "Auto-refill is off.");
+    });
+  };
+
   return (
     <GoatSettingsContent
       title="Billing"
-      description="Choose a workspace plan, manage seats, and top up usage credits."
+      description="Add credits to the shared workspace balance. Everything is pay-as-you-go — no seats, no subscription."
     >
-      {data.paymentNeedsAttention ? (
+      {lowBalance ? (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
-          Stripe could not collect the latest payment. OpenCompany Pro remains active during payment
-          retries; a workspace admin should update the payment method.
+          {data.creditBalanceUsdMicros <= 0
+            ? "Your workspace is out of credits. Chat and ingestion are paused until you top up."
+            : "Your balance is running low. Top up to keep chat and ingestion running."}
         </div>
       ) : null}
 
-      <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface-muted/40 p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-              Current plan
-            </div>
-            <div className="mt-1 text-[20px] font-semibold tracking-tight text-ink">
-              {isPro ? "OpenCompany Pro" : isActivating ? "Activating Pro" : "Free"}
-            </div>
-          </div>
-          <span className="rounded-full bg-canvas px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
-            {data.subscriptionStatus ?? "Active"}
-          </span>
+      {data.autoRefill.lastError ? (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
+          Auto-refill failed: {data.autoRefill.lastError} Update your card with a new top-up, then
+          re-enable auto-refill.
         </div>
-        {isPro ? (
-          <div className="text-[12.5px] leading-5 text-ink-subtle">
-            <span className="font-medium text-ink">
-              {data.seatQuantity.toLocaleString()} seat{data.seatQuantity === 1 ? "" : "s"} ×{" "}
-              {formattedSeatPrice}/month
-            </span>
-            , plus applicable tax. {data.proMonthlyPerSeat.toLocaleString()} ingested items per
-            seat, pooled across the workspace.
-            {data.cancelAtPeriodEnd && data.currentPeriodEnd
-              ? ` Pro remains active until ${formatDate(data.currentPeriodEnd)}.`
-              : null}
-          </div>
-        ) : isActivating ? (
-          <div className="text-[12.5px] leading-5 text-ink-subtle">
-            Stripe is waiting for Checkout or the first payment to complete. No Pro entitlement is
-            granted until the subscription becomes active.
-          </div>
-        ) : (
-          <div className="text-[12.5px] leading-5 text-ink-subtle">
-            Up to {data.freeMaxMembers} workspace members and{" "}
-            {data.freeMonthlyLimit.toLocaleString()} ingested items each month. Chat is usage-based
-            from your credit balance.
-          </div>
-        )}
-
-        <div className="grid gap-2 sm:grid-cols-2">
-          <BillingMetric
-            icon={<DatabaseZap size={14} />}
-            label={`Ingestions in ${formatMonth(data.monthStartedAt)}`}
-            value={`${data.monthlyIngestionsUsed.toLocaleString()} ingestion${data.monthlyIngestionsUsed === 1 ? "" : "s"}`}
-            detail={`${data.monthlyIngestionsUsed.toLocaleString()} of ${data.monthlyIngestionLimit.toLocaleString()} monthly allowance${
-              isPro
-                ? ` (${data.proMonthlyPerSeat.toLocaleString()} × ${data.seatQuantity.toLocaleString()} seat${data.seatQuantity === 1 ? "" : "s"})`
-                : ""
-            }${
-              data.overageUnits > 0
-                ? `, plus ${data.overageUnits.toLocaleString()} overage (${formatUsdMicros(data.overageUsdMicros)} from credits)`
-                : ""
-            }`}
-            progress={Math.min(
-              100,
-              (data.monthlyIngestionsUsed / data.monthlyIngestionLimit) * 100,
-            )}
-          />
-          <BillingMetric
-            icon={<CalendarDays size={14} />}
-            label={
-              isPro
-                ? data.cancelAtPeriodEnd
-                  ? "Plan ends"
-                  : "Next billing cycle"
-                : "Allowance resets"
-            }
-            value={
-              isPro && data.currentPeriodEnd
-                ? formatDate(data.currentPeriodEnd)
-                : !isPro
-                  ? formatDate(data.monthResetAt)
-                  : "Pending activation"
-            }
-            detail={
-              isPro
-                ? data.cancelAtPeriodEnd
-                  ? "Your workspace returns to Free on this date"
-                  : "Your monthly subscription renews on this date"
-                : "Your Free monthly allowance starts over"
-            }
-          />
-        </div>
-
-        {data.isAdmin ? (
-          <button
-            type="button"
-            disabled={isPending}
-            onClick={() =>
-              run(
-                hasManagedSubscription
-                  ? createGoatBillingPortalAction
-                  : createGoatProCheckoutAction,
-              )
-            }
-            className="inline-flex w-fit items-center gap-2 rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
-          >
-            {isPending ? <Loader2 size={13} className="animate-spin" /> : <CreditCard size={13} />}
-            {hasManagedSubscription ? "Manage billing" : "Upgrade to Pro"}
-          </button>
-        ) : (
-          <p className="text-[11.5px] leading-4 text-ink-subtle">
-            Only workspace admins can change the plan or payment details.
-          </p>
-        )}
-      </section>
+      ) : null}
 
       <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface-muted/40 p-4">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
               <Wallet size={13} />
-              Usage credits
+              Balance
             </div>
-            <div className="mt-1 text-[20px] font-semibold tracking-tight text-ink">
+            <div className="mt-1 text-[24px] font-semibold tracking-tight text-ink">
               {formatUsdMicros(data.creditBalanceUsdMicros)}
             </div>
           </div>
-        </div>
-        <p className="text-[12.5px] leading-5 text-ink-subtle">
-          Credits pay for chat (per-message model cost), frontier-intelligence brain ingestion, and
-          ingestion beyond your monthly allowance ({overagePer100} per 100 extra items, Pro only).
-          Included ingestions run on basic intelligence at no extra cost.
-        </p>
-        {data.isAdmin ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {data.topUpAmountsCents.map((amountCents) => (
-              <button
-                key={amountCents}
-                type="button"
-                disabled={isPending}
-                onClick={() => run(() => createGoatCreditTopUpAction(amountCents))}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-canvas px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-50"
-              >
-                {isPending ? <Loader2 size={12} className="animate-spin" /> : null}
-                Add {formatUsd(amountCents)}
-              </button>
-            ))}
+          <div className="text-right">
+            <div className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+              Spent this month
+            </div>
+            <div className="mt-1 text-[17px] font-semibold tracking-tight text-ink">
+              {formatUsdMicros(data.spendThisMonthUsdMicros)}
+            </div>
           </div>
-        ) : (
-          <p className="text-[11.5px] leading-4 text-ink-subtle">
-            Only workspace admins can add credits.
-          </p>
-        )}
-      </section>
-
-      <section className="grid gap-3 sm:grid-cols-2">
-        <PlanCard
-          title="Free"
-          price="$0"
-          active={!isPro && !isActivating}
-          features={[
-            `Up to ${data.freeMaxMembers} workspace members`,
-            `${data.freeMonthlyLimit.toLocaleString()} ingested items each month`,
-            "Unlimited brain retrieval",
-            "Usage-based chat from credits",
-          ]}
-        />
-        <PlanCard
-          title="OpenCompany Pro"
-          price={`${formattedSeatPrice} per seat/month`}
-          active={isPro}
-          features={[
-            `Up to ${data.proMaxMembers} workspace members`,
-            `${data.proMonthlyPerSeat.toLocaleString()} ingested items per seat, pooled`,
-            `${overagePer100} per 100 extra items from credits`,
-            "Unlimited brain retrieval",
-            "Usage-based chat from credits",
-            "Plus applicable tax",
-          ]}
-        />
-      </section>
-    </GoatSettingsContent>
-  );
-}
-
-function BillingMetric({
-  icon,
-  label,
-  value,
-  detail,
-  progress,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  detail: string;
-  progress?: number | null;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-canvas p-3">
-      <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-        <span className="flex size-6 items-center justify-center rounded-md bg-surface-muted text-ink">
-          {icon}
-        </span>
-        {label}
-      </div>
-      <div className="mt-2 text-[17px] font-semibold tracking-tight text-ink">{value}</div>
-      <div className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">{detail}</div>
-      {progress != null ? (
-        <div
-          className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-muted"
-          role="progressbar"
-          aria-valuenow={Math.round(progress)}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
-          <div className="h-full rounded-full bg-ink" style={{ width: `${progress}%` }} />
         </div>
-      ) : null}
-    </div>
-  );
-}
 
-function PlanCard({
-  title,
-  price,
-  active,
-  features,
-}: {
-  title: string;
-  price: string;
-  active: boolean;
-  features: string[];
-}) {
-  return (
-    <div className={`rounded-xl border p-4 ${active ? "border-ink/25" : "border-border"}`}>
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-[14px] font-semibold text-ink">{title}</h2>
-        {active ? <span className="text-[11px] font-medium text-ink-subtle">Current</span> : null}
-      </div>
-      <div className="mt-1 text-[13px] text-ink-subtle">{price}</div>
-      <ul className="mt-3 flex flex-col gap-1.5">
-        {features.map((feature) => (
-          <li key={feature} className="flex items-center gap-2 text-[12px] text-ink-subtle">
-            <Check size={12} className="text-ink" />
-            {feature}
+        <div className="flex flex-wrap items-center gap-2">
+          {data.topUpAmountsCents.map((amountCents) => (
+            <button
+              key={amountCents}
+              type="button"
+              disabled={isPending}
+              onClick={() => run(() => createGoatCreditTopUpAction(amountCents))}
+              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-50 ${
+                amountCents === data.defaultTopUpCents
+                  ? "border-ink/30 bg-canvas"
+                  : "border-border bg-canvas"
+              }`}
+            >
+              {isPending ? <Loader2 size={12} className="animate-spin" /> : null}
+              Add {formatUsd(amountCents)}
+            </button>
+          ))}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[13px] text-ink-subtle">$</span>
+            <input
+              inputMode="decimal"
+              value={customAmount}
+              onChange={(event) => setCustomAmount(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") topUpCustom();
+              }}
+              aria-label="Custom top-up amount in dollars"
+              className="w-16 rounded-md border border-ink/10 bg-canvas px-2 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
+            />
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={topUpCustom}
+              className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+        <p className="text-[11.5px] leading-4 text-ink-subtle">
+          Anyone in the workspace can add credits. Payments run through Stripe; the card is saved
+          for auto-refill.
+        </p>
+      </section>
+
+      <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface-muted/40 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+              <RefreshCw size={13} />
+              Auto-refill
+            </div>
+            <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
+              Automatically add credits with your saved card when the balance drops below $5.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoRefillEnabled}
+            disabled={isPending || (!autoRefillEnabled && !data.autoRefill.hasPaymentMethod)}
+            onClick={() => saveAutoRefill(!autoRefillEnabled)}
+            className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+              autoRefillEnabled ? "bg-ink" : "bg-ink/20"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 size-4 rounded-full bg-canvas transition-transform ${
+                autoRefillEnabled ? "translate-x-4" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[12.5px] text-ink-subtle">Refill amount</span>
+          <span className="text-[13px] text-ink-subtle">$</span>
+          <input
+            inputMode="decimal"
+            value={autoRefillAmount}
+            onChange={(event) => setAutoRefillAmount(event.target.value)}
+            onBlur={() => {
+              if (autoRefillEnabled) saveAutoRefill(true);
+            }}
+            aria-label="Auto-refill amount in dollars"
+            className="w-16 rounded-md border border-ink/10 bg-canvas px-2 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
+          />
+        </div>
+        {!data.autoRefill.hasPaymentMethod ? (
+          <p className="text-[11.5px] leading-4 text-ink-subtle">
+            Add credits once first — auto-refill charges the card saved during a top-up.
+          </p>
+        ) : null}
+      </section>
+
+      <section className="flex flex-col gap-2 rounded-xl border border-border bg-surface-muted/40 p-4">
+        <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          How pricing works
+        </h2>
+        <ul className="flex flex-col gap-1 text-[12.5px] leading-5 text-ink-subtle">
+          <li>
+            Chat: model cost + {data.platformFeePercent}% platform fee, charged per message from
+            your balance.
           </li>
-        ))}
-      </ul>
-    </div>
+          <li>
+            Brain ingestion: model cost + {data.platformFeePercent}% platform fee, plus{" "}
+            {formatUsd(data.ingestFeeUsdCentsPer50)} per 50 ingested items.
+          </li>
+          <li>Brain retrieval and browsing are free.</li>
+        </ul>
+      </section>
+
+      {data.isAdmin && data.hasStripeCustomer ? (
+        <button
+          type="button"
+          disabled={isPending}
+          onClick={() => run(createGoatBillingPortalAction)}
+          className="inline-flex w-fit items-center gap-2 rounded-md border border-border bg-canvas px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-50"
+        >
+          {isPending ? <Loader2 size={13} className="animate-spin" /> : <CreditCard size={13} />}
+          Manage billing details
+        </button>
+      ) : null}
+    </GoatSettingsContent>
   );
 }
 
@@ -327,14 +284,4 @@ function formatUsdMicros(usdMicros: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(usdMicros / 1_000_000);
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(value));
-}
-
-function formatMonth(value: string) {
-  return new Intl.DateTimeFormat(undefined, { month: "long", timeZone: "UTC" }).format(
-    new Date(value),
-  );
 }

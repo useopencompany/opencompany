@@ -45,8 +45,20 @@ describe("Goat Brain skills", () => {
     expect(goatBrainSkillFromDocument(skillDocument({ status: "active" }))).not.toBeNull();
   });
 
+  it("materializes a skill without a description", () => {
+    const skill = goatBrainSkillFromDocument(skillDocument({ description: "" }));
+    expect(skill).toEqual({
+      id: "coding-work",
+      name: "Coding work",
+      description: "",
+      instructions: "Inspect, implement, and verify.",
+    });
+    expect(serializeGoatBrainSkillMarkdown(skill!)).toBe(
+      '---\nname: "coding-work"\n---\n\nInspect, implement, and verify.\n',
+    );
+  });
+
   it("excludes incomplete, archived, and merged pages", () => {
-    expect(goatBrainSkillFromDocument(skillDocument({ description: "" }))).toBeNull();
     expect(goatBrainSkillFromDocument(skillDocument({ instructions: "" }))).toBeNull();
     expect(goatBrainSkillFromDocument(skillDocument({ id: "Coding work" }))).toBeNull();
     expect(goatBrainSkillFromDocument(skillDocument({ id: `s${"x".repeat(64)}` }))).toBeNull();

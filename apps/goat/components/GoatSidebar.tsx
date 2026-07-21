@@ -16,11 +16,12 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { type MouseEventHandler, useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
 import { GoatSidebarFeedback } from "@/components/GoatSidebarFeedback";
 import { closeGoatChatSessionAction, setGoatChatPinnedAction } from "@/lib/chat-actions";
+import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
 import type { GoatChatSummaryView } from "@/lib/chat-ui";
 import { switchGoatWorkspaceAction } from "@/lib/workspace-actions";
 
@@ -59,17 +60,20 @@ function SidebarNavRow({
   label,
   active,
   incomplete = false,
+  onClick,
 }: {
   href: string;
   icon: LucideIcon;
   label: string;
   active: boolean;
   incomplete?: boolean;
+  onClick?: MouseEventHandler<HTMLAnchorElement>;
 }) {
   return (
     <Link
       href={href}
       prefetch
+      {...(onClick ? { onClick } : {})}
       aria-current={active ? "page" : undefined}
       className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
@@ -132,7 +136,24 @@ export function GoatSidebar({
 
         {/* Primary nav */}
         <nav aria-label="Goat primary" className="flex flex-col gap-px px-2 pt-2">
-          <SidebarNavRow href="/" icon={House} label="Home" active={homeActive} />
+          <SidebarNavRow
+            href="/"
+            icon={House}
+            label="Home"
+            active={homeActive}
+            onClick={(event) => {
+              if (
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+              ) {
+                return;
+              }
+              window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT));
+            }}
+          />
           {!mcpSetup.completedAt ? (
             <SidebarNavRow
               href="/settings/mcp"

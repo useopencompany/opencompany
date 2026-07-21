@@ -7,6 +7,7 @@ import {
   reopenGoatChatSessionForUser,
   setGoatChatSessionPinnedForUser,
 } from "@/lib/chat";
+import { closeGoatCodexChatSessionForChat } from "@/lib/codex-chat";
 
 export type CloseGoatChatResult = {
   ok: boolean;
@@ -27,6 +28,19 @@ export async function closeGoatChatSessionAction(
   if (!closed) {
     return { ok: false, error: "Could not close that chat." };
   }
+
+  // Best-effort engine cleanup; the chat close itself must not fail on it. No-op for
+  // non-Codex chats (there is no matching engine session row).
+  await closeGoatCodexChatSessionForChat({
+    userWorkosId: user.workosUserId,
+    chatSessionId: trimmed,
+  }).catch((error) => {
+    console.warn("Goat codex chat close cleanup failed.", {
+      event: "goat.codex_chat_close_cleanup_failed",
+      chat_session_id: trimmed,
+      error,
+    });
+  });
 
   revalidatePath("/");
   return { ok: true, error: null };

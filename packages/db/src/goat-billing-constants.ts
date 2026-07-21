@@ -1,48 +1,41 @@
-// Pure Goat plan configuration, kept free of server-only imports (db client,
-// node:crypto) so client components can share the exact numbers and math the
-// server enforces instead of mirroring them. Re-exported by ./goat-billing.
+// Pure Goat billing configuration, kept free of server-only imports (db
+// client, node:crypto) so client components can share the exact numbers and
+// math the server enforces instead of mirroring them. Re-exported by
+// ./goat-billing.
+//
+// Billing v4 is pure usage-based: no plans, no seats. A workspace wallet is
+// topped up via Stripe and every billable action debits it — model cost from
+// the pricing table plus a platform fee, and a flat per-item fee on ingestion.
 
-import type { GoatWorkspacePlan } from "./goat-schema";
-
-export const GOAT_FREE_MONTHLY_INGESTION_LIMIT = 300;
-export const GOAT_PRO_MONTHLY_INGESTIONS_PER_SEAT = 300;
-export const GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS = 1_700;
-
-export const GOAT_FREE_MAX_MEMBERS = 3;
-export const GOAT_PRO_MAX_MEMBERS = 50;
-
-// Pro overage: $2 per 100 raw events, debited from workspace credits per
-// admitted reservation ($0.02 per raw event).
-export const GOAT_INGESTION_OVERAGE_USD_CENTS_PER_100_EVENTS = 200;
-export const GOAT_INGESTION_OVERAGE_USD_MICROS_PER_RAW_EVENT = 20_000;
-
-// One-time grant at workspace creation so usage-based chat works before the
-// first top-up.
+// One-time grant at workspace creation — the only free usage. Everything
+// after it is metered.
 export const GOAT_STARTER_CREDIT_USD_CENTS = 500;
 
-export const GOAT_TOP_UP_AMOUNTS_USD_CENTS = [500, 1_000, 2_500, 5_000] as const;
+export const GOAT_TOP_UP_AMOUNTS_USD_CENTS = [500, 1_000, 2_000, 5_000, 10_000] as const;
+export const GOAT_DEFAULT_TOP_UP_USD_CENTS = 2_000;
 export const GOAT_MIN_TOP_UP_USD_CENTS = 500;
 export const GOAT_MAX_TOP_UP_USD_CENTS = 100_000;
 
-// Ingestion model tiers: "basic" (open-source) is included in the plan;
-// "frontier" passes model cost through to the workspace's credit balance.
+// Flat ingestion fee, charged once per admitted reservation on top of the
+// pass-through model cost: $0.20 per 50 items = $0.004/item. Anchor: 2,000
+// items/mo ≈ $8 in fees + basic-tier model cost ≲ $10 all-in. Validate against
+// traced per-item model cost before locking; tune this fee, not the
+// pass-through.
+export const GOAT_INGEST_ITEM_FEE_USD_MICROS = 4_000;
+
+// Balance thresholds: warn in the UI below $2; auto-refill (when enabled and
+// a card is saved) tops up once the balance drops below $5.
+export const GOAT_LOW_BALANCE_WARN_USD_MICROS = 2_000_000;
+export const GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS = 5_000_000;
+
+// Plain product cap, no longer tied to billing plans.
+export const GOAT_MAX_MEMBERS = 50;
+
+// Ingestion model tiers: both are metered (model cost + fee); "frontier" just
+// runs a more expensive model.
 export const GOAT_BASIC_INGEST_MODEL = "moonshotai/kimi-k2.6";
 export const GOAT_FRONTIER_INGEST_MODEL = "anthropic/claude-sonnet-5";
 
-export function goatMonthlyIngestionLimit(plan: GoatWorkspacePlan, seatQuantity: number) {
-  if (plan !== "pro") return GOAT_FREE_MONTHLY_INGESTION_LIMIT;
-  return GOAT_PRO_MONTHLY_INGESTIONS_PER_SEAT * Math.max(1, seatQuantity);
-}
-
-export function goatIngestionOverageUsdMicros(rawEventCount: number) {
-  return Math.max(0, rawEventCount) * GOAT_INGESTION_OVERAGE_USD_MICROS_PER_RAW_EVENT;
-}
-
-export function goatIngestionOverageRawEventCount(input: {
-  consumedUnits: number;
-  rawEventCount: number;
-  limit: number;
-}) {
-  const includedRemaining = Math.max(0, input.limit - Math.max(0, input.consumedUnits));
-  return Math.max(0, Math.max(0, input.rawEventCount) - includedRemaining);
+export function goatIngestItemFeeUsdMicros(rawEventCount: number) {
+  return Math.max(0, rawEventCount) * GOAT_INGEST_ITEM_FEE_USD_MICROS;
 }

@@ -1,10 +1,11 @@
 import { Template } from "e2b";
+import { CODEX_CLI_PACKAGE, CODEX_CLI_VERSION } from "../../src/codex-version";
+
+export { CODEX_CLI_PACKAGE, CODEX_CLI_VERSION } from "../../src/codex-version";
 
 export const CODEX_TOOLBOX_TEMPLATE_ALIAS = "opencompany-codex-toolbox";
 export const CODEX_TOOLBOX_CPU_COUNT = 8;
 export const CODEX_TOOLBOX_MEMORY_MB = 8192;
-export const CODEX_CLI_VERSION = "0.144.5";
-export const CODEX_CLI_PACKAGE = `@openai/codex@${CODEX_CLI_VERSION}`;
 export const PLAYWRIGHT_PACKAGE = "playwright@1.60.0";
 export const BUN_VERSION = "1.3.2";
 

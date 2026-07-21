@@ -45,7 +45,7 @@ export async function createGoatBrainSkillAction(input: {
   brainRef: string;
   folderPath: string;
   name: string;
-  description: string;
+  description?: string;
 }): Promise<BrainMutationResult> {
   const resolved = await resolveBrainMutationContext(input.brainRef);
   if ("ok" in resolved) return resolved;
@@ -55,7 +55,7 @@ export async function createGoatBrainSkillAction(input: {
     userWorkosId: context.user.workosUserId,
     folderPath: input.folderPath,
     name: input.name,
-    description: input.description,
+    ...(input.description !== undefined ? { description: input.description } : {}),
   });
 }
 

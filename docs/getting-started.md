@@ -204,7 +204,6 @@ in Infisical `dev` + `/web` and `/runner`:
 - `GITHUB_APP_PRIVATE_KEY`
 - `STRIPE_SECRET_KEY`
 - `GOAT_STRIPE_API_KEY`
-- `GOAT_STRIPE_PRO_PRICE_ID`
 - `GOAT_STRIPE_CHECKOUT_ENABLED`
 - `CRON_SECRET`
 - optional runner, Linear, analytics, and observability values from `.env.example`
@@ -221,35 +220,31 @@ without copying them by hand.
 Stripe setup has a local fallback: if `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` are still
 placeholders, `bun run setup` reads the active Stripe CLI test key and runs
 `stripe listen --print-secret`, then writes both values into `.env.local` without printing them. It
-also loads Goat billing values from Infisical `dev` + `/web`, reuses or creates the licensed USD 17
-per-seat monthly OpenCompany Pro test Price by lookup key, generates `CRON_SECRET`, and refreshes
+also loads Goat billing values from Infisical `dev` + `/web`, generates `CRON_SECRET`, and refreshes
 `apps/goat/.env.local`. Run `stripe login` once first. If you use a non-default Stripe CLI profile,
 set `STRIPE_CLI_PROJECT_NAME` before running setup.
 
 For an existing checkout where only Stripe is missing, run `bun run setup:stripe`.
 
-Goat subscriptions additionally require `GOAT_STRIPE_API_KEY`. Setup prefers an `rk_test_` key from
+Goat billing additionally requires `GOAT_STRIPE_API_KEY`. Setup prefers an `rk_test_` key from
 the Stripe CLI. Stripe may instead issue an expiring `sk_test_` CLI key; setup accepts that only as a
 gitignored local-development fallback. It refuses non-restricted keys without an expiry, and hosted
 environments always require a dedicated restricted key stored in Infisical. If the active profile
 has no suitable key, run `stripe login` or create a restricted test key in Stripe, store it in
 Infisical `dev` + `/web`, and rerun setup.
-`GOAT_STRIPE_PRO_PRICE_ID` is provisioned automatically in test mode. Stripe Checkout uses automatic
-tax; add the jurisdictions where the business is registered under **Stripe Tax → Registrations**
-before enabling live Checkout. Configure the customer portal separately in test and live modes
-with payment methods, invoice history, tax IDs, and cancellation at period end enabled; leave
-customer quantity changes disabled because Goat synchronizes active workspace members.
-Limit the Goat restricted key to Customer, Checkout Session, Customer Portal, Price read,
-Subscription read, and Subscription Item write permissions.
+Goat billing is pure usage-based (wallet top-ups, no subscription Prices to provision). Stripe
+Checkout uses automatic tax; add the jurisdictions where the business is registered under
+**Stripe Tax → Registrations** before enabling live Checkout. Configure the customer portal
+separately in test and live modes with payment methods, invoice history, and tax IDs enabled.
+Limit the Goat restricted key to Customer, Checkout Session, Customer Portal, and PaymentIntent
+write permissions (auto-refill creates off-session PaymentIntents on saved cards).
 Hosted live Checkout also requires `GOAT_STRIPE_CHECKOUT_ENABLED=true`; keep it false until the
 business's Stripe Tax registrations are configured.
 
-Goat subscription and credit top-up Checkouts accept promotion codes. For internal no-cost tests,
-create a 100%-off coupon and a customer-facing promotion code in Stripe test mode. Leave the coupon
-unrestricted when it should work for both subscriptions and credit top-ups; scope subscription-only
-coupons to the OpenCompany Pro product. Use `once` duration for one free subscription invoice or
-`forever` for free renewals too. Add an expiry, redemption limit, or customer restriction unless the
-code is deliberately permanent; create live-mode codes separately and keep them private.
+Goat credit top-up Checkouts accept promotion codes. For internal no-cost tests, create a 100%-off
+coupon and a customer-facing promotion code in Stripe test mode. Add an expiry, redemption limit, or
+customer restriction unless the code is deliberately permanent; create live-mode codes separately
+and keep them private.
 
 Then pull them locally:
 

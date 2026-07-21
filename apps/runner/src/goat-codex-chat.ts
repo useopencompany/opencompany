@@ -11,6 +11,7 @@ import {
   type GoatCodexChatTurn,
   goatChatMessages,
   goatChatSessionSkills,
+  goatCodexChatInteractions,
   goatCodexChatTurns,
   goatIntegrations,
 } from "@opencompany/db/goat-schema";
@@ -43,6 +44,7 @@ const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
 const CODEX_CHAT_WORKDIR = "/home/user/opencompany-goat/codex-chat";
 const CODEX_CHAT_ATTACHMENTS_ROOT = "/home/user/.opencompany-goat/codex-chat-attachments";
 const INTERRUPT_POLL_INTERVAL_MS = 2_000;
+const INTERACTION_POLL_INTERVAL_MS = 500;
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat" });
 
@@ -64,6 +66,8 @@ export async function runGoatCodexChatTurn(input: {
   shouldAbort?: () => Error | null;
 }) {
   const { turn, session, env, shouldAbort } = input;
+  const settings = normalizeTurnSettings(turn.settings);
+  const planMode = settings.planModeReasoningEffort !== null;
   const leaseId = turn.leaseId;
   const leaseOwner = turn.leaseOwner;
   if (!leaseId || !leaseOwner) {
@@ -82,6 +86,7 @@ export async function runGoatCodexChatTurn(input: {
         model: session.model,
         leaseId,
         leaseOwner,
+        planMode,
         turnCreatedAt: turn.createdAt,
       },
       redact: (value) => value,
@@ -123,7 +128,6 @@ export async function runGoatCodexChatTurn(input: {
 
   const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
   const github = await loadGoatGitHubAuthForUser(turn.userWorkosId);
-  const settings = normalizeTurnSettings(turn.settings);
   const redact = createKnownSecretRedactor([
     serializedAuthJson,
     auth.kind === "api" ? auth.apiKeyValue : null,
@@ -140,6 +144,7 @@ export async function runGoatCodexChatTurn(input: {
       model: session.model,
       leaseId,
       leaseOwner,
+      planMode,
       turnCreatedAt: turn.createdAt,
     },
     redact,
@@ -147,6 +152,12 @@ export async function runGoatCodexChatTurn(input: {
     // previous write landed before a transient failure of the same turn).
     initialParts,
   });
+
+  if (input.recovery) {
+    // A server request belongs to the dead proxy connection and cannot be resumed. Settle it
+    // before starting the recovery turn so a stale card cannot accept an unusable answer.
+    await projector.cancelPendingInteractions();
+  }
 
   try {
     const attachments = await loadGoatCodexChatAttachments(turn);
@@ -190,6 +201,12 @@ export async function runGoatCodexChatTurn(input: {
       blobToken: env.blobReadWriteToken,
     });
 
+    const checkAbort = createTurnAbortCheck({
+      turnId: turn.id,
+      leaseId,
+      leaseOwner,
+      ...(shouldAbort ? { shouldAbort } : {}),
+    });
     const summary = await runCodexAppServerTurn({
       sandbox,
       codexWorkRoot: CODEX_CHAT_WORKDIR,
@@ -220,13 +237,30 @@ export async function runGoatCodexChatTurn(input: {
         githubAuthHeader: github?.githubAuthHeader ?? null,
       },
       timeoutMs: env.codexTimeoutMs,
-      checkAbort: createTurnAbortCheck({
-        turnId: turn.id,
-        leaseId,
-        leaseOwner,
-        ...(shouldAbort ? { shouldAbort } : {}),
-      }),
+      checkAbort,
       onRuntimeEvents: (events) => projector.push(events),
+      onServerRequest: async (request) => {
+        if (request.method === "item/commandExecution/requestApproval") {
+          return { decision: "decline" };
+        }
+        if (request.method === "item/fileChange/requestApproval") {
+          return { decision: "decline" };
+        }
+        if (request.method !== "item/tool/requestUserInput") {
+          throw new Error(`Unsupported Codex app-server request: ${request.method}`);
+        }
+
+        const { interactionId } = await projector.requestUserInput(request);
+        const resolution = await waitForCodexChatInteraction({
+          interactionId,
+          request: request.params,
+          leaseId,
+          timeoutMs: env.codexTimeoutMs,
+          checkAbort,
+        });
+        await projector.resolveInteraction(interactionId, resolution?.status ?? "canceled");
+        return resolution?.response ?? { answers: {} };
+      },
       onActivity: async () => undefined,
     });
 
@@ -275,6 +309,128 @@ export async function runGoatCodexChatTurn(input: {
     // next message reconnects to warm files and a reusable app-server daemon.
     await armSandboxIdleTimeout(sandbox, env.goatCodexChatIdleTimeoutMs).catch(() => undefined);
   }
+}
+
+async function waitForCodexChatInteraction(input: {
+  interactionId: string;
+  request: Record<string, unknown>;
+  leaseId: string;
+  timeoutMs: number;
+  checkAbort: () => Promise<void>;
+}): Promise<{
+  response: Record<string, unknown>;
+  status: "answered" | "auto-resolved";
+} | null> {
+  const requestedAutoResolutionMs =
+    typeof input.request.autoResolutionMs === "number" && input.request.autoResolutionMs >= 0
+      ? input.request.autoResolutionMs
+      : null;
+  const autoResolutionMs =
+    requestedAutoResolutionMs == null ? null : Math.min(requestedAutoResolutionMs, input.timeoutMs);
+  const deadline = Date.now() + (autoResolutionMs ?? input.timeoutMs);
+
+  while (true) {
+    await input.checkAbort();
+    const [interaction] = await getDb()
+      .select({
+        status: goatCodexChatInteractions.status,
+        response: goatCodexChatInteractions.response,
+      })
+      .from(goatCodexChatInteractions)
+      .innerJoin(
+        goatCodexChatTurns,
+        eq(goatCodexChatTurns.id, goatCodexChatInteractions.codexChatTurnId),
+      )
+      .where(
+        and(
+          eq(goatCodexChatInteractions.id, input.interactionId),
+          eq(goatCodexChatInteractions.leaseId, input.leaseId),
+          eq(goatCodexChatInteractions.leaseId, goatCodexChatTurns.leaseId),
+        ),
+      )
+      .limit(1);
+    if (!interaction || interaction.status === "canceled") return null;
+    if (interaction.status === "resolved") {
+      return isRecord(interaction.response)
+        ? {
+            response: interaction.response,
+            status: isEmptyCodexUserInputResponse(interaction.response)
+              ? "auto-resolved"
+              : "answered",
+          }
+        : null;
+    }
+
+    if (Date.now() >= deadline) {
+      if (autoResolutionMs !== null) {
+        const response = defaultCodexUserInputResponse(input.request);
+        const [resolved] = await getDb()
+          .update(goatCodexChatInteractions)
+          .set({
+            status: "resolved",
+            response,
+            resolvedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(goatCodexChatInteractions.id, input.interactionId),
+              eq(goatCodexChatInteractions.leaseId, input.leaseId),
+              eq(goatCodexChatInteractions.status, "pending"),
+              currentInteractionLeaseSql(),
+            ),
+          )
+          .returning({ response: goatCodexChatInteractions.response });
+        if (resolved && isRecord(resolved.response)) {
+          return { response: resolved.response, status: "auto-resolved" };
+        }
+        continue;
+      }
+      const [canceled] = await getDb()
+        .update(goatCodexChatInteractions)
+        .set({ status: "canceled", resolvedAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(goatCodexChatInteractions.id, input.interactionId),
+            eq(goatCodexChatInteractions.leaseId, input.leaseId),
+            eq(goatCodexChatInteractions.status, "pending"),
+            currentInteractionLeaseSql(),
+          ),
+        )
+        .returning({ id: goatCodexChatInteractions.id });
+      // If the cancel claimed nothing, a user answer resolved the row in the SELECT→UPDATE
+      // window; loop so the next SELECT observes it instead of dropping the answer.
+      if (!canceled) continue;
+      return null;
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        Math.min(INTERACTION_POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())),
+      ),
+    );
+  }
+}
+
+function defaultCodexUserInputResponse(_request: Record<string, unknown>) {
+  // Codex's reference TUI auto-resolves timed prompts with an empty answer map. Choosing an
+  // option here would silently turn a timeout into user intent.
+  return { answers: {} };
+}
+
+function isEmptyCodexUserInputResponse(response: Record<string, unknown>) {
+  return isRecord(response.answers) && Object.keys(response.answers).length === 0;
+}
+
+function currentInteractionLeaseSql() {
+  return sql`EXISTS (
+    SELECT 1
+    FROM ${goatCodexChatTurns} AS current_turn
+    WHERE current_turn.id = ${goatCodexChatInteractions.codexChatTurnId}
+      AND current_turn.status = 'running'
+      AND current_turn.lease_id = ${goatCodexChatInteractions.leaseId}
+  )`;
 }
 
 async function loadGoatCodexChatSessionSkills(turn: GoatCodexChatTurn) {

@@ -258,12 +258,17 @@ export type GoatStripeSubscriptionStatus =
   | "paused";
 export type GoatIngestionReservationStatus = "pending" | "consumed";
 export type GoatBrainIntelligence = "basic" | "frontier";
+// "frontier_ingest" and "ingest_overage" are legacy v3 sources kept for
+// historical rows; v4 writes "ingest_model_usage" (per attempt, all tiers)
+// and "ingest_fee" (flat per-item fee at reservation admission).
 export type GoatCreditLedgerSource =
   | "starter_grant"
   | "stripe_topup"
   | "chat_model_usage"
   | "frontier_ingest"
   | "ingest_overage"
+  | "ingest_model_usage"
+  | "ingest_fee"
   | "adjustment";
 export type GoatCheckoutSessionStatus = "pending" | "open" | "fulfilled" | "failed";
 export type GoatBrainVisibility = "workspace" | "restricted";
@@ -427,6 +432,8 @@ export type GoatCodexChatTurnSettings = {
   } | null;
 };
 
+export type GoatCodexChatInteractionStatus = "pending" | "resolved" | "canceled";
+
 export type GoatChatMessageDebugTrace = {
   schemaVersion?:
     | "opencompany.chat.debug.v1"
@@ -556,8 +563,10 @@ export const goatWorkspaceMembers = goat.table(
   }),
 );
 
-// Stripe is authoritative for subscription lifecycle; this row is the local
-// entitlement projection used by Goat's latency-sensitive quota checks.
+// Billing v4: this row is the wallet's Stripe home (customer id + auto-refill
+// state). plan/seat/subscription columns are orphaned v3 leftovers — no code
+// writes them anymore; a cleanup migration drops them once prod confirms zero
+// live goat subscriptions.
 export const goatWorkspaceBilling = goat.table(
   "workspace_billing",
   {
@@ -571,13 +580,20 @@ export const goatWorkspaceBilling = goat.table(
     stripeSubscriptionItemId: text("stripe_subscription_item_id"),
     stripePriceId: text("stripe_price_id"),
     subscriptionStatus: text("subscription_status").$type<GoatStripeSubscriptionStatus>(),
-    // Projected from the Stripe subscription item quantity ($18/seat). The
-    // pooled Pro ingestion allowance is 300 x seat_quantity per month.
     seatQuantity: integer("seat_quantity").notNull().default(1),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     paymentNeedsAttention: boolean("payment_needs_attention").notNull().default(false),
     lastStripeEventCreated: timestamp("last_stripe_event_created", { withTimezone: true }),
+    // Auto-refill: card saved during top-up Checkout, charged off-session when
+    // the balance drops below the threshold. in_flight_at is a lease so
+    // concurrent triggers charge at most once.
+    autoRefillEnabled: boolean("auto_refill_enabled").notNull().default(false),
+    autoRefillAmountCents: integer("auto_refill_amount_cents").notNull().default(2000),
+    autoRefillPaymentMethodId: text("auto_refill_payment_method_id"),
+    autoRefillInFlightAt: timestamp("auto_refill_in_flight_at", { withTimezone: true }),
+    autoRefillLastAttemptAt: timestamp("auto_refill_last_attempt_at", { withTimezone: true }),
+    autoRefillLastError: text("auto_refill_last_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -605,9 +621,10 @@ export const goatStripeWebhookEvents = goat.table("stripe_webhook_events", {
   processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// USD credit balance per workspace. Funds usage-based chat, frontier-ingest
-// cost pass-through, and Pro ingestion overage. Mirrors the web app's
-// workspace_credit_balances, scoped to goat workspaces.
+// USD credit balance per workspace — the billing v4 wallet. Funds every
+// metered surface: chat turns, ingestion model cost (all tiers), and the flat
+// per-item ingestion fee. Mirrors the web app's workspace_credit_balances,
+// scoped to goat workspaces.
 export const goatCreditBalances = goat.table("credit_balances", {
   workspaceId: text("workspace_id")
     .primaryKey()
@@ -712,7 +729,7 @@ export const goatCreditLedger = goat.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'stripe_topup', 'chat_model_usage', 'frontier_ingest', 'ingest_overage', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'stripe_topup', 'chat_model_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );
@@ -2943,6 +2960,51 @@ export const goatCodexChatTurns = goat.table(
   }),
 );
 
+export const goatCodexChatInteractions = goat.table(
+  "codex_chat_interactions",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    codexChatSessionId: text("codex_chat_session_id")
+      .notNull()
+      .references(() => goatCodexChatSessions.id, { onDelete: "cascade" }),
+    codexChatTurnId: text("codex_chat_turn_id")
+      .notNull()
+      .references(() => goatCodexChatTurns.id, { onDelete: "cascade" }),
+    leaseId: text("lease_id").notNull(),
+    requestId: text("request_id").notNull(),
+    itemId: text("item_id"),
+    method: text("method").notNull(),
+    status: text("status").$type<GoatCodexChatInteractionStatus>().notNull().default("pending"),
+    request: jsonb("request").$type<Record<string, unknown>>().notNull(),
+    response: jsonb("response").$type<Record<string, unknown>>(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionStatusIdx: index("goat_codex_chat_interactions_session_status_idx").on(
+      table.codexChatSessionId,
+      table.status,
+      table.createdAt,
+    ),
+    turnCreatedIdx: index("goat_codex_chat_interactions_turn_created_idx").on(
+      table.codexChatTurnId,
+      table.createdAt,
+    ),
+    statusCheck: check(
+      "goat_codex_chat_interactions_status_check",
+      sql`${table.status} IN ('pending', 'resolved', 'canceled')`,
+    ),
+    methodCheck: check(
+      "goat_codex_chat_interactions_method_check",
+      sql`${table.method} = 'item/tool/requestUserInput'`,
+    ),
+  }),
+);
+
 export const goatCodexChatEvents = goat.table(
   "codex_chat_events",
   {
@@ -3361,6 +3423,7 @@ export const goatCodexChatSessionsRelations = relations(goatCodexChatSessions, (
     references: [goatChatSessions.id],
   }),
   turns: many(goatCodexChatTurns),
+  interactions: many(goatCodexChatInteractions),
   events: many(goatCodexChatEvents),
 }));
 
@@ -3387,8 +3450,27 @@ export const goatCodexChatTurnsRelations = relations(goatCodexChatTurns, ({ one,
     references: [goatChatMessages.id],
     relationName: "goat_codex_chat_turns_assistant_message",
   }),
+  interactions: many(goatCodexChatInteractions),
   events: many(goatCodexChatEvents),
 }));
+
+export const goatCodexChatInteractionsRelations = relations(
+  goatCodexChatInteractions,
+  ({ one }) => ({
+    user: one(goatUsers, {
+      fields: [goatCodexChatInteractions.userWorkosId],
+      references: [goatUsers.workosUserId],
+    }),
+    codexChatSession: one(goatCodexChatSessions, {
+      fields: [goatCodexChatInteractions.codexChatSessionId],
+      references: [goatCodexChatSessions.id],
+    }),
+    codexChatTurn: one(goatCodexChatTurns, {
+      fields: [goatCodexChatInteractions.codexChatTurnId],
+      references: [goatCodexChatTurns.id],
+    }),
+  }),
+);
 
 export const goatCodexChatEventsRelations = relations(goatCodexChatEvents, ({ one }) => ({
   user: one(goatUsers, {
@@ -3676,6 +3758,7 @@ export type GoatLocalCodexCommand = typeof goatLocalCodexCommands.$inferSelect;
 export type GoatLocalCodexEvent = typeof goatLocalCodexEvents.$inferSelect;
 export type GoatCodexChatSession = typeof goatCodexChatSessions.$inferSelect;
 export type GoatCodexChatTurn = typeof goatCodexChatTurns.$inferSelect;
+export type GoatCodexChatInteraction = typeof goatCodexChatInteractions.$inferSelect;
 export type GoatCodexChatEvent = typeof goatCodexChatEvents.$inferSelect;
 export type GoatIntegration = typeof goatIntegrations.$inferSelect;
 export type GoatIntegrationCredential = typeof goatIntegrationCredentials.$inferSelect;

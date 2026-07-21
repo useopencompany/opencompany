@@ -225,7 +225,7 @@ export async function createGoatBrainSkillForUser(input: {
   userWorkosId: string;
   folderPath: string;
   name: string;
-  description: string;
+  description?: string;
 }): Promise<BrainMutationResult> {
   const folderPath = normalizeGoatBrainFolderForV1(input.folderPath);
   if (!isGoatBrainSkillFolder(folderPath)) {
@@ -233,7 +233,7 @@ export async function createGoatBrainSkillForUser(input: {
   }
   const invalid = validateGoatBrainSkillFields({
     name: input.name,
-    description: input.description,
+    description: input.description ?? "",
   });
   if (invalid) return { ok: false, message: invalid };
   return createGoatBrainDocumentForUser({
@@ -241,7 +241,7 @@ export async function createGoatBrainSkillForUser(input: {
     userWorkosId: input.userWorkosId,
     folderPath,
     fileName: input.name,
-    description: input.description.trim(),
+    ...(input.description?.trim() ? { description: input.description.trim() } : {}),
     brainIdMaxLength: 64,
   });
 }
@@ -279,7 +279,7 @@ export async function updateGoatBrainSkillForUser(input: {
         ? parsed.frontmatter.status
         : existing.status,
       title: input.name.trim(),
-      description: input.description.trim(),
+      ...(input.description.trim() ? { description: input.description.trim() } : {}),
       createdAt: parsed.frontmatter.createdAt ?? existing.createdAt.toISOString(),
       updatedAt: nowIso(),
       relations: parsed.frontmatter.relations ?? [],
@@ -670,7 +670,6 @@ function validateGoatBrainSkillFields(input: { name: string; description: string
   const description = input.description.trim();
   if (!name) return "Skill name cannot be empty.";
   if (name.length > 160) return "Skill names must be 160 characters or fewer.";
-  if (!description) return "Skill description cannot be empty.";
   if (description.length > 1_000) {
     return "Skill descriptions must be 1,000 characters or fewer.";
   }

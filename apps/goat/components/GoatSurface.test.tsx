@@ -1,8 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/agent-runtime";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
+import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
   type GoatChatMessageMetadata,
@@ -216,6 +218,63 @@ describe("GoatSurface chat streaming UI", () => {
     expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
   });
 
+  it("routes a new chat immediately with the session id sent to the server", async () => {
+    const user = userEvent.setup();
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start now");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const optimisticHref = routerMock.replace.mock.calls[0]?.[0];
+    expect(optimisticHref).toMatch(
+      /^\/chat\/goat_chat_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    const optimisticSessionId = String(optimisticHref).slice("/chat/".length);
+    expect(chatMock.preparedRequestBodies[0]).toMatchObject({
+      sessionId: null,
+      newSessionId: optimisticSessionId,
+      model: DEFAULT_GOAT_MODEL,
+    });
+  });
+
+  it("resets and focuses the blank composer immediately when Home is requested", async () => {
+    const user = userEvent.setup();
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [],
+        }}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Unsent draft");
+    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+
+    const composer = screen.getByPlaceholderText("Ask Goat anything...");
+    expect(composer).toHaveValue("");
+    expect(composer).toHaveFocus();
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+  });
+
+  it("does not reopen a new chat when its response arrives after Home was clicked", async () => {
+    const user = userEvent.setup();
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+    act(() => chatMock.finishWithSessionId?.("goat_chat_returned_late"));
+
+    expect(screen.getByPlaceholderText("Ask Goat anything...")).toHaveFocus();
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(routerMock.replace).not.toHaveBeenCalledWith("/chat/goat_chat_returned_late");
+  });
+
   it("keeps the painted composer overlay aligned with textarea scrolling", async () => {
     const user = userEvent.setup();
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
@@ -288,6 +347,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Local Codex"));
+    expect(screen.queryByRole("button", { name: "Plan mode" })).not.toBeInTheDocument();
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Inspect");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -295,8 +355,9 @@ describe("GoatSurface chat streaming UI", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/local-codex/messages", expect.any(Object)),
     );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    const [, init] = fetchMock.mock.calls[0]!;
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/local-codex/messages")!;
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      newSessionId: expect.stringMatching(/^goat_chat_/),
       message: {
         id: expect.stringMatching(/^goat_chat_msg_/),
         role: "user",
@@ -401,8 +462,9 @@ describe("GoatSurface chat streaming UI", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
     );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    const [, init] = fetchMock.mock.calls[0]!;
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      newSessionId: expect.stringMatching(/^goat_chat_/),
       message: {
         id: expect.stringMatching(/^goat_chat_msg_/),
         role: "user",
@@ -519,8 +581,12 @@ describe("GoatSurface chat streaming UI", () => {
     await screen.findByText("PDF");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    const body = JSON.parse(
+      String(fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")?.[1]?.body),
+    );
     expect(body.message.metadata.attachments).toEqual([
       expect.objectContaining({
         kind: "pdf",
@@ -611,7 +677,7 @@ describe("GoatSurface chat streaming UI", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
     );
-    const [, init] = fetchMock.mock.calls[0]!;
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
     expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
       settings: {
         reasoningEffort: "high",
@@ -628,6 +694,144 @@ describe("GoatSurface chat streaming UI", () => {
         "false",
       ),
     );
+  });
+
+  it("starts plan implementation as a default-mode Codex follow-up", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return Response.json(
+        {
+          ok: true,
+          sessionId: "goat_chat_codex_1",
+          userMessageId: "goat_chat_msg_implement_user",
+          assistantMessageId: "goat_chat_msg_implement_assistant",
+          mode: "started",
+        },
+        { status: 202 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        codexConnected
+        initialChat={{
+          id: "goat_chat_codex_1",
+          title: "Codex plan",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          codexComposerSettings: {
+            reasoningEffort: "high",
+            planModeEnabled: true,
+            goalMode: null,
+          },
+          messages: [
+            {
+              id: "assistant_plan",
+              role: "assistant",
+              metadata: { sessionId: "goat_chat_codex_1" },
+              parts: [
+                {
+                  type: "dynamic-tool",
+                  toolName: CODEX_PLAN_TOOL_NAME,
+                  toolCallId: "plan_1",
+                  state: "output-available",
+                  input: { label: "Plan" },
+                  output: {
+                    status: "completed",
+                    text: "1. Inspect\n2. Patch\n3. Verify",
+                    implementationAvailable: true,
+                  },
+                } as GoatChatUiMessage["parts"][number],
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Implement plan" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      sessionId: "goat_chat_codex_1",
+      message: { role: "user", parts: [{ type: "text", text: "Implement the plan." }] },
+      settings: { reasoningEffort: "high", planModeEnabled: false, goalMode: null },
+    });
+  });
+
+  it("posts an interactive Codex question answer to its durable interaction", async () => {
+    const user = userEvent.setup();
+    const interactionId = "goat_codex_chat_interaction_123e4567-e89b-12d3-a456-426614174000";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return Response.json({ ok: true }, { status: 202 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        codexConnected
+        initialChat={{
+          id: "goat_chat_codex_1",
+          title: "Codex question",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          messages: [
+            {
+              id: "assistant_question",
+              role: "assistant",
+              metadata: { sessionId: "goat_chat_codex_1" },
+              parts: [
+                {
+                  type: "dynamic-tool",
+                  toolName: CODEX_QUESTION_TOOL_NAME,
+                  toolCallId: "question_1",
+                  state: "approval-requested",
+                  input: {
+                    label: "Question",
+                    interactionId,
+                    question: "Which scope?",
+                    questions: [
+                      {
+                        id: "scope",
+                        header: "Scope",
+                        question: "Which scope?",
+                        options: [{ label: "Foundational", description: "Harden everything." }],
+                      },
+                    ],
+                  },
+                } as GoatChatUiMessage["parts"][number],
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /Foundational/ }));
+    await user.click(screen.getByRole("button", { name: "Send answer" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/codex-chat/interactions/${interactionId}`,
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, init] = fetchMock.mock.calls.find(
+      ([url]) => url === `/api/codex-chat/interactions/${interactionId}`,
+    )!;
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      answers: { scope: { answers: ["Foundational"] } },
+    });
   });
 
   it("opens existing Codex chats in codex mode without enabling resume", () => {
@@ -846,6 +1050,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies).toHaveLength(2);
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       sessionId: null,
+      newSessionId: expect.stringMatching(/^goat_chat_/),
       model: DEFAULT_GOAT_MODEL,
     });
     expect(chatMock.preparedRequestBodies[1]).toMatchObject({
@@ -1002,6 +1207,51 @@ describe("GoatSurface chat streaming UI", () => {
     });
   });
 
+  it("retries the Brain skill catalog on the next mention-menu open after a failed fetch", async () => {
+    const user = userEvent.setup();
+    let catalogCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/brain/skills") {
+        catalogCalls += 1;
+        if (catalogCalls === 1) return new Response("nope", { status: 500 });
+        return new Response(
+          JSON.stringify({
+            skills: [
+              {
+                brainRef: "goat_brain_1",
+                id: "coding-work",
+                name: "Coding work",
+                description: "Use focused verification for code changes.",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    await user.type(textarea, "@coding");
+    await waitFor(() => expect(catalogCalls).toBe(1));
+    expect(screen.queryByRole("option", { name: /coding work/i })).not.toBeInTheDocument();
+
+    await user.clear(textarea);
+    await user.type(textarea, "@coding");
+    await screen.findByRole("option", { name: /coding work/i });
+    expect(catalogCalls).toBe(2);
+  });
+
   it("does not offer Brain skills in Local Codex mode", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn();
@@ -1021,7 +1271,11 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "@skill/coding");
 
     await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(fetchMock).not.toHaveBeenCalled();
+    // The credit-balance hook fetches on mount; no skill-catalog request may fire.
+    const skillCatalogCalls = fetchMock.mock.calls.filter(
+      ([url]) => !String(url).startsWith("/api/billing/balance"),
+    );
+    expect(skillCatalogCalls).toHaveLength(0);
     expect(screen.queryByRole("listbox", { name: "Mention menu" })).not.toBeInTheDocument();
   });
 

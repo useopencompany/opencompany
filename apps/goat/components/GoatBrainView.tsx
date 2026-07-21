@@ -673,9 +673,7 @@ function GoatBrainEditor({
     if (!selectedDocument) return;
     try {
       const skillIsComplete =
-        isGoatBrainSkillFolder(selectedDocument.folderPath) &&
-        Boolean(editorDescription.trim()) &&
-        Boolean(editorValue.trim());
+        isGoatBrainSkillFolder(selectedDocument.folderPath) && Boolean(editorValue.trim());
       await navigator.clipboard.writeText(
         skillIsComplete
           ? serializeGoatBrainSkillMarkdown({
@@ -1450,7 +1448,7 @@ function SkillDialog({
           />
         </label>
         <label className="flex flex-col gap-1 text-[12px] text-ink-subtle">
-          Description
+          Description (optional)
           <textarea
             value={description}
             maxLength={1000}
@@ -1473,7 +1471,7 @@ function SkillDialog({
           </button>
           <button
             type="button"
-            disabled={pending || !name.trim() || !description.trim()}
+            disabled={pending || !name.trim()}
             onClick={() => onSubmit(name, description)}
             className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
           >
@@ -1799,7 +1797,7 @@ function BrainDocumentPanel({
               />
               {isSkill ? (
                 <label className="mt-6 flex flex-col gap-2 text-[12px] font-medium text-ink-muted">
-                  Description
+                  Description (optional)
                   <textarea
                     value={editorDescription}
                     maxLength={1000}

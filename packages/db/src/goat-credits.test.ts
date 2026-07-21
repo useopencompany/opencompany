@@ -5,6 +5,8 @@ import {
   goatUsdMicrosToCents,
   grantGoatStarterCredit,
   hasPositiveGoatCreditBalance,
+  loadGoatSpendBreakdown,
+  recordGoatAutoRefillCredit,
   recordGoatCreditDebit,
 } from "./goat-credits";
 
@@ -53,12 +55,12 @@ describe("goat credits", () => {
     const db = fakeDb([]);
     const result = await recordGoatCreditDebit({
       workspaceId: "goat_ws_1",
-      source: "frontier_ingest",
-      idempotencyKey: "frontier:job_1:1",
+      source: "ingest_model_usage",
+      idempotencyKey: "ingest_model:job_1:1",
       providerCostUsdMicros: 100_000,
-      platformFeeUsdMicros: 10_000,
-      totalCostUsdMicros: 110_000,
-      costBasis: { kind: "frontier_ingest" },
+      platformFeeUsdMicros: 20_000,
+      totalCostUsdMicros: 120_000,
+      costBasis: { kind: "ingest_model_usage" },
       db,
     });
     expect(result).toEqual({ ok: false, reason: "duplicate" });
@@ -141,5 +143,52 @@ describe("goat credits", () => {
       balanceCents: 1_500,
     });
     expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a replayed auto-refill PaymentIntent as a duplicate", async () => {
+    // Both the synchronous confirm path and the payment_intent.succeeded
+    // webhook credit with the same pi:{id} idempotency key; the second call
+    // must be a no-op.
+    const db = fakeDb([]);
+    const result = await recordGoatAutoRefillCredit({
+      workspaceId: "goat_ws_1",
+      amountCents: 2_000,
+      paymentIntentId: "pi_123",
+      db,
+    });
+    expect(result).toEqual({ ok: false, reason: "duplicate" });
+    expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("credits an auto-refill charge and returns the new balance", async () => {
+    const db = fakeDb([{ ledgerId: 42, balanceUsdMicros: "21000000" }]);
+    const result = await recordGoatAutoRefillCredit({
+      workspaceId: "goat_ws_1",
+      amountCents: 2_000,
+      paymentIntentId: "pi_456",
+      db,
+    });
+    expect(result).toEqual({ ok: true, ledgerId: 42, balanceUsdMicros: 21_000_000 });
+  });
+
+  it("coerces spend-breakdown aggregates to numbers", async () => {
+    const db = fakeDb([
+      {
+        day: "2026-07-19",
+        category: "ingestion",
+        spendUsdMicros: "124000",
+        providerCostUsdMicros: "100000",
+        platformFeeUsdMicros: "24000",
+      },
+    ]);
+    await expect(loadGoatSpendBreakdown("goat_ws_1", { db })).resolves.toEqual([
+      {
+        day: "2026-07-19",
+        category: "ingestion",
+        spendUsdMicros: 124_000,
+        providerCostUsdMicros: 100_000,
+        platformFeeUsdMicros: 24_000,
+      },
+    ]);
   });
 });

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  closeGoatCodexChatSessionForChat,
   createGoatCodexChatMessage,
   getGoatCodexChatSandboxStatus,
   interruptGoatCodexChatSession,
@@ -9,8 +10,11 @@ const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   select: vi.fn(),
   selectResults: [] as unknown[][],
+  update: vi.fn(),
+  updateResults: [] as unknown[][],
   codexConnected: vi.fn(),
   getSandboxStatus: vi.fn(),
+  killSandbox: vi.fn(),
   wake: vi.fn(),
 }));
 
@@ -18,6 +22,7 @@ vi.mock("@opencompany/db/client", () => ({
   getDb: () => ({
     execute: mocks.execute,
     select: mocks.select,
+    update: mocks.update,
   }),
 }));
 
@@ -27,6 +32,7 @@ vi.mock("@/lib/codex-auth", () => ({
 
 vi.mock("@/lib/task-runner", () => ({
   getGoatCodexSandboxStatus: mocks.getSandboxStatus,
+  killGoatCodexSandbox: mocks.killSandbox,
   triggerGoatCodexChatWake: mocks.wake,
 }));
 
@@ -49,6 +55,15 @@ function createSelectBuilder(rows: unknown[]) {
     builder[method] = vi.fn(() => builder);
   }
   builder.limit = vi.fn(async () => rows);
+  return builder;
+}
+
+function createUpdateBuilder(rows: unknown[]) {
+  const builder: Record<string, unknown> = {};
+  for (const method of ["set", "where"]) {
+    builder[method] = vi.fn(() => builder);
+  }
+  builder.returning = vi.fn(async () => rows);
   return builder;
 }
 
@@ -349,6 +364,55 @@ describe("interruptGoatCodexChatSession", () => {
     expect(settleSql).toContain("'interrupted'");
     expect(settleSql).toContain("NOT EXISTS");
     expect(settleSql).toContain("status IN ('queued', 'starting', 'running')");
+  });
+});
+
+describe("closeGoatCodexChatSessionForChat", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.updateResults.length = 0;
+    mocks.update.mockImplementation(() => createUpdateBuilder(mocks.updateResults.shift() ?? []));
+    mocks.killSandbox.mockResolvedValue(true);
+  });
+
+  it("settles a settled session to closed and kills its sandbox", async () => {
+    mocks.updateResults.push([{ sandboxId: "sbx_123" }]);
+
+    await closeGoatCodexChatSessionForChat({
+      userWorkosId: "user_1",
+      chatSessionId: "goat_chat_1",
+    });
+
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.killSandbox).toHaveBeenCalledWith("sbx_123");
+  });
+
+  it("skips the kill when no engine session matched or none has a sandbox", async () => {
+    mocks.updateResults.push([]);
+    await closeGoatCodexChatSessionForChat({
+      userWorkosId: "user_1",
+      chatSessionId: "goat_chat_plain",
+    });
+
+    mocks.updateResults.push([{ sandboxId: null }]);
+    await closeGoatCodexChatSessionForChat({
+      userWorkosId: "user_1",
+      chatSessionId: "goat_chat_no_sandbox",
+    });
+
+    expect(mocks.killSandbox).not.toHaveBeenCalled();
+  });
+
+  it("does not throw when the sandbox kill fails", async () => {
+    mocks.updateResults.push([{ sandboxId: "sbx_123" }]);
+    mocks.killSandbox.mockRejectedValue(new Error("runner down"));
+
+    await expect(
+      closeGoatCodexChatSessionForChat({
+        userWorkosId: "user_1",
+        chatSessionId: "goat_chat_1",
+      }),
+    ).resolves.toBeUndefined();
   });
 });
 
