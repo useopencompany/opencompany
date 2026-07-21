@@ -17,7 +17,7 @@ The connection is personal: the API key is minted in your Attio workspace's deve
 4. In Goat, open **Settings → Attio** (or choose **Set up** on the Attio source card).
 5. Paste the token and save it. Goat validates it against the Attio API, registers the webhook, and stores the signing secret.
 
-Goat saves the scopes reported by Attio when the key is validated. Connections saved before scope tracking are read-only in Chat until the key is pasted and saved again. A Chat creation runs only when you explicitly ask for it, supports standard people, companies, deals, and markdown notes, and creates at most one item per capability action. Updates, deletes, and custom objects are not supported.
+Goat saves the scopes reported by Attio when the key is validated. For connections saved before scope tracking, Chat revalidates the key's live scopes before deciding whether creation is available; resave the key if that check cannot complete. Chat can search or page through available standard records, query people or companies by interaction recency, and read workspace lists, their entries, and notes. A Chat creation runs only when you explicitly ask for it, supports standard people, companies, enabled deals, and markdown notes, and creates at most one item per capability action. Updates, deletes, and custom objects are not supported.
 
 Attio documents the required permissions in its [record creation](https://docs.attio.com/rest-api/endpoint-reference/records/create-a-record), [note creation](https://docs.attio.com/rest-api/endpoint-reference/notes/create-a-note), and [webhook creation](https://docs.attio.com/rest-api/endpoint-reference/webhooks/create-a-webhook) API contracts.
 

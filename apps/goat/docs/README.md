@@ -135,9 +135,10 @@ Connected chat capabilities are dispatched through `use_capability` with an expl
 `read` for retrieval, or an advertised `create` or `write` for mutations. Slack and YouTube remain
 read-only. Linear advertises `write`; its read calls receive only read tools, while an explicitly
 requested write call additionally receives bounded `create_issue` access. Attio advertises
-scope-dependent `create` access for standard people, companies, deals, and notes, with one
-successful creation per call. Linear updates, comments, deletes, and every other unlisted mutation
-remain unavailable, as do Attio updates and deletes.
+read access for available standard records, interaction-recency queries, workspace lists and their
+entries, and notes. It advertises scope-dependent `create` access for standard people, companies,
+enabled deals, and notes, with one successful creation per call. Linear updates, comments, deletes,
+and every other unlisted mutation remain unavailable, as do Attio updates and deletes.
 `start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The
