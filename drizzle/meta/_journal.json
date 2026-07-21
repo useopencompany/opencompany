@@ -1016,6 +1016,13 @@
       "when": 1784652410000,
       "tag": "0144_goat_codex_chat_interactions",
       "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1784652411000,
+      "tag": "0145_goat_billing_v4",
+      "breakpoints": true
     }
   ]
 }

@@ -1,10 +1,10 @@
 "use server";
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
-  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
   loadGoatBillingOverview,
+  setGoatAutoRefillConfig,
   setGoatStripeCustomerId,
 } from "@opencompany/db/goat-billing";
 import {
@@ -16,15 +16,9 @@ import {
   markGoatCheckoutRecordFailed,
   markGoatCheckoutRecordOpen,
 } from "@opencompany/db/goat-credits";
-import { countGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import { redirect } from "next/navigation";
 import { currentGoatUser } from "@/lib/auth";
-import {
-  assertGoatCheckoutEnabled,
-  getGoatAppUrl,
-  getGoatProPriceId,
-  getGoatStripe,
-} from "@/lib/billing/stripe";
+import { assertGoatCheckoutEnabled, getGoatAppUrl, getGoatStripe } from "@/lib/billing/stripe";
 
 export type GoatBillingActionResult = { ok: false; error: string } | never;
 
@@ -33,15 +27,6 @@ function billingError(error: unknown, fallback: string): GoatBillingActionResult
     ok: false,
     error: error instanceof Error ? error.message : fallback,
   };
-}
-
-function goatProCheckoutIdempotencyKey(workspaceId: string, params: object): string {
-  const requestFingerprint = createHash("sha256")
-    .update(JSON.stringify(params))
-    .digest("hex")
-    .slice(0, 16);
-  const hour = Math.floor(Date.now() / 3_600_000);
-  return `goat-pro-v2-${workspaceId}-${hour}-${requestFingerprint}`;
 }
 
 async function ensureGoatStripeCustomerId(context: {
@@ -64,88 +49,11 @@ async function ensureGoatStripeCustomerId(context: {
   );
 }
 
-export async function createGoatProCheckoutAction(): Promise<GoatBillingActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can change the plan." };
-  }
-  let checkoutUrl: string;
-  try {
-    assertGoatCheckoutEnabled();
-    const overview = await loadGoatBillingOverview(context.workspace.id);
-    if (overview.plan === "pro") {
-      return {
-        ok: false,
-        error: "This workspace already has OpenCompany Pro.",
-      };
-    }
-    if (
-      overview.billing.stripeSubscriptionId &&
-      overview.billing.subscriptionStatus !== "canceled" &&
-      overview.billing.subscriptionStatus !== "incomplete_expired"
-    ) {
-      return {
-        ok: false,
-        error: "This workspace already has a Stripe subscription. Open billing management instead.",
-      };
-    }
-    const stripe = getGoatStripe();
-    const customerId = await ensureGoatStripeCustomerId({
-      workspaceId: context.workspace.id,
-      workspaceName: context.workspace.name,
-      email: context.authUser.email,
-      existingCustomerId: overview.billing.stripeCustomerId,
-    });
-    // Pro is seat-priced: every current member is a paid seat. Later member
-    // changes flow through the seat sync + hourly reconcile.
-    const seatQuantity = Math.max(1, await countGoatWorkspaceMembers(context.workspace.id));
-    const appUrl = getGoatAppUrl();
-    const checkoutParams = {
-      mode: "subscription" as const,
-      customer: customerId,
-      allow_promotion_codes: true,
-      success_url: `${appUrl}/settings/workspace/billing?checkout=success`,
-      cancel_url: `${appUrl}/settings/workspace/billing?checkout=cancelled`,
-      automatic_tax: { enabled: true },
-      billing_address_collection: "required" as const,
-      tax_id_collection: { enabled: true },
-      customer_update: { address: "auto" as const, name: "auto" as const },
-      line_items: [{ price: getGoatProPriceId(), quantity: seatQuantity }],
-      metadata: {
-        billingProduct: "goat",
-        goatWorkspaceId: context.workspace.id,
-      },
-      subscription_data: {
-        metadata: {
-          billingProduct: "goat",
-          goatWorkspaceId: context.workspace.id,
-        },
-      },
-    };
-    const session = await stripe.checkout.sessions.create(checkoutParams, {
-      idempotencyKey: goatProCheckoutIdempotencyKey(context.workspace.id, checkoutParams),
-    });
-    if (!session.url) return { ok: false, error: "Stripe did not return a Checkout URL." };
-    await captureServerEvent("goat_billing_checkout_started", context.user.workosUserId, {
-      user_id: context.user.workosUserId,
-      workspace_id: context.workspace.id,
-      seat_quantity: seatQuantity,
-      seat_monthly_price_usd_cents: GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
-    });
-    checkoutUrl = session.url;
-  } catch (error) {
-    return billingError(error, "Could not start OpenCompany Pro checkout.");
-  }
-  redirect(checkoutUrl);
-}
-
+// Self-serve: any workspace member can top up the shared wallet.
 export async function createGoatCreditTopUpAction(
   amountCents: number,
 ): Promise<GoatBillingActionResult> {
   const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can add credits." };
-  }
   if (
     !Number.isSafeInteger(amountCents) ||
     amountCents < GOAT_MIN_TOP_UP_USD_CENTS ||
@@ -183,6 +91,9 @@ export async function createGoatCreditTopUpAction(
       automatic_tax: { enabled: true },
       billing_address_collection: "required",
       customer_update: { address: "auto", name: "auto" },
+      // Save the card for off-session auto-refill charges; the webhook records
+      // the resulting payment method on fulfillment.
+      payment_intent_data: { setup_future_usage: "off_session" },
       line_items: [
         {
           price_data: {
@@ -236,6 +147,43 @@ export async function createGoatCreditTopUpAction(
     return billingError(error, "Could not start the credit top-up checkout.");
   }
   redirect(checkoutUrl);
+}
+
+// v5: recurring auto-top-up schedules; v4 only refills at the fixed threshold.
+export async function setGoatAutoRefillAction(input: {
+  enabled: boolean;
+  amountCents: number;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const context = await currentGoatUser();
+  if (
+    !Number.isSafeInteger(input.amountCents) ||
+    input.amountCents < GOAT_MIN_TOP_UP_USD_CENTS ||
+    input.amountCents > GOAT_MAX_TOP_UP_USD_CENTS
+  ) {
+    return {
+      ok: false,
+      error: `Auto-refill amounts must be between $${GOAT_MIN_TOP_UP_USD_CENTS / 100} and $${GOAT_MAX_TOP_UP_USD_CENTS / 100}.`,
+    };
+  }
+  try {
+    const updated = await setGoatAutoRefillConfig({
+      workspaceId: context.workspace.id,
+      enabled: input.enabled,
+      amountCents: input.amountCents,
+    });
+    if (!updated) {
+      return {
+        ok: false,
+        error: "Add credits once first — auto-refill charges the card saved during a top-up.",
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update auto-refill.",
+    };
+  }
 }
 
 export async function createGoatBillingPortalAction(): Promise<GoatBillingActionResult> {

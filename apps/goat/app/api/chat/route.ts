@@ -26,6 +26,7 @@ import {
 } from "ai";
 import { after } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
@@ -40,7 +41,11 @@ import {
   isGoatChatCapabilitiesKilled,
   resolveGoatCapabilityUniverse,
 } from "@/lib/capabilities/registry";
-import type { GoatCapabilityCallDebug, ResolvedGoatCapability } from "@/lib/capabilities/types";
+import type {
+  GoatCapabilityCallDebug,
+  GoatCapabilityOperation,
+  ResolvedGoatCapability,
+} from "@/lib/capabilities/types";
 import { runGoatCapabilityWorker } from "@/lib/capabilities/worker";
 import {
   createDbGoatChatStore,
@@ -98,7 +103,10 @@ import { createGoatTaskForUser } from "@/lib/tasks";
 export const maxDuration = 240;
 export const runtime = "nodejs";
 
-const logger = createLogger({ service: "opencompany-goat", runtime: "goat-chat" });
+const logger = createLogger({
+  service: "opencompany-goat",
+  runtime: "goat-chat",
+});
 
 type ChatRequestBody = {
   sessionId?: unknown;
@@ -159,7 +167,9 @@ export async function POST(request: Request): Promise<Response> {
       ? "codex"
       : undefined;
   if (requestedEngine && attachments.length > 0) {
-    return new Response("Attachments are not supported in engine chats yet.", { status: 400 });
+    return new Response("Attachments are not supported in engine chats yet.", {
+      status: 400,
+    });
   }
 
   const parsedSkillMentions = readGoatBrainSkillMentionRefs(
@@ -895,7 +905,12 @@ export async function POST(request: Request): Promise<Response> {
 function groupSessionSkillsByActivationMessage(skills: GoatChatSessionSkillSnapshot[]) {
   const grouped = new Map<
     string,
-    Array<{ id: string; name: string; description: string; instructions: string }>
+    Array<{
+      id: string;
+      name: string;
+      description: string;
+      instructions: string;
+    }>
   >();
   for (const skill of skills) {
     const activated = grouped.get(skill.activatedMessageId) ?? [];
@@ -960,7 +975,7 @@ async function executeChatWebSearch(input: {
 
 async function executeChatCapabilityCall(input: {
   capability: ResolvedGoatCapability;
-  operation: "read" | "create";
+  operation: GoatCapabilityOperation;
   request: string;
   toolCallId: string;
   ordinal: number;
@@ -1022,7 +1037,10 @@ async function executeChatCapabilityCall(input: {
       }),
     });
 
-    input.capabilityDebug.push({ toolCallId: input.toolCallId, ...result.debug });
+    input.capabilityDebug.push({
+      toolCallId: input.toolCallId,
+      ...result.debug,
+    });
     capabilitySpan.end({
       "goat.outcome": result.debug.outcome === "error" ? "failure" : "success",
       "goat.capability_steps": result.debug.steps,
@@ -1213,6 +1231,9 @@ async function recordChatModelCost(input: {
       totalCostUsdMicros: cost.totalCostUsdMicros,
       costBasis: cost.costBasis,
     });
+    // Fire-and-forget: charge the saved card when the balance dropped below
+    // the auto-refill threshold. The cron sweep covers runner-side debits.
+    void maybeTriggerGoatAutoRefill(input.workspaceId);
   } catch (error) {
     logger.warn("Goat chat credit debit failed", {
       event: "goat.chat_credit_debit_failed",
@@ -1232,7 +1253,11 @@ function resolveChatScheduleTarget(
   input: { scheduleId?: string; scheduleName?: string },
 ):
   | { ok: true; schedule: GoatTaskScheduleView }
-  | { ok: false; error: string; status: "not_found" | "ambiguous" | "invalid" } {
+  | {
+      ok: false;
+      error: string;
+      status: "not_found" | "ambiguous" | "invalid";
+    } {
   const scheduleId = input.scheduleId?.trim();
   if (scheduleId) {
     const schedule = schedules.find((candidate) => candidate.id === scheduleId);

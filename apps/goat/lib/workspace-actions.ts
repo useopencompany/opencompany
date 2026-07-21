@@ -1,11 +1,7 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import {
-  GOAT_FREE_MAX_MEMBERS,
-  GOAT_PRO_MAX_MEMBERS,
-  loadGoatBillingOverview,
-} from "@opencompany/db/goat-billing";
+import { GOAT_MAX_MEMBERS } from "@opencompany/db/goat-billing";
 import {
   type GoatBrainIntelligence,
   type GoatBrainVisibility,
@@ -34,7 +30,6 @@ import {
   GOAT_ACTIVE_BRAIN_COOKIE,
   GOAT_ACTIVE_WORKSPACE_COOKIE,
 } from "@/lib/auth";
-import { syncGoatWorkspaceSeatQuantity } from "@/lib/billing/seat-sync";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
 
@@ -323,23 +318,18 @@ export async function inviteToGoatWorkspaceAction(
   }
 
   try {
-    // Seat cap: members plus pending invites must stay under the plan's
-    // limit. Acceptance races can still overshoot by one or two — the
-    // adoption path deliberately never blocks a sign-in on billing — so this
-    // check plus the members-panel over-cap banner is the enforcement.
-    const [overview, members, invitations] = await Promise.all([
-      loadGoatBillingOverview(context.workspace.id),
+    // Product cap (not billing): members plus pending invites must stay under
+    // the workspace limit. Acceptance races can still overshoot by one or two
+    // — the adoption path deliberately never blocks a sign-in — so this check
+    // plus the members-panel over-cap banner is the enforcement.
+    const [members, invitations] = await Promise.all([
       listGoatWorkspaceMembers(context.workspace.id),
       listGoatWorkspaceInvitationsAction(),
     ]);
-    const memberCap = overview.plan === "pro" ? GOAT_PRO_MAX_MEMBERS : GOAT_FREE_MAX_MEMBERS;
-    if (members.length + invitations.length >= memberCap) {
+    if (members.length + invitations.length >= GOAT_MAX_MEMBERS) {
       return {
         ok: false,
-        error:
-          overview.plan === "pro"
-            ? `Your plan allows up to ${GOAT_PRO_MAX_MEMBERS} members (including pending invites). Remove a member or revoke an invite first.`
-            : `The Free plan allows up to ${GOAT_FREE_MAX_MEMBERS} members (including pending invites). Upgrade to Pro for up to ${GOAT_PRO_MAX_MEMBERS}.`,
+        error: `Workspaces allow up to ${GOAT_MAX_MEMBERS} members (including pending invites). Remove a member or revoke an invite first.`,
       };
     }
     const organizationId = await ensureGoatWorkspaceOrganization(context.workspace);
@@ -421,9 +411,6 @@ export async function removeGoatWorkspaceMemberAction(
       workspaceId: context.workspace.id,
       userWorkosId,
     });
-    // Fire-and-forget: the seat count changed, push it to Stripe. Failures
-    // are repaired by the hourly reconcile; removal itself must succeed.
-    void syncGoatWorkspaceSeatQuantity(context.workspace.id);
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (error) {
@@ -460,7 +447,6 @@ export async function updateGoatWorkspaceNameAction(
 export async function getGoatWorkspaceSettingsAction(): Promise<{
   workspace: { id: string; name: string };
   role: "admin" | "member";
-  plan: "free" | "pro";
   memberCap: number;
   members: GoatWorkspaceMemberView[];
   invitations: GoatWorkspaceInvitationView[];
@@ -472,10 +458,9 @@ export async function getGoatWorkspaceSettingsAction(): Promise<{
     .from(goatWorkspaces)
     .where(eq(goatWorkspaces.id, context.workspace.id))
     .limit(1);
-  const [members, invitations, overview] = await Promise.all([
+  const [members, invitations] = await Promise.all([
     listGoatWorkspaceMembersAction(),
     listGoatWorkspaceInvitationsAction(),
-    loadGoatBillingOverview(context.workspace.id),
   ]);
   return {
     workspace: {
@@ -483,8 +468,7 @@ export async function getGoatWorkspaceSettingsAction(): Promise<{
       name: workspaceRow?.name ?? context.workspace.name,
     },
     role: context.role,
-    plan: overview.plan,
-    memberCap: overview.plan === "pro" ? GOAT_PRO_MAX_MEMBERS : GOAT_FREE_MAX_MEMBERS,
+    memberCap: GOAT_MAX_MEMBERS,
     members,
     invitations,
   };

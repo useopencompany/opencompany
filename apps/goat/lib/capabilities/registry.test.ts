@@ -48,6 +48,11 @@ const RESOLVED = {
   createTools: async () => ({ tools: {} }),
 };
 
+const RESOLVED_WRITE = {
+  ...RESOLVED,
+  operations: ["read", "write"] as const,
+};
+
 afterEach(() => {
   vi.clearAllMocks();
   delete process.env.GOAT_CHAT_CAPABILITIES_KILL_SWITCH;
@@ -63,17 +68,19 @@ describe("resolveGoatCapabilityUniverse", () => {
     const universe = await resolveGoatCapabilityUniverse("user_1");
     expect(universe.map((capability) => capability.id)).toEqual(["slack", "youtube_transcript"]);
     expect(universe[0]?.workerModel).toBe("openai/gpt-5.4-mini");
+    expect(universe[0]?.operations).toEqual(["read"]);
     expect(universe[0]?.indexLine).toBe(RESOLVED.indexLine);
   });
 
   it("treats resolver failures as unavailable instead of failing the turn", async () => {
     mocks.slackResolve.mockRejectedValue(new Error("db down"));
-    mocks.linearResolve.mockResolvedValue(RESOLVED);
+    mocks.linearResolve.mockResolvedValue(RESOLVED_WRITE);
     mocks.youtubeResolve.mockResolvedValue(null);
     mocks.attioResolve.mockResolvedValue(null);
 
     const universe = await resolveGoatCapabilityUniverse("user_1");
     expect(universe.map((capability) => capability.id)).toEqual(["linear"]);
+    expect(universe[0]?.operations).toEqual(["read", "write"]);
   });
 
   it("returns an empty universe when nothing is connected", async () => {

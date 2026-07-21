@@ -89,9 +89,9 @@ export type GoatLinearMcpWorkerConnection =
   | { ok: false; reason: "not_connected" | "needs_reauth" }
   | { ok: true; integrationId: string; authProvider: OAuthClientProvider };
 
-// Read-path connection for capability workers: resolves the connected MCP row
-// and builds an OAuth provider that refreshes/persists tokens but can never
-// start an interactive authorization (it calls onAuthorizationRequired instead).
+// Foreground capability-worker connection: resolves the connected MCP row and
+// builds an OAuth provider that refreshes/persists tokens but can never start
+// an interactive authorization (it calls onAuthorizationRequired instead).
 export async function loadGoatLinearMcpWorkerConnection(input: {
   userWorkosId: string;
   onAuthorizationRequired: () => never;

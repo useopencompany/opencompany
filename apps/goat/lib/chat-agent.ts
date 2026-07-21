@@ -106,7 +106,10 @@ type DeleteTaskScheduleRunner = (
 type CapabilityDispatcher = {
   // Ids resolved server-side from real connection state; they become the
   // dispatch enum, so a disconnected capability cannot be invoked by guessing.
-  list: readonly { id: string; operations: readonly GoatCapabilityOperation[] }[];
+  list: readonly {
+    id: string;
+    operations: readonly GoatCapabilityOperation[];
+  }[];
   execute: (input: {
     capability: string;
     operation: GoatCapabilityOperation;
@@ -386,7 +389,10 @@ export function createOpenCompanyChatToolContext(input: {
             ]
           : [];
         if (!content && attachmentIds.length === 0) {
-          return { ok: false, error: "save_to_brain needs content or attachmentIds." };
+          return {
+            ok: false,
+            error: "save_to_brain needs content or attachmentIds.",
+          };
         }
         const title = typeof args.title === "string" ? args.title.trim() : "";
         const intent = typeof args.intent === "string" ? args.intent.trim() : "";
@@ -595,6 +601,10 @@ export function createOpenCompanyChatToolContext(input: {
   const capabilities = input.capabilities;
   if (capabilities && capabilities.list.length > 0) {
     const capabilityIds = capabilities.list.map((capability) => capability.id);
+    const operationOrder: readonly GoatCapabilityOperation[] = ["read", "create", "write"];
+    const capabilityOperations = operationOrder.filter((operation) =>
+      capabilities.list.some((capability) => capability.operations.includes(operation)),
+    );
     tools[USE_CAPABILITY_TOOL_NAME] = tool<UseCapabilityToolInput, UseCapabilityToolOutput>({
       description: USE_CAPABILITY_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<UseCapabilityToolInput>({
@@ -604,11 +614,11 @@ export function createOpenCompanyChatToolContext(input: {
           capability: {
             type: "string",
             enum: capabilityIds,
-            description: "Which connected capability to query.",
+            description: "Which connected capability to use.",
           },
           operation: {
             type: "string",
-            enum: ["read", "create"],
+            enum: capabilityOperations,
             description: USE_CAPABILITY_OPERATION_DESCRIPTION,
           },
           request: {
@@ -634,20 +644,23 @@ export function createOpenCompanyChatToolContext(input: {
             },
           };
         }
-        if (args.operation !== "read" && args.operation !== "create") {
+        const operation =
+          args.operation === "read" || args.operation === "create" || args.operation === "write"
+            ? args.operation
+            : null;
+        if (!operation) {
           return {
             capability,
             summary: "",
             entities: [],
             error: {
               code: "invalid_request",
-              hint: 'operation must be either "read" or "create".',
+              hint: 'The operation must be "read", "create", or "write".',
             },
           };
         }
-        const operation = args.operation;
-        const resolvedCapability = capabilities.list.find((entry) => entry.id === capability);
-        if (!resolvedCapability?.operations.includes(operation)) {
+        const selectedCapability = capabilities.list.find((entry) => entry.id === capability);
+        if (!selectedCapability?.operations.includes(operation)) {
           return {
             capability,
             summary: "",
@@ -689,7 +702,12 @@ export function createOpenCompanyChatToolContext(input: {
           typeof executionContext.toolCallId === "string"
             ? executionContext.toolCallId
             : `capability_${capabilityCallCount}`;
-        return capabilities.execute({ capability, operation, request, toolCallId });
+        return capabilities.execute({
+          capability,
+          operation,
+          request,
+          toolCallId,
+        });
       },
     });
   }

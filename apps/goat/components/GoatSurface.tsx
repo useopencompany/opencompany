@@ -35,10 +35,12 @@ import {
   Code2,
   FileText,
   LoaderCircle,
+  MessageSquare,
   MessageSquarePlus,
   Pause,
   Play,
   Plus,
+  RotateCcw,
   Settings,
   Sparkles,
   Square,
@@ -69,9 +71,10 @@ import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type { CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
+import { useGoatCreditBalance } from "@/components/chat/useGoatCreditBalance";
 import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainSkillCatalogItem } from "@/lib/brain-skills";
-import { closeGoatChatSessionAction } from "@/lib/chat-actions";
+import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import { GOAT_HOME_NAVIGATION_EVENT, newOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
 import {
@@ -223,6 +226,7 @@ export function GoatSurface({
   defaultModel,
   initialChat,
   recentChats = [],
+  archivedChats = [],
   codexConnected = false,
   localCodexBetaEnabled = false,
   taskSpawningEnabled = false,
@@ -235,6 +239,7 @@ export function GoatSurface({
   defaultModel: string;
   initialChat: GoatChatSessionView | null;
   recentChats?: readonly GoatChatSummaryView[];
+  archivedChats?: readonly GoatChatSummaryView[];
   codexConnected?: boolean;
   localCodexBetaEnabled?: boolean;
   taskSpawningEnabled?: boolean;
@@ -325,6 +330,7 @@ export function GoatSurface({
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [newChatPrompt, setNewChatPrompt] = useState("");
+  const [restoringChatId, setRestoringChatId] = useState<string | null>(null);
   const [backgroundChatCount, setBackgroundChatCount] = useState(0);
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
     ReadonlySet<string>
@@ -466,6 +472,7 @@ export function GoatSurface({
       }),
     [prepareSendMessagesRequest],
   );
+  const { balance: creditBalance, refetch: refetchCreditBalance } = useGoatCreditBalance();
   const {
     messages,
     setMessages,
@@ -488,6 +495,7 @@ export function GoatSurface({
     transport,
     onFinish: ({ message }) => {
       if (!mountedRef.current) return;
+      void refetchCreditBalance();
       recordOptimisticTurnDuration(message.id);
       const sessionId = message.metadata?.sessionId;
       const pendingNewSessionId = pendingNewSessionIdRef.current;
@@ -512,6 +520,7 @@ export function GoatSurface({
     },
     onError: (error) => {
       if (error.message?.includes(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE)) {
+        void refetchCreditBalance();
         toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
           action: {
             label: "Add credits",
@@ -542,6 +551,17 @@ export function GoatSurface({
       : null;
   const activeEngine = activeEngineChat?.engine ?? selectedEngine;
   const isEngineChat = activeEngine !== null;
+  // Hard stop: with enforcement on and an empty balance, block new sends
+  // before they 402. Codex-engine chats stay exempt, matching the server gate.
+  const outOfCredits = Boolean(
+    creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
+  );
+  const chatSendBlocked = outOfCredits && !isEngineChat;
+  const lowCreditBalance = Boolean(
+    creditBalance &&
+      creditBalance.balanceUsdMicros > 0 &&
+      creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
+  );
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") return codexConnected;
@@ -635,10 +655,11 @@ export function GoatSurface({
     [chatMessages],
   );
   const activeTurnTimerStartedAtMs = activeTurnStartedAtMs ?? latestActiveTurnStartedAtMs;
+  const paletteRecentChats = useMemo(
+    () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
+    [optimisticallyArchivedChatIds, recentChats],
+  );
   const trimmedNewChatPrompt = newChatPrompt.trim();
-  const newChatPromptValid =
-    trimmedNewChatPrompt.length > 0 &&
-    trimmedNewChatPrompt.length <= BACKGROUND_CHAT_PROMPT_MAX_LENGTH;
   const showCodexComposerControls = isEngineChat && !localCodexFeatureDisabledForChat;
 
   useEffect(() => {
@@ -945,6 +966,41 @@ export function GoatSurface({
     });
   };
 
+  const closeCommandPalette = useCallback(() => {
+    setNewChatCommandOpen(false);
+    setNewChatPrompt("");
+  }, []);
+
+  const jumpToChat = useCallback(
+    (chat: GoatChatSummaryView) => {
+      closeCommandPalette();
+      router.push(chatHref(chat.id));
+    },
+    [closeCommandPalette, router],
+  );
+
+  const restoreAndOpenChat = useCallback(
+    (chat: GoatChatSummaryView) => {
+      if (restoringChatId) return;
+      setRestoringChatId(chat.id);
+      closeCommandPalette();
+      startArchiveTransition(async () => {
+        // The chat route only serves open sessions, so the archived chat must be
+        // reopened before we navigate — otherwise the page would render empty.
+        const result = await reopenGoatChatSessionAction(chat.id);
+        if (result.ok) {
+          router.push(chatHref(chat.id));
+          router.refresh();
+          setRestoringChatId(null);
+          return;
+        }
+        setRestoringChatId(null);
+        toast.error(result.error ?? "Could not restore that chat.");
+      });
+    },
+    [closeCommandPalette, restoringChatId, router, startArchiveTransition],
+  );
+
   const startBackgroundChat = useCallback(
     (prompt: string) => {
       const trimmedPrompt = prompt.trim();
@@ -985,6 +1041,15 @@ export function GoatSurface({
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isGenerating || engineSubmitting) return;
+    if (chatSendBlocked) {
+      toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
+        action: {
+          label: "Add credits",
+          onClick: () => router.push("/settings/workspace/billing"),
+        },
+      });
+      return;
+    }
 
     const prompt = input.trim();
     const pendingAttachments = composerAttachments.attachments;
@@ -1383,29 +1448,21 @@ export function GoatSurface({
     <div className="relative flex min-h-0 flex-1 flex-col items-center overflow-hidden">
       <CommandDialog
         open={newChatCommandOpen}
-        onOpenChange={setNewChatCommandOpen}
-        title="New Goat Chat"
-        description="Create a new Goat chat in the background."
+        onOpenChange={(open) => (open ? setNewChatCommandOpen(true) : closeCommandPalette())}
+        title="Search Goat chats"
+        description="Search chats, reopen archived ones, or start a new chat."
         className="top-[22%] max-w-xl translate-y-0 border-border bg-surface p-0 text-ink shadow-[0_18px_60px_rgba(15,15,15,0.18)]"
       >
         <CommandInput
           value={newChatPrompt}
           onValueChange={setNewChatPrompt}
-          placeholder={
-            taskSpawningEnabled ? "Describe the new chat or task..." : "Describe the new chat..."
-          }
-          onKeyDown={(event) => {
-            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-            event.preventDefault();
-            startBackgroundChat(newChatPrompt);
-          }}
+          placeholder="Search chats or describe a new one..."
         />
         <CommandList>
-          <CommandEmpty>Type what Goat should do.</CommandEmpty>
+          <CommandEmpty>No matching chats. Press Enter to start a new one.</CommandEmpty>
           <CommandGroup heading="Actions">
             <CommandItem
               value={`Create new chat ${newChatPrompt}`}
-              disabled={!newChatPromptValid}
               onSelect={() => startBackgroundChat(newChatPrompt)}
               className="gap-3"
             >
@@ -1429,6 +1486,54 @@ export function GoatSurface({
               <CommandShortcut>Enter</CommandShortcut>
             </CommandItem>
           </CommandGroup>
+          {paletteRecentChats.length > 0 ? (
+            <CommandGroup heading="Chats">
+              {paletteRecentChats.map((chat) => (
+                <CommandItem
+                  key={chat.id}
+                  value={`chat ${chat.title} ${chat.id}`}
+                  onSelect={() => jumpToChat(chat)}
+                  className="gap-3"
+                >
+                  <MessageSquare size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-medium text-ink">{chat.title}</p>
+                    <p className="truncate text-[12px] text-ink-subtle">{chat.preview}</p>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : null}
+          {archivedChats.length > 0 ? (
+            <CommandGroup heading="Archived">
+              {archivedChats.map((chat) => (
+                <CommandItem
+                  key={chat.id}
+                  value={`archived ${chat.title} ${chat.id}`}
+                  onSelect={() => restoreAndOpenChat(chat)}
+                  className="gap-3"
+                >
+                  {restoringChatId === chat.id ? (
+                    <LoaderCircle
+                      size={16}
+                      strokeWidth={2}
+                      className="shrink-0 animate-spin text-ink-subtle"
+                    />
+                  ) : (
+                    <Archive size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-medium text-ink">{chat.title}</p>
+                    <p className="truncate text-[12px] text-ink-subtle">Archived chat</p>
+                  </div>
+                  <CommandShortcut className="flex items-center gap-1">
+                    <RotateCcw size={12} strokeWidth={2} />
+                    Restore
+                  </CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : null}
         </CommandList>
       </CommandDialog>
 
@@ -1574,6 +1679,36 @@ export function GoatSurface({
         className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
       >
         <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
+          {chatSendBlocked ? (
+            <p
+              className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-4 text-ink shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+              role="alert"
+            >
+              Your workspace is out of credits — chat is paused.{" "}
+              <button
+                type="button"
+                onClick={() => router.push("/settings/workspace/billing")}
+                className="font-medium underline"
+              >
+                Top up to continue
+              </button>
+            </p>
+          ) : lowCreditBalance && creditBalance ? (
+            <p
+              className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+              role="status"
+            >
+              {formatCreditBalance(creditBalance.balanceUsdMicros)} in credits left.{" "}
+              <button
+                type="button"
+                onClick={() => router.push("/settings/workspace/billing")}
+                className="font-medium text-ink underline"
+              >
+                Add credits
+              </button>{" "}
+              to keep chat and ingestion running.
+            </p>
+          ) : null}
           {chatError ? (
             <p
               className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
@@ -1717,7 +1852,8 @@ export function GoatSurface({
                     )) ||
                   composerAttachments.isUploading ||
                   engineSubmitting ||
-                  localCodexFeatureDisabledForChat
+                  localCodexFeatureDisabledForChat ||
+                  chatSendBlocked
                 }
                 isGenerating={isGenerating}
                 onStop={stopGeneration}
@@ -1789,6 +1925,15 @@ export function GoatSurface({
       </form>
     </div>
   );
+}
+
+function formatCreditBalance(usdMicros: number) {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(usdMicros / 1_000_000);
 }
 
 function mentionsFromMessageMetadata(metadata: GoatChatMessageMetadata | undefined) {

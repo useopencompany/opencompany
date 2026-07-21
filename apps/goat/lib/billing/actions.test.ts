@@ -1,22 +1,21 @@
-import { loadGoatBillingOverview } from "@opencompany/db/goat-billing";
+import { loadGoatBillingOverview, setGoatAutoRefillConfig } from "@opencompany/db/goat-billing";
 import {
   createGoatPendingCheckoutRecord,
   markGoatCheckoutRecordOpen,
 } from "@opencompany/db/goat-credits";
-import { countGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import { redirect } from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
-import { getGoatProPriceId, getGoatStripe } from "@/lib/billing/stripe";
-import { createGoatCreditTopUpAction, createGoatProCheckoutAction } from "./actions";
+import { getGoatStripe } from "@/lib/billing/stripe";
+import { createGoatCreditTopUpAction, setGoatAutoRefillAction } from "./actions";
 
 vi.mock("@opencompany/analytics/server", () => ({
   captureServerEvent: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@opencompany/db/goat-billing", () => ({
-  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS: 1_700,
   loadGoatBillingOverview: vi.fn(),
+  setGoatAutoRefillConfig: vi.fn(),
   setGoatStripeCustomerId: vi.fn(),
 }));
 
@@ -26,15 +25,10 @@ vi.mock("@opencompany/db/goat-credits", () => ({
   markGoatCheckoutRecordOpen: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@opencompany/db/goat-workspaces", () => ({
-  countGoatWorkspaceMembers: vi.fn().mockResolvedValue(1),
-}));
-
 vi.mock("@/lib/auth", () => ({ currentGoatUser: vi.fn() }));
 vi.mock("@/lib/billing/stripe", () => ({
   assertGoatCheckoutEnabled: vi.fn(),
   getGoatAppUrl: vi.fn(() => "https://goat.test"),
-  getGoatProPriceId: vi.fn(() => "price_goat_pro"),
   getGoatStripe: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
@@ -49,16 +43,14 @@ describe("Goat billing actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(currentGoatUser).mockResolvedValue({
-      role: "admin",
+      role: "member",
       workspace: { id: "goat_ws_1", name: "Acme" },
       user: { workosUserId: "user_1" },
-      authUser: { email: "admin@example.com" },
+      authUser: { email: "member@example.com" },
     } as Awaited<ReturnType<typeof currentGoatUser>>);
     vi.mocked(loadGoatBillingOverview).mockResolvedValue({
-      plan: "free",
       billing: { stripeCustomerId: "cus_goat_1" },
-    } as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
-    vi.mocked(countGoatWorkspaceMembers).mockResolvedValue(3);
+    } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
     checkoutCreate.mockResolvedValue({
       id: "cs_test_1",
       url: "https://checkout.stripe.test/session",
@@ -68,62 +60,7 @@ describe("Goat billing actions", () => {
     } as never);
   });
 
-  it("creates tax-aware seat-priced Checkout with quantity = member count", async () => {
-    await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
-
-    expect(getGoatProPriceId).toHaveBeenCalled();
-    const [params] = checkoutCreate.mock.calls[0] as [
-      {
-        line_items: Array<{ price: string; quantity: number }>;
-        allow_promotion_codes: boolean;
-        automatic_tax: { enabled: boolean };
-        payment_method_types?: unknown;
-        subscription_data: { metadata: Record<string, string> };
-      },
-    ];
-    expect(params.line_items).toEqual([{ price: "price_goat_pro", quantity: 3 }]);
-    expect(params.allow_promotion_codes).toBe(true);
-    expect(params.automatic_tax).toEqual({ enabled: true });
-    expect(params.payment_method_types).toBeUndefined();
-    expect(params.subscription_data.metadata.goatWorkspaceId).toBe("goat_ws_1");
-    expect(redirect).toHaveBeenCalledWith("https://checkout.stripe.test/session");
-  });
-
-  it("only reuses Pro Checkout idempotency keys for identical parameters", async () => {
-    const now = vi.spyOn(Date, "now").mockReturnValue(1_784_190_000_000);
-
-    try {
-      await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
-      await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
-      vi.mocked(countGoatWorkspaceMembers).mockResolvedValue(4);
-      await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
-    } finally {
-      now.mockRestore();
-    }
-
-    const keys = checkoutCreate.mock.calls.map(
-      ([, options]) => (options as { idempotencyKey: string }).idempotencyKey,
-    );
-    expect(keys).toHaveLength(3);
-    expect(keys[0]).toMatch(/^goat-pro-v2-goat_ws_1-\d+-[a-f0-9]{16}$/);
-    expect(keys[1]).toBe(keys[0]);
-    expect(keys[2]).toMatch(/^goat-pro-v2-goat_ws_1-\d+-[a-f0-9]{16}$/);
-    expect(keys[2]).not.toBe(keys[0]);
-  });
-
-  it("rejects billing changes from non-admin members", async () => {
-    vi.mocked(currentGoatUser).mockResolvedValue({
-      role: "member",
-    } as Awaited<ReturnType<typeof currentGoatUser>>);
-
-    await expect(createGoatProCheckoutAction()).resolves.toEqual({
-      ok: false,
-      error: "Only workspace admins can change the plan.",
-    });
-    expect(checkoutCreate).not.toHaveBeenCalled();
-  });
-
-  it("creates a payment-mode top-up Checkout with goat_topup metadata", async () => {
+  it("creates a payment-mode top-up Checkout for any member, saving the card", async () => {
     await expect(createGoatCreditTopUpAction(1_000)).rejects.toThrow("NEXT_REDIRECT");
 
     expect(createGoatPendingCheckoutRecord).toHaveBeenCalledWith(
@@ -137,12 +74,15 @@ describe("Goat billing actions", () => {
       {
         mode: string;
         allow_promotion_codes: boolean;
+        payment_intent_data: { setup_future_usage: string };
         line_items: Array<{ price_data: { currency: string; unit_amount: number } }>;
         metadata: Record<string, string>;
       },
     ];
     expect(params.mode).toBe("payment");
     expect(params.allow_promotion_codes).toBe(true);
+    // The saved card is what auto-refill charges off-session later.
+    expect(params.payment_intent_data).toEqual({ setup_future_usage: "off_session" });
     expect(params.line_items[0]?.price_data).toMatchObject({
       currency: "usd",
       unit_amount: 1_000,
@@ -162,15 +102,31 @@ describe("Goat billing actions", () => {
     expect(checkoutCreate).not.toHaveBeenCalled();
   });
 
-  it("rejects top-ups from non-admin members", async () => {
-    vi.mocked(currentGoatUser).mockResolvedValue({
-      role: "member",
-    } as Awaited<ReturnType<typeof currentGoatUser>>);
+  it("saves auto-refill config when a payment method exists", async () => {
+    vi.mocked(setGoatAutoRefillConfig).mockResolvedValue({ enabled: true, amountCents: 2_000 });
 
-    await expect(createGoatCreditTopUpAction(1_000)).resolves.toEqual({
-      ok: false,
-      error: "Only workspace admins can add credits.",
+    await expect(setGoatAutoRefillAction({ enabled: true, amountCents: 2_000 })).resolves.toEqual({
+      ok: true,
     });
-    expect(checkoutCreate).not.toHaveBeenCalled();
+    expect(setGoatAutoRefillConfig).toHaveBeenCalledWith({
+      workspaceId: "goat_ws_1",
+      enabled: true,
+      amountCents: 2_000,
+    });
+  });
+
+  it("refuses to enable auto-refill before a card is saved", async () => {
+    vi.mocked(setGoatAutoRefillConfig).mockResolvedValue(null);
+
+    await expect(
+      setGoatAutoRefillAction({ enabled: true, amountCents: 2_000 }),
+    ).resolves.toMatchObject({ ok: false });
+  });
+
+  it("rejects auto-refill amounts outside the allowed range", async () => {
+    await expect(
+      setGoatAutoRefillAction({ enabled: true, amountCents: 100 }),
+    ).resolves.toMatchObject({ ok: false });
+    expect(setGoatAutoRefillConfig).not.toHaveBeenCalled();
   });
 });

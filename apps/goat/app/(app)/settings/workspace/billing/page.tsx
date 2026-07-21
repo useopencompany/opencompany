@@ -1,47 +1,51 @@
+import { PLATFORM_FEE_BPS } from "@opencompany/billing";
+import { loadGoatBillingOverview } from "@opencompany/db/goat-billing";
 import {
-  GOAT_FREE_MAX_MEMBERS,
-  GOAT_FREE_MONTHLY_INGESTION_LIMIT,
-  GOAT_PRO_MAX_MEMBERS,
-  GOAT_PRO_MONTHLY_INGESTIONS_PER_SEAT,
-  GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
-  loadGoatBillingOverview,
-} from "@opencompany/db/goat-billing";
-import {
-  GOAT_INGESTION_OVERAGE_USD_CENTS_PER_100_EVENTS,
+  GOAT_DEFAULT_TOP_UP_USD_CENTS,
+  GOAT_INGEST_ITEM_FEE_USD_MICROS,
+  GOAT_LOW_BALANCE_WARN_USD_MICROS,
+  GOAT_MAX_TOP_UP_USD_CENTS,
+  GOAT_MIN_TOP_UP_USD_CENTS,
   GOAT_TOP_UP_AMOUNTS_USD_CENTS,
 } from "@opencompany/db/goat-billing-constants";
+import { loadGoatCreditOverview } from "@opencompany/db/goat-credits";
 import { GoatBillingPanel } from "@/components/GoatBillingPanel";
 import { currentGoatUser } from "@/lib/auth";
 
-export default async function WorkspaceBillingSettingsPage() {
-  const context = await currentGoatUser();
-  const overview = await loadGoatBillingOverview(context.workspace.id);
+export default async function WorkspaceBillingSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ topup?: string }>;
+}) {
+  const [context, params] = await Promise.all([currentGoatUser(), searchParams]);
+  const [overview, credit] = await Promise.all([
+    loadGoatBillingOverview(context.workspace.id),
+    loadGoatCreditOverview(context.workspace.id),
+  ]);
   return (
     <GoatBillingPanel
       data={{
-        plan: overview.plan,
-        subscriptionStatus: overview.billing.subscriptionStatus,
-        cancelAtPeriodEnd: overview.billing.cancelAtPeriodEnd,
-        currentPeriodEnd: overview.billing.currentPeriodEnd?.toISOString() ?? null,
-        paymentNeedsAttention: overview.billing.paymentNeedsAttention,
-        seatMonthlyPriceUsdCents: GOAT_PRO_SEAT_MONTHLY_PRICE_USD_CENTS,
-        seatQuantity: overview.seatQuantity,
-        memberCount: overview.memberCount,
-        freeMaxMembers: GOAT_FREE_MAX_MEMBERS,
-        proMaxMembers: GOAT_PRO_MAX_MEMBERS,
-        monthlyIngestionsUsed: overview.used,
-        monthlyIngestionLimit: overview.window.limit,
-        freeMonthlyLimit: GOAT_FREE_MONTHLY_INGESTION_LIMIT,
-        proMonthlyPerSeat: GOAT_PRO_MONTHLY_INGESTIONS_PER_SEAT,
-        overageUnits: overview.overageUnitsThisWindow,
-        overageUsdMicros: overview.overageUsdMicrosThisWindow,
-        overageCentsPer100: GOAT_INGESTION_OVERAGE_USD_CENTS_PER_100_EVENTS,
         creditBalanceUsdMicros: overview.creditBalanceUsdMicros,
+        spendThisMonthUsdMicros: credit.spendThisMonthUsdMicros,
+        lowBalanceWarnUsdMicros: GOAT_LOW_BALANCE_WARN_USD_MICROS,
         topUpAmountsCents: [...GOAT_TOP_UP_AMOUNTS_USD_CENTS],
-        monthStartedAt: overview.window.start.toISOString(),
-        monthResetAt: overview.window.resetAt.toISOString(),
+        defaultTopUpCents: GOAT_DEFAULT_TOP_UP_USD_CENTS,
+        minTopUpCents: GOAT_MIN_TOP_UP_USD_CENTS,
+        maxTopUpCents: GOAT_MAX_TOP_UP_USD_CENTS,
+        autoRefill: {
+          enabled: overview.autoRefill.enabled,
+          amountCents: overview.autoRefill.amountCents,
+          hasPaymentMethod: overview.autoRefill.hasPaymentMethod,
+          lastError: overview.autoRefill.lastError,
+        },
+        platformFeePercent: PLATFORM_FEE_BPS / 100,
+        ingestFeeUsdCentsPer50: (GOAT_INGEST_ITEM_FEE_USD_MICROS * 50) / 10_000,
+        hasStripeCustomer: Boolean(overview.billing.stripeCustomerId),
         isAdmin: context.role === "admin",
       }}
+      topupResult={
+        params.topup === "success" ? "success" : params.topup === "cancelled" ? "cancelled" : null
+      }
     />
   );
 }

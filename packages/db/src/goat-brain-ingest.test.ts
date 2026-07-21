@@ -6,9 +6,6 @@ const { getDbMock, reserveGoatWorkspaceIngestionMock } = vi.hoisted(() => ({
   getDbMock: vi.fn(),
   reserveGoatWorkspaceIngestionMock: vi.fn(async ({ workspaceId }: { workspaceId: string }) => ({
     reservation: { workspaceId },
-    window: { plan: "free", limit: 200 },
-    consumedBefore: 0,
-    usedAfter: 1,
     pendingUnits: 0,
     paused: false,
     created: false,

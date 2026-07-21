@@ -1,32 +1,25 @@
-import {
-  GOAT_PRO_MONTHLY_INGESTIONS_PER_SEAT,
-  loadGoatBillingOverview,
-} from "@opencompany/db/goat-billing";
-import {
-  type GoatIngestionUsageData,
-  GoatIngestionUsagePanel,
-} from "@/components/GoatIngestionUsagePanel";
+import { loadGoatBillingOverview } from "@opencompany/db/goat-billing";
+import { loadGoatSpendBreakdown } from "@opencompany/db/goat-credits";
+import { type GoatUsageData, GoatUsagePanel } from "@/components/GoatIngestionUsagePanel";
 import { currentGoatUser } from "@/lib/auth";
 
 export default async function WorkspaceUsageSettingsPage() {
   const context = await currentGoatUser();
-  const overview = await loadGoatBillingOverview(context.workspace.id);
+  const [overview, breakdown] = await Promise.all([
+    loadGoatBillingOverview(context.workspace.id),
+    loadGoatSpendBreakdown(context.workspace.id, { days: 30 }),
+  ]);
   return (
-    <GoatIngestionUsagePanel
+    <GoatUsagePanel
       data={{
-        plan: overview.plan,
-        used: overview.used,
-        limit: overview.window.limit,
-        seatQuantity: overview.seatQuantity,
-        perSeatAllowance: GOAT_PRO_MONTHLY_INGESTIONS_PER_SEAT,
-        overageUnits: overview.overageUnitsThisWindow,
-        overageUsdMicros: overview.overageUsdMicrosThisWindow,
+        breakdown,
+        ingestedThisMonth: overview.ingestedThisMonth,
         pending: overview.pending,
-        resetAt: overview.window.resetAt.toISOString(),
+        creditBalanceUsdMicros: overview.creditBalanceUsdMicros,
         providers: overview.providers,
         recent: overview.recent.map(
           (
-            item: Omit<GoatIngestionUsageData["recent"][number], "createdAt"> & {
+            item: Omit<GoatUsageData["recent"][number], "createdAt"> & {
               createdAt: Date;
             },
           ) => ({

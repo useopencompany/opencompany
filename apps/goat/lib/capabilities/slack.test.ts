@@ -6,7 +6,9 @@ const mocks = vi.hoisted(() => ({
   dbRows: [] as unknown[],
 }));
 
-vi.mock("@/lib/integrations/slack", () => ({ slackApiRequest: mocks.slackApiRequest }));
+vi.mock("@/lib/integrations/slack", () => ({
+  slackApiRequest: mocks.slackApiRequest,
+}));
 vi.mock("@opencompany/db/goat-integrations", () => ({
   loadGoatIntegrationCredential: mocks.loadCredential,
 }));
@@ -32,7 +34,12 @@ const CONTEXT: GoatCapabilityWorkerContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
-  userContext: { email: "ada@example.com", firstName: "Ada", lastName: null, timezone: "UTC" },
+  userContext: {
+    email: "ada@example.com",
+    firstName: "Ada",
+    lastName: null,
+    timezone: "UTC",
+  },
 };
 
 function connectedRow(scopes: string[]) {

@@ -3,7 +3,10 @@ import type { ToolSet } from "ai";
 
 export type GoatCapabilityId = "slack" | "linear" | "youtube_transcript" | "attio";
 
-export type GoatCapabilityOperation = "read" | "create";
+// Capabilities advertise their permitted operations after resolving the
+// user's connection. This keeps scope-dependent creation out of read workers
+// while retaining Linear's existing, explicitly requested write mode.
+export type GoatCapabilityOperation = "read" | "create" | "write";
 
 export type GoatCapabilityEntity = {
   type: string;

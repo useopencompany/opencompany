@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatBrainView } from "@/components/GoatBrainView";
-import { GoatBrainRoute, GoatPreferencesSettingsRoute, GoatUsageSettingsRoute } from "./GoatRoutes";
+import { GoatBrainRoute, GoatPreferencesSettingsRoute } from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -61,10 +61,6 @@ vi.mock("@/components/GoatBrainSettings", () => ({
 
 vi.mock("@/components/GoatSurface", () => ({
   GoatSurface: () => null,
-}));
-
-vi.mock("@/components/GoatSpendOverview", () => ({
-  GoatSpendOverview: () => <div data-testid="spend-overview" />,
 }));
 
 vi.mock("@/components/JamieIntegrationSetup", () => ({
@@ -220,12 +216,6 @@ describe("GoatSettingsRoute", () => {
     expect(toastMock.success).toHaveBeenCalledWith("Bridge launcher downloaded.");
 
     clickMock.mockRestore();
-  });
-
-  it("shows usage spend on the usage settings route", () => {
-    render(<GoatUsageSettingsRoute />);
-
-    expect(screen.getByTestId("spend-overview")).toBeInTheDocument();
   });
 });
 
