@@ -1,7 +1,6 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import type { AgentModelId } from "@opencompany/agent-runtime";
 import { CODEX_REASONING_EFFORTS } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { GoatChatEngine, GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
@@ -60,6 +59,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   useTransition,
 } from "react";
 import { buildChatTaskLookup } from "@/components/chat/assistant-items";
@@ -76,6 +76,12 @@ import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainSkillCatalogItem } from "@/lib/brain-skills";
 import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
+import {
+  type GoatChatModelSelection,
+  persistLastGoatChatSelection,
+  readLastGoatChatSelection,
+  subscribeLastGoatChatSelection,
+} from "@/lib/chat-composer-selection";
 import { GOAT_HOME_NAVIGATION_EVENT, newOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
 import {
   compareGoatChatMessageOrder,
@@ -95,7 +101,6 @@ import {
   CODEX_CHAT_DEFAULT_MODEL_ID,
   CODEX_PICKER_VALUE,
   type CodexChatModelId,
-  type CodexPickerValue,
   normalizeCodexChatModelId,
 } from "@/lib/codex-chat-constants";
 import {
@@ -105,7 +110,7 @@ import {
 } from "@/lib/codex-chat-settings";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
-import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
+import { LOCAL_CODEX_PICKER_VALUE } from "@/lib/local-codex-constants";
 import {
   CODEX_MODELS,
   DEFAULT_GOAT_MODEL,
@@ -156,8 +161,6 @@ type MentionOption =
       description: string;
       mention: GoatChatMention;
     };
-
-type GoatChatModelSelection = AgentModelId | LocalCodexPickerValue | CodexPickerValue;
 
 // Engine chats (Local Codex bridge, cloud Codex sandbox) bypass useChat entirely: sends go to an
 // engine endpoint, streaming arrives as Electric row updates, and stop is an interrupt call.
@@ -291,12 +294,23 @@ export function GoatSurface({
     sessionId: string;
     messages: GoatChatUiMessage[];
   } | null>(null);
-  const [chatModel, setChatModel] = useState<GoatChatModelSelection>(() => {
+  const rememberedChatModel = useSyncExternalStore(
+    subscribeLastGoatChatSelection,
+    () =>
+      readLastGoatChatSelection(userWorkosId, {
+        codexConnected,
+        localCodexBetaEnabled,
+      }),
+    () => normalizeGoatModel(defaultModel),
+  );
+  const [chatModelOverride, setChatModelOverride] = useState<GoatChatModelSelection | null>(() => {
+    if (!initialChat) return null;
     const engine = engineChatKindFromChat(initialChat, localCodexBetaEnabled);
     if (engine === "codex") return CODEX_PICKER_VALUE;
     if (engine === "local_codex") return LOCAL_CODEX_PICKER_VALUE;
-    return normalizeGoatModel(initialChat?.model ?? defaultModel);
+    return normalizeGoatModel(initialChat.model);
   });
+  const chatModel = chatModelOverride ?? rememberedChatModel;
   const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
     normalizeCodexChatModelId(initialChat?.model),
   );
@@ -761,12 +775,14 @@ export function GoatSurface({
       setChatSessionId(chat?.id ?? null);
       setPersistedChatSessionId(chat?.id ?? null);
       setChatInstanceKey(chat?.id ?? `goat-chat-main-${crypto.randomUUID()}`);
-      setChatModel(
+      setChatModelOverride(
         engineTarget === "local_codex"
           ? LOCAL_CODEX_PICKER_VALUE
           : engineTarget === "codex"
             ? CODEX_PICKER_VALUE
-            : normalizeGoatModel(chat?.model ?? defaultModel),
+            : chat
+              ? normalizeGoatModel(chat.model)
+              : null,
       );
       setCodexModel(normalizeCodexChatModelId(chat?.model));
       setEngineChatSession(
@@ -794,7 +810,6 @@ export function GoatSurface({
       codexGoalTokenBudget,
       codexPlanModeEnabled,
       codexReasoningEffort,
-      defaultModel,
       isEngineChat,
       localCodexBetaEnabled,
       localCodexFeatureDisabledForChat,
@@ -1924,7 +1939,8 @@ export function GoatSurface({
               <GoatModelPicker
                 value={chatModel}
                 onChange={(model) => {
-                  setChatModel(model);
+                  setChatModelOverride(model);
+                  persistLastGoatChatSelection(userWorkosId, model);
                   if (model === CODEX_PICKER_VALUE && model !== chatModel) {
                     setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
                   } else if (model === LOCAL_CODEX_PICKER_VALUE && model !== chatModel) {
