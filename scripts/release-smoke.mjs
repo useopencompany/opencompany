@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 
 // Called by: .github/workflows/release-production.yml and root `bun run release:smoke`.
-// Purpose: polls production web and runner health checks after deployment.
+// Purpose: polls production web, Goat, and runner health checks after deployment.
 
 import { execFileSync } from "node:child_process";
+
+import { expectedReleaseFor } from "./lib/release-smoke.mjs";
 
 const webUrl = normalizeBaseUrl(process.env.WEB_URL || process.env.PRODUCTION_WEB_URL);
 const webVercelDeployment = normalizeBaseUrl(process.env.SMOKE_WEB_VERCEL_DEPLOYMENT);
 const goatUrl = normalizeBaseUrl(process.env.GOAT_URL || process.env.PRODUCTION_GOAT_URL);
 const goatVercelDeployment = normalizeBaseUrl(process.env.SMOKE_GOAT_VERCEL_DEPLOYMENT);
 const runnerUrl = normalizeBaseUrl(process.env.RUNNER_PUBLIC_URL);
-const expectedRelease = process.env.EXPECTED_RELEASE;
 const attempts = Number(process.env.SMOKE_ATTEMPTS ?? "30");
 const webAttempts = Number(process.env.SMOKE_WEB_ATTEMPTS ?? attempts);
 const goatAttempts = Number(process.env.SMOKE_GOAT_ATTEMPTS ?? attempts);
@@ -55,6 +56,7 @@ console.log("Release smoke checks passed.");
 
 async function checkUntilReady(name, url, maxAttempts, waitMs) {
   let lastError;
+  const expectedRelease = expectedReleaseFor(name);
 
   console.log(`${name} health check target: ${url}`);
 

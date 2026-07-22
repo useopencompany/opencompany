@@ -17,7 +17,7 @@ async function main() {
   const projectId = requiredEnv(options.projectEnv);
   const deployTimeoutMs = Number(process.env.VERCEL_DEPLOY_TIMEOUT_MS ?? 8 * 60 * 1000);
   const readyTimeoutMs = Number(process.env.VERCEL_READY_TIMEOUT_MS ?? 8 * 60 * 1000);
-  const pollDelayMs = Number(process.env.VERCEL_READY_POLL_MS ?? 10 * 1000);
+  const pollDelayMs = Number(process.env.VERCEL_READY_POLL_MS ?? 2 * 1000);
 
   const deployOutput = await runCommand(
     "bunx",
