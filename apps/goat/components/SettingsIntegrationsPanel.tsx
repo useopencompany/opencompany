@@ -1,6 +1,7 @@
 "use client";
 
 import type { GoatMcpClient } from "@opencompany/db/goat-schema";
+import { toast } from "@opencompany/ui/components/sonner";
 import {
   AttioIcon,
   FathomIcon,
@@ -20,7 +21,7 @@ import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useMemo, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import {
   disconnectGoatCodexAuth,
@@ -44,6 +45,10 @@ import {
   type GoatSlackProviderState,
   goatIntegrationStateFromRows,
 } from "@/lib/integration-state";
+import {
+  goatIntegrationConnectionError,
+  goatIntegrationConnectionSuccess,
+} from "@/lib/onboarding-integrations";
 import { createGoatCollections, type GoatIntegrationRow } from "@/lib/task-collections";
 
 // Presentation metadata for each integration card: the real brand logo (or a
@@ -153,22 +158,55 @@ export function SettingsIntegrationsPanel({
   mcpSetup: GoatMcpSetupView;
 }) {
   const hydrated = useHydrated();
-  if (!hydrated) {
-    return (
-      <IntegrationCards
-        integrations={initialIntegrations}
-        isWorkspaceAdmin={isWorkspaceAdmin}
-        mcpSetup={mcpSetup}
-      />
-    );
-  }
   return (
-    <LiveSettingsIntegrations
-      initialIntegrations={initialIntegrations}
-      isWorkspaceAdmin={isWorkspaceAdmin}
-      mcpSetup={mcpSetup}
-    />
+    <>
+      <IntegrationSetupFeedback />
+      {!hydrated ? (
+        <IntegrationCards
+          integrations={initialIntegrations}
+          isWorkspaceAdmin={isWorkspaceAdmin}
+          mcpSetup={mcpSetup}
+        />
+      ) : (
+        <LiveSettingsIntegrations
+          initialIntegrations={initialIntegrations}
+          isWorkspaceAdmin={isWorkspaceAdmin}
+          mcpSetup={mcpSetup}
+        />
+      )}
+    </>
   );
+}
+
+function IntegrationSetupFeedback() {
+  const handled = useRef(false);
+
+  useEffect(() => {
+    if (handled.current) return;
+
+    const url = new URL(window.location.href);
+    const status = url.searchParams.get("setup");
+    if (status !== "connected" && status !== "error") return;
+
+    handled.current = true;
+    const provider = url.searchParams.get("integration");
+    if (status === "error") {
+      toast.error(goatIntegrationConnectionError(provider, url.searchParams.get("reason")));
+    } else {
+      toast.success(goatIntegrationConnectionSuccess(provider));
+    }
+
+    url.searchParams.delete("integration");
+    url.searchParams.delete("setup");
+    url.searchParams.delete("reason");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, []);
+
+  return null;
 }
 
 function LiveSettingsIntegrations({

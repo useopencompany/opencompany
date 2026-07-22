@@ -1,8 +1,20 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
 import { SettingsIntegrationsPanel } from "./SettingsIntegrationsPanel";
+
+const { toastError, toastSuccess } = vi.hoisted(() => ({
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+}));
+
+vi.mock("@opencompany/ui/components/sonner", () => ({
+  toast: {
+    error: toastError,
+    success: toastSuccess,
+  },
+}));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
@@ -28,6 +40,57 @@ vi.mock("@/lib/integration-account-actions", () => ({
 }));
 
 describe("SettingsIntegrationsPanel", () => {
+  beforeEach(() => {
+    toastError.mockClear();
+    toastSuccess.mockClear();
+    window.history.replaceState({}, "", "/settings/integrations");
+  });
+
+  it("shows an actionable OAuth error once and removes the consumed query parameters", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/settings/integrations?integration=hubspot&setup=error&reason=not_configured&section=personal",
+    );
+
+    render(
+      <SettingsIntegrationsPanel
+        initialIntegrations={goatIntegrationStateFromRows([]) as GoatIntegrationState}
+        isWorkspaceAdmin
+        mcpSetup={{ preferredClient: null, completedAt: null }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(toastError).toHaveBeenCalledOnce();
+    });
+    expect(toastError).toHaveBeenCalledWith(
+      "HubSpot isn't available right now. Please try again later.",
+    );
+    expect(window.location.search).toBe("?section=personal");
+  });
+
+  it("confirms a completed OAuth connection and clears its callback parameters", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/settings/integrations?integration=hubspot&setup=connected",
+    );
+
+    render(
+      <SettingsIntegrationsPanel
+        initialIntegrations={goatIntegrationStateFromRows([]) as GoatIntegrationState}
+        isWorkspaceAdmin
+        mcpSetup={{ preferredClient: null, completedAt: null }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(toastSuccess).toHaveBeenCalledWith("HubSpot connected.");
+    });
+    expect(window.location.search).toBe("");
+  });
+
   it("always exposes the permanent Goat Brain MCP entry", () => {
     render(
       <SettingsIntegrationsPanel

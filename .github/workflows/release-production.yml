@@ -299,6 +299,9 @@ jobs:
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
             "ELECTRIC_URL",
+            "GOAT_HUBSPOT_CLIENT_ID",
+            "GOAT_HUBSPOT_CLIENT_SECRET",
+            "GOAT_HUBSPOT_STATE_SECRET",
           ];
 
           async function listProductionEnv(projectId, label, teamId, token) {
