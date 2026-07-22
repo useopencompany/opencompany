@@ -24,6 +24,7 @@ vi.mock("@opencompany/db/goat-integrations", () => ({
   markGoatIntegrationStatus: mocks.markStatus,
 }));
 
+import { executeGoatAction } from "@/lib/actions/execute";
 import { resolveGmailActions } from "@/lib/actions/gmail";
 import { GoatActionAuthError, type GoatActionExecuteContext } from "@/lib/actions/types";
 
@@ -31,6 +32,7 @@ const CONTEXT: GoatActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
+  userTimezone: "UTC",
 };
 
 function connectedRow(email = "louis@example.com") {
@@ -181,6 +183,73 @@ describe("gmail.search_messages", () => {
     const apiCall = fetchMock.mock.calls[1];
     expect((apiCall?.[1] as RequestInit).headers).toEqual(
       expect.objectContaining({ Authorization: "Bearer ya29.new" }),
+    );
+  });
+
+  it("surfaces a bounded Google error reason as provider_error", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.loadCredential.mockResolvedValue(freshCredential());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(
+          {
+            error: {
+              message: "Invalid id value",
+              errors: [{ reason: "invalid" }],
+              status: "INVALID_ARGUMENT",
+            },
+          },
+          400,
+        ),
+      ),
+    );
+    const providerCatalog = await resolveGmailActions("user_1");
+    if (!providerCatalog) throw new Error("missing Gmail catalog");
+
+    const result = await executeGoatAction({
+      catalog: {
+        providers: [
+          {
+            id: providerCatalog.id,
+            label: providerCatalog.label,
+            description: providerCatalog.description,
+          },
+        ],
+        actions: providerCatalog.actions,
+      },
+      actionId: "gmail.search_messages",
+      params: { query: "is:unread" },
+      userWorkosId: CONTEXT.userWorkosId,
+      signal: CONTEXT.signal,
+      currentDate: CONTEXT.currentDate,
+      userTimezone: CONTEXT.userTimezone,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      action: "gmail.search_messages",
+      error: {
+        code: "provider_error",
+        provider: "gmail",
+        message:
+          "Google API request failed with 400: Invalid id value (invalid, INVALID_ARGUMENT).",
+      },
+    });
+  });
+
+  it("falls back to a status-only Google error for a non-JSON response", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.loadCredential.mockResolvedValue(freshCredential());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<html>upstream failed</html>", { status: 502 })),
+    );
+    const catalog = await resolveGmailActions("user_1");
+    const search = findAction(catalog, "gmail.search_messages");
+
+    await expect(search.execute({ query: "is:unread" }, CONTEXT)).rejects.toThrow(
+      "Google API request failed with 502.",
     );
   });
 

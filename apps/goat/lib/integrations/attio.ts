@@ -20,14 +20,17 @@ import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analyti
 export const GOAT_ATTIO_API_BASE_URL = "https://api.attio.com/v2";
 
 const ATTIO_API_TIMEOUT_MS = 15_000;
+const MAX_ATTIO_ERROR_DETAIL_CHARS = 200;
 
 export class GoatAttioApiRequestError extends Error {
   readonly status: number;
+  readonly detail: string | undefined;
 
-  constructor(status: number, method: string, path: string) {
+  constructor(status: number, method: string, path: string, detail?: string) {
     super(`Attio API ${method} ${path} failed (${status}).`);
     this.name = "GoatAttioApiRequestError";
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -393,10 +396,44 @@ export async function requestGoatAttioApi(input: {
     ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
   });
   if (!response.ok) {
-    throw new GoatAttioApiRequestError(response.status, method, input.path);
+    const body = await response.text();
+    throw new GoatAttioApiRequestError(
+      response.status,
+      method,
+      input.path,
+      attioApiErrorDetail(body),
+    );
   }
   if (response.status === 204) return null;
   return await response.json().catch(() => null);
+}
+
+function attioApiErrorDetail(body: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const error = parsed as Record<string, unknown>;
+  const message = boundedAttioErrorString(error.message);
+  const code = boundedAttioErrorString(error.code);
+  const detail = message ? `${message}${code && code !== message ? ` (${code})` : ""}` : code;
+  if (!detail) return undefined;
+  const normalized = detail.replace(/[.\s]+$/g, "");
+  return normalized.length > MAX_ATTIO_ERROR_DETAIL_CHARS
+    ? `${normalized.slice(0, MAX_ATTIO_ERROR_DETAIL_CHARS - 1)}…`
+    : normalized;
+}
+
+function boundedAttioErrorString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return undefined;
+  return normalized.length > MAX_ATTIO_ERROR_DETAIL_CHARS
+    ? `${normalized.slice(0, MAX_ATTIO_ERROR_DETAIL_CHARS - 1)}…`
+    : normalized;
 }
 
 function newGoatIntegrationId() {

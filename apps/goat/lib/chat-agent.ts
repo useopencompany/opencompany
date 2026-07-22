@@ -5,6 +5,7 @@ import {
   goatGatewayProviderOptions,
 } from "@opencompany/goat-observability";
 import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
+import { MAX_ACTION_CALLS_PER_TURN } from "@/lib/actions/limits";
 import {
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
   normalizeGoatBrainReadToolInput,
@@ -75,6 +76,7 @@ import {
   WEB_SEARCH_TOOL_DESCRIPTION,
 } from "@/lib/prompts";
 
+export { MAX_ACTION_CALLS_PER_TURN } from "@/lib/actions/limits";
 export {
   createOpenCompanyChatSystemPrompt,
   OPENCOMPANY_CHAT_SYSTEM_PROMPT,
@@ -122,10 +124,6 @@ type ActionDispatcher = {
     toolCallId: string;
   }) => Promise<UseActionToolOutput>;
 };
-
-// Direct provider calls are cheap compared to the old sub-agent workers, so
-// the per-turn budget is looser.
-export const MAX_ACTION_CALLS_PER_TURN = 10;
 
 // Main chat (and the MCP connector) get a read-only brain surface: recall and
 // inspect only. Every write path — new content and edits to existing records —

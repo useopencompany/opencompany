@@ -193,7 +193,7 @@ describe("POST /api/chat", () => {
   });
 
   it("forwards use_action calls to the executor and returns its result", async () => {
-    mockAuth();
+    mockAuth({ timezone: "" });
     mockCreateTurn();
     mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
     const catalog = sampleActionCatalog();
@@ -252,6 +252,7 @@ describe("POST /api/chat", () => {
         actionId: "slack.fetch_history",
         params: { channel: "C123" },
         userWorkosId: "user_1",
+        userTimezone: "UTC",
       }),
     );
     expect(actionOutput).toEqual(

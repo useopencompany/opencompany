@@ -29,6 +29,7 @@ const CONTEXT: GoatActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-22T00:00:00.000Z"),
+  userTimezone: "UTC",
 };
 
 function connectedRow(email = "louis@example.com") {
@@ -215,11 +216,13 @@ describe("google_drive.search_files", () => {
 
   it("surfaces provider API failures", async () => {
     mocks.dbRows = [connectedRow()];
-    mocks.googleApiCall.mockRejectedValue(new Error("Google API request failed with 503."));
+    mocks.googleApiCall.mockRejectedValue(
+      new Error("Google API request failed with 400: Invalid id value (invalid)."),
+    );
     const action = findSearchAction(await resolveGoogleDriveActions("user_1"));
 
     await expect(action.execute({ query: "roadmap" }, CONTEXT)).rejects.toThrow(
-      "Google API request failed with 503.",
+      "Google API request failed with 400: Invalid id value (invalid).",
     );
   });
 

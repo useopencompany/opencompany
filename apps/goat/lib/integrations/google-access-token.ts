@@ -8,6 +8,7 @@ import type { GoatIntegrationProvider } from "@opencompany/db/goat-schema";
 
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const REFRESH_SKEW_MS = 60_000;
+const MAX_GOOGLE_ERROR_DETAIL_CHARS = 200;
 
 type StoredGoogleTokens = {
   access_token?: string;
@@ -67,7 +68,12 @@ export async function googleApiCall(
       await markGoogleNeedsReauth(connection, "Google rejected API access.");
       throw new GoogleAccessAuthError("Google rejected access for this account.");
     }
-    throw new Error(`Google API request failed with ${response.status}.`);
+    const detail = googleApiErrorDetail(text);
+    throw new Error(
+      detail
+        ? `Google API request failed with ${response.status}: ${detail}.`
+        : `Google API request failed with ${response.status}.`,
+    );
   }
   return text ? (JSON.parse(text) as unknown) : {};
 }
@@ -161,4 +167,45 @@ function isGooglePermissionError(status: number, body: string) {
     status === 403 &&
     (body.includes("insufficientPermissions") || body.includes("insufficient_scope"))
   );
+}
+
+function googleApiErrorDetail(body: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body) as unknown;
+  } catch {
+    return undefined;
+  }
+  const root = asRecord(parsed);
+  const error = asRecord(root?.error);
+  const message = boundedErrorString(error?.message);
+  const firstError = Array.isArray(error?.errors) ? asRecord(error.errors[0]) : null;
+  const reason = boundedErrorString(firstError?.reason);
+  const status = boundedErrorString(error?.status);
+  const parts = [message, reason, status].filter(
+    (value, index, values): value is string =>
+      Boolean(value) &&
+      values.findIndex((candidate) => candidate?.toLowerCase() === value?.toLowerCase()) === index,
+  );
+  if (parts.length === 0) return undefined;
+  const detail = parts.length === 1 ? parts[0]! : `${parts[0]} (${parts.slice(1).join(", ")})`;
+  return truncateErrorDetail(detail.replace(/[.\s]+$/g, ""));
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function boundedErrorString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized ? truncateErrorDetail(normalized) : undefined;
+}
+
+function truncateErrorDetail(value: string) {
+  return value.length > MAX_GOOGLE_ERROR_DETAIL_CHARS
+    ? `${value.slice(0, MAX_GOOGLE_ERROR_DETAIL_CHARS - 1)}…`
+    : value;
 }

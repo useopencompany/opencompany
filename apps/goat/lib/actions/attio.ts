@@ -24,7 +24,9 @@ const STANDARD_OBJECTS = ["people", "companies", "deals"] as const;
 const MAX_SEARCH_RECORDS = 10;
 const DEFAULT_SEARCH_RECORDS = 5;
 const MAX_QUERY_CHARS = 256;
-const MAX_PROPERTIES = 8;
+const MAX_RECORD_ID_CHARS = 200;
+const MAX_SEARCH_PROPERTIES = 8;
+const MAX_DETAIL_PROPERTIES = 24;
 const MAX_PROPERTY_CHARS = 200;
 const MAX_TITLE_CHARS = 200;
 
@@ -67,7 +69,7 @@ export async function resolveAttioActions(
         account: {
           type: "string" as const,
           enum: connections.map((connection) => connection.selector),
-          description: "The connected Attio workspace to search.",
+          description: "The connected Attio workspace to use.",
         },
       }
     : {};
@@ -96,7 +98,7 @@ export async function resolveAttioActions(
         id: "attio.search_records",
         provider: "attio",
         description:
-          "Fuzzy-search Attio people, companies, and deals by name, domain, email, phone number, social handle, or deal label. Returns compact matching CRM records.",
+          "Fuzzy-search Attio people, companies, and deals by name, domain, email, phone number, social handle, or deal label. Returns compact matches only; call attio.get_record with the returned object and id for full properties such as company domain or deal stage and value.",
         params: {
           type: "object",
           additionalProperties: false,
@@ -156,10 +158,74 @@ export async function resolveAttioActions(
           return {
             workspace: connection.selector,
             records: attioRecordList(response, limit).flatMap((record) => {
-              const compact = compactAttioRecord(record, credential.objectSlugById);
+              const compact = compactAttioRecord(
+                record,
+                credential.objectSlugById,
+                MAX_SEARCH_PROPERTIES,
+              );
               return compact ? [compact] : [];
             }),
           };
+        },
+      },
+      {
+        id: "attio.get_record",
+        provider: "attio",
+        description:
+          "Get one Attio person, company, or deal by object and record id. Returns a detailed CRM record with a larger property set than attio.search_records.",
+        params: {
+          type: "object",
+          additionalProperties: false,
+          required: multipleAccounts ? ["object", "record_id", "account"] : ["object", "record_id"],
+          properties: {
+            object: {
+              type: "string",
+              enum: [...STANDARD_OBJECTS],
+              description: "The record type returned by attio.search_records.",
+            },
+            record_id: {
+              type: "string",
+              minLength: 1,
+              maxLength: MAX_RECORD_ID_CHARS,
+              description: "The record id returned by attio.search_records.",
+            },
+            ...accountParam,
+          },
+        },
+        execute: async (params, context) => {
+          assertKnownParams(
+            params,
+            multipleAccounts ? ["object", "record_id", "account"] : ["object", "record_id"],
+          );
+          const connection = resolveConnection(
+            connections,
+            multipleAccounts ? requiredStringParam(params, "account") : undefined,
+          );
+          const credential = await getCredential(context, connection);
+          const object = parseObject(
+            requiredStringParam(params, "object"),
+            credential.availableObjects,
+          );
+          const recordId = requiredStringParam(params, "record_id");
+          if (recordId.length > MAX_RECORD_ID_CHARS) {
+            throw new GoatActionInvalidParamsError(
+              `"record_id" must be at most ${MAX_RECORD_ID_CHARS} characters.`,
+            );
+          }
+          const response = await callAttioRecordsApi({
+            context,
+            connection,
+            credential,
+            path: `/objects/${encodeURIComponent(object)}/records/${encodeURIComponent(recordId)}`,
+          });
+          const record = asRecord(asRecord(response)?.data) as AttioRecordInput | null;
+          const compact = record
+            ? compactAttioRecord(record, credential.objectSlugById, MAX_DETAIL_PROPERTIES)
+            : null;
+          if (!compact) {
+            throw new Error("Attio returned an invalid record response.");
+          }
+          return { workspace: connection.selector, record: compact };
         },
       },
     ],
@@ -298,18 +364,35 @@ async function searchAttioRecords(input: {
   objects: AttioObjectSlug[];
   limit: number;
 }) {
+  return await callAttioRecordsApi({
+    context: input.context,
+    connection: input.connection,
+    credential: input.credential,
+    path: "/objects/records/search",
+    method: "POST",
+    body: {
+      query: input.query,
+      objects: input.objects,
+      request_as: { type: "workspace" },
+      limit: input.limit,
+    },
+  });
+}
+
+async function callAttioRecordsApi(input: {
+  context: GoatActionExecuteContext;
+  connection: AttioConnection;
+  credential: AttioCredential;
+  path: string;
+  method?: string;
+  body?: unknown;
+}) {
   try {
-    // Attio exposes search as POST, but this endpoint only reads records.
     return await requestGoatAttioApi({
       apiKey: input.credential.apiKey,
-      path: "/objects/records/search",
-      method: "POST",
-      body: {
-        query: input.query,
-        objects: input.objects,
-        request_as: { type: "workspace" },
-        limit: input.limit,
-      },
+      path: input.path,
+      ...(input.method ? { method: input.method } : {}),
+      ...(input.body !== undefined ? { body: input.body } : {}),
       signal: input.context.signal,
     });
   } catch (error) {
@@ -332,7 +415,11 @@ async function searchAttioRecords(input: {
       );
     }
     if (error instanceof GoatAttioApiRequestError) {
-      throw new Error(`Attio API request failed (${error.status}).`);
+      throw new Error(
+        error.detail
+          ? `Attio API request failed (${error.status}): ${error.detail}.`
+          : `Attio API request failed (${error.status}).`,
+      );
     }
     throw new Error("Attio could not be reached. Try again in a moment.");
   }
@@ -399,6 +486,20 @@ function parseObjects(
   return objects;
 }
 
+function parseObject(value: string, availableObjects: ReadonlySet<AttioObjectSlug>) {
+  if (!isAttioObjectSlug(value)) {
+    throw new GoatActionInvalidParamsError('"object" must be one of people, companies, or deals.');
+  }
+  if (!availableObjects.has(value)) {
+    throw new GoatActionInvalidParamsError(
+      `The Attio ${value} object is not available in this workspace. Available: ${[
+        ...availableObjects,
+      ].join(", ")}.`,
+    );
+  }
+  return value;
+}
+
 function attioRecordList(response: unknown, limit: number): AttioRecordInput[] {
   const data = asRecord(response)?.data;
   return Array.isArray(data)
@@ -409,8 +510,9 @@ function attioRecordList(response: unknown, limit: number): AttioRecordInput[] {
 function compactAttioRecord(
   record: AttioRecordInput,
   objectSlugById: ReadonlyMap<string, AttioObjectSlug>,
+  maxProperties: number,
 ) {
-  const recordId = boundedIdentifier(record.id?.record_id, 200);
+  const recordId = boundedIdentifier(record.id?.record_id, MAX_RECORD_ID_CHARS);
   const object =
     asAttioObjectSlug(record.object) ??
     asAttioObjectSlug(record.object_slug) ??
@@ -426,9 +528,9 @@ function compactAttioRecord(
   let inspectedProperties = 0;
   for (const rawSlug in values) {
     if (!Object.hasOwn(values, rawSlug)) continue;
-    if (inspectedProperties >= MAX_PROPERTIES * 4) break;
+    if (inspectedProperties >= maxProperties * 4) break;
     inspectedProperties += 1;
-    if (Object.keys(properties).length >= MAX_PROPERTIES) break;
+    if (Object.keys(properties).length >= maxProperties) break;
     const slug = rawSlug.trim();
     if (
       !/^[a-z0-9_-]{1,100}$/i.test(slug) ||

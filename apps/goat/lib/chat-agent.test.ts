@@ -728,6 +728,10 @@ describe("list_actions and use_action tools", () => {
       "slack.fetch_history",
       "linear.list_issues",
     ]);
+    expect(extractUseActionDescription(context.tools)).toContain(
+      `Limited to ${MAX_ACTION_CALLS_PER_TURN} calls per chat turn`,
+    );
+    expect(MAX_ACTION_CALLS_PER_TURN).toBe(16);
     const listed = await executeListActionsTool(context.tools, { integration: "slack" });
     expect(listed).toEqual({
       ok: true,
@@ -925,6 +929,11 @@ function extractUseActionEnum(tools: unknown) {
   return (
     inputSchema?.properties?.action?.enum ?? inputSchema?.jsonSchema?.properties?.action?.enum ?? []
   );
+}
+
+function extractUseActionDescription(tools: unknown) {
+  type Tools = Record<typeof USE_ACTION_TOOL_NAME, { description?: string }>;
+  return (tools as Tools)[USE_ACTION_TOOL_NAME]?.description ?? "";
 }
 
 function extractListActionsIntegrationEnum(tools: unknown) {
