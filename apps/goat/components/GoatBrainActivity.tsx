@@ -72,12 +72,23 @@ export function GoatBrainActivity({ brainRef }: { brainRef: string }) {
 export function GoatBrainRecentActivity({
   brainRef,
   limit = 6,
+  filter = "filed",
 }: {
   brainRef: string;
   limit?: number;
+  filter?: GoatBrainActivityFilter;
 }) {
-  return <GoatBrainActivityFeed brainRef={brainRef} limit={limit} variant="overview" />;
+  return (
+    <GoatBrainActivityFeed
+      brainRef={brainRef}
+      limit={limit}
+      variant="overview"
+      activityFilter={filter}
+    />
+  );
 }
+
+export type GoatBrainActivityFilter = "filed" | "received" | "skipped" | "all";
 
 // Mounted eagerly by the Overview page and lazily by the activity popover; the
 // ingest-job and source-item shapes start syncing as soon as either consumer mounts.
@@ -86,11 +97,13 @@ function GoatBrainActivityFeed({
   onOpenTrace,
   limit,
   variant = "popover",
+  activityFilter = "all",
 }: {
   brainRef: string;
   onOpenTrace?: (trace: SelectedBrainIngestTrace) => void;
   limit?: number;
   variant?: "popover" | "overview";
+  activityFilter?: GoatBrainActivityFilter;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
   const brainCollections = useMemo(
@@ -155,7 +168,11 @@ function GoatBrainActivityFeed({
     () => buildGoatBrainActivityEvents((jobRows ?? []) as GoatBrainIngestJobRow[], sourceItems),
     [jobRows, sourceItems],
   );
-  const visibleEvents = limit ? events.slice(0, limit) : events;
+  const filteredEvents = useMemo(
+    () => events.filter((event) => activityMatchesFilter(event.kind, activityFilter)),
+    [activityFilter, events],
+  );
+  const visibleEvents = limit ? filteredEvents.slice(0, limit) : filteredEvents;
   const loading = (jobsLoading || itemsLoading) && events.length === 0;
   const overview = variant === "overview";
 
@@ -189,6 +206,16 @@ function GoatBrainActivityFeed({
           >
             No activity yet. Chat captures and meeting ingestions show up here as they are filed
             into this brain.
+          </div>
+        ) : filteredEvents.length === 0 ? (
+          <div
+            className={
+              overview
+                ? "py-5 text-[12.5px] leading-5 text-ink-subtle"
+                : "px-2 py-3 text-[12px] text-ink-subtle"
+            }
+          >
+            {emptyActivityFilterMessage(activityFilter)}
           </div>
         ) : (
           visibleEvents.map((event) => {
@@ -280,6 +307,22 @@ function GoatBrainActivityFeed({
       </div>
     </div>
   );
+}
+
+function activityMatchesFilter(
+  kind: GoatBrainActivityKind,
+  filter: GoatBrainActivityFilter,
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "received") return kind === "captured";
+  return kind === filter;
+}
+
+function emptyActivityFilterMessage(filter: GoatBrainActivityFilter): string {
+  if (filter === "filed") return "No successful filings yet.";
+  if (filter === "received") return "No received items yet.";
+  if (filter === "skipped") return "No skipped filings yet.";
+  return "No matching activity yet.";
 }
 
 function TraceIdLine({ traceId }: { traceId: string }) {
