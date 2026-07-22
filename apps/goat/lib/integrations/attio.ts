@@ -20,6 +20,16 @@ export const GOAT_ATTIO_API_BASE_URL = "https://api.attio.com/v2";
 
 const ATTIO_API_TIMEOUT_MS = 15_000;
 
+export class GoatAttioApiRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, method: string, path: string) {
+    super(`Attio API ${method} ${path} failed (${status}).`);
+    this.name = "GoatAttioApiRequestError";
+    this.status = status;
+  }
+}
+
 // The webhook subscriptions the connection needs: record lifecycle on the
 // standard CRM objects plus notes attached to them. Everything else (lists,
 // comments, tasks) stays out of scope for ingestion.
@@ -97,7 +107,7 @@ export async function validateGoatAttioApiKey(apiKey: string): Promise<GoatAttio
 export async function fetchGoatAttioObjectIds(
   apiKey: string,
 ): Promise<Partial<Record<GoatAttioObjectType, string>>> {
-  const response = await attioRequest({ apiKey, path: "/objects" });
+  const response = await requestGoatAttioApi({ apiKey, path: "/objects" });
   const objects = (response as { data?: Array<Record<string, unknown>> })?.data ?? [];
   const slugToType = new Map(
     (Object.entries(GOAT_ATTIO_OBJECT_SLUGS) as [GoatAttioObjectType, string][]).map(
@@ -140,7 +150,7 @@ export async function createGoatAttioWebhook(input: {
       value: objectId,
     })),
   };
-  const response = (await attioRequest({
+  const response = (await requestGoatAttioApi({
     apiKey: input.apiKey,
     path: "/webhooks",
     method: "POST",
@@ -174,7 +184,7 @@ export async function deleteGoatAttioWebhook(input: {
   webhookId: string;
 }): Promise<boolean> {
   try {
-    await attioRequest({
+    await requestGoatAttioApi({
       apiKey: input.apiKey,
       path: `/webhooks/${encodeURIComponent(input.webhookId)}`,
       method: "DELETE",
@@ -356,25 +366,28 @@ export async function getGoatAttioIntegrationState(
   };
 }
 
-async function attioRequest(input: {
+export async function requestGoatAttioApi(input: {
   apiKey: string;
   path: string;
   method?: string;
   body?: unknown;
+  signal?: AbortSignal;
 }): Promise<unknown> {
+  const method = input.method ?? "GET";
   const response = await fetch(`${GOAT_ATTIO_API_BASE_URL}${input.path}`, {
-    method: input.method ?? "GET",
+    method,
     headers: {
       Authorization: `Bearer ${input.apiKey}`,
+      Accept: "application/json",
       ...(input.body !== undefined ? { "Content-Type": "application/json" } : {}),
     },
-    signal: AbortSignal.timeout(ATTIO_API_TIMEOUT_MS),
+    // Main-chat actions pass their shared abort/timeout signal. Connection
+    // setup keeps the integration client's existing bounded timeout.
+    signal: input.signal ?? AbortSignal.timeout(ATTIO_API_TIMEOUT_MS),
     ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
   });
   if (!response.ok) {
-    throw new Error(
-      `Attio API ${input.method ?? "GET"} ${input.path} failed (${response.status}).`,
-    );
+    throw new GoatAttioApiRequestError(response.status, method, input.path);
   }
   if (response.status === 204) return null;
   return await response.json().catch(() => null);
