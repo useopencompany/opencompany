@@ -24,12 +24,30 @@ export default defineConfig({
     ],
   },
   test: {
-    environment: "jsdom",
     globals: true,
-    exclude: ["node_modules/**", ".next/**"],
     clearMocks: true,
     // userEvent-driven component tests can exceed the 5s default under CI load.
     testTimeout: 15000,
     hookTimeout: 15000,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "node",
+          environment: "node",
+          include: ["**/*.{test,spec}.?(c|m)[jt]s"],
+          exclude: ["node_modules/**", ".next/**"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "jsdom",
+          environment: "jsdom",
+          include: ["**/*.{test,spec}.?(c|m)[jt]sx"],
+          exclude: ["node_modules/**", ".next/**"],
+        },
+      },
+    ],
   },
 });
