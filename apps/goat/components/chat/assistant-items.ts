@@ -180,7 +180,7 @@ export function toolCallViewFromPart(
       : null;
   return {
     name,
-    label: name === USE_ACTION_TOOL_NAME ? useActionToolLabel(part.input) : toolLabel(name),
+    label: name === USE_ACTION_TOOL_NAME ? actionToolLabel(part.input) : toolLabel(name),
     status,
     statusText:
       codexPromptOutcome === "answered"
@@ -302,13 +302,13 @@ export function toolDetail(
     return taskScheduleMutationToolDetail(part);
   }
   if (name === USE_ACTION_TOOL_NAME) {
-    return useActionToolDetail(part);
+    return actionToolDetail(part);
   }
 
   return formatToolInput(part.input);
 }
 
-function useActionToolDetail(part: Record<string, unknown>) {
+function actionToolDetail(part: Record<string, unknown>) {
   const action = isRecord(part.input) ? readString(part.input.action) : null;
   if (part.state === "output-available" && isUseActionToolOutput(part.output)) {
     if (part.output.ok === false) {
@@ -319,7 +319,7 @@ function useActionToolDetail(part: Record<string, unknown>) {
   return truncateToolPreview(action) ?? formatToolInput(part.input);
 }
 
-function useActionToolLabel(input: unknown) {
+function actionToolLabel(input: unknown) {
   const action = isRecord(input) ? readString(input.action) : null;
   if (!action) return "Action";
   return toolLabel(action.split(".").join("_"));

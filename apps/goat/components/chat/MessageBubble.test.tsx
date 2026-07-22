@@ -176,7 +176,8 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.queryByText("Hiring update")).not.toBeInTheDocument();
   });
 
-  it("renders use_action parts with the action-derived label", () => {
+  it("renders use_action parts as expandable input and output details", async () => {
+    const user = userEvent.setup();
     const message: GoatChatUiMessage = {
       id: "assistant_6",
       role: "assistant",
@@ -199,7 +200,18 @@ describe("MessageBubble assistant errors", () => {
 
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
-    expect(screen.getByText("Linear List Issues")).toBeInTheDocument();
+    const toolCall = screen.getByTestId("chat-tool-call-use_action");
+    const disclosure = within(toolCall).getByRole("button", { name: /Linear List Issues/i });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(within(toolCall).queryByText("Input")).not.toBeInTheDocument();
+
+    await user.click(disclosure);
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(within(toolCall).getByText("Input")).toBeInTheDocument();
+    expect(within(toolCall).getByText("Output")).toBeInTheDocument();
+    expect(within(toolCall).getByText(/"team": "Goat"/)).toBeInTheDocument();
+    expect(within(toolCall).getByText(/"issues": \[\]/)).toBeInTheDocument();
     expect(screen.getByText("No open issues for the Goat team.")).toBeInTheDocument();
   });
 

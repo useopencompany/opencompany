@@ -24,7 +24,7 @@ export async function resolveGoatActionCatalog(
     (entry): entry is GoatActionProviderCatalog => entry !== null && entry.actions.length > 0,
   );
   return {
-    providers: providers.map((provider) => ({ id: provider.id, label: provider.label })),
+    providers: providers.map(({ id, label, description }) => ({ id, label, description })),
     actions: providers.flatMap((provider) => provider.actions),
   };
 }

@@ -54,7 +54,7 @@ const OPENCOMPANY_CHAT_WEB_SEARCH_CHAT_FALLBACK =
   "If web_search fails or is unavailable, say that briefly and explain what information is still missing.";
 
 const OPENCOMPANY_CHAT_ACTION_BEHAVIOR_LINES = [
-  "Use list_actions then use_action for quick read lookups against the integrations in <integrations>. All actions are read-only; you cannot post, edit, create, or delete anything through them. Independent lookups may be dispatched in parallel in one step.",
+  "For a quick read lookup against <integrations>, call list_actions with the relevant integration id, then call use_action with an exact action id and matching parameters. All actions are read-only; you cannot post, edit, create, or delete anything through them. Independent lookups may be dispatched in parallel in one step.",
   "Choose the lightest path: answer directly when you already know; use use_action for a quick supported lookup in a connected integration; start a task for deep, multi-step, or cross-source work.",
   "If a use_action result has ok=false, follow its error message (for example suggesting the user reconnect an integration in Settings → Integrations) instead of retrying the same call, and say briefly what happened.",
 ];
@@ -99,7 +99,7 @@ export function createOpenCompanyChatSystemPrompt(
       enabled: boolean;
       nextRunAt: string;
     }[];
-    connectedIntegrations?: readonly { id: string; label: string }[];
+    connectedIntegrations?: readonly { id: string; label: string; description: string }[];
   } = {},
 ) {
   const taskToolsEnabled = input.taskToolsEnabled ?? true;
@@ -119,10 +119,12 @@ export function createOpenCompanyChatSystemPrompt(
     ...(connectedIntegrations.length > 0
       ? [
           promptBlock("integrations", [
-            `Connected integrations usable in chat via list_actions and use_action (all read-only): ${connectedIntegrations
-              .map((integration) => `${integration.id} (${integration.label})`)
-              .join(", ")}.`,
-            "Call list_actions to see the exact actions and their parameters before the first use_action call.",
+            "Connected read-only integrations usable in chat:",
+            ...connectedIntegrations.map(
+              (integration) =>
+                `- ${integration.id} — ${integration.label}: ${integration.description}`,
+            ),
+            "Call list_actions with the exact integration id to see its actions and parameters before the first use_action call for that integration.",
           ]),
         ]
       : []),

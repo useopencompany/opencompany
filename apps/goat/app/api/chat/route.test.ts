@@ -1557,7 +1557,13 @@ function mockExecuteGoatAction() {
 
 function sampleActionCatalog() {
   return {
-    providers: [{ id: "slack" as const, label: 'Slack workspace "Acme"' }],
+    providers: [
+      {
+        id: "slack" as const,
+        label: 'Slack workspace "Acme"',
+        description: "Read conversations, messages, threads, and workspace members.",
+      },
+    ],
     actions: [
       {
         id: "slack.fetch_history",

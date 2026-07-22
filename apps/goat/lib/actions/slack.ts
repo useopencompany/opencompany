@@ -291,6 +291,7 @@ export async function resolveSlackActions(
   return {
     id: "slack",
     label: connection.teamName ? `Slack workspace "${connection.teamName}"` : "Slack workspace",
+    description: "Read conversations, messages, threads, and workspace members.",
     actions,
   };
 }

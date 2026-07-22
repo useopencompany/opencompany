@@ -9,7 +9,11 @@ import type {
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
-import type { GoatActionErrorCode, GoatActionProviderId } from "@/lib/actions/types";
+import type {
+  GoatActionErrorCode,
+  GoatActionProviderDescriptor,
+  GoatActionProviderId,
+} from "@/lib/actions/types";
 import { finiteDurationMs } from "@/lib/chat-timing";
 import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 
@@ -276,12 +280,29 @@ export type WebSearchToolOutput =
       error: string;
     };
 
-export type ListActionsToolInput = Record<string, never>;
-
-export type ListActionsToolOutput = {
-  providers: { id: GoatActionProviderId; label: string }[];
+export type GoatChatActionCatalog = {
+  providers: GoatActionProviderDescriptor[];
   actions: { id: string; provider: GoatActionProviderId; description: string; params: unknown }[];
 };
+
+export type ListActionsToolInput = {
+  integration: GoatActionProviderId;
+};
+
+export type ListActionsToolOutput =
+  | {
+      ok: true;
+      integration: GoatActionProviderDescriptor;
+      actions: GoatChatActionCatalog["actions"];
+    }
+  | {
+      ok: false;
+      error: {
+        code: "unknown_integration";
+        message: string;
+        availableIntegrations: GoatActionProviderId[];
+      };
+    };
 
 export type UseActionToolInput = {
   action: string;

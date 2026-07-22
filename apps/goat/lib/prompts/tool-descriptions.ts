@@ -70,7 +70,10 @@ export const WEB_SEARCH_RECENCY_DAYS_DESCRIPTION =
   "Optional freshness window for latest/recent requests. Use 7 for very recent news, 30 for recent updates, and 90 for broader current context.";
 
 export const LIST_ACTIONS_TOOL_DESCRIPTION =
-  "List the concrete read-only actions available on the user's connected integrations (see <integrations>). Returns every action id with a description and JSON parameter schema. Call this once before your first use_action call in a conversation; do not call it again unless an action id is rejected.";
+  "List the concrete read-only actions available for one of the user's connected integrations. Pass the exact integration id from <integrations>. Returns that integration's action ids with descriptions and JSON parameter schemas. Call this once per integration before its first use_action call in a conversation; do not call it again unless an action id is rejected.";
+
+export const LIST_ACTIONS_INTEGRATION_DESCRIPTION =
+  "The exact connected integration id from <integrations>.";
 
 export const USE_ACTION_TOOL_DESCRIPTION =
   "Execute one read-only action from the list_actions catalog against the user's connected integration. Pass the exact action id and a params object matching that action's schema. Returns provider data directly; large results are truncated, so prefer small limits and precise queries.";

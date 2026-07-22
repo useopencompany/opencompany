@@ -6,8 +6,10 @@ import {
 } from "@/lib/chat-agent";
 import {
   GOAT_BRAIN_TOOL_NAME,
+  type GoatChatActionCatalog,
   type GoatBrainToolInput,
   LIST_ACTIONS_TOOL_NAME,
+  type ListActionsToolInput,
   type ListActionsToolOutput,
   SAVE_TO_BRAIN_TOOL_NAME,
   type SaveToBrainToolInput,
@@ -650,10 +652,18 @@ describe("runOpenCompanyChatAgent", () => {
 });
 
 describe("list_actions and use_action tools", () => {
-  const catalog: ListActionsToolOutput = {
+  const catalog: GoatChatActionCatalog = {
     providers: [
-      { id: "slack", label: 'Slack workspace "Acme"' },
-      { id: "linear", label: "Linear workspace" },
+      {
+        id: "slack",
+        label: 'Slack workspace "Acme"',
+        description: "Read Slack messages.",
+      },
+      {
+        id: "linear",
+        label: "Linear workspace",
+        description: "Read Linear records.",
+      },
     ],
     actions: [
       {
@@ -693,18 +703,42 @@ describe("list_actions and use_action tools", () => {
     expect(emptyContext.tools[USE_ACTION_TOOL_NAME]).toBeUndefined();
   });
 
-  it("builds the action enum from the catalog and returns it from list_actions", async () => {
+  it("builds integration and action enums and lists only the selected integration", async () => {
     const context = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
       actions: { catalog, execute: vi.fn() },
     });
+    expect(extractListActionsIntegrationEnum(context.tools)).toEqual(["slack", "linear"]);
     expect(extractUseActionEnum(context.tools)).toEqual([
       "slack.fetch_history",
       "linear.list_issues",
     ]);
-    const listed = await executeListActionsTool(context.tools);
-    expect(listed).toEqual(catalog);
+    const listed = await executeListActionsTool(context.tools, { integration: "slack" });
+    expect(listed).toEqual({
+      ok: true,
+      integration: catalog.providers[0],
+      actions: [catalog.actions[0]],
+    });
+
+    const listedLinear = await executeListActionsTool(context.tools, { integration: "linear" });
+    expect(listedLinear).toEqual({
+      ok: true,
+      integration: catalog.providers[1],
+      actions: [catalog.actions[1]],
+    });
+
+    const unknown = await executeListActionsTool(context.tools, {
+      integration: "mail",
+    } as unknown as ListActionsToolInput);
+    expect(unknown).toEqual({
+      ok: false,
+      error: {
+        code: "unknown_integration",
+        message: 'Unknown integration "mail". Use an exact id from <integrations>.',
+        availableIntegrations: ["slack", "linear"],
+      },
+    });
   });
 
   it("dispatches valid calls and steers invalid or over-budget ones", async () => {
@@ -879,13 +913,30 @@ function extractUseActionEnum(tools: unknown) {
   );
 }
 
-async function executeListActionsTool(tools: unknown): Promise<ListActionsToolOutput> {
+function extractListActionsIntegrationEnum(tools: unknown) {
+  type IntegrationSchema = { properties?: { integration?: { enum?: string[] } } };
+  type Tools = Record<
+    typeof LIST_ACTIONS_TOOL_NAME,
+    { inputSchema?: IntegrationSchema & { jsonSchema?: IntegrationSchema } }
+  >;
+  const inputSchema = (tools as Tools)[LIST_ACTIONS_TOOL_NAME]?.inputSchema;
+  return (
+    inputSchema?.properties?.integration?.enum ??
+    inputSchema?.jsonSchema?.properties?.integration?.enum ??
+    []
+  );
+}
+
+async function executeListActionsTool(
+  tools: unknown,
+  input: ListActionsToolInput,
+): Promise<ListActionsToolOutput> {
   type Tools = Record<typeof LIST_ACTIONS_TOOL_NAME, { execute?: unknown }>;
   const tool = (tools as Tools)[LIST_ACTIONS_TOOL_NAME];
   if (typeof tool?.execute !== "function") {
     throw new Error(`${LIST_ACTIONS_TOOL_NAME} execute function was not configured.`);
   }
-  return tool.execute({}, { toolCallId: "call_0", messages: [] });
+  return tool.execute(input, { toolCallId: "call_0", messages: [] });
 }
 
 async function executeUseActionTool(

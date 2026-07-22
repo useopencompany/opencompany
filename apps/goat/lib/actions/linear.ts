@@ -218,7 +218,12 @@ export async function resolveLinearActions(
       executeLinearAction(spec, spec.normalize ? spec.normalize(params) : params, context),
   }));
 
-  return { id: "linear", label: "Linear workspace", actions };
+  return {
+    id: "linear",
+    label: "Linear workspace",
+    description: "Read issues, comments, projects, teams, members, and workflow statuses.",
+    actions,
+  };
 }
 
 async function executeLinearAction(

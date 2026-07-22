@@ -17,6 +17,7 @@ function providerCatalog(id: "slack" | "gmail" | "linear"): GoatActionProviderCa
   return {
     id,
     label: `${id} label`,
+    description: `${id} description`,
     actions: [
       {
         id: `${id}.read_something`,
@@ -52,6 +53,10 @@ describe("resolveGoatActionCatalog", () => {
 
     const catalog = await resolveGoatActionCatalog("user_1");
     expect(catalog.providers.map((provider) => provider.id)).toEqual(["slack", "linear"]);
+    expect(catalog.providers.map((provider) => provider.description)).toEqual([
+      "slack description",
+      "linear description",
+    ]);
     expect(catalog.actions.map((action) => action.id)).toEqual([
       "slack.read_something",
       "linear.read_something",

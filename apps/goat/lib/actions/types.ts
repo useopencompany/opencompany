@@ -20,6 +20,12 @@ export type GoatActionDescriptor = {
   params: JSONSchema7;
 };
 
+export type GoatActionProviderDescriptor = {
+  id: GoatActionProviderId;
+  label: string;
+  description: string;
+};
+
 export type GoatActionExecuteContext = {
   userWorkosId: string;
   signal: AbortSignal;
@@ -30,14 +36,12 @@ export type ResolvedGoatAction = GoatActionDescriptor & {
   execute: (params: Record<string, unknown>, context: GoatActionExecuteContext) => Promise<unknown>;
 };
 
-export type GoatActionProviderCatalog = {
-  id: GoatActionProviderId;
-  label: string;
+export type GoatActionProviderCatalog = GoatActionProviderDescriptor & {
   actions: ResolvedGoatAction[];
 };
 
 export type GoatResolvedActionCatalog = {
-  providers: { id: GoatActionProviderId; label: string }[];
+  providers: GoatActionProviderDescriptor[];
   actions: ResolvedGoatAction[];
 };
 

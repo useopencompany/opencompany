@@ -32,7 +32,7 @@ export async function executeGoatAction(input: {
       action: input.actionId,
       error: {
         code: "invalid_params",
-        message: `"${input.actionId}" is not an available action. Call list_actions for the current catalog.`,
+        message: `"${input.actionId}" is not an available action. Call list_actions with the relevant integration id for the current catalog.`,
       },
     };
   }
@@ -65,7 +65,7 @@ export async function executeGoatAction(input: {
         error: {
           code: "invalid_params",
           provider: action.provider,
-          message: `${error.message} Check the action's params schema from list_actions.`,
+          message: `${error.message} Check the action's params schema from list_actions for ${action.provider}.`,
         },
       };
     }

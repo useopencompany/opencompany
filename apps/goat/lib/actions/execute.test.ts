@@ -13,7 +13,7 @@ import {
 
 function catalogWith(execute: ResolvedGoatAction["execute"]): GoatResolvedActionCatalog {
   return {
-    providers: [{ id: "slack", label: "Slack" }],
+    providers: [{ id: "slack", label: "Slack", description: "Read Slack messages." }],
     actions: [
       {
         id: "slack.fetch_history",

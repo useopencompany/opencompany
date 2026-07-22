@@ -173,6 +173,7 @@ export async function resolveGmailActions(
       connections.length === 1
         ? `Gmail (${connectionLabel(connections[0]!)})`
         : `Gmail (${connections.length} accounts)`,
+    description: "Search and read messages and threads.",
     actions,
   };
 }
