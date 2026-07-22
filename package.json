@@ -44,6 +44,7 @@
     "infisical:export": "node scripts/infisical-export-local.mjs",
     "infisical:release:preflight": "infisical run --env=prod --path=/release -- bun run release:preflight -- --release",
     "release:preflight": "node scripts/release-preflight.mjs",
+    "release:scope": "node scripts/release-scope.mjs",
     "release:inngest:sync": "node scripts/release-inngest-sync.mjs",
     "release:render": "node scripts/render-release.mjs",
     "release:smoke": "node scripts/release-smoke.mjs",
