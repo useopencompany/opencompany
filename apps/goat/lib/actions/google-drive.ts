@@ -37,8 +37,9 @@ export async function resolveGoogleDriveActions(
       ? {
           account: {
             type: "string" as const,
+            maxLength: 200,
             description: `Which connected Google Drive account to use. One of: ${connections
-              .map((connection) => JSON.stringify(connectionLabel(connection)))
+              .map((connection) => JSON.stringify(accountSelector(connection, connections)))
               .join(", ")}.`,
           },
         }
@@ -172,14 +173,12 @@ function resolveConnection(
   if (account) {
     const wanted = account.toLowerCase();
     const match = connections.find(
-      (entry) =>
-        entry.accountEmail?.toLowerCase() === wanted ||
-        connectionLabel(entry).toLowerCase() === wanted,
+      (entry) => accountSelector(entry, connections).toLowerCase() === wanted,
     );
     if (!match) {
       throw new GoatActionInvalidParamsError(
         `No connected Google Drive account matches ${JSON.stringify(account)}. Connected accounts: ${connections
-          .map((entry) => JSON.stringify(connectionLabel(entry)))
+          .map((entry) => JSON.stringify(accountSelector(entry, connections)))
           .join(", ")}.`,
       );
     }
@@ -188,7 +187,7 @@ function resolveConnection(
   if (connections.length === 1) return connections[0]!;
   throw new GoatActionInvalidParamsError(
     `Multiple Google Drive accounts are connected; pass account as one of: ${connections
-      .map((entry) => JSON.stringify(connectionLabel(entry)))
+      .map((entry) => JSON.stringify(accountSelector(entry, connections)))
       .join(", ")}.`,
   );
 }
@@ -198,6 +197,17 @@ function connectionLabel(connection: GoogleDriveConnection) {
   if (!label) return "Google account";
   const normalized = label.replace(/\s+/g, " ");
   return normalized.length > 100 ? `${normalized.slice(0, 100)}…` : normalized;
+}
+
+function accountSelector(
+  connection: GoogleDriveConnection,
+  connections: readonly GoogleDriveConnection[],
+) {
+  const label = connectionLabel(connection);
+  const duplicateLabel = connections.some(
+    (entry) => entry !== connection && connectionLabel(entry).toLowerCase() === label.toLowerCase(),
+  );
+  return duplicateLabel ? `${label} (${connection.integrationId})` : label;
 }
 
 async function googleDriveApiCall(

@@ -248,4 +248,42 @@ describe("google_drive.search_files", () => {
       { signal: CONTEXT.signal },
     );
   });
+
+  it("uses unique selectors when multiple accounts have the same label", async () => {
+    mocks.dbRows = [
+      {
+        ...connectedRow("first@example.com"),
+        integrationId: "gint_drive_first",
+        accountEmail: null,
+        accountName: "Shared account",
+      },
+      {
+        ...connectedRow("second@example.com"),
+        integrationId: "gint_drive_second",
+        accountEmail: null,
+        accountName: "Shared account",
+      },
+    ];
+    mocks.googleApiCall.mockResolvedValue({ files: [] });
+    const action = findSearchAction(await resolveGoogleDriveActions("user_1"));
+
+    expect(action.params.properties?.account).toMatchObject({
+      maxLength: 200,
+      description: expect.stringContaining("Shared account (gint_drive_second)"),
+    });
+    await expect(
+      action.execute({ query: "roadmap", account: "Shared account" }, CONTEXT),
+    ).rejects.toThrow("No connected Google Drive account");
+    await action.execute(
+      { query: "roadmap", account: "Shared account (gint_drive_second)" },
+      CONTEXT,
+    );
+
+    expect(mocks.googleApiCall).toHaveBeenCalledWith(
+      expect.objectContaining({ integrationId: "gint_drive_second" }),
+      "GET",
+      expect.any(URL),
+      { signal: CONTEXT.signal },
+    );
+  });
 });
