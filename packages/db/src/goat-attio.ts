@@ -65,10 +65,6 @@ export type GoatAttioApiKeyCredentialPayload = {
 export type GoatAttioBrainSourceConfig = {
   objectTypes?: GoatAttioObjectTypeRef[];
   events?: GoatAttioEventRef[];
-  // Attio recalculates enrichment and relationship fields across hundreds of
-  // records as actor "system". Those updates are high-volume and excluded
-  // unless the source owner explicitly opts in.
-  includeSystemUpdates?: boolean;
 };
 
 export type GoatAttioIntegrationForWorkspace = {
@@ -105,7 +101,6 @@ export function parseGoatAttioBrainSourceConfig(value: unknown): GoatAttioBrainS
   return {
     ...(objectTypes ? { objectTypes } : {}),
     ...(events ? { events } : {}),
-    ...(record.includeSystemUpdates === true ? { includeSystemUpdates: true } : {}),
   };
 }
 
@@ -132,11 +127,9 @@ export function goatAttioRouteMatchesEvent(
 ) {
   const selected = goatAttioSelectedEventTypes(config);
   if (!selected.has(eventType)) return false;
-  return !(
-    eventType === "object_updated" &&
-    context.actorType?.trim().toLowerCase() === "system" &&
-    config.includeSystemUpdates !== true
-  );
+  // Attio recalculates enrichment and relationship fields across many records
+  // as actor "system". These provider-managed updates are never Brain events.
+  return !(eventType === "object_updated" && context.actorType?.trim().toLowerCase() === "system");
 }
 
 export function goatAttioEventTypeFor(action: GoatAttioEventAction): GoatAttioEventType {
