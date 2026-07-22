@@ -28,7 +28,10 @@ import { captureException } from "@opencompany/observability";
 import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
-import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
+import {
+  DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT,
+  parseCodexChatSettings,
+} from "@/lib/codex-chat-settings";
 import { LOCAL_CODEX_DEFAULT_MODEL, LOCAL_CODEX_PICKER_VALUE } from "@/lib/local-codex-constants";
 import { extractLocalRepositoryPath, hashLocalBridgeToken } from "@/lib/local-codex-utils";
 import { toGoatTaskTitle } from "@/lib/task-display";
@@ -167,7 +170,10 @@ export async function createOrSteerLocalCodexMessage(input: {
   if (prompt.length > LOCAL_CODEX_PROMPT_MAX_LENGTH) {
     return { ok: false, status: 400, error: "Messages can be at most 10,000 characters." };
   }
-  const parsedSettings = parseCodexChatSettings(input.settings);
+  const parsedSettings = parseCodexChatSettings(
+    input.settings,
+    DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT,
+  );
   if (!parsedSettings.ok) return { ok: false, status: 400, error: parsedSettings.error };
   const settings = parsedSettings.settings;
 

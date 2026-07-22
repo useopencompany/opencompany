@@ -467,7 +467,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByText("Cloud Codex sandbox"));
 
     expect(
-      screen.getByRole("button", { name: "Codex reasoning effort: Medium (click to cycle)" }),
+      screen.getByRole("button", { name: "Codex reasoning effort: XHigh (click to cycle)" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Plan mode" })).toHaveAttribute(
       "aria-pressed",
@@ -525,7 +525,7 @@ describe("GoatSurface chat streaming UI", () => {
         parts: [{ type: "text", text: "Clone my repo" }],
       },
       settings: {
-        reasoningEffort: "medium",
+        reasoningEffort: "xhigh",
         planModeEnabled: false,
         goalMode: null,
       },
@@ -717,9 +717,12 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
-    await user.click(
-      screen.getByRole("button", { name: "Codex reasoning effort: Medium (click to cycle)" }),
-    );
+    const reasoningControl = screen.getByRole("button", {
+      name: "Codex reasoning effort: XHigh (click to cycle)",
+    });
+    await user.click(reasoningControl);
+    await user.click(reasoningControl);
+    await user.click(reasoningControl);
     await user.click(screen.getByRole("button", { name: "Plan mode" }));
     await user.click(screen.getByRole("button", { name: "Goal mode" }));
     await user.click(screen.getByRole("checkbox", { name: "Goal mode" }));

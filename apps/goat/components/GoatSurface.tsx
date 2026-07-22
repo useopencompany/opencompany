@@ -98,7 +98,11 @@ import {
   type CodexPickerValue,
   normalizeCodexChatModelId,
 } from "@/lib/codex-chat-constants";
-import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
+import {
+  DEFAULT_CODEX_CHAT_REASONING_EFFORT,
+  DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT,
+  type GoatCodexComposerSettingsView,
+} from "@/lib/codex-chat-settings";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
@@ -1871,7 +1875,11 @@ export function GoatSurface({
                 value={chatModel}
                 onChange={(model) => {
                   setChatModel(model);
-                  if (model !== CODEX_PICKER_VALUE && model !== LOCAL_CODEX_PICKER_VALUE) {
+                  if (model === CODEX_PICKER_VALUE && model !== chatModel) {
+                    setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+                  } else if (model === LOCAL_CODEX_PICKER_VALUE && model !== chatModel) {
+                    setCodexReasoningEffort(DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT);
+                  } else if (model !== CODEX_PICKER_VALUE && model !== LOCAL_CODEX_PICKER_VALUE) {
                     setCodexPlanModeEnabled(false);
                     setCodexGoalModeEnabled(false);
                     setCodexGoalObjective("");
@@ -2118,9 +2126,11 @@ function appendEngineOptimisticMessages(
   return next;
 }
 
-function defaultCodexComposerUiState(): CodexComposerUiState {
+function defaultCodexComposerUiState(
+  reasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
+): CodexComposerUiState {
   return {
-    reasoningEffort: "medium",
+    reasoningEffort,
     planModeEnabled: false,
     goalModeEnabled: false,
     goalObjective: "",
@@ -2132,6 +2142,7 @@ function codexComposerUiStateForChat(
   chat:
     | {
         id?: string | null;
+        engine?: GoatChatEngine;
         codexComposerSettings?: CodexComposerSettings | null;
       }
     | null
@@ -2142,13 +2153,19 @@ function codexComposerUiStateForChat(
     const saved = savedByChatId?.get(chat.id);
     if (saved) return saved;
   }
-  return codexComposerUiStateFromSettings(chat?.codexComposerSettings ?? null);
+  return codexComposerUiStateFromSettings(
+    chat?.codexComposerSettings ?? null,
+    chat?.engine === "local_codex" ? DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT : undefined,
+  );
 }
 
 function codexComposerUiStateFromSettings(
   settings: CodexComposerSettings | null | undefined,
+  defaultReasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 ): CodexComposerUiState {
-  if (!settings) return defaultCodexComposerUiState();
+  if (!settings) {
+    return defaultCodexComposerUiState(defaultReasoningEffort);
+  }
   const goalMode = settings.goalMode ?? null;
   return {
     reasoningEffort: settings.reasoningEffort,
