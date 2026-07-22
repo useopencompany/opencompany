@@ -15,6 +15,7 @@ import { type GoatAttioObjectType, goatIntegrations } from "@opencompany/db/goat
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { getGoatAppUrl } from "@/lib/app-url";
 import type { GoatAttioProviderState } from "@/lib/integration-state";
+import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
 export const GOAT_ATTIO_API_BASE_URL = "https://api.attio.com/v2";
 
@@ -320,6 +321,11 @@ export async function connectGoatAttioIntegration(input: {
     });
     throw error;
   }
+
+  await captureGoatIntegrationAddedAnalytics({
+    userWorkosId: input.userWorkosId,
+    provider: "attio",
+  });
 
   return { integrationId: integration.id };
 }

@@ -22,6 +22,7 @@
     "@opencompany/goat-observability": "workspace:*",
     "@opencompany/memory": "workspace:*",
     "@opencompany/observability": "workspace:*",
+    "@opencompany/statsig": "workspace:*",
     "@sentry/bun": "^10.53.1",
     "@vercel/blob": "^2.4.0",
     "agent-browser": "^0.27.2",

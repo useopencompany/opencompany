@@ -12,6 +12,7 @@ import {
 import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { GoatGranolaProviderState } from "@/lib/integration-state";
+import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
 export const GOAT_GRANOLA_API_BASE_URL = "https://public-api.granola.ai/v1";
 
@@ -162,6 +163,11 @@ export async function connectGoatGranolaIntegration(input: {
     { integrationId: integration.id, userWorkosId: input.userWorkosId },
     db,
   );
+
+  await captureGoatIntegrationAddedAnalytics({
+    userWorkosId: input.userWorkosId,
+    provider: "granola",
+  });
 
   return { integrationId: integration.id };
 }

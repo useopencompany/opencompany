@@ -12,6 +12,7 @@ import {
 import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { GoatFathomProviderState } from "@/lib/integration-state";
+import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
 export const GOAT_FATHOM_API_BASE_URL = "https://api.fathom.ai/external/v1";
 
@@ -146,6 +147,11 @@ export async function connectGoatFathomIntegration(input: {
     },
     db,
   );
+
+  await captureGoatIntegrationAddedAnalytics({
+    userWorkosId: input.userWorkosId,
+    provider: "fathom",
+  });
 
   return { integrationId: integration.id };
 }

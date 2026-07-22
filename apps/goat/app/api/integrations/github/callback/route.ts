@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
   appendGoatGitHubIntegrationStatus,
   buildGoatGitHubUserAuthorizationUrl,
@@ -92,6 +93,11 @@ export async function GET(request: Request) {
       accountLogin: installation.account?.login ?? verifiedInstallation.account?.login ?? null,
       accountType: installation.account?.type ?? verifiedInstallation.account?.type ?? null,
       repositories,
+    });
+    await captureGoatIntegrationAddedAnalytics({
+      userWorkosId: current.user.workosUserId,
+      workspaceId: state.workspaceId,
+      provider: "github",
     });
 
     return NextResponse.redirect(

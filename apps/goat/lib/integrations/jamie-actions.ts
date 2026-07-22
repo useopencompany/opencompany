@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
+import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
   createOrResetGoatJamieWebhookEndpoint,
   type GoatJamieWebhookSetup,
@@ -46,7 +47,7 @@ export async function createOrResetJamieWebhookEndpointAction(): Promise<JamieWe
 export async function saveJamieWebhookApiKeyAction(
   apiKey: string,
 ): Promise<JamieWebhookEndpointActionResult> {
-  const { workspace, role } = await currentGoatUser();
+  const { user, workspace, role } = await currentGoatUser();
   if (role !== "admin") {
     return { ok: false, error: "Only workspace admins can manage the Jamie integration." };
   }
@@ -54,6 +55,11 @@ export async function saveJamieWebhookApiKeyAction(
     const setup = await saveGoatJamieWebhookApiKey({
       workspaceId: workspace.id,
       apiKey,
+    });
+    await captureGoatIntegrationAddedAnalytics({
+      userWorkosId: user.workosUserId,
+      workspaceId: workspace.id,
+      provider: "jamie",
     });
     revalidatePath("/", "layout");
     return {
