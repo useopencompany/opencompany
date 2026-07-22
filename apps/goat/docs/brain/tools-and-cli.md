@@ -67,13 +67,12 @@ the same tool runner. Reads are served by the read plane. `save_to_brain` requir
 access and immediately creates a draft in `inbox/`, then queues the same durable curation pipeline
 used by Goat chat. MCP clients do not receive raw document mutation tools.
 
-### Member MCP setup and completion
+### MCP setup and completion
 
-The reusable setup guide lives at `/setup/mcp` and is also embedded in the owner and invited-member
-onboarding flows. It gives Claude, ChatGPT, and Cursor equal prominence, remembers the user's chosen
-client, defaults to the active brain, and generates a first useful query from the user's display
-name, workspace, and selected brain. The permanent Settings → Integrations entry links back to the
-guide.
+The reusable setup guide lives at `/setup/mcp`. It gives Claude, ChatGPT, and Cursor equal
+prominence, remembers the user's chosen client, defaults to the active brain, and generates a first
+useful query from the user's display name, workspace, and selected brain. The permanent Settings →
+Integrations entry links to the guide; MCP setup is not part of onboarding.
 
 Setup completion is global per Goat user, not per workspace, brain, or client. The sidebar reminder
 stays visible until the user completes one successful `query` command through MCP against any brain

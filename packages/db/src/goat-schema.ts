@@ -530,9 +530,11 @@ export const goatOnboarding = goat.table("onboarding", {
   }),
   referralSource: text("referral_source"),
   // Self-reported profile captured on the first onboarding step. `role` is one
-  // of the ROLE_PROFILES ids in the wizard and seeds the tailored brain folders;
-  // `building` is a free-form one-liner describing what they're working on.
+  // of the ROLE_PROFILES ids in the wizard and seeds the tailored brain folders.
   role: text("role"),
+  // Legacy free-text field retained for existing rows. New Goat onboarding
+  // stores the normalized hostname in companyDomain and the homepage URL in
+  // contextUrls.
   building: text("building"),
   companyDomain: text("company_domain"),
   contextUrls: jsonb("context_urls").$type<string[]>(),

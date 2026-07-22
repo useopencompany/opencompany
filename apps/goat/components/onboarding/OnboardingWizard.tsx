@@ -41,9 +41,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
-import { GoatBrainImport } from "@/components/GoatBrainImport";
 import { resolveGoatBrainSourceState, SourceProviderCard } from "@/components/GoatBrainSourceCards";
-import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { ConnectIntegrationModal } from "@/components/onboarding/ConnectIntegrationModal";
 import {
   type GoatBrainSourcesDetails,
@@ -54,6 +52,7 @@ import {
   type GoatBrainSourceProviderDef,
 } from "@/lib/brain-sources/registry";
 import {
+  checkGoatOnboardingCompanyUrlAction,
   checkGoatWorkspaceSlugAction,
   finishGoatOnboardingAction,
   saveGoatOnboardingBrainFoldersAction,
@@ -68,11 +67,13 @@ import {
   goatOnboardingConnectHref,
   goatOnboardingConnectionError,
 } from "@/lib/onboarding-integrations";
+import { queueGoatOnboardingKickoff } from "@/lib/onboarding-kickoff";
 import {
-  GOAT_ONBOARDING_BUILDING_MAX_LENGTH,
+  GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH,
   type GoatOnboardingRole,
   goatOnboardingFoldersForRole,
   isGoatOnboardingRole,
+  normalizeGoatOnboardingCompanyUrl,
 } from "@/lib/onboarding-profile";
 
 type OnboardingUser = {
@@ -81,37 +82,25 @@ type OnboardingUser = {
   avatarUrl: string | null;
 };
 
-type StepKey =
-  | "profile"
-  | "workspace"
-  | "brain"
-  | "sources"
-  | "context"
-  | "connect"
-  | "finish"
-  | "welcome";
+type StepKey = "profile" | "workspace" | "brain" | "sources" | "finish" | "welcome";
 
 type StepDef = { key: StepKey; label: string };
 
 // Activation-optimized order: know them → name it → shape it (pre-tailored from
-// their role) → feed it (peak) → teach it → use it → done. Referral is folded
-// into the finish so it never interrupts a value step.
+// their role) → feed it → done. Referral is folded into the finish so it never
+// interrupts a value step.
 const OWNER_STEPS: StepDef[] = [
   { key: "profile", label: "About you" },
   { key: "workspace", label: "Create workspace" },
   { key: "brain", label: "Set up your brain" },
   { key: "sources", label: "Connect sources" },
-  { key: "context", label: "Import context" },
-  { key: "connect", label: "Connect over MCP" },
   { key: "finish", label: "You're all set" },
 ];
 
-// Invited members join a workspace an admin already shaped, so we skip creation,
-// folders, sources, and context — and get them straight to what's theirs: their
-// own client connection.
+// Invited members join a workspace an admin already shaped, so they only need a
+// welcome before entering the product.
 const MEMBER_STEPS: StepDef[] = [
   { key: "welcome", label: "Welcome" },
-  { key: "connect", label: "Connect over MCP" },
   { key: "finish", label: "You're all set" },
 ];
 
@@ -190,6 +179,7 @@ function foldersForRole(role: GoatOnboardingRole | null): string[] {
 // ---------------------------------------------------------------------------
 
 type SlugStatus = "idle" | "checking" | "available" | "taken";
+type CompanyUrlStatus = "idle" | "checking" | "verified" | "invalid";
 
 export function OnboardingWizard({
   user,
@@ -200,12 +190,10 @@ export function OnboardingWizard({
   initialWorkspaceName,
   initialSlug,
   initialRole,
-  initialBuilding,
+  initialCompanyUrl,
   initialReferral,
   initialSourceDetails,
   initialConnectionResult,
-  initialMcpClient,
-  initialMcpCompletedAt,
 }: {
   user: OnboardingUser;
   currentWorkspaceName: string;
@@ -215,12 +203,10 @@ export function OnboardingWizard({
   initialWorkspaceName: string;
   initialSlug: string;
   initialRole: string | null;
-  initialBuilding: string;
+  initialCompanyUrl: string;
   initialReferral: string | null;
   initialSourceDetails: GoatBrainSourcesDetails | null;
   initialConnectionResult: GoatOnboardingConnectionResult | null;
-  initialMcpClient: "claude" | "chatgpt" | "cursor" | null;
-  initialMcpCompletedAt: string | null;
 }) {
   const router = useRouter();
   const STEPS = variant === "member" ? MEMBER_STEPS : OWNER_STEPS;
@@ -234,7 +220,7 @@ export function OnboardingWizard({
   const [slug, setSlug] = useState(initialSlug);
   const [referral, setReferral] = useState<string | null>(initialReferral);
   const [role, setRole] = useState<GoatOnboardingRole | null>(normalizedInitialRole);
-  const [building, setBuilding] = useState(initialBuilding);
+  const [companyUrl, setCompanyUrl] = useState(initialCompanyUrl);
   const [workingFolders, setWorkingFolders] = useState<string[]>(() =>
     foldersForRole(normalizedInitialRole),
   );
@@ -243,10 +229,28 @@ export function OnboardingWizard({
     slug: string;
     available: boolean;
   } | null>(null);
+  const [companyUrlCheck, setCompanyUrlCheck] = useState<{
+    companyUrl: string;
+    reachable: boolean;
+    error: string | null;
+  } | null>(null);
 
   const step = STEPS[stepIndex] ?? STEPS[0]!;
   const isLast = stepIndex === STEPS.length - 1;
   const effectiveSlug = slugTouched ? slug : slugify(workspaceName);
+  const normalizedCompanyUrl = normalizeGoatOnboardingCompanyUrl(companyUrl);
+  const shouldCheckCompanyUrl = step.key === "profile" && normalizedCompanyUrl !== null;
+  const companyUrlStatus: CompanyUrlStatus = !companyUrl.trim()
+    ? "idle"
+    : !normalizedCompanyUrl
+      ? "invalid"
+      : companyUrlCheck?.companyUrl === normalizedCompanyUrl
+        ? companyUrlCheck.reachable
+          ? "verified"
+          : "invalid"
+        : "checking";
+  const companyUrlError =
+    companyUrlCheck?.companyUrl === normalizedCompanyUrl ? companyUrlCheck.error : null;
   const shouldCheckSlug = step.key === "workspace" && effectiveSlug.length > 0;
   const slugStatus: SlugStatus = !shouldCheckSlug
     ? "idle"
@@ -273,10 +277,30 @@ export function OnboardingWizard({
     return () => window.clearTimeout(timer);
   }, [effectiveSlug, shouldCheckSlug]);
 
+  useEffect(() => {
+    if (!shouldCheckCompanyUrl || !normalizedCompanyUrl) return;
+    const timer = window.setTimeout(() => {
+      void checkGoatOnboardingCompanyUrlAction(normalizedCompanyUrl)
+        .then((result) => {
+          const checkedUrl = result.companyUrl;
+          if (!checkedUrl) return;
+          setCompanyUrlCheck({ ...result, companyUrl: checkedUrl });
+        })
+        .catch(() => {
+          setCompanyUrlCheck({
+            companyUrl: normalizedCompanyUrl,
+            reachable: false,
+            error: "We couldn't verify that company URL. Try again.",
+          });
+        });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [normalizedCompanyUrl, shouldCheckCompanyUrl]);
+
   // Saves the current step server-side; returns false (and toasts) on rejection.
   const persistCurrentStep = async (): Promise<boolean> => {
     if (step.key === "profile") {
-      const r = await saveGoatOnboardingProfileAction({ role, building });
+      const r = await saveGoatOnboardingProfileAction({ role, companyUrl });
       return r.ok || toastFail(r.error);
     }
     if (step.key === "workspace") {
@@ -303,6 +327,12 @@ export function OnboardingWizard({
     startTransition(async () => {
       if (!(await persistCurrentStep())) return;
       if (isLast) {
+        if (variant === "owner" && normalizedCompanyUrl) {
+          if (!queueGoatOnboardingKickoff(normalizedCompanyUrl)) {
+            toast.error("Onboarding finished, but the first Brain run could not be started.");
+            return;
+          }
+        }
         router.push("/");
         return;
       }
@@ -322,7 +352,7 @@ export function OnboardingWizard({
 
   const canContinue =
     step.key === "profile"
-      ? role !== null
+      ? role !== null && companyUrlStatus === "verified"
       : step.key === "workspace"
         ? workspaceName.trim().length > 0 && effectiveSlug.length > 0 && slugStatus !== "taken"
         : true;
@@ -345,8 +375,10 @@ export function OnboardingWizard({
               user={user}
               role={role}
               onRole={selectRole}
-              building={building}
-              onBuilding={setBuilding}
+              companyUrl={companyUrl}
+              onCompanyUrl={setCompanyUrl}
+              companyUrlStatus={companyUrlStatus}
+              companyUrlError={companyUrlError}
             />
           )}
           {step.key === "workspace" && (
@@ -376,19 +408,6 @@ export function OnboardingWizard({
               brainRef={brainRef}
               initialDetails={initialSourceDetails}
               initialConnectionResult={initialConnectionResult}
-            />
-          )}
-          {step.key === "context" && <ImportStep brainRef={brainRef} />}
-          {step.key === "connect" && (
-            <McpSetupGuide
-              displayName={user.name}
-              workspaceName={
-                variant === "member"
-                  ? currentWorkspaceName
-                  : workspaceName.trim() || currentWorkspaceName
-              }
-              initialClient={initialMcpClient}
-              initialCompletedAt={initialMcpCompletedAt}
             />
           )}
           {step.key === "finish" && (
@@ -428,7 +447,7 @@ export function OnboardingWizard({
                 disabled={!canContinue || isPending}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-[13px] font-semibold text-canvas transition-opacity hover:opacity-90 disabled:opacity-40"
               >
-                {isPending ? "Saving…" : isLast ? "Enter OpenCompany" : "Continue"}
+                {isPending ? "Saving…" : isLast ? "Finish onboarding" : "Continue"}
                 {!isLast && !isPending && <ArrowRight size={15} strokeWidth={2} />}
               </button>
             </div>
@@ -440,7 +459,7 @@ export function OnboardingWizard({
 }
 
 function isSkippable(key: StepKey) {
-  return key === "sources" || key === "context" || key === "connect";
+  return key === "sources";
 }
 
 function toastFail(message: string): false {
@@ -503,27 +522,40 @@ function IdentityRow({ user }: { user: OnboardingUser }) {
 }
 
 // ---------------------------------------------------------------------------
-// Step — Profile (role + what they're building)
+// Step — Profile (role + company URL)
 // ---------------------------------------------------------------------------
 
 function ProfileStep({
   user,
   role,
   onRole,
-  building,
-  onBuilding,
+  companyUrl,
+  onCompanyUrl,
+  companyUrlStatus,
+  companyUrlError,
 }: {
   user: OnboardingUser;
   role: GoatOnboardingRole | null;
   onRole: (id: GoatOnboardingRole) => void;
-  building: string;
-  onBuilding: (v: string) => void;
+  companyUrl: string;
+  onCompanyUrl: (v: string) => void;
+  companyUrlStatus: CompanyUrlStatus;
+  companyUrlError: string | null;
 }) {
+  const companyUrlHint =
+    companyUrlStatus === "checking"
+      ? "Checking website…"
+      : companyUrlStatus === "verified"
+        ? "Website verified. We'll use it to start your first Brain research run."
+        : companyUrlStatus === "invalid"
+          ? (companyUrlError ?? "Enter a valid company URL.")
+          : "We'll use this to start your first Brain research run.";
+
   return (
     <div>
       <StepHeader
         title={`Welcome, ${user.name.split(" ")[0]}`}
-        subtitle="Two quick questions so we can shape your brain around how you actually work."
+        subtitle="Tell us a little about your role and company so we can shape your Brain around how you work."
       />
 
       <div className="flex flex-col gap-6">
@@ -569,13 +601,17 @@ function ProfileStep({
           </div>
         </div>
 
-        <Field label="What are you building?" hint="Optional — one line is plenty.">
+        <Field label="Company URL" hint={companyUrlHint}>
           <input
             className={inputClass}
-            value={building}
-            onChange={(e) => onBuilding(e.target.value)}
-            maxLength={GOAT_ONBOARDING_BUILDING_MAX_LENGTH}
-            placeholder="A B2B analytics platform for logistics teams"
+            type="url"
+            inputMode="url"
+            autoComplete="url"
+            value={companyUrl}
+            onChange={(e) => onCompanyUrl(e.target.value)}
+            maxLength={GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH}
+            placeholder="https://yourcompany.com"
+            required
           />
         </Field>
       </div>
@@ -1230,32 +1266,6 @@ function SourcesStep({
           }}
         />
       ) : null}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Step — Import context (real company-context import)
-// ---------------------------------------------------------------------------
-
-// Wraps the shared GoatBrainImport flow (scan → review workload → build) in the
-// onboarding chrome. The import runs on background workers, so the user can kick
-// it off and keep moving — or Skip and run it later from Brain settings.
-function ImportStep({ brainRef }: { brainRef: string | null }) {
-  return (
-    <div>
-      <StepHeader
-        title="Help us set up your brain"
-        subtitle="Point Goat at your company website and pick what to pull in. It scans first and shows you the exact workload before any ingestion runs — so nothing happens you didn't ask for."
-      />
-
-      {brainRef ? (
-        <GoatBrainImport brainRef={brainRef} compact />
-      ) : (
-        <p className="text-[12px] leading-4 text-danger">
-          A Brain is required before context can be imported.
-        </p>
-      )}
     </div>
   );
 }
