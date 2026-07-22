@@ -24,6 +24,9 @@ const MAX_HISTORY_MESSAGES = 30;
 const MAX_LISTED_CONVERSATIONS = 100;
 const MAX_LISTED_USERS = 100;
 const MAX_SEARCH_MATCHES = 20;
+const MAX_CONVERSATION_RESOLUTION_PAGES = 5;
+const MAX_SLACK_CURSOR_CHARS = 1_000;
+const SLACK_CONVERSATION_ID_PATTERN = /^[CGD][A-Z0-9]{6,}$/;
 
 const CONVERSATION_TYPES = ["public_channel", "private_channel", "im", "mpim"] as const;
 
@@ -46,6 +49,15 @@ type SlackMessage = {
   reply_count?: number;
 };
 
+type SlackConversation = {
+  id?: string;
+  name?: string;
+  is_im?: boolean;
+  is_mpim?: boolean;
+  user?: string;
+  topic?: { value?: string };
+};
+
 export async function resolveSlackActions(
   userWorkosId: string,
 ): Promise<GoatActionProviderCatalog | null> {
@@ -61,6 +73,40 @@ export async function resolveSlackActions(
       throw error;
     });
     return credentialPromise;
+  };
+
+  let conversationIndexPromise: Promise<SlackConversationIndex> | null = null;
+  const resolveConversationId = async (
+    value: string,
+    context: GoatActionExecuteContext,
+    credential: SlackCredential,
+  ) => {
+    if (SLACK_CONVERSATION_ID_PATTERN.test(value)) return value;
+    const normalizedName = normalizeConversationName(value);
+    if (!normalizedName) {
+      throw new GoatActionInvalidParamsError('"channel" must be a conversation id or name.');
+    }
+    conversationIndexPromise ??= loadSlackConversationIndex(credential.token, context.signal).catch(
+      (error) => {
+        conversationIndexPromise = null;
+        throw error;
+      },
+    );
+    const index = await conversationIndexPromise;
+    const matches = index.byName.get(normalizedName) ?? [];
+    if (matches.length === 0) {
+      throw new GoatActionInvalidParamsError(
+        `No Slack conversation named ${JSON.stringify(value)} was found across ${index.searched} conversations. Try slack.list_conversations to inspect available names and ids.`,
+      );
+    }
+    if (matches.length > 1) {
+      throw new GoatActionInvalidParamsError(
+        `Multiple Slack conversations match ${JSON.stringify(value)}: ${matches
+          .map((match) => `${match.name} (${match.id})`)
+          .join(", ")}. Pass the conversation id instead.`,
+      );
+    }
+    return matches[0]!.id;
   };
 
   const actions: ResolvedGoatAction[] = [
@@ -79,20 +125,21 @@ export async function resolveSlackActions(
             description: "Conversation types to include. Defaults to all types.",
           },
           limit: { type: "number", description: "Max conversations to return (default 50)." },
+          cursor: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_SLACK_CURSOR_CHARS,
+            description: "Pagination cursor returned as next_cursor by a previous call.",
+          },
         },
       },
       execute: async (params, context) => {
         const credential = await getCredential(context);
         const types = parseConversationTypes(params.types);
+        const cursor = boundedOptionalString(params, "cursor", MAX_SLACK_CURSOR_CHARS);
         const result = await slackApiRequest<{
-          channels?: Array<{
-            id?: string;
-            name?: string;
-            is_im?: boolean;
-            is_mpim?: boolean;
-            user?: string;
-            topic?: { value?: string };
-          }>;
+          channels?: SlackConversation[];
+          response_metadata?: { next_cursor?: string };
         }>({
           method: "conversations.list",
           token: credential.token,
@@ -103,8 +150,13 @@ export async function resolveSlackActions(
             limit: String(
               clampCount(optionalNumberParam(params, "limit"), 50, MAX_LISTED_CONVERSATIONS),
             ),
+            ...(cursor ? { cursor } : {}),
           },
         });
+        const nextCursor = boundedString(
+          result.response_metadata?.next_cursor,
+          MAX_SLACK_CURSOR_CHARS,
+        );
         return {
           conversations: (result.channels ?? []).map((channel) => ({
             id: channel.id,
@@ -114,6 +166,7 @@ export async function resolveSlackActions(
             user: channel.user,
             topic: truncateText(channel.topic?.value, 120),
           })),
+          ...(nextCursor ? { next_cursor: nextCursor } : {}),
         };
       },
     },
@@ -127,7 +180,10 @@ export async function resolveSlackActions(
         additionalProperties: false,
         required: ["channel"],
         properties: {
-          channel: { type: "string", description: "Conversation id (C…, G…, or D…)." },
+          channel: {
+            type: "string",
+            description: "Conversation id (C…, G…, D…) or a channel name like #engineering.",
+          },
           oldest_iso: {
             type: "string",
             description: "Only messages after this ISO 8601 timestamp.",
@@ -141,7 +197,11 @@ export async function resolveSlackActions(
       },
       execute: async (params, context) => {
         const credential = await getCredential(context);
-        const channel = requiredStringParam(params, "channel");
+        const channel = await resolveConversationId(
+          requiredStringParam(params, "channel"),
+          context,
+          credential,
+        );
         const oldestIso = optionalStringParam(params, "oldest_iso");
         const latestIso = optionalStringParam(params, "latest_iso");
         const result = await slackApiRequest<{ messages?: SlackMessage[] }>({
@@ -169,21 +229,29 @@ export async function resolveSlackActions(
         additionalProperties: false,
         required: ["channel", "thread_ts"],
         properties: {
-          channel: { type: "string", description: "Conversation id containing the thread." },
+          channel: {
+            type: "string",
+            description: "Conversation id (C…, G…, D…) or a channel name like #engineering.",
+          },
           thread_ts: { type: "string", description: "The ts of the thread's parent message." },
           limit: { type: "number", description: "Max replies to return (default 20)." },
         },
       },
       execute: async (params, context) => {
+        const threadTs = requiredStringParam(params, "thread_ts");
         const credential = await getCredential(context);
-        const channel = requiredStringParam(params, "channel");
+        const channel = await resolveConversationId(
+          requiredStringParam(params, "channel"),
+          context,
+          credential,
+        );
         const result = await slackApiRequest<{ messages?: SlackMessage[] }>({
           method: "conversations.replies",
           token: credential.token,
           signal: context.signal,
           form: {
             channel,
-            ts: requiredStringParam(params, "thread_ts"),
+            ts: threadTs,
             limit: String(
               clampCount(optionalNumberParam(params, "limit"), 20, MAX_HISTORY_MESSAGES),
             ),
@@ -348,6 +416,69 @@ function parseConversationTypes(value: unknown): string[] {
     (entry): entry is string =>
       typeof entry === "string" && (CONVERSATION_TYPES as readonly string[]).includes(entry),
   );
+}
+
+type SlackConversationIndex = {
+  byName: Map<string, Array<{ id: string; name: string }>>;
+  searched: number;
+};
+
+async function loadSlackConversationIndex(
+  token: string,
+  signal: AbortSignal,
+): Promise<SlackConversationIndex> {
+  const byName = new Map<string, Array<{ id: string; name: string }>>();
+  let searched = 0;
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_CONVERSATION_RESOLUTION_PAGES; page += 1) {
+    const result = await slackApiRequest<{
+      channels?: SlackConversation[];
+      response_metadata?: { next_cursor?: string };
+    }>({
+      method: "conversations.list",
+      token,
+      signal,
+      form: {
+        types: CONVERSATION_TYPES.join(","),
+        exclude_archived: "true",
+        limit: "200",
+        ...(cursor ? { cursor } : {}),
+      },
+    });
+    const channels = result.channels ?? [];
+    searched += channels.length;
+    for (const channel of channels) {
+      const id = boundedString(channel.id, 100);
+      const name = boundedString(channel.name, 300);
+      if (!id || !name) continue;
+      const normalizedName = normalizeConversationName(name);
+      if (!normalizedName) continue;
+      const matches = byName.get(normalizedName) ?? [];
+      matches.push({ id, name });
+      byName.set(normalizedName, matches);
+    }
+    cursor = boundedString(result.response_metadata?.next_cursor, MAX_SLACK_CURSOR_CHARS);
+    if (!cursor) break;
+  }
+  return { byName, searched };
+}
+
+function normalizeConversationName(value: string) {
+  return value.trim().replace(/^#/, "").trim().toLowerCase();
+}
+
+function boundedOptionalString(params: Record<string, unknown>, key: string, maxChars: number) {
+  const value = optionalStringParam(params, key);
+  if (value && value.length > maxChars) {
+    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
+  }
+  return value;
+}
+
+function boundedString(value: unknown, maxChars: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized && normalized.length <= maxChars ? normalized : undefined;
 }
 
 function compactMessages(

@@ -1,3 +1,5 @@
+import { MAX_ACTION_CALLS_PER_TURN } from "@/lib/actions/limits";
+
 export const GOAT_BRAIN_TOOL_DESCRIPTION =
   "Read-only access to the user's durable Goat Brain (structured memory stored as Markdown files). Use it to recall and inspect existing knowledge, never to write. Use query for recall/search, list for inventory, get for a known brain id, timeline for a record's history, help for command-specific usage, and doctor for validation. Use query with since windows like 6h, 2d, 1w, or an ISO timestamp to search or browse recent Brain entries; omit text when the user only wants recent entries. Use includeMerged only when inspecting duplicate/merged history and includeArchived only for retired records. To add or edit Brain content — new pages, evidence, corrections, links, or merges — use save_to_brain instead; the background curation agent files it. Do not treat Brain as a chat scratchpad.";
 
@@ -75,8 +77,7 @@ export const LIST_ACTIONS_TOOL_DESCRIPTION =
 export const LIST_ACTIONS_INTEGRATION_DESCRIPTION =
   "The exact connected integration id from <integrations>.";
 
-export const USE_ACTION_TOOL_DESCRIPTION =
-  "Execute one read-only action from the list_actions catalog against the user's connected integration. Pass the exact action id and a params object matching that action's schema. Returns provider data directly; large results are truncated, so prefer small limits and precise queries.";
+export const USE_ACTION_TOOL_DESCRIPTION = `Execute one read-only action from the list_actions catalog against the user's connected integration. Pass the exact action id and a params object matching that action's schema. Returns provider data directly; large results are truncated, so prefer small limits and precise queries. Limited to ${MAX_ACTION_CALLS_PER_TURN} calls per chat turn — plan lookups to fit, and start a task for deep multi-hop work instead.`;
 
 export const USE_ACTION_ACTION_DESCRIPTION =
   "The exact action id from list_actions, for example slack.fetch_history.";

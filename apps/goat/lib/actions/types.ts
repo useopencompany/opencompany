@@ -37,6 +37,7 @@ export type GoatActionExecuteContext = {
   userWorkosId: string;
   signal: AbortSignal;
   currentDate: Date;
+  userTimezone: string;
 };
 
 export type ResolvedGoatAction = GoatActionDescriptor & {

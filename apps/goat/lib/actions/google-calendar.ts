@@ -68,13 +68,13 @@ export async function resolveGoogleCalendarActions(
           },
           time_min: {
             type: "string",
-            format: "date-time",
-            description: "Inclusive RFC 3339 lower bound, including Z or a numeric UTC offset.",
+            description:
+              'Inclusive RFC 3339 date-time ("2026-07-22T09:00:00Z") or a plain date ("2026-07-22") interpreted as 00:00 in the user\'s timezone.',
           },
           time_max: {
             type: "string",
-            format: "date-time",
-            description: "Exclusive RFC 3339 upper bound, including Z or a numeric UTC offset.",
+            description:
+              'Exclusive RFC 3339 date-time ("2026-07-23T09:00:00Z") or a plain date ("2026-07-22") interpreted as 00:00 on the next day in the user\'s timezone. Matching plain dates select that full local day.',
           },
           query: {
             type: "string",
@@ -101,6 +101,7 @@ export async function resolveGoogleCalendarActions(
         const { timeMin, timeMax } = validateTimeWindow(
           requiredStringParam(params, "time_min"),
           requiredStringParam(params, "time_max"),
+          context.userTimezone,
         );
         const calendarId =
           boundedOptionalString(params, "calendar_id", MAX_CALENDAR_ID_CHARS) ?? "primary";
@@ -229,17 +230,28 @@ async function calendarApiCall(
   }
 }
 
-function validateTimeWindow(timeMin: string, timeMax: string) {
-  const normalizedMin = validateRfc3339(timeMin, "time_min");
-  const normalizedMax = validateRfc3339(timeMax, "time_max");
+function validateTimeWindow(timeMin: string, timeMax: string, userTimezone: string) {
+  const timezone = validIanaTimezone(userTimezone);
+  const normalizedMin = validateRfc3339(timeMin, "time_min", timezone, false);
+  const normalizedMax = validateRfc3339(timeMax, "time_max", timezone, true);
   if (Date.parse(normalizedMax) <= Date.parse(normalizedMin)) {
     throw new GoatActionInvalidParamsError('"time_max" must be after "time_min".');
   }
   return { timeMin: normalizedMin, timeMax: normalizedMax };
 }
 
-function validateRfc3339(value: string, field: string) {
+function validateRfc3339(
+  value: string,
+  field: string,
+  timezone: string,
+  nextDayForPlainDate: boolean,
+) {
   const trimmed = value.trim();
+  const plainDate = parsePlainDate(trimmed);
+  if (plainDate) {
+    const boundary = nextDayForPlainDate ? addUtcDays(plainDate, 1) : plainDate;
+    return localMidnightRfc3339(boundary, timezone);
+  }
   const date = new Date(`${trimmed.slice(0, 10)}T00:00:00Z`);
   if (
     trimmed.length > 100 ||
@@ -249,10 +261,82 @@ function validateRfc3339(value: string, field: string) {
     Number.isNaN(Date.parse(trimmed))
   ) {
     throw new GoatActionInvalidParamsError(
-      `"${field}" must be an RFC 3339 date-time with Z or a numeric UTC offset.`,
+      `"${field}" must be an RFC 3339 date-time with Z or a numeric UTC offset, or a valid YYYY-MM-DD date.`,
     );
   }
   return trimmed;
+}
+
+type CalendarDate = { year: number; month: number; day: number };
+
+function parsePlainDate(value: string): CalendarDate | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? { year, month, day }
+    : null;
+}
+
+function addUtcDays(value: CalendarDate, days: number): CalendarDate {
+  const date = new Date(Date.UTC(value.year, value.month - 1, value.day + days));
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+  };
+}
+
+function validIanaTimezone(value: string) {
+  const normalized = value.trim() || "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: normalized }).format(0);
+    return normalized;
+  } catch {
+    return "UTC";
+  }
+}
+
+function localMidnightRfc3339(value: CalendarDate, timezone: string) {
+  const wallClockUtc = Date.UTC(value.year, value.month - 1, value.day);
+  let offsetMinutes = timezoneOffsetMinutes(timezone, wallClockUtc);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const instant = wallClockUtc - offsetMinutes * 60_000;
+    const nextOffset = timezoneOffsetMinutes(timezone, instant);
+    if (nextOffset === offsetMinutes) break;
+    offsetMinutes = nextOffset;
+  }
+  return `${formatCalendarDate(value)}T00:00:00${formatUtcOffset(offsetMinutes)}`;
+}
+
+function timezoneOffsetMinutes(timezone: string, instant: number) {
+  const timeZoneName = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    timeZoneName: "longOffset",
+  })
+    .formatToParts(new Date(instant))
+    .find((part) => part.type === "timeZoneName")?.value;
+  if (timeZoneName === "GMT" || timeZoneName === "UTC") return 0;
+  const match = /^(?:GMT|UTC)([+-])(\d{2}):(\d{2})$/.exec(timeZoneName ?? "");
+  if (!match) return 0;
+  const minutes = Number(match[2]) * 60 + Number(match[3]);
+  return match[1] === "-" ? -minutes : minutes;
+}
+
+function formatCalendarDate(value: CalendarDate) {
+  return `${String(value.year).padStart(4, "0")}-${String(value.month).padStart(2, "0")}-${String(value.day).padStart(2, "0")}`;
+}
+
+function formatUtcOffset(offsetMinutes: number) {
+  if (offsetMinutes === 0) return "Z";
+  const absoluteMinutes = Math.abs(offsetMinutes);
+  const sign = offsetMinutes < 0 ? "-" : "+";
+  return `${sign}${String(Math.floor(absoluteMinutes / 60)).padStart(2, "0")}:${String(absoluteMinutes % 60).padStart(2, "0")}`;
 }
 
 function validateLimit(value: unknown) {

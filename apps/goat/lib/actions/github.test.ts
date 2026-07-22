@@ -32,6 +32,7 @@ const CONTEXT: GoatActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-22T00:00:00.000Z"),
+  userTimezone: "UTC",
 };
 
 function connection(accountName = "opencompany", installationId = "installation_1") {

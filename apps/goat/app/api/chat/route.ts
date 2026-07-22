@@ -497,6 +497,7 @@ export async function POST(request: Request): Promise<Response> {
                 params: call.params,
                 signal: generationSignal,
                 currentDate,
+                userTimezone: context.user.timezone?.trim() || "UTC",
                 userWorkosId: context.user.workosUserId,
                 chatSessionId: turn.session.id,
                 attributes: {
@@ -962,6 +963,7 @@ async function executeChatActionCall(input: {
   params: Record<string, unknown>;
   signal: AbortSignal;
   currentDate: Date;
+  userTimezone: string;
   userWorkosId: string;
   chatSessionId: string;
   attributes: Record<string, string | number | boolean | null | undefined>;
@@ -990,6 +992,7 @@ async function executeChatActionCall(input: {
       userWorkosId: input.userWorkosId,
       signal: input.signal,
       currentDate: input.currentDate,
+      userTimezone: input.userTimezone,
     });
     actionSpan.end({
       "goat.outcome": result.ok ? "success" : "failure",

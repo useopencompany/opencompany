@@ -22,6 +22,7 @@ const CONTEXT: GoatActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
+  userTimezone: "UTC",
 };
 
 function mockClient(remoteTools: Record<string, { execute?: unknown }>) {
