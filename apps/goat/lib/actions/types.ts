@@ -3,6 +3,7 @@ import type { JSONSchema7 } from "ai";
 export type GoatActionProviderId =
   | "slack"
   | "gmail"
+  | "google_calendar"
   | "google_drive"
   | "linear"
   | "attio"

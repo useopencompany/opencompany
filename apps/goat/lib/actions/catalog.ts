@@ -1,6 +1,7 @@
 import { resolveAttioActions } from "@/lib/actions/attio";
 import { resolveGitHubActions } from "@/lib/actions/github";
 import { resolveGmailActions } from "@/lib/actions/gmail";
+import { resolveGoogleCalendarActions } from "@/lib/actions/google-calendar";
 import { resolveGoogleDriveActions } from "@/lib/actions/google-drive";
 import { resolveLinearActions } from "@/lib/actions/linear";
 import { resolveSlackActions } from "@/lib/actions/slack";
@@ -22,6 +23,7 @@ export async function resolveGoatActionCatalog(input: {
   const resolved = await Promise.all([
     resolveSlackActions(input.userWorkosId).catch(() => null),
     resolveGmailActions(input.userWorkosId).catch(() => null),
+    resolveGoogleCalendarActions(input.userWorkosId).catch(() => null),
     resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
     resolveLinearActions(input.userWorkosId).catch(() => null),
     resolveAttioActions(input.userWorkosId).catch(() => null),
