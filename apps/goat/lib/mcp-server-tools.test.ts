@@ -149,7 +149,7 @@ describe("Goat MCP tools", () => {
         sourceRef: `mcp:${general.brain.id}`,
         toolInput: {
           command: "query",
-          flags: { text: "workos sponsorship", limit: 10, json: true },
+          flags: { text: "workos sponsorship", limit: 10, includeNeighbors: false, json: true },
         },
       }),
     );

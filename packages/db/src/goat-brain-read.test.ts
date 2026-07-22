@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveGoatBrainSince } from "./goat-brain-read";
+import { filterVectorCandidates, resolveGoatBrainSince } from "./goat-brain-read";
 
 describe("resolveGoatBrainSince", () => {
   const now = Date.parse("2026-07-10T12:00:00.000Z");
@@ -20,5 +20,34 @@ describe("resolveGoatBrainSince", () => {
     expect(() => resolveGoatBrainSince("last week-ish", now)).toThrow(
       'Invalid "since" value: last week-ish',
     );
+  });
+});
+
+describe("filterVectorCandidates", () => {
+  it("keeps candidates at or under the cutoff and drops the rest", () => {
+    const rows = [
+      { id: "a", distance: 0.12 },
+      { id: "b", distance: 0.8 },
+      { id: "c", distance: 0.81 },
+      { id: "d", distance: 0.99 },
+    ];
+    expect(filterVectorCandidates(rows, 0.8)).toEqual([
+      { id: "a", distance: 0.12 },
+      { id: "b", distance: 0.8 },
+    ]);
+  });
+
+  it("drops non-finite distances (e.g. an unparseable driver value)", () => {
+    const rows = [
+      { id: "a", distance: 0.2 },
+      { id: "b", distance: Number.NaN },
+    ];
+    expect(filterVectorCandidates(rows, 0.8)).toEqual([{ id: "a", distance: 0.2 }]);
+  });
+
+  it("converts distance into similarity the way the hit does (1 - distance, 4dp)", () => {
+    const kept = filterVectorCandidates([{ id: "a", distance: 0.1234 }], 0.8);
+    const distance = kept[0]?.distance ?? Number.NaN;
+    expect(Number((1 - distance).toFixed(4))).toBe(0.8766);
   });
 });

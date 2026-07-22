@@ -107,7 +107,9 @@ export function mcpTextToolResult(output: {
   error?: string;
 }) {
   const errorText = output.error || output.stderr || output.stdout || "Unknown error.";
-  const body = output.parsed !== undefined ? JSON.stringify(output.parsed, null, 2) : output.stdout;
+  // Compact JSON: this text body mirrors structuredContent (per the MCP spec), so pretty-printing
+  // it just doubles the already-duplicated payload with no reader benefit.
+  const body = output.parsed !== undefined ? JSON.stringify(output.parsed) : output.stdout;
   const structuredContent =
     output.parsed && typeof output.parsed === "object" && !Array.isArray(output.parsed)
       ? (output.parsed as Record<string, unknown>)
