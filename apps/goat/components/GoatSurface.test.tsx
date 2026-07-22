@@ -183,6 +183,7 @@ function requestChatSessionId(init: RequestInit | undefined, fallback: string) {
 
 describe("GoatSurface chat streaming UI", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     pathnameMock.value = "/";
     chatMock.status = "ready";
     chatMock.finishSessionId = null;
@@ -367,6 +368,66 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       model: "moonshotai/kimi-k3",
     });
+  });
+
+  it("remembers the last main chat model when returning Home and remounting", async () => {
+    const user = userEvent.setup();
+    const props = {
+      tasks: [],
+      defaultModel: DEFAULT_GOAT_MODEL,
+      initialChat: null,
+      userWorkosId: "user_1",
+    } as const;
+    const { unmount } = render(<GoatSurface {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Kimi K3"));
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Use Kimi");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
+
+    unmount();
+    render(<GoatSurface {...props} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3"),
+    );
+  });
+
+  it("remembers the last main chat engine when returning Home and remounting", async () => {
+    const user = userEvent.setup();
+    const sharedProps = {
+      tasks: [],
+      defaultModel: DEFAULT_GOAT_MODEL,
+      codexConnected: true,
+      userWorkosId: "user_1",
+    } as const;
+    const { unmount } = render(
+      <GoatSurface
+        {...sharedProps}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
+
+    unmount();
+    render(<GoatSurface {...sharedProps} initialChat={null} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex"),
+    );
   });
 
   it("shows Local Codex only when the beta flag is enabled and submits to the local endpoint", async () => {
@@ -1262,6 +1323,70 @@ describe("GoatSurface chat streaming UI", () => {
       text: "@skill/coding-work then continue",
       metadata: {
         mentions: [{ kind: "skill", brainRef: "goat_brain_1", id: "coding-work" }],
+      },
+    });
+  });
+
+  it("resolves exact Brain skill mentions pasted into the composer", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            skills: [
+              {
+                brainRef: "goat_brain_1",
+                id: "product-feature",
+                name: "Product feature",
+                description: "Plan and shape a product feature.",
+              },
+              {
+                brainRef: "goat_brain_1",
+                id: "add-integration-to-main-chat",
+                name: "Add integration to main chat",
+                description: "Add a new integration to the main chat.",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const pastedText =
+      "@skill/product-feature use @skill/add-integration-to-main-chat to add attio";
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: (format: string) => (format === "text/plain" ? pastedText : ""),
+        items: [],
+      },
+    });
+
+    expect(textarea).toHaveValue(pastedText);
+    expect(await screen.findAllByTestId("selected-skill-mention")).toHaveLength(2);
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: pastedText,
+      metadata: {
+        mentions: [
+          { kind: "skill", brainRef: "goat_brain_1", id: "product-feature" },
+          {
+            kind: "skill",
+            brainRef: "goat_brain_1",
+            id: "add-integration-to-main-chat",
+          },
+        ],
       },
     });
   });

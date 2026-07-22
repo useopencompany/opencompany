@@ -89,11 +89,11 @@ recent open chat session. It passes those into `GoatSurface`.
 
 The composer can attach eligible pages from the active Brain's protected `skills/` folder with
 `@skill/<id>`. The visible token is paired with structured `{ kind: "skill", brainRef, id }`
-metadata; manually typed lookalikes stay plain text. The server resolves that metadata again under
-the current user's active-Brain access, rejects stale or cross-Brain references, and caps a turn at
-16 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable
-snapshot in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original
-version.
+metadata. Exact skill tokens pasted into the composer are resolved against the active Brain catalog,
+while manually typed lookalikes stay plain text. The server resolves that metadata again under the
+current user's active-Brain access, rejects stale or cross-Brain references, and caps a turn at 16
+skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable snapshot
+in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
 matching `/chat/<id>` URL immediately with the native History API, without starting a server
@@ -131,21 +131,16 @@ The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, 
 structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
 timezone. `goat_brain` is always available and `web_search` is available when Exa is configured.
-Connected chat capabilities are dispatched through `use_capability` with an explicit operation:
-`read` for retrieval, or an advertised `create` or `write` for mutations. Slack and YouTube remain
-read-only. Linear advertises `write`; its read calls receive only read tools, while an explicitly
-requested write call additionally receives bounded `create_issue` access. Attio advertises read
-access for available standard records, interaction-recency queries, workspace lists and their
-entries, and notes. It advertises scope-dependent `create` access for standard people, companies,
-enabled deals, and notes, with one successful creation per call. Google Calendar advertises `create`
-and `write` only for accounts connected with the `calendar.events` scope. Calendar read workers can
-list events and free/busy
-windows; create workers receive one event-create tool, while write workers receive event-update and
-event-delete tools. A Calendar worker can make at most one mutation attempt and never changes
-attendees or sends invitations. Existing read-only Calendar connections must be reconnected before
-the mutation operations are advertised by using **Reconnect or add** and selecting the same Google
-account. Linear updates, comments, deletes, and every other unlisted mutation remain unavailable, as
-do Attio updates and deletes.
+Connected integration lookups are dispatched through the read-only `list_actions` and `use_action`
+tools. The route resolves a per-user catalog from currently connected providers, and the model must
+discover a provider's concrete action ids and parameter schemas before executing one. Slack exposes
+conversation, message, thread, member, and scope-dependent search reads. Gmail exposes message
+search plus message and thread retrieval, with an explicit account required when several are
+connected. Linear exposes a curated read catalog for issues, comments, projects, teams, members,
+and workflow statuses. Attio exposes bounded fuzzy search across available standard people,
+companies, and deals, with an explicit workspace required when several are connected. Actions
+cannot create, update, or delete provider data, and disconnected providers are absent from the
+catalog.
 `start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The
