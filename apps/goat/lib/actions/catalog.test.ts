@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   resolveAttioActions: vi.fn(),
   resolveSlackActions: vi.fn(),
   resolveGmailActions: vi.fn(),
+  resolveGoogleCalendarActions: vi.fn(),
   resolveGoogleDriveActions: vi.fn(),
   resolveLinearActions: vi.fn(),
 }));
@@ -11,6 +12,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/actions/attio", () => ({ resolveAttioActions: mocks.resolveAttioActions }));
 vi.mock("@/lib/actions/slack", () => ({ resolveSlackActions: mocks.resolveSlackActions }));
 vi.mock("@/lib/actions/gmail", () => ({ resolveGmailActions: mocks.resolveGmailActions }));
+vi.mock("@/lib/actions/google-calendar", () => ({
+  resolveGoogleCalendarActions: mocks.resolveGoogleCalendarActions,
+}));
 vi.mock("@/lib/actions/google-drive", () => ({
   resolveGoogleDriveActions: mocks.resolveGoogleDriveActions,
 }));
@@ -20,7 +24,7 @@ import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions
 import type { GoatActionProviderCatalog } from "@/lib/actions/types";
 
 function providerCatalog(
-  id: "slack" | "gmail" | "google_drive" | "linear" | "attio",
+  id: "slack" | "gmail" | "google_calendar" | "google_drive" | "linear" | "attio",
 ): GoatActionProviderCatalog {
   return {
     id,
@@ -57,6 +61,7 @@ describe("resolveGoatActionCatalog", () => {
   it("includes only connected providers", async () => {
     mocks.resolveSlackActions.mockResolvedValue(providerCatalog("slack"));
     mocks.resolveGmailActions.mockResolvedValue(null);
+    mocks.resolveGoogleCalendarActions.mockResolvedValue(providerCatalog("google_calendar"));
     mocks.resolveGoogleDriveActions.mockResolvedValue(providerCatalog("google_drive"));
     mocks.resolveLinearActions.mockResolvedValue(providerCatalog("linear"));
     mocks.resolveAttioActions.mockResolvedValue(providerCatalog("attio"));
@@ -64,18 +69,21 @@ describe("resolveGoatActionCatalog", () => {
     const catalog = await resolveGoatActionCatalog("user_1");
     expect(catalog.providers.map((provider) => provider.id)).toEqual([
       "slack",
+      "google_calendar",
       "google_drive",
       "linear",
       "attio",
     ]);
     expect(catalog.providers.map((provider) => provider.description)).toEqual([
       "slack description",
+      "google_calendar description",
       "google_drive description",
       "linear description",
       "attio description",
     ]);
     expect(catalog.actions.map((action) => action.id)).toEqual([
       "slack.read_something",
+      "google_calendar.read_something",
       "google_drive.read_something",
       "linear.read_something",
       "attio.read_something",
@@ -85,6 +93,7 @@ describe("resolveGoatActionCatalog", () => {
   it("keeps other providers when one resolver throws", async () => {
     mocks.resolveSlackActions.mockRejectedValue(new Error("boom"));
     mocks.resolveGmailActions.mockResolvedValue(providerCatalog("gmail"));
+    mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
@@ -96,6 +105,7 @@ describe("resolveGoatActionCatalog", () => {
   it("returns an empty catalog when nothing is connected", async () => {
     mocks.resolveSlackActions.mockResolvedValue(null);
     mocks.resolveGmailActions.mockResolvedValue(null);
+    mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);

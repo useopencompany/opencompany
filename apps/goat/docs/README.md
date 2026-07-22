@@ -136,11 +136,13 @@ tools. The route resolves a per-user catalog from currently connected providers,
 discover a provider's concrete action ids and parameter schemas before executing one. Slack exposes
 conversation, message, thread, member, and scope-dependent search reads. Gmail exposes message
 search plus message and thread retrieval, with an explicit account required when several are
-connected. Linear exposes a curated read catalog for issues, comments, projects, teams, members,
-and workflow statuses. Attio exposes bounded fuzzy search across available standard people,
-companies, and deals, with an explicit workspace required when several are connected. Actions
-cannot create, update, or delete provider data, and disconnected providers are absent from the
-catalog.
+connected. Google Calendar exposes a bounded event-list read, while Google Drive exposes file
+search. Linear exposes a curated read catalog for issues, comments, projects, teams, members, and
+workflow statuses. Attio exposes bounded fuzzy search across available standard people, companies,
+and deals, with an explicit workspace required when several are connected. Actions cannot create,
+update, or delete provider data, disconnected providers are absent from the catalog, guessed action
+ids cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
+connected-account work continues through background tasks.
 `start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The

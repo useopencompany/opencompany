@@ -17,6 +17,11 @@ const CONNECTED_INTEGRATIONS = [
     label: "Linear workspace",
     description: "Read issues, comments, projects, teams, members, and workflow statuses.",
   },
+  {
+    id: "google_calendar",
+    label: "Google Calendar (louis@example.com)",
+    description: "List calendar events in a bounded time window.",
+  },
 ];
 
 describe("createOpenCompanyChatSystemPrompt integrations", () => {
@@ -42,12 +47,16 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     expect(prompt).toContain(
       "- gmail — Gmail (louis@example.com): Search and read messages and threads.",
     );
+    expect(prompt).toContain(
+      "- google_calendar — Google Calendar (louis@example.com): List calendar events in a bounded time window.",
+    );
     expect(prompt).toContain("Connected read-only integrations");
     expect(prompt).toContain("Call list_actions with the exact integration id");
     expect(prompt).toContain("call list_actions with the relevant integration id");
     expect(prompt).toContain("you cannot post, edit, create, or delete anything");
     expect(prompt).toContain("Choose the lightest path");
     expect(prompt).toContain("start a task for deep, multi-step, or cross-source work");
+    expect(prompt).toContain("one quick bounded lookup");
     expect(prompt).toContain("If a use_action result has ok=false");
     // The block stays small: one routing line per integration, not an action index.
     const block = prompt.slice(prompt.indexOf("<integrations>"), prompt.indexOf("</integrations>"));
