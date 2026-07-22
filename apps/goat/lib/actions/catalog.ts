@@ -1,4 +1,5 @@
 import { resolveGmailActions } from "@/lib/actions/gmail";
+import { resolveGoogleDriveActions } from "@/lib/actions/google-drive";
 import { resolveLinearActions } from "@/lib/actions/linear";
 import { resolveSlackActions } from "@/lib/actions/slack";
 import type { GoatActionProviderCatalog, GoatResolvedActionCatalog } from "@/lib/actions/types";
@@ -18,6 +19,7 @@ export async function resolveGoatActionCatalog(
   const resolved = await Promise.all([
     resolveSlackActions(userWorkosId).catch(() => null),
     resolveGmailActions(userWorkosId).catch(() => null),
+    resolveGoogleDriveActions(userWorkosId).catch(() => null),
     resolveLinearActions(userWorkosId).catch(() => null),
   ]);
   const providers = resolved.filter(
