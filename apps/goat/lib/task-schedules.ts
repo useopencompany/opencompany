@@ -77,38 +77,66 @@ export async function createGoatTaskScheduleForUser(input: {
     throw new Error("Recurring task schedule could not compute a next run.");
   }
 
-  const schedule = await getDb().transaction(async (tx) => {
-    const [user] = await tx
-      .select({ enabled: goatUsers.taskSpawningEnabled })
-      .from(goatUsers)
-      .where(eq(goatUsers.workosUserId, input.userWorkosId))
-      .limit(1)
-      .for("update");
-    if (!user?.enabled) {
-      throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
-    }
+  const scheduleId = newGoatTaskScheduleId();
+  const result = await getDb().execute(sql`
+    WITH enabled_user AS MATERIALIZED (
+      SELECT task_user.workos_user_id
+      FROM goat.users AS task_user
+      WHERE task_user.workos_user_id = ${input.userWorkosId}
+        AND task_user.task_spawning_enabled = true
+      FOR UPDATE OF task_user
+    )
+    INSERT INTO goat.task_schedules (
+      id,
+      user_workos_id,
+      name,
+      source_description,
+      cron,
+      timezone,
+      prompt,
+      planned_harness_spec,
+      enabled,
+      next_run_at,
+      created_at,
+      updated_at
+    )
+    SELECT
+      ${scheduleId},
+      enabled_user.workos_user_id,
+      ${parsed.value.name},
+      ${parsed.value.sourceDescription},
+      ${parsed.value.cron},
+      ${parsed.value.timezone},
+      ${parsed.value.prompt},
+      ${JSON.stringify(plannedHarnessSpec)}::jsonb,
+      true,
+      ${nextRunAt},
+      ${now},
+      ${now}
+    FROM enabled_user
+    RETURNING id
+  `);
 
-    const [created] = await tx
-      .insert(goatTaskSchedules)
-      .values({
-        id: newGoatTaskScheduleId(),
-        userWorkosId: input.userWorkosId,
-        name: parsed.value.name,
-        sourceDescription: parsed.value.sourceDescription,
-        cron: parsed.value.cron,
-        timezone: parsed.value.timezone,
-        prompt: parsed.value.prompt,
-        plannedHarnessSpec,
-        enabled: true,
-        nextRunAt,
-        updatedAt: now,
-      })
-      .returning();
-    return created;
-  });
-
-  if (!schedule) throw new Error("Unable to create recurring task.");
-  return schedule;
+  const [schedule] = rowsFromExecute<{ id: string }>(result);
+  if (!schedule) {
+    throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
+  }
+  return {
+    id: schedule.id,
+    userWorkosId: input.userWorkosId,
+    name: parsed.value.name,
+    sourceDescription: parsed.value.sourceDescription,
+    cron: parsed.value.cron,
+    timezone: parsed.value.timezone,
+    prompt: parsed.value.prompt,
+    plannedHarnessSpec,
+    enabled: true,
+    lastRunAt: null,
+    nextRunAt,
+    deletedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 export async function setGoatTaskScheduleEnabledAction(scheduleId: string, enabled: boolean) {
@@ -398,4 +426,13 @@ function newGoatTaskScheduleId() {
 
 function newGoatTaskScheduleRunId() {
   return `goat_task_schedule_run_${randomUUID()}`;
+}
+
+function rowsFromExecute<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && "rows" in result) {
+    const rows = (result as { rows?: unknown }).rows;
+    if (Array.isArray(rows)) return rows as T[];
+  }
+  return [];
 }

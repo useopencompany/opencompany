@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createGoatTaskScheduleForUser } from "@/lib/task-schedules";
 
 const mocks = vi.hoisted(() => ({
-  insert: vi.fn(),
+  execute: vi.fn(),
   planGoatTaskHarness: vi.fn(),
   select: vi.fn(),
   transaction: vi.fn(),
@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: () => ({
+    execute: mocks.execute,
     select: mocks.select,
     transaction: mocks.transaction,
   }),
@@ -40,47 +41,17 @@ describe("createGoatTaskScheduleForUser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.planGoatTaskHarness.mockResolvedValue(harnessSpec);
-    mocks.transaction.mockImplementation(async (callback) =>
-      callback({ insert: mocks.insert, select: mocks.select }),
-    );
-    mocks.select.mockReturnValueOnce({
+    mocks.transaction.mockImplementation(() => {
+      throw new Error("No transactions support in neon-http driver");
+    });
+    mocks.select.mockReturnValue({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
           limit: vi.fn(async () => [{ enabled: true }]),
         })),
       })),
     });
-    mocks.select.mockReturnValueOnce({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(() => ({
-            for: vi.fn(async () => [{ enabled: true }]),
-          })),
-        })),
-      })),
-    });
-    mocks.insert.mockReturnValue({
-      values: vi.fn(() => ({
-        returning: vi.fn(async () => [
-          {
-            id: "goat_task_schedule_1",
-            userWorkosId: "user_1",
-            name: "Daily briefing",
-            sourceDescription: "daily at 9",
-            cron: "0 9 * * *",
-            timezone: "America/Los_Angeles",
-            prompt: "Send a daily briefing.",
-            plannedHarnessSpec: harnessSpec,
-            enabled: true,
-            lastRunAt: null,
-            nextRunAt: new Date("2026-06-01T16:00:00.000Z"),
-            deletedAt: null,
-            createdAt: new Date("2026-06-01T00:00:00.000Z"),
-            updatedAt: new Date("2026-06-01T00:00:00.000Z"),
-          },
-        ]),
-      })),
-    });
+    mocks.execute.mockResolvedValue([{ id: "goat_task_schedule_1" }]);
   });
 
   it("plans and stores a recurring task schedule", async () => {
@@ -98,7 +69,8 @@ describe("createGoatTaskScheduleForUser", () => {
       userWorkosId: "user_1",
       prompt: "Send a daily briefing.",
     });
-    expect(mocks.insert).toHaveBeenCalledOnce();
+    expect(mocks.execute).toHaveBeenCalledOnce();
+    expect(mocks.transaction).not.toHaveBeenCalled();
     expect(schedule).toMatchObject({
       id: "goat_task_schedule_1",
       plannedHarnessSpec: harnessSpec,
@@ -139,28 +111,12 @@ describe("createGoatTaskScheduleForUser", () => {
       }),
     ).rejects.toThrow("Background tasks are disabled");
     expect(mocks.planGoatTaskHarness).not.toHaveBeenCalled();
-    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.transaction).not.toHaveBeenCalled();
   });
 
-  it("re-checks the flag under a row lock before inserting a schedule", async () => {
-    mocks.select.mockReset();
-    mocks.select
-      .mockReturnValueOnce({
-        from: vi.fn(() => ({
-          where: vi.fn(() => ({
-            limit: vi.fn(async () => [{ enabled: true }]),
-          })),
-        })),
-      })
-      .mockReturnValueOnce({
-        from: vi.fn(() => ({
-          where: vi.fn(() => ({
-            limit: vi.fn(() => ({
-              for: vi.fn(async () => [{ enabled: false }]),
-            })),
-          })),
-        })),
-      });
+  it("re-checks the flag under a row lock in the atomic insert", async () => {
+    mocks.execute.mockResolvedValue([]);
 
     await expect(
       createGoatTaskScheduleForUser({
@@ -172,6 +128,22 @@ describe("createGoatTaskScheduleForUser", () => {
       }),
     ).rejects.toThrow("Background tasks are disabled");
     expect(mocks.planGoatTaskHarness).toHaveBeenCalledOnce();
-    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.execute).toHaveBeenCalledOnce();
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(sqlTextFromExecuteCall(0)).toContain("task_user.task_spawning_enabled = true");
+    expect(sqlTextFromExecuteCall(0)).toContain("FOR UPDATE OF task_user");
   });
 });
+
+function sqlTextFromExecuteCall(callIndex: number) {
+  const query = mocks.execute.mock.calls[callIndex]?.[0] as
+    | { queryChunks?: Array<string | { value?: string[] }> }
+    | undefined;
+  return (
+    query?.queryChunks
+      ?.map((chunk) =>
+        typeof chunk === "string" ? "?" : ((chunk?.value ?? []) as string[]).join(""),
+      )
+      .join("") ?? ""
+  );
+}
