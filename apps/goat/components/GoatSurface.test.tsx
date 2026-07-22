@@ -1266,6 +1266,70 @@ describe("GoatSurface chat streaming UI", () => {
     });
   });
 
+  it("resolves exact Brain skill mentions pasted into the composer", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            skills: [
+              {
+                brainRef: "goat_brain_1",
+                id: "product-feature",
+                name: "Product feature",
+                description: "Plan and shape a product feature.",
+              },
+              {
+                brainRef: "goat_brain_1",
+                id: "add-integration-to-main-chat",
+                name: "Add integration to main chat",
+                description: "Add a new integration to the main chat.",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    const pastedText =
+      "@skill/product-feature use @skill/add-integration-to-main-chat to add attio";
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: (format: string) => (format === "text/plain" ? pastedText : ""),
+        items: [],
+      },
+    });
+
+    expect(textarea).toHaveValue(pastedText);
+    expect(await screen.findAllByTestId("selected-skill-mention")).toHaveLength(2);
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: pastedText,
+      metadata: {
+        mentions: [
+          { kind: "skill", brainRef: "goat_brain_1", id: "product-feature" },
+          {
+            kind: "skill",
+            brainRef: "goat_brain_1",
+            id: "add-integration-to-main-chat",
+          },
+        ],
+      },
+    });
+  });
+
   it("retries the Brain skill catalog on the next mention-menu open after a failed fetch", async () => {
     const user = userEvent.setup();
     let catalogCalls = 0;

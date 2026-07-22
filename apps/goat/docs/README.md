@@ -89,11 +89,11 @@ recent open chat session. It passes those into `GoatSurface`.
 
 The composer can attach eligible pages from the active Brain's protected `skills/` folder with
 `@skill/<id>`. The visible token is paired with structured `{ kind: "skill", brainRef, id }`
-metadata; manually typed lookalikes stay plain text. The server resolves that metadata again under
-the current user's active-Brain access, rejects stale or cross-Brain references, and caps a turn at
-16 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable
-snapshot in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original
-version.
+metadata. Exact skill tokens pasted into the composer are resolved against the active Brain catalog,
+while manually typed lookalikes stay plain text. The server resolves that metadata again under the
+current user's active-Brain access, rejects stale or cross-Brain references, and caps a turn at 16
+skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable snapshot
+in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
 matching `/chat/<id>` URL immediately with the native History API, without starting a server

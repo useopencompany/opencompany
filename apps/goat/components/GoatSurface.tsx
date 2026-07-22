@@ -598,14 +598,7 @@ export function GoatSurface({
     if (!skillMentionMenuOpen) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      void fetch("/api/brain/skills", { signal: controller.signal })
-        .then(async (response) => {
-          if (!response.ok) throw new Error(`Skill catalog request failed (${response.status})`);
-          const payload = (await response.json()) as { skills?: unknown };
-          return Array.isArray(payload.skills)
-            ? payload.skills.filter(isGoatBrainSkillCatalogItem)
-            : [];
-        })
+      void fetchGoatBrainSkillCatalog(controller.signal)
         .then(setSkillCatalog)
         .catch(() => {});
     }, 80);
@@ -1403,6 +1396,65 @@ export function GoatSurface({
     updateMentionToken(nextInput, event.target.selectionStart);
   };
 
+  const onInputPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (composerAttachments.handlePasteFiles(event)) return;
+    if (!userWorkosId || activeEngine === "local_codex") return;
+
+    const pastedText = event.clipboardData.getData("text/plain");
+    const pastedSkillIds = skillMentionIdsFromText(pastedText);
+    if (pastedSkillIds.size === 0) return;
+
+    // Native textarea paste cannot carry our structured mention metadata. Insert the same text
+    // ourselves, then resolve only exact skill tokens from the pasted fragment against the active
+    // Brain catalog. Manually typed lookalikes continue to stay plain text.
+    event.preventDefault();
+    const textareaValue = event.currentTarget.value;
+    const selectionStart = event.currentTarget.selectionStart ?? textareaValue.length;
+    const selectionEnd = event.currentTarget.selectionEnd ?? selectionStart;
+    const availableLength = Math.max(
+      0,
+      event.currentTarget.maxLength - (textareaValue.length - (selectionEnd - selectionStart)),
+    );
+    const insertedText = pastedText.slice(0, availableLength);
+    const nextInput = `${textareaValue.slice(0, selectionStart)}${insertedText}${textareaValue.slice(selectionEnd)}`;
+    const nextCaret = selectionStart + insertedText.length;
+    const pastedMentions = skillMentionsFromPastedText({
+      pastedText: insertedText,
+      fullInput: nextInput,
+      skillIds: pastedSkillIds,
+      skills: skillCatalog,
+    });
+
+    pendingInputCaretRef.current = nextCaret;
+    setInput(nextInput);
+    setMentionToken(null);
+    setSelectedMentions((current) =>
+      mergeVisibleGoatChatMentions(nextInput, current, pastedMentions),
+    );
+
+    const knownSkillIds = new Set(
+      skillCatalog.flatMap((skill) => (pastedSkillIds.has(skill.id) ? [skill.id] : [])),
+    );
+    if (knownSkillIds.size === pastedSkillIds.size) return;
+
+    void fetchGoatBrainSkillCatalog()
+      .then((skills) => {
+        if (!mountedRef.current) return;
+        setSkillCatalog(skills);
+        const currentInput = inputRef.current?.value ?? nextInput;
+        const resolvedMentions = skillMentionsFromPastedText({
+          pastedText: insertedText,
+          fullInput: currentInput,
+          skillIds: pastedSkillIds,
+          skills,
+        });
+        setSelectedMentions((current) =>
+          mergeVisibleGoatChatMentions(currentInput, current, resolvedMentions),
+        );
+      })
+      .catch(() => {});
+  };
+
   const selectMention = (option: MentionOption) => {
     if (!mentionToken) return;
     const before = input.slice(0, mentionToken.start);
@@ -1809,9 +1861,7 @@ export function GoatSurface({
                   }
                   onKeyDown={onKeyDown}
                   onScroll={syncInputOverlayScroll}
-                  onPaste={(event) => {
-                    composerAttachments.handlePasteFiles(event);
-                  }}
+                  onPaste={onInputPaste}
                   onSelect={(event) =>
                     updateMentionToken(
                       event.currentTarget.value,
@@ -2262,6 +2312,46 @@ function goatChatMentionIsVisible(value: string, mention: GoatChatMention) {
   return new RegExp(`(^|\\s)${token}(?=\\s|$)`, "i").test(value);
 }
 
+function skillMentionIdsFromText(value: string) {
+  const ids = new Set<string>();
+  for (const match of value.matchAll(/(^|\s)@skill\/([a-z0-9][a-z0-9-]{0,79})(?=\s|$)/gi)) {
+    const id = match[2];
+    if (id) ids.add(id.toLowerCase());
+  }
+  return ids;
+}
+
+function skillMentionsFromPastedText(input: {
+  pastedText: string;
+  fullInput: string;
+  skillIds: ReadonlySet<string>;
+  skills: GoatBrainSkillCatalogItem[];
+}): GoatChatMention[] {
+  return input.skills.flatMap((skill) => {
+    if (!input.skillIds.has(skill.id)) return [];
+    const mention: GoatChatMention = { kind: "skill", brainRef: skill.brainRef, id: skill.id };
+    return goatChatMentionIsVisible(input.pastedText, mention) &&
+      goatChatMentionIsVisible(input.fullInput, mention)
+      ? [mention]
+      : [];
+  });
+}
+
+function mergeVisibleGoatChatMentions(
+  value: string,
+  current: GoatChatMention[],
+  additions: GoatChatMention[],
+) {
+  const next = current.filter((mention) => goatChatMentionIsVisible(value, mention));
+  for (const mention of additions) {
+    if (next.some((candidate) => candidate.kind === mention.kind && candidate.id === mention.id)) {
+      continue;
+    }
+    next.push(mention);
+  }
+  return next;
+}
+
 function buildMentionOptions(input: {
   token: ActiveMentionToken | null;
   skills: GoatBrainSkillCatalogItem[];
@@ -2340,6 +2430,13 @@ function isGoatBrainSkillCatalogItem(value: unknown): value is GoatBrainSkillCat
     typeof item.name === "string" &&
     typeof item.description === "string"
   );
+}
+
+async function fetchGoatBrainSkillCatalog(signal?: AbortSignal) {
+  const response = await fetch("/api/brain/skills", signal ? { signal } : {});
+  if (!response.ok) throw new Error(`Skill catalog request failed (${response.status})`);
+  const payload = (await response.json()) as { skills?: unknown };
+  return Array.isArray(payload.skills) ? payload.skills.filter(isGoatBrainSkillCatalogItem) : [];
 }
 
 function escapeRegExp(value: string) {
