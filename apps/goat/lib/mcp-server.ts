@@ -8,58 +8,54 @@ import {
 import * as z from "zod/v4-mini";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
-import { GOAT_BRAIN_READ_COMMANDS, normalizeGoatBrainReadToolInput } from "@/lib/brain-surface";
-import { GOAT_BRAIN_TOOL_NAME, type GoatBrainToolInput } from "@/lib/chat-ui";
+import { normalizeGoatBrainReadToolInput } from "@/lib/brain-surface";
+import {
+  type BrainSelectorArgs,
+  coerceDocumentIds,
+  GET_DOCUMENT_TOOL_DESCRIPTION,
+  GET_DOCUMENT_TOOL_NAME,
+  GET_TIMELINE_TOOL_DESCRIPTION,
+  GET_TIMELINE_TOOL_NAME,
+  type GetDocumentArgs,
+  type GetTimelineArgs,
+  GOAT_BRAIN_ADVANCED_TOOL_DESCRIPTION,
+  GOAT_BRAIN_ADVANCED_TOOL_NAME,
+  getDocumentInputSchema,
+  getDocumentToToolInput,
+  getTimelineInputSchema,
+  getTimelineToToolInput,
+  goatBrainAdvancedInputSchema,
+  LIST_BRAINS_TOOL_NAME,
+  LIST_DOCUMENTS_TOOL_DESCRIPTION,
+  LIST_DOCUMENTS_TOOL_NAME,
+  type ListDocumentsArgs,
+  listDocumentsInputSchema,
+  listDocumentsToToolInput,
+  resolveBrainParam,
+  SAVE_TO_BRAIN_TOOL_DESCRIPTION,
+  SAVE_TO_BRAIN_TOOL_NAME,
+  SEARCH_BRAIN_TOOL_DESCRIPTION,
+  SEARCH_BRAIN_TOOL_NAME,
+  type SearchBrainArgs,
+  saveToBrainInputSchema,
+  searchBrainInputSchema,
+  searchBrainToToolInput,
+} from "@/lib/brain-tools";
+import type { GoatBrainToolInput } from "@/lib/chat-ui";
 
 // Tool registration for the user-level Goat MCP connector: one surface spanning
 // every brain the token's user can access, addressed via an optional `brain`
 // argument plus a `list_brains` tool. Reads are available to every brain member;
 // captures preserve the same workspace-admin boundary as Goat chat writes.
+//
+// The everyday surface is a small set of flat, intent-named tools (search_brain,
+// get_document, list_documents, get_timeline) whose parameters match what an agent
+// guesses without a system prompt. They map to the shared read engine via the pure
+// mappers in brain-tools.ts. goat_brain remains as an advanced escape hatch.
 export type GoatMcpToolContext = {
   userWorkosId: string;
   gatewayApiKey: string;
   signal?: AbortSignal;
-};
-
-const queryBrainInputSchema = {
-  text: z.string().check(z.minLength(1)),
-  folder: z.optional(z.string().check(z.minLength(1))),
-  limit: z.optional(z.number().check(z.int(), z.minimum(1), z.maximum(50))),
-  type: z.optional(z.string().check(z.minLength(1))),
-  kind: z.optional(z.enum(["page", "evidence"])),
-  since: z.optional(z.string().check(z.minLength(1))),
-  hops: z.optional(z.number().check(z.int(), z.minimum(0))),
-  lexicalOnly: z.optional(z.boolean()),
-  includeMerged: z.optional(z.boolean()),
-  includeArchived: z.optional(z.boolean()),
-};
-
-const getDocumentInputSchema = {
-  ids: z.array(z.string().check(z.minLength(1))).check(z.minLength(1), z.maxLength(20)),
-};
-
-const goatBrainFlagValueSchema = z.union([
-  z.string(),
-  z.number(),
-  z.boolean(),
-  z.array(z.string()),
-]);
-
-const goatBrainInputSchema = {
-  command: z.enum([...GOAT_BRAIN_READ_COMMANDS]),
-  flags: z.optional(z.record(z.string(), goatBrainFlagValueSchema)),
-  stdin: z.optional(z.string()),
-};
-
-const brainArgSchema = {
-  brain: z.optional(z.string().check(z.minLength(1))),
-};
-
-const saveToBrainInputSchema = {
-  content: z.string().check(z.minLength(1)),
-  title: z.optional(z.string().check(z.minLength(1), z.maxLength(200))),
-  intent: z.optional(z.string().check(z.minLength(1), z.maxLength(1_000))),
-  ...brainArgSchema,
 };
 
 const listBrainsOutputSchema = {
@@ -178,50 +174,14 @@ function renderBrainList(brains: GoatBrainWithWorkspace[]) {
     .join("\n");
 }
 
-function queryToolInput(input: {
-  text: string;
-  folder?: string | undefined;
-  limit?: number | undefined;
-  type?: string | undefined;
-  kind?: "page" | "evidence" | undefined;
-  since?: string | undefined;
-  hops?: number | undefined;
-  lexicalOnly?: boolean | undefined;
-  includeMerged?: boolean | undefined;
-  includeArchived?: boolean | undefined;
-}): GoatBrainToolInput {
-  return {
-    command: "query",
-    flags: {
-      text: input.text,
-      ...(input.folder ? { folder: input.folder } : {}),
-      ...(input.type ? { type: input.type } : {}),
-      ...(input.kind ? { kind: input.kind } : {}),
-      ...(input.since ? { since: input.since } : {}),
-      ...(input.hops !== undefined ? { hops: input.hops } : {}),
-      limit: input.limit ?? 10,
-      ...(input.lexicalOnly ? { lexicalOnly: input.lexicalOnly } : {}),
-      ...(input.includeMerged ? { includeMerged: input.includeMerged } : {}),
-      ...(input.includeArchived ? { includeArchived: input.includeArchived } : {}),
-      json: true,
-    },
-  };
-}
-
 export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContext) {
-  const brainArgHint =
-    'Pass "brain" (id, or slug when unique) to choose a brain; omit it if you only have one. Call list_brains to see what you can access.';
-
-  const run = async (brainParam: string | undefined, toolInput: GoatBrainToolInput) => {
+  // Resolve the brain, then run a mapped read against the shared engine. Every flat read tool
+  // funnels through here so brain resolution and error shaping stay identical.
+  const run = async (selector: BrainSelectorArgs, toolInput: GoatBrainToolInput) => {
     const accessible = await listAccessibleGoatBrainsForUser(ctx.userWorkosId);
-    const resolved = resolveGoatMcpBrain(accessible, brainParam);
+    const resolved = resolveGoatMcpBrain(accessible, resolveBrainParam(selector));
     if (!resolved.ok) {
-      return mcpTextToolResult({
-        ok: false,
-        stdout: "",
-        stderr: "",
-        error: resolved.error,
-      });
+      return mcpTextToolResult({ ok: false, stdout: "", stderr: "", error: resolved.error });
     }
     const output = await runGoatBrainToolForUser({
       brainRef: resolved.brain.id,
@@ -234,52 +194,89 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
     return mcpTextToolResult(output);
   };
 
+  // Wrap a mapper so any synchronous mapping/validation error becomes a tool error result
+  // instead of a thrown exception the transport would surface as a raw failure.
+  const runMapped = async <A>(args: A, map: (args: A) => GoatBrainToolInput) => {
+    try {
+      return await run(args as BrainSelectorArgs, map(args));
+    } catch (error) {
+      return mcpTextToolResult({
+        ok: false,
+        stdout: "",
+        stderr: "",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   server.registerTool(
-    GOAT_BRAIN_TOOL_NAME,
+    SEARCH_BRAIN_TOOL_NAME,
     {
-      title: "Goat brain",
-      description: `Read your Goat knowledge brains using the same read-only goat_brain command surface as OpenCompany chat. Use query for recall/search, list for inventory, get for known ids, timeline for dated evidence, doctor for validation, and help for usage. ${brainArgHint} Query/timeline since accepts relative windows like 6h, 2d, 1w or an ISO-8601 timestamp.`,
-      inputSchema: { ...goatBrainInputSchema, ...brainArgSchema },
+      title: "Search brain",
+      description: SEARCH_BRAIN_TOOL_DESCRIPTION,
+      inputSchema: searchBrainInputSchema,
       annotations: READ_TOOL_ANNOTATIONS,
     },
-    async (args) => {
-      try {
-        return await run(args.brain, normalizeGoatBrainReadToolInput(args));
-      } catch (error) {
+    async (args: SearchBrainArgs) => runMapped(args, searchBrainToToolInput),
+  );
+
+  server.registerTool(
+    GET_DOCUMENT_TOOL_NAME,
+    {
+      title: "Get brain document",
+      description: GET_DOCUMENT_TOOL_DESCRIPTION,
+      inputSchema: getDocumentInputSchema,
+      annotations: READ_TOOL_ANNOTATIONS,
+    },
+    async (args: GetDocumentArgs) => {
+      if (coerceDocumentIds(args).length === 0) {
         return mcpTextToolResult({
           ok: false,
           stdout: "",
           stderr: "",
-          error: error instanceof Error ? error.message : String(error),
+          error:
+            'get_document needs at least one id. Pass "ids" (one id or a list) from a search_brain or list_documents hit.',
         });
       }
+      return runMapped(args, getDocumentToToolInput);
     },
   );
 
   server.registerTool(
-    "query_brain",
+    LIST_DOCUMENTS_TOOL_NAME,
     {
-      title: "Query brain",
-      description: `Compatibility wrapper over goat_brain query for your Goat knowledge brains. Prefer goat_brain for the full shared read surface. ${brainArgHint}`,
-      inputSchema: { ...queryBrainInputSchema, ...brainArgSchema },
+      title: "List brain documents",
+      description: LIST_DOCUMENTS_TOOL_DESCRIPTION,
+      inputSchema: listDocumentsInputSchema,
       annotations: READ_TOOL_ANNOTATIONS,
     },
-    async ({ brain, ...args }) => run(brain, queryToolInput(args)),
+    async (args: ListDocumentsArgs) => runMapped(args, listDocumentsToToolInput),
   );
 
   server.registerTool(
-    "get_document",
+    GET_TIMELINE_TOOL_NAME,
     {
-      title: "Get brain document",
-      description: `Compatibility wrapper over goat_brain get for your Goat knowledge brains. Prefer goat_brain for the full shared read surface. ${brainArgHint}`,
-      inputSchema: { ...getDocumentInputSchema, ...brainArgSchema },
+      title: "Get brain document timeline",
+      description: GET_TIMELINE_TOOL_DESCRIPTION,
+      inputSchema: getTimelineInputSchema,
       annotations: READ_TOOL_ANNOTATIONS,
     },
-    async ({ brain, ids }) => run(brain, { command: "get", flags: { id: ids, json: true } }),
+    async (args: GetTimelineArgs) => runMapped(args, getTimelineToToolInput),
   );
 
   server.registerTool(
-    "list_brains",
+    GOAT_BRAIN_ADVANCED_TOOL_NAME,
+    {
+      title: "Goat brain (advanced)",
+      description: GOAT_BRAIN_ADVANCED_TOOL_DESCRIPTION,
+      inputSchema: goatBrainAdvancedInputSchema,
+      annotations: READ_TOOL_ANNOTATIONS,
+    },
+    async (args) => runMapped(args, normalizeGoatBrainReadToolInput),
+  );
+
+  server.registerTool(
+    LIST_BRAINS_TOOL_NAME,
     {
       title: "List brains",
       description:
@@ -315,18 +312,18 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
   );
 
   server.registerTool(
-    "save_to_brain",
+    SAVE_TO_BRAIN_TOOL_NAME,
     {
       title: "Save to Goat brain",
-      description: `Capture content the user explicitly wants remembered. This immediately creates a draft in the selected brain's inbox, then queues background curation to title, link, merge, and file it. Preserve the user's content faithfully; do not use this as a scratchpad or save without clear user intent. Requires workspace-admin access. ${brainArgHint}`,
+      description: SAVE_TO_BRAIN_TOOL_DESCRIPTION,
       inputSchema: saveToBrainInputSchema,
       outputSchema: saveToBrainOutputSchema,
       annotations: CAPTURE_TOOL_ANNOTATIONS,
     },
-    async ({ brain, content, title, intent }) => {
+    async ({ content, title, intent, ...selector }) => {
       try {
         const accessible = await listAccessibleGoatBrainsForUser(ctx.userWorkosId);
-        const resolved = resolveGoatMcpBrain(accessible, brain);
+        const resolved = resolveGoatMcpBrain(accessible, resolveBrainParam(selector));
         if (!resolved.ok) {
           return mcpTextToolResult({
             ok: false,
