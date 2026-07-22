@@ -1,6 +1,12 @@
 import type { JSONSchema7 } from "ai";
 
-export type GoatActionProviderId = "slack" | "gmail" | "google_drive" | "linear" | "github";
+export type GoatActionProviderId =
+  | "slack"
+  | "gmail"
+  | "google_drive"
+  | "linear"
+  | "attio"
+  | "github";
 
 export type GoatActionErrorCode =
   | "not_connected"

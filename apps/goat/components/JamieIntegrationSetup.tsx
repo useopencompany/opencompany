@@ -22,12 +22,20 @@ export function JamieIntegrationSetup({
   initialState,
   brainSourcesHref = null,
   canManage = true,
+  variant = "settings",
+  onSaved,
 }: {
   initialState: GoatJamieProviderState;
   brainSourcesHref?: string | null;
   // Jamie is a workspace-owned integration; members see status only while
   // admins get the webhook + API key setup.
   canManage?: boolean;
+  // "modal" embeds the form in the onboarding connect dialog: the Status
+  // section (which duplicates the dialog title) is dropped.
+  variant?: "settings" | "modal";
+  // Fired only after a successful API-key save — creating the endpoint alone
+  // does not make Jamie connected.
+  onSaved?: () => void;
 }) {
   const router = useRouter();
   const [endpoint, setEndpoint] = useState<EndpointSetup | null>(null);
@@ -69,6 +77,7 @@ export function JamieIntegrationSetup({
       setEndpoint(result.setup);
       setApiKey("");
       router.refresh();
+      onSaved?.();
     });
   }
 
@@ -81,38 +90,46 @@ export function JamieIntegrationSetup({
 
   return (
     <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-1">
-        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-          Status
-        </h2>
-        <div className="flex items-center gap-3 rounded-lg px-2 py-2">
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="text-[14px] font-medium leading-tight text-ink">{status.label}</span>
-            {status.detail ? (
-              <span className="text-[12px] leading-4 text-ink-subtle">{status.detail}</span>
-            ) : null}
-          </div>
-          <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
-            {status.badge}
-          </span>
-        </div>
-        {apiKeyConfigured && brainSourcesHref ? (
-          <div className="px-2 pt-1">
-            <Link
-              href={brainSourcesHref}
-              prefetch
-              className="inline-flex items-center rounded-md border border-ink/15 px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
-            >
-              Open Brain sources
-            </Link>
-          </div>
-        ) : null}
-        {canManage ? null : (
+      {variant === "modal" ? (
+        canManage ? null : (
           <p className="px-2 text-[12px] leading-4 text-ink-subtle">
             Jamie is a workspace integration managed by workspace admins.
           </p>
-        )}
-      </section>
+        )
+      ) : (
+        <section className="flex flex-col gap-1">
+          <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+            Status
+          </h2>
+          <div className="flex items-center gap-3 rounded-lg px-2 py-2">
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <span className="text-[14px] font-medium leading-tight text-ink">{status.label}</span>
+              {status.detail ? (
+                <span className="text-[12px] leading-4 text-ink-subtle">{status.detail}</span>
+              ) : null}
+            </div>
+            <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+              {status.badge}
+            </span>
+          </div>
+          {apiKeyConfigured && brainSourcesHref ? (
+            <div className="px-2 pt-1">
+              <Link
+                href={brainSourcesHref}
+                prefetch
+                className="inline-flex items-center rounded-md border border-ink/15 px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
+              >
+                Open Brain sources
+              </Link>
+            </div>
+          ) : null}
+          {canManage ? null : (
+            <p className="px-2 text-[12px] leading-4 text-ink-subtle">
+              Jamie is a workspace integration managed by workspace admins.
+            </p>
+          )}
+        </section>
+      )}
 
       {canManage ? (
         <ManageJamieSections

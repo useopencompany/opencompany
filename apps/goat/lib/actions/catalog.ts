@@ -1,3 +1,4 @@
+import { resolveAttioActions } from "@/lib/actions/attio";
 import { resolveGitHubActions } from "@/lib/actions/github";
 import { resolveGmailActions } from "@/lib/actions/gmail";
 import { resolveGoogleDriveActions } from "@/lib/actions/google-drive";
@@ -23,6 +24,7 @@ export async function resolveGoatActionCatalog(input: {
     resolveGmailActions(input.userWorkosId).catch(() => null),
     resolveGoogleDriveActions(input.userWorkosId).catch(() => null),
     resolveLinearActions(input.userWorkosId).catch(() => null),
+    resolveAttioActions(input.userWorkosId).catch(() => null),
     resolveGitHubActions(input.workspaceId).catch(() => null),
   ]);
   const providers = resolved.filter(

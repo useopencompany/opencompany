@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  resolveAttioActions: vi.fn(),
   resolveSlackActions: vi.fn(),
   resolveGmailActions: vi.fn(),
   resolveGoogleDriveActions: vi.fn(),
@@ -8,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   resolveGitHubActions: vi.fn(),
 }));
 
+vi.mock("@/lib/actions/attio", () => ({ resolveAttioActions: mocks.resolveAttioActions }));
 vi.mock("@/lib/actions/slack", () => ({ resolveSlackActions: mocks.resolveSlackActions }));
 vi.mock("@/lib/actions/gmail", () => ({ resolveGmailActions: mocks.resolveGmailActions }));
 vi.mock("@/lib/actions/google-drive", () => ({
@@ -20,7 +22,7 @@ import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions
 import type { GoatActionProviderCatalog } from "@/lib/actions/types";
 
 function providerCatalog(
-  id: "slack" | "gmail" | "google_drive" | "linear" | "github",
+  id: "slack" | "gmail" | "google_drive" | "linear" | "attio" | "github",
 ): GoatActionProviderCatalog {
   return {
     id,
@@ -59,6 +61,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGmailActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(providerCatalog("google_drive"));
     mocks.resolveLinearActions.mockResolvedValue(providerCatalog("linear"));
+    mocks.resolveAttioActions.mockResolvedValue(providerCatalog("attio"));
     mocks.resolveGitHubActions.mockResolvedValue(providerCatalog("github"));
 
     const catalog = await resolveGoatActionCatalog({
@@ -69,18 +72,21 @@ describe("resolveGoatActionCatalog", () => {
       "slack",
       "google_drive",
       "linear",
+      "attio",
       "github",
     ]);
     expect(catalog.providers.map((provider) => provider.description)).toEqual([
       "slack description",
       "google_drive description",
       "linear description",
+      "attio description",
       "github description",
     ]);
     expect(catalog.actions.map((action) => action.id)).toEqual([
       "slack.read_something",
       "google_drive.read_something",
       "linear.read_something",
+      "attio.read_something",
       "github.read_something",
     ]);
     expect(mocks.resolveGitHubActions).toHaveBeenCalledWith("workspace_1");
@@ -91,6 +97,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGmailActions.mockResolvedValue(providerCatalog("gmail"));
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
+    mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
 
     const catalog = await resolveGoatActionCatalog({
@@ -105,6 +112,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGmailActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
+    mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
 
     const catalog = await resolveGoatActionCatalog({

@@ -13,9 +13,15 @@ import {
 export function AttioIntegrationSetup({
   initialState,
   brainSourcesHref = null,
+  variant = "settings",
+  onSaved,
 }: {
   initialState: GoatAttioProviderState;
   brainSourcesHref?: string | null;
+  // "modal" embeds the form in the onboarding connect dialog: the Status
+  // section (which duplicates the dialog title) is dropped.
+  variant?: "settings" | "modal";
+  onSaved?: () => void;
 }) {
   const router = useRouter();
   const [state, setState] = useState(initialState);
@@ -35,6 +41,7 @@ export function AttioIntegrationSetup({
       setState(result.state);
       setApiKey("");
       router.refresh();
+      onSaved?.();
     });
   }
 
@@ -61,33 +68,35 @@ export function AttioIntegrationSetup({
 
   return (
     <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-1">
-        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-          Status
-        </h2>
-        <div className="flex items-center gap-3 rounded-lg px-2 py-2">
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="text-[14px] font-medium leading-tight text-ink">{status.label}</span>
-            {status.detail ? (
-              <span className="text-[12px] leading-4 text-ink-subtle">{status.detail}</span>
-            ) : null}
+      {variant === "modal" ? null : (
+        <section className="flex flex-col gap-1">
+          <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+            Status
+          </h2>
+          <div className="flex items-center gap-3 rounded-lg px-2 py-2">
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <span className="text-[14px] font-medium leading-tight text-ink">{status.label}</span>
+              {status.detail ? (
+                <span className="text-[12px] leading-4 text-ink-subtle">{status.detail}</span>
+              ) : null}
+            </div>
+            <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+              {status.badge}
+            </span>
           </div>
-          <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
-            {status.badge}
-          </span>
-        </div>
-        {state.connected && brainSourcesHref ? (
-          <div className="px-2 pt-1">
-            <Link
-              href={brainSourcesHref}
-              prefetch
-              className="inline-flex items-center rounded-md border border-ink/15 px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
-            >
-              Open Brain sources
-            </Link>
-          </div>
-        ) : null}
-      </section>
+          {state.connected && brainSourcesHref ? (
+            <div className="px-2 pt-1">
+              <Link
+                href={brainSourcesHref}
+                prefetch
+                className="inline-flex items-center rounded-md border border-ink/15 px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
+              >
+                Open Brain sources
+              </Link>
+            </div>
+          ) : null}
+        </section>
+      )}
 
       <section className="flex flex-col gap-3">
         <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
