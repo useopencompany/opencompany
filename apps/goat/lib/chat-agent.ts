@@ -9,7 +9,6 @@ import {
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
   normalizeGoatBrainReadToolInput,
 } from "@/lib/brain-surface";
-import type { GoatCapabilityCallDebug, GoatCapabilityOperation } from "@/lib/capabilities/types";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
@@ -20,6 +19,10 @@ import {
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainToolInput,
   type GoatBrainToolOutput,
+  type GoatChatActionCatalog,
+  LIST_ACTIONS_TOOL_NAME,
+  type ListActionsToolInput,
+  type ListActionsToolOutput,
   SAVE_TO_BRAIN_TOOL_NAME,
   type SaveToBrainToolInput,
   type SaveToBrainToolOutput,
@@ -29,9 +32,9 @@ import {
   START_TASK_TOOL_NAME,
   type StartTaskToolInput,
   type StartTaskToolOutput,
-  USE_CAPABILITY_TOOL_NAME,
-  type UseCapabilityToolInput,
-  type UseCapabilityToolOutput,
+  USE_ACTION_TOOL_NAME,
+  type UseActionToolInput,
+  type UseActionToolOutput,
   WEB_SEARCH_TOOL_NAME,
   type WebSearchToolInput,
   type WebSearchToolOutput,
@@ -41,6 +44,8 @@ import {
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
   GOAT_BRAIN_TOOL_DESCRIPTION,
+  LIST_ACTIONS_INTEGRATION_DESCRIPTION,
+  LIST_ACTIONS_TOOL_DESCRIPTION,
   SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION,
   SAVE_TO_BRAIN_CONTENT_DESCRIPTION,
   SAVE_TO_BRAIN_INTENT_DESCRIPTION,
@@ -59,9 +64,9 @@ import {
   START_TASK_TOOL_DESCRIPTION,
   TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
   TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
-  USE_CAPABILITY_OPERATION_DESCRIPTION,
-  USE_CAPABILITY_REQUEST_DESCRIPTION,
-  USE_CAPABILITY_TOOL_DESCRIPTION,
+  USE_ACTION_ACTION_DESCRIPTION,
+  USE_ACTION_PARAMS_DESCRIPTION,
+  USE_ACTION_TOOL_DESCRIPTION,
   WEB_SEARCH_QUERY_DESCRIPTION,
   WEB_SEARCH_RECENCY_DAYS_DESCRIPTION,
   WEB_SEARCH_TOOL_DESCRIPTION,
@@ -103,22 +108,21 @@ type EditTaskScheduleRunner = (
 type DeleteTaskScheduleRunner = (
   input: DeleteTaskScheduleToolInput,
 ) => Promise<DeleteTaskScheduleToolOutput>;
-type CapabilityDispatcher = {
-  // Ids resolved server-side from real connection state; they become the
-  // dispatch enum, so a disconnected capability cannot be invoked by guessing.
-  list: readonly {
-    id: string;
-    operations: readonly GoatCapabilityOperation[];
-  }[];
+type ActionDispatcher = {
+  // The action catalog resolved server-side from real connection state; ids
+  // become the dispatch enum, so a disconnected provider's actions cannot be
+  // invoked by guessing.
+  catalog: GoatChatActionCatalog;
   execute: (input: {
-    capability: string;
-    operation: GoatCapabilityOperation;
-    request: string;
+    action: string;
+    params: Record<string, unknown>;
     toolCallId: string;
-  }) => Promise<UseCapabilityToolOutput>;
+  }) => Promise<UseActionToolOutput>;
 };
 
-export const MAX_CAPABILITY_CALLS_PER_TURN = 4;
+// Direct provider calls are cheap compared to the old sub-agent workers, so
+// the per-turn budget is looser.
+export const MAX_ACTION_CALLS_PER_TURN = 10;
 
 // Main chat (and the MCP connector) get a read-only brain surface: recall and
 // inspect only. Every write path — new content and edits to existing records —
@@ -142,9 +146,6 @@ export type OpenCompanyChatAgentDebugTrace = {
     outputTokens?: number;
     totalTokens?: number;
   };
-  // Worker-side transcripts of use_capability calls, keyed by toolCallId. Kept
-  // out of tool outputs so they never enter the model context.
-  capabilityCalls?: Array<GoatCapabilityCallDebug & { toolCallId: string }>;
   error?: string;
 };
 
@@ -257,7 +258,7 @@ export function createOpenCompanyChatToolContext(input: {
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   webSearch?: WebSearchRunner;
-  capabilities?: CapabilityDispatcher;
+  actions?: ActionDispatcher;
 }) {
   let startedTask: StartedTask | null = null;
   let startTaskInFlight: Promise<StartedTask> | null = null;
@@ -265,7 +266,7 @@ export function createOpenCompanyChatToolContext(input: {
   let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
   let visibleToolActivity = false;
   let webSearchCallCount = 0;
-  let capabilityCallCount = 0;
+  let actionCallCount = 0;
 
   const tools: ToolSet = {
     [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
@@ -598,116 +599,105 @@ export function createOpenCompanyChatToolContext(input: {
     });
   }
 
-  const capabilities = input.capabilities;
-  if (capabilities && capabilities.list.length > 0) {
-    const capabilityIds = capabilities.list.map((capability) => capability.id);
-    const operationOrder: readonly GoatCapabilityOperation[] = ["read", "create", "write"];
-    const capabilityOperations = operationOrder.filter((operation) =>
-      capabilities.list.some((capability) => capability.operations.includes(operation)),
-    );
-    tools[USE_CAPABILITY_TOOL_NAME] = tool<UseCapabilityToolInput, UseCapabilityToolOutput>({
-      description: USE_CAPABILITY_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<UseCapabilityToolInput>({
+  const actions = input.actions;
+  if (actions && actions.catalog.actions.length > 0) {
+    const integrationIds = actions.catalog.providers.map((provider) => provider.id);
+    const actionIds = actions.catalog.actions.map((action) => action.id);
+    tools[LIST_ACTIONS_TOOL_NAME] = tool<ListActionsToolInput, ListActionsToolOutput>({
+      description: LIST_ACTIONS_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<ListActionsToolInput>({
         type: "object",
         additionalProperties: false,
         properties: {
-          capability: {
+          integration: {
             type: "string",
-            enum: capabilityIds,
-            description: "Which connected capability to use.",
-          },
-          operation: {
-            type: "string",
-            enum: capabilityOperations,
-            description: USE_CAPABILITY_OPERATION_DESCRIPTION,
-          },
-          request: {
-            type: "string",
-            description: USE_CAPABILITY_REQUEST_DESCRIPTION,
+            enum: integrationIds,
+            description: LIST_ACTIONS_INTEGRATION_DESCRIPTION,
           },
         },
-        required: ["capability", "operation", "request"],
+        required: ["integration"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        const requestedIntegration =
+          typeof args.integration === "string" ? args.integration.trim().toLowerCase() : "";
+        const integration = actions.catalog.providers.find(
+          (provider) => provider.id === requestedIntegration,
+        );
+        if (!integration) {
+          return {
+            ok: false,
+            error: {
+              code: "unknown_integration",
+              message: `Unknown integration ${JSON.stringify(requestedIntegration)}. Use an exact id from <integrations>.`,
+              availableIntegrations: integrationIds,
+            },
+          };
+        }
+        return {
+          ok: true,
+          integration,
+          actions: actions.catalog.actions.filter((action) => action.provider === integration.id),
+        };
+      },
+    });
+    tools[USE_ACTION_TOOL_NAME] = tool<UseActionToolInput, UseActionToolOutput>({
+      description: USE_ACTION_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<UseActionToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: "string",
+            enum: actionIds,
+            description: USE_ACTION_ACTION_DESCRIPTION,
+          },
+          params: {
+            type: "object",
+            additionalProperties: true,
+            description: USE_ACTION_PARAMS_DESCRIPTION,
+          },
+        },
+        required: ["action", "params"],
       }),
       execute: async (args, executionContext) => {
         visibleToolActivity = true;
-        const capability = typeof args.capability === "string" ? args.capability : "";
+        const action = typeof args.action === "string" ? args.action : "";
         // Models occasionally emit values outside a schema enum; re-validate so
-        // an invented id fails as a steering envelope, not an executor error.
-        if (!capabilityIds.includes(capability)) {
+        // an invented id fails as a steering result, not an executor error.
+        if (!actionIds.includes(action)) {
           return {
-            capability,
-            summary: "",
-            entities: [],
+            ok: false,
+            action,
             error: {
-              code: "invalid_request",
-              hint: `"${capability}" is not an available capability. Available: ${capabilityIds.join(", ")}.`,
+              code: "invalid_params",
+              message: `"${action}" is not an available action. Call list_actions with the relevant integration id for the current catalog.`,
             },
           };
         }
-        const operation =
-          args.operation === "read" || args.operation === "create" || args.operation === "write"
-            ? args.operation
-            : null;
-        if (!operation) {
+        const params =
+          args.params && typeof args.params === "object" && !Array.isArray(args.params)
+            ? args.params
+            : {};
+        if (actionCallCount >= MAX_ACTION_CALLS_PER_TURN) {
           return {
-            capability,
-            summary: "",
-            entities: [],
-            error: {
-              code: "invalid_request",
-              hint: 'The operation must be "read", "create", or "write".',
-            },
-          };
-        }
-        const selectedCapability = capabilities.list.find((entry) => entry.id === capability);
-        if (!selectedCapability?.operations.includes(operation)) {
-          return {
-            capability,
-            summary: "",
-            entities: [],
-            error: {
-              code: "invalid_request",
-              hint: `${capability} does not permit ${operation} operations for this connection. Use an advertised operation or reconnect with the required permissions.`,
-            },
-          };
-        }
-        const request = typeof args.request === "string" ? args.request.trim() : "";
-        if (!request) {
-          return {
-            capability,
-            summary: "",
-            entities: [],
-            error: {
-              code: "invalid_request",
-              hint: "The request was empty. Send a self-contained natural-language request.",
-            },
-          };
-        }
-        if (capabilityCallCount >= MAX_CAPABILITY_CALLS_PER_TURN) {
-          return {
-            capability,
-            summary: "",
-            entities: [],
+            ok: false,
+            action,
             error: {
               code: "call_budget",
-              hint: `use_capability is limited to ${MAX_CAPABILITY_CALLS_PER_TURN} calls per chat turn. Summarize what you already have, or start a task for deeper work.`,
+              message: `use_action is limited to ${MAX_ACTION_CALLS_PER_TURN} calls per chat turn. Summarize what you already have, or start a task for deeper work.`,
             },
           };
         }
-        capabilityCallCount += 1;
+        actionCallCount += 1;
         const toolCallId =
           executionContext &&
           typeof executionContext === "object" &&
           "toolCallId" in executionContext &&
           typeof executionContext.toolCallId === "string"
             ? executionContext.toolCallId
-            : `capability_${capabilityCallCount}`;
-        return capabilities.execute({
-          capability,
-          operation,
-          request,
-          toolCallId,
-        });
+            : `action_${actionCallCount}`;
+        return actions.execute({ action, params, toolCallId });
       },
     });
   }

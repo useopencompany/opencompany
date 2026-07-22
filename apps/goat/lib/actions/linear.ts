@@ -1,0 +1,353 @@
+import { createMCPClient } from "@ai-sdk/mcp";
+import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
+import {
+  GoatActionAuthError,
+  type GoatActionExecuteContext,
+  GoatActionInvalidParamsError,
+  type GoatActionProviderCatalog,
+  type ResolvedGoatAction,
+} from "@/lib/actions/types";
+import {
+  GOAT_LINEAR_MCP_ENDPOINT_URL,
+  getGoatLinearIntegrationState,
+  loadGoatLinearMcpWorkerConnection,
+} from "@/lib/integrations/linear-mcp";
+
+// Linear treats priority=0 and assignee=null as active filters, but models
+// commonly emit them as placeholders for omitted optional fields. Expose
+// explicit booleans for those two searches and normalize every argument before
+// the remote MCP tool receives it.
+const LINEAR_LIST_ISSUES_STRING_FILTERS = [
+  "cursor",
+  "query",
+  "team",
+  "state",
+  "cycle",
+  "label",
+  "assignee",
+  "delegate",
+  "project",
+  "release",
+  "parentId",
+  "createdAt",
+  "updatedAt",
+] as const;
+
+const LINEAR_LIST_ISSUES_PARAMS: JSONSchema7 = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    limit: { type: "number", minimum: 1, maximum: 250 },
+    cursor: {
+      type: "string",
+      description: "Next page cursor. Omit on the first page.",
+    },
+    orderBy: { type: "string", enum: ["createdAt", "updatedAt"] },
+    query: {
+      type: "string",
+      description: "Search issue title or description.",
+    },
+    team: { type: "string", description: "Team name or ID." },
+    state: { type: "string", description: "State type, name, or ID." },
+    cycle: { type: "string", description: "Cycle name, number, or ID." },
+    label: { type: "string", description: "Label name or ID." },
+    assignee: {
+      type: "string",
+      description:
+        'User ID, name, email, or "me". Omit unless the request explicitly filters by assignee.',
+    },
+    unassigned: {
+      type: "boolean",
+      description:
+        "Set true only when the request explicitly asks for unassigned issues. Omit otherwise.",
+    },
+    delegate: { type: "string", description: "Agent name or ID." },
+    project: { type: "string", description: "Project name, ID, or slug." },
+    release: { type: "string", description: "Release ID or slug." },
+    priority: {
+      type: "number",
+      description:
+        "Priority filter: 1=Urgent, 2=High, 3=Medium, 4=Low. Omit when no priority filter was requested; use unprioritized for issues with no priority.",
+    },
+    unprioritized: {
+      type: "boolean",
+      description:
+        "Set true only when the request explicitly asks for issues with no priority. Omit otherwise.",
+    },
+    parentId: { type: "string", description: "Parent issue ID or identifier." },
+    createdAt: {
+      type: "string",
+      description: "Created-after ISO-8601 date or duration.",
+    },
+    updatedAt: {
+      type: "string",
+      description: "Updated-after ISO-8601 date or duration.",
+    },
+    includeArchived: {
+      type: "boolean",
+      description: "Whether to include archived issues.",
+    },
+  },
+};
+
+// Static curated read catalog against Linear's hosted MCP server. Descriptors
+// stay local so catalog resolution costs no MCP handshake; the remote tool is
+// looked up by name at execute time.
+type LinearActionSpec = {
+  id: string;
+  remoteName: string;
+  description: string;
+  params: JSONSchema7;
+  normalize?: (params: Record<string, unknown>) => Record<string, unknown>;
+};
+
+const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
+  {
+    id: "linear.list_issues",
+    remoteName: "list_issues",
+    description:
+      "List and filter Linear issues (team, assignee, state, project, updated/created ranges, full-text query). Omit unused filters; use unassigned=true only for explicitly unassigned work.",
+    params: LINEAR_LIST_ISSUES_PARAMS,
+    normalize: normalizeLinearListIssuesInput,
+  },
+  {
+    id: "linear.get_issue",
+    remoteName: "get_issue",
+    description: "Fetch one Linear issue by its ID or identifier (for example ENG-123).",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id"],
+      properties: {
+        id: { type: "string", description: "Issue ID or identifier such as ENG-123." },
+      },
+    },
+  },
+  {
+    id: "linear.list_comments",
+    remoteName: "list_comments",
+    description: "List the comments on one Linear issue.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      required: ["issueId"],
+      properties: {
+        issueId: { type: "string", description: "Issue ID or identifier such as ENG-123." },
+      },
+    },
+  },
+  {
+    id: "linear.list_projects",
+    remoteName: "list_projects",
+    description: "List Linear projects, optionally filtered by team.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        team: { type: "string", description: "Team name or ID." },
+        limit: { type: "number", minimum: 1, maximum: 250 },
+        query: { type: "string", description: "Search project names." },
+      },
+    },
+  },
+  {
+    id: "linear.get_project",
+    remoteName: "get_project",
+    description: "Fetch one Linear project by name, ID, or slug.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      required: ["query"],
+      properties: {
+        query: { type: "string", description: "Project name, ID, or slug." },
+      },
+    },
+  },
+  {
+    id: "linear.list_teams",
+    remoteName: "list_teams",
+    description: "List the Linear teams in the workspace.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        query: { type: "string", description: "Search team names." },
+        limit: { type: "number", minimum: 1, maximum: 250 },
+      },
+    },
+  },
+  {
+    id: "linear.list_users",
+    remoteName: "list_users",
+    description: "List Linear workspace members to resolve names to user IDs.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        query: { type: "string", description: "Search user names or emails." },
+        limit: { type: "number", minimum: 1, maximum: 250 },
+      },
+    },
+  },
+  {
+    id: "linear.list_issue_statuses",
+    remoteName: "list_issue_statuses",
+    description: "List the issue statuses (workflow states) available for a team.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        team: { type: "string", description: "Team name or ID." },
+      },
+    },
+  },
+];
+
+export async function resolveLinearActions(
+  userWorkosId: string,
+): Promise<GoatActionProviderCatalog | null> {
+  const state = await getGoatLinearIntegrationState(userWorkosId);
+  if (!state.connected) return null;
+
+  const actions: ResolvedGoatAction[] = LINEAR_ACTION_SPECS.map((spec) => ({
+    id: spec.id,
+    provider: "linear",
+    description: spec.description,
+    params: spec.params,
+    execute: (params, context) =>
+      executeLinearAction(spec, spec.normalize ? spec.normalize(params) : params, context),
+  }));
+
+  return {
+    id: "linear",
+    label: "Linear workspace",
+    description: "Read issues, comments, projects, teams, members, and workflow statuses.",
+    actions,
+  };
+}
+
+async function executeLinearAction(
+  spec: LinearActionSpec,
+  params: Record<string, unknown>,
+  context: GoatActionExecuteContext,
+): Promise<unknown> {
+  const connection = await loadGoatLinearMcpWorkerConnection({
+    userWorkosId: context.userWorkosId,
+    onAuthorizationRequired: () => {
+      throw new GoatActionAuthError(
+        "auth_expired",
+        "linear",
+        "The Linear connection needs reauthorization; reconnect Linear in Settings → Integrations.",
+      );
+    },
+  });
+  if (!connection.ok) {
+    throw new GoatActionAuthError(
+      connection.reason === "not_connected" ? "not_connected" : "auth_expired",
+      "linear",
+      "Linear is not usable for this account; reconnect Linear in Settings → Integrations.",
+    );
+  }
+
+  const client = await createMCPClient({
+    clientName: "opencompany-goat-actions",
+    version: "0.1.0",
+    transport: {
+      type: "http" as const,
+      url: GOAT_LINEAR_MCP_ENDPOINT_URL,
+      authProvider: connection.authProvider,
+    },
+  });
+
+  try {
+    const definitions = await client.listTools({ options: { signal: context.signal } });
+    const rawTools = client.toolsFromDefinitions(definitions) as ToolSet;
+    const remote = rawTools[spec.remoteName] as
+      | { execute?: (input: unknown, options: ToolExecutionOptions) => Promise<unknown> }
+      | undefined;
+    const execute = remote?.execute?.bind(remote);
+    if (!execute) {
+      throw new Error(
+        `Linear no longer exposes the "${spec.remoteName}" tool; this action is unavailable.`,
+      );
+    }
+    const result = await execute(params, {
+      toolCallId: `goat-action-${spec.remoteName}`,
+      messages: [],
+      abortSignal: context.signal,
+    });
+    return unwrapMcpResult(result);
+  } finally {
+    await client.close().catch(() => {});
+  }
+}
+
+export function normalizeLinearListIssuesInput(input: unknown): Record<string, unknown> {
+  if (!isRecord(input)) return {};
+
+  const normalized: Record<string, unknown> = {};
+  for (const key of LINEAR_LIST_ISSUES_STRING_FILTERS) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) normalized[key] = value.trim();
+  }
+
+  if (typeof input.limit === "number" && Number.isInteger(input.limit) && input.limit > 0) {
+    normalized.limit = Math.min(input.limit, 250);
+  }
+  if (input.orderBy === "createdAt" || input.orderBy === "updatedAt") {
+    normalized.orderBy = input.orderBy;
+  }
+  if (input.includeArchived === true || input.includeArchived === false) {
+    normalized.includeArchived = input.includeArchived;
+  }
+
+  const priority = input.priority;
+  const unprioritized = input.unprioritized === true;
+  if (unprioritized && priority !== undefined && priority !== null && priority !== 0) {
+    throw new GoatActionInvalidParamsError(
+      "Choose either a priority or unprioritized issues, not both.",
+    );
+  }
+  if (unprioritized) {
+    normalized.priority = 0;
+  } else if (priority === 1 || priority === 2 || priority === 3 || priority === 4) {
+    normalized.priority = priority;
+  }
+
+  const assignee = normalized.assignee;
+  const unassigned = input.unassigned === true;
+  if (unassigned && assignee !== undefined) {
+    throw new GoatActionInvalidParamsError(
+      "Choose either an assignee or unassigned issues, not both.",
+    );
+  }
+  if (unassigned) normalized.assignee = null;
+
+  return normalized;
+}
+
+// MCP tool results arrive as {content: [{type:"text", text}...], isError?}.
+// Surface remote errors as provider errors and hand the model parsed JSON when
+// the payload is a single JSON text block.
+function unwrapMcpResult(result: unknown): unknown {
+  if (!isRecord(result) || !Array.isArray(result.content)) return result;
+  const texts = result.content
+    .filter((entry): entry is { type: string; text: string } =>
+      Boolean(isRecord(entry) && entry.type === "text" && typeof entry.text === "string"),
+    )
+    .map((entry) => entry.text);
+  const joined = texts.join("\n");
+  if (result.isError === true) {
+    throw new Error(joined || "Linear returned an error for this action.");
+  }
+  if (texts.length === 0) return result;
+  try {
+    return JSON.parse(joined) as unknown;
+  } catch {
+    return joined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}

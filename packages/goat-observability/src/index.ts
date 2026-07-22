@@ -14,7 +14,7 @@ export const GOAT_OTEL_TRACE_SAMPLE_RATE = 1;
 export const GOAT_SPANS = {
   signupCompleted: "goat.signup.completed",
   chatTurn: "goat.chat.turn",
-  chatCapabilityCall: "goat.chat.capability_call",
+  chatActionCall: "goat.chat.action_call",
   taskDispatch: "goat.task.dispatch",
   taskClaim: "goat.task.claim",
   taskRun: "goat.task.run",
@@ -37,8 +37,8 @@ export const GOAT_METRICS = {
   chatTasksStartedTotal: "goat.chat.tasks_started_total",
   chatWebSearchesTotal: "goat.chat.web_searches_total",
   chatWebSearchCostUsdMicros: "goat.chat.web_search_cost_usd_micros",
-  chatCapabilityCallsTotal: "goat.chat.capability_calls_total",
-  chatCapabilityCallDurationMs: "goat.chat.capability_call_duration_ms",
+  chatActionCallsTotal: "goat.chat.action_calls_total",
+  chatActionCallDurationMs: "goat.chat.action_call_duration_ms",
   codexChatQueueWaitMs: "goat.codex_chat.queue_wait_ms",
   taskDispatchesTotal: "goat.task_dispatches_total",
   taskDispatchDurationMs: "goat.task_dispatch_duration_ms",
@@ -81,8 +81,7 @@ export type GoatGatewayFeature =
   | "task"
   | "brain-ingest"
   | "brain-query"
-  | "slack-bot"
-  | "capability";
+  | "slack-bot";
 
 export type GoatGatewayAttribution = {
   user?: string;
@@ -159,8 +158,8 @@ const LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS = new Set([
   "goat.budget_accounting_complete",
   "goat.web_search_provider",
   "goat.web_search_operation",
-  "goat.capability",
-  "goat.worker_model",
+  "goat.action",
+  "goat.action_provider",
   "goat.token_direction",
   "goat.signup_source",
 ]);

@@ -343,27 +343,64 @@ function codexQuestionInput(
 }
 
 function ToolCallRow({ tool }: { tool: ToolCallView }) {
+  const [expanded, setExpanded] = useState(false);
   const meta = getToolCallMeta(tool);
   const Icon = meta.icon;
+  const hasOutput = tool.output !== undefined;
   return (
     <div
       data-testid={`chat-tool-call-${tool.name}`}
-      className="flex max-w-[80%] items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 text-[12px] shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+      className="-ml-1 max-w-[92%] text-[11.5px] leading-5 text-ink-muted"
     >
-      <Icon
-        size={14}
-        strokeWidth={2}
-        className={`shrink-0 ${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-1.5">
-          <span className="truncate font-medium leading-4 text-ink">{tool.label}</span>
-          <span className={`${meta.className} shrink-0 text-[11px] leading-4`}>
+      <div className="flex min-w-0 max-w-full items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <ChevronRight
+            size={11}
+            strokeWidth={1.9}
+            className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+            <Icon
+              size={11}
+              strokeWidth={1.75}
+              className={`${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
+            />
+          </span>
+          <span title={tool.label} className="min-w-0 truncate font-medium text-ink/65">
+            {tool.label}
+          </span>
+          {tool.detail ? (
+            <span
+              title={tool.detail}
+              className="inline-flex min-w-0 max-w-[min(440px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
+            >
+              <span className="min-w-0 truncate">{tool.detail}</span>
+            </span>
+          ) : null}
+          <span className={`${meta.className} shrink-0 text-[10.5px] font-medium`}>
             {tool.statusText}
           </span>
-        </div>
-        {tool.detail ? <p className="truncate leading-4 text-ink-subtle">{tool.detail}</p> : null}
+        </button>
       </div>
+      {expanded ? (
+        <div className="ml-6 mt-1 border-l border-border pl-3">
+          <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input) || "No input"} />
+          {hasOutput ? (
+            <ToolPreviewBlock label="Output" value={formatDebugValue(tool.output) || "No output"} />
+          ) : null}
+          {tool.errorText?.trim() ? (
+            <ToolPreviewBlock label="Error" value={tool.errorText} />
+          ) : null}
+          {!hasOutput && !tool.errorText ? (
+            <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -408,12 +445,12 @@ function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
       </div>
       {expanded ? (
         <div className="ml-6 mt-1 border-l border-border pl-3">
-          <BrainPreviewBlock label="Input" value={formatDebugValue(tool.input)} />
-          {commandPreview ? <BrainPreviewBlock label="Command" value={commandPreview} /> : null}
-          {stdoutPreview ? <BrainPreviewBlock label="Stdout" value={stdoutPreview} /> : null}
-          {parsedPreview ? <BrainPreviewBlock label="Parsed" value={parsedPreview} /> : null}
-          {stderrPreview ? <BrainPreviewBlock label="Stderr" value={stderrPreview} /> : null}
-          {errorPreview ? <BrainPreviewBlock label="Error" value={errorPreview} /> : null}
+          <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input)} />
+          {commandPreview ? <ToolPreviewBlock label="Command" value={commandPreview} /> : null}
+          {stdoutPreview ? <ToolPreviewBlock label="Stdout" value={stdoutPreview} /> : null}
+          {parsedPreview ? <ToolPreviewBlock label="Parsed" value={parsedPreview} /> : null}
+          {stderrPreview ? <ToolPreviewBlock label="Stderr" value={stderrPreview} /> : null}
+          {errorPreview ? <ToolPreviewBlock label="Error" value={errorPreview} /> : null}
           {!isGoatBrainToolOutput(tool.output) && !tool.errorText ? (
             <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
           ) : null}
@@ -464,14 +501,14 @@ function CodexCommandRow({ tool }: { tool: ToolCallView }) {
       {expanded ? (
         <div className="ml-6 mt-1 border-l border-border pl-3">
           {outputPreview ? (
-            <BrainPreviewBlock label="Output" value={outputPreview} />
+            <ToolPreviewBlock label="Output" value={outputPreview} />
           ) : (
             <div className="py-1 text-[11px] text-ink-subtle">
               {output || tool.errorText ? "No output" : "Waiting for result"}
             </div>
           )}
           {tool.errorText?.trim() ? (
-            <BrainPreviewBlock label="Error" value={tool.errorText} />
+            <ToolPreviewBlock label="Error" value={tool.errorText} />
           ) : null}
         </div>
       ) : null}
@@ -558,7 +595,7 @@ function BrainStatusText({ status }: { status: ToolCallView["status"] }) {
   );
 }
 
-function BrainPreviewBlock({ label, value }: { label: string; value: string }) {
+function ToolPreviewBlock({ label, value }: { label: string; value: string }) {
   return (
     <div className="py-1 first:pt-0">
       <div className="mb-0.5 text-[10px] font-medium uppercase text-ink-subtle">{label}</div>

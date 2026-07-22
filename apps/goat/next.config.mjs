@@ -1,4 +1,5 @@
 import { createMDX } from "fumadocs-mdx/next";
+import { SENSITIVE_CALLBACK_REQUEST_PATTERN } from "./request-logging.mjs";
 
 const release =
   process.env.RELEASE_SHA ||
@@ -22,6 +23,11 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_OBSERVABILITY_RELEASE: release,
     ...(release ? { NEXT_PUBLIC_BUILD_TIMESTAMP: new Date().toISOString() } : {}),
+  },
+  logging: {
+    incomingRequests: {
+      ignore: [SENSITIVE_CALLBACK_REQUEST_PATTERN],
+    },
   },
   transpilePackages: [
     "@opencompany/agent-runtime",
