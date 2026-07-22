@@ -7,8 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-22
+
 ### Added
-- Migrated the published OpenCompany blog archive into the marketing site with its existing URLs and search metadata.
+- Four new brain sources file in automatically: Attio, HubSpot, Fathom, and Granola — so your CRM records, meeting notes, and calls land in the brain without you lifting a finger (#776, #757, #767, #758) — @louis.
+- Ask Goat right from Slack — mention @opencompany in a channel and it answers from your brain (beta) (#759) — @louis.
+- Goat chat can now search across your connected tools — Slack, Gmail, GitHub, Linear, Attio, Google Drive, and Google Calendar — and pull the results straight into the conversation (#830, #828, #832, #831, #807) — @louis.
+- Chat answers now cite the brain sources they came from, so you can see where an answer is grounded (#775) — @louis.
+- Codex coding sessions run in the cloud and show up as Tasks, with model selection and file attachments (#784, #766, #771) — @louis.
+- The changelog now lives in the sidebar, so you can see what's new without leaving the app (#833) — @louis.
+- Browse and restore your archived chats from the ⌘K palette (#796) — @louis.
+- Goat remembers the model you picked for main chat between sessions (#829) — @louis.
+- Kimi K3 is now in the model picker (#777) — @louis.
+- A sidebar feedback widget sends your bugs and ideas straight to our team (#764) — @louis.
+- Save anything to your brain over MCP from any agent (#748) — @louis.
+- Migrated the OpenCompany blog archive into the new marketing site, keeping its existing URLs and search metadata (#765) — @louis.
+
+### Changed
+- Billing is now a pure pay-as-you-go wallet — you pay only for what you use and top up yourself, with no seats or plans (#802) — @louis.
+- The integrations settings page was redesigned as a clean grid of brand cards, with a scope switcher and the option to connect tools during onboarding (#810, #824, #834) — @louis.
+- Brain ingestion is more reliable, resumes cleanly after upgrades, and brain search now returns sharper, better-ranked results (#792, #770, #835) — @louis.
+- A context-usage tooltip shows how full the model's context window is, and switching between chats is now instant (#795, #804) — @louis.
+
+### Fixed
+- Linear now reconnects cleanly instead of getting stuck showing as disconnected (#814) — @louis.
+- Codex chat sessions no longer get stuck when queued, closed, or interrupted by a deploy (#794, #798, #812) — @louis.
+- Attio system noise is kept out of the brain, and Attio ingestion is more robust (#819, #781) — @louis.
+- Integration setup failures now show a clear error instead of failing silently (#821) — @louis.
+- Checkout is more reliable, with fixed promotion-code and idempotency handling (#761, #763) — @louis.
 
 ## [1.0.0] - 2026-07-15
 
