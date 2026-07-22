@@ -1,4 +1,5 @@
 import { createMCPClient } from "@ai-sdk/mcp";
+import { isValidGoatBrainSourceRef } from "@opencompany/goat-brain";
 import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
 import {
   GoatActionAuthError,
@@ -276,10 +277,39 @@ async function executeLinearAction(
       messages: [],
       abortSignal: context.signal,
     });
-    return unwrapMcpResult(result);
+    return addLinearSourceMetadata(unwrapMcpResult(result), spec, connection.integrationId);
   } finally {
     await client.close().catch(() => {});
   }
+}
+
+function addLinearSourceMetadata(
+  value: unknown,
+  spec: LinearActionSpec,
+  integrationId: string,
+): unknown {
+  if (spec.remoteName !== "list_issues" && spec.remoteName !== "get_issue") return value;
+  if (!isRecord(value)) return value;
+
+  if (Array.isArray(value.issues)) {
+    return {
+      ...value,
+      integrationId,
+      issues: value.issues.map((issue) => addLinearIssueSource(issue, integrationId)),
+    };
+  }
+  return addLinearIssueSource(value, integrationId);
+}
+
+function addLinearIssueSource(value: unknown, integrationId: string): unknown {
+  if (!isRecord(value)) return value;
+  const identifier = typeof value.identifier === "string" ? value.identifier.trim() : "";
+  if (!identifier) return { ...value, integrationId };
+  const sourceRef = `linear:issue:${identifier}`;
+  if (!isValidGoatBrainSourceRef(sourceRef)) {
+    throw new Error("Linear returned an identifier that cannot form a Brain source reference.");
+  }
+  return { ...value, sourceRef, integrationId };
 }
 
 export function normalizeLinearListIssuesInput(input: unknown): Record<string, unknown> {

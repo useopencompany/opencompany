@@ -72,12 +72,10 @@ export default async function OnboardingPage({
       initialWorkspaceName={savedSlug ? context.workspace.name : ""}
       initialSlug={savedSlug}
       initialRole={onboarding?.role ?? null}
-      initialBuilding={onboarding?.building ?? ""}
+      initialCompanyUrl={onboarding?.contextUrls?.[0] ?? onboarding?.companyDomain ?? ""}
       initialReferral={onboarding?.referralSource ?? null}
       initialSourceDetails={sourceDetails}
       initialConnectionResult={connectionResult}
-      initialMcpClient={context.user.preferredMcpClient}
-      initialMcpCompletedAt={context.user.mcpSetupCompletedAt?.toISOString() ?? null}
     />
   );
 }

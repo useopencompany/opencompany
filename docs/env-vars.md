@@ -428,10 +428,14 @@ Release-only script vars:
 
 | Var | Required | Purpose |
 |---|---:|---|
-| `EXPECTED_RELEASE` | No | Smoke check expects health endpoint release fields to start with this SHA. |
+| `EXPECTED_RELEASE` | No | Backwards-compatible expected SHA for every enabled smoke-check surface that does not set a surface-specific override. |
+| `EXPECTED_WEB_RELEASE` | No | Expected SHA for the web health check. Set to an empty value to require health without a release match. |
+| `EXPECTED_GOAT_RELEASE` | No | Expected SHA for the Goat health check. Set to an empty value to require health without a release match. |
+| `EXPECTED_RUNNER_RELEASE` | No | Expected SHA for the runner health check. Set to an empty value to require health without a release match. |
 | `RENDER_DEPLOY_TIMEOUT_MS` | No | Maximum time to wait for the Render deploy API before smoke checks. Defaults to `900000`. |
 | `RENDER_DEPLOY_POLL_MS` | No | Delay between Render deploy status polls. Defaults to `10000`. |
 | `RENDER_DEPLOY_STALE_MS` | No | Age after which an in-flight Render deploy is considered hung or superseded; the release script cancels such deploys before triggering (and cancels its own deploy on wait timeout) so they cannot block the queue. Defaults to `600000`. |
+| `VERCEL_READY_POLL_MS` | No | Delay between Vercel deployment readiness polls. Defaults to `2000`. |
 | `SMOKE_WEB` | No | Set to `false`, `0`, or `no` to skip web health checks. Defaults to enabled. |
 | `SMOKE_GOAT` | No | Set to `true`, `1`, or `yes` to include the Goat health check. Defaults to disabled for local script runs; the production workflow enables it. |
 | `SMOKE_RUNNER` | No | Set to `false`, `0`, or `no` to skip runner health checks. Defaults to enabled. |

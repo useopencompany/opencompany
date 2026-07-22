@@ -44,7 +44,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 | Tool | Where | Capability |
 | --- | --- | --- |
 | `goat_brain` | `apps/goat/lib/brain-cli.ts` + shared read surface in `apps/goat/lib/brain-surface.ts` | Reads (`query`/`get`/`timeline`/`list`) are served in-process by the [read plane](./retrieval-planes.md) (`@opencompany/db/goat-brain-read`) — no materialization, no CLI spawn. Main chat exposes the same read-only command surface as MCP and does not expose write commands. |
-| `save_to_brain` | `apps/goat/lib/brain-capture.ts` | Capture-only: instant draft page in `inbox/` + durable curation job. This is the intended chat write path. See [ingestion.md](./ingestion.md#2-chat-captures-agentic). |
+| `save_to_brain` | `apps/goat/lib/brain-capture.ts` | Capture-only for all members with access to the active brain: instant draft page in `inbox/` + durable curation job. Canonical integration refs can be copied with content or hydrated in the runner from a ref + integration id. This is the intended chat write path. See [ingestion.md](./ingestion.md#2-explicit-captures-from-chat-or-mcp-agentic). |
 
 ## Runner ingestion agents
 
@@ -67,13 +67,12 @@ the same tool runner. Reads are served by the read plane. `save_to_brain` requir
 access and immediately creates a draft in `inbox/`, then queues the same durable curation pipeline
 used by Goat chat. MCP clients do not receive raw document mutation tools.
 
-### Member MCP setup and completion
+### MCP setup and completion
 
-The reusable setup guide lives at `/setup/mcp` and is also embedded in the owner and invited-member
-onboarding flows. It gives Claude, ChatGPT, and Cursor equal prominence, remembers the user's chosen
-client, defaults to the active brain, and generates a first useful query from the user's display
-name, workspace, and selected brain. The permanent Settings → Integrations entry links back to the
-guide.
+The reusable setup guide lives at `/setup/mcp`. It gives Claude, ChatGPT, and Cursor equal
+prominence, remembers the user's chosen client, defaults to the active brain, and generates a first
+useful query from the user's display name, workspace, and selected brain. The permanent Settings →
+Integrations entry links to the guide; MCP setup is not part of onboarding.
 
 Setup completion is global per Goat user, not per workspace, brain, or client. The sidebar reminder
 stays visible until the user completes one successful `query` command through MCP against any brain
@@ -93,5 +92,5 @@ signal from the earliest qualifying historical tool run.
 | --- | --- | --- |
 | Runner ingestion agents | ✓ (CLI — needs read-your-writes against its job root) | ✓ (CLI, allow-listed) |
 | Goat chat `goat_brain` | ✓ (read plane) | never |
-| Goat chat `save_to_brain` | — | capture → curation job only |
+| Goat chat `save_to_brain` | — | capture → curation job only (all members with active-brain access) |
 | External agents (MCP) | ✓ (read plane: `goat_brain`, plus compatibility `query_brain`/`get_document`) | capture → curation job only (`save_to_brain`, workspace admins) |

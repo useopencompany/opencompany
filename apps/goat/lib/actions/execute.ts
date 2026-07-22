@@ -24,6 +24,7 @@ export async function executeGoatAction(input: {
   userWorkosId: string;
   signal: AbortSignal;
   currentDate: Date;
+  userTimezone: string;
 }): Promise<GoatActionResult> {
   const action = input.catalog.actions.find((entry) => entry.id === input.actionId);
   if (!action) {
@@ -45,6 +46,7 @@ export async function executeGoatAction(input: {
       userWorkosId: input.userWorkosId,
       signal,
       currentDate: input.currentDate,
+      userTimezone: input.userTimezone,
     });
     return { ok: true, action: action.id, result: clampActionResult(result) };
   } catch (error) {

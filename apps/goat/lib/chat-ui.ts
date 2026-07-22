@@ -232,6 +232,9 @@ export type SaveToBrainToolInput = {
   content?: string;
   title?: string;
   intent?: string;
+  sourceRef?: string;
+  integrationId?: string;
+  fallbackContent?: string;
   // Ids of files attached in this conversation to file as brain assets.
   attachmentIds?: string[];
 };

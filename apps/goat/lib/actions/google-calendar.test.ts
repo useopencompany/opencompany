@@ -33,6 +33,7 @@ const CONTEXT: GoatActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-22T12:00:00.000Z"),
+  userTimezone: "UTC",
 };
 const WINDOW = {
   time_min: "2026-07-22T00:00:00Z",
@@ -89,8 +90,8 @@ describe("resolveGoogleCalendarActions", () => {
         additionalProperties: false,
         required: ["time_min", "time_max"],
         properties: {
-          time_min: { type: "string", format: "date-time" },
-          time_max: { type: "string", format: "date-time" },
+          time_min: { type: "string", description: expect.stringContaining("plain date") },
+          time_max: { type: "string", description: expect.stringContaining("full local day") },
           limit: { type: "integer", minimum: 1, maximum: 25 },
         },
       },
@@ -195,9 +196,6 @@ describe("google_calendar.list_events", () => {
     await expect(action.execute({ time_min: WINDOW.time_min }, CONTEXT)).rejects.toThrow(
       '"time_max" is required',
     );
-    await expect(action.execute({ ...WINDOW, time_min: "2026-07-22" }, CONTEXT)).rejects.toThrow(
-      "RFC 3339",
-    );
     await expect(
       action.execute({ ...WINDOW, time_min: "2026-02-30T00:00:00Z" }, CONTEXT),
     ).rejects.toThrow("RFC 3339");
@@ -220,6 +218,66 @@ describe("google_calendar.list_events", () => {
       "Unknown parameter",
     );
     expect(mocks.googleApiCall).not.toHaveBeenCalled();
+  });
+
+  it("coerces matching plain dates to a full day in the user's timezone", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({ items: [] });
+    const action = findListEvents(await resolveGoogleCalendarActions("user_1"));
+
+    await action.execute(
+      { time_min: "2026-07-22", time_max: "2026-07-22" },
+      { ...CONTEXT, userTimezone: "America/New_York" },
+    );
+
+    const url = mocks.googleApiCall.mock.calls[0]?.[2] as URL;
+    expect(url.searchParams.get("timeMin")).toBe("2026-07-22T00:00:00-04:00");
+    expect(url.searchParams.get("timeMax")).toBe("2026-07-23T00:00:00-04:00");
+  });
+
+  it("uses the offset on each local midnight across a DST boundary", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({ items: [] });
+    const action = findListEvents(await resolveGoogleCalendarActions("user_1"));
+
+    await action.execute(
+      { time_min: "2026-03-08", time_max: "2026-03-08" },
+      { ...CONTEXT, userTimezone: "America/New_York" },
+    );
+
+    const url = mocks.googleApiCall.mock.calls[0]?.[2] as URL;
+    expect(url.searchParams.get("timeMin")).toBe("2026-03-08T00:00:00-05:00");
+    expect(url.searchParams.get("timeMax")).toBe("2026-03-09T00:00:00-04:00");
+  });
+
+  it("keeps full timestamps unchanged when mixed with a plain date", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({ items: [] });
+    const action = findListEvents(await resolveGoogleCalendarActions("user_1"));
+
+    await action.execute(
+      { time_min: "2026-07-22", time_max: "2026-07-23T12:00:00Z" },
+      { ...CONTEXT, userTimezone: "America/New_York" },
+    );
+
+    const url = mocks.googleApiCall.mock.calls[0]?.[2] as URL;
+    expect(url.searchParams.get("timeMin")).toBe("2026-07-22T00:00:00-04:00");
+    expect(url.searchParams.get("timeMax")).toBe("2026-07-23T12:00:00Z");
+  });
+
+  it("falls back to UTC for an invalid user timezone", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({ items: [] });
+    const action = findListEvents(await resolveGoogleCalendarActions("user_1"));
+
+    await action.execute(
+      { time_min: "2026-07-22", time_max: "2026-07-22" },
+      { ...CONTEXT, userTimezone: "Not/A_Timezone" },
+    );
+
+    const url = mocks.googleApiCall.mock.calls[0]?.[2] as URL;
+    expect(url.searchParams.get("timeMin")).toBe("2026-07-22T00:00:00Z");
+    expect(url.searchParams.get("timeMax")).toBe("2026-07-23T00:00:00Z");
   });
 
   it("never returns more events than the requested limit", async () => {
@@ -316,7 +374,9 @@ describe("google_calendar.list_events", () => {
 
   it("surfaces Calendar API failures as provider errors", async () => {
     mocks.dbRows = [connectedRow()];
-    const providerError = new Error("Google API request failed with 503.");
+    const providerError = new Error(
+      "Google API request failed with 503: Calendar backend unavailable (backendError).",
+    );
     mocks.googleApiCall.mockRejectedValue(providerError);
     const action = findListEvents(await resolveGoogleCalendarActions("user_1"));
 

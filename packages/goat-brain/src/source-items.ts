@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isValidGoatBrainSourceRef } from "./schema";
+import { isValidGoatBrainSourceRef, parseGoatBrainSourceRef } from "./schema";
 
 export type BrainSourceProvider =
   | "jamie"
@@ -19,6 +19,7 @@ export type BrainSourceType =
   | "meeting"
   | "run"
   | "capture"
+  | "pointer"
   | "asset"
   | "conversation"
   | "issue"
@@ -316,6 +317,123 @@ export type NormalizedGoatChatCaptureSourceItem =
     sourceProvider: "goat-chat";
     sourceType: "capture";
   };
+
+export type GoatBrainHydratablePointerProvider = "slack" | "gmail" | "linear";
+
+export type NormalizedGoatBrainPointerContent = {
+  pointer: {
+    ref: string;
+    fallbackText?: string;
+    chatSessionId: string;
+    userMessageId: string;
+    draftBrainId: string;
+    draftFolder: string;
+  };
+};
+
+export type NormalizedGoatBrainPointerSourceItem =
+  NormalizedBrainSourceItem<NormalizedGoatBrainPointerContent> & {
+    sourceProvider: GoatBrainHydratablePointerProvider;
+    sourceType: "pointer";
+  };
+
+export function normalizeGoatBrainPointerCapture(input: {
+  sourceRef: string;
+  title: string;
+  fallbackText?: string;
+  chatSessionId: string;
+  userMessageId: string;
+  draftBrainId: string;
+  draftFolder: string;
+  capturedAt: string;
+}): NormalizedGoatBrainPointerSourceItem {
+  const sourceRef = input.sourceRef.trim();
+  const parsedRef = parseGoatBrainSourceRef(sourceRef);
+  if (!parsedRef || !isHydratablePointerProvider(parsedRef.provider)) {
+    throw invalid(
+      "pointer sourceRef must identify a supported integration source",
+      "invalid_pointer",
+    );
+  }
+  const title = readNonEmpty(input.title, "pointer title");
+  const chatSessionId = readNonEmpty(input.chatSessionId, "pointer chatSessionId");
+  const userMessageId = readNonEmpty(input.userMessageId, "pointer userMessageId");
+  const draftBrainId = readNonEmpty(input.draftBrainId, "pointer draftBrainId");
+  const draftFolder = readNonEmpty(input.draftFolder, "pointer draftFolder");
+  const capturedAt = optionalIsoString(input.capturedAt);
+  if (!capturedAt) throw invalid("pointer capturedAt must be a timestamp", "invalid_pointer");
+  const fallbackText = optionalString(input.fallbackText);
+  const pointer = {
+    ref: sourceRef,
+    ...(fallbackText ? { fallbackText } : {}),
+    chatSessionId,
+    userMessageId,
+    draftBrainId,
+    draftFolder,
+  };
+  // Pointer identity deliberately ignores the chat turn, fallback, and draft.
+  // Re-saving the same canonical source through one integration therefore
+  // deduplicates instead of spending on another hydration of identical input.
+  const contentHashInput = {
+    sourceProvider: parsedRef.provider,
+    sourceType: "pointer",
+    sourceRef,
+  };
+
+  return {
+    sourceProvider: parsedRef.provider,
+    sourceType: "pointer",
+    externalId: sourceRef,
+    sourceRef,
+    title,
+    occurredAt: capturedAt,
+    capturedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: { pointer },
+  };
+}
+
+export function isNormalizedGoatBrainPointerSourceItem(
+  value: unknown,
+): value is NormalizedGoatBrainPointerSourceItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<NormalizedGoatBrainPointerSourceItem>;
+  if (
+    !isHydratablePointerProvider(item.sourceProvider) ||
+    item.sourceType !== "pointer" ||
+    typeof item.externalId !== "string" ||
+    typeof item.sourceRef !== "string" ||
+    !isValidGoatBrainSourceRef(item.sourceRef) ||
+    typeof item.title !== "string" ||
+    typeof item.occurredAt !== "string" ||
+    typeof item.capturedAt !== "string" ||
+    typeof item.contentHash !== "string" ||
+    !item.content ||
+    typeof item.content !== "object"
+  ) {
+    return false;
+  }
+  const parsedRef = parseGoatBrainSourceRef(item.sourceRef);
+  if (parsedRef?.provider !== item.sourceProvider || item.externalId !== item.sourceRef) {
+    return false;
+  }
+  const pointer = (item.content as Partial<NormalizedGoatBrainPointerContent>).pointer;
+  return (
+    !!pointer &&
+    typeof pointer === "object" &&
+    pointer.ref === item.sourceRef &&
+    typeof pointer.chatSessionId === "string" &&
+    typeof pointer.userMessageId === "string" &&
+    typeof pointer.draftBrainId === "string" &&
+    typeof pointer.draftFolder === "string" &&
+    (pointer.fallbackText === undefined || typeof pointer.fallbackText === "string")
+  );
+}
+
+function isHydratablePointerProvider(value: unknown): value is GoatBrainHydratablePointerProvider {
+  return value === "slack" || value === "gmail" || value === "linear";
+}
 
 export function normalizeGoatChatCapture(input: {
   text: string;

@@ -210,6 +210,8 @@ export type GoatBrainAgentIngestEnv = Pick<RunnerEnv, "vercelAiGatewayApiKey"> &
   // Enables web-search enrichment during ingest. Absent → enrichment tool is
   // never registered and the agent works source-only.
   exaApiKey?: RunnerEnv["exaApiKey"];
+  googleOAuthClientId?: RunnerEnv["googleOAuthClientId"];
+  googleOAuthClientSecret?: RunnerEnv["googleOAuthClientSecret"];
 };
 
 export type GoatBrainAgentCliResult = {

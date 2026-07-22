@@ -33,6 +33,7 @@ const CONTEXT: GoatActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-22T00:00:00.000Z"),
+  userTimezone: "UTC",
 };
 
 const READ_SCOPES = ["object_configuration:read", "record_permission:read"];
@@ -65,7 +66,7 @@ describe("resolveAttioActions", () => {
     expect(await resolveAttioActions("user_1")).toBeNull();
   });
 
-  it("exposes one strict read-only record search descriptor", async () => {
+  it("exposes strict read-only record search and detail descriptors", async () => {
     const catalog = await resolveAttioActions("user_1");
     expect(catalog).toMatchObject({
       id: "attio",
@@ -78,6 +79,15 @@ describe("resolveAttioActions", () => {
             type: "object",
             additionalProperties: false,
             required: ["query"],
+          },
+        },
+        {
+          id: "attio.get_record",
+          provider: "attio",
+          params: {
+            type: "object",
+            additionalProperties: false,
+            required: ["object", "record_id"],
           },
         },
       ],
@@ -525,6 +535,82 @@ describe("attio.query_list", () => {
   });
 });
 
+describe("attio.get_record", () => {
+  it("fetches a full record and renders a larger set of typed properties", async () => {
+    mocks.loadCredential.mockResolvedValue(credential("workspace_1", true));
+    const values = {
+      name: [{ attribute_type: "text", value: "Expansion" }],
+      domain: [{ attribute_type: "domain", domain: "example.com" }],
+      stage: [{ attribute_type: "status", status: { title: "In progress" } }],
+      value: [{ attribute_type: "currency", currency_value: 125000 }],
+      unsafe_reference: [
+        { attribute_type: "record-reference", target_record_id: "private_record_id" },
+      ],
+      ...Object.fromEntries(
+        Array.from({ length: 30 }, (_, index) => [`custom_${index}`, [{ value: `${index}` }]]),
+      ),
+    };
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          id: { object_id: "object_deals", record_id: "deal_1" },
+          created_at: "2026-07-02T00:00:00.000Z",
+          web_url: "https://app.attio.com/acme/deal/deal_1",
+          values,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const action = await findGetRecordAction();
+    const result = (await action.execute({ object: "deals", record_id: "deal_1" }, CONTEXT)) as {
+      workspace: string;
+      record: { id: string; title: string; properties: Record<string, string> };
+    };
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.attio.com/v2/objects/deals/records/deal_1",
+      expect.objectContaining({ method: "GET", signal: CONTEXT.signal }),
+    );
+    expect(result).toMatchObject({
+      workspace: "Acme",
+      record: {
+        id: "deal_1",
+        title: "Expansion",
+        properties: {
+          name: "Expansion",
+          domain: "example.com",
+          stage: "In progress",
+          value: "125000",
+        },
+      },
+    });
+    expect(Object.keys(result.record.properties)).toHaveLength(24);
+    expect(result.record.properties).not.toHaveProperty("unsafe_reference");
+    expect(JSON.stringify(result)).not.toContain("private_record_id");
+  });
+
+  it("validates object availability and bounded record ids before fetching", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const action = await findGetRecordAction();
+
+    await expect(action.execute({ object: "contacts", record_id: "1" }, CONTEXT)).rejects.toThrow(
+      '"object" must be one of',
+    );
+    await expect(action.execute({ object: "deals", record_id: "1" }, CONTEXT)).rejects.toThrow(
+      "deals object is not available",
+    );
+    await expect(
+      action.execute({ object: "people", record_id: "x".repeat(201) }, CONTEXT),
+    ).rejects.toThrow('"record_id" must be at most 200');
+    await expect(
+      action.execute({ object: "people", record_id: "1", mutate: true }, CONTEXT),
+    ).rejects.toThrow('Unknown parameter: "mutate"');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 async function findSearchAction() {
   const catalog = await resolveAttioActions("user_1");
   const action = catalog?.actions.find((entry) => entry.id === "attio.search_records");
@@ -536,6 +622,13 @@ async function findListAction() {
   const catalog = await resolveAttioActions("user_1");
   const action = catalog?.actions.find((entry) => entry.id === "attio.query_list");
   if (!action) throw new Error("missing attio.query_list");
+  return action;
+}
+
+async function findGetRecordAction() {
+  const catalog = await resolveAttioActions("user_1");
+  const action = catalog?.actions.find((entry) => entry.id === "attio.get_record");
+  if (!action) throw new Error("missing attio.get_record");
   return action;
 }
 
@@ -558,7 +651,7 @@ function connectedRow(
   };
 }
 
-function credential(workspaceId = "workspace_1") {
+function credential(workspaceId = "workspace_1", includeDeals = false) {
   return {
     payload: {
       apiKey: "attio_test_api_key",
@@ -568,6 +661,7 @@ function credential(workspaceId = "workspace_1") {
       objectIdBySlug: {
         person: "object_people",
         company: "object_companies",
+        ...(includeDeals ? { deal: "object_deals" } : {}),
       },
       createdAt: "2026-07-22T00:00:00.000Z",
     },

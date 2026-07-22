@@ -32,6 +32,7 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
       base,
     );
     expect(base).not.toContain("<integrations>");
+    expect(base).not.toContain("<brain_fill>");
     expect(base).not.toContain("list_actions");
     expect(base).not.toContain("use_action");
   });
@@ -58,9 +59,25 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     expect(prompt).toContain("start a task for deep, multi-step, or cross-source work");
     expect(prompt).toContain("one quick bounded lookup");
     expect(prompt).toContain("If a use_action result has ok=false");
+    expect(prompt).toContain("<brain_fill>");
+    expect(prompt).toContain("Survey breadth before depth");
+    expect(prompt).toContain("exception to normal task routing");
+    expect(prompt).toContain("nextCursor or nextPageToken");
+    expect(prompt).toContain("sourceRef plus integrationId");
+    expect(prompt).toContain("summarize what you saved");
     // The block stays small: one routing line per integration, not an action index.
     const block = prompt.slice(prompt.indexOf("<integrations>"), prompt.indexOf("</integrations>"));
     expect(block.length).toBeLessThan(800);
+  });
+
+  it("omits brain-fill guidance when chat capture is disabled", () => {
+    const prompt = createOpenCompanyChatSystemPrompt({
+      connectedIntegrations: CONNECTED_INTEGRATIONS,
+      brainCaptureEnabled: false,
+    });
+
+    expect(prompt).toContain("<integrations>");
+    expect(prompt).not.toContain("<brain_fill>");
   });
 
   it("drops the start-a-task routing when task tools are disabled", () => {
