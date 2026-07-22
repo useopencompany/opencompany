@@ -66,6 +66,12 @@ function providerName(provider: string | null) {
       return "Jamie";
     case "hubspot":
       return "HubSpot";
+    case "granola":
+      return "Granola";
+    case "fathom":
+      return "Fathom";
+    case "attio":
+      return "Attio";
     default:
       return "This source";
   }

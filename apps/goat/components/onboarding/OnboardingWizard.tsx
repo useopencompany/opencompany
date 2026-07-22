@@ -44,6 +44,7 @@ import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
 import { GoatBrainImport } from "@/components/GoatBrainImport";
 import { resolveGoatBrainSourceState, SourceProviderCard } from "@/components/GoatBrainSourceCards";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
+import { ConnectIntegrationModal } from "@/components/onboarding/ConnectIntegrationModal";
 import {
   type GoatBrainSourcesDetails,
   getGoatBrainSourcesAction,
@@ -998,6 +999,12 @@ function SourcesStep({
 }) {
   const [details, setDetails] = useState(initialDetails);
   const [connectingId, setConnectingId] = useState<string | null>(null);
+  // The api_key/webhook providers connect inside a modal rather than navigating
+  // out of the wizard.
+  const [modalProvider, setModalProvider] = useState<GoatBrainSourceProviderDef | null>(null);
+  // When the OAuth popup is blocked we surface an in-wizard notice with a plain
+  // anchor instead of a same-tab redirect that would drop wizard state.
+  const [popupBlocked, setPopupBlocked] = useState<{ name: string; href: string } | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(() =>
     initialConnectionResult?.status === "error"
       ? goatOnboardingConnectionError(
@@ -1031,6 +1038,7 @@ function SourcesStep({
       popupRef.current = null;
       connectingRef.current = null;
       setConnectingId(null);
+      setPopupBlocked(null);
       if (message.status === "connected") {
         setConnectionError(null);
         setConnectionNotice("Account authorized. Now choose what should feed this Brain.");
@@ -1073,9 +1081,11 @@ function SourcesStep({
   const openConnection = (provider: GoatBrainSourceProviderDef) => {
     setConnectionError(null);
     setConnectionNotice(null);
+    setPopupBlocked(null);
 
     if (provider.connectionKind !== "oauth") {
-      window.location.assign(provider.onboardingConnectHref ?? provider.connectHref);
+      if (!details) void reload();
+      setModalProvider(provider);
       return;
     }
 
@@ -1089,7 +1099,10 @@ function SourcesStep({
     );
 
     if (!popup) {
-      window.location.assign(connectHref);
+      // Same-tab redirect would discard unsaved wizard state; offer a plain
+      // anchor instead. The anchor-opened tab has no usable window.opener, so
+      // /onboarding/connected completes via localStorage → the storage listener.
+      setPopupBlocked({ name: provider.name, href: connectHref });
       return;
     }
 
@@ -1140,6 +1153,19 @@ function SourcesStep({
           {connectionNotice}
         </div>
       ) : null}
+      {popupBlocked ? (
+        <div className="mb-4 flex flex-col gap-2 rounded-md border border-border bg-surface px-3 py-2.5 text-[12px] leading-4 text-ink-muted">
+          <span>Your browser blocked the {popupBlocked.name} connect window.</span>
+          <a
+            href={popupBlocked.href}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex w-fit items-center rounded-md border border-ink/15 px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
+          >
+            Open connect window
+          </a>
+        </div>
+      ) : null}
 
       <div className="mb-5 rounded-lg border border-border bg-surface p-3.5">
         <div className="flex items-center justify-between text-[12.5px]">
@@ -1184,6 +1210,25 @@ function SourcesStep({
         <p className="mt-3 text-[12px] leading-4 text-danger">
           A Brain is required before sources can be configured.
         </p>
+      ) : null}
+
+      {modalProvider ? (
+        <ConnectIntegrationModal
+          provider={modalProvider}
+          details={details}
+          onClose={() => {
+            // Reload on close picks up partial progress (e.g. a Jamie endpoint
+            // created without a key yet — reopening shows the persisted URL).
+            setModalProvider(null);
+            void reload();
+          }}
+          onConnected={() => {
+            setModalProvider(null);
+            setConnectionError(null);
+            setConnectionNotice("Account authorized. Now choose what should feed this Brain.");
+            void reload();
+          }}
+        />
       ) : null}
     </div>
   );
