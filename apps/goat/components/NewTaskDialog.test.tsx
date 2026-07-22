@@ -2,29 +2,32 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { CreateTaskResult } from "@/lib/tasks";
 import { NewTaskDialog } from "./NewTaskDialog";
 
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const tasksActionsMock = vi.hoisted(() => ({
-  createGoatTaskAction: vi.fn(async () => ({
-    ok: true as const,
-    task: {
-      id: "goat_task_new",
-      displayId: "TASK-7",
-      name: "New task",
-      prompt: "Do it",
-      model: "anthropic/claude-sonnet-5",
-      scheduleId: null,
-      scheduledFor: null,
-      engine: "opencompany" as const,
-      status: "queued" as const,
-      result: null,
-      error: null,
-      archivedAt: null,
-      createdAt: "2026-07-21T10:00:00.000Z",
-      updatedAt: "2026-07-21T10:00:00.000Z",
-    },
-  })),
+  createGoatTaskAction: vi.fn(
+    async (): Promise<CreateTaskResult> => ({
+      ok: true,
+      task: {
+        id: "goat_task_new",
+        displayId: "TASK-7",
+        name: "New task",
+        prompt: "Do it",
+        model: "anthropic/claude-sonnet-5",
+        scheduleId: null,
+        scheduledFor: null,
+        engine: "opencompany",
+        status: "queued",
+        result: null,
+        error: null,
+        archivedAt: null,
+        createdAt: "2026-07-21T10:00:00.000Z",
+        updatedAt: "2026-07-21T10:00:00.000Z",
+      },
+    }),
+  ),
 }));
 const scheduleActionsMock = vi.hoisted(() => ({
   createGoatTaskScheduleAction: vi.fn(async () => ({
@@ -104,8 +107,7 @@ describe("NewTaskDialog", () => {
     tasksActionsMock.createGoatTaskAction.mockResolvedValueOnce({
       ok: false,
       error: "Background tasks are disabled.",
-      // biome-ignore lint/suspicious/noExplicitAny: narrowing the mocked union
-    } as any);
+    });
     const user = userEvent.setup();
     render(<NewTaskDialog open onClose={() => {}} onTaskCreated={() => {}} />);
 

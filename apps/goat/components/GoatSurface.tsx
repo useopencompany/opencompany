@@ -117,7 +117,6 @@ import {
   type GoatChatMessageRow,
   type GoatCodexChatSessionRow,
   type GoatLocalCodexSessionRow,
-  type GoatTaskRow,
 } from "@/lib/task-collections";
 import type { GoatCodexSandboxStatus } from "@/lib/task-runner";
 import {
