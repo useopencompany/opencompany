@@ -1,57 +1,46 @@
 import { describe, expect, it } from "vitest";
 import { createOpenCompanyChatSystemPrompt } from "@/lib/prompts/main-chat";
 
-const CAPABILITIES = [
-  { id: "slack", indexLine: "slack — CAN read history. CANNOT post." },
-  {
-    id: "linear",
-    indexLine: "linear — CAN read and create issues. CANNOT update.",
-  },
-  {
-    id: "youtube_transcript",
-    indexLine: "youtube_transcript — fetches transcripts.",
-  },
+const CONNECTED_INTEGRATIONS = [
+  { id: "slack", label: 'Slack workspace "Acme"' },
+  { id: "gmail", label: "Gmail (louis@example.com)" },
+  { id: "linear", label: "Linear workspace" },
 ];
 
-describe("createOpenCompanyChatSystemPrompt capabilities", () => {
-  it("produces an identical prompt when capabilities are absent or empty", () => {
+describe("createOpenCompanyChatSystemPrompt integrations", () => {
+  it("produces an identical prompt when integrations are absent or empty", () => {
     const currentDate = "2026-07-18";
     const base = createOpenCompanyChatSystemPrompt({ currentDate });
-    expect(createOpenCompanyChatSystemPrompt({ currentDate, capabilities: [] })).toBe(base);
-    expect(base).not.toContain("<capabilities>");
-    expect(base).not.toContain("use_capability");
+    expect(createOpenCompanyChatSystemPrompt({ currentDate, connectedIntegrations: [] })).toBe(
+      base,
+    );
+    expect(base).not.toContain("<integrations>");
+    expect(base).not.toContain("list_actions");
+    expect(base).not.toContain("use_action");
   });
 
-  it("renders the index block and behavior lines when capabilities are present", () => {
+  it("renders the integrations block and behavior lines when integrations are present", () => {
     const prompt = createOpenCompanyChatSystemPrompt({
-      capabilities: CAPABILITIES,
+      connectedIntegrations: CONNECTED_INTEGRATIONS,
     });
-    expect(prompt).toContain("<capabilities>");
-    expect(prompt).toContain("- slack — CAN read history. CANNOT post.");
-    expect(prompt).toContain("- youtube_transcript — fetches transcripts.");
-    expect(prompt).toContain("use with the use_capability tool");
-    expect(prompt).toContain("use_capability tool for quick work");
-    expect(prompt).toContain('Select operation "read" for retrieval');
-    expect(prompt).toContain('Select "create" or "write" only when the latest user message');
-    expect(prompt).toContain("exactly one successful creation");
-    expect(prompt).toContain("Only perform changes the capability says it CAN perform");
-    expect(prompt).toContain("fully self-contained");
-    expect(prompt).toContain("latest user message explicitly and unambiguously asks");
-    expect(prompt).toContain(
-      "Ask a concise follow-up instead of guessing a material mutation target",
-    );
+    expect(prompt).toContain("<integrations>");
+    expect(prompt).toContain('slack (Slack workspace "Acme")');
+    expect(prompt).toContain("gmail (Gmail (louis@example.com))");
+    expect(prompt).toContain("all read-only");
+    expect(prompt).toContain("Call list_actions to see the exact actions");
+    expect(prompt).toContain("Use list_actions then use_action for quick read lookups");
+    expect(prompt).toContain("you cannot post, edit, create, or delete anything");
     expect(prompt).toContain("Choose the lightest path");
     expect(prompt).toContain("start a task for deep, multi-step, or cross-source work");
-    expect(prompt).toContain("follow its hint");
-    // Index block stays inside the prompt-token budget (~300 tokens ≈ 1400 chars)
-    // even with headroom for more capabilities.
-    const block = prompt.slice(prompt.indexOf("<capabilities>"), prompt.indexOf("</capabilities>"));
-    expect(block.length).toBeLessThan(1400);
+    expect(prompt).toContain("If a use_action result has ok=false");
+    // Integrations block stays small — a couple of lines, not an action index.
+    const block = prompt.slice(prompt.indexOf("<integrations>"), prompt.indexOf("</integrations>"));
+    expect(block.length).toBeLessThan(600);
   });
 
   it("drops the start-a-task routing when task tools are disabled", () => {
     const prompt = createOpenCompanyChatSystemPrompt({
-      capabilities: CAPABILITIES,
+      connectedIntegrations: CONNECTED_INTEGRATIONS,
       taskToolsEnabled: false,
     });
     expect(prompt).toContain("Choose the lightest path");

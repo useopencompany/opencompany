@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
   type GoatChatUiMessage,
-  USE_CAPABILITY_TOOL_PART_TYPE,
+  USE_ACTION_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
 import type { ChatTaskLookup } from "./assistant-items";
@@ -176,43 +176,58 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.queryByText("Hiring update")).not.toBeInTheDocument();
   });
 
-  it("renders historical capability parts without operation as external source chips", () => {
+  it("renders use_action parts with the action-derived label", () => {
     const message: GoatChatUiMessage = {
       id: "assistant_6",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
       parts: [
         {
-          type: USE_CAPABILITY_TOOL_PART_TYPE,
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_action_1",
+          state: "output-available",
+          input: { action: "linear.list_issues", params: { team: "Goat" } },
+          output: {
+            ok: true,
+            action: "linear.list_issues",
+            result: { issues: [] },
+          },
+        },
+        { type: "text", text: "No open issues for the Goat team." },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByText("Linear List Issues")).toBeInTheDocument();
+    expect(screen.getByText("No open issues for the Goat team.")).toBeInTheDocument();
+  });
+
+  it("renders historical use_capability parts through the generic tool row without crashing", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_7",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: "tool-use_capability",
           toolCallId: "tool_capability_1",
           state: "output-available",
           input: { capability: "linear", request: "Find the launch issue" },
           output: {
             capability: "linear",
             summary: "ENG-123 tracks the launch.",
-            entities: [
-              {
-                type: "linear_issue",
-                id: "ENG-123",
-                url: "https://linear.app/acme/issue/ENG-123",
-                title: "Launch tracking",
-              },
-            ],
+            entities: [],
           },
-        },
+        } as unknown as GoatChatUiMessage["parts"][number],
         { type: "text", text: "ENG-123 tracks the launch." },
       ],
     };
 
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
-    const source = screen.getByRole("link", {
-      name: "Source 1: Launch tracking (ENG-123)",
-    });
-    expect(source).toHaveAttribute("href", "https://linear.app/acme/issue/ENG-123");
-    expect(source).toHaveAttribute("target", "_blank");
-    expect(source).toHaveAttribute("rel", "noopener noreferrer");
-    expect(screen.getByLabelText("Sources")).toBeInTheDocument();
+    expect(screen.getByText("Use Capability")).toBeInTheDocument();
+    expect(screen.getByText("ENG-123 tracks the launch.")).toBeInTheDocument();
   });
 });
 

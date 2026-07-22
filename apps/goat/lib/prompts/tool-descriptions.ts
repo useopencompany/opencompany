@@ -69,11 +69,14 @@ export const WEB_SEARCH_QUERY_DESCRIPTION =
 export const WEB_SEARCH_RECENCY_DAYS_DESCRIPTION =
   "Optional freshness window for latest/recent requests. Use 7 for very recent news, 30 for recent updates, and 90 for broader current context.";
 
-export const USE_CAPABILITY_TOOL_DESCRIPTION =
-  "Use one of the user's connected capabilities listed in <capabilities>. A fresh worker handles each call with only the tools permitted for the selected operation and returns a compact summary plus entity references. Use read for retrieval. Use create or write only when the latest user message explicitly requests a supported change and the capability advertises that exact operation. A create call permits at most one successful creation; write calls remain limited to the capability's stated mutation tools.";
+export const LIST_ACTIONS_TOOL_DESCRIPTION =
+  "List the concrete read-only actions available on the user's connected integrations (see <integrations>). Returns every action id with a description and JSON parameter schema. Call this once before your first use_action call in a conversation; do not call it again unless an action id is rejected.";
 
-export const USE_CAPABILITY_OPERATION_DESCRIPTION =
-  'Select "read" for lookup or retrieval. Select "create" or "write" only when the user explicitly and unambiguously asked for a supported external change and the chosen capability advertises that exact operation.';
+export const USE_ACTION_TOOL_DESCRIPTION =
+  "Execute one read-only action from the list_actions catalog against the user's connected integration. Pass the exact action id and a params object matching that action's schema. Returns provider data directly; large results are truncated, so prefer small limits and precise queries.";
 
-export const USE_CAPABILITY_REQUEST_DESCRIPTION =
-  "A fully self-contained natural-language request for the worker, which sees none of this conversation. Resolve pronouns and references into concrete names, emails, channel names, issue keys, or URLs from chat context, and convert relative dates like 'yesterday' or 'last week' into absolute dates. For creates or writes, include the exact requested changes and targets without inventing missing values. State the desired detail, e.g. 'the 5 most recent'. Do not include instructions about which tools to use or how to format output.";
+export const USE_ACTION_ACTION_DESCRIPTION =
+  "The exact action id from list_actions, for example slack.fetch_history.";
+
+export const USE_ACTION_PARAMS_DESCRIPTION =
+  "Arguments matching this action's params schema from list_actions. Pass an empty object when the action takes no arguments.";

@@ -53,11 +53,10 @@ const OPENCOMPANY_CHAT_WEB_SEARCH_TASK_FALLBACK =
 const OPENCOMPANY_CHAT_WEB_SEARCH_CHAT_FALLBACK =
   "If web_search fails or is unavailable, say that briefly and explain what information is still missing.";
 
-const OPENCOMPANY_CHAT_CAPABILITY_BEHAVIOR_LINES = [
-  'Use the use_capability tool for quick work against the capabilities listed in <capabilities>. Select operation "read" for retrieval. Select "create" or "write" only when the latest user message explicitly and unambiguously asks for that external change and the capability advertises that exact operation. Never infer mutation permission from a lookup, suggestion, or older context. Only perform changes the capability says it CAN perform.',
-  "Each capability request must be fully self-contained — the worker sees none of this conversation — so resolve names, channels, issue keys, record ids, absolute dates, and exact requested mutation content before dispatching. Ask a concise follow-up instead of guessing a material mutation target or value. A create call may perform exactly one successful creation; split multiple requested creations across separate calls. Independent read lookups may be dispatched in parallel in one step.",
-  "Choose the lightest path: answer directly when you already know; use use_capability for a quick supported lookup or explicit change in a connected capability; start a task for deep, multi-step, or cross-source work.",
-  "If a use_capability result carries an error, follow its hint (for example suggesting the user reconnect an integration in Settings → Integrations) instead of retrying the same call, and say briefly what happened.",
+const OPENCOMPANY_CHAT_ACTION_BEHAVIOR_LINES = [
+  "Use list_actions then use_action for quick read lookups against the integrations in <integrations>. All actions are read-only; you cannot post, edit, create, or delete anything through them. Independent lookups may be dispatched in parallel in one step.",
+  "Choose the lightest path: answer directly when you already know; use use_action for a quick supported lookup in a connected integration; start a task for deep, multi-step, or cross-source work.",
+  "If a use_action result has ok=false, follow its error message (for example suggesting the user reconnect an integration in Settings → Integrations) instead of retrying the same call, and say briefly what happened.",
 ];
 
 export const OPENCOMPANY_CHAT_BEHAVIOR = promptBlock("behavior", [
@@ -100,12 +99,12 @@ export function createOpenCompanyChatSystemPrompt(
       enabled: boolean;
       nextRunAt: string;
     }[];
-    capabilities?: readonly { id: string; indexLine: string }[];
+    connectedIntegrations?: readonly { id: string; label: string }[];
   } = {},
 ) {
   const taskToolsEnabled = input.taskToolsEnabled ?? true;
   const scheduleToolsEnabled = input.scheduleToolsEnabled ?? taskToolsEnabled;
-  const capabilities = input.capabilities ?? [];
+  const connectedIntegrations = input.connectedIntegrations ?? [];
   return [
     promptBlock("system", [
       ...OPENCOMPANY_CHAT_SYSTEM_BASE_LINES,
@@ -117,11 +116,13 @@ export function createOpenCompanyChatSystemPrompt(
       ...(scheduleToolsEnabled ? formatRecurringScheduleContext(input.recurringSchedules) : []),
     ]),
     promptBlock("user_context", formatUserContext(input.userContext)),
-    ...(capabilities.length > 0
+    ...(connectedIntegrations.length > 0
       ? [
-          promptBlock("capabilities", [
-            "Connected capabilities you can use with the use_capability tool. Each line states what that capability can and cannot do:",
-            ...capabilities.map((capability) => `- ${capability.indexLine}`),
+          promptBlock("integrations", [
+            `Connected integrations usable in chat via list_actions and use_action (all read-only): ${connectedIntegrations
+              .map((integration) => `${integration.id} (${integration.label})`)
+              .join(", ")}.`,
+            "Call list_actions to see the exact actions and their parameters before the first use_action call.",
           ]),
         ]
       : []),
@@ -139,18 +140,18 @@ export function createOpenCompanyChatSystemPrompt(
               : OPENCOMPANY_CHAT_WEB_SEARCH_CHAT_FALLBACK,
           ]
         : []),
-      ...(capabilities.length > 0 ? formatCapabilityBehaviorLines({ taskToolsEnabled }) : []),
+      ...(connectedIntegrations.length > 0 ? formatActionBehaviorLines({ taskToolsEnabled }) : []),
     ]),
     OPENCOMPANY_CHAT_SOUL,
   ].join("\n\n");
 }
 
-function formatCapabilityBehaviorLines(input: { taskToolsEnabled: boolean }) {
-  if (input.taskToolsEnabled) return OPENCOMPANY_CHAT_CAPABILITY_BEHAVIOR_LINES;
+function formatActionBehaviorLines(input: { taskToolsEnabled: boolean }) {
+  if (input.taskToolsEnabled) return OPENCOMPANY_CHAT_ACTION_BEHAVIOR_LINES;
   // Without task tools, the routing line cannot point at start_task.
-  return OPENCOMPANY_CHAT_CAPABILITY_BEHAVIOR_LINES.map((line) =>
+  return OPENCOMPANY_CHAT_ACTION_BEHAVIOR_LINES.map((line) =>
     line.startsWith("Choose the lightest path")
-      ? "Choose the lightest path: answer directly when you already know; use use_capability for a quick supported lookup or explicit change in a connected capability."
+      ? "Choose the lightest path: answer directly when you already know; use use_action for a quick supported lookup in a connected integration."
       : line,
   );
 }
