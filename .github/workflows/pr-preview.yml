@@ -40,7 +40,7 @@ env:
 jobs:
   # ---------------------------------------------------------------------------
   # Gate: don't provision a preview until CI (lint/typecheck/build/test) passes
-  # for the PR's head SHA. Waits for the `CI` workflow's quality check to conclude.
+  # for the PR's head SHA. Waits for each required CI quality check to conclude.
   # ---------------------------------------------------------------------------
   await-ci:
     name: Wait for CI to pass
@@ -91,41 +91,52 @@ jobs:
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.PR_NUMBER), body });
             }
 
-      - name: Wait for CI quality check
+      - name: Wait for CI quality checks
         id: wait
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           PR_SHA: ${{ github.event.pull_request.head.sha }}
-          # The check-run name == the CI quality job's `name:` (.github/workflows/ci.yml).
-          CI_CHECK_NAME: "Lint, typecheck, build, and test"
+          # These check-run names match the CI jobs' `name:` values (.github/workflows/ci.yml).
+          CI_CHECK_NAMES: '["Format, lint, and typecheck", "Build", "Test"]'
         with:
           script: |
             const sha = process.env.PR_SHA;
-            const checkName = process.env.CI_CHECK_NAME;
+            const checkNames = JSON.parse(process.env.CI_CHECK_NAMES);
             const deadline = Date.now() + 28 * 60 * 1000;
             const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
             while (Date.now() < deadline) {
               const { data } = await github.rest.checks.listForRef({
                 owner: context.repo.owner, repo: context.repo.repo, ref: sha, per_page: 100,
               });
-              const runs = data.check_runs
-                .filter((c) => c.name === checkName)
-                .sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
-              const run = runs[0];
-              if (run && run.status === "completed") {
-                if (run.conclusion === "success") {
-                  core.info(`CI "${checkName}" passed for ${sha.slice(0, 7)}.`);
-                  core.setOutput("passed", "true");
-                  return;
-                }
+              const latestRuns = new Map(
+                checkNames.map((checkName) => [
+                  checkName,
+                  data.check_runs
+                    .filter((run) => run.name === checkName && run.app?.slug === "github-actions")
+                    .sort((a, b) => b.id - a.id)[0],
+                ]),
+              );
+              const failed = [...latestRuns].find(
+                ([, run]) => run?.status === "completed" && run.conclusion !== "success",
+              );
+              if (failed) {
+                const [checkName, run] = failed;
                 core.warning(`CI "${checkName}" concluded "${run.conclusion}" — skipping preview.`);
                 core.setOutput("passed", "false");
                 return;
               }
-              core.info(run ? `CI status: ${run.status}…` : "CI check not reported yet, waiting…");
+              const pending = [...latestRuns].filter(([, run]) => run?.status !== "completed");
+              if (pending.length === 0) {
+                core.info(`All CI quality checks passed for ${sha.slice(0, 7)}.`);
+                core.setOutput("passed", "true");
+                return;
+              }
+              core.info(
+                `Waiting for CI: ${pending.map(([name, run]) => `${name} (${run?.status || "not reported"})`).join(", ")}…`,
+              );
               await sleep(10000);
             }
-            core.warning(`Timed out waiting for CI "${checkName}" on ${sha.slice(0, 7)} — skipping preview.`);
+            core.warning(`Timed out waiting for CI quality checks on ${sha.slice(0, 7)} — skipping preview.`);
             core.setOutput("passed", "false");
 
   # ---------------------------------------------------------------------------
