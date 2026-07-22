@@ -4,6 +4,7 @@ import {
   loadGoatIntegrationCredential,
 } from "@opencompany/db/goat-integrations";
 import { goatIntegrations } from "@opencompany/db/goat-schema";
+import { isValidGoatBrainSourceRef } from "@opencompany/goat-brain";
 import { and, desc, eq } from "drizzle-orm";
 import {
   clampCount,
@@ -35,6 +36,8 @@ type SlackConnection = {
 
 type SlackCredential = {
   token: string;
+  integrationId: string;
+  teamId: string;
   teamDomain: string | null;
 };
 
@@ -121,7 +124,7 @@ export async function resolveSlackActions(
       id: "slack.fetch_history",
       provider: "slack",
       description:
-        "Fetch recent messages from one Slack conversation (channel, DM, or group DM). A message's id is its ts value in its channel.",
+        "Fetch one page of recent messages from a Slack conversation (channel, DM, or group DM). A message's id is its ts value in its channel. Pass nextCursor as cursor to continue deeper into history.",
       params: {
         type: "object",
         additionalProperties: false,
@@ -136,6 +139,10 @@ export async function resolveSlackActions(
             type: "string",
             description: "Only messages before this ISO 8601 timestamp.",
           },
+          cursor: {
+            type: "string",
+            description: "Next-page cursor returned by an earlier slack.fetch_history call.",
+          },
           limit: { type: "number", description: "Max messages to return (default 20)." },
         },
       },
@@ -144,7 +151,11 @@ export async function resolveSlackActions(
         const channel = requiredStringParam(params, "channel");
         const oldestIso = optionalStringParam(params, "oldest_iso");
         const latestIso = optionalStringParam(params, "latest_iso");
-        const result = await slackApiRequest<{ messages?: SlackMessage[] }>({
+        const cursor = optionalStringParam(params, "cursor");
+        const result = await slackApiRequest<{
+          messages?: SlackMessage[];
+          response_metadata?: { next_cursor?: string };
+        }>({
           method: "conversations.history",
           token: credential.token,
           signal: context.signal,
@@ -155,9 +166,16 @@ export async function resolveSlackActions(
             ),
             ...(oldestIso ? { oldest: isoToSlackTs(oldestIso) } : {}),
             ...(latestIso ? { latest: isoToSlackTs(latestIso) } : {}),
+            ...(cursor ? { cursor } : {}),
           },
         });
-        return { messages: compactMessages(result.messages, channel, credential.teamDomain) };
+        return {
+          integrationId: credential.integrationId,
+          messages: compactMessages(result.messages, channel, credential),
+          ...(result.response_metadata?.next_cursor
+            ? { nextCursor: result.response_metadata.next_cursor }
+            : {}),
+        };
       },
     },
     {
@@ -189,7 +207,10 @@ export async function resolveSlackActions(
             ),
           },
         });
-        return { messages: compactMessages(result.messages, channel, credential.teamDomain) };
+        return {
+          integrationId: credential.integrationId,
+          messages: compactMessages(result.messages, channel, credential),
+        };
       },
     },
     {
@@ -257,6 +278,7 @@ export async function resolveSlackActions(
           messages?: {
             matches?: Array<{
               ts?: string;
+              thread_ts?: string;
               text?: string;
               user?: string;
               username?: string;
@@ -282,7 +304,18 @@ export async function resolveSlackActions(
             username: match.username,
             text: truncateText(match.text, MAX_MESSAGE_TEXT_CHARS),
             url: match.permalink,
+            ...(match.channel?.id && match.ts
+              ? {
+                  sourceRef: slackSourceRef(
+                    credential.teamId,
+                    match.channel.id,
+                    match.thread_ts ?? match.ts,
+                  ),
+                }
+              : {}),
+            integrationId: credential.integrationId,
           })),
+          integrationId: credential.integrationId,
         };
       },
     });
@@ -331,14 +364,20 @@ async function loadSlackCredential(
   });
   const payload = credential?.payload as GoatSlackOAuthCredentialPayload | undefined;
   const token = payload?.access_token;
-  if (!token) {
+  const teamId = payload?.team_id;
+  if (!token || !teamId) {
     throw new GoatActionAuthError(
       "auth_expired",
       "slack",
       "The Slack connection has no usable token; reconnect Slack in Settings → Integrations.",
     );
   }
-  return { token, teamDomain: payload?.team_domain ?? null };
+  return {
+    token,
+    integrationId: connection.integrationId,
+    teamId,
+    teamDomain: payload?.team_domain ?? null,
+  };
 }
 
 function parseConversationTypes(value: unknown): string[] {
@@ -353,7 +392,7 @@ function parseConversationTypes(value: unknown): string[] {
 function compactMessages(
   messages: SlackMessage[] | undefined,
   channel: string,
-  teamDomain: string | null,
+  credential: SlackCredential,
 ) {
   return (messages ?? []).map((message) => ({
     ts: message.ts,
@@ -361,8 +400,22 @@ function compactMessages(
     text: truncateText(message.text, MAX_MESSAGE_TEXT_CHARS),
     thread_ts: message.thread_ts,
     reply_count: message.reply_count,
-    url: slackPermalink(teamDomain, channel, message.ts),
+    url: slackPermalink(credential.teamDomain, channel, message.ts),
+    ...(message.ts
+      ? {
+          sourceRef: slackSourceRef(credential.teamId, channel, message.thread_ts ?? message.ts),
+        }
+      : {}),
+    integrationId: credential.integrationId,
   }));
+}
+
+function slackSourceRef(teamId: string, channelId: string, ts: string) {
+  const sourceRef = `slack:conversation:${teamId}:${channelId}:${ts}`;
+  if (!isValidGoatBrainSourceRef(sourceRef)) {
+    throw new Error("Slack returned identifiers that cannot form a Brain source reference.");
+  }
+  return sourceRef;
 }
 
 function slackPermalink(teamDomain: string | null, channel: string, ts: string | undefined) {

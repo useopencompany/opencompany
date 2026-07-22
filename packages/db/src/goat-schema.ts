@@ -127,6 +127,7 @@ export type GoatBrainSourceType =
   | "meeting"
   | "run"
   | "capture"
+  | "pointer"
   | "asset"
   | "conversation"
   | "issue"
@@ -143,7 +144,10 @@ export type GoatHubspotEventAction = "create" | "update";
 export type GoatAttioObjectType = "person" | "company" | "deal";
 export type GoatAttioEventAction = "create" | "update" | "note";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
-export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
+export type GoatBrainIngestJobKind =
+  | "brain_source_item_ingest"
+  | "brain_agent_ingest"
+  | "brain_pointer_hydrate";
 export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 export type GoatBrainImportStatus =
   | "discovering"
@@ -1509,7 +1513,7 @@ export const goatBrainSourceItems = goat.table(
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting', 'run', 'capture', 'asset', 'conversation', 'issue', 'activity', 'thread', 'document')`,
+      sql`${table.sourceType} IN ('meeting', 'run', 'capture', 'pointer', 'asset', 'conversation', 'issue', 'activity', 'thread', 'document')`,
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
@@ -1589,7 +1593,7 @@ export const goatBrainIngestJobs = goat.table(
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
-      sql`${table.kind} IN ('brain_source_item_ingest', 'brain_agent_ingest')`,
+      sql`${table.kind} IN ('brain_source_item_ingest', 'brain_agent_ingest', 'brain_pointer_hydrate')`,
     ),
     statusCheck: check(
       "goat_brain_ingest_jobs_status_check",

@@ -206,6 +206,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   const exaApiKey = process.env.EXA_API_KEY?.trim();
   const canManageWorkspaceBrain = context.role === "admin";
+  const brainCaptureEnabled = Boolean(context.activeBrain);
   const taskToolsEnabled = context.user.taskSpawningEnabled && canManageWorkspaceBrain;
 
   // Action catalog: resolved per request from real connection state. On by
@@ -356,8 +357,8 @@ export async function POST(request: Request): Promise<Response> {
     latestUserMessage: parsed.value.prompt,
     ...(requestedEngine ? { requestedEngine } : {}),
     // goat_brain is read-only for everyone (recall/inspect). The only write path
-    // in chat is save_to_brain, which is wired below for admins and enqueues the
-    // durable ingestion agent. No per-command role branching needed here.
+    // in chat is save_to_brain, which is available to every workspace member
+    // with an active brain and enqueues the durable ingestion agent.
     runBrainCli: (toolInput, toolExecutionContext) => {
       const toolCallId = goatBrainToolCallId(toolExecutionContext);
       const activeBrain = context.activeBrain;
@@ -382,7 +383,7 @@ export async function POST(request: Request): Promise<Response> {
         signal: generationSignal,
       });
     },
-    ...(canManageWorkspaceBrain
+    ...(brainCaptureEnabled
       ? {
           saveToBrain: async (toolInput) => {
             const activeBrain = context.activeBrain;
@@ -402,18 +403,22 @@ export async function POST(request: Request): Promise<Response> {
               });
             }
             const content = toolInput.content?.trim();
-            if (!content) {
+            const sourceRef = toolInput.sourceRef?.trim();
+            if (!content && !sourceRef) {
               return {
                 ok: false,
-                error: "Provide content or attachmentIds to save.",
+                error: "Provide content, sourceRef, or attachmentIds to save.",
               };
             }
             const captured = await captureToGoatBrainInbox({
               brainRef: activeBrain.id,
               userWorkosId: context.user.workosUserId,
-              text: content,
+              ...(content ? { text: content } : {}),
               ...(toolInput.title ? { title: toolInput.title } : {}),
               ...(toolInput.intent ? { intent: toolInput.intent } : {}),
+              ...(sourceRef ? { sourceRef } : {}),
+              ...(toolInput.integrationId ? { integrationId: toolInput.integrationId } : {}),
+              ...(toolInput.fallbackContent ? { fallbackText: toolInput.fallbackContent } : {}),
               source: {
                 kind: "chat",
                 connectionId: turn.session.id,
@@ -677,10 +682,9 @@ export async function POST(request: Request): Promise<Response> {
         ? {
             name: context.activeBrain.name,
             workspaceName: context.workspace.name,
-            readOnly: !canManageWorkspaceBrain,
           }
         : null,
-      brainCaptureEnabled: canManageWorkspaceBrain,
+      brainCaptureEnabled,
       taskToolsEnabled,
       scheduleToolsEnabled: taskToolsEnabled,
       recurringSchedules,

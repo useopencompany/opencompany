@@ -10,6 +10,8 @@ const LINEAR_API_TIMEOUT_MS = 10_000;
 export const LINEAR_SNAPSHOT_COMMENT_LIMIT = 50;
 
 export type LinearIssueSnapshot = {
+  organizationId: string;
+  organizationUrlKey?: string;
   issueId: string;
   identifier?: string;
   url?: string;
@@ -58,7 +60,7 @@ const ISSUE_SNAPSHOT_QUERY = `query GoatLinearIssueSnapshot($id: String!, $comme
     assignee { name displayName }
     creator { name displayName }
     project { name }
-    team { id key name }
+    team { id key name organization { id urlKey } }
     labels { nodes { name } }
     comments(first: $commentLimit, orderBy: createdAt) {
       nodes {
@@ -77,6 +79,7 @@ const ISSUE_SNAPSHOT_QUERY = `query GoatLinearIssueSnapshot($id: String!, $comme
 export async function fetchLinearIssueSnapshot(input: {
   token: string;
   issueId: string;
+  suppressErrors?: boolean;
 }): Promise<LinearIssueSnapshot | null> {
   try {
     const data = await linearGraphqlRequest<{ issue?: Record<string, unknown> | null }>({
@@ -88,6 +91,7 @@ export async function fetchLinearIssueSnapshot(input: {
     if (!issue) return null;
     return toIssueSnapshot(issue);
   } catch (error) {
+    if (input.suppressErrors === false) throw error;
     logger.warn("Linear issue snapshot fetch failed", {
       event: "opencompany.goat_linear_snapshot_failed",
       issue_id: input.issueId,
@@ -134,13 +138,15 @@ export async function linearGraphqlRequest<T>(input: {
 function toIssueSnapshot(issue: Record<string, unknown>): LinearIssueSnapshot | null {
   const issueId = asString(issue.id);
   const title = asString(issue.title);
-  if (!issueId || !title) return null;
 
   const state = asRecord(issue.state);
   const assignee = asRecord(issue.assignee);
   const creator = asRecord(issue.creator);
   const project = asRecord(issue.project);
   const team = asRecord(issue.team);
+  const organization = asRecord(team?.organization);
+  const organizationId = asString(organization?.id);
+  if (!organizationId || !issueId || !title) return null;
   const labels = asRecord(issue.labels);
   const labelNames = Array.isArray(labels?.nodes)
     ? labels.nodes.flatMap((node) => {
@@ -188,8 +194,11 @@ function toIssueSnapshot(issue: Record<string, unknown>): LinearIssueSnapshot | 
   const teamId = asString(team?.id);
   const teamKey = asString(team?.key);
   const teamName = asString(team?.name);
+  const organizationUrlKey = asString(organization?.urlKey);
 
   return {
+    organizationId,
+    ...(organizationUrlKey ? { organizationUrlKey } : {}),
     issueId,
     ...(identifier ? { identifier } : {}),
     ...(url ? { url } : {}),

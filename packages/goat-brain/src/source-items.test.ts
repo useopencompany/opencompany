@@ -5,6 +5,7 @@ import {
   isNormalizedAttioObjectSourceItem,
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
+  isNormalizedGoatBrainPointerSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedGoatImportSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
@@ -15,6 +16,7 @@ import {
   normalizeAttioObjectWindow,
   normalizeGitHubActivityWebhook,
   normalizeGmailThreadWindow,
+  normalizeGoatBrainPointerCapture,
   normalizeGoatChatCapture,
   normalizeGoatImportRun,
   normalizeGoogleDriveDocument,
@@ -404,6 +406,79 @@ describe("Goat chat capture normalization", () => {
     expect(isNormalizedGoatChatCaptureSourceItem({ sourceProvider: "goat-chat" })).toBe(false);
     expect(
       isNormalizedGoatChatCaptureSourceItem(normalizeJamieMeetingCompletedWebhook(jamiePayload())),
+    ).toBe(false);
+  });
+});
+
+describe("Goat Brain pointer capture normalization", () => {
+  const base = {
+    sourceRef: "slack:conversation:T123:C456:1234.5678",
+    title: "Slack launch discussion",
+    chatSessionId: "goat_chat_session_1",
+    userMessageId: "goat_chat_msg_1",
+    draftBrainId: "slack-launch-discussion",
+    draftFolder: "inbox",
+    capturedAt: "2026-07-09T10:00:00.000Z",
+  };
+
+  it("normalizes a hydratable source pointer", () => {
+    const item = normalizeGoatBrainPointerCapture({
+      ...base,
+      fallbackText: "A short fallback summary.",
+    });
+
+    expect(item).toMatchObject({
+      sourceProvider: "slack",
+      sourceType: "pointer",
+      externalId: base.sourceRef,
+      sourceRef: base.sourceRef,
+      title: "Slack launch discussion",
+    });
+    expect(item.content.pointer).toMatchObject({
+      ref: base.sourceRef,
+      fallbackText: "A short fallback summary.",
+      chatSessionId: "goat_chat_session_1",
+      userMessageId: "goat_chat_msg_1",
+      draftBrainId: "slack-launch-discussion",
+      draftFolder: "inbox",
+    });
+    expect(isNormalizedGoatBrainPointerSourceItem(item)).toBe(true);
+    expect(isNormalizedGoatBrainPointerSourceItem(JSON.parse(JSON.stringify(item)))).toBe(true);
+  });
+
+  it("deduplicates by canonical source ref instead of chat metadata", () => {
+    const first = normalizeGoatBrainPointerCapture(base);
+    const second = normalizeGoatBrainPointerCapture({
+      ...base,
+      fallbackText: "Different fallback text.",
+      chatSessionId: "another_session",
+      userMessageId: "another_message",
+      draftBrainId: "another-draft",
+    });
+
+    expect(second.contentHash).toBe(first.contentHash);
+  });
+
+  it("rejects unsupported pointer providers and unrelated guard payloads", () => {
+    expect(() =>
+      normalizeGoatBrainPointerCapture({
+        ...base,
+        sourceRef: "github:issue:opencompany:123",
+      }),
+    ).toThrow(BrainSourceNormalizationError);
+    expect(isNormalizedGoatBrainPointerSourceItem(null)).toBe(false);
+    expect(
+      isNormalizedGoatBrainPointerSourceItem(
+        normalizeGoatChatCapture({
+          text: "A note",
+          title: "Note",
+          chatSessionId: "session",
+          userMessageId: "message",
+          draftBrainId: "note",
+          draftFolder: "inbox",
+          capturedAt: "2026-07-09T10:00:00.000Z",
+        }),
+      ),
     ).toBe(false);
   });
 });
