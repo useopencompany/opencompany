@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
 import { SettingsIntegrationsPanel } from "./SettingsIntegrationsPanel";
@@ -57,7 +57,6 @@ describe("SettingsIntegrationsPanel", () => {
       <SettingsIntegrationsPanel
         initialIntegrations={goatIntegrationStateFromRows([]) as GoatIntegrationState}
         isWorkspaceAdmin
-        mcpSetup={{ preferredClient: null, completedAt: null }}
       />,
     );
 
@@ -81,7 +80,6 @@ describe("SettingsIntegrationsPanel", () => {
       <SettingsIntegrationsPanel
         initialIntegrations={goatIntegrationStateFromRows([]) as GoatIntegrationState}
         isWorkspaceAdmin
-        mcpSetup={{ preferredClient: null, completedAt: null }}
       />,
     );
 
@@ -91,38 +89,40 @@ describe("SettingsIntegrationsPanel", () => {
     expect(window.location.search).toBe("");
   });
 
-  it("always exposes the permanent Goat Brain MCP entry", () => {
+  it("does not surface Goat MCP as an integration (it lives in its own tab)", () => {
     render(
       <SettingsIntegrationsPanel
         initialIntegrations={goatIntegrationStateFromRows([]) as GoatIntegrationState}
         isWorkspaceAdmin={false}
-        mcpSetup={{ preferredClient: null, completedAt: null }}
       />,
     );
 
-    // The MCP card shows its title + client hint; its CTA links to the setup page.
-    expect(screen.getByText("Goat MCP")).toBeInTheDocument();
-    expect(screen.getByText("Claude, ChatGPT, or Cursor")).toBeInTheDocument();
-    const cta = screen.getByRole("link", { name: "Set up" });
-    expect(cta).toHaveAttribute("href", "/settings/mcp");
+    expect(screen.queryByText("Goat MCP")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "/settings/mcp" })).not.toBeInTheDocument();
   });
 
-  it("reports the verified connection and remembered client", () => {
+  it("switches between the workspace and personal scopes", () => {
     render(
       <SettingsIntegrationsPanel
         initialIntegrations={goatIntegrationStateFromRows([]) as GoatIntegrationState}
         isWorkspaceAdmin
-        mcpSetup={{
-          preferredClient: "cursor",
-          completedAt: "2026-07-13T09:00:00.000Z",
-        }}
       />,
     );
 
-    expect(screen.getByText("Goat MCP")).toBeInTheDocument();
-    expect(screen.getByText("Connected with Cursor")).toBeInTheDocument();
-    const cta = screen.getByRole("link", { name: "Manage" });
-    expect(cta).toHaveAttribute("href", "/settings/mcp");
+    // Workspace scope is shown first: GitHub is a workspace-owned connection and
+    // Gmail (personal) is hidden.
+    expect(
+      screen.getByText("Bring pull requests and issues from your repositories into Goat."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Let Goat read and act on your email.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    // Personal scope reveals the personal connections and hides the workspace ones.
+    expect(screen.getByText("Let Goat read and act on your email.")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Bring pull requests and issues from your repositories into Goat."),
+    ).not.toBeInTheDocument();
   });
 
   it("renders the Linear MCP connection instead of the separate brain-source accounts", () => {
@@ -143,14 +143,9 @@ describe("SettingsIntegrationsPanel", () => {
       },
     ]) as GoatIntegrationState;
 
-    render(
-      <SettingsIntegrationsPanel
-        initialIntegrations={integrations}
-        isWorkspaceAdmin
-        mcpSetup={{ preferredClient: null, completedAt: null }}
-      />,
-    );
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
+    // Linear lives under the Workspace scope, which is shown first.
     const linearCard = screen
       .getByText("Connect issues, projects, and comments from Linear.")
       .closest("div.rounded-2xl");
