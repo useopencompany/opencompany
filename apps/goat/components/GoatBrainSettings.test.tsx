@@ -200,7 +200,7 @@ describe("GoatBrainSourceCards", () => {
     );
   });
 
-  it("uses safe Attio defaults and requires an explicit system-update opt-in", async () => {
+  it("uses safe Attio defaults and never offers system updates", async () => {
     const user = userEvent.setup();
     const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === "attio");
     if (!provider) throw new Error("Attio source provider is not registered.");
@@ -209,7 +209,11 @@ describe("GoatBrainSourceCards", () => {
         brainRef="goat_brain_1"
         provider={provider}
         details={brainSourceDetails({
-          sources: [attioSource({ config: { objectTypes: [{ id: "person" }] } })],
+          sources: [
+            attioSource({
+              config: { objectTypes: [{ id: "person" }], includeSystemUpdates: true },
+            }),
+          ],
           attio: {
             integration: {
               provider: "attio",
@@ -234,7 +238,9 @@ describe("GoatBrainSourceCards", () => {
     ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("checkbox", { name: "Record updated" }));
-    await user.click(screen.getByRole("checkbox", { name: /Include Attio automation/ }));
+    expect(
+      screen.queryByRole("checkbox", { name: /Include Attio automation/ }),
+    ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save Attio source" }));
 
     await waitFor(() =>
@@ -244,7 +250,6 @@ describe("GoatBrainSourceCards", () => {
         enabled: true,
         objectTypes: [{ id: "person" }],
         events: [{ id: "object_created" }, { id: "note_added" }, { id: "object_updated" }],
-        includeSystemUpdates: true,
       }),
     );
   });

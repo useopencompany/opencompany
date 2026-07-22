@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { getDb } from "./client";
 import {
   type GoatBrainSourceConfigProvider,
@@ -10,6 +11,15 @@ import {
 } from "./goat-schema";
 
 type DbLike = any;
+
+// The Goat web app uses neon-http, which cannot open interactive transactions.
+// Run multi-statement mutations sequentially there; pooled runner callers still
+// get a real transaction.
+function runAtomically<T>(db: DbLike, fn: (tx: DbLike) => Promise<T>): Promise<T> {
+  if (db instanceof NeonHttpDatabase) return fn(db);
+  if (typeof db.transaction !== "function") return fn(db);
+  return db.transaction(fn);
+}
 
 export const GOAT_BRAIN_SOURCE_DISABLED_INGEST_REASON =
   "Stopped because this Brain source was disabled.";
@@ -121,7 +131,8 @@ export async function upsertGoatBrainSource(input: {
   db?: DbLike;
 }): Promise<{ id: string }> {
   if (!input.db) {
-    return await getDb().transaction((tx) => upsertGoatBrainSource({ ...input, db: tx }));
+    const db = getDb();
+    return await runAtomically(db, (tx) => upsertGoatBrainSource({ ...input, db: tx }));
   }
   const db = input.db;
   const now = input.now ?? new Date();
@@ -169,7 +180,8 @@ export async function setGoatBrainSourceEnabled(input: {
   db?: DbLike;
 }): Promise<boolean> {
   if (!input.db) {
-    return await getDb().transaction((tx) => setGoatBrainSourceEnabled({ ...input, db: tx }));
+    const db = getDb();
+    return await runAtomically(db, (tx) => setGoatBrainSourceEnabled({ ...input, db: tx }));
   }
   const db = input.db;
   const now = input.now ?? new Date();
@@ -201,7 +213,8 @@ export async function deleteGoatBrainSource(input: {
   db?: DbLike;
 }): Promise<boolean> {
   if (!input.db) {
-    return await getDb().transaction((tx) => deleteGoatBrainSource({ ...input, db: tx }));
+    const db = getDb();
+    return await runAtomically(db, (tx) => deleteGoatBrainSource({ ...input, db: tx }));
   }
   const db = input.db;
   const now = new Date();

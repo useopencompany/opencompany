@@ -9,7 +9,7 @@
     "vercel-build": "bun --cwd ../.. turbo build --filter=@opencompany/web",
     "start": "node ../../scripts/next-app.mjs start",
     "docs:generate": "fumadocs-mdx",
-    "lint": "bun run docs:generate && eslint .",
+    "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "bun run docs:generate && tsc --noEmit",
     "test": "vitest run",

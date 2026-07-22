@@ -1,6 +1,6 @@
 "use client";
 
-import type { GoatMcpClient } from "@opencompany/db/goat-schema";
+import { toast } from "@opencompany/ui/components/sonner";
 import {
   AttioIcon,
   FathomIcon,
@@ -13,14 +13,12 @@ import {
   type LucideIcon as IconComponent,
   LinearIcon,
   OpenAIIcon,
-  OpenCompanyMark,
   SlackIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useMemo, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import {
   disconnectGoatCodexAuth,
@@ -44,13 +42,17 @@ import {
   type GoatSlackProviderState,
   goatIntegrationStateFromRows,
 } from "@/lib/integration-state";
+import {
+  goatIntegrationConnectionError,
+  goatIntegrationConnectionSuccess,
+} from "@/lib/onboarding-integrations";
 import { createGoatCollections, type GoatIntegrationRow } from "@/lib/task-collections";
 
 // Presentation metadata for each integration card: the real brand logo (or a
 // monogram fallback where no square vector mark exists), the colored logo tile,
 // and a short connection-focused description. Keyed by provider so the card
 // components derive everything from the provider string.
-type IntegrationMetaKey = GoatPersonalAccountProvider | "github" | "jamie" | "mcp" | "codex";
+type IntegrationMetaKey = GoatPersonalAccountProvider | "github" | "jamie" | "codex";
 
 type IntegrationMeta = {
   label: string;
@@ -129,12 +131,6 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: FathomIcon,
     tileClass: "bg-[#1355FF] text-white",
   },
-  mcp: {
-    label: "Goat MCP",
-    description: "Use Goat from Claude, ChatGPT, or Cursor over MCP.",
-    Icon: OpenCompanyMark,
-    tileClass: "bg-ink text-canvas",
-  },
   codex: {
     label: "Codex",
     description: "Connect your Codex subscription so Goat can run coding tasks.",
@@ -146,39 +142,63 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
 export function SettingsIntegrationsPanel({
   initialIntegrations,
   isWorkspaceAdmin,
-  mcpSetup,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
-  mcpSetup: GoatMcpSetupView;
 }) {
   const hydrated = useHydrated();
-  if (!hydrated) {
-    return (
-      <IntegrationCards
-        integrations={initialIntegrations}
-        isWorkspaceAdmin={isWorkspaceAdmin}
-        mcpSetup={mcpSetup}
-      />
-    );
-  }
   return (
-    <LiveSettingsIntegrations
-      initialIntegrations={initialIntegrations}
-      isWorkspaceAdmin={isWorkspaceAdmin}
-      mcpSetup={mcpSetup}
-    />
+    <>
+      <IntegrationSetupFeedback />
+      {!hydrated ? (
+        <IntegrationCards integrations={initialIntegrations} isWorkspaceAdmin={isWorkspaceAdmin} />
+      ) : (
+        <LiveSettingsIntegrations
+          initialIntegrations={initialIntegrations}
+          isWorkspaceAdmin={isWorkspaceAdmin}
+        />
+      )}
+    </>
   );
+}
+
+function IntegrationSetupFeedback() {
+  const handled = useRef(false);
+
+  useEffect(() => {
+    if (handled.current) return;
+
+    const url = new URL(window.location.href);
+    const status = url.searchParams.get("setup");
+    if (status !== "connected" && status !== "error") return;
+
+    handled.current = true;
+    const provider = url.searchParams.get("integration");
+    if (status === "error") {
+      toast.error(goatIntegrationConnectionError(provider, url.searchParams.get("reason")));
+    } else {
+      toast.success(goatIntegrationConnectionSuccess(provider));
+    }
+
+    url.searchParams.delete("integration");
+    url.searchParams.delete("setup");
+    url.searchParams.delete("reason");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, []);
+
+  return null;
 }
 
 function LiveSettingsIntegrations({
   initialIntegrations,
   isWorkspaceAdmin,
-  mcpSetup,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
-  mcpSetup: GoatMcpSetupView;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
   const { data: rows, isLoading } = useLiveQuery((q) =>
@@ -199,92 +219,181 @@ function LiveSettingsIntegrations({
     };
   }, [initialIntegrations, isLoading, rows]);
 
+  return <IntegrationCards integrations={integrations} isWorkspaceAdmin={isWorkspaceAdmin} />;
+}
+
+type IntegrationScope = "workspace" | "personal";
+
+// Group-card providers surfaced under each scope. These are all user-owned in the
+// data model (each member connects their own account), but the CRM / meeting /
+// issue-tracking tools read as shared workspace tooling, so we present them under
+// the Workspace scope; Gmail / Calendar / Drive / Slack stay personal.
+const WORKSPACE_ACCOUNT_PROVIDERS = [
+  "hubspot",
+  "attio",
+  "granola",
+  "fathom",
+] as const satisfies readonly GoatPersonalAccountProvider[];
+
+const PERSONAL_ACCOUNT_PROVIDERS = [
+  "gmail",
+  "google_calendar",
+  "google_drive",
+  "slack",
+] as const satisfies readonly GoatPersonalAccountProvider[];
+
+function countConnectedAccounts(
+  integrations: GoatIntegrationState,
+  providers: readonly GoatPersonalAccountProvider[],
+) {
+  let count = 0;
+  for (const provider of providers) {
+    count += integrations.personalAccounts[provider].filter((account) => account.connected).length;
+  }
+  return count;
+}
+
+function countWorkspaceConnected(integrations: GoatIntegrationState) {
   return (
-    <IntegrationCards
-      integrations={integrations}
-      isWorkspaceAdmin={isWorkspaceAdmin}
-      mcpSetup={mcpSetup}
-    />
+    (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
+    (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
+    (integrationStatus(integrations.linear) === "Connected" ? 1 : 0) +
+    countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
+  );
+}
+
+function countPersonalConnected(integrations: GoatIntegrationState) {
+  return (
+    countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS) +
+    (integrations.codex.connected ? 1 : 0)
   );
 }
 
 function IntegrationCards({
   integrations,
   isWorkspaceAdmin,
-  mcpSetup,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
-  mcpSetup: GoatMcpSetupView;
 }) {
+  const [scope, setScope] = useState<IntegrationScope>("workspace");
+
   return (
-    <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-3">
-        <SectionHeader
-          title="Workspace"
-          description={`Shared connections that feed the brains in this workspace.${
-            isWorkspaceAdmin ? "" : " Managed by workspace admins."
-          }`}
-        />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
-          <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
-        </div>
-      </section>
-      <section className="flex flex-col gap-3">
-        <SectionHeader
-          title="Personal"
-          description="Connections that act as you. Only you can manage them or wire them into brains."
-        />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <IntegrationProviderGroupCard
-            provider="gmail"
-            accounts={integrations.personalAccounts.gmail}
-          />
-          <IntegrationProviderGroupCard
-            provider="google_calendar"
-            accounts={integrations.personalAccounts.google_calendar}
-          />
-          <IntegrationProviderGroupCard
-            provider="google_drive"
-            accounts={integrations.personalAccounts.google_drive}
-          />
-          <IntegrationCardRow integration={integrations.linear} />
-          <IntegrationProviderGroupCard
-            provider="slack"
-            accounts={integrations.personalAccounts.slack}
-          />
-          <IntegrationProviderGroupCard
-            provider="hubspot"
-            accounts={integrations.personalAccounts.hubspot}
-          />
-          <IntegrationProviderGroupCard
-            provider="attio"
-            accounts={integrations.personalAccounts.attio}
-          />
-          <IntegrationProviderGroupCard
-            provider="granola"
-            accounts={integrations.personalAccounts.granola}
-          />
-          <IntegrationProviderGroupCard
-            provider="fathom"
-            accounts={integrations.personalAccounts.fathom}
-          />
-          <McpIntegrationCard setup={mcpSetup} />
-          <CodexIntegrationCard integration={integrations.codex} />
-        </div>
-      </section>
+    <div className="flex flex-col gap-6">
+      <IntegrationScopeSwitch
+        scope={scope}
+        onScopeChange={setScope}
+        workspaceCount={countWorkspaceConnected(integrations)}
+        personalCount={countPersonalConnected(integrations)}
+      />
+      {scope === "workspace" ? (
+        <section className="flex flex-col gap-3">
+          <p className="text-[12px] leading-5 text-ink-subtle">
+            {`Shared connections that feed the brains in this workspace.${
+              isWorkspaceAdmin ? "" : " Managed by workspace admins."
+            }`}
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
+            <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
+            <IntegrationCardRow integration={integrations.linear} />
+            <IntegrationProviderGroupCard
+              provider="hubspot"
+              accounts={integrations.personalAccounts.hubspot}
+            />
+            <IntegrationProviderGroupCard
+              provider="attio"
+              accounts={integrations.personalAccounts.attio}
+            />
+            <IntegrationProviderGroupCard
+              provider="granola"
+              accounts={integrations.personalAccounts.granola}
+            />
+            <IntegrationProviderGroupCard
+              provider="fathom"
+              accounts={integrations.personalAccounts.fathom}
+            />
+          </div>
+        </section>
+      ) : (
+        <section className="flex flex-col gap-3">
+          <p className="text-[12px] leading-5 text-ink-subtle">
+            Connections that act as you. Only you can manage them or wire them into brains.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <IntegrationProviderGroupCard
+              provider="gmail"
+              accounts={integrations.personalAccounts.gmail}
+            />
+            <IntegrationProviderGroupCard
+              provider="google_calendar"
+              accounts={integrations.personalAccounts.google_calendar}
+            />
+            <IntegrationProviderGroupCard
+              provider="google_drive"
+              accounts={integrations.personalAccounts.google_drive}
+            />
+            <IntegrationProviderGroupCard
+              provider="slack"
+              accounts={integrations.personalAccounts.slack}
+            />
+            <CodexIntegrationCard integration={integrations.codex} />
+          </div>
+        </section>
+      )}
     </div>
   );
 }
 
-function SectionHeader({ title, description }: { title: string; description: string }) {
+// Segmented control at the top of the page to flip between the workspace-owned
+// connections and the personal ones, each with a live count of what's connected.
+function IntegrationScopeSwitch({
+  scope,
+  onScopeChange,
+  workspaceCount,
+  personalCount,
+}: {
+  scope: IntegrationScope;
+  onScopeChange: (scope: IntegrationScope) => void;
+  workspaceCount: number;
+  personalCount: number;
+}) {
+  const tabs: { key: IntegrationScope; label: string; count: number }[] = [
+    { key: "workspace", label: "Workspace", count: workspaceCount },
+    { key: "personal", label: "Personal", count: personalCount },
+  ];
+
   return (
-    <div className="flex flex-col gap-1">
-      <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-        {title}
-      </h2>
-      <p className="text-[12px] leading-5 text-ink-subtle">{description}</p>
+    <div className="inline-flex w-fit items-center gap-2">
+      {tabs.map((tab) => {
+        const active = scope === tab.key;
+        return (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => onScopeChange(tab.key)}
+            aria-pressed={active}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20",
+              active
+                ? "bg-ink text-canvas"
+                : "border border-border bg-surface text-ink hover:bg-surface-hover",
+            )}
+          >
+            {tab.label}
+            {tab.count > 0 ? (
+              <span
+                className={cn(
+                  "inline-flex min-w-[18px] items-center justify-center rounded-full px-1 text-[11px] font-semibold leading-4",
+                  active ? "bg-canvas/20 text-canvas" : "bg-surface-muted text-ink-subtle",
+                )}
+              >
+                {tab.count}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -353,44 +462,6 @@ function NotConnectedStatus() {
       <span className="size-1.5 rounded-full bg-ink-subtle/40" aria-hidden="true" />
       Not connected
     </span>
-  );
-}
-
-type GoatMcpSetupView = {
-  preferredClient: GoatMcpClient | null;
-  completedAt: string | null;
-};
-
-const MCP_CLIENT_LABELS: Record<GoatMcpClient, string> = {
-  claude: "Claude",
-  chatgpt: "ChatGPT",
-  cursor: "Cursor",
-};
-
-function McpIntegrationCard({ setup }: { setup: GoatMcpSetupView }) {
-  const clientLabel = setup.preferredClient ? MCP_CLIENT_LABELS[setup.preferredClient] : null;
-  const connected = Boolean(setup.completedAt);
-  const detail = connected
-    ? clientLabel
-      ? `Connected with ${clientLabel}`
-      : "Connected"
-    : clientLabel
-      ? `Continue setup for ${clientLabel}`
-      : "Claude, ChatGPT, or Cursor";
-
-  return (
-    <IntegrationCard
-      meta={INTEGRATION_META.mcp}
-      body={<p className="truncate text-[12px] leading-4 text-ink-subtle">{detail}</p>}
-      footer={
-        <Link
-          href="/settings/mcp"
-          className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          {connected ? "Manage" : "Set up"}
-        </Link>
-      }
-    />
   );
 }
 

@@ -20,11 +20,7 @@ import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useEffect, useMemo, useState, useTransition } from "react";
 import { AttioIntegrationSetup } from "@/components/AttioIntegrationSetup";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
-import {
-  type GoatAppInitialData,
-  type GoatBrainSummaryView,
-  useGoatAppData,
-} from "@/components/GoatAppDataProvider";
+import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSettings } from "@/components/GoatBrainSettings";
 import { GoatBrainView } from "@/components/GoatBrainView";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
@@ -143,18 +139,14 @@ export function GoatSettingsRoute() {
 }
 
 export function GoatIntegrationsSettingsRoute() {
-  const { integrations, mcpSetup, workspace } = useGoatAppData();
+  const { integrations, workspace } = useGoatAppData();
 
   return (
     <GoatSettingsContent
       title="Integrations"
       description="Connect the tools Goat can read from and act on."
     >
-      <IntegrationRows
-        integrations={integrations}
-        isWorkspaceAdmin={workspace.role === "admin"}
-        mcpSetup={mcpSetup}
-      />
+      <IntegrationRows integrations={integrations} isWorkspaceAdmin={workspace.role === "admin"} />
     </GoatSettingsContent>
   );
 }
@@ -744,17 +736,14 @@ function localBridgeName() {
 function IntegrationRows({
   integrations,
   isWorkspaceAdmin,
-  mcpSetup,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
-  mcpSetup: GoatAppInitialData["mcpSetup"];
 }) {
   return (
     <SettingsIntegrationsPanel
       initialIntegrations={integrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
-      mcpSetup={mcpSetup}
     />
   );
 }

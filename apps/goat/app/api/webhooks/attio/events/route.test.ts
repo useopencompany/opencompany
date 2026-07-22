@@ -84,30 +84,14 @@ describe("POST /api/webhooks/attio/events", () => {
     ]);
   });
 
-  it("ignores Attio system record updates unless the Brain source opts in", async () => {
+  it("always ignores Attio system record updates", async () => {
     const ignored = await POST(
-      attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID, "system"), "system-default"),
+      attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID, "system"), "system-update"),
     );
 
+    expect(ignored.status).toBe(200);
     await expect(ignored.json()).resolves.toEqual({ ok: true, buffered: 0 });
     expect(insertGoatAttioObjectEvents).toHaveBeenLastCalledWith([]);
-
-    vi.mocked(listEnabledGoatAttioBrainSourceRoutes).mockResolvedValueOnce([
-      {
-        integrationId: "gint_attio_1",
-        brainRef: "gbrain_1",
-        config: {
-          objectTypes: [{ id: "deal" }],
-          events: [{ id: "object_updated" }],
-          includeSystemUpdates: true,
-        },
-      },
-    ]);
-    const included = await POST(
-      attioRequest(recordUpdatedEvent(DEAL_OBJECT_ID, "system"), "system-opt-in"),
-    );
-
-    await expect(included.json()).resolves.toEqual({ ok: true, buffered: 1 });
   });
 
   it("uses Attio's idempotency key as the stable retry identity", async () => {
