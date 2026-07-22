@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import type { GoatJamieProviderState } from "@/lib/integration-state";
+import { saveJamieWebhookApiKeyAction } from "@/lib/integrations/jamie-actions";
+import { GOAT_JAMIE_WEBHOOK_SECRET_HEADER } from "@/lib/integrations/jamie-constants";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -72,6 +74,48 @@ describe("JamieIntegrationSetup", () => {
       "href",
       "/brain/goat_brain_1/settings",
     );
+  });
+
+  it("hides the Status section header in the modal variant", () => {
+    render(
+      <JamieIntegrationSetup
+        initialState={jamieState({ apiKeyConfigured: true })}
+        variant="modal"
+      />,
+    );
+
+    expect(screen.queryByText("Status")).not.toBeInTheDocument();
+    // The setup sections still render so the form stays usable inside the modal.
+    expect(screen.getByText("Jamie webhook")).toBeInTheDocument();
+    expect(screen.getByText("Jamie API key")).toBeInTheDocument();
+  });
+
+  it("fires onSaved after a successful API key save", async () => {
+    const user = userEvent.setup();
+    const onSaved = vi.fn();
+    vi.mocked(saveJamieWebhookApiKeyAction).mockResolvedValue({
+      ok: true,
+      setup: {
+        integrationId: "goat_integration_1",
+        webhookUrl: "https://my.opencompany.chat/api/webhooks/jamie",
+        headerName: GOAT_JAMIE_WEBHOOK_SECRET_HEADER,
+        apiKeyConfigured: true,
+      },
+    });
+
+    render(
+      <JamieIntegrationSetup
+        initialState={jamieState({ apiKeyConfigured: false })}
+        variant="modal"
+        onSaved={onSaved}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("API key"), validJamieApiKey());
+    await user.click(screen.getByRole("button", { name: "Save API key" }));
+
+    expect(saveJamieWebhookApiKeyAction).toHaveBeenCalledWith(validJamieApiKey());
+    expect(onSaved).toHaveBeenCalledTimes(1);
   });
 });
 
