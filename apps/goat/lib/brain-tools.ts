@@ -59,6 +59,8 @@ export const searchBrainInputSchema = {
   since: z.optional(nonEmptyString),
   limit: z.optional(z.number().check(z.int(), z.minimum(1), z.maximum(50))),
   hops: z.optional(z.number().check(z.int(), z.minimum(0), z.maximum(3))),
+  includeNeighbors: z.optional(z.boolean()),
+  snippetChars: z.optional(z.number().check(z.int(), z.minimum(0), z.maximum(1200))),
   lexicalOnly: z.optional(z.boolean()),
   includeMerged: z.optional(z.boolean()),
   includeArchived: z.optional(z.boolean()),
@@ -73,13 +75,15 @@ export type SearchBrainArgs = BrainSelectorArgs & {
   since?: string | undefined;
   limit?: number | undefined;
   hops?: number | undefined;
+  includeNeighbors?: boolean | undefined;
+  snippetChars?: number | undefined;
   lexicalOnly?: boolean | undefined;
   includeMerged?: boolean | undefined;
   includeArchived?: boolean | undefined;
 };
 
 export const SEARCH_BRAIN_TOOL_DESCRIPTION =
-  'Search a knowledge brain for pages and evidence by meaning and keyword. This is the primary recall tool. Pass "query" with the topic to find (e.g. { "query": "WorkOS sponsorship deal terms" }). Omit "query" and pass "since" (a relative window like 6h, 2d, 1w or an ISO-8601 timestamp) to browse recent entries. Each hit returns an id — follow the important ones with get_document. Read-only.';
+  'Search a knowledge brain for pages and evidence by meaning and keyword. This is the primary recall tool. Pass "query" with the topic to find (e.g. { "query": "WorkOS sponsorship deal terms" }). Omit "query" and pass "since" (a relative window like 6h, 2d, 1w or an ISO-8601 timestamp) to browse recent entries. Each hit returns an id — follow the important ones with get_document. "score" is a relative rank within this response, not absolute confidence — do not threshold on it. Trust hits whose "signals" include both "lexical" and "vector"; vector-only hits may be semantic noise, and "vectorSimilarity" (when present) is the absolute confidence. When browsing with "since" (no query), score reflects recency only. Set includeNeighbors: true to get linked pages per hit (get_document always returns full links). Set snippetChars (e.g. 150) to trim each snippet; snippetChars: 150 with the default no-neighbors gives concise output. Read-only.';
 
 export function searchBrainToToolInput(args: SearchBrainArgs): GoatBrainToolInput {
   const query = args.query?.trim();
@@ -93,6 +97,10 @@ export function searchBrainToToolInput(args: SearchBrainArgs): GoatBrainToolInpu
       ...(args.since?.trim() ? { since: args.since.trim() } : {}),
       ...(args.hops !== undefined ? { hops: args.hops } : {}),
       limit: args.limit ?? 10,
+      // MCP defaults to no neighbors — the biggest payload lever. Chat/CLI keep them (absent flag
+      // → true downstream). Normalizes to the `include-neighbors` engine flag.
+      includeNeighbors: args.includeNeighbors ?? false,
+      ...(args.snippetChars !== undefined ? { snippetChars: args.snippetChars } : {}),
       ...(args.lexicalOnly ? { lexicalOnly: true } : {}),
       ...(args.includeMerged ? { includeMerged: true } : {}),
       ...(args.includeArchived ? { includeArchived: true } : {}),
@@ -122,9 +130,10 @@ export const GET_DOCUMENT_TOOL_DESCRIPTION =
 
 export function coerceDocumentIds(args: GetDocumentArgs): string[] {
   const raw = args.ids ?? args.id;
-  if (Array.isArray(raw)) return raw.map((item) => item.trim()).filter(Boolean);
-  if (typeof raw === "string" && raw.trim()) return [raw.trim()];
-  return [];
+  const items = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+  // Brain ids are slugs — commas are never legal — so a "a, b, c" string is unambiguously a list
+  // an agent packed into one field. Split every item and drop blanks.
+  return items.flatMap((item) => item.split(",").map((id) => id.trim())).filter(Boolean);
 }
 
 export function getDocumentToToolInput(args: GetDocumentArgs): GoatBrainToolInput {

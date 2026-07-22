@@ -20,17 +20,38 @@ describe("resolveBrainParam", () => {
 });
 
 describe("searchBrainToToolInput", () => {
-  it("maps a query into the query command with json output and a default limit", () => {
+  it("maps a query into the query command with json output, default limit, and no neighbors", () => {
     expect(searchBrainToToolInput({ query: "workos sponsorship" })).toEqual({
       command: "query",
-      flags: { text: "workos sponsorship", limit: 10, json: true },
+      flags: { text: "workos sponsorship", limit: 10, includeNeighbors: false, json: true },
     });
   });
 
   it("omits text for a recency-only browse and passes since", () => {
     expect(searchBrainToToolInput({ since: "7d" })).toEqual({
       command: "query",
-      flags: { since: "7d", limit: 10, json: true },
+      flags: { since: "7d", limit: 10, includeNeighbors: false, json: true },
+    });
+  });
+
+  it("opts into neighbors and passes snippetChars when set", () => {
+    expect(
+      searchBrainToToolInput({ query: "pricing", includeNeighbors: true, snippetChars: 150 }),
+    ).toEqual({
+      command: "query",
+      flags: {
+        text: "pricing",
+        limit: 10,
+        includeNeighbors: true,
+        snippetChars: 150,
+        json: true,
+      },
+    });
+  });
+
+  it("passes snippetChars: 0 through (no snippet), not swallowed as falsy", () => {
+    expect(searchBrainToToolInput({ query: "pricing", snippetChars: 0 }).flags).toMatchObject({
+      snippetChars: 0,
     });
   });
 
@@ -56,6 +77,7 @@ describe("searchBrainToToolInput", () => {
         kind: "page",
         hops: 1,
         limit: 25,
+        includeNeighbors: false,
         lexicalOnly: true,
         includeMerged: true,
         json: true,
@@ -87,6 +109,13 @@ describe("coerceDocumentIds / getDocumentToToolInput", () => {
     ]);
     expect(coerceDocumentIds({ id: ["  a  ", "", "b"] })).toEqual(["a", "b"]);
     expect(coerceDocumentIds({})).toEqual([]);
+  });
+
+  it("splits a comma-joined id string an agent packed into one field", () => {
+    expect(coerceDocumentIds({ ids: "a, b, c" })).toEqual(["a", "b", "c"]);
+    expect(coerceDocumentIds({ id: "a,b" })).toEqual(["a", "b"]);
+    // Commas inside array items split too, and blanks from trailing commas drop.
+    expect(coerceDocumentIds({ ids: ["a, b", "c,"] })).toEqual(["a", "b", "c"]);
   });
 
   it("passes an explicit section through", () => {
