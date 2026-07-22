@@ -168,7 +168,10 @@ describe("POST /api/chat", () => {
 
     const response = await POST(validChatRequest("What's new in #general?"));
     expect(response.status).toBe(200);
-    expect(resolveGoatActionCatalog).toHaveBeenCalledWith("user_1");
+    expect(resolveGoatActionCatalog).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceId: "goat_ws_user_1",
+    });
   });
 
   it("honors the actions kill switch", async () => {
