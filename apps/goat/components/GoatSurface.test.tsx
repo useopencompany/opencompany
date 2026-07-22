@@ -15,6 +15,10 @@ import {
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import {
+  buildGoatOnboardingKickoffPrompt,
+  queueGoatOnboardingKickoff,
+} from "@/lib/onboarding-kickoff";
 import { GoatSurface, type GoatTaskView } from "./GoatSurface";
 
 const chatMock = vi.hoisted(() => ({
@@ -184,6 +188,7 @@ function requestChatSessionId(init: RequestInit | undefined, fallback: string) {
 describe("GoatSurface chat streaming UI", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    window.sessionStorage.clear();
     pathnameMock.value = "/";
     chatMock.status = "ready";
     chatMock.finishSessionId = null;
@@ -238,6 +243,22 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
     expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
+  });
+
+  it("consumes the onboarding kickoff and sends it once through main chat", async () => {
+    const companyUrl = "https://opencompany.ai/";
+    expect(queueGoatOnboardingKickoff(companyUrl)).toBe(true);
+
+    const { rerender } = render(
+      <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />,
+    );
+
+    const prompt = buildGoatOnboardingKickoffPrompt(companyUrl);
+    await waitFor(() => expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: prompt }));
+    expect(chatMock.sendMessage).toHaveBeenCalledTimes(1);
+
+    rerender(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    expect(chatMock.sendMessage).toHaveBeenCalledTimes(1);
   });
 
   it("updates the URL without a server navigation and sends the reserved id", async () => {

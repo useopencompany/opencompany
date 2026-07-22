@@ -11,7 +11,8 @@ For the Brain (Goat's knowledge store — data model, ingestion, tools, contract
 Goat has four LLM paths:
 
 1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
-   This agent answers directly, calls `goat_brain`, or calls `start_task`.
+   This agent answers directly, reads connected integrations, calls `goat_brain`, captures with
+   `save_to_brain`, or calls `start_task`.
 2. **Background task:** a durable row in `goat.tasks` claimed by `apps/runner`, planned into a
    `goat.harness.v1` config, then executed by an AI SDK model loop in the runner process.
 3. **Local Codex chat:** a Goat chat engine mode that queues commands for a user-run local bridge.
@@ -40,6 +41,8 @@ Browser
       streamText(default Goat chat agent)
         answer directly
         OR call goat_brain
+        OR survey connected integrations with list_actions/use_action
+           and capture focused findings with save_to_brain
         OR, when Background tasks is enabled in Preferences, call start_task
           insert goat.tasks row
           POST /internal/goat/tasks/:taskId/run
@@ -116,7 +119,9 @@ optionally stops the active stream, and marks the chat session closed through
 3. Requires `VERCEL_AI_GATEWAY_API_KEY`.
 4. Finds or creates an open `goat.chat_sessions` row.
 5. Persists the user message in `goat.chat_messages`.
-6. Creates the chat tool context for `start_task`, `goat_brain`, and optional `web_search`.
+6. Resolves read-only connected-integration actions and creates the chat tool context for
+   `goat_brain`, `save_to_brain`, `list_actions`/`use_action`, optional `start_task`, and optional
+   `web_search`.
 7. Calls `streamText` through Vercel AI Gateway with the selected model.
 8. Streams the UI message response back to the browser.
 9. Persists the assistant message, debug trace, and optional task link on finish.
@@ -143,6 +148,11 @@ and deals, with an explicit workspace required when several are connected. Actio
 update, or delete provider data, disconnected providers are absent from the catalog, guessed action
 ids cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
 connected-account work continues through background tasks.
+
+When connected integrations and an active brain are present, a conditional `brain_fill` prompt
+teaches the agent to survey breadth before depth, page promising sources, save focused findings
+with canonical provenance, summarize the pass, and ask what to deepen. This fill workflow stays in
+main chat even though ordinary deeper or multi-source work routes to a background task.
 `start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The

@@ -118,6 +118,7 @@ import {
   goatModelContextWindowTokens,
   normalizeGoatModel,
 } from "@/lib/model-options";
+import { consumeGoatOnboardingKickoffPrompt } from "@/lib/onboarding-kickoff";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
@@ -269,6 +270,7 @@ export function GoatSurface({
   const routedChatSessionIdRef = useRef(initialChat?.id ?? null);
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
+  const onboardingKickoffReadRef = useRef(false);
   const initialCodexComposerUiState = codexComposerUiStateForChat(initialChat);
   const activeTurnStartedAtRef = useRef<number | null>(null);
   const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
@@ -1230,6 +1232,25 @@ export function GoatSurface({
       toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
     });
   };
+
+  useEffect(() => {
+    if (onboardingKickoffReadRef.current) return;
+    onboardingKickoffReadRef.current = true;
+    const prompt = consumeGoatOnboardingKickoffPrompt();
+    if (!prompt) return;
+
+    // This synchronizes one-time browser storage with the normal form submit
+    // path. Defer the state update so React can finish the mount (including the
+    // development Strict Mode setup/cleanup cycle) before the automatic send.
+    queueMicrotask(() => {
+      if (!mountedRef.current) return;
+      setChatModelOverride(normalizeGoatModel(defaultModel));
+      setInput(prompt);
+      requestAnimationFrame(() => {
+        if (mountedRef.current) formRef.current?.requestSubmit();
+      });
+    });
+  }, [defaultModel]);
 
   const handleCodexToolAction = async (action: CodexToolAction) => {
     if (action.type === "answer-question") {

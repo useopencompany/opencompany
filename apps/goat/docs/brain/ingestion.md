@@ -63,7 +63,8 @@ Current providers/types:
 | Provider | Type | Normalizer | sourceRef shape |
 | --- | --- | --- | --- |
 | `jamie` | `meeting` | `normalizeJamieMeetingCompletedWebhook` | `jamie:meeting:<externalId>` |
-| `goat-chat` | `capture` | `normalizeGoatChatCapture` | `goat-chat:<userMessageId>` |
+| `goat-chat` | `capture` | `normalizeGoatChatCapture` | `goat-chat:<userMessageId>` or the saved source's canonical ref |
+| `slack`, `gmail`, `linear` | `pointer` | `normalizeGoatBrainPointerCapture` | canonical ref returned by the chat action |
 | `google_drive` | `document` | `normalizeGoogleDriveDocument` | `google-drive:file:<fileId>` |
 
 ## Google Drive documents
@@ -106,18 +107,37 @@ merge) against a materialized copy of the brain. The system prompt embeds
 
 ### 2. Explicit captures from chat or MCP (agentic)
 
-Chat's `save_to_brain` tool (`apps/goat/lib/brain-capture.ts`) is capture-first: it immediately
+Chat's `save_to_brain` tool (`apps/goat/lib/brain-capture.ts`) is available to every member with
+access to an active brain. It is capture-first: it immediately
 writes a **draft page in `inbox/`** (status `draft`) so the user sees the save instantly, then
 records a source item and enqueues a `brain_agent_ingest` job. `runGoatChatCaptureAgentIngest`
 later curates the draft: better title, entity type, target folder, links, promotion out of the
 inbox, and merging with duplicate drafts. The draft's minted `brain_id` doubles as the source
 item's `externalId` for dedupe.
 
+When the save includes copied integration content plus `sourceRef`, both the draft and source item
+cite that canonical Slack, Gmail, Linear, or URL ref instead of the chat message. Every successful
+save reserves workspace ingestion credits, including saves made by non-admin members.
+
 The user-level MCP server exposes the same capture path as `save_to_brain` for workspace admins.
 MCP captures use an `mcp:` source ref so provenance and ingestion traces identify their origin;
 they otherwise share the immediate-draft and background-curation behavior above.
 
-### 3. Jamie meetings (legacy deterministic template — draining)
+### 3. Integration pointers (hydrate, then ingest)
+
+A ref-only chat save for Slack, Gmail, or Linear records a `pointer` source item and enqueues a
+`brain_pointer_hydrate` job with the provider integration id. The runner loads that credential,
+re-fetches the full provider source, runs the existing provider normalizer, and delegates to the
+existing Slack conversation, Gmail thread, or Linear issue agent-ingest profile. This avoids the
+foreground action's display truncation while preserving the canonical source ref.
+
+The immediate inbox draft still makes the save visible before the job runs. Transient provider
+failures use the queue's existing retry/backoff behavior. A deleted or forbidden source is curated
+from the optional short fallback; without one, the job is skipped as `pointer_source_unreachable`.
+The pointer content hash is based on its canonical ref, so re-saving the same ref deduplicates
+instead of forcing a fresh hydration.
+
+### 4. Jamie meetings (legacy deterministic template — draining)
 
 Jobs with `kind: brain_source_item_ingest` run `writeJamieMeetingToBrain`
 (`apps/runner/src/goat-brain-jamie-writes.ts`): a no-LLM template writer with deterministic ids

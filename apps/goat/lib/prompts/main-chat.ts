@@ -59,6 +59,15 @@ const OPENCOMPANY_CHAT_ACTION_BEHAVIOR_LINES = [
   "If a use_action result has ok=false, follow its error message (for example suggesting the user reconnect an integration in Settings → Integrations) instead of retrying the same call, and say briefly what happened.",
 ];
 
+const OPENCOMPANY_CHAT_BRAIN_FILL_LINES = [
+  "When the user asks to seed, bootstrap, fill, or build the Brain from connected integrations, do the work transparently in this conversation instead of treating it as a black-box import.",
+  "This workflow is an exception to normal task routing: keep the first pass in main chat even though it is multi-step, cross-source, or connected-account work. Work within the current turn budget, summarize progress, and continue in a later turn when the user asks you to deepen it.",
+  "Survey breadth before depth: call list_actions for each relevant integration, list its active or relevant surfaces first (such as Slack channels, Gmail threads, and Linear projects/issues), then read deeply only where durable company knowledge is likely: decisions, product direction, customers, team, and process. Skip bots, notifications, routine status churn, and chit-chat.",
+  "Navigate deeper with provider pagination when a result returns nextCursor or nextPageToken. Carry that exact cursor into the next use_action call only when the source is worth deeper reading.",
+  "Save findings as several focused Brain captures rather than one giant dump. For copied source content, pass its sourceRef. Prefer a bare sourceRef plus integrationId when use_action returned both, so background ingestion can hydrate the full provider source; include fallbackContent only as a short safety net.",
+  "After the first pass, summarize what you saved, what you skipped, and why, then ask what the user wants to deepen.",
+];
+
 export const OPENCOMPANY_CHAT_BEHAVIOR = promptBlock("behavior", [
   ...OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES,
   ...OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES,
@@ -99,12 +108,17 @@ export function createOpenCompanyChatSystemPrompt(
       enabled: boolean;
       nextRunAt: string;
     }[];
-    connectedIntegrations?: readonly { id: string; label: string; description: string }[];
+    connectedIntegrations?: readonly {
+      id: string;
+      label: string;
+      description: string;
+    }[];
   } = {},
 ) {
   const taskToolsEnabled = input.taskToolsEnabled ?? true;
   const scheduleToolsEnabled = input.scheduleToolsEnabled ?? taskToolsEnabled;
   const connectedIntegrations = input.connectedIntegrations ?? [];
+  const brainFillEnabled = connectedIntegrations.length > 0 && (input.brainCaptureEnabled ?? true);
   return [
     promptBlock("system", [
       ...OPENCOMPANY_CHAT_SYSTEM_BASE_LINES,
@@ -125,6 +139,18 @@ export function createOpenCompanyChatSystemPrompt(
                 `- ${integration.id} — ${integration.label}: ${integration.description}`,
             ),
             "Call list_actions with the exact integration id to see its actions and parameters before the first use_action call for that integration.",
+          ]),
+        ]
+      : []),
+    ...(brainFillEnabled
+      ? [
+          promptBlock("brain_fill", [
+            ...OPENCOMPANY_CHAT_BRAIN_FILL_LINES,
+            ...(input.webSearchEnabled
+              ? [
+                  "Use web_search for public context about the company when it will complement the connected sources, and save a worthwhile web finding with its canonical URL as sourceRef plus faithful content.",
+                ]
+              : []),
           ]),
         ]
       : []),
@@ -183,8 +209,8 @@ function formatBaseBehaviorLines(input: {
   const taskToolsEnabled = input.taskToolsEnabled ?? true;
   const scheduleToolsEnabled = input.scheduleToolsEnabled ?? taskToolsEnabled;
   const lines = OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES.filter((line) => {
-    // goat_brain is always read-only, so only the save_to_brain (capture) lines
-    // are gated: browse-only members keep the read guidance but lose capture.
+    // goat_brain is always read-only, so only save_to_brain guidance is gated
+    // when no active Brain capture path is available.
     if (
       !brainCaptureEnabled &&
       (line.startsWith("Use the save_to_brain tool") ||

@@ -1,0 +1,172 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  captureAnalytics: vi.fn(),
+  enqueue: vi.fn(),
+  findExistingPointer: vi.fn(),
+  nextBrainId: vi.fn(),
+  upsertFile: vi.fn(),
+  wake: vi.fn(),
+}));
+
+vi.mock("@opencompany/analytics/goat", () => ({
+  captureGoatIngestionQuotaAnalytics: mocks.captureAnalytics,
+}));
+vi.mock("@opencompany/db/goat-brain-files", () => ({
+  createGoatBrainMarkdownContent: vi.fn((input: unknown) => JSON.stringify(input)),
+  goatBrainFilePathFor: vi.fn((folder: string, id: string) => `${folder}/${id}.md`),
+  upsertGoatBrainFile: mocks.upsertFile,
+}));
+vi.mock("@opencompany/db/goat-brain-ingest", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opencompany/db/goat-brain-ingest")>();
+  return {
+    ...actual,
+    findExistingGoatBrainPointerIngest: mocks.findExistingPointer,
+    upsertGoatBrainSourceItemAndEnqueue: mocks.enqueue,
+  };
+});
+vi.mock("@/lib/brain", () => ({
+  nextAvailableGoatBrainId: mocks.nextBrainId,
+}));
+vi.mock("@/lib/task-runner", () => ({
+  triggerGoatBrainIngestWake: mocks.wake,
+}));
+
+import { captureToGoatBrainInbox } from "@/lib/brain-capture";
+
+const BASE_INPUT = {
+  brainRef: "goat_brain_1",
+  userWorkosId: "user_1",
+  title: "Launch decision",
+  source: {
+    kind: "chat" as const,
+    connectionId: "session_1",
+    itemId: "message_1",
+  },
+};
+
+describe("captureToGoatBrainInbox", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.nextBrainId.mockResolvedValue("launch-decision");
+    mocks.findExistingPointer.mockResolvedValue(null);
+    mocks.enqueue.mockResolvedValue({
+      jobId: "goat_brain_job_1",
+      enqueued: true,
+      paused: false,
+      quotaUpdates: [],
+    });
+    mocks.wake.mockResolvedValue(undefined);
+  });
+
+  it("preserves source provenance for copied integration content", async () => {
+    const result = await captureToGoatBrainInbox({
+      ...BASE_INPUT,
+      text: "The team approved the launch plan.",
+      sourceRef: "linear:issue:ENG-1",
+    });
+
+    expect(result).toMatchObject({ ok: true, draftBrainId: "launch-decision" });
+    expect(mocks.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceConnectionId: "session_1",
+        kind: "brain_agent_ingest",
+        item: expect.objectContaining({
+          sourceType: "capture",
+          sourceRef: "linear:issue:ENG-1",
+        }),
+      }),
+    );
+    expect(mocks.upsertFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('"ref":"linear:issue:ENG-1"'),
+      }),
+    );
+  });
+
+  it("enqueues a bare integration source for pointer hydration", async () => {
+    const result = await captureToGoatBrainInbox({
+      ...BASE_INPUT,
+      sourceRef: "slack:conversation:T123:C456:1234.5678",
+      integrationId: "gint_slack_1",
+      fallbackText: "The team approved the launch plan.",
+    });
+
+    expect(result).toMatchObject({ ok: true, enqueued: true });
+    expect(mocks.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceConnectionId: "gint_slack_1",
+        integrationId: "gint_slack_1",
+        kind: "brain_pointer_hydrate",
+        item: expect.objectContaining({
+          sourceProvider: "slack",
+          sourceType: "pointer",
+          sourceRef: "slack:conversation:T123:C456:1234.5678",
+          content: expect.objectContaining({
+            pointer: expect.objectContaining({
+              fallbackText: "The team approved the launch plan.",
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(mocks.wake).toHaveBeenCalledOnce();
+  });
+
+  it("rejects pointers without a provider integration id", async () => {
+    const result = await captureToGoatBrainInbox({
+      ...BASE_INPUT,
+      sourceRef: "gmail:thread:thread_1",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "A bare integration source needs the integrationId returned by use_action.",
+    });
+    expect(mocks.upsertFile).not.toHaveBeenCalled();
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("reuses an existing pointer capture without creating another draft", async () => {
+    mocks.findExistingPointer.mockResolvedValue({
+      jobId: "goat_brain_job_existing",
+      status: "succeeded",
+      planPaused: false,
+      draftBrainId: "existing-launch-decision",
+      draftFolder: "projects",
+      title: "Existing launch decision",
+    });
+
+    const result = await captureToGoatBrainInbox({
+      ...BASE_INPUT,
+      sourceRef: "linear:issue:ENG-1",
+      integrationId: "gint_linear_1",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      draftBrainId: "existing-launch-decision",
+      path: "projects/existing-launch-decision.md",
+      title: "Existing launch decision",
+      jobId: "goat_brain_job_existing",
+      enqueued: false,
+      quotaPaused: false,
+    });
+    expect(mocks.nextBrainId).not.toHaveBeenCalled();
+    expect(mocks.upsertFile).not.toHaveBeenCalled();
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("requires content when a source provider cannot be hydrated", async () => {
+    const result = await captureToGoatBrainInbox({
+      ...BASE_INPUT,
+      sourceRef: "https://example.com/company",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "This source needs fallback content because its provider cannot be hydrated.",
+    });
+    expect(mocks.upsertFile).not.toHaveBeenCalled();
+  });
+});

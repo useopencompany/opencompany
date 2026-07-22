@@ -148,6 +148,7 @@ export async function fetchGmailMessageMetadata(
 export async function fetchGmailThreadSnapshot(
   call: GmailApiCaller,
   threadId: string,
+  options: { maxBodyChars?: number } = {},
 ): Promise<GmailThreadSnapshot> {
   const url = new URL(`${GMAIL_BASE}/threads/${encodeURIComponent(threadId)}`);
   url.searchParams.set("format", "full");
@@ -169,7 +170,7 @@ export async function fetchGmailThreadSnapshot(
         cc: headers.cc ?? null,
         snippet: readString(message, "snippet") ?? null,
         internalDate: readInternalDate(message),
-        bodyText: truncate(stripQuotedReply(rawBody), MAX_BODY_CHARS),
+        bodyText: truncate(stripQuotedReply(rawBody), options.maxBodyChars ?? MAX_BODY_CHARS),
       },
     ];
   });

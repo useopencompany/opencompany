@@ -116,7 +116,11 @@ describe("linear action execution", () => {
   });
 
   it("normalizes list_issues input, calls the remote tool, and closes the client", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({ ok: true, authProvider: {} });
+    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+      ok: true,
+      integrationId: "gint_linear_1",
+      authProvider: {},
+    });
     const remoteExecute = vi.fn(async () => ({
       content: [{ type: "text", text: '{"issues":[{"identifier":"ENG-1"}]}' }],
     }));
@@ -130,12 +134,25 @@ describe("linear action execution", () => {
     );
 
     expect(remoteExecute).toHaveBeenCalledWith({ team: "Goat" }, expect.anything());
-    expect(result).toEqual({ issues: [{ identifier: "ENG-1" }] });
+    expect(result).toEqual({
+      integrationId: "gint_linear_1",
+      issues: [
+        {
+          identifier: "ENG-1",
+          sourceRef: "linear:issue:ENG-1",
+          integrationId: "gint_linear_1",
+        },
+      ],
+    });
     expect(close).toHaveBeenCalled();
   });
 
   it("fails as a provider error when the remote tool is missing and still closes the client", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({ ok: true, authProvider: {} });
+    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+      ok: true,
+      integrationId: "gint_linear_1",
+      authProvider: {},
+    });
     const { close } = mockClient({});
 
     const catalog = await resolveLinearActions("user_1");
@@ -147,7 +164,11 @@ describe("linear action execution", () => {
   });
 
   it("surfaces MCP isError results as thrown provider errors", async () => {
-    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({ ok: true, authProvider: {} });
+    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+      ok: true,
+      integrationId: "gint_linear_1",
+      authProvider: {},
+    });
     const remoteExecute = vi.fn(async () => ({
       isError: true,
       content: [{ type: "text", text: "Team not found" }],
