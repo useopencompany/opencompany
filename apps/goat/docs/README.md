@@ -144,7 +144,8 @@ search plus message and thread retrieval, with an explicit account required when
 connected. Google Calendar exposes a bounded event-list read, while Google Drive exposes file
 search. Linear exposes a curated read catalog for issues, comments, projects, teams, members, and
 workflow statuses. Attio exposes bounded fuzzy search across available standard people, companies,
-and deals, with an explicit workspace required when several are connected. Actions cannot create,
+and deals plus bounded list reads that can apply a saved-view filter from an Attio collection URL,
+with an explicit workspace required when several are connected. Actions cannot create,
 update, or delete provider data, disconnected providers are absent from the catalog, guessed action
 ids cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
 connected-account work continues through background tasks.

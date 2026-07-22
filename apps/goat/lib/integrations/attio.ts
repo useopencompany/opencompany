@@ -56,6 +56,14 @@ export function parseGoatAttioScopes(value: unknown): string[] {
   return [...new Set(values.map((scope) => scope.trim()).filter(Boolean))].sort();
 }
 
+export function hasGoatAttioListReadScopes(scopes: readonly string[]) {
+  const canReadListConfiguration =
+    scopes.includes("list_configuration:read") || scopes.includes("list_configuration:read-write");
+  const canReadListEntries =
+    scopes.includes("list_entry:read") || scopes.includes("list_entry:read-write");
+  return canReadListConfiguration && canReadListEntries;
+}
+
 // Attio publishes no key format; only reject strings that are clearly not a
 // pasted key (whitespace, absurd lengths) and let the API call be the judge.
 export function isValidAttioApiKey(apiKey: string) {

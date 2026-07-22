@@ -37,6 +37,10 @@ const CONTEXT: GoatActionExecuteContext = {
 };
 
 const READ_SCOPES = ["object_configuration:read", "record_permission:read"];
+const LIST_READ_SCOPES = ["list_configuration:read", "list_entry:read"];
+const LIST_ID = "33ebdbe9-e529-47c9-b894-0ba25e9c15c0";
+const VIEW_ID = "cf7aaeb5-7507-4a84-9c26-9d36e34d7b70";
+const LIST_URL = `https://app.attio.com/acme/collection/${LIST_ID}/view/${VIEW_ID}`;
 
 beforeEach(() => {
   mocks.dbRows = [connectedRow()];
@@ -62,7 +66,7 @@ describe("resolveAttioActions", () => {
     expect(await resolveAttioActions("user_1")).toBeNull();
   });
 
-  it("exposes strict read-only search and record-detail descriptors", async () => {
+  it("exposes strict read-only record search and detail descriptors", async () => {
     const catalog = await resolveAttioActions("user_1");
     expect(catalog).toMatchObject({
       id: "attio",
@@ -88,9 +92,8 @@ describe("resolveAttioActions", () => {
         },
       ],
     });
-    const search = catalog?.actions.find((action) => action.id === "attio.search_records");
-    expect(search?.description).toContain("call attio.get_record");
-    expect(search?.params.properties).toMatchObject({
+    const schema = catalog?.actions[0]?.params;
+    expect(schema?.properties).toMatchObject({
       query: { type: "string", minLength: 1, maxLength: 256 },
       objects: {
         type: "array",
@@ -101,21 +104,44 @@ describe("resolveAttioActions", () => {
       },
       limit: { type: "integer", minimum: 1, maximum: 10 },
     });
-    expect(search?.params.properties).not.toHaveProperty("account");
-    const getRecord = catalog?.actions.find((action) => action.id === "attio.get_record");
-    expect(getRecord?.params.properties).toMatchObject({
-      object: { type: "string", enum: ["people", "companies", "deals"] },
-      record_id: { type: "string", minLength: 1, maxLength: 200 },
-    });
+    expect(schema?.properties).not.toHaveProperty("account");
     expect(catalog?.actions.every((action) => !/create|update|delete|write/.test(action.id))).toBe(
       true,
     );
+    expect(catalog?.actions).not.toContainEqual(
+      expect.objectContaining({ id: "attio.query_list" }),
+    );
+    expect(mocks.loadCredential).not.toHaveBeenCalled();
+  });
+
+  it("only exposes list reads when the key has both list read scopes", async () => {
+    mocks.dbRows = [connectedRow({ scopes: [...READ_SCOPES, ...LIST_READ_SCOPES] })];
+
+    const catalog = await resolveAttioActions("user_1");
+    const action = catalog?.actions.find((entry) => entry.id === "attio.query_list");
+
+    expect(action).toMatchObject({
+      id: "attio.query_list",
+      provider: "attio",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["list"],
+        properties: {
+          list: { type: "string", maxLength: 2000 },
+          view: { type: "string", maxLength: 2000 },
+          limit: { type: "integer", minimum: 1, maximum: 20 },
+          offset: { type: "integer", minimum: 0, maximum: 10000 },
+        },
+      },
+    });
+    expect(catalog?.description).toContain("read lists");
     expect(mocks.loadCredential).not.toHaveBeenCalled();
   });
 });
 
 describe("attio.search_records", () => {
-  it("searches available standard objects and returns real lean search records", async () => {
+  it("searches available standard objects and returns compact, bounded records", async () => {
     const providerRecords = [
       {
         id: { object_id: "object_people", record_id: "person_1" },
@@ -125,22 +151,38 @@ describe("attio.search_records", () => {
         phone_numbers: ["+44 123"],
         web_url: "https://app.attio.com/acme/person/person_1",
         created_at: "2026-07-01T00:00:00.000Z",
+        values: {
+          name: [{ attribute_type: "personal-name", full_name: "Ada Lovelace" }],
+          description: [{ attribute_type: "text", value: "x".repeat(500) }],
+          unsafe_reference: [
+            { attribute_type: "record-reference", target_record_id: "private_record_id" },
+          ],
+          one: [{ value: "1" }],
+          two: [{ value: "2" }],
+          three: [{ value: "3" }],
+          four: [{ value: "4" }],
+          five: [{ value: "5" }],
+          six: [{ value: "6" }],
+          seven: [{ value: "7" }],
+          eight: [{ value: "8" }],
+          nine: [{ value: "9" }],
+        },
       },
       {
         id: { object_id: "object_companies", record_id: "company_0" },
         object_slug: "companies",
-        record_text: "Company 0",
         web_url: "javascript:alert(1)",
+        values: { name: [{ value: "Company 0" }] },
       },
       {
         id: { object_id: "custom_object", record_id: "custom_1" },
         object_slug: "custom_records",
-        record_text: "Must be dropped",
+        values: { name: [{ value: "Must be dropped" }] },
       },
       ...Array.from({ length: 4 }, (_, index) => ({
         id: { object_id: "object_companies", record_id: `company_${index + 1}` },
         object_slug: "companies",
-        record_text: `Company ${index + 1}`,
+        values: { name: [{ value: `Company ${index + 1}` }] },
       })),
     ];
     const fetchMock = vi.fn(async (...request: [RequestInfo | URL, RequestInit?]) => {
@@ -182,13 +224,17 @@ describe("attio.search_records", () => {
       title: "Ada Lovelace",
       url: "https://app.attio.com/acme/person/person_1",
       properties: {
+        name: "Ada Lovelace",
         email_addresses: "ada@example.com",
         phone_numbers: "+44 123",
       },
     });
-    expect(Object.keys(result.records[0]?.properties ?? {})).toHaveLength(2);
+    expect(result.records[0]?.properties.description).toHaveLength(200);
+    expect(result.records[0]?.properties).not.toHaveProperty("unsafe_reference");
+    expect(Object.keys(result.records[0]?.properties ?? {})).toHaveLength(8);
     expect(result.records[1]).not.toHaveProperty("url");
     expect(JSON.stringify(result)).not.toContain("attio_test_api_key");
+    expect(JSON.stringify(result)).not.toContain("private_record_id");
   });
 
   it("validates required, unknown, malformed, and unavailable parameters before the API call", async () => {
@@ -246,18 +292,7 @@ describe("attio.search_records", () => {
     );
   });
 
-  it("surfaces a bounded Attio provider reason", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse({ message: "Object not found", code: "not_found" }, 404)),
-    );
-
-    await expect(
-      findSearchAction().then((action) => action.execute({ query: "Ada" }, CONTEXT)),
-    ).rejects.toThrow("Attio API request failed (404): Object not found (not_found).");
-  });
-
-  it("falls back cleanly for non-JSON provider errors without exposing the body", async () => {
+  it("returns safe provider errors without exposing response bodies", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response("private provider payload", { status: 500 })),
@@ -330,6 +365,173 @@ describe("attio.search_records", () => {
     const pending = action.execute({ query: "Ada" }, { ...CONTEXT, signal: controller.signal });
     controller.abort(new Error("chat stopped"));
     await expect(pending).rejects.toThrow("chat stopped");
+  });
+});
+
+describe("attio.query_list", () => {
+  beforeEach(() => {
+    mocks.dbRows = [connectedRow({ scopes: [...READ_SCOPES, ...LIST_READ_SCOPES] })];
+  });
+
+  it("applies a saved view from a collection URL and hydrates parent records in a batch", async () => {
+    const fetchMock = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(request);
+      if (url === `https://api.attio.com/v2/lists/${LIST_ID}`) {
+        return jsonResponse({
+          data: {
+            id: { list_id: LIST_ID },
+            api_slug: "fundraising",
+            name: "Fundraising",
+            parent_object: ["companies"],
+          },
+        });
+      }
+      if (url === `https://api.attio.com/v2/lists/${LIST_ID}/entries/query`) {
+        return jsonResponse({
+          data: [
+            {
+              id: { entry_id: "entry_1" },
+              parent_record_id: "company_1",
+              parent_object: "companies",
+              created_at: "2026-07-20T00:00:00.000Z",
+              entry_values: {
+                status: [{ attribute_type: "status", status: { title: "Contacted" } }],
+                owner: [
+                  {
+                    attribute_type: "actor-reference",
+                    referenced_actor_id: "private_actor_id",
+                  },
+                ],
+              },
+            },
+            {
+              id: { entry_id: "entry_2" },
+              parent_record_id: "company_2",
+              parent_object: "companies",
+              entry_values: {
+                status: [{ attribute_type: "status", status: { title: "Interested" } }],
+              },
+            },
+          ],
+        });
+      }
+      if (url === "https://api.attio.com/v2/objects/companies/records/query") {
+        return jsonResponse({
+          data: [
+            {
+              id: { record_id: "company_2" },
+              web_url: "https://app.attio.com/acme/company/company_2",
+              values: { name: [{ attribute_type: "text", value: "Beta Ventures" }] },
+            },
+            {
+              id: { record_id: "company_1" },
+              web_url: "https://app.attio.com/acme/company/company_1",
+              values: {
+                name: [{ attribute_type: "text", value: "Acme Capital" }],
+                unsafe_reference: [
+                  { attribute_type: "record-reference", target_record_id: "private_record_id" },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected Attio request: ${url} ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = (await findListAction().then((action) =>
+      action.execute({ list: LIST_URL, limit: 2, offset: 3 }, CONTEXT),
+    )) as {
+      workspace: string;
+      list: { id: string; apiSlug: string; name: string; parentObjects: string[] };
+      view: { id: string };
+      entries: Array<{
+        id: string;
+        parent: { id: string; title: string; properties: Record<string, string> };
+        values: Record<string, string>;
+      }>;
+      hasMore: boolean;
+      nextOffset?: number;
+    };
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const entriesCall = fetchMock.mock.calls.find(([request]) =>
+      String(request).endsWith(`/lists/${LIST_ID}/entries/query`),
+    );
+    expect(entriesCall?.[1]).toMatchObject({ method: "POST", signal: CONTEXT.signal });
+    expect(JSON.parse(String(entriesCall?.[1]?.body))).toEqual({
+      filter_view_id: VIEW_ID,
+      limit: 2,
+      offset: 3,
+    });
+    const recordsCall = fetchMock.mock.calls.find(([request]) =>
+      String(request).endsWith("/objects/companies/records/query"),
+    );
+    expect(JSON.parse(String(recordsCall?.[1]?.body))).toEqual({
+      filter: { record_id: { $in: ["company_1", "company_2"] } },
+      limit: 2,
+    });
+    expect(result).toMatchObject({
+      workspace: "Acme",
+      list: {
+        id: LIST_ID,
+        apiSlug: "fundraising",
+        name: "Fundraising",
+        parentObjects: ["companies"],
+      },
+      view: { id: VIEW_ID },
+      entries: [
+        {
+          id: "entry_1",
+          parent: {
+            id: "company_1",
+            title: "Acme Capital",
+            properties: { name: "Acme Capital" },
+          },
+          values: { status: "Contacted" },
+        },
+        {
+          id: "entry_2",
+          parent: {
+            id: "company_2",
+            title: "Beta Ventures",
+            properties: { name: "Beta Ventures" },
+          },
+          values: { status: "Interested" },
+        },
+      ],
+      hasMore: true,
+      nextOffset: 5,
+    });
+    expect(JSON.stringify(result)).not.toContain("private_actor_id");
+    expect(JSON.stringify(result)).not.toContain("private_record_id");
+  });
+
+  it("rejects invalid list references and pagination before calling Attio", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const action = await findListAction();
+
+    await expect(action.execute({ list: "https://example.com/list" }, CONTEXT)).rejects.toThrow(
+      "secure app.attio.com",
+    );
+    await expect(
+      action.execute(
+        {
+          list: LIST_URL,
+          view: `https://app.attio.com/acme/collection/97052eb9-e65e-443f-a297-f2d9a4a7f795/view/${VIEW_ID}`,
+        },
+        CONTEXT,
+      ),
+    ).rejects.toThrow('The "view" URL must belong to the list');
+    await expect(action.execute({ list: LIST_ID, limit: 21 }, CONTEXT)).rejects.toThrow(
+      '"limit" must be an integer from 1 to 20',
+    );
+    await expect(action.execute({ list: LIST_ID, offset: 10_001 }, CONTEXT)).rejects.toThrow(
+      '"offset" must be an integer from 0 to 10000',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -413,6 +615,13 @@ async function findSearchAction() {
   const catalog = await resolveAttioActions("user_1");
   const action = catalog?.actions.find((entry) => entry.id === "attio.search_records");
   if (!action) throw new Error("missing attio.search_records");
+  return action;
+}
+
+async function findListAction() {
+  const catalog = await resolveAttioActions("user_1");
+  const action = catalog?.actions.find((entry) => entry.id === "attio.query_list");
+  if (!action) throw new Error("missing attio.query_list");
   return action;
 }
 

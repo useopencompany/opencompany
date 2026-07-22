@@ -170,6 +170,7 @@ export function AttioIntegrationSetup({
           <li>
             Create an integration and generate an access token with these scopes:{" "}
             <code>object_configuration:read</code>, <code>record_permission:read-write</code>,{" "}
+            <code>list_configuration:read</code>, <code>list_entry:read</code>,{" "}
             <code>note:read-write</code>, and <code>webhook:read-write</code>.
           </li>
           <li>Copy the token, paste it here, and save it.</li>
@@ -177,8 +178,8 @@ export function AttioIntegrationSetup({
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
           Saving the key registers an Attio webhook so new and updated people, companies, deals, and
-          notes flow into the brain as they happen. The same connection also lets Chat retrieve
-          those standard records and, when you explicitly ask, create one record or note per action.
+          notes flow into the brain as they happen. The same connection also lets Chat search those
+          standard records and read Attio lists, including a saved view shared as a collection URL.
         </p>
       </section>
     </div>
