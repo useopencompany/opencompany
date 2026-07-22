@@ -30,7 +30,7 @@ import {
 } from "@/lib/prompts";
 
 describe("runOpenCompanyChatAgent", () => {
-  it("instructs the model to delegate latest-email checks", async () => {
+  it("includes task fallback guidance for connected-account checks", async () => {
     const startTask = vi.fn();
 
     await runOpenCompanyChatAgent({

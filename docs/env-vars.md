@@ -209,7 +209,7 @@ Set these in the separate Vercel project for Goat:
 | `ELECTRIC_SOURCE_ID` / `ELECTRIC_SOURCE_SECRET` | Electric Cloud only | Electric Cloud source auth. |
 | `ELECTRIC_SECRET` / `ELECTRIC_TOKEN` | Self-hosted Electric only | Optional self-hosted Electric auth. |
 | `REDIS_URL` (or `KV_URL`) | No | Enables resumable Goat chat streams (`resumable-stream`): refreshes reattach to in-flight turns, disconnects no longer cancel generation, and the stop button cancels via `/api/chat/[sessionId]/stop`. Without it, chat still works; a mid-stream disconnect persists the partial response instead. |
-| `GOAT_CHAT_ACTIONS_KILL_SWITCH` | No | Set to `true` to globally disable Goat chat actions (the `list_actions`/`use_action` tools over Slack, Gmail, and Linear reads) for everyone, without a deploy rollback. Chat actions are otherwise on by default for connected integrations. |
+| `GOAT_CHAT_ACTIONS_KILL_SWITCH` | No | Set to `true` to globally disable Goat chat actions (the `list_actions`/`use_action` tools over Attio, Slack, Gmail, Google Calendar, Google Drive, and Linear reads) for everyone, without a deploy rollback. Chat actions are otherwise on by default for connected integrations. |
 | `SUPADATA_API_KEY` | No | Used by the runner's hosted YouTube tools (Supadata-backed). |
 | `GOAT_OBSERVABILITY_ENABLED` | No | Enables Goat OpenTelemetry traces and metrics when `true`, `1`, `on`, or `yes`. Missing or false disables the package. |
 | `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` | Required with Goat OTel | OTLP HTTP base endpoint for SigNoz, for example `https://ingest.<region>.signoz.cloud:443` or `http://signoz:4318`. |
