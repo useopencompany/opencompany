@@ -3,7 +3,16 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 import { useLiveQuery } from "@tanstack/react-db";
-import { createContext, type ReactNode, useContext, useMemo } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { GoatTaskView } from "@/components/GoatSurface";
 import { GOAT_PINNED_CHAT_LIMIT, type GoatChatSummaryView } from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
@@ -85,6 +94,9 @@ type GoatAppData = GoatAppInitialData & {
 const GOAT_ARCHIVED_CHAT_LIMIT = 50;
 
 const GoatAppDataContext = createContext<GoatAppData | null>(null);
+const subscribeToHydration = () => () => undefined;
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
 
 export function GoatAppDataProvider({
   initialData,
@@ -92,6 +104,49 @@ export function GoatAppDataProvider({
 }: {
   initialData: GoatAppInitialData;
   children: ReactNode;
+}) {
+  const initialValue = useMemo(() => initialGoatAppData(initialData), [initialData]);
+  const [liveSnapshot, setLiveSnapshot] = useState<{
+    initialData: GoatAppInitialData;
+    value: GoatAppData;
+  } | null>(null);
+  const updateLiveData = useCallback(
+    (value: GoatAppData) => setLiveSnapshot({ initialData, value }),
+    [initialData],
+  );
+  const value = liveSnapshot?.initialData === initialData ? liveSnapshot.value : initialValue;
+
+  return (
+    <GoatAppDataContext.Provider value={value}>
+      {children}
+      <GoatAppLiveDataSync initialData={initialData} onData={updateLiveData} />
+    </GoatAppDataContext.Provider>
+  );
+}
+
+function GoatAppLiveDataSync({
+  initialData,
+  onData,
+}: {
+  initialData: GoatAppInitialData;
+  onData: (value: GoatAppData) => void;
+}) {
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  );
+  return hydrated ? (
+    <GoatAppLiveDataSubscriptions initialData={initialData} onData={onData} />
+  ) : null;
+}
+
+function GoatAppLiveDataSubscriptions({
+  initialData,
+  onData,
+}: {
+  initialData: GoatAppInitialData;
+  onData: (value: GoatAppData) => void;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
   const { data: taskRows, isLoading: tasksLoading } = useLiveQuery(
@@ -265,7 +320,11 @@ export function GoatAppDataProvider({
     [archivedChats, initialData, integrations, recentChats, schedules, taskRows, tasks],
   );
 
-  return <GoatAppDataContext.Provider value={value}>{children}</GoatAppDataContext.Provider>;
+  // TanStack DB currently has no server snapshot for useLiveQuery. Keep its
+  // subscriptions in this post-hydration bridge while the outer provider
+  // serves the server snapshot immediately, without remounting app children.
+  useEffect(() => onData(value), [onData, value]);
+  return null;
 }
 
 export function useGoatAppData() {
@@ -278,6 +337,14 @@ export function useGoatAppData() {
 // the settings sidebar in isolated component tests).
 export function useGoatAppDataOptional() {
   return useContext(GoatAppDataContext);
+}
+
+function initialGoatAppData(initialData: GoatAppInitialData): GoatAppData {
+  return {
+    ...initialData,
+    taskRows: [],
+    archivedChats: [],
+  };
 }
 
 function taskRowToView(row: GoatTaskRow): GoatTaskView {
