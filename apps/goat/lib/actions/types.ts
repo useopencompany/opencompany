@@ -6,7 +6,8 @@ export type GoatActionProviderId =
   | "google_calendar"
   | "google_drive"
   | "linear"
-  | "attio";
+  | "attio"
+  | "github";
 
 export type GoatActionErrorCode =
   | "not_connected"

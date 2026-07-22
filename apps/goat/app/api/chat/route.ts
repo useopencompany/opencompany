@@ -215,7 +215,10 @@ export async function POST(request: Request): Promise<Response> {
   const actionsEnabled = !requestedEngine && !isGoatChatActionsKilled();
   const emptyCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
   const actionCatalog = actionsEnabled
-    ? await resolveGoatActionCatalog(context.user.workosUserId).catch((error) => {
+    ? await resolveGoatActionCatalog({
+        userWorkosId: context.user.workosUserId,
+        workspaceId: context.workspace.id,
+      }).catch((error) => {
         logger.warn("Goat chat action catalog resolution failed", {
           event: "goat.chat_action_catalog_resolution_failed",
           error,

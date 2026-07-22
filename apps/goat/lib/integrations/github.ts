@@ -34,6 +34,23 @@ export type GoatGitHubRepository = {
   private: boolean;
 };
 
+export type GoatGitHubConnectedInstallation = {
+  installationId: string;
+  accountName: string | null;
+};
+
+export class GoatGitHubApiError extends Error {
+  readonly status: number;
+  readonly operation: "installation_token" | "request";
+
+  constructor(status: number, operation: "installation_token" | "request" = "request") {
+    super(`GitHub API request failed with ${status}.`);
+    this.name = "GoatGitHubApiError";
+    this.status = status;
+    this.operation = operation;
+  }
+}
+
 export type GoatGitHubProviderState = {
   provider: "github";
   connected: boolean;
@@ -105,6 +122,31 @@ export async function getGoatGitHubIntegrationState(
     accountName: row.accountName,
     statusReason: row.statusReason,
   };
+}
+
+export async function listConnectedGoatGitHubInstallations(
+  workspaceId: string,
+): Promise<GoatGitHubConnectedInstallation[]> {
+  const rows = await getDb()
+    .select({
+      installationId: goatIntegrations.externalId,
+      accountName: goatIntegrations.accountName,
+      status: goatIntegrations.status,
+    })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.workspaceId, workspaceId),
+        eq(goatIntegrations.provider, GITHUB_PROVIDER),
+      ),
+    )
+    .orderBy(desc(goatIntegrations.updatedAt));
+
+  return rows.flatMap((row) => {
+    const installationId = row.installationId?.trim();
+    if (row.status !== "connected" || !installationId) return [];
+    return [{ installationId, accountName: row.accountName }];
+  });
 }
 
 export function isGoatGitHubIntegrationConfigured() {
@@ -222,23 +264,29 @@ export async function getGoatGitHubInstallation(input: { installationId: string 
   });
 }
 
-export async function listGoatGitHubInstallationRepositories(input: { installationId: string }) {
-  const token = await getGoatGitHubInstallationToken(input.installationId);
+export async function listGoatGitHubInstallationRepositories(input: {
+  installationId: string;
+  signal?: AbortSignal;
+}) {
+  const token = await getGoatGitHubInstallationToken(input.installationId, input.signal);
   const repositories = await githubPaginatedRequest<GitHubInstallationRepositories, GitHubRepo>({
     token,
     path: "/installation/repositories",
     pickItems: (page) => page.repositories ?? [],
+    ...(input.signal ? { signal: input.signal } : {}),
   });
 
   return repositories.map(toGoatGitHubRepository);
 }
 
-export async function getGoatGitHubInstallationToken(installationId: string) {
+export async function getGoatGitHubInstallationToken(installationId: string, signal?: AbortSignal) {
   const result = await githubRequest<{ token?: string }>({
     token: createAppJwt(),
     authScheme: "Bearer",
     path: `/app/installations/${installationId}/access_tokens`,
     method: "POST",
+    operation: "installation_token",
+    ...(signal ? { signal } : {}),
   });
 
   if (!result.token) {
@@ -246,6 +294,22 @@ export async function getGoatGitHubInstallationToken(installationId: string) {
   }
 
   return result.token;
+}
+
+export async function searchGoatGitHubIssues(input: {
+  installationId: string;
+  query: string;
+  limit: number;
+  signal: AbortSignal;
+}): Promise<unknown> {
+  const token = await getGoatGitHubInstallationToken(input.installationId, input.signal);
+  const search = new URLSearchParams({ q: input.query, per_page: String(input.limit) });
+  return githubRequest<unknown>({
+    token,
+    path: `/search/issues?${search.toString()}`,
+    method: "GET",
+    signal: input.signal,
+  });
 }
 
 export async function syncGoatGitHubIntegrationRepositories(input: {
@@ -427,6 +491,8 @@ async function githubRequest<T>(input: {
   path: string;
   method: "GET" | "POST";
   authScheme?: "Bearer" | "token";
+  signal?: AbortSignal;
+  operation?: "installation_token" | "request";
 }): Promise<T> {
   const response = await fetch(`https://api.github.com${input.path}`, {
     method: input.method,
@@ -436,10 +502,11 @@ async function githubRequest<T>(input: {
       "Content-Type": "application/json",
       "X-GitHub-Api-Version": "2022-11-28",
     },
+    ...(input.signal ? { signal: input.signal } : {}),
   });
 
   if (!response.ok) {
-    throw new Error(`GitHub API request failed with ${response.status}: ${await response.text()}`);
+    throw new GoatGitHubApiError(response.status, input.operation);
   }
 
   return (await response.json()) as T;
@@ -450,6 +517,7 @@ async function githubPaginatedRequest<TPage, TItem>(input: {
   path: string;
   authScheme?: "Bearer" | "token";
   pickItems: (page: TPage) => TItem[];
+  signal?: AbortSignal;
 }) {
   const items: TItem[] = [];
   let page = 1;
@@ -461,6 +529,7 @@ async function githubPaginatedRequest<TPage, TItem>(input: {
       path: `${input.path}${separator}per_page=100&page=${page}`,
       method: "GET",
       ...(input.authScheme ? { authScheme: input.authScheme } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
     });
     const pageItems = input.pickItems(result);
     items.push(...pageItems);

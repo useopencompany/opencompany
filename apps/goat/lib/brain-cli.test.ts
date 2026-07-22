@@ -381,7 +381,7 @@ describe("read plane commands", () => {
     expect(output.stdout).toContain("Linked: → works_at acme (Acme, page/company)");
     expect(output.stdout).toContain("→ cites ev-acme-email (Acme email, evidence/source)");
     expect(output.stdout).toContain("Next: get ada");
-    expect(output.parsed).toEqual({ hits: [HIT] });
+    expect(output.parsed).toEqual({ hits: [HIT], mode: "search" });
     expect(output.traceId).toMatch(/^goat_brain_run_/);
     expect(dbMocks.insert).toHaveBeenCalledWith(goatBrainToolRuns);
     expect(dbMocks.insertValues).toHaveBeenCalledWith(
@@ -478,7 +478,7 @@ describe("read plane commands", () => {
     expect(output.stdout).toContain("Not found: ghost");
   });
 
-  it("fails get when nothing resolves", async () => {
+  it("fails get with a surface-neutral message and no write-command manual", async () => {
     vi.mocked(getGoatBrainDocuments).mockResolvedValue({ documents: [], missing: ["ghost"] });
 
     const output = await runGoatBrainToolForUser({
@@ -488,6 +488,28 @@ describe("read plane commands", () => {
 
     expect(output.ok).toBe(false);
     expect(output.error).toContain('No brain doc found with id "ghost"');
+    expect(output.error).toContain("Search for it to find the right id.");
+    // Read errors no longer append the CLI manual (which documents create/rewrite/merge/delete).
+    expect(output.error).not.toContain("append-evidence");
+    expect(output.error).not.toContain("Use goat_brain as { command, flags, stdin? }");
+  });
+
+  it("marks a recency-only browse as mode: browse and threads verbosity flags", async () => {
+    vi.mocked(searchGoatBrain).mockResolvedValue([]);
+
+    const output = await runGoatBrainToolForUser({
+      ...BASE_INPUT,
+      toolInput: {
+        command: "query",
+        flags: { since: "2d", includeNeighbors: false, snippetChars: 150 },
+      },
+    });
+
+    expect(searchGoatBrain).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ since: "2d", includeNeighbors: false, snippetChars: 150 }),
+    );
+    expect(output.parsed).toEqual({ hits: [], mode: "browse" });
   });
 
   it("serves timeline and list from the read module", async () => {

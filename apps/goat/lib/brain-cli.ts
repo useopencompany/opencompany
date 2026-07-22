@@ -321,7 +321,9 @@ async function runGoatBrainReadCommandForUser(
       stderr: "",
       command: resolved.display,
       argv: resolved.argv,
-      error: `${errorMessage(error)}\n\n${GOAT_BRAIN_TOOL_HELP}`,
+      // Read errors return just the message: GOAT_BRAIN_TOOL_HELP documents write commands
+      // (create/rewrite/merge/delete…) the read surface cannot call, so appending it here misleads.
+      error: errorMessage(error),
     };
   }
 
@@ -364,20 +366,27 @@ async function executeGoatBrainReadCommand(
       const since = flagString(flags.since);
       const limit = flagNumber(flags.limit);
       const hops = flagNumber(flags.hops);
+      const includeNeighbors = flagBoolean(flags["include-neighbors"]);
+      const snippetChars = flagNumber(flags["snippet-chars"]);
+      const text = flagString(flags.text) ?? "";
       const hits = await searchGoatBrain(ctx, {
-        text: flagString(flags.text) ?? "",
+        text,
         ...(folder ? { folder: normalizeGoatBrainFolderForV1(folder) } : {}),
         ...(type ? { type } : {}),
         ...(kind ? { kind: kind as GoatBrainKind } : {}),
         ...(since ? { since } : {}),
         ...(limit !== undefined ? { limit } : {}),
         ...(hops !== undefined ? { hops: Math.max(0, hops) } : {}),
+        ...(includeNeighbors !== undefined ? { includeNeighbors } : {}),
+        ...(snippetChars !== undefined ? { snippetChars } : {}),
         ...(flagBoolean(flags["lexical-only"]) ? { lexicalOnly: true } : {}),
         ...(flagBoolean(flags["include-merged"]) ? { includeMerged: true } : {}),
         ...(flagBoolean(flags["include-archived"]) ? { includeArchived: true } : {}),
         ...(flagBoolean(flags["include-conflicts"]) ? { includeConflicts: true } : {}),
       });
-      return { stdout: renderQueryHits(hits), parsed: { hits } };
+      // `mode` distinguishes a relevance-ranked search from a recency-ordered browse (no query),
+      // where score reflects freshness only.
+      return { stdout: renderQueryHits(hits), parsed: { hits, mode: text ? "search" : "browse" } };
     }
     case "get": {
       const ids = flagStringList(flags.id);
@@ -389,7 +398,7 @@ async function executeGoatBrainReadCommand(
       const result = await getGoatBrainDocuments(ctx, ids);
       if (result.documents.length === 0) {
         throw new Error(
-          `No brain doc found with id ${ids.map((id) => `"${id}"`).join(", ")}. Try query to locate it.`,
+          `No brain doc found with id ${ids.map((id) => `"${id}"`).join(", ")}. Search for it to find the right id.`,
         );
       }
       return {
@@ -406,7 +415,8 @@ async function executeGoatBrainReadCommand(
         ...(since ? { since } : {}),
         ...(limit !== undefined ? { limit } : {}),
       });
-      if (!result) throw new Error(`No brain doc found with id "${id}". Try query to locate it.`);
+      if (!result)
+        throw new Error(`No brain doc found with id "${id}". Search for it to find the right id.`);
       const stdout = result.entries.length
         ? result.entries
             .map((entry) =>
@@ -653,6 +663,8 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "since",
     "limit",
     "hops",
+    "include-neighbors",
+    "snippet-chars",
     // Accepted for compatibility with existing model habits; the read plane ignores them
     // (expansion is always both-direction, and stored documents are valid by construction).
     "graph-direction",
