@@ -911,7 +911,6 @@ export async function setGoatBrainAttioSourceAction(input: {
   enabled: boolean;
   objectTypes: GoatAttioObjectTypeRef[];
   events: GoatAttioEventRef[];
-  includeSystemUpdates?: boolean;
 }): Promise<GoatWorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
@@ -938,7 +937,6 @@ export async function setGoatBrainAttioSourceAction(input: {
       config: {
         objectTypes: sanitizeAttioObjectTypeRefs(input.objectTypes),
         events: sanitizeAttioEventRefs(input.events),
-        includeSystemUpdates: input.includeSystemUpdates === true,
       },
     });
 

@@ -1867,10 +1867,6 @@ function attioEventsFromConfig(config: Record<string, unknown> | undefined): Att
   return [...seen];
 }
 
-function attioIncludesSystemUpdates(config: Record<string, unknown> | undefined) {
-  return config?.includeSystemUpdates === true;
-}
-
 function AttioObjectPicker({
   brainRef,
   integrationId,
@@ -1888,9 +1884,6 @@ function AttioObjectPicker({
   const [selection, setSelection] = useState<Set<AttioObjectSelection>>(() => new Set(saved));
   const [eventSelection, setEventSelection] = useState<Set<AttioEventSelection>>(
     () => new Set(savedEvents),
-  );
-  const [includeSystemUpdates, setIncludeSystemUpdates] = useState(() =>
-    attioIncludesSystemUpdates(source?.config),
   );
   const [dirty, setDirty] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -1929,7 +1922,6 @@ function AttioObjectPicker({
         enabled: source ? source.enabled : true,
         objectTypes: [...selection].map((id) => ({ id })),
         events: [...eventSelection].map((id) => ({ id })),
-        includeSystemUpdates: eventSelection.has("object_updated") && includeSystemUpdates,
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -2013,27 +2005,10 @@ function AttioObjectPicker({
             </label>
           ))}
         </div>
-        {eventSelection.has("object_updated") ? (
-          <label className="mx-1 mb-1 flex cursor-pointer items-start gap-2 rounded-md bg-surface-muted px-2 py-1.5 text-[12px] leading-4 text-ink-muted">
-            <input
-              type="checkbox"
-              checked={includeSystemUpdates}
-              onChange={(event) => {
-                setDirty(true);
-                setIncludeSystemUpdates(event.target.checked);
-              }}
-              className="mt-0.5 accent-ink"
-            />
-            <span>
-              Include Attio automation and system updates. This can create high-volume activity when
-              Attio recalculates CRM fields.
-            </span>
-          </label>
-        ) : null}
       </div>
       <p className="text-[11.5px] leading-4 text-ink-subtle">
         Selected Attio CRM activity is ingested into this brain and visible to everyone with access
-        to it. Unnamed records and system updates are excluded by default.
+        to it. Unnamed records and system updates are always excluded.
       </p>
       {dirty ? (
         <div className="flex justify-end">
