@@ -1,5 +1,7 @@
 import { convertToModelMessages, streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
+import { executeGoatAction } from "@/lib/actions/execute";
 import { currentGoatUser } from "@/lib/auth";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
@@ -8,11 +10,6 @@ import {
   GoatBrainSkillMentionError,
   resolveGoatBrainSkillMentions,
 } from "@/lib/brain-skills";
-import {
-  isGoatChatCapabilitiesKilled,
-  resolveGoatCapabilityUniverse,
-} from "@/lib/capabilities/registry";
-import { runGoatCapabilityWorker } from "@/lib/capabilities/worker";
 import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
@@ -21,10 +18,11 @@ import {
   EDIT_TASK_SCHEDULE_TOOL_NAME,
   GOAT_BRAIN_TOOL_NAME,
   GOAT_BRAIN_TOOL_PART_TYPE,
+  LIST_ACTIONS_TOOL_NAME,
   SAVE_TO_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
   START_TASK_TOOL_NAME,
-  USE_CAPABILITY_TOOL_NAME,
+  USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
@@ -87,13 +85,13 @@ vi.mock("@/lib/task-schedules", () => ({
   updateGoatTaskScheduleAction: vi.fn(),
 }));
 
-vi.mock("@/lib/capabilities/registry", () => ({
-  isGoatChatCapabilitiesKilled: vi.fn(),
-  resolveGoatCapabilityUniverse: vi.fn(),
+vi.mock("@/lib/actions/catalog", () => ({
+  isGoatChatActionsKilled: vi.fn(),
+  resolveGoatActionCatalog: vi.fn(),
 }));
 
-vi.mock("@/lib/capabilities/worker", () => ({
-  runGoatCapabilityWorker: vi.fn(),
+vi.mock("@/lib/actions/execute", () => ({
+  executeGoatAction: vi.fn(),
 }));
 
 vi.mock("ai", () => ({
@@ -114,8 +112,8 @@ describe("POST /api/chat", () => {
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "test-key");
     mockListCurrentUserGoatTaskSchedules().mockResolvedValue([]);
     mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
-    mockIsGoatChatCapabilitiesKilled().mockReturnValue(false);
-    mockResolveGoatCapabilityUniverse().mockResolvedValue([]);
+    mockIsGoatChatActionsKilled().mockReturnValue(false);
+    mockResolveGoatActionCatalog().mockResolvedValue({ providers: [], actions: [] });
     vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([]);
     vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([]);
   });
@@ -155,94 +153,64 @@ describe("POST /api/chat", () => {
     await expect(response.text()).resolves.toContain("Messages can be at most");
   });
 
-  it("does not resolve or expose capabilities when the beta is disabled", async () => {
-    mockAuth({ chatCapabilitiesBetaEnabled: false });
+  it("resolves the action catalog for every non-engine request without a beta flag", async () => {
+    mockAuth();
     mockCreateTurn();
+    mockResolveGoatActionCatalog().mockResolvedValue(sampleActionCatalog());
     mockStreamText().mockImplementation((options: unknown) => {
-      expect(
-        (options as { tools?: Record<string, unknown> }).tools?.[USE_CAPABILITY_TOOL_NAME],
-      ).toBeUndefined();
+      const tools = (options as { tools?: Record<string, unknown> }).tools ?? {};
+      expect(tools[LIST_ACTIONS_TOOL_NAME]).toBeDefined();
+      expect(tools[USE_ACTION_TOOL_NAME]).toBeDefined();
       return {
         toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
       } as never;
     });
 
-    const response = await POST(validChatRequest("Read Attio"));
+    const response = await POST(validChatRequest("What's new in #general?"));
     expect(response.status).toBe(200);
-    expect(resolveGoatCapabilityUniverse).not.toHaveBeenCalled();
+    expect(resolveGoatActionCatalog).toHaveBeenCalledWith("user_1");
   });
 
-  it("honors the capability kill switch even when the beta is enabled", async () => {
-    mockAuth({ chatCapabilitiesBetaEnabled: true });
-    mockIsGoatChatCapabilitiesKilled().mockReturnValue(true);
+  it("honors the actions kill switch", async () => {
+    mockAuth();
+    mockIsGoatChatActionsKilled().mockReturnValue(true);
     mockCreateTurn();
-    mockStreamText().mockReturnValue({
-      toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
-    } as never);
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tools = (options as { tools?: Record<string, unknown> }).tools ?? {};
+      expect(tools[LIST_ACTIONS_TOOL_NAME]).toBeUndefined();
+      expect(tools[USE_ACTION_TOOL_NAME]).toBeUndefined();
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
 
-    const response = await POST(validChatRequest("Read Attio"));
+    const response = await POST(validChatRequest("What's new in #general?"));
     expect(response.status).toBe(200);
-    expect(resolveGoatCapabilityUniverse).not.toHaveBeenCalled();
+    expect(resolveGoatActionCatalog).not.toHaveBeenCalled();
   });
 
-  it("forwards capability operations and persists worker debug metadata", async () => {
-    mockAuth({ chatCapabilitiesBetaEnabled: true });
+  it("forwards use_action calls to the executor and returns its result", async () => {
+    mockAuth();
     mockCreateTurn();
     mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
-    const capability = {
-      id: "attio" as const,
-      operations: ["read", "create"] as const,
-      workerModel: "openai/gpt-5.4-mini" as const,
-      indexLine: "attio — CAN read and explicitly create one item.",
-      recipeLines: ["Use typed tools."],
-      createTools: vi.fn(),
-    };
-    mockResolveGoatCapabilityUniverse().mockResolvedValue([capability]);
-    mockRunGoatCapabilityWorker().mockResolvedValue({
-      envelope: {
-        summary: "Created Ada Lovelace.",
-        entities: [
-          {
-            type: "attio_record",
-            id: "people:rec_ada",
-            url: "https://app.attio.com/acme/people/rec_ada",
-            title: "Ada Lovelace",
-          },
-        ],
-      },
-      debug: {
-        capability: "attio",
-        operation: "create",
-        workerModel: "openai/gpt-5.4-mini",
-        steps: 1,
-        durationMs: 25,
-        outcome: "success",
-        transcript: [
-          {
-            tool: "attio_create_person",
-            durationMs: 10,
-            inputPreview: '{"fullName":"Ada Lovelace"}',
-            outputPreview: '{"id":"rec_ada"}',
-          },
-        ],
-      },
-      usage: emptyUsage(),
+    const catalog = sampleActionCatalog();
+    mockResolveGoatActionCatalog().mockResolvedValue(catalog);
+    mockExecuteGoatAction().mockResolvedValue({
+      ok: true,
+      action: "slack.fetch_history",
+      result: { messages: [{ ts: "1.0", text: "hello" }] },
     });
-    let capabilityOutput: unknown;
+    let actionOutput: unknown;
     mockStreamText().mockImplementation((options: unknown) => {
-      const capabilityTool = (options as { tools?: Record<string, { execute?: unknown }> }).tools?.[
-        USE_CAPABILITY_TOOL_NAME
+      const actionTool = (options as { tools?: Record<string, { execute?: unknown }> }).tools?.[
+        USE_ACTION_TOOL_NAME
       ];
-      if (typeof capabilityTool?.execute !== "function") {
-        throw new Error("use_capability was not configured.");
+      if (typeof actionTool?.execute !== "function") {
+        throw new Error("use_action was not configured.");
       }
-      const execution = capabilityTool.execute(
-        {
-          capability: "attio",
-          operation: "create",
-          request: "Create a person named Ada Lovelace with email ada@example.com.",
-        },
-        { toolCallId: "cap_call_1", messages: [] },
+      const execution = actionTool.execute(
+        { action: "slack.fetch_history", params: { channel: "C123" } },
+        { toolCallId: "action_call_1", messages: [] },
       ) as Promise<unknown>;
       return {
         toUIMessageStreamResponse: vi.fn(
@@ -257,12 +225,12 @@ describe("POST /api/chat", () => {
               isAborted: boolean;
             }) => Promise<void>;
           }) => {
-            capabilityOutput = await execution;
+            actionOutput = await execution;
             await responseOptions.onFinish({
               responseMessage: {
                 id: "assistant_1",
                 role: "assistant",
-                parts: [{ type: "text", text: "Created Ada Lovelace." }],
+                parts: [{ type: "text", text: "The latest message is hello." }],
               },
               finishReason: "stop",
               isAborted: false,
@@ -273,31 +241,22 @@ describe("POST /api/chat", () => {
       } as never;
     });
 
-    const response = await POST(validChatRequest("Create Ada Lovelace in Attio"));
+    const response = await POST(validChatRequest("What's new in #general?"));
     expect(response.status).toBe(200);
-    expect(resolveGoatCapabilityUniverse).toHaveBeenCalledWith("user_1");
-    expect(runGoatCapabilityWorker).toHaveBeenCalledWith(
+    expect(executeGoatAction).toHaveBeenCalledWith(
       expect.objectContaining({
-        capability,
-        operation: "create",
-        request: "Create a person named Ada Lovelace with email ada@example.com.",
+        catalog,
+        actionId: "slack.fetch_history",
+        params: { channel: "C123" },
+        userWorkosId: "user_1",
       }),
     );
-    expect(capabilityOutput).toEqual(
-      expect.objectContaining({ capability: "attio", summary: "Created Ada Lovelace." }),
+    expect(actionOutput).toEqual(
+      expect.objectContaining({ ok: true, action: "slack.fetch_history" }),
     );
     expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        debugTrace: expect.objectContaining({
-          capabilityCalls: [
-            expect.objectContaining({
-              toolCallId: "cap_call_1",
-              capability: "attio",
-              operation: "create",
-              outcome: "success",
-            }),
-          ],
-        }),
+        content: "The latest message is hello.",
       }),
       expect.anything(),
     );
@@ -1455,7 +1414,6 @@ function mockAuth(
     timezone: string;
     taskSpawningEnabled: boolean;
     role: "admin" | "member";
-    chatCapabilitiesBetaEnabled: boolean;
   }> = {},
 ) {
   const user = {
@@ -1479,7 +1437,7 @@ function mockAuth(
       timezone: user.timezone,
       taskSpawningEnabled: overrides.taskSpawningEnabled ?? true,
       localCodexBetaEnabled: false,
-      chatCapabilitiesBetaEnabled: overrides.chatCapabilitiesBetaEnabled ?? false,
+      chatCapabilitiesBetaEnabled: false,
       onboardedAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1585,16 +1543,37 @@ function mockStreamText() {
   return vi.mocked(streamText);
 }
 
-function mockResolveGoatCapabilityUniverse() {
-  return vi.mocked(resolveGoatCapabilityUniverse);
+function mockResolveGoatActionCatalog() {
+  return vi.mocked(resolveGoatActionCatalog);
 }
 
-function mockIsGoatChatCapabilitiesKilled() {
-  return vi.mocked(isGoatChatCapabilitiesKilled);
+function mockIsGoatChatActionsKilled() {
+  return vi.mocked(isGoatChatActionsKilled);
 }
 
-function mockRunGoatCapabilityWorker() {
-  return vi.mocked(runGoatCapabilityWorker);
+function mockExecuteGoatAction() {
+  return vi.mocked(executeGoatAction);
+}
+
+function sampleActionCatalog() {
+  return {
+    providers: [
+      {
+        id: "slack" as const,
+        label: 'Slack workspace "Acme"',
+        description: "Read conversations, messages, threads, and workspace members.",
+      },
+    ],
+    actions: [
+      {
+        id: "slack.fetch_history",
+        provider: "slack" as const,
+        description: "Fetch recent messages from one Slack conversation.",
+        params: { type: "object" as const, properties: {} },
+        execute: vi.fn(),
+      },
+    ],
+  };
 }
 
 function validChatRequest(text: string) {
@@ -1606,14 +1585,4 @@ function validChatRequest(text: string) {
       parts: [{ type: "text", text }],
     },
   });
-}
-
-function emptyUsage() {
-  return {
-    inputTokens: 0,
-    inputTokenDetails: { noCacheTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
-    outputTokens: 0,
-    outputTokenDetails: { textTokens: 0, reasoningTokens: 0 },
-    totalTokens: 0,
-  };
 }

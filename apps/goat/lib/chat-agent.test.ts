@@ -1,19 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createOpenCompanyChatToolContext,
-  MAX_CAPABILITY_CALLS_PER_TURN,
+  MAX_ACTION_CALLS_PER_TURN,
   runOpenCompanyChatAgent,
 } from "@/lib/chat-agent";
 import {
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainToolInput,
+  type GoatChatActionCatalog,
+  LIST_ACTIONS_TOOL_NAME,
+  type ListActionsToolInput,
+  type ListActionsToolOutput,
   SAVE_TO_BRAIN_TOOL_NAME,
   type SaveToBrainToolInput,
   type SaveToBrainToolOutput,
   START_TASK_TOOL_NAME,
-  USE_CAPABILITY_TOOL_NAME,
-  type UseCapabilityToolInput,
-  type UseCapabilityToolOutput,
+  USE_ACTION_TOOL_NAME,
+  type UseActionToolInput,
+  type UseActionToolOutput,
   WEB_SEARCH_TOOL_NAME,
   type WebSearchToolInput,
   type WebSearchToolOutput,
@@ -647,137 +651,146 @@ describe("runOpenCompanyChatAgent", () => {
   });
 });
 
-describe("use_capability tool", () => {
-  const okEnvelope = (capability: string): UseCapabilityToolOutput => ({
-    capability,
-    summary: "found it",
-    entities: [],
+describe("list_actions and use_action tools", () => {
+  const catalog: GoatChatActionCatalog = {
+    providers: [
+      {
+        id: "slack",
+        label: 'Slack workspace "Acme"',
+        description: "Read Slack messages.",
+      },
+      {
+        id: "linear",
+        label: "Linear workspace",
+        description: "Read Linear records.",
+      },
+    ],
+    actions: [
+      {
+        id: "slack.fetch_history",
+        provider: "slack",
+        description: "Fetch recent messages from one Slack conversation.",
+        params: { type: "object", properties: { channel: { type: "string" } } },
+      },
+      {
+        id: "linear.list_issues",
+        provider: "linear",
+        description: "List Linear issues.",
+        params: { type: "object", properties: {} },
+      },
+    ],
+  };
+  const okResult = (action: string): UseActionToolOutput => ({
+    ok: true,
+    action,
+    result: { messages: [] },
   });
 
-  it("is absent without a capability universe", () => {
+  it("is absent without an action catalog", () => {
     const context = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
     });
-    expect(context.tools[USE_CAPABILITY_TOOL_NAME]).toBeUndefined();
+    expect(context.tools[LIST_ACTIONS_TOOL_NAME]).toBeUndefined();
+    expect(context.tools[USE_ACTION_TOOL_NAME]).toBeUndefined();
 
     const emptyContext = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
-      capabilities: { list: [], execute: vi.fn() },
+      actions: { catalog: { providers: [], actions: [] }, execute: vi.fn() },
     });
-    expect(emptyContext.tools[USE_CAPABILITY_TOOL_NAME]).toBeUndefined();
+    expect(emptyContext.tools[LIST_ACTIONS_TOOL_NAME]).toBeUndefined();
+    expect(emptyContext.tools[USE_ACTION_TOOL_NAME]).toBeUndefined();
   });
 
-  it("builds the capability enum from the resolved universe", () => {
+  it("builds integration and action enums and lists only the selected integration", async () => {
     const context = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
-      capabilities: {
-        list: [
-          { id: "slack", operations: ["read"] },
-          { id: "linear", operations: ["read", "write"] },
-          { id: "attio", operations: ["read", "create"] },
-        ],
-        execute: vi.fn(),
+      actions: { catalog, execute: vi.fn() },
+    });
+    expect(extractListActionsIntegrationEnum(context.tools)).toEqual(["slack", "linear"]);
+    expect(extractUseActionEnum(context.tools)).toEqual([
+      "slack.fetch_history",
+      "linear.list_issues",
+    ]);
+    const listed = await executeListActionsTool(context.tools, { integration: "slack" });
+    expect(listed).toEqual({
+      ok: true,
+      integration: catalog.providers[0],
+      actions: [catalog.actions[0]],
+    });
+
+    const listedLinear = await executeListActionsTool(context.tools, { integration: "linear" });
+    expect(listedLinear).toEqual({
+      ok: true,
+      integration: catalog.providers[1],
+      actions: [catalog.actions[1]],
+    });
+
+    const unknown = await executeListActionsTool(context.tools, {
+      integration: "mail",
+    } as unknown as ListActionsToolInput);
+    expect(unknown).toEqual({
+      ok: false,
+      error: {
+        code: "unknown_integration",
+        message: 'Unknown integration "mail". Use an exact id from <integrations>.',
+        availableIntegrations: ["slack", "linear"],
       },
     });
-    expect(extractUseCapabilityEnum(context.tools)).toEqual(["slack", "linear", "attio"]);
-    expect(extractUseCapabilityOperationEnum(context.tools)).toEqual(["read", "create", "write"]);
   });
 
   it("dispatches valid calls and steers invalid or over-budget ones", async () => {
-    const execute = vi.fn(async ({ capability }: { capability: string }) => okEnvelope(capability));
+    const execute = vi.fn(async ({ action }: { action: string }) => okResult(action));
     const context = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
-      capabilities: { list: [{ id: "slack", operations: ["read"] }], execute },
+      actions: { catalog, execute },
     });
 
-    const valid = await executeUseCapabilityTool(context.tools, {
-      capability: "slack",
-      operation: "read",
-      request: "Messages in #general since 2026-07-17.",
+    const valid = await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C123" },
     });
-    expect(valid.summary).toBe("found it");
+    expect(valid.ok).toBe(true);
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
-        capability: "slack",
-        operation: "read",
-        request: "Messages in #general since 2026-07-17.",
+        action: "slack.fetch_history",
+        params: { channel: "C123" },
       }),
     );
 
-    const unknown = await executeUseCapabilityTool(context.tools, {
-      capability: "github",
-      operation: "read",
-      request: "anything",
+    const unknown = await executeUseActionTool(context.tools, {
+      action: "github.list_repos",
+      params: {},
     });
-    expect(unknown.error?.code).toBe("invalid_request");
+    expect(unknown.ok).toBe(false);
+    if (!unknown.ok) {
+      expect(unknown.error.code).toBe("invalid_params");
+      expect(unknown.error.message).toContain("list_actions");
+    }
+    expect(execute).toHaveBeenCalledTimes(1);
 
-    const empty = await executeUseCapabilityTool(context.tools, {
-      capability: "slack",
-      operation: "read",
-      request: "   ",
-    });
-    expect(empty.error?.code).toBe("invalid_request");
+    // Missing params coerces to an empty object rather than failing.
+    await executeUseActionTool(context.tools, { action: "linear.list_issues" });
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "linear.list_issues", params: {} }),
+    );
 
-    for (let call = 1; call < MAX_CAPABILITY_CALLS_PER_TURN; call += 1) {
-      await executeUseCapabilityTool(context.tools, {
-        capability: "slack",
-        operation: "read",
-        request: `lookup ${call}`,
+    for (let call = 2; call < MAX_ACTION_CALLS_PER_TURN; call += 1) {
+      await executeUseActionTool(context.tools, {
+        action: "slack.fetch_history",
+        params: { channel: `C${call}` },
       });
     }
-    const overBudget = await executeUseCapabilityTool(context.tools, {
-      capability: "slack",
-      operation: "read",
-      request: "one too many",
+    const overBudget = await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "Cx" },
     });
-    expect(overBudget.error?.code).toBe("call_budget");
-    expect(execute).toHaveBeenCalledTimes(MAX_CAPABILITY_CALLS_PER_TURN);
-  });
-
-  it("dispatches mutations only to capabilities that advertise the operation", async () => {
-    const execute = vi.fn(async ({ capability }: { capability: string }) => okEnvelope(capability));
-    const context = createOpenCompanyChatToolContext({
-      model: DEFAULT_GOAT_MODEL,
-      runBrainCli: vi.fn(),
-      capabilities: {
-        list: [
-          { id: "attio", operations: ["read"] },
-          { id: "slack", operations: ["read"] },
-          { id: "linear", operations: ["read", "write"] },
-        ],
-        execute,
-      },
-    });
-
-    const rejectedCreate = await executeUseCapabilityTool(context.tools, {
-      capability: "attio",
-      operation: "create",
-      request: "Create a person named Ada Lovelace.",
-    });
-    expect(rejectedCreate.error?.code).toBe("invalid_request");
-    expect(rejectedCreate.error?.hint).toContain("does not permit create");
-
-    const rejectedWrite = await executeUseCapabilityTool(context.tools, {
-      capability: "slack",
-      operation: "write",
-      request: "Post hello in #general.",
-    });
-    expect(rejectedWrite.error?.code).toBe("invalid_request");
-    expect(execute).not.toHaveBeenCalled();
-
-    const created = await executeUseCapabilityTool(context.tools, {
-      capability: "linear",
-      operation: "write",
-      request: "Create an issue named Fix login in the Goat team.",
-    });
-    expect(created.summary).toBe("found it");
-    expect(execute).toHaveBeenCalledWith(
-      expect.objectContaining({ capability: "linear", operation: "write" }),
-    );
+    expect(overBudget.ok).toBe(false);
+    if (!overBudget.ok) expect(overBudget.error.code).toBe("call_budget");
+    expect(execute).toHaveBeenCalledTimes(MAX_ACTION_CALLS_PER_TURN);
   });
 });
 
@@ -888,42 +901,52 @@ async function executeWebSearchTool(options: unknown, input: WebSearchToolInput)
   return tool.execute(input);
 }
 
-function extractUseCapabilityEnum(tools: unknown) {
-  type CapabilitySchema = { properties?: { capability?: { enum?: string[] } } };
+function extractUseActionEnum(tools: unknown) {
+  type ActionSchema = { properties?: { action?: { enum?: string[] } } };
   type Tools = Record<
-    typeof USE_CAPABILITY_TOOL_NAME,
-    { inputSchema?: CapabilitySchema & { jsonSchema?: CapabilitySchema } }
+    typeof USE_ACTION_TOOL_NAME,
+    { inputSchema?: ActionSchema & { jsonSchema?: ActionSchema } }
   >;
-  const inputSchema = (tools as Tools)[USE_CAPABILITY_TOOL_NAME]?.inputSchema;
+  const inputSchema = (tools as Tools)[USE_ACTION_TOOL_NAME]?.inputSchema;
   return (
-    inputSchema?.properties?.capability?.enum ??
-    inputSchema?.jsonSchema?.properties?.capability?.enum ??
+    inputSchema?.properties?.action?.enum ?? inputSchema?.jsonSchema?.properties?.action?.enum ?? []
+  );
+}
+
+function extractListActionsIntegrationEnum(tools: unknown) {
+  type IntegrationSchema = { properties?: { integration?: { enum?: string[] } } };
+  type Tools = Record<
+    typeof LIST_ACTIONS_TOOL_NAME,
+    { inputSchema?: IntegrationSchema & { jsonSchema?: IntegrationSchema } }
+  >;
+  const inputSchema = (tools as Tools)[LIST_ACTIONS_TOOL_NAME]?.inputSchema;
+  return (
+    inputSchema?.properties?.integration?.enum ??
+    inputSchema?.jsonSchema?.properties?.integration?.enum ??
     []
   );
 }
 
-function extractUseCapabilityOperationEnum(tools: unknown) {
-  type CapabilitySchema = { properties?: { operation?: { enum?: string[] } } };
-  type Tools = Record<
-    typeof USE_CAPABILITY_TOOL_NAME,
-    { inputSchema?: CapabilitySchema & { jsonSchema?: CapabilitySchema } }
-  >;
-  const inputSchema = (tools as Tools)[USE_CAPABILITY_TOOL_NAME]?.inputSchema;
-  return (
-    inputSchema?.properties?.operation?.enum ??
-    inputSchema?.jsonSchema?.properties?.operation?.enum ??
-    []
-  );
-}
-
-async function executeUseCapabilityTool(
+async function executeListActionsTool(
   tools: unknown,
-  input: UseCapabilityToolInput,
-): Promise<UseCapabilityToolOutput> {
-  type Tools = Record<typeof USE_CAPABILITY_TOOL_NAME, { execute?: unknown }>;
-  const tool = (tools as Tools)[USE_CAPABILITY_TOOL_NAME];
+  input: ListActionsToolInput,
+): Promise<ListActionsToolOutput> {
+  type Tools = Record<typeof LIST_ACTIONS_TOOL_NAME, { execute?: unknown }>;
+  const tool = (tools as Tools)[LIST_ACTIONS_TOOL_NAME];
   if (typeof tool?.execute !== "function") {
-    throw new Error(`${USE_CAPABILITY_TOOL_NAME} execute function was not configured.`);
+    throw new Error(`${LIST_ACTIONS_TOOL_NAME} execute function was not configured.`);
+  }
+  return tool.execute(input, { toolCallId: "call_0", messages: [] });
+}
+
+async function executeUseActionTool(
+  tools: unknown,
+  input: UseActionToolInput,
+): Promise<UseActionToolOutput> {
+  type Tools = Record<typeof USE_ACTION_TOOL_NAME, { execute?: unknown }>;
+  const tool = (tools as Tools)[USE_ACTION_TOOL_NAME];
+  if (typeof tool?.execute !== "function") {
+    throw new Error(`${USE_ACTION_TOOL_NAME} execute function was not configured.`);
   }
   return tool.execute(input, { toolCallId: "call_1", messages: [] });
 }

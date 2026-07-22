@@ -25,6 +25,9 @@ import {
   streamText,
 } from "ai";
 import { after } from "next/server";
+import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
+import { executeGoatAction } from "@/lib/actions/execute";
+import type { GoatResolvedActionCatalog } from "@/lib/actions/types";
 import { currentGoatUser } from "@/lib/auth";
 import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
@@ -37,16 +40,6 @@ import {
   readGoatBrainSkillMentionRefs,
   resolveGoatBrainSkillMentions,
 } from "@/lib/brain-skills";
-import {
-  isGoatChatCapabilitiesKilled,
-  resolveGoatCapabilityUniverse,
-} from "@/lib/capabilities/registry";
-import type {
-  GoatCapabilityCallDebug,
-  GoatCapabilityOperation,
-  ResolvedGoatCapability,
-} from "@/lib/capabilities/types";
-import { runGoatCapabilityWorker } from "@/lib/capabilities/worker";
 import {
   createDbGoatChatStore,
   createGoatChatUserTurn,
@@ -85,7 +78,7 @@ import {
   type GoatChatUiMessage,
   replaceGoatChatUiMessageText,
   textFromGoatChatUiMessage,
-  type UseCapabilityToolOutput,
+  type UseActionToolOutput,
   type WebSearchToolInput,
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
@@ -215,22 +208,20 @@ export async function POST(request: Request): Promise<Response> {
   const canManageWorkspaceBrain = context.role === "admin";
   const taskToolsEnabled = context.user.taskSpawningEnabled && canManageWorkspaceBrain;
 
-  // Capability universe: resolved per request from real connection state, only
-  // when the beta flag is on and the kill switch is off. Flag off means zero
-  // extra queries and a byte-identical prompt and tool set.
-  const capabilitiesEnabled =
-    context.user.chatCapabilitiesBetaEnabled === true &&
-    !isGoatChatCapabilitiesKilled() &&
-    !requestedEngine;
-  const capabilityUniverse = capabilitiesEnabled
-    ? await resolveGoatCapabilityUniverse(context.user.workosUserId).catch((error) => {
-        logger.warn("Goat chat capability resolution failed", {
-          event: "goat.chat_capability_resolution_failed",
+  // Action catalog: resolved per request from real connection state. On by
+  // default for everyone; the env kill switch disables it without a deploy,
+  // and engine chats (Codex) never get chat actions.
+  const actionsEnabled = !requestedEngine && !isGoatChatActionsKilled();
+  const emptyCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
+  const actionCatalog = actionsEnabled
+    ? await resolveGoatActionCatalog(context.user.workosUserId).catch((error) => {
+        logger.warn("Goat chat action catalog resolution failed", {
+          event: "goat.chat_action_catalog_resolution_failed",
           error,
         });
-        return [] as ResolvedGoatCapability[];
+        return emptyCatalog;
       })
-    : [];
+    : emptyCatalog;
 
   const store = createDbGoatChatStore();
   const recurringSchedules = taskToolsEnabled ? await listCurrentUserGoatTaskSchedules() : [];
@@ -357,9 +348,6 @@ export async function POST(request: Request): Promise<Response> {
     }
   };
 
-  let capabilityCallOrdinal = 0;
-  const capabilityDebug: Array<GoatCapabilityCallDebug & { toolCallId: string }> = [];
-
   const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
     latestUserMessage: parsed.value.prompt,
@@ -464,60 +452,34 @@ export async function POST(request: Request): Promise<Response> {
             }),
         }
       : {}),
-    ...(capabilityUniverse.length > 0
+    ...(actionCatalog.actions.length > 0
       ? {
-          capabilities: {
-            list: capabilityUniverse.map((capability) => ({
-              id: capability.id,
-              operations: capability.operations,
-            })),
-            execute: (call) => {
-              capabilityCallOrdinal += 1;
-              const capability = capabilityUniverse.find((entry) => entry.id === call.capability);
-              if (!capability) {
-                return Promise.resolve({
-                  capability: call.capability,
-                  summary: "",
-                  entities: [],
-                  error: {
-                    code: "invalid_request" as const,
-                    hint: `"${call.capability}" is not an available capability.`,
-                  },
-                });
-              }
-              if (!capability.operations.includes(call.operation)) {
-                return Promise.resolve({
-                  capability: call.capability,
-                  summary: "",
-                  entities: [],
-                  error: {
-                    code: "invalid_request" as const,
-                    hint: `${call.capability} does not permit ${call.operation} operations for this connection.`,
-                  },
-                });
-              }
-              return executeChatCapabilityCall({
-                capability,
-                operation: call.operation,
-                request: call.request,
-                toolCallId: call.toolCallId,
-                ordinal: capabilityCallOrdinal,
-                gatewayApiKey,
+          actions: {
+            catalog: {
+              providers: actionCatalog.providers,
+              actions: actionCatalog.actions.map((action) => ({
+                id: action.id,
+                provider: action.provider,
+                description: action.description,
+                params: action.params,
+              })),
+            },
+            execute: (call) =>
+              executeChatActionCall({
+                catalog: actionCatalog,
+                action: call.action,
+                params: call.params,
                 signal: generationSignal,
                 currentDate,
-                user: context.user,
-                workspaceId: context.workspace.id,
+                userWorkosId: context.user.workosUserId,
                 chatSessionId: turn.session.id,
-                userMessageId: turn.userMessage.id,
                 attributes: {
                   ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
                   "goat.chat_session_id": turn.session.id,
                   "goat.chat_message_id": turn.userMessage.id,
                 },
                 chatSpan,
-                capabilityDebug,
-              });
-            },
+              }),
           },
         }
       : {}),
@@ -648,7 +610,6 @@ export async function POST(request: Request): Promise<Response> {
       ...debugTrace,
       durationMs: elapsedChatDurationMs(),
       ...(generationSignal.aborted ? { aborted: true } : {}),
-      ...(capabilityDebug.length > 0 ? { capabilityCalls: capabilityDebug } : {}),
       error: error instanceof Error ? error.message : "Goat chat stream ended before completion.",
       finishReason,
     };
@@ -720,13 +681,8 @@ export async function POST(request: Request): Promise<Response> {
       taskToolsEnabled,
       scheduleToolsEnabled: taskToolsEnabled,
       recurringSchedules,
-      ...(capabilityUniverse.length > 0
-        ? {
-            capabilities: capabilityUniverse.map((capability) => ({
-              id: capability.id,
-              indexLine: capability.indexLine,
-            })),
-          }
+      ...(actionCatalog.providers.length > 0
+        ? { connectedIntegrations: actionCatalog.providers }
         : {}),
     }),
     messages: await convertToModelMessages(
@@ -860,7 +816,6 @@ export async function POST(request: Request): Promise<Response> {
         durationMs: elapsedChatDurationMs(),
         ...(isAborted ? { aborted: true } : {}),
         ...(responseMessage.parts.length ? { uiMessageParts: responseMessage.parts } : {}),
-        ...(capabilityDebug.length > 0 ? { capabilityCalls: capabilityDebug } : {}),
         ...(finishReasonText ? { finishReason: finishReasonText } : {}),
       };
       const assistantMessageInput = {
@@ -973,177 +928,81 @@ async function executeChatWebSearch(input: {
   }
 }
 
-async function executeChatCapabilityCall(input: {
-  capability: ResolvedGoatCapability;
-  operation: GoatCapabilityOperation;
-  request: string;
-  toolCallId: string;
-  ordinal: number;
-  gatewayApiKey: string;
+// Direct provider calls: no sub-agent LLM, so no worker cost recording — the
+// only model usage in a turn is the main stream's own totalUsage.
+async function executeChatActionCall(input: {
+  catalog: GoatResolvedActionCatalog;
+  action: string;
+  params: Record<string, unknown>;
   signal: AbortSignal;
   currentDate: Date;
-  user: {
-    workosUserId: string;
-    email: string;
-    firstName: string | null;
-    lastName: string | null;
-    timezone: string;
-  };
-  workspaceId: string;
+  userWorkosId: string;
   chatSessionId: string;
-  userMessageId: string;
   attributes: Record<string, string | number | boolean | null | undefined>;
   chatSpan: ReturnType<typeof startGoatSpan>;
-  capabilityDebug: Array<GoatCapabilityCallDebug & { toolCallId: string }>;
-}): Promise<UseCapabilityToolOutput> {
+}): Promise<UseActionToolOutput> {
   const startedAt = performance.now();
+  const provider = input.catalog.actions.find((entry) => entry.id === input.action)?.provider;
   // Created inside the chat-turn span's context so it nests as a child span.
-  const capabilitySpan = input.chatSpan.runInContext(() =>
-    startGoatSpan(GOAT_SPANS.chatCapabilityCall, {
+  const actionSpan = input.chatSpan.runInContext(() =>
+    startGoatSpan(GOAT_SPANS.chatActionCall, {
       ...input.attributes,
-      "goat.capability": input.capability.id,
-      "goat.capability_operation": input.operation,
-      "goat.worker_model": input.capability.workerModel,
+      "goat.action": input.action,
+      ...(provider ? { "goat.action_provider": provider } : {}),
     }),
   );
   const metricAttributes = {
-    "goat.capability": input.capability.id,
-    "goat.capability_operation": input.operation,
-    "goat.worker_model": input.capability.workerModel,
+    "goat.action": input.action,
+    ...(provider ? { "goat.action_provider": provider } : {}),
   };
 
   try {
-    const result = await runGoatCapabilityWorker({
-      capability: input.capability,
-      operation: input.operation,
-      request: input.request,
-      context: {
-        userWorkosId: input.user.workosUserId,
-        signal: input.signal,
-        currentDate: input.currentDate,
-        userContext: {
-          email: input.user.email,
-          firstName: input.user.firstName,
-          lastName: input.user.lastName,
-          timezone: input.user.timezone,
-        },
-      },
-      gatewayApiKey: input.gatewayApiKey,
-      attribution: createGoatGatewayAttribution({
-        userWorkosId: input.user.workosUserId,
-        feature: "capability",
-        chatSessionId: input.chatSessionId,
-        tags: [`capability:${input.capability.id}`],
-      }),
+    const result = await executeGoatAction({
+      catalog: input.catalog,
+      actionId: input.action,
+      params: input.params,
+      userWorkosId: input.userWorkosId,
+      signal: input.signal,
+      currentDate: input.currentDate,
     });
-
-    input.capabilityDebug.push({
-      toolCallId: input.toolCallId,
-      ...result.debug,
+    actionSpan.end({
+      "goat.outcome": result.ok ? "success" : "failure",
+      ...(result.ok ? {} : { "goat.action_error_code": result.error.code }),
     });
-    capabilitySpan.end({
-      "goat.outcome": result.debug.outcome === "error" ? "failure" : "success",
-      "goat.capability_steps": result.debug.steps,
-      "goat.capability_entity_count": result.envelope.entities.length,
-      ...(result.debug.errorCode ? { "goat.capability_error_code": result.debug.errorCode } : {}),
-    });
-    recordGoatCounter(GOAT_METRICS.chatCapabilityCallsTotal, 1, {
+    recordGoatCounter(GOAT_METRICS.chatActionCallsTotal, 1, {
       ...metricAttributes,
-      "goat.outcome": result.debug.outcome,
+      "goat.outcome": result.ok ? "success" : result.error.code,
     });
     recordGoatHistogram(
-      GOAT_METRICS.chatCapabilityCallDurationMs,
+      GOAT_METRICS.chatActionCallDurationMs,
       Math.max(0, Math.round(performance.now() - startedAt)),
       metricAttributes,
     );
-    await recordCapabilityWorkerCost({
-      workerModel: input.capability.workerModel,
-      usage: result.usage,
-      capabilityId: input.capability.id,
-      workspaceId: input.workspaceId,
-      userWorkosId: input.user.workosUserId,
-      chatSessionId: input.chatSessionId,
-      userMessageId: input.userMessageId,
-      ordinal: input.ordinal,
-    });
-
-    return { capability: input.capability.id, ...result.envelope };
+    return result;
   } catch (error) {
-    // The worker converts its own failures into envelopes; reaching here means
-    // infrastructure broke. Still return an envelope so the turn survives.
-    capabilitySpan.fail(error, metricAttributes);
-    capabilitySpan.end({ "goat.outcome": "failure" });
-    recordGoatCounter(GOAT_METRICS.chatCapabilityCallsTotal, 1, {
+    // executeGoatAction converts action failures into structured results;
+    // reaching here means infrastructure broke (or the turn was aborted).
+    // Still return a structured result so the turn survives.
+    actionSpan.fail(error, metricAttributes);
+    actionSpan.end({ "goat.outcome": "failure" });
+    recordGoatCounter(GOAT_METRICS.chatActionCallsTotal, 1, {
       ...metricAttributes,
       "goat.outcome": "error",
     });
-    logger.warn("Goat chat capability call failed", {
-      event: "goat.chat_capability_call_failed",
-      capability: input.capability.id,
+    logger.warn("Goat chat action call failed", {
+      event: "goat.chat_action_call_failed",
+      action: input.action,
       chat_session_id: input.chatSessionId,
       error,
     });
     return {
-      capability: input.capability.id,
-      summary: "",
-      entities: [],
+      ok: false,
+      action: input.action,
       error: {
         code: "internal",
-        hint: `The ${input.capability.id} lookup failed unexpectedly; suggest trying again.`,
+        message: `The ${input.action} call failed unexpectedly; suggest trying again.`,
       },
     };
-  }
-}
-
-// Worker LLM calls run inside tool execution, outside the main stream's
-// totalUsage, so they get their own metric surface and credit debit. The
-// ordinal keys idempotency per call within the turn.
-async function recordCapabilityWorkerCost(input: {
-  workerModel: string;
-  usage: LanguageModelUsage;
-  capabilityId: string;
-  workspaceId: string;
-  userWorkosId: string;
-  chatSessionId: string;
-  userMessageId: string;
-  ordinal: number;
-}) {
-  const cost = calculateModelUsageCost({
-    modelName: input.workerModel,
-    inputTokens: readUsageNumber(input.usage.inputTokens),
-    inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
-    inputCacheReadTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheReadTokens),
-    inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
-    outputTokens: readUsageNumber(input.usage.outputTokens),
-  });
-  recordGoatModelCost({
-    costUsdMicros: cost.totalCostUsdMicros,
-    attributes: {
-      "goat.model": input.workerModel,
-      "goat.surface": "chat_capability",
-    },
-  });
-  if (!cost.billable) return;
-  try {
-    await recordGoatCreditDebit({
-      workspaceId: input.workspaceId,
-      userWorkosId: input.userWorkosId,
-      source: "chat_model_usage",
-      idempotencyKey: `chat:${input.userMessageId}:capability:${input.ordinal}`,
-      chatSessionId: input.chatSessionId,
-      providerCostUsdMicros: cost.providerCostUsdMicros,
-      platformFeeUsdMicros: cost.platformFeeUsdMicros,
-      totalCostUsdMicros: cost.totalCostUsdMicros,
-      costBasis: cost.costBasis,
-      metadata: { kind: "capability_worker", capability: input.capabilityId },
-    });
-  } catch (error) {
-    logger.warn("Goat capability credit debit failed", {
-      event: "goat.chat_capability_credit_debit_failed",
-      workspace_id: input.workspaceId,
-      chat_session_id: input.chatSessionId,
-      error,
-    });
   }
 }
 
