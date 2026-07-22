@@ -13,6 +13,7 @@ import {
 } from "@opencompany/db/goat-integrations";
 import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, desc, eq, sql } from "drizzle-orm";
+import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import { getGoatAppUrl } from "@/lib/workos";
 
 export const GOAT_LINEAR_MCP_ENDPOINT_URL = "https://mcp.linear.app/mcp";
@@ -294,6 +295,7 @@ async function markGoatLinearConnected(integrationId: string, userWorkosId: stri
         eq(goatIntegrations.provider, GOAT_LINEAR_PROVIDER),
       ),
     );
+  await captureGoatIntegrationAddedAnalytics({ userWorkosId, provider: "linear" });
 }
 
 async function loadLinearPayload(input: { userWorkosId: string; integrationId: string }) {

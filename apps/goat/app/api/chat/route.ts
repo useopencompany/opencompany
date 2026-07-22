@@ -16,6 +16,7 @@ import {
   startGoatSpan,
 } from "@opencompany/goat-observability";
 import { createLogger } from "@opencompany/observability";
+import { captureStatsigServerEvent } from "@opencompany/statsig/server";
 import {
   convertToModelMessages,
   createGateway,
@@ -330,6 +331,28 @@ export async function POST(request: Request): Promise<Response> {
       messageId: turn.userMessage.id,
       apiKey: gatewayApiKey,
     }).catch(() => undefined),
+  );
+  if (turn.sessionCreated) {
+    after(
+      captureStatsigServerEvent("chat_started", context.user.workosUserId, {
+        user_id: context.user.workosUserId,
+        workspace_id: context.workspace.id,
+        session_id: turn.session.id,
+      }),
+    );
+  }
+  // Fires on every user turn (new chats and follow-ups). `is_first_message` lets the PM
+  // segment new conversations from continued ones, while the raw count measures engagement
+  // volume and per-session grouping gives conversation depth.
+  after(
+    captureStatsigServerEvent("chat_message_sent", context.user.workosUserId, {
+      user_id: context.user.workosUserId,
+      workspace_id: context.workspace.id,
+      session_id: turn.session.id,
+      is_first_message: turn.sessionCreated,
+      model: turn.session.model,
+      message_length: parsed.value.prompt.length,
+    }),
   );
 
   // With resumable streams, a client disconnect (refresh, tab close, stop())

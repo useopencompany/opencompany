@@ -209,7 +209,7 @@ export async function createGoatChatUserTurn(
   },
   store: GoatChatStore = createDbGoatChatStore(),
 ) {
-  const session = await findOrCreateOpenSession({
+  const { session, created: sessionCreated } = await findOrCreateOpenSession({
     store,
     userWorkosId: input.userWorkosId,
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -233,6 +233,7 @@ export async function createGoatChatUserTurn(
   const storedMessages = [...previousMessages, toStoredChatMessage(userMessage)];
   return {
     session,
+    sessionCreated,
     userMessage,
     storedMessages,
     messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
@@ -656,7 +657,7 @@ async function findOrCreateOpenSession(input: {
       userWorkosId: input.userWorkosId,
       sessionId: input.sessionId,
     });
-    if (existing) return existing;
+    if (existing) return { session: existing, created: false };
   }
 
   if (input.newSessionId) {
@@ -664,15 +665,16 @@ async function findOrCreateOpenSession(input: {
       userWorkosId: input.userWorkosId,
       sessionId: input.newSessionId,
     });
-    if (existing) return existing;
+    if (existing) return { session: existing, created: false };
   }
 
-  return input.store.createSession({
+  const session = await input.store.createSession({
     ...(input.newSessionId ? { id: input.newSessionId } : {}),
     userWorkosId: input.userWorkosId,
     model: input.model,
     title: titleFromPrompt(input.prompt, input.firstAttachmentName ?? null),
   });
+  return { session, created: true };
 }
 
 function titleFromPrompt(prompt: string, firstAttachmentName: string | null = null) {
