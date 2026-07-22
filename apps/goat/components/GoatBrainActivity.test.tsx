@@ -125,16 +125,17 @@ describe("GoatBrainActivity", () => {
   });
 
   it("filters overview activity before applying its row limit", () => {
+    const skippedJobs = Array.from({ length: 30 }, (_, index) =>
+      job({
+        id: `gbjob_skipped_${index}`,
+        source_item_id: `gbsrc_skipped_${index}`,
+        status: "skipped",
+        completed_at: `2026-07-09T10:${String(index + 2).padStart(2, "0")}:00.000Z`,
+        result: { skipped: true },
+      }),
+    );
     queryRows.jobs = [
-      ...Array.from({ length: 6 }, (_, index) =>
-        job({
-          id: `gbjob_skipped_${index}`,
-          source_item_id: `gbsrc_skipped_${index}`,
-          status: "skipped",
-          completed_at: `2026-07-09T10:0${index + 2}:00.000Z`,
-          result: { skipped: true },
-        }),
-      ),
+      ...skippedJobs,
       job({
         id: "gbjob_filed",
         source_item_id: "gbsrc_filed",
@@ -143,7 +144,12 @@ describe("GoatBrainActivity", () => {
         result: { summary: "Filed one page." },
       }),
     ];
-    queryRows.items = [item({ id: "gbsrc_filed", title: "Older useful signal" })];
+    queryRows.items = [
+      ...skippedJobs.map((skippedJob, index) =>
+        item({ id: skippedJob.source_item_id, title: `Routine notification ${index}` }),
+      ),
+      item({ id: "gbsrc_filed", title: "Older useful signal" }),
+    ];
 
     render(<GoatBrainRecentActivity brainRef="goat_brain_1" limit={1} />);
 

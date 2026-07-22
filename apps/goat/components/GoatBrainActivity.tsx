@@ -164,16 +164,19 @@ function GoatBrainActivityFeed({
       controller.abort();
     };
   }, [brainRef, missingSourceItemIdsKey]);
+  const filteredKind = activityKindForFilter(activityFilter);
   const events = useMemo(
-    () => buildGoatBrainActivityEvents((jobRows ?? []) as GoatBrainIngestJobRow[], sourceItems),
-    [jobRows, sourceItems],
+    () =>
+      buildGoatBrainActivityEvents(
+        (jobRows ?? []) as GoatBrainIngestJobRow[],
+        sourceItems,
+        filteredKind ? { kinds: [filteredKind] } : undefined,
+      ),
+    [filteredKind, jobRows, sourceItems],
   );
-  const filteredEvents = useMemo(
-    () => events.filter((event) => activityMatchesFilter(event.kind, activityFilter)),
-    [activityFilter, events],
-  );
-  const visibleEvents = limit ? filteredEvents.slice(0, limit) : filteredEvents;
-  const loading = (jobsLoading || itemsLoading) && events.length === 0;
+  const visibleEvents = limit ? events.slice(0, limit) : events;
+  const hasJobs = (jobRows?.length ?? 0) > 0;
+  const loading = (jobsLoading || itemsLoading) && !hasJobs;
   const overview = variant === "overview";
 
   return (
@@ -196,7 +199,7 @@ function GoatBrainActivityFeed({
           >
             Loading activity…
           </div>
-        ) : events.length === 0 ? (
+        ) : !hasJobs ? (
           <div
             className={
               overview
@@ -207,7 +210,7 @@ function GoatBrainActivityFeed({
             No activity yet. Chat captures and meeting ingestions show up here as they are filed
             into this brain.
           </div>
-        ) : filteredEvents.length === 0 ? (
+        ) : events.length === 0 ? (
           <div
             className={
               overview
@@ -309,13 +312,10 @@ function GoatBrainActivityFeed({
   );
 }
 
-function activityMatchesFilter(
-  kind: GoatBrainActivityKind,
-  filter: GoatBrainActivityFilter,
-): boolean {
-  if (filter === "all") return true;
-  if (filter === "received") return kind === "captured";
-  return kind === filter;
+function activityKindForFilter(filter: GoatBrainActivityFilter): GoatBrainActivityKind | null {
+  if (filter === "all") return null;
+  if (filter === "received") return "captured";
+  return filter;
 }
 
 function emptyActivityFilterMessage(filter: GoatBrainActivityFilter): string {
