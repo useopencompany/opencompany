@@ -46,24 +46,20 @@ describe("Goat Attio brain source config", () => {
     expect(goatAttioEventTypeFor("note")).toBe("note_added");
   });
 
-  it("requires an explicit opt-in for Attio system record updates", () => {
-    const safe = parseGoatAttioBrainSourceConfig({
-      objectTypes: [{ id: "person" }],
-      events: [{ id: "object_updated" }],
-    });
-    expect(goatAttioRouteMatchesEvent(safe, "object_updated", { actorType: "system" })).toBe(false);
-    expect(
-      goatAttioRouteMatchesEvent(safe, "object_updated", { actorType: "workspace-member" }),
-    ).toBe(true);
-
-    const optedIn = parseGoatAttioBrainSourceConfig({
+  it("always excludes Attio system record updates, including legacy opt-ins", () => {
+    const config = parseGoatAttioBrainSourceConfig({
       objectTypes: [{ id: "person" }],
       events: [{ id: "object_updated" }],
       includeSystemUpdates: true,
     });
-    expect(goatAttioRouteMatchesEvent(optedIn, "object_updated", { actorType: "system" })).toBe(
-      true,
+
+    expect(config).not.toHaveProperty("includeSystemUpdates");
+    expect(goatAttioRouteMatchesEvent(config, "object_updated", { actorType: "system" })).toBe(
+      false,
     );
+    expect(
+      goatAttioRouteMatchesEvent(config, "object_updated", { actorType: "workspace-member" }),
+    ).toBe(true);
   });
 });
 
