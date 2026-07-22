@@ -7,7 +7,6 @@ export async function loadGoatFeatureFlagsForUser(userWorkosId: string) {
   const [user] = await getDb()
     .select({
       localCodexBetaEnabled: goatUsers.localCodexBetaEnabled,
-      chatCapabilitiesBetaEnabled: goatUsers.chatCapabilitiesBetaEnabled,
     })
     .from(goatUsers)
     .where(eq(goatUsers.workosUserId, userWorkosId))

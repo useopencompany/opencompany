@@ -4,7 +4,6 @@ import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
-  Blocks,
   CircleUserRound,
   Code2,
   Download,
@@ -21,11 +20,7 @@ import { useRouter } from "next/navigation";
 import { type KeyboardEvent, useEffect, useMemo, useState, useTransition } from "react";
 import { AttioIntegrationSetup } from "@/components/AttioIntegrationSetup";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
-import {
-  type GoatAppInitialData,
-  type GoatBrainSummaryView,
-  useGoatAppData,
-} from "@/components/GoatAppDataProvider";
+import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSettings } from "@/components/GoatBrainSettings";
 import { GoatBrainView } from "@/components/GoatBrainView";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
@@ -44,7 +39,6 @@ import type { GoatIntegrationState } from "@/lib/integration-state";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import {
-  updateGoatChatCapabilitiesBetaAction,
   updateGoatLocalCodexBetaAction,
   updateGoatTaskSpawningAction,
 } from "@/lib/user-preferences";
@@ -145,18 +139,14 @@ export function GoatSettingsRoute() {
 }
 
 export function GoatIntegrationsSettingsRoute() {
-  const { integrations, mcpSetup, workspace } = useGoatAppData();
+  const { integrations, workspace } = useGoatAppData();
 
   return (
     <GoatSettingsContent
       title="Integrations"
       description="Connect the tools Goat can read from and act on."
     >
-      <IntegrationRows
-        integrations={integrations}
-        isWorkspaceAdmin={workspace.role === "admin"}
-        mcpSetup={mcpSetup}
-      />
+      <IntegrationRows integrations={integrations} isWorkspaceAdmin={workspace.role === "admin"} />
     </GoatSettingsContent>
   );
 }
@@ -212,13 +202,6 @@ export function GoatPreferencesSettingsRoute() {
           checked={featureFlags.localCodexBridge}
           update={updateGoatLocalCodexBetaAction}
           showLocalBridgePairing
-        />
-        <BetaFeatureSwitch
-          icon={Blocks}
-          label="Chat capabilities"
-          description="Let chat query connected integrations (Slack, Linear, YouTube) directly"
-          checked={featureFlags.chatCapabilities}
-          update={updateGoatChatCapabilitiesBetaAction}
         />
       </section>
     </GoatSettingsContent>
@@ -753,17 +736,14 @@ function localBridgeName() {
 function IntegrationRows({
   integrations,
   isWorkspaceAdmin,
-  mcpSetup,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
-  mcpSetup: GoatAppInitialData["mcpSetup"];
 }) {
   return (
     <SettingsIntegrationsPanel
       initialIntegrations={integrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
-      mcpSetup={mcpSetup}
     />
   );
 }

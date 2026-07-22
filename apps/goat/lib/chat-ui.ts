@@ -9,7 +9,11 @@ import type {
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
-import type { GoatCapabilityEnvelope, GoatCapabilityOperation } from "@/lib/capabilities/types";
+import type {
+  GoatActionErrorCode,
+  GoatActionProviderDescriptor,
+  GoatActionProviderId,
+} from "@/lib/actions/types";
 import { finiteDurationMs } from "@/lib/chat-timing";
 import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
 
@@ -42,8 +46,10 @@ export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
 export const SAVE_TO_BRAIN_TOOL_PART_TYPE = `tool-${SAVE_TO_BRAIN_TOOL_NAME}` as const;
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
-export const USE_CAPABILITY_TOOL_NAME = "use_capability";
-export const USE_CAPABILITY_TOOL_PART_TYPE = `tool-${USE_CAPABILITY_TOOL_NAME}` as const;
+export const LIST_ACTIONS_TOOL_NAME = "list_actions";
+export const LIST_ACTIONS_TOOL_PART_TYPE = `tool-${LIST_ACTIONS_TOOL_NAME}` as const;
+export const USE_ACTION_TOOL_NAME = "use_action";
+export const USE_ACTION_TOOL_PART_TYPE = `tool-${USE_ACTION_TOOL_NAME}` as const;
 
 export type GoatTaskCardMetadata = {
   id: string;
@@ -274,19 +280,42 @@ export type WebSearchToolOutput =
       error: string;
     };
 
-export type UseCapabilityToolInput = {
-  capability: string;
-  // Optional only so persisted tool parts from before operation modes continue
-  // to render. The live tool schema requires this field for every new call.
-  operation?: GoatCapabilityOperation;
-  request: string;
+export type GoatChatActionCatalog = {
+  providers: GoatActionProviderDescriptor[];
+  actions: { id: string; provider: GoatActionProviderId; description: string; params: unknown }[];
 };
 
-// The worker's envelope plus the capability id, so the UI can label the row
-// without re-reading the input part.
-export type UseCapabilityToolOutput = GoatCapabilityEnvelope & {
-  capability: string;
+export type ListActionsToolInput = {
+  integration: GoatActionProviderId;
 };
+
+export type ListActionsToolOutput =
+  | {
+      ok: true;
+      integration: GoatActionProviderDescriptor;
+      actions: GoatChatActionCatalog["actions"];
+    }
+  | {
+      ok: false;
+      error: {
+        code: "unknown_integration";
+        message: string;
+        availableIntegrations: GoatActionProviderId[];
+      };
+    };
+
+export type UseActionToolInput = {
+  action: string;
+  params?: Record<string, unknown>;
+};
+
+export type UseActionToolOutput =
+  | { ok: true; action: string; result: unknown }
+  | {
+      ok: false;
+      action: string;
+      error: { code: GoatActionErrorCode; provider?: GoatActionProviderId; message: string };
+    };
 
 export type GoatChatTools = {
   start_task: {
@@ -317,9 +346,13 @@ export type GoatChatTools = {
     input: WebSearchToolInput;
     output: WebSearchToolOutput;
   };
-  use_capability: {
-    input: UseCapabilityToolInput;
-    output: UseCapabilityToolOutput;
+  list_actions: {
+    input: ListActionsToolInput;
+    output: ListActionsToolOutput;
+  };
+  use_action: {
+    input: UseActionToolInput;
+    output: UseActionToolOutput;
   };
   codex_command: {
     input: CodexCommandToolInput;
