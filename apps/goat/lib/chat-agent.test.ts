@@ -6,8 +6,8 @@ import {
 } from "@/lib/chat-agent";
 import {
   GOAT_BRAIN_TOOL_NAME,
-  type GoatChatActionCatalog,
   type GoatBrainToolInput,
+  type GoatChatActionCatalog,
   LIST_ACTIONS_TOOL_NAME,
   type ListActionsToolInput,
   type ListActionsToolOutput,
