@@ -25,7 +25,6 @@ export type GoatBrainSourceProviderDef = {
   // means shipping its connector and flipping this flag.
   available: boolean;
   connectHref: string;
-  onboardingConnectHref?: string;
   docsHref?: string;
 };
 
@@ -41,7 +40,6 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     connectionKind: "webhook",
     available: true,
     connectHref: "/settings/jamie",
-    onboardingConnectHref: "/onboarding/jamie",
     docsHref: GOAT_JAMIE_DOCS_HREF,
   },
   {
