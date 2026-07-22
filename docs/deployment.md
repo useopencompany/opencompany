@@ -22,13 +22,16 @@ runner is a dedicated live data plane rather than a short request handler.
 Production releases are intentionally guarded:
 
 1. Run CI on `main`.
-2. Run Drizzle migrations against production Neon.
-3. Build the Vercel web app for the exact commit.
-4. Re-check that the release is still current.
-5. Trigger the Render runner deploy, then deploy the prebuilt Vercel web, Goat, and marketing apps
-   while Render builds.
-6. Wait for the Render runner deploy for the exact commit.
-7. Smoke check the canonical production web `/api/healthz` and runner `/healthz`.
+2. Compare the commit range since the last successful production deployment with Turbo's package
+   graph and plan which of web, Goat, marketing, and runner need deployment.
+3. Run Drizzle migrations against production Neon.
+4. Build the affected Vercel apps for the exact commit.
+5. Re-check that the release is still current.
+6. Trigger an affected Render runner deploy, then deploy the affected prebuilt Vercel apps while
+   Render builds.
+7. Wait for the Render runner deploy when one was triggered.
+8. Smoke check all canonical production health endpoints, requiring the exact commit only from
+   surfaces deployed by this release.
 
 The workflow lives in `.github/workflows/release-production.yml`. It runs automatically after the
 `CI` workflow succeeds for a push to `main`, and it can still be manually triggered from GitHub
@@ -38,11 +41,17 @@ older queued releases are cancelled automatically. A release that has already st
 mid-flight, but automatic releases re-check `origin/main` before setup, before production changes,
 and before deploy so stale commits skip the remaining expensive or mutating work.
 
-After migrations and the final deploy freshness check, web and runner deployment wait time may
-overlap. This keeps release latency down without starting production deploys for stale commits. A
-failed Vercel deploy best-effort cancels the in-flight Render deploy, but cancellation is not a
-rollback guarantee; if Render has already gone live, treat the failed workflow as requiring operator
-follow-up.
+Automatic releases use the last successful GitHub production deployment as the affected-range base,
+not the immediate parent commit. This preserves changes from a superseded release that was skipped.
+If the workflow cannot resolve a valid ancestor base, it safely deploys every surface. Changes to
+release orchestration and shared root build configuration also force a full release. Manual workflow
+dispatches deploy every Vercel app and optionally the runner.
+
+After migrations and the final deploy freshness check, affected Vercel and runner deployment wait
+time may overlap. This keeps release latency down without starting production deploys for stale
+commits. A failed Vercel deploy best-effort cancels the in-flight Render deploy, but cancellation is
+not a rollback guarantee; if Render has already gone live, treat the failed workflow as requiring
+operator follow-up.
 
 The `CI` workflow uses branch/PR concurrency with `cancel-in-progress: true`, so a newer push to the
 same PR or to `main` cancels superseded lint/typecheck/build/test work. This keeps rapid merge
@@ -50,10 +59,11 @@ bursts from spending Actions minutes on commits that can no longer release.
 
 The web and Goat smoke checks use `PRODUCTION_WEB_URL` and `PRODUCTION_GOAT_URL` from Infisical
 `prod` + `/release`, not the raw Vercel deployment URLs, so Vercel deployment protection can remain
-enabled on generated preview-style URLs. In production the canonical web URL is
-`https://my.opencompany.cloud`. The Better Stack status page monitors the same web `/api/healthz`,
-Goat `/api/healthz`, and runner `/healthz` endpoints as the release smoke check, so keep those
-health endpoints stable when changing deployment or monitoring behavior.
+enabled on generated preview-style URLs. All three production surfaces receive a basic health check;
+only surfaces selected by the release plan must report the new commit SHA. In production the canonical
+web URL is `https://my.opencompany.cloud`. The Better Stack status page monitors the same web
+`/api/healthz`, Goat `/api/healthz`, and runner `/healthz` endpoints as the release smoke check, so
+keep those health endpoints stable when changing deployment or monitoring behavior.
 
 Release attribution is not managed as an Infisical secret. Vercel and Render expose commit metadata
 to the server runtimes, and the production workflow injects `RELEASE_SHA` as

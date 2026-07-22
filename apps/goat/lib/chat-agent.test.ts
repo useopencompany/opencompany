@@ -555,6 +555,14 @@ describe("runOpenCompanyChatAgent", () => {
         const empty = await executeSaveToBrainTool(options, { content: "   " });
         expect(empty).toMatchObject({ ok: false });
 
+        const pointer = await executeSaveToBrainTool(options, {
+          sourceRef: "slack:conversation:T123:C456:1234.5678",
+          integrationId: "gint_slack_1",
+          fallbackContent: "The team approved the launch plan.",
+          title: "Launch decision",
+        });
+        expect(pointer).toMatchObject({ ok: true, status: "captured" });
+
         return {
           text: "Saved. It's in your Brain inbox and will be filed shortly.",
           finishReason: "stop",
@@ -569,11 +577,17 @@ describe("runOpenCompanyChatAgent", () => {
     });
 
     expect(startTask).not.toHaveBeenCalled();
-    expect(saveToBrain).toHaveBeenCalledTimes(1);
-    expect(saveToBrain).toHaveBeenCalledWith({
+    expect(saveToBrain).toHaveBeenCalledTimes(2);
+    expect(saveToBrain).toHaveBeenNthCalledWith(1, {
       content: "https://example.com/pricing-teardown",
       title: "Pricing teardown reference",
       intent: "reference for the pricing rework",
+    });
+    expect(saveToBrain).toHaveBeenNthCalledWith(2, {
+      sourceRef: "slack:conversation:T123:C456:1234.5678",
+      integrationId: "gint_slack_1",
+      fallbackContent: "The team approved the launch plan.",
+      title: "Launch decision",
     });
     expect(result.task).toBeNull();
     expect(result.content).toContain("Saved.");

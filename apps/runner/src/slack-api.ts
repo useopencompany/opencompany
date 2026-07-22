@@ -27,7 +27,7 @@ const INGESTED_MESSAGE_SUBTYPES = new Set<string | undefined>([
 type CacheEntry = { value: string; expiresAt: number };
 const userNameCache = new Map<string, CacheEntry>();
 
-type SlackApiMessage = {
+export type SlackApiMessage = {
   ts?: string;
   thread_ts?: string;
   user?: string;
@@ -41,6 +41,7 @@ export async function slackApiRequest<T extends Record<string, unknown>>(input: 
   method: string;
   token: string;
   form?: Record<string, string>;
+  signal?: AbortSignal;
 }): Promise<T> {
   const call = async () => {
     const response = await fetch(`https://slack.com/api/${input.method}`, {
@@ -50,7 +51,9 @@ export async function slackApiRequest<T extends Record<string, unknown>>(input: 
         Authorization: `Bearer ${input.token}`,
       },
       body: new URLSearchParams(input.form ?? {}).toString(),
-      signal: AbortSignal.timeout(SLACK_API_TIMEOUT_MS),
+      signal: input.signal
+        ? AbortSignal.any([input.signal, AbortSignal.timeout(SLACK_API_TIMEOUT_MS)])
+        : AbortSignal.timeout(SLACK_API_TIMEOUT_MS),
     });
     return response;
   };
@@ -289,7 +292,7 @@ async function fetchThreadMessages(input: {
   }
 }
 
-function normalizeSlackApiMessages(
+export function normalizeSlackApiMessages(
   messages: readonly SlackApiMessage[],
   input: {
     excludedTs: ReadonlySet<string>;

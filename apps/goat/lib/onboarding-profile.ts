@@ -24,7 +24,7 @@ export const GOAT_ONBOARDING_ROLE_FOLDERS = {
   research: ["research", "sources", "notes", "concepts", "meetings", "reports"],
 } as const satisfies Record<GoatOnboardingRole, readonly string[]>;
 
-export const GOAT_ONBOARDING_BUILDING_MAX_LENGTH = 280;
+export const GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH = 2_048;
 
 const GOAT_ONBOARDING_ROLES = new Set<string>(GOAT_ONBOARDING_ROLE_IDS);
 
@@ -38,24 +38,36 @@ export function goatOnboardingFoldersForRole(role: unknown): string[] {
     : [...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS];
 }
 
+export function normalizeGoatOnboardingCompanyUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH) return null;
+
+  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (!url.hostname || url.username || url.password) return null;
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function parseGoatOnboardingProfile(input: {
   role: unknown;
-  building: unknown;
-}): { ok: true; role: GoatOnboardingRole; building: string | null } | { ok: false; error: string } {
+  companyUrl: unknown;
+}): { ok: true; role: GoatOnboardingRole; companyUrl: string } | { ok: false; error: string } {
   if (!isGoatOnboardingRole(input.role)) {
     return { ok: false, error: "Choose the role that best describes you." };
   }
-  if (input.building !== null && typeof input.building !== "string") {
-    return { ok: false, error: "What you're building must be text." };
+  if (typeof input.companyUrl !== "string" || !input.companyUrl.trim()) {
+    return { ok: false, error: "Enter your company URL." };
   }
 
-  const building = input.building?.trim() ?? "";
-  if (building.length > GOAT_ONBOARDING_BUILDING_MAX_LENGTH) {
-    return {
-      ok: false,
-      error: `What you're building is too long (max ${GOAT_ONBOARDING_BUILDING_MAX_LENGTH} characters).`,
-    };
-  }
+  const companyUrl = normalizeGoatOnboardingCompanyUrl(input.companyUrl);
+  if (!companyUrl) return { ok: false, error: "Enter a valid company URL." };
 
-  return { ok: true, role: input.role, building: building || null };
+  return { ok: true, role: input.role, companyUrl };
 }

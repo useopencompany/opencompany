@@ -21,6 +21,8 @@ export type GoogleApiAccount = {
   accountEmail: string | null;
 };
 
+export type GoogleApiEnv = Pick<RunnerEnv, "googleOAuthClientId" | "googleOAuthClientSecret">;
+
 type StoredGoogleTokens = {
   access_token?: string;
   refresh_token?: string;
@@ -29,7 +31,7 @@ type StoredGoogleTokens = {
 };
 
 export async function getGoogleAccessToken(input: {
-  env: RunnerEnv;
+  env: GoogleApiEnv;
   userWorkosId: string;
   account: GoogleApiAccount;
   signal: AbortSignal;
@@ -62,7 +64,7 @@ export async function getGoogleAccessToken(input: {
 
 async function refreshGoogleAccessToken(
   input: {
-    env: RunnerEnv;
+    env: GoogleApiEnv;
     userWorkosId: string;
     account: GoogleApiAccount;
     signal: AbortSignal;
@@ -156,7 +158,7 @@ export class GoogleApiRequestError extends Error {
 }
 
 export async function googleApiCall(input: {
-  env: RunnerEnv;
+  env: GoogleApiEnv;
   userWorkosId: string;
   account: GoogleApiAccount;
   method: string;
@@ -178,7 +180,7 @@ export async function googleApiCall(input: {
 }
 
 export async function googleApiFetch(input: {
-  env: RunnerEnv;
+  env: GoogleApiEnv;
   userWorkosId: string;
   account: GoogleApiAccount;
   method: string;

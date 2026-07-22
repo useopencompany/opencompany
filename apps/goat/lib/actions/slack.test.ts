@@ -42,7 +42,7 @@ beforeEach(() => {
   mocks.dbRows = [connectedRow([])];
   mocks.loadCredential.mockReset();
   mocks.loadCredential.mockResolvedValue({
-    payload: { access_token: "xoxp-1", team_domain: "acme" },
+    payload: { access_token: "xoxp-1", team_id: "T123", team_domain: "acme" },
   });
   mocks.slackApiRequest.mockReset();
 });
@@ -91,28 +91,38 @@ describe("resolveSlackActions", () => {
   it("fetches history with the expected Slack method and truncates + permalinks messages", async () => {
     mocks.dbRows = [connectedRow([])];
     mocks.loadCredential.mockResolvedValue({
-      payload: { access_token: "xoxp-1", team_domain: "acme" },
+      payload: { access_token: "xoxp-1", team_id: "T123", team_domain: "acme" },
     });
     mocks.slackApiRequest.mockResolvedValueOnce({
       messages: [{ ts: "1234.5678", user: "U1", text: "y".repeat(900) }],
+      response_metadata: { next_cursor: "cursor_2" },
     });
 
     const catalog = await resolveSlackActions("user_1");
     const history = catalog?.actions.find((action) => action.id === "slack.fetch_history");
-    const result = (await history?.execute({ channel: "C1234567", limit: 5 }, CONTEXT)) as {
-      messages: Array<{ text?: string; url?: string }>;
+    const result = (await history?.execute(
+      { channel: "C1234567", limit: 5, cursor: "cursor_1" },
+      CONTEXT,
+    )) as {
+      integrationId: string;
+      nextCursor?: string;
+      messages: Array<{ text?: string; url?: string; sourceRef?: string; integrationId?: string }>;
     };
 
     expect(mocks.slackApiRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         method: "conversations.history",
         token: "xoxp-1",
-        form: expect.objectContaining({ channel: "C1234567", limit: "5" }),
+        form: expect.objectContaining({ channel: "C1234567", limit: "5", cursor: "cursor_1" }),
       }),
     );
     expect(mocks.slackApiRequest).toHaveBeenCalledTimes(1);
     expect(result.messages[0]?.text?.length).toBe(701);
     expect(result.messages[0]?.url).toBe("https://acme.slack.com/archives/C1234567/p12345678");
+    expect(result.messages[0]?.sourceRef).toBe("slack:conversation:T123:C1234567:1234.5678");
+    expect(result.messages[0]?.integrationId).toBe("gint_1");
+    expect(result.integrationId).toBe("gint_1");
+    expect(result.nextCursor).toBe("cursor_2");
   });
 
   it.each([
@@ -243,7 +253,7 @@ describe("resolveSlackActions", () => {
   it("rejects missing required params before any provider call", async () => {
     mocks.dbRows = [connectedRow([])];
     mocks.loadCredential.mockResolvedValue({
-      payload: { access_token: "xoxp-1", team_domain: "acme" },
+      payload: { access_token: "xoxp-1", team_id: "T123", team_domain: "acme" },
     });
     mocks.slackApiRequest.mockClear();
     const catalog = await resolveSlackActions("user_1");

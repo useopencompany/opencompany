@@ -1,0 +1,18 @@
+const EXPECTED_RELEASE_ENV = {
+  web: "EXPECTED_WEB_RELEASE",
+  goat: "EXPECTED_GOAT_RELEASE",
+  runner: "EXPECTED_RUNNER_RELEASE",
+};
+
+export function expectedReleaseFor(surface, env = process.env) {
+  const variable = EXPECTED_RELEASE_ENV[surface];
+  if (!variable) {
+    throw new Error(`Unknown smoke-check surface: ${surface}`);
+  }
+
+  if (Object.hasOwn(env, variable)) {
+    return env[variable]?.trim() || "";
+  }
+
+  return env.EXPECTED_RELEASE?.trim() || "";
+}

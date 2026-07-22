@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { NeonHttpDatabase } from "drizzle-orm/neon-http";
-import type { NormalizedBrainSourceItem } from "../../goat-brain/src/index";
+import {
+  type GoatBrainHydratablePointerProvider,
+  isNormalizedGoatBrainPointerSourceItem,
+  type NormalizedBrainSourceItem,
+} from "../../goat-brain/src/index";
 import { getDb } from "./client";
 import { reserveGoatWorkspaceIngestion } from "./goat-billing";
 import {
@@ -24,6 +28,7 @@ type PersistedGoatBrainIngestJob = {
 export const GOAT_BRAIN_SOURCE_ITEM_INGEST_JOB_KIND: GoatBrainIngestJobKind =
   "brain_source_item_ingest";
 export const GOAT_BRAIN_AGENT_INGEST_JOB_KIND: GoatBrainIngestJobKind = "brain_agent_ingest";
+export const GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND: GoatBrainIngestJobKind = "brain_pointer_hydrate";
 
 export type UpsertGoatBrainSourceItemResult = {
   sourceItemId: string;
@@ -41,6 +46,63 @@ export type GoatIngestionQuotaUpdate = {
   pendingUnits: number;
   paused: boolean;
 };
+
+export type ExistingGoatBrainPointerIngest = {
+  jobId: string;
+  status: GoatBrainIngestJobStatus;
+  planPaused: boolean;
+  draftBrainId: string;
+  draftFolder: string;
+  title: string;
+};
+
+export async function findExistingGoatBrainPointerIngest(input: {
+  userWorkosId: string;
+  integrationId: string;
+  provider: GoatBrainHydratablePointerProvider;
+  sourceRef: string;
+  brainRef: string;
+  db?: DbLike;
+}): Promise<ExistingGoatBrainPointerIngest | null> {
+  const db = input.db ?? getDb();
+  const [row] = await db
+    .select({
+      normalizedPayload: goatBrainSourceItems.normalizedPayload,
+      jobId: goatBrainIngestJobs.id,
+      status: goatBrainIngestJobs.status,
+      planPaused: goatBrainIngestJobs.planPaused,
+    })
+    .from(goatBrainSourceItems)
+    .innerJoin(
+      goatBrainIngestJobs,
+      and(
+        eq(goatBrainIngestJobs.sourceItemId, goatBrainSourceItems.id),
+        eq(goatBrainIngestJobs.kind, GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND),
+        eq(goatBrainIngestJobs.brainRef, input.brainRef),
+      ),
+    )
+    .where(
+      and(
+        eq(goatBrainSourceItems.userWorkosId, input.userWorkosId),
+        eq(goatBrainSourceItems.integrationId, input.integrationId),
+        eq(goatBrainSourceItems.sourceProvider, input.provider),
+        eq(goatBrainSourceItems.sourceType, "pointer"),
+        eq(goatBrainSourceItems.sourceRef, input.sourceRef),
+      ),
+    )
+    .orderBy(desc(goatBrainIngestJobs.createdAt))
+    .limit(1);
+  if (!row || !isNormalizedGoatBrainPointerSourceItem(row.normalizedPayload)) return null;
+  const pointer = row.normalizedPayload.content.pointer;
+  return {
+    jobId: row.jobId,
+    status: row.status,
+    planPaused: row.planPaused,
+    draftBrainId: pointer.draftBrainId,
+    draftFolder: pointer.draftFolder,
+    title: row.normalizedPayload.title,
+  };
+}
 
 export async function upsertGoatBrainSourceItemAndEnqueue(input: {
   userWorkosId: string;

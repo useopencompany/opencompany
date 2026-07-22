@@ -91,10 +91,14 @@ describe("gmail.search_messages", () => {
   it("lists matches and hydrates metadata headers", async () => {
     mocks.dbRows = [connectedRow()];
     mocks.loadCredential.mockResolvedValue(freshCredential());
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      const input = args[0];
       const url = String(input);
       if (url.includes("/messages?") || url.includes("q=")) {
-        return jsonResponse({ messages: [{ id: "m1", threadId: "t1" }] });
+        return jsonResponse({
+          messages: [{ id: "m1", threadId: "t1" }],
+          nextPageToken: "page_2",
+        });
       }
       return jsonResponse({
         id: "m1",
@@ -113,19 +117,41 @@ describe("gmail.search_messages", () => {
 
     const catalog = await resolveGmailActions("user_1");
     const search = findAction(catalog, "gmail.search_messages");
-    const result = (await search.execute({ query: "from:jane", limit: 5 }, CONTEXT)) as {
-      messages: Array<{ id?: string; from?: string; subject?: string }>;
+    const result = (await search.execute(
+      { query: "from:jane", limit: 5, pageToken: "page_1" },
+      CONTEXT,
+    )) as {
+      integrationId: string;
+      nextPageToken?: string;
+      messages: Array<{
+        id?: string;
+        from?: string;
+        subject?: string;
+        sourceRef?: string;
+        integrationId?: string;
+        url?: string;
+      }>;
     };
 
     const listUrl = String(fetchMock.mock.calls[0]?.[0]);
     expect(listUrl).toContain("q=from%3Ajane");
     expect(listUrl).toContain("maxResults=5");
+    expect(listUrl).toContain("pageToken=page_1");
     const hydrateUrl = String(fetchMock.mock.calls[1]?.[0]);
     expect(hydrateUrl).toContain("/messages/m1");
     expect(hydrateUrl).toContain("format=metadata");
     expect(result.messages).toEqual([
-      expect.objectContaining({ id: "m1", from: "jane@example.com", subject: "Invoice" }),
+      expect.objectContaining({
+        id: "m1",
+        from: "jane@example.com",
+        subject: "Invoice",
+        sourceRef: "gmail:thread:t1",
+        integrationId: "gint_gmail_1",
+        url: "https://mail.google.com/mail/u/louis%40example.com/#all/t1",
+      }),
     ]);
+    expect(result.integrationId).toBe("gint_gmail_1");
+    expect(result.nextPageToken).toBe("page_2");
   });
 
   it("refreshes an expired token before calling the API", async () => {
@@ -136,7 +162,8 @@ describe("gmail.search_messages", () => {
     });
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "client");
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "secret");
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      const input = args[0];
       const url = String(input);
       if (url.includes("oauth2.googleapis.com/token")) {
         return jsonResponse({ access_token: "ya29.new", expires_in: 3600 });
