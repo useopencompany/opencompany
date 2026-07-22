@@ -47,7 +47,7 @@ async function handleMcpRequest(request: Request) {
             version: "0.1.0",
           },
           instructions:
-            "Use list_brains before the first brain operation when the user may have more than one brain. Use goat_brain for retrieval and follow returned page ids with get. When the user explicitly asks to save or remember content, call save_to_brain once with the faithful source content; it creates an inbox draft and queues background curation. Never save inferred preferences or conversational scratchpad content without clear user intent.",
+            "Brains are knowledge stores. Retrieve with search_brain (semantic + keyword recall), then fetch full documents by id with get_document; use list_documents to enumerate a brain and get_timeline for a record's dated history. goat_brain is an advanced escape hatch (doctor/help) — prefer the flat tools. Every tool takes an optional brain id; call list_brains first when the user may have more than one brain. When the user explicitly asks to save or remember content, call save_to_brain once with the faithful source content; it creates an inbox draft and queues background curation. Never save inferred preferences or conversational scratchpad content without clear user intent.",
         },
         {
           // Empty base path serves the streamable-HTTP transport at /mcp.
