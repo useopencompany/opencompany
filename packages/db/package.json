@@ -137,7 +137,7 @@
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config drizzle.config.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
-    "test": "tsc --noEmit --project tsconfig.json && vitest run"
+    "test": "vitest run"
   },
   "dependencies": {
     "@opencompany/agent-runtime": "workspace:*",
