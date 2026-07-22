@@ -330,7 +330,6 @@ export function OnboardingWizard({
         if (variant === "owner" && normalizedCompanyUrl) {
           if (!queueGoatOnboardingKickoff(normalizedCompanyUrl)) {
             toast.error("Onboarding finished, but the first Brain run could not be started.");
-            return;
           }
         }
         router.push("/");

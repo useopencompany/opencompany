@@ -5,19 +5,21 @@ describe("verifyGoatOnboardingCompanyUrl", () => {
   const publicLookup = vi.fn(async () => [{ address: "93.184.216.34" }]);
 
   it("accepts a reachable public website", async () => {
-    const fetchUrl = vi.fn(async () => new Response("ok", { status: 200 }));
+    const requestUrl = vi.fn(async () => new Response("ok", { status: 200 }));
 
     await expect(
       verifyGoatOnboardingCompanyUrl("https://example.com/", {
         lookup: publicLookup,
-        fetch: fetchUrl,
+        request: requestUrl,
       }),
     ).resolves.toEqual({ ok: true });
-    expect(fetchUrl).toHaveBeenCalledOnce();
+    expect(requestUrl).toHaveBeenCalledWith(new URL("https://example.com/"), [
+      { address: "93.184.216.34" },
+    ]);
   });
 
   it("validates every redirect target before following it", async () => {
-    const fetchUrl = vi.fn(
+    const requestUrl = vi.fn(
       async () =>
         new Response(null, {
           status: 302,
@@ -28,17 +30,17 @@ describe("verifyGoatOnboardingCompanyUrl", () => {
     await expect(
       verifyGoatOnboardingCompanyUrl("https://example.com/", {
         lookup: publicLookup,
-        fetch: fetchUrl,
+        request: requestUrl,
       }),
     ).resolves.toEqual({ ok: false, error: "Enter a public company URL." });
-    expect(fetchUrl).toHaveBeenCalledOnce();
+    expect(requestUrl).toHaveBeenCalledOnce();
   });
 
   it("rejects unreachable and missing websites", async () => {
     await expect(
       verifyGoatOnboardingCompanyUrl("https://example.com/", {
         lookup: publicLookup,
-        fetch: vi.fn(async () => new Response(null, { status: 404 })),
+        request: vi.fn(async () => new Response(null, { status: 404 })),
       }),
     ).resolves.toEqual({
       ok: false,
@@ -48,7 +50,7 @@ describe("verifyGoatOnboardingCompanyUrl", () => {
     await expect(
       verifyGoatOnboardingCompanyUrl("https://example.com/", {
         lookup: publicLookup,
-        fetch: vi.fn(async () => {
+        request: vi.fn(async () => {
           throw new Error("DNS failure");
         }),
       }),

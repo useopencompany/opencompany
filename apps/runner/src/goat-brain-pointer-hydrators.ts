@@ -294,9 +294,11 @@ async function hydrateGmailPointer(input: Parameters<GoatBrainPointerHydrator["h
     });
   let snapshot;
   try {
-    snapshot = await fetchGmailThreadSnapshot(call, threadId, {
-      maxBodyChars: Number.POSITIVE_INFINITY,
-    });
+    // Keep the shared per-message body bound. Pointer hydration fetches the
+    // provider source instead of relying on chat's much smaller preview, but it
+    // must not turn an arbitrarily large mailbox thread into an unbounded DB
+    // payload and ingestion job.
+    snapshot = await fetchGmailThreadSnapshot(call, threadId);
   } catch (error) {
     if (error instanceof GoogleApiRequestError && (error.status === 403 || error.status === 404)) {
       return null;

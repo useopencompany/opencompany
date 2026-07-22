@@ -1,14 +1,17 @@
 import { lookup as dnsLookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { isIP, type LookupFunction } from "node:net";
 
 const MAX_REDIRECTS = 5;
 const URL_CHECK_TIMEOUT_MS = 8_000;
 
 type LookupAddress = { address: string };
+type CompanyUrlResponse = Pick<Response, "status" | "headers" | "body">;
 
 type CompanyUrlVerificationDependencies = {
   lookup?: (hostname: string) => Promise<readonly LookupAddress[]>;
-  fetch?: typeof fetch;
+  request?: (url: URL, addresses: readonly LookupAddress[]) => Promise<CompanyUrlResponse>;
 };
 
 export async function verifyGoatOnboardingCompanyUrl(
@@ -16,26 +19,20 @@ export async function verifyGoatOnboardingCompanyUrl(
   dependencies: CompanyUrlVerificationDependencies = {},
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const lookup = dependencies.lookup ?? lookupPublicAddresses;
-  const fetchUrl = dependencies.fetch ?? fetch;
+  const requestUrl = dependencies.request ?? requestPinnedHttpUrl;
   let currentUrl = new URL(companyUrl);
 
   try {
     for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
-      if (!(await isPublicHttpUrl(currentUrl, lookup))) {
+      const addresses = await publicHttpAddresses(currentUrl, lookup);
+      if (!addresses) {
         return { ok: false, error: "Enter a public company URL." };
       }
 
-      const response = await fetchUrl(currentUrl, {
-        method: "GET",
-        redirect: "manual",
-        cache: "no-store",
-        signal: AbortSignal.timeout(URL_CHECK_TIMEOUT_MS),
-        headers: {
-          Accept: "text/html,application/xhtml+xml",
-          Range: "bytes=0-0",
-          "User-Agent": "OpenCompany onboarding URL verifier",
-        },
-      });
+      // Resolve and validate once, then pin the request to one of those exact
+      // addresses. A second, implicit DNS lookup here would allow a hostname to
+      // rebind from a public address to an internal service between checks.
+      const response = await requestUrl(currentUrl, addresses);
 
       if (response.status >= 300 && response.status < 400) {
         await response.body?.cancel();
@@ -64,18 +61,65 @@ async function lookupPublicAddresses(hostname: string): Promise<readonly LookupA
   return dnsLookup(hostname, { all: true, verbatim: true });
 }
 
-async function isPublicHttpUrl(
+async function publicHttpAddresses(
   url: URL,
   lookup: (hostname: string) => Promise<readonly LookupAddress[]>,
-) {
-  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-  if (url.username || url.password) return false;
+): Promise<readonly LookupAddress[] | null> {
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (url.username || url.password) return null;
 
   const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
-  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost")) return false;
+  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost")) return null;
 
   const addresses = isIP(hostname) ? [{ address: hostname }] : await lookup(hostname);
-  return addresses.length > 0 && addresses.every(({ address }) => isPublicIpAddress(address));
+  return addresses.length > 0 && addresses.every(({ address }) => isPublicIpAddress(address))
+    ? addresses
+    : null;
+}
+
+function requestPinnedHttpUrl(
+  url: URL,
+  addresses: readonly LookupAddress[],
+): Promise<CompanyUrlResponse> {
+  const address = addresses.find((candidate) => isIP(candidate.address) === 4) ?? addresses[0];
+  if (!address) return Promise.reject(new Error("The company URL did not resolve."));
+  const family = isIP(address.address);
+  if (!family) return Promise.reject(new Error("The company URL resolved to an invalid address."));
+
+  const pinnedLookup: LookupFunction = (_hostname, _options, callback) => {
+    callback(null, address.address, family);
+  };
+  const request = url.protocol === "https:" ? httpsRequest : httpRequest;
+
+  return new Promise((resolve, reject) => {
+    const outgoing = request(
+      url,
+      {
+        method: "GET",
+        lookup: pinnedLookup,
+        signal: AbortSignal.timeout(URL_CHECK_TIMEOUT_MS),
+        headers: {
+          Accept: "text/html,application/xhtml+xml",
+          Range: "bytes=0-0",
+          "User-Agent": "OpenCompany onboarding URL verifier",
+        },
+      },
+      (incoming) => {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(incoming.headers)) {
+          if (Array.isArray(value)) {
+            for (const entry of value) headers.append(name, entry);
+          } else if (value !== undefined) {
+            headers.set(name, value);
+          }
+        }
+        incoming.destroy();
+        resolve({ status: incoming.statusCode ?? 500, headers, body: null });
+      },
+    );
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
 }
 
 export function isPublicIpAddress(address: string): boolean {
