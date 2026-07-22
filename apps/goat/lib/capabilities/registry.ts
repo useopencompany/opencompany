@@ -1,4 +1,5 @@
 import { attioCapability } from "@/lib/capabilities/attio";
+import { googleCalendarCapability } from "@/lib/capabilities/google-calendar";
 import { linearCapability } from "@/lib/capabilities/linear";
 import { slackCapability } from "@/lib/capabilities/slack";
 import type {
@@ -13,9 +14,10 @@ const GOAT_CAPABILITY_REGISTRY: readonly GoatCapabilityDefinition[] = [
   linearCapability,
   youtubeTranscriptCapability,
   attioCapability,
+  googleCalendarCapability,
 ];
 
-const MUTATING_CAPABILITY_IDS = new Set<GoatCapabilityId>(["linear", "attio"]);
+const MUTATING_CAPABILITY_IDS = new Set<GoatCapabilityId>(["linear", "attio", "google_calendar"]);
 
 // Global kill switch: disables capabilities for everyone regardless of the
 // per-user beta flag, without a deploy rollback.

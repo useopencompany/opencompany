@@ -1,7 +1,12 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ToolSet } from "ai";
 
-export type GoatCapabilityId = "slack" | "linear" | "youtube_transcript" | "attio";
+export type GoatCapabilityId =
+  | "slack"
+  | "linear"
+  | "youtube_transcript"
+  | "attio"
+  | "google_calendar";
 
 // Capabilities advertise their permitted operations after resolving the
 // user's connection. This keeps scope-dependent creation out of read workers
