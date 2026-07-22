@@ -36,6 +36,10 @@ const CONTEXT: GoatActionExecuteContext = {
 };
 
 const READ_SCOPES = ["object_configuration:read", "record_permission:read"];
+const LIST_READ_SCOPES = ["list_configuration:read", "list_entry:read"];
+const LIST_ID = "33ebdbe9-e529-47c9-b894-0ba25e9c15c0";
+const VIEW_ID = "cf7aaeb5-7507-4a84-9c26-9d36e34d7b70";
+const LIST_URL = `https://app.attio.com/acme/collection/${LIST_ID}/view/${VIEW_ID}`;
 
 beforeEach(() => {
   mocks.dbRows = [connectedRow()];
@@ -94,6 +98,34 @@ describe("resolveAttioActions", () => {
     expect(catalog?.actions.every((action) => !/create|update|delete|write/.test(action.id))).toBe(
       true,
     );
+    expect(catalog?.actions).not.toContainEqual(
+      expect.objectContaining({ id: "attio.query_list" }),
+    );
+    expect(mocks.loadCredential).not.toHaveBeenCalled();
+  });
+
+  it("only exposes list reads when the key has both list read scopes", async () => {
+    mocks.dbRows = [connectedRow({ scopes: [...READ_SCOPES, ...LIST_READ_SCOPES] })];
+
+    const catalog = await resolveAttioActions("user_1");
+    const action = catalog?.actions.find((entry) => entry.id === "attio.query_list");
+
+    expect(action).toMatchObject({
+      id: "attio.query_list",
+      provider: "attio",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["list"],
+        properties: {
+          list: { type: "string", maxLength: 2000 },
+          view: { type: "string", maxLength: 2000 },
+          limit: { type: "integer", minimum: 1, maximum: 20 },
+          offset: { type: "integer", minimum: 0, maximum: 10000 },
+        },
+      },
+    });
+    expect(catalog?.description).toContain("read lists");
     expect(mocks.loadCredential).not.toHaveBeenCalled();
   });
 });
@@ -326,10 +358,184 @@ describe("attio.search_records", () => {
   });
 });
 
+describe("attio.query_list", () => {
+  beforeEach(() => {
+    mocks.dbRows = [connectedRow({ scopes: [...READ_SCOPES, ...LIST_READ_SCOPES] })];
+  });
+
+  it("applies a saved view from a collection URL and hydrates parent records in a batch", async () => {
+    const fetchMock = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(request);
+      if (url === `https://api.attio.com/v2/lists/${LIST_ID}`) {
+        return jsonResponse({
+          data: {
+            id: { list_id: LIST_ID },
+            api_slug: "fundraising",
+            name: "Fundraising",
+            parent_object: ["companies"],
+          },
+        });
+      }
+      if (url === `https://api.attio.com/v2/lists/${LIST_ID}/entries/query`) {
+        return jsonResponse({
+          data: [
+            {
+              id: { entry_id: "entry_1" },
+              parent_record_id: "company_1",
+              parent_object: "companies",
+              created_at: "2026-07-20T00:00:00.000Z",
+              entry_values: {
+                status: [{ attribute_type: "status", status: { title: "Contacted" } }],
+                owner: [
+                  {
+                    attribute_type: "actor-reference",
+                    referenced_actor_id: "private_actor_id",
+                  },
+                ],
+              },
+            },
+            {
+              id: { entry_id: "entry_2" },
+              parent_record_id: "company_2",
+              parent_object: "companies",
+              entry_values: {
+                status: [{ attribute_type: "status", status: { title: "Interested" } }],
+              },
+            },
+          ],
+        });
+      }
+      if (url === "https://api.attio.com/v2/objects/companies/records/query") {
+        return jsonResponse({
+          data: [
+            {
+              id: { record_id: "company_2" },
+              web_url: "https://app.attio.com/acme/company/company_2",
+              values: { name: [{ attribute_type: "text", value: "Beta Ventures" }] },
+            },
+            {
+              id: { record_id: "company_1" },
+              web_url: "https://app.attio.com/acme/company/company_1",
+              values: {
+                name: [{ attribute_type: "text", value: "Acme Capital" }],
+                unsafe_reference: [
+                  { attribute_type: "record-reference", target_record_id: "private_record_id" },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected Attio request: ${url} ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = (await findListAction().then((action) =>
+      action.execute({ list: LIST_URL, limit: 2, offset: 3 }, CONTEXT),
+    )) as {
+      workspace: string;
+      list: { id: string; apiSlug: string; name: string; parentObjects: string[] };
+      view: { id: string };
+      entries: Array<{
+        id: string;
+        parent: { id: string; title: string; properties: Record<string, string> };
+        values: Record<string, string>;
+      }>;
+      hasMore: boolean;
+      nextOffset?: number;
+    };
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const entriesCall = fetchMock.mock.calls.find(([request]) =>
+      String(request).endsWith(`/lists/${LIST_ID}/entries/query`),
+    );
+    expect(entriesCall?.[1]).toMatchObject({ method: "POST", signal: CONTEXT.signal });
+    expect(JSON.parse(String(entriesCall?.[1]?.body))).toEqual({
+      filter_view_id: VIEW_ID,
+      limit: 2,
+      offset: 3,
+    });
+    const recordsCall = fetchMock.mock.calls.find(([request]) =>
+      String(request).endsWith("/objects/companies/records/query"),
+    );
+    expect(JSON.parse(String(recordsCall?.[1]?.body))).toEqual({
+      filter: { record_id: { $in: ["company_1", "company_2"] } },
+      limit: 2,
+    });
+    expect(result).toMatchObject({
+      workspace: "Acme",
+      list: {
+        id: LIST_ID,
+        apiSlug: "fundraising",
+        name: "Fundraising",
+        parentObjects: ["companies"],
+      },
+      view: { id: VIEW_ID },
+      entries: [
+        {
+          id: "entry_1",
+          parent: {
+            id: "company_1",
+            title: "Acme Capital",
+            properties: { name: "Acme Capital" },
+          },
+          values: { status: "Contacted" },
+        },
+        {
+          id: "entry_2",
+          parent: {
+            id: "company_2",
+            title: "Beta Ventures",
+            properties: { name: "Beta Ventures" },
+          },
+          values: { status: "Interested" },
+        },
+      ],
+      hasMore: true,
+      nextOffset: 5,
+    });
+    expect(JSON.stringify(result)).not.toContain("private_actor_id");
+    expect(JSON.stringify(result)).not.toContain("private_record_id");
+  });
+
+  it("rejects invalid list references and pagination before calling Attio", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const action = await findListAction();
+
+    await expect(action.execute({ list: "https://example.com/list" }, CONTEXT)).rejects.toThrow(
+      "secure app.attio.com",
+    );
+    await expect(
+      action.execute(
+        {
+          list: LIST_URL,
+          view: `https://app.attio.com/acme/collection/97052eb9-e65e-443f-a297-f2d9a4a7f795/view/${VIEW_ID}`,
+        },
+        CONTEXT,
+      ),
+    ).rejects.toThrow('The "view" URL must belong to the list');
+    await expect(action.execute({ list: LIST_ID, limit: 21 }, CONTEXT)).rejects.toThrow(
+      '"limit" must be an integer from 1 to 20',
+    );
+    await expect(action.execute({ list: LIST_ID, offset: 10_001 }, CONTEXT)).rejects.toThrow(
+      '"offset" must be an integer from 0 to 10000',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 async function findSearchAction() {
   const catalog = await resolveAttioActions("user_1");
   const action = catalog?.actions.find((entry) => entry.id === "attio.search_records");
   if (!action) throw new Error("missing attio.search_records");
+  return action;
+}
+
+async function findListAction() {
+  const catalog = await resolveAttioActions("user_1");
+  const action = catalog?.actions.find((entry) => entry.id === "attio.query_list");
+  if (!action) throw new Error("missing attio.query_list");
   return action;
 }
 
