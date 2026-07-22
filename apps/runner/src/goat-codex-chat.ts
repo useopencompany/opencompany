@@ -899,7 +899,7 @@ function normalizeTurnSettings(value: unknown): {
 } {
   const record = isRecord(value) ? value : {};
   return {
-    reasoningEffort: readReasoningEffort(record.reasoningEffort) ?? "medium",
+    reasoningEffort: readReasoningEffort(record.reasoningEffort) ?? "xhigh",
     planModeReasoningEffort: readReasoningEffort(record.planModeReasoningEffort),
     goalMode: readGoalMode(record.goalMode),
   };

@@ -21,7 +21,11 @@ import {
 import { GOAT_ATTIO_API_BASE_URL } from "@/lib/integrations/attio";
 
 const ATTIO_REQUEST_TIMEOUT_MS = 12_000;
+const ATTIO_SCOPE_REFRESH_TIMEOUT_MS = 3_000;
 const MAX_SEARCH_RECORDS = 25;
+const MAX_LIST_RECORDS = 25;
+const MAX_LISTS = 50;
+const MAX_LIST_ENTRIES = 25;
 const MAX_NOTES = 25;
 const MAX_PROPERTIES = 24;
 const MAX_PROPERTY_CHARS = 500;
@@ -41,8 +45,10 @@ type AttioRequestContext = {
   apiKey: string;
   connection: AttioConnection;
   userWorkosId: string;
+  userEmail: string;
   signal: AbortSignal;
   objectSlugById: ReadonlyMap<string, AttioObjectSlug>;
+  availableObjects: ReadonlySet<AttioObjectSlug>;
 };
 type AttioRecordInput = {
   id?: { object_id?: string; record_id?: string };
@@ -51,6 +57,9 @@ type AttioRecordInput = {
   created_at?: string;
   web_url?: string;
   values?: Record<string, unknown>;
+  record_text?: string;
+  email_addresses?: string[];
+  phone_numbers?: string[];
 };
 type AttioNoteInput = {
   id?: { note_id?: string } | string;
@@ -62,6 +71,20 @@ type AttioNoteInput = {
   content?: string;
   created_at?: string;
   web_url?: string;
+};
+type AttioListInput = {
+  id?: { list_id?: string };
+  api_slug?: string;
+  name?: string;
+  parent_object?: string | string[];
+  created_at?: string;
+};
+type AttioListEntryInput = {
+  id?: { entry_id?: string };
+  parent_object?: string;
+  parent_record_id?: string;
+  created_at?: string;
+  entry_values?: Record<string, unknown>;
 };
 
 export const attioCapability: GoatCapabilityDefinition = {
@@ -91,14 +114,15 @@ export const attioCapability: GoatCapabilityDefinition = {
       indexLine:
         "attio — accesses the user's Attio workspace" +
         workspace +
-        ". CAN search and retrieve standard people, companies, deals, and their notes. " +
+        ". CAN search and retrieve available standard people, companies, and deals, query interaction recency, and read workspace lists, list entries, and notes. " +
         createLine +
         " CANNOT update, upsert, or delete records, use custom objects, or create tasks or list entries.",
       recipeLines: [
         "Use attio_search_records to resolve a person, company, or deal by name before fetching the exact record or attaching a relationship.",
-        "When searching, include only the standard object slugs people, companies, and deals. Custom objects are unsupported.",
+        "Use attio_list_lists then attio_list_entries when the user names an Attio List or asks who is on one. Use attio_list_records for bounded browsing or interaction-recency questions.",
+        "When searching, include only standard object slugs available in this workspace. Deals are optional in Attio and may not be enabled. Custom objects are unsupported.",
         "Use attio_list_notes with both object and recordId to list notes on one record, or omit both to list notes globally.",
-        "If an Attio tool reports a missing scope or asks for reconnection, stop immediately and report that guidance; do not retry the call.",
+        "If an Attio tool reports an error, do not retry the same tool with rephrased input. Follow its guidance or use a different tool that directly addresses the request.",
         ...(connection.canCreateRecords
           ? [
               "Create a person, company, or deal only when this worker is in create mode and the request explicitly asks for that exact creation. Resolve related record ids with read tools first.",
@@ -134,8 +158,12 @@ async function loadAttioConnection(userWorkosId: string): Promise<AttioConnectio
     .orderBy(desc(goatIntegrations.updatedAt))
     .limit(1);
   if (!row || row.status !== "connected") return null;
-  const scopes = Array.isArray(row.scopes) ? row.scopes : [];
-  const canReadObjects = scopes.includes("object_configuration:read");
+  const storedScopes = Array.isArray(row.scopes) ? row.scopes : [];
+  const scopes =
+    storedScopes.length > 0 ? storedScopes : await loadLegacyAttioScopes(userWorkosId, row.id);
+  const canReadObjects =
+    scopes.includes("object_configuration:read") ||
+    scopes.includes("object_configuration:read-write");
   const canReadRecords =
     scopes.includes("record_permission:read") || scopes.includes("record_permission:read-write");
   return {
@@ -144,6 +172,44 @@ async function loadAttioConnection(userWorkosId: string): Promise<AttioConnectio
     canCreateRecords: canReadObjects && scopes.includes("record_permission:read-write"),
     canCreateNotes: canReadObjects && canReadRecords && scopes.includes("note:read-write"),
   };
+}
+
+async function loadLegacyAttioScopes(userWorkosId: string, integrationId: string) {
+  const credential = await loadGoatIntegrationCredential({
+    userWorkosId,
+    integrationId,
+    provider: GOAT_ATTIO_PROVIDER,
+    kind: GOAT_ATTIO_CREDENTIAL_KIND,
+  });
+  const payload = credential?.payload as GoatAttioApiKeyCredentialPayload | undefined;
+  if (typeof payload?.apiKey !== "string" || !payload.apiKey) return [];
+  try {
+    const response = await fetch(GOAT_ATTIO_API_BASE_URL + "/self", {
+      headers: { Authorization: "Bearer " + payload.apiKey, Accept: "application/json" },
+      signal: AbortSignal.timeout(ATTIO_SCOPE_REFRESH_TIMEOUT_MS),
+    });
+    if (!response.ok) return [];
+    const body = (await response.json().catch(() => null)) as {
+      active?: boolean;
+      workspace_id?: string;
+      scope?: string | string[];
+    } | null;
+    if (
+      !body?.active ||
+      typeof body.workspace_id !== "string" ||
+      body.workspace_id !== payload.workspaceId
+    ) {
+      return [];
+    }
+    const values = Array.isArray(body?.scope)
+      ? body.scope
+      : typeof body?.scope === "string"
+        ? body.scope.split(/\s+/)
+        : [];
+    return [...new Set(values.map((scope) => scope.trim()).filter(Boolean))].sort();
+  } catch {
+    return [];
+  }
 }
 
 async function createAttioTools(
@@ -169,18 +235,23 @@ async function createAttioTools(
     );
   }
   const objectSlugById = new Map<string, AttioObjectSlug>();
+  const availableObjects = new Set<AttioObjectSlug>();
   for (const [objectType, objectId] of Object.entries(payload.objectIdBySlug ?? {})) {
     const slug = GOAT_ATTIO_OBJECT_SLUGS[objectType as keyof typeof GOAT_ATTIO_OBJECT_SLUGS];
     if (slug && typeof objectId === "string") {
-      objectSlugById.set(objectId, slug as AttioObjectSlug);
+      const objectSlug = slug as AttioObjectSlug;
+      objectSlugById.set(objectId, objectSlug);
+      availableObjects.add(objectSlug);
     }
   }
   const requestContext: AttioRequestContext = {
     apiKey,
     connection,
     userWorkosId: context.userWorkosId,
+    userEmail: context.userContext.email,
     signal: context.signal,
     objectSlugById,
+    availableObjects,
   };
   const tools = createAttioReadTools(requestContext);
   if (operation === "create") Object.assign(tools, createAttioCreateTools(requestContext));
@@ -191,7 +262,7 @@ function createAttioReadTools(context: AttioRequestContext): ToolSet {
   return {
     attio_search_records: tool({
       description:
-        "Fuzzy-search Attio's standard people, companies, and deals. Returns compact records and attio_record entities.",
+        "Fuzzy-search available standard Attio people, companies, and deals by name, domain, email, phone, or social handle. Returns compact records and attio_record entities.",
       inputSchema: jsonSchema<{
         query: string;
         objects?: AttioObjectSlug[];
@@ -200,7 +271,7 @@ function createAttioReadTools(context: AttioRequestContext): ToolSet {
         type: "object",
         additionalProperties: false,
         properties: {
-          query: { type: "string", minLength: 1, maxLength: 500 },
+          query: { type: "string", minLength: 1, maxLength: 256 },
           objects: {
             type: "array",
             items: { type: "string", enum: [...STANDARD_OBJECTS] },
@@ -211,18 +282,149 @@ function createAttioReadTools(context: AttioRequestContext): ToolSet {
         required: ["query"],
       }),
       execute: async (args) => {
-        const query = requiredString(args.query, "query", 500);
-        const objects = normalizeObjects(args.objects);
+        const query = requiredString(args.query, "query", 256);
+        const objects = normalizeObjects(args.objects, context.availableObjects);
         const limit = clampCount(args.limit, 10, MAX_SEARCH_RECORDS);
         const response = await attioRequest(context, {
           path: "/objects/records/search",
           method: "POST",
-          body: { query, objects, limit },
+          body: { query, objects, request_as: { type: "workspace" }, limit },
         });
         return {
           records: attioRecordList(response)
             .slice(0, limit)
             .map((record) => compactAttioRecord(record, undefined, context.objectSlugById)),
+        };
+      },
+    }),
+    attio_list_records: tool({
+      description:
+        "List records for one available standard Attio object. Optionally return records not interacted with on or after an ISO timestamp, including records with no interaction.",
+      inputSchema: jsonSchema<{
+        object: AttioObjectSlug;
+        notInteractedSince?: string;
+        limit?: number;
+        offset?: number;
+      }>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          object: { type: "string", enum: [...STANDARD_OBJECTS] },
+          notInteractedSince: {
+            type: "string",
+            minLength: 10,
+            maxLength: 40,
+            description:
+              "ISO 8601 cutoff. Returns records whose last interaction is before this time or missing.",
+          },
+          limit: { type: "number", minimum: 1, maximum: MAX_LIST_RECORDS },
+          offset: { type: "number", minimum: 0, maximum: 10_000 },
+        },
+        required: ["object"],
+      }),
+      execute: async (args) => {
+        const object = requireAvailableObject(args.object, context.availableObjects);
+        const limit = clampCount(args.limit, 10, MAX_LIST_RECORDS);
+        const offset = clampOffset(args.offset);
+        const cutoff = optionalIsoTimestamp(args.notInteractedSince, "notInteractedSince");
+        const response = await attioRequest(context, {
+          path: "/objects/" + object + "/records/query",
+          method: "POST",
+          body: {
+            ...(cutoff
+              ? {
+                  filter: {
+                    $not: { last_interaction: { interacted_at: { $gte: cutoff } } },
+                  },
+                  sorts: [
+                    { direction: "desc", attribute: "last_interaction", field: "interacted_at" },
+                  ],
+                }
+              : {}),
+            limit,
+            offset,
+          },
+        });
+        return {
+          records: attioRecordList(response)
+            .slice(0, limit)
+            .map((record) => compactAttioRecord(record, object, context.objectSlugById)),
+          nextOffset: offset + limit,
+        };
+      },
+    }),
+    attio_list_lists: tool({
+      description:
+        "List the Attio workspace's lists, including each list slug and parent object type.",
+      inputSchema: jsonSchema<{ limit?: number }>({
+        type: "object",
+        additionalProperties: false,
+        properties: { limit: { type: "number", minimum: 1, maximum: MAX_LISTS } },
+      }),
+      execute: async (args) => {
+        const limit = clampCount(args.limit, 25, MAX_LISTS);
+        const response = await attioRequest(context, { path: "/lists" });
+        return { lists: attioListList(response).slice(0, limit).map(compactAttioList) };
+      },
+    }),
+    attio_list_entries: tool({
+      description:
+        "List entries in one Attio List by list slug or id, enriched with compact parent person/company/deal records.",
+      inputSchema: jsonSchema<{ list: string; limit?: number; offset?: number }>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          list: { type: "string", minLength: 1, maxLength: 200 },
+          limit: { type: "number", minimum: 1, maximum: MAX_LIST_ENTRIES },
+          offset: { type: "number", minimum: 0, maximum: 10_000 },
+        },
+        required: ["list"],
+      }),
+      execute: async (args) => {
+        const listRef = requiredString(args.list, "list", 200);
+        const limit = clampCount(args.limit, 10, MAX_LIST_ENTRIES);
+        const offset = clampOffset(args.offset);
+        const listResponse = await attioRequest(context, {
+          path: "/lists/" + encodeURIComponent(listRef),
+        });
+        const list = attioList(listResponse);
+        if (!list) throw new Error("Attio list " + JSON.stringify(listRef) + " was not found.");
+        const parentObject = attioListParentObject(list);
+        if (!parentObject) {
+          throw new Error(
+            "This Attio list does not use a supported people, companies, or deals parent object.",
+          );
+        }
+        requireAvailableObject(parentObject, context.availableObjects);
+        const entriesResponse = await attioRequest(context, {
+          path: "/lists/" + encodeURIComponent(listRef) + "/entries/query",
+          method: "POST",
+          body: { limit, offset },
+        });
+        const entries = attioListEntryList(entriesResponse).slice(0, limit);
+        const recordIds = entries
+          .map((entry) => entry.parent_record_id)
+          .filter((recordId): recordId is string => Boolean(recordId));
+        const recordsById = new Map<string, ReturnType<typeof compactAttioRecord>>();
+        if (recordIds.length > 0) {
+          const recordsResponse = await attioRequest(context, {
+            path: "/objects/" + parentObject + "/records/query",
+            method: "POST",
+            body: {
+              filter: { record_id: { $in: recordIds } },
+              limit: recordIds.length,
+              offset: 0,
+            },
+          });
+          for (const record of attioRecordList(recordsResponse)) {
+            const compact = compactAttioRecord(record, parentObject, context.objectSlugById);
+            recordsById.set(compact.id, compact);
+          }
+        }
+        return {
+          list: compactAttioList(list),
+          entries: entries.map((entry) => compactAttioListEntry(entry, recordsById)),
+          nextOffset: offset + limit,
         };
       },
     }),
@@ -238,7 +440,7 @@ function createAttioReadTools(context: AttioRequestContext): ToolSet {
         required: ["object", "recordId"],
       }),
       execute: async (args) => {
-        const object = requiredObject(args.object);
+        const object = requireAvailableObject(args.object, context.availableObjects);
         const recordId = requiredString(args.recordId, "recordId", 200);
         const response = await attioRequest(context, {
           path: "/objects/" + object + "/records/" + encodeURIComponent(recordId),
@@ -281,7 +483,7 @@ function createAttioReadTools(context: AttioRequestContext): ToolSet {
         const limit = clampCount(args.limit, 10, MAX_NOTES);
         const query = new URLSearchParams({ limit: String(limit) });
         if (args.object && args.recordId) {
-          query.set("parent_object", requiredObject(args.object));
+          query.set("parent_object", requireAvailableObject(args.object, context.availableObjects));
           query.set("parent_record_id", requiredString(args.recordId, "recordId", 200));
         }
         const response = await attioRequest(context, {
@@ -319,7 +521,7 @@ function createAttioReadTools(context: AttioRequestContext): ToolSet {
 function createAttioCreateTools(context: AttioRequestContext): ToolSet {
   const guard = createSingleMutationGuard();
   const tools: ToolSet = {};
-  if (context.connection.canCreateRecords) {
+  if (context.connection.canCreateRecords && context.availableObjects.has("people")) {
     tools.attio_create_person = tool({
       description:
         "Create one Attio person from typed common fields. Use only for the user's explicit creation request.",
@@ -362,6 +564,8 @@ function createAttioCreateTools(context: AttioRequestContext): ToolSet {
           return await createRecord(context, "people", values);
         }),
     });
+  }
+  if (context.connection.canCreateRecords && context.availableObjects.has("companies")) {
     tools.attio_create_company = tool({
       description:
         "Create one Attio company from typed common fields. Use only for the user's explicit creation request.",
@@ -387,12 +591,15 @@ function createAttioCreateTools(context: AttioRequestContext): ToolSet {
           return await createRecord(context, "companies", values);
         }),
     });
+  }
+  if (context.connection.canCreateRecords && context.availableObjects.has("deals")) {
     tools.attio_create_deal = tool({
       description:
-        "Create one Attio deal with optional typed relationships. Use only for the user's explicit creation request.",
+        "Create one Attio deal with an explicit stage and optional typed relationships. Defaults ownership to the requesting user's email. Use only for the user's explicit creation request.",
       inputSchema: jsonSchema<{
         name: string;
-        stage?: string;
+        stage: string;
+        ownerEmail?: string;
         value?: number;
         companyRecordId?: string;
         personRecordIds?: string[];
@@ -402,6 +609,7 @@ function createAttioCreateTools(context: AttioRequestContext): ToolSet {
         properties: {
           name: { type: "string", minLength: 1, maxLength: 300 },
           stage: { type: "string", minLength: 1, maxLength: 200 },
+          ownerEmail: { type: "string", minLength: 3, maxLength: 320 },
           value: { type: "number", minimum: 0 },
           companyRecordId: { type: "string", minLength: 1, maxLength: 200 },
           personRecordIds: {
@@ -410,16 +618,19 @@ function createAttioCreateTools(context: AttioRequestContext): ToolSet {
             maxItems: MAX_PEOPLE_PER_DEAL,
           },
         },
-        required: ["name"],
+        required: ["name", "stage"],
       }),
       execute: async (args) =>
         guard.run("attio_create_deal", args, async () => {
           const values: Record<string, unknown> = {
             name: requiredString(args.name, "name", 300),
           };
-          const stage = optionalString(args.stage, "stage", 200);
+          const stage = requiredString(args.stage, "stage", 200);
+          const ownerEmail =
+            optionalString(args.ownerEmail, "ownerEmail", 320) ?? context.userEmail;
           const companyRecordId = optionalString(args.companyRecordId, "companyRecordId", 200);
-          if (stage) values.stage = stage;
+          values.stage = stage;
+          values.owner = ownerEmail;
           if (args.value !== undefined) {
             if (typeof args.value !== "number" || !Number.isFinite(args.value) || args.value < 0) {
               throw new Error("value must be a finite non-negative number.");
@@ -474,7 +685,7 @@ function createAttioCreateTools(context: AttioRequestContext): ToolSet {
             method: "POST",
             body: {
               data: {
-                parent_object: requiredObject(args.object),
+                parent_object: requireAvailableObject(args.object, context.availableObjects),
                 parent_record_id: requiredString(args.recordId, "recordId", 200),
                 title: requiredString(args.title, "title", 300),
                 format: "markdown",
@@ -546,11 +757,26 @@ async function attioRequest(
   }
   if (response.status === 403) {
     throw new Error(
-      "Attio denied this action because the API key is missing the required scope. Resave a key with object_configuration:read, record_permission:read-write, and note:read-write as needed.",
+      "Attio denied this action because the API key is missing a required scope. Resave a key with the list, record, note, and object permissions needed for this request.",
     );
   }
   if (response.status === 404) return null;
-  if (!response.ok) throw new Error("Attio returned a provider error (" + response.status + ").");
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(() => null)) as {
+      code?: unknown;
+      message?: unknown;
+    } | null;
+    const code = primitiveString(errorBody?.code);
+    const message = primitiveString(errorBody?.message);
+    const detail = [code, message].filter(Boolean).join(": ");
+    throw new Error(
+      "Attio rejected this request (" +
+        response.status +
+        ")" +
+        (detail ? ": " + truncate(detail, 300) : ".") +
+        (response.status < 500 ? " Do not retry it with rephrased input." : ""),
+    );
+  }
   if (response.status === 204) return null;
   return await response.json().catch(() => null);
 }
@@ -567,6 +793,27 @@ function attioRecordList(response: unknown): AttioRecordInput[] {
 function attioRecord(response: unknown): AttioRecordInput | null {
   const data = asRecord(response)?.data;
   return isAttioRecordInput(data) ? data : null;
+}
+
+function attioListList(response: unknown): AttioListInput[] {
+  const data = asRecord(response)?.data;
+  if (!Array.isArray(data)) return [];
+  return data.filter((entry): entry is AttioListInput => asRecord(entry) !== null);
+}
+
+function attioList(response: unknown): AttioListInput | null {
+  const data = asRecord(response)?.data;
+  return asRecord(data) ? (data as AttioListInput) : null;
+}
+
+function attioListEntryList(response: unknown): AttioListEntryInput[] {
+  const data = asRecord(response)?.data;
+  if (!Array.isArray(data)) return [];
+  return data.filter(
+    (entry): entry is AttioListEntryInput =>
+      asRecord(entry) !== null &&
+      typeof (entry as AttioListEntryInput).parent_record_id === "string",
+  );
 }
 
 function attioNoteList(response: unknown): AttioNoteInput[] {
@@ -613,9 +860,14 @@ export function compactAttioRecord(
     const value = renderAttioValues(entries);
     if (value) properties[slug] = truncate(value, MAX_PROPERTY_CHARS);
   }
+  const searchEmails = compactStringList(record.email_addresses);
+  const searchPhones = compactStringList(record.phone_numbers);
+  if (!properties.email_addresses && searchEmails) properties.email_addresses = searchEmails;
+  if (!properties.phone_numbers && searchPhones) properties.phone_numbers = searchPhones;
   const title =
     properties.name ??
     properties.full_name ??
+    primitiveString(record.record_text) ??
     properties.email_addresses ??
     singularObjectName(object) + " " + (recordId || "record");
   const url = safeUrl(record.web_url);
@@ -663,6 +915,51 @@ export function compactAttioNote(note: AttioNoteInput) {
   };
 }
 
+function compactAttioList(list: AttioListInput) {
+  const id = primitiveString(list.id?.list_id) ?? primitiveString(list.api_slug) ?? "";
+  const apiSlug = primitiveString(list.api_slug) ?? id;
+  const name = (primitiveString(list.name) ?? apiSlug) || "Untitled list";
+  const parentObject = attioListParentObject(list);
+  return {
+    id,
+    apiSlug,
+    name,
+    ...(parentObject ? { parentObject } : {}),
+    ...(list.created_at ? { createdAt: list.created_at } : {}),
+    entity: { type: "attio_list", id, title: name },
+  };
+}
+
+function compactAttioListEntry(
+  entry: AttioListEntryInput,
+  recordsById: ReadonlyMap<string, ReturnType<typeof compactAttioRecord>>,
+) {
+  const id = primitiveString(entry.id?.entry_id) ?? "";
+  const recordId = primitiveString(entry.parent_record_id) ?? "";
+  const properties: Record<string, string> = {};
+  for (const [slug, values] of Object.entries(entry.entry_values ?? {})) {
+    if (Object.keys(properties).length >= MAX_PROPERTIES) break;
+    const value = renderAttioValues(values);
+    if (value) properties[slug] = truncate(value, MAX_PROPERTY_CHARS);
+  }
+  return {
+    id,
+    recordId,
+    ...(entry.created_at ? { createdAt: entry.created_at } : {}),
+    properties,
+    record: recordsById.get(recordId) ?? null,
+  };
+}
+
+function attioListParentObject(list: AttioListInput): AttioObjectSlug | null {
+  const values = Array.isArray(list.parent_object) ? list.parent_object : [list.parent_object];
+  for (const value of values) {
+    const object = asObjectSlug(value);
+    if (object) return object;
+  }
+  return null;
+}
+
 function renderAttioValues(entries: unknown): string | null {
   if (!Array.isArray(entries)) return primitiveString(entries);
   const rendered = entries
@@ -678,7 +975,12 @@ function renderAttioValues(entries: unknown): string | null {
 
 function renderAttioValue(value: Record<string, unknown>): string | null {
   const type = typeof value.attribute_type === "string" ? value.attribute_type : "";
-  if (type === "interaction" || type === "actor-reference") return null;
+  if (type === "actor-reference") return null;
+  if (type === "interaction") {
+    const timestamp = primitiveString(value.interacted_at);
+    const interactionType = primitiveString(value.interaction_type);
+    return timestamp ? timestamp + (interactionType ? " (" + interactionType + ")" : "") : null;
+  }
   if (type === "personal-name") {
     return (
       primitiveString(value.full_name) ??
@@ -754,9 +1056,55 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function normalizeObjects(value: unknown): AttioObjectSlug[] {
-  if (!Array.isArray(value) || value.length === 0) return [...STANDARD_OBJECTS];
-  return [...new Set(value.map(requiredObject))];
+function normalizeObjects(
+  value: unknown,
+  availableObjects: ReadonlySet<AttioObjectSlug>,
+): AttioObjectSlug[] {
+  const requested =
+    !Array.isArray(value) || value.length === 0
+      ? [...STANDARD_OBJECTS]
+      : [...new Set(value.map(requiredObject))];
+  const available = requested.filter((object) => availableObjects.has(object));
+  if (available.length === 0) {
+    throw new Error(
+      "None of the requested Attio objects are enabled. Available: " +
+        ([...availableObjects].join(", ") || "none") +
+        ".",
+    );
+  }
+  return available;
+}
+
+function requireAvailableObject(
+  value: unknown,
+  availableObjects: ReadonlySet<AttioObjectSlug>,
+): AttioObjectSlug {
+  const object = requiredObject(value);
+  if (!availableObjects.has(object)) {
+    throw new Error(
+      "The Attio " +
+        object +
+        " object is not enabled in this workspace. Available: " +
+        ([...availableObjects].join(", ") || "none") +
+        ".",
+    );
+  }
+  return object;
+}
+
+function clampOffset(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.min(10_000, Math.max(0, Math.floor(value)));
+}
+
+function optionalIsoTimestamp(value: unknown, field: string): string | null {
+  const raw = optionalString(value, field, 40);
+  if (!raw) return null;
+  const timestamp = new Date(raw);
+  if (Number.isNaN(timestamp.getTime())) {
+    throw new Error(field + " must be a valid ISO 8601 timestamp.");
+  }
+  return timestamp.toISOString();
 }
 
 function requiredObject(value: unknown): AttioObjectSlug {
@@ -805,6 +1153,15 @@ function primitiveString(value: unknown): string | null {
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (typeof value === "boolean") return value ? "true" : "false";
   return null;
+}
+
+function compactStringList(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const entries = value
+    .map(primitiveString)
+    .filter((entry): entry is string => Boolean(entry))
+    .slice(0, 10);
+  return entries.length > 0 ? entries.join("; ") : null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

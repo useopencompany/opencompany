@@ -3,7 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GoatBrainActivity } from "./GoatBrainActivity";
+import { GoatBrainActivity, GoatBrainRecentActivity } from "./GoatBrainActivity";
 
 const queryRows = vi.hoisted(() => ({
   jobs: [] as unknown[],
@@ -91,6 +91,92 @@ describe("GoatBrainActivity", () => {
       "href",
       "/brain/goat_brain_1/companies/customers/acme",
     );
+  });
+
+  it("shows only successful filings in the overview by default", () => {
+    queryRows.jobs = [
+      job({
+        id: "gbjob_filed",
+        source_item_id: "gbsrc_filed",
+        status: "succeeded",
+        completed_at: "2026-07-09T10:01:00.000Z",
+        result: { summary: "Filed one page." },
+      }),
+      job({
+        id: "gbjob_skipped",
+        source_item_id: "gbsrc_skipped",
+        status: "skipped",
+        completed_at: "2026-07-09T10:02:00.000Z",
+        result: { skipped: true, summary: "No durable knowledge." },
+      }),
+    ];
+    queryRows.items = [
+      item({ id: "gbsrc_filed", title: "Useful customer signal" }),
+      item({ id: "gbsrc_skipped", title: "Routine notification" }),
+    ];
+
+    render(<GoatBrainRecentActivity brainRef="goat_brain_1" />);
+
+    expect(screen.getByText("Filed into brain")).toBeInTheDocument();
+    expect(screen.getByText("Useful customer signal")).toBeInTheDocument();
+    expect(screen.queryByText("Received")).not.toBeInTheDocument();
+    expect(screen.queryByText("Skipped filing")).not.toBeInTheDocument();
+    expect(screen.queryByText("Routine notification")).not.toBeInTheDocument();
+  });
+
+  it("filters overview activity before applying its row limit", () => {
+    const skippedJobs = Array.from({ length: 30 }, (_, index) =>
+      job({
+        id: `gbjob_skipped_${index}`,
+        source_item_id: `gbsrc_skipped_${index}`,
+        status: "skipped",
+        completed_at: `2026-07-09T10:${String(index + 2).padStart(2, "0")}:00.000Z`,
+        result: { skipped: true },
+      }),
+    );
+    queryRows.jobs = [
+      ...skippedJobs,
+      job({
+        id: "gbjob_filed",
+        source_item_id: "gbsrc_filed",
+        status: "succeeded",
+        completed_at: "2026-07-09T10:01:00.000Z",
+        result: { summary: "Filed one page." },
+      }),
+    ];
+    queryRows.items = [
+      ...skippedJobs.map((skippedJob, index) =>
+        item({ id: skippedJob.source_item_id, title: `Routine notification ${index}` }),
+      ),
+      item({ id: "gbsrc_filed", title: "Older useful signal" }),
+    ];
+
+    render(<GoatBrainRecentActivity brainRef="goat_brain_1" limit={1} />);
+
+    expect(screen.getByText("Older useful signal")).toBeInTheDocument();
+  });
+
+  it("can show received and skipped overview activity", () => {
+    queryRows.jobs = [
+      job({
+        status: "skipped",
+        completed_at: "2026-07-09T10:01:00.000Z",
+        result: { skipped: true },
+      }),
+    ];
+    queryRows.items = [item()];
+
+    const { rerender } = render(
+      <GoatBrainRecentActivity brainRef="goat_brain_1" filter="received" />,
+    );
+
+    expect(screen.getByText("Captured to inbox")).toBeInTheDocument();
+    expect(screen.queryByText("Skipped filing")).not.toBeInTheDocument();
+
+    rerender(<GoatBrainRecentActivity brainRef="goat_brain_1" filter="skipped" />);
+
+    expect(screen.getByText("Skipped filing")).toBeInTheDocument();
+    expect(screen.queryByText("Captured to inbox")).not.toBeInTheDocument();
   });
 
   it("bounds visible quick links and reports the hidden count", () => {

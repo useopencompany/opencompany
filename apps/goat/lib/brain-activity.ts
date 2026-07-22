@@ -36,6 +36,10 @@ export type GoatBrainActivityEvent = {
   durationMs: number | null;
 };
 
+type GoatBrainActivityEventOptions = {
+  kinds?: readonly GoatBrainActivityKind[];
+};
+
 export type GoatBrainDraftIngestStateKind = "queued" | "paused" | "running" | "retrying" | "failed";
 
 export type GoatBrainDraftIngestState = {
@@ -56,6 +60,7 @@ const MAX_DETAIL_LENGTH = 180;
 export function buildGoatBrainActivityEvents(
   jobs: readonly GoatBrainIngestJobRow[],
   sourceItems: readonly GoatBrainSourceItemRow[],
+  options: GoatBrainActivityEventOptions = {},
 ): GoatBrainActivityEvent[] {
   const itemsById = new Map(sourceItems.map((item) => [item.id, item]));
   const events: GoatBrainActivityEvent[] = [];
@@ -154,8 +159,10 @@ export function buildGoatBrainActivityEvents(
     }
   }
 
+  const includedKinds = options.kinds ? new Set(options.kinds) : null;
   return events
     .toSorted((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    .filter((event) => !includedKinds || includedKinds.has(event.kind))
     .slice(0, MAX_ACTIVITY_EVENTS);
 }
 

@@ -266,6 +266,7 @@ describe("runGoatCodexChatTurn", () => {
       expect.objectContaining({
         existingEngineSessionId: "thread_existing",
         codexWorkRoot: "/home/user/opencompany-goat/codex-chat",
+        reasoningEffort: "xhigh",
       }),
     );
     expect(dbMocks.execute).toHaveBeenCalledOnce();

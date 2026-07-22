@@ -78,8 +78,30 @@ afterEach(() => {
 });
 
 describe("attio capability resolution and tools", () => {
-  it("keeps legacy unknown-scope connections read-only until the key is resaved", async () => {
+  it("revalidates legacy unknown-scope connections before deciding create access", async () => {
     mocks.dbRows = [connectedRow([])];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          active: true,
+          workspace_id: "workspace_1",
+          scope:
+            "object_configuration:read-write record_permission:read-write note:read-write list_configuration:read-write list_entry:read-write",
+        }),
+      ),
+    );
+    const resolved = await attioCapability.resolve("user_1");
+    expect(resolved?.operations).toEqual(["read", "create"]);
+    expect(resolved?.indexLine).toContain("CAN create");
+  });
+
+  it("keeps legacy connections read-only when live scope validation fails", async () => {
+    mocks.dbRows = [connectedRow([])];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 500 })),
+    );
     const resolved = await attioCapability.resolve("user_1");
     expect(resolved?.operations).toEqual(["read"]);
     expect(resolved?.indexLine).toContain("resaved with read-write scopes");
@@ -100,6 +122,9 @@ describe("attio capability resolution and tools", () => {
     const read = await createResolvedTools("read");
     expect(Object.keys(read)).toEqual([
       "attio_search_records",
+      "attio_list_records",
+      "attio_list_lists",
+      "attio_list_entries",
       "attio_get_record",
       "attio_list_notes",
       "attio_get_note",
@@ -149,6 +174,7 @@ describe("attio capability resolution and tools", () => {
     expect(JSON.parse(String(request?.[1]?.body))).toEqual({
       query: "Ada",
       objects: ["people"],
+      request_as: { type: "workspace" },
       limit: 25,
     });
     expect(JSON.stringify(result)).not.toContain("attio_secret_key");
@@ -169,6 +195,183 @@ describe("attio capability resolution and tools", () => {
     const description = (result as { records: Array<{ properties: Record<string, string> }> })
       .records[0]?.properties.description;
     expect(description?.length).toBe(500);
+  });
+
+  it("filters search to objects enabled in the connected Attio workspace", async () => {
+    mocks.loadCredential.mockResolvedValueOnce({
+      payload: {
+        apiKey: "attio_secret_key",
+        objectIdBySlug: {
+          person: "object_people",
+          company: "object_companies",
+        },
+      },
+    });
+    const fetchMock = vi.fn(async (...request: [RequestInfo | URL, RequestInit?]) => {
+      void request;
+      return jsonResponse({ data: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = await createResolvedTools("read");
+
+    await executeTool(tools, "attio_search_records", {
+      query: "Partner",
+      objects: ["people", "companies", "deals"],
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      objects: ["people", "companies"],
+      request_as: { type: "workspace" },
+    });
+    await expect(
+      executeTool(tools, "attio_get_record", { object: "deals", recordId: "deal_1" }),
+    ).rejects.toThrow("deals object is not enabled");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("compacts Attio's beta search result shape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          data: [
+            {
+              id: { object_id: "object_people", record_id: "person_1" },
+              object_slug: "people",
+              record_text: "Bela Wiertz",
+              email_addresses: ["bela@example.com"],
+              phone_numbers: ["+4912345"],
+            },
+          ],
+        }),
+      ),
+    );
+
+    await expect(
+      executeTool(await createResolvedTools("read"), "attio_search_records", {
+        query: "Bela",
+        objects: ["people"],
+      }),
+    ).resolves.toMatchObject({
+      records: [
+        {
+          id: "person_1",
+          object: "people",
+          title: "Bela Wiertz",
+          properties: {
+            email_addresses: "bela@example.com",
+            phone_numbers: "+4912345",
+          },
+        },
+      ],
+    });
+  });
+
+  it("lists records not interacted with since a cutoff and preserves interaction timestamps", async () => {
+    const fetchMock = vi.fn(async (...request: [RequestInfo | URL, RequestInit?]) => {
+      void request;
+      return jsonResponse({
+        data: [
+          {
+            id: { object_id: "object_people", record_id: "person_1" },
+            values: {
+              name: [{ attribute_type: "personal-name", full_name: "Ada Lovelace" }],
+              last_interaction: [
+                {
+                  attribute_type: "interaction",
+                  interaction_type: "email",
+                  interacted_at: "2026-07-10T09:00:00.000Z",
+                  active_until: null,
+                },
+              ],
+            },
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeTool(await createResolvedTools("read"), "attio_list_records", {
+      object: "people",
+      notInteractedSince: "2026-07-16T12:00:00Z",
+      limit: 5,
+      offset: 2,
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.attio.test/v2/objects/people/records/query",
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      filter: {
+        $not: {
+          last_interaction: { interacted_at: { $gte: "2026-07-16T12:00:00.000Z" } },
+        },
+      },
+      sorts: [{ direction: "desc", attribute: "last_interaction", field: "interacted_at" }],
+      limit: 5,
+      offset: 2,
+    });
+    expect(result).toMatchObject({
+      records: [
+        {
+          title: "Ada Lovelace",
+          properties: { last_interaction: "2026-07-10T09:00:00.000Z (email)" },
+        },
+      ],
+      nextOffset: 7,
+    });
+  });
+
+  it("lists Attio lists and enriches list entries with their parent records", async () => {
+    const list = {
+      id: { list_id: "list_1" },
+      api_slug: "leads",
+      name: "YT Partnerships",
+      parent_object: ["companies"],
+    };
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const value = String(url);
+      if (value.endsWith("/lists")) return jsonResponse({ data: [list] });
+      if (value.endsWith("/lists/leads")) return jsonResponse({ data: list });
+      if (value.endsWith("/lists/leads/entries/query")) {
+        return jsonResponse({
+          data: [
+            {
+              id: { entry_id: "entry_1" },
+              parent_object: "companies",
+              parent_record_id: "company_1",
+              entry_values: {},
+            },
+          ],
+        });
+      }
+      expect(value).toContain("/objects/companies/records/query");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        filter: { record_id: { $in: ["company_1"] } },
+        limit: 1,
+        offset: 0,
+      });
+      return jsonResponse({
+        data: [
+          {
+            id: { object_id: "object_companies", record_id: "company_1" },
+            values: { name: [{ attribute_type: "text", value: "Acme" }] },
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const tools = await createResolvedTools("read");
+
+    await expect(executeTool(tools, "attio_list_lists", {})).resolves.toMatchObject({
+      lists: [{ apiSlug: "leads", name: "YT Partnerships", parentObject: "companies" }],
+    });
+    await expect(
+      executeTool(tools, "attio_list_entries", { list: "leads", limit: 10 }),
+    ).resolves.toMatchObject({
+      list: { apiSlug: "leads", name: "YT Partnerships" },
+      entries: [{ id: "entry_1", record: { id: "company_1", title: "Acme" } }],
+    });
   });
 
   it("builds typed person, company, deal, and markdown-note request bodies", async () => {
@@ -238,6 +441,7 @@ describe("attio capability resolution and tools", () => {
           values: {
             name: "Enterprise",
             stage: "Qualified",
+            owner: "ada@example.com",
             value: 120000,
             associated_company: {
               target_object: "companies",
@@ -299,7 +503,7 @@ describe("attio capability resolution and tools", () => {
         object: "people",
         recordId: "rec_1",
       }),
-    ).rejects.toThrow("missing the required scope");
+    ).rejects.toThrow("missing a required scope");
     expect(mocks.markStatus).not.toHaveBeenCalled();
   });
 
@@ -338,7 +542,7 @@ describe("attio capability resolution and tools", () => {
         object: "people",
         recordId: "rec_1",
       }),
-    ).rejects.toThrow("provider error (500)");
+    ).rejects.toThrow("rejected this request (500)");
   });
 
   it("surfaces bounded provider timeouts without exposing credentials", async () => {

@@ -1,16 +1,20 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import type { GoatBrainDocumentView } from "@/lib/brain";
 import { GoatBrainOverview } from "./GoatBrainOverview";
 
 vi.mock("@/components/GoatBrainActivity", () => ({
-  GoatBrainRecentActivity: ({ brainRef }: { brainRef: string }) => (
-    <div data-testid="recent-activity">{brainRef}</div>
+  GoatBrainRecentActivity: ({ brainRef, filter }: { brainRef: string; filter: string }) => (
+    <div data-testid="recent-activity">
+      {brainRef}:{filter}
+    </div>
   ),
 }));
 
-it("shows 7-day growth, retrievals, sources, and recent activity", () => {
+it("shows useful activity by default and lets the user change the activity filter", async () => {
+  const user = userEvent.setup();
   render(
     <GoatBrainOverview
       brainName="Company brain"
@@ -34,7 +38,18 @@ it("shows 7-day growth, retrievals, sources, and recent activity", () => {
   expect(screen.getByText("42")).toBeInTheDocument();
   expect(screen.getByText("Active sources")).toBeInTheDocument();
   expect(screen.getByText("3")).toBeInTheDocument();
-  expect(screen.getByTestId("recent-activity")).toHaveTextContent("goat_brain_1");
+  expect(screen.getByRole("combobox", { name: "Filter recent activity" })).toHaveTextContent(
+    "Filed",
+  );
+  expect(screen.getByTestId("recent-activity")).toHaveTextContent("goat_brain_1:filed");
+
+  await user.click(screen.getByRole("combobox", { name: "Filter recent activity" }));
+  await user.click(screen.getByRole("option", { name: "Skipped" }));
+
+  expect(screen.getByRole("combobox", { name: "Filter recent activity" })).toHaveTextContent(
+    "Skipped",
+  );
+  expect(screen.getByTestId("recent-activity")).toHaveTextContent("goat_brain_1:skipped");
 });
 
 function createDocument({

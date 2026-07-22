@@ -2,7 +2,8 @@ import { isCodexReasoningEffort } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { GoatCodexChatTurnSettings } from "@opencompany/db/goat-schema";
 
-export const DEFAULT_CODEX_CHAT_REASONING_EFFORT: CodexReasoningEffort = "medium";
+export const DEFAULT_CODEX_CHAT_REASONING_EFFORT: CodexReasoningEffort = "xhigh";
+export const DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT: CodexReasoningEffort = "medium";
 export const DEFAULT_CODEX_PLAN_MODE_REASONING_EFFORT: CodexReasoningEffort = "high";
 export const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 export const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
@@ -29,9 +30,12 @@ export type GoatCodexComposerSettingsView = {
   goalMode: CodexGoalMode | null;
 };
 
-export function parseCodexChatSettings(value: unknown): CodexChatSettingsResult {
+export function parseCodexChatSettings(
+  value: unknown,
+  defaultReasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
+): CodexChatSettingsResult {
   if (value == null) {
-    return { ok: true, settings: { reasoningEffort: DEFAULT_CODEX_CHAT_REASONING_EFFORT } };
+    return { ok: true, settings: { reasoningEffort: defaultReasoningEffort } };
   }
   if (!isRecord(value)) return { ok: false, error: "Invalid Codex settings." };
 

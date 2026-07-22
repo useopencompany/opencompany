@@ -1,9 +1,34 @@
 "use client";
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@opencompany/ui/components/select";
 import { DatabaseZap, FilePlus2, RadioTower } from "lucide-react";
-import { GoatBrainRecentActivity } from "@/components/GoatBrainActivity";
+import { useState } from "react";
+import {
+  type GoatBrainActivityFilter,
+  GoatBrainRecentActivity,
+} from "@/components/GoatBrainActivity";
 import type { GoatBrainDocumentView } from "@/lib/brain";
 import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
+
+const ACTIVITY_FILTER_OPTIONS = [
+  "filed",
+  "received",
+  "skipped",
+  "all",
+] as const satisfies readonly GoatBrainActivityFilter[];
+
+const ACTIVITY_FILTER_LABELS: Record<GoatBrainActivityFilter, string> = {
+  filed: "Filed",
+  received: "Received",
+  skipped: "Skipped",
+  all: "All activity",
+};
 
 export function GoatBrainOverview({
   brainName,
@@ -16,6 +41,7 @@ export function GoatBrainOverview({
   documents: GoatBrainDocumentView[];
   stats: GoatBrainOverviewStats;
 }) {
+  const [activityFilter, setActivityFilter] = useState<GoatBrainActivityFilter>("filed");
   const windowStart = new Date(stats.windowStartedAt).getTime();
   const itemsAdded = documents.reduce((total, document) => {
     const createdAt = new Date(document.createdAt).getTime();
@@ -86,17 +112,43 @@ export function GoatBrainOverview({
         </section>
 
         <section aria-labelledby="brain-recent-activity-title" className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1">
-            <h2 id="brain-recent-activity-title" className="text-[14px] font-semibold text-ink">
-              Recent activity
-            </h2>
-            <p className="text-[12px] leading-5 text-ink-subtle">
-              The latest captures and filing updates.
-            </p>
+          <div className="flex items-end justify-between gap-4">
+            <div className="flex flex-col gap-1">
+              <h2 id="brain-recent-activity-title" className="text-[14px] font-semibold text-ink">
+                Recent activity
+              </h2>
+              <p className="text-[12px] leading-5 text-ink-subtle">
+                The latest activity from your brain sources.
+              </p>
+            </div>
+            <Select
+              value={activityFilter}
+              onValueChange={(value) => {
+                if (isActivityFilter(value)) setActivityFilter(value);
+              }}
+            >
+              <SelectTrigger
+                aria-label="Filter recent activity"
+                className="h-7 w-[116px] shrink-0 border-border-subtle bg-surface px-2 text-[11.5px] text-ink shadow-none"
+              >
+                <SelectValue>{ACTIVITY_FILTER_LABELS[activityFilter]}</SelectValue>
+              </SelectTrigger>
+              <SelectContent className="min-w-[132px]">
+                {ACTIVITY_FILTER_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option} className="text-[12px]">
+                    {ACTIVITY_FILTER_LABELS[option]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <GoatBrainRecentActivity brainRef={brainRef} />
+          <GoatBrainRecentActivity brainRef={brainRef} filter={activityFilter} />
         </section>
       </div>
     </div>
   );
+}
+
+function isActivityFilter(value: unknown): value is GoatBrainActivityFilter {
+  return ACTIVITY_FILTER_OPTIONS.some((option) => option === value);
 }
