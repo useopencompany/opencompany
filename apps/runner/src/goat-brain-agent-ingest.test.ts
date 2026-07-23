@@ -3,6 +3,7 @@ import path from "node:path";
 import type { GoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
 import {
   normalizeAttioObjectWindow,
+  normalizeGitHubActivityWebhook,
   normalizeGmailThreadWindow,
   normalizeGoatChatCapture,
   normalizeGoogleDriveDocument,
@@ -80,6 +81,7 @@ vi.mock("@opencompany/db/goat-gmail", async (importOriginal) => ({
 import {
   ATTIO_OBJECT_INGEST_SYSTEM_PROMPT,
   buildAttioObjectAgentIngestPrompt,
+  buildGitHubActivityAgentIngestPrompt,
   buildGmailThreadAgentIngestPrompt,
   buildGoatChatCaptureAgentIngestPrompt,
   buildGoogleDriveDocumentAgentIngestPrompt,
@@ -139,6 +141,29 @@ function captureItem() {
     draftFolder: "inbox",
     capturedAt: "2026-07-09T10:00:00.000Z",
   });
+}
+
+function githubActivityItem() {
+  const item = normalizeGitHubActivityWebhook(
+    "pull_request",
+    {
+      action: "closed",
+      repository: { id: 4242, full_name: "acme/api", private: true },
+      pull_request: {
+        number: 123,
+        merged: true,
+        title: "Add usage-based billing",
+        body: "Implements metered billing per workspace.",
+        html_url: "https://github.com/acme/api/pull/123",
+        user: { login: "ada" },
+        merged_by: { login: "grace" },
+        merged_at: "2026-07-01T11:58:00Z",
+      },
+    },
+    { capturedAt: "2026-07-01T12:00:00.000Z" },
+  );
+  if (!item) throw new Error("Expected a normalized GitHub activity item.");
+  return item;
 }
 
 function slackItem() {
@@ -348,6 +373,7 @@ beforeEach(() => {
 describe("validateGoatBrainAgentInvocation", () => {
   it("rejects commands outside the ingestion agent surface", () => {
     expect(validateGoatBrainAgentInvocation({ command: "delete" })).toContain("not available");
+    expect(validateGoatBrainAgentInvocation({ command: "doctor" })).toContain("not available");
     expect(validateGoatBrainAgentInvocation({ command: "merge" })).toContain("not available");
     expect(validateGoatBrainAgentInvocation({ command: "ingest" })).toContain("not available");
     expect(validateGoatBrainAgentInvocation({ command: "set" })).toBeNull();
@@ -374,6 +400,16 @@ describe("validateGoatBrainAgentInvocation", () => {
         stdin: "Ada leads GTM.",
       }),
     ).toBeNull();
+  });
+});
+
+describe("buildGitHubActivityAgentIngestPrompt", () => {
+  it("maps product surfaces to the valid project entity type", () => {
+    const prompt = buildGitHubActivityAgentIngestPrompt(githubActivityItem());
+
+    expect(prompt).toContain("project page with entity type `project`");
+    expect(prompt).toContain("Do not use `product` as an entity type; it is not valid.");
+    expect(prompt).not.toContain("project/product page");
   });
 });
 
