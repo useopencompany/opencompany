@@ -2747,7 +2747,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(screen.getByTestId("chat-tool-call-web_search")).toBeInTheDocument();
     expect(screen.getByText("Web Search")).toBeInTheDocument();
-    expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.queryByText("Done")).not.toBeInTheDocument();
     expect(screen.getByText("query: latest Google updates")).toBeInTheDocument();
   });
 

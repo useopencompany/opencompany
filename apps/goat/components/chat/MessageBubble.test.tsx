@@ -207,6 +207,7 @@ describe("MessageBubble assistant errors", () => {
     const toolCall = screen.getByTestId("chat-tool-call-use_action");
     const disclosure = within(toolCall).getByRole("button", { name: /Linear List Issues/i });
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(within(toolCall).queryByText("Done")).not.toBeInTheDocument();
     expect(within(toolCall).queryByText("Input")).not.toBeInTheDocument();
 
     await user.click(disclosure);
