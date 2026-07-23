@@ -33,8 +33,10 @@ export type GoatLinearProviderState = {
   provider: "linear";
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
   accountName: string | null;
   statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
 };
 
 // The Linear brain-source connection (a Linear OAuth app with webhooks), as
@@ -341,8 +343,10 @@ function linearProviderState(row: IntegrationStateRow | undefined): GoatLinearPr
       provider: "linear",
       connected: false,
       status: "not_connected",
+      integrationId: null,
       accountName: null,
       statusReason: null,
+      capabilityModes: {},
     };
   }
 
@@ -350,8 +354,10 @@ function linearProviderState(row: IntegrationStateRow | undefined): GoatLinearPr
     provider: "linear",
     connected: row.status === "connected",
     status: row.status,
+    integrationId: row.id ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }
 

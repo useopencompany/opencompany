@@ -134,6 +134,7 @@ describe("SettingsIntegrationsPanel", () => {
         externalId: "linear_mcp",
         accountName: "Linear",
         status: "connected",
+        capabilityModes: {},
       },
       {
         id: "gint_linear_source",
@@ -156,5 +157,19 @@ describe("SettingsIntegrationsPanel", () => {
       within(linearCard as HTMLElement).queryByText("Source workspace"),
     ).not.toBeInTheDocument();
     expect(within(linearCard as HTMLElement).queryByRole("link", { name: "Connect" })).toBeNull();
+    const readPermission = within(linearCard as HTMLElement).getByRole("group", {
+      name: "Read Linear permission",
+    });
+    const writePermission = within(linearCard as HTMLElement).getByRole("group", {
+      name: "Create issues permission",
+    });
+    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });

@@ -2,11 +2,18 @@ import { createMCPClient } from "@ai-sdk/mcp";
 import { isValidGoatBrainSourceRef } from "@opencompany/goat-brain";
 import type { JSONSchema7, ToolExecutionOptions, ToolSet } from "ai";
 import {
+  effectiveCapabilityMode,
+  type GoatCapabilityId,
+  providerCapability,
+} from "@/lib/actions/capabilities";
+import {
   GoatActionAuthError,
   type GoatActionExecuteContext,
   GoatActionInvalidParamsError,
+  GoatActionPermissionError,
   type GoatActionProviderCatalog,
   type ResolvedGoatAction,
+  requiredStringParam,
 } from "@/lib/actions/types";
 import {
   GOAT_LINEAR_MCP_ENDPOINT_URL,
@@ -91,12 +98,86 @@ const LINEAR_LIST_ISSUES_PARAMS: JSONSchema7 = {
   },
 };
 
-// Static curated read catalog against Linear's hosted MCP server. Descriptors
+const MAX_LINEAR_ISSUE_TITLE_CHARS = 255;
+const MAX_LINEAR_ISSUE_DESCRIPTION_CHARS = 25_000;
+const MAX_LINEAR_SELECTOR_CHARS = 500;
+const MAX_LINEAR_PARENT_ID_CHARS = 100;
+const MAX_LINEAR_LABELS = 25;
+const MAX_LINEAR_LABEL_CHARS = 100;
+
+const LINEAR_CREATE_ISSUE_PARAMS: JSONSchema7 = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "team"],
+  properties: {
+    title: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_ISSUE_TITLE_CHARS,
+      description: "Issue title.",
+    },
+    team: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_SELECTOR_CHARS,
+      description:
+        "Team name, key, or ID. Use linear.list_teams first when it is available and the team is unclear.",
+    },
+    description: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_ISSUE_DESCRIPTION_CHARS,
+      description: "Optional Markdown issue description.",
+    },
+    assignee: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_SELECTOR_CHARS,
+      description: 'Optional assignee name, email, ID, or "me".',
+    },
+    state: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_SELECTOR_CHARS,
+      description: "Optional workflow state name or ID.",
+    },
+    project: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_SELECTOR_CHARS,
+      description: "Optional project name, slug, or ID.",
+    },
+    priority: {
+      type: "integer",
+      enum: [0, 1, 2, 3, 4],
+      description: "Optional priority: 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low.",
+    },
+    labels: {
+      type: "array",
+      maxItems: MAX_LINEAR_LABELS,
+      items: {
+        type: "string",
+        minLength: 1,
+        maxLength: MAX_LINEAR_LABEL_CHARS,
+      },
+      description: "Optional label names or IDs.",
+    },
+    parentId: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_PARENT_ID_CHARS,
+      description: "Optional parent issue ID or identifier when creating a sub-issue.",
+    },
+  },
+};
+
+// Static curated catalog against Linear's hosted MCP server. Descriptors
 // stay local so catalog resolution costs no MCP handshake; the remote tool is
 // looked up by name at execute time.
 type LinearActionSpec = {
   id: string;
   remoteName: string;
+  capability: GoatCapabilityId;
   description: string;
   params: JSONSchema7;
   normalize?: (params: Record<string, unknown>) => Record<string, unknown>;
@@ -106,6 +187,7 @@ const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
   {
     id: "linear.list_issues",
     remoteName: "list_issues",
+    capability: "read",
     description:
       "List and filter Linear issues (team, assignee, state, project, updated/created ranges, full-text query). Omit unused filters; use unassigned=true only for explicitly unassigned work.",
     params: LINEAR_LIST_ISSUES_PARAMS,
@@ -114,6 +196,7 @@ const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
   {
     id: "linear.get_issue",
     remoteName: "get_issue",
+    capability: "read",
     description: "Fetch one Linear issue by its ID or identifier (for example ENG-123).",
     params: {
       type: "object",
@@ -127,6 +210,7 @@ const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
   {
     id: "linear.list_comments",
     remoteName: "list_comments",
+    capability: "read",
     description: "List the comments on one Linear issue.",
     params: {
       type: "object",
@@ -140,6 +224,7 @@ const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
   {
     id: "linear.list_projects",
     remoteName: "list_projects",
+    capability: "read",
     description: "List Linear projects, optionally filtered by team.",
     params: {
       type: "object",
@@ -154,6 +239,7 @@ const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
   {
     id: "linear.get_project",
     remoteName: "get_project",
+    capability: "read",
     description: "Fetch one Linear project by name, ID, or slug.",
     params: {
       type: "object",
@@ -167,6 +253,7 @@ const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
   {
     id: "linear.list_teams",
     remoteName: "list_teams",
+    capability: "read",
     description: "List the Linear teams in the workspace.",
     params: {
       type: "object",
@@ -180,6 +267,7 @@ const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
   {
     id: "linear.list_users",
     remoteName: "list_users",
+    capability: "read",
     description: "List Linear workspace members to resolve names to user IDs.",
     params: {
       type: "object",
@@ -193,6 +281,7 @@ const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
   {
     id: "linear.list_issue_statuses",
     remoteName: "list_issue_statuses",
+    capability: "read",
     description: "List the issue statuses (workflow states) available for a team.",
     params: {
       type: "object",
@@ -202,30 +291,80 @@ const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
       },
     },
   },
+  {
+    id: "linear.create_issue",
+    remoteName: "save_issue",
+    capability: "write",
+    description:
+      "Create a new Linear issue in a specific team. Use only when the user explicitly asked to create a ticket; include only issue fields the user requested or clearly supplied.",
+    params: LINEAR_CREATE_ISSUE_PARAMS,
+    normalize: normalizeLinearCreateIssueInput,
+  },
 ];
 
 export async function resolveLinearActions(
   userWorkosId: string,
 ): Promise<GoatActionProviderCatalog | null> {
   const state = await getGoatLinearIntegrationState(userWorkosId);
-  if (!state.connected) return null;
+  const integrationId = state.integrationId;
+  if (!state.connected || !integrationId) return null;
 
-  const actions: ResolvedGoatAction[] = LINEAR_ACTION_SPECS.map((spec) => ({
+  const readEnabled = effectiveCapabilityMode("linear", "read", state.capabilityModes) !== "off";
+  const writeEnabled = effectiveCapabilityMode("linear", "write", state.capabilityModes) !== "off";
+  if (!readEnabled && !writeEnabled) return null;
+
+  const specs = LINEAR_ACTION_SPECS.filter(
+    (spec) =>
+      (spec.capability === "read" && readEnabled) || (spec.capability === "write" && writeEnabled),
+  );
+
+  const actions: ResolvedGoatAction[] = specs.map((spec) => ({
     id: spec.id,
     provider: "linear",
-    capability: "read",
-    permissionMode: "on",
+    capability: spec.capability,
+    ...permissionAnnotation(spec.capability, {
+      integrationId,
+      capabilityModes: state.capabilityModes,
+    }),
     description: spec.description,
     params: spec.params,
     execute: (params, context) =>
-      executeLinearAction(spec, spec.normalize ? spec.normalize(params) : params, context),
+      executeLinearAction(
+        spec,
+        spec.normalize ? spec.normalize(params) : params,
+        context,
+        integrationId,
+      ),
   }));
 
   return {
     id: "linear",
     label: "Linear workspace",
-    description: "Read issues, comments, projects, teams, members, and workflow statuses.",
+    description:
+      readEnabled && writeEnabled
+        ? "Read Linear workspace context and create new issues."
+        : readEnabled
+          ? "Read issues, comments, projects, teams, members, and workflow statuses."
+          : "Create new issues in Linear.",
     actions,
+  };
+}
+
+function permissionAnnotation(
+  capabilityId: GoatCapabilityId,
+  state: { integrationId: string; capabilityModes: unknown },
+): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+  if (effectiveCapabilityMode("linear", capabilityId, state.capabilityModes) !== "ask") {
+    return { permissionMode: "on" };
+  }
+  return {
+    permissionMode: "ask",
+    permission: {
+      provider: "linear",
+      capabilityId,
+      label: providerCapability("linear", capabilityId)?.label ?? capabilityId,
+      integrationIds: [state.integrationId],
+    },
   };
 }
 
@@ -233,7 +372,12 @@ async function executeLinearAction(
   spec: LinearActionSpec,
   params: Record<string, unknown>,
   context: GoatActionExecuteContext,
+  expectedIntegrationId: string,
 ): Promise<unknown> {
+  if (spec.capability === "write") {
+    await assertLinearWriteStillEnabled(context.userWorkosId, expectedIntegrationId);
+  }
+
   const connection = await loadGoatLinearMcpWorkerConnection({
     userWorkosId: context.userWorkosId,
     onAuthorizationRequired: () => {
@@ -249,6 +393,12 @@ async function executeLinearAction(
       connection.reason === "not_connected" ? "not_connected" : "auth_expired",
       "linear",
       "Linear is not usable for this account; reconnect Linear in Settings → Integrations.",
+    );
+  }
+  if (spec.capability === "write" && connection.integrationId !== expectedIntegrationId) {
+    throw new GoatActionPermissionError(
+      "linear",
+      "The Linear connection changed before this issue could be created. Retry so Goat can use the current connection and permission.",
     );
   }
 
@@ -285,12 +435,38 @@ async function executeLinearAction(
   }
 }
 
+async function assertLinearWriteStillEnabled(userWorkosId: string, expectedIntegrationId: string) {
+  const state = await getGoatLinearIntegrationState(userWorkosId);
+  // Let the normal connection loader return the structured reconnect error for
+  // disconnected accounts. A different connected row is a permission boundary:
+  // the approval/catalog belonged to the previous connection.
+  if (!state.connected) return;
+  if (state.integrationId !== expectedIntegrationId) {
+    throw new GoatActionPermissionError(
+      "linear",
+      "The Linear connection changed before this issue could be created. Retry so Goat can use the current connection and permission.",
+    );
+  }
+  if (effectiveCapabilityMode("linear", "write", state.capabilityModes) === "off") {
+    throw new GoatActionPermissionError(
+      "linear",
+      "Creating Linear issues is turned off. It can be changed under Settings → Integrations.",
+    );
+  }
+}
+
 function addLinearSourceMetadata(
   value: unknown,
   spec: LinearActionSpec,
   integrationId: string,
 ): unknown {
-  if (spec.remoteName !== "list_issues" && spec.remoteName !== "get_issue") return value;
+  if (
+    spec.remoteName !== "list_issues" &&
+    spec.remoteName !== "get_issue" &&
+    spec.remoteName !== "save_issue"
+  ) {
+    return value;
+  }
   if (!isRecord(value)) return value;
 
   if (Array.isArray(value.issues)) {
@@ -356,6 +532,117 @@ export function normalizeLinearListIssuesInput(input: unknown): Record<string, u
   if (unassigned) normalized.assignee = null;
 
   return normalized;
+}
+
+export function normalizeLinearCreateIssueInput(input: unknown): Record<string, unknown> {
+  if (!isRecord(input)) {
+    throw new GoatActionInvalidParamsError("Linear issue parameters must be an object.");
+  }
+  assertOnlyKnownParams(input, LINEAR_CREATE_ISSUE_PARAM_KEYS);
+
+  const normalized: Record<string, unknown> = {
+    title: requiredBoundedString(input, "title", MAX_LINEAR_ISSUE_TITLE_CHARS),
+    team: requiredBoundedString(input, "team", MAX_LINEAR_SELECTOR_CHARS),
+  };
+  for (const [key, maxChars] of [
+    ["description", MAX_LINEAR_ISSUE_DESCRIPTION_CHARS],
+    ["assignee", MAX_LINEAR_SELECTOR_CHARS],
+    ["state", MAX_LINEAR_SELECTOR_CHARS],
+    ["project", MAX_LINEAR_SELECTOR_CHARS],
+    ["parentId", MAX_LINEAR_PARENT_ID_CHARS],
+  ] as const) {
+    const value = optionalBoundedString(input, key, maxChars);
+    if (value !== undefined) normalized[key] = value;
+  }
+
+  if (input.priority !== undefined && input.priority !== null) {
+    if (
+      typeof input.priority !== "number" ||
+      !Number.isInteger(input.priority) ||
+      input.priority < 0 ||
+      input.priority > 4
+    ) {
+      throw new GoatActionInvalidParamsError(
+        '"priority" must be an integer from 0 (none) to 4 (low).',
+      );
+    }
+    normalized.priority = input.priority;
+  }
+
+  const labels = normalizeLinearLabels(input.labels);
+  if (labels !== undefined) normalized.labels = labels;
+  return normalized;
+}
+
+const LINEAR_CREATE_ISSUE_PARAM_KEYS = [
+  "title",
+  "team",
+  "description",
+  "assignee",
+  "state",
+  "project",
+  "priority",
+  "labels",
+  "parentId",
+] as const;
+
+function assertOnlyKnownParams(params: Record<string, unknown>, allowed: readonly string[]) {
+  const allowedSet = new Set(allowed);
+  const unknown = Object.keys(params).find((key) => !allowedSet.has(key));
+  if (unknown) {
+    throw new GoatActionInvalidParamsError(`Unknown parameter ${JSON.stringify(unknown)}.`);
+  }
+}
+
+function requiredBoundedString(params: Record<string, unknown>, key: string, maxChars: number) {
+  const value = requiredStringParam(params, key);
+  if (value.length > maxChars) {
+    throw new GoatActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
+  }
+  return value;
+}
+
+function optionalBoundedString(params: Record<string, unknown>, key: string, maxChars: number) {
+  const value = params[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new GoatActionInvalidParamsError(`"${key}" must be a non-empty string.`);
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > maxChars) {
+    throw new GoatActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
+  }
+  return trimmed;
+}
+
+function normalizeLinearLabels(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) {
+    throw new GoatActionInvalidParamsError('"labels" must be an array of label names or IDs.');
+  }
+  if (value.length > MAX_LINEAR_LABELS) {
+    throw new GoatActionInvalidParamsError(`"labels" allows at most ${MAX_LINEAR_LABELS} entries.`);
+  }
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || !entry.trim()) {
+      throw new GoatActionInvalidParamsError(
+        '"labels" must contain only non-empty label names or IDs.',
+      );
+    }
+    const label = entry.trim();
+    if (label.length > MAX_LINEAR_LABEL_CHARS) {
+      throw new GoatActionInvalidParamsError(
+        `Linear labels may not exceed ${MAX_LINEAR_LABEL_CHARS} characters.`,
+      );
+    }
+    const normalized = label.toLowerCase();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    labels.push(label);
+  }
+  return labels;
 }
 
 // MCP tool results arrive as {content: [{type:"text", text}...], isError?}.
