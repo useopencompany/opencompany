@@ -615,7 +615,7 @@ export const goatWorkspaceCapabilities = goat.table(
     pk: primaryKey({ columns: [table.workspaceId, table.source] }),
     sourceCheck: check(
       "goat_workspace_capabilities_source_check",
-      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead')`,
+      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo')`,
     ),
   }),
 );
@@ -2815,11 +2815,11 @@ export const goatCapabilityRuns = goat.table(
     ),
     sourceCheck: check(
       "goat_capability_runs_source_check",
-      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead')`,
+      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo')`,
     ),
     providerCheck: check(
       "goat_capability_runs_provider_check",
-      sql`${table.provider} IN ('tikhub', 'apify', 'pdl')`,
+      sql`${table.provider} IN ('tikhub', 'apify', 'pdl', 'semrush')`,
     ),
     inputHashCheck: check(
       "goat_capability_runs_input_hash_check",
