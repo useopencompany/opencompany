@@ -836,6 +836,9 @@ export async function POST(request: Request): Promise<Response> {
     experimental_transform: smoothStream(),
     abortSignal: generationSignal,
     tools: toolContext.tools,
+    ...(toolContext.repairToolCall
+      ? { experimental_repairToolCall: toolContext.repairToolCall }
+      : {}),
     providerOptions: goatGatewayProviderOptions(gatewayAttribution),
     async onFinish(event) {
       const finishReason = stringifyFinishReason(event.finishReason);
