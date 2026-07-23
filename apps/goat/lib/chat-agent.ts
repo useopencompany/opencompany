@@ -5,6 +5,7 @@ import {
   type GoatGatewayFeature,
   goatGatewayProviderOptions,
 } from "@opencompany/goat-observability";
+import { flushLatitude, latitudeTelemetry } from "@opencompany/goat-observability/latitude";
 import {
   createGateway,
   generateText,
@@ -217,6 +218,9 @@ export async function runOpenCompanyChatAgent(input: {
   feature?: GoatGatewayFeature;
   userWorkosId?: string | null;
   chatSessionId?: string | null;
+  // Latitude session grouping for surfaces without a chat session (e.g. a
+  // Slack thread ref); chatSessionId wins when both are set.
+  telemetrySessionId?: string | null;
   brainRef?: string | null;
   abortSignal?: AbortSignal;
   generateTextImpl?: GenerateTextLike;
@@ -269,18 +273,36 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.extraSystemBlocks ?? []),
   ].join("\n\n");
 
-  const result = await generate({
-    model: gateway(input.model),
-    system,
-    messages: input.messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-    })),
-    stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
-    tools: toolContext.tools,
-    providerOptions: goatGatewayProviderOptions(attribution),
-    ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
-  });
+  const feature = input.feature ?? "chat";
+  let result: Awaited<ReturnType<GenerateTextLike>>;
+  try {
+    result = await generate({
+      model: gateway(input.model),
+      system,
+      messages: input.messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+      stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
+      tools: toolContext.tools,
+      providerOptions: goatGatewayProviderOptions(attribution),
+      ...latitudeTelemetry({
+        name: feature === "slack-bot" ? "slack-answer" : "chat-agent",
+        feature,
+        userId: input.userWorkosId,
+        sessionId: input.chatSessionId ?? input.telemetrySessionId,
+        metadata: {
+          model: input.model,
+          ...(input.brainRef ? { brainRef: input.brainRef } : {}),
+        },
+      }),
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    });
+  } finally {
+    // Headless callers (Slack bot, schedulers) have no response lifecycle to
+    // hook a flush onto, so export before returning. No-op when disabled.
+    await flushLatitude();
+  }
 
   const startedTask = toolContext.getStartedTask();
   const content = normalizeAgentText(result.text, startedTask);

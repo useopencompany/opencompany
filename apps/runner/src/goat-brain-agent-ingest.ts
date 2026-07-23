@@ -73,6 +73,7 @@ import {
   recordGoatBrainIngestBudgetExhausted,
   recordGoatBrainIngestSpend,
 } from "@opencompany/goat-observability";
+import { latitudeTelemetry } from "@opencompany/goat-observability/latitude";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import * as ai from "ai";
@@ -2724,6 +2725,13 @@ export async function runIngestAgentLoop(input: {
         },
       ],
       tools: { ...tools, ...enrichmentTools },
+      ...latitudeTelemetry({
+        name: "brain-ingest",
+        feature: "brain-ingest",
+        userId: input.userWorkosId,
+        sessionId: input.ingestJobId,
+        metadata: { model: input.model, brainRef: input.brainRef },
+      }),
       stopWhen: [
         ai.stepCountIs(GOAT_BRAIN_AGENT_INGEST_MAX_STEPS),
         () => budgetExhausted || budgetAccountingError !== null,

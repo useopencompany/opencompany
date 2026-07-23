@@ -43,6 +43,7 @@ import {
   startGoatSpan,
   withGoatSpan,
 } from "@opencompany/goat-observability";
+import { flushLatitude } from "@opencompany/goat-observability/latitude";
 import { captureException, createLogger } from "@opencompany/observability";
 import { flushBraintrust, traceBraintrust } from "@opencompany/observability/braintrust";
 import { captureStatsigServerEvent } from "@opencompany/statsig/server";
@@ -960,6 +961,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
     // Flush the job's spans promptly; the runner is long-lived and may not shut
     // down (its only other flush point) for a long time. No-ops when disabled.
     await flushBraintrust();
+    await flushLatitude();
   }
 }
 

@@ -166,6 +166,10 @@ Set these in Vercel Production.
 | `BRAINTRUST_API_KEY` | Required with `BRAINTRUST_ENABLED` | Braintrust API key for runner traces. |
 | `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |
 | `BRAINTRUST_PROJECT_NAME` | No | Braintrust project name for runner traces. Defaults to `OpenCompany Runner`. |
+| `LATITUDE_API_KEY` | Required with `LATITUDE_PROJECT_SLUG` | Enables full-content Latitude LLM tracing for Goat chat and runner ingestion when both values are set. |
+| `LATITUDE_PROJECT_SLUG` | Required with `LATITUDE_API_KEY` | Latitude project slug that receives Goat LLM spans. |
+| `LATITUDE_SERVICE_NAME` | No | Service name attached to Latitude spans. Defaults to `opencompany-goat`; set `opencompany-runner-goat` for the runner. |
+| `LATITUDE_TELEMETRY_DISABLED` | No | Kill switch for Latitude export when set to `true`, `1`, `on`, or `yes`. |
 | `BETTER_STACK_ERRORS_DSN` | No | Server-side error capture DSN override. |
 | `BETTER_STACK_PREVIEW_SOURCE_NAME` | No | Local/operator override for `bun run preview:debug-session` output. Defaults to `opencompany-runner-preview`; not a source token. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENABLED` | No | Browser observability toggle. |
@@ -214,6 +218,9 @@ Set these in the separate Vercel project for Goat:
 | `GOAT_OBSERVABILITY_ENABLED` | No | Enables Goat OpenTelemetry traces and metrics when `true`, `1`, `on`, or `yes`. Missing or false disables the package. |
 | `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` | Required with Goat OTel | OTLP HTTP base endpoint for SigNoz, for example `https://ingest.<region>.signoz.cloud:443` or `http://signoz:4318`. |
 | `GOAT_OTEL_EXPORTER_OTLP_HEADERS` | SigNoz Cloud only | Comma-separated OTLP headers, usually `signoz-ingestion-key=<key>`. Leave empty for most self-hosted SigNoz setups. |
+| `LATITUDE_API_KEY` / `LATITUDE_PROJECT_SLUG` | No; both required to enable | Enables full-content Latitude tracing for Goat chat and Slack bot model calls. Store both in Infisical `prod` + `/goat` before enabling. |
+| `LATITUDE_SERVICE_NAME` | No | Latitude service name. Defaults to `opencompany-goat`. |
+| `LATITUDE_TELEMETRY_DISABLED` | No | Emergency kill switch for Latitude export. |
 
 Goat main chat uses `EXA_API_KEY` for optional lightweight public-web search. The runner also needs
 `EXA_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `E2B_API_KEY`,
@@ -375,6 +382,9 @@ Set these in the Render `opencompany-runner` service.
 | `BRAINTRUST_API_KEY` | Required with `BRAINTRUST_ENABLED` | Braintrust API key for runner traces. |
 | `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |
 | `BRAINTRUST_PROJECT_NAME` | No | Braintrust project name for runner traces. Defaults to `OpenCompany Runner`. |
+| `LATITUDE_API_KEY` / `LATITUDE_PROJECT_SLUG` | No; both required to enable | Enables full-content Latitude tracing for Goat brain ingestion. Store both in Infisical `prod` + `/runner` before enabling. |
+| `LATITUDE_SERVICE_NAME` | No | Latitude service name. Set to `opencompany-runner-goat` for runner spans. |
+| `LATITUDE_TELEMETRY_DISABLED` | No | Emergency kill switch for Latitude export. |
 
 Render also injects `PORT` and `RENDER_GIT_COMMIT`; do not set them manually unless debugging.
 
