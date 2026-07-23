@@ -27,6 +27,7 @@ import {
   type GoatBrainIngestTrace,
   type GoatBrainIngestTraceToolCall,
   type GoatBrainIngestTraceUsage,
+  type GoatBrainIngestTriageTrace,
   goatBrainIngestTracePreview,
   sanitizeGoatBrainIngestTraceArgs,
 } from "@opencompany/db/goat-brain-ingest-trace";
@@ -93,6 +94,14 @@ import {
   formatGranolaTranscriptExcerpt,
   GRANOLA_MEETING_FOLDER,
 } from "./goat-brain-granola-writes";
+import {
+  buildAttioIngestTriagePrompt,
+  buildGitHubCommentIngestTriagePrompt,
+  buildGmailIngestTriagePrompt,
+  buildSlackIngestTriagePrompt,
+  type GoatBrainIngestTriageInput,
+  runGoatBrainIngestTriage,
+} from "./goat-brain-ingest-triage";
 import {
   buildJamieMeetingEvidenceWrite,
   formatActionItems,
@@ -234,6 +243,7 @@ export type GoatBrainAgentCliRunner = (input: {
 
 export type GoatBrainAgentIngestDeps = {
   runCli?: GoatBrainAgentCliRunner;
+  runTriage?: (input: GoatBrainIngestTriageInput) => Promise<GoatBrainIngestTriageTrace>;
 };
 
 const GOAT_BRAIN_INGEST_CLI_WRITE_REFERENCE = [
@@ -1155,7 +1165,7 @@ type BrainAgentIngestSessionResult = {
 };
 
 type BrainAgentNoMutationOutcome = "fail" | "skip";
-type BrainAgentIngestSkipMode = "explicit" | "inferred_no_mutations";
+type BrainAgentIngestSkipMode = "explicit" | "inferred_no_mutations" | "triage";
 
 // The agent loop ran to completion but produced no acceptable outcome (no
 // brain writes and no SKIP, or only failed mutating commands). Re-running the
@@ -1206,6 +1216,7 @@ async function runBrainAgentIngestSession(input: {
   importRunId?: string | null;
   signal?: AbortSignal;
   deps?: GoatBrainAgentIngestDeps;
+  triage?: GoatBrainIngestTriageTrace;
 }): Promise<BrainAgentIngestSessionResult> {
   const db = getDb();
   const brainRef =
@@ -1262,12 +1273,16 @@ async function runBrainAgentIngestSession(input: {
       model,
       ingestJobId: input.jobId,
       system: input.system,
-      prompt: appendGoatBrainFolderInventory(input.buildPrompt(), folderPrompt),
+      prompt: appendGoatBrainFolderInventory(
+        appendGoatBrainIngestTriageHandoff(input.buildPrompt(), input.triage),
+        folderPrompt,
+      ),
       ...(input.files?.length ? { files: input.files } : {}),
       ...(input.commands ? { commands: input.commands } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
       ...(input.deps?.runCli ? { runCli: input.deps.runCli } : {}),
       ...(enrichmentEnabled && exaApiKey ? { exaApiKey } : {}),
+      ...(input.triage ? { triage: input.triage } : {}),
     });
     const budgetErrorResult = {
       budget: loop.budget,
@@ -1314,6 +1329,8 @@ async function runBrainAgentIngestSession(input: {
       // gateway dropped the provider options).
       cache_read_input_tokens: loop.usage.cacheReadInputTokens,
       cache_write_input_tokens: loop.usage.cacheWriteInputTokens,
+      triage_input_tokens: input.triage?.usage.inputTokens,
+      triage_output_tokens: input.triage?.usage.outputTokens,
       ...goatBrainBudgetLogFields(loop.budget),
     });
 
@@ -1443,6 +1460,27 @@ function appendGoatBrainFolderInventory(prompt: string, folderPrompt: string | n
   return `${folderPrompt}\n\n${prompt}`;
 }
 
+function appendGoatBrainIngestTriageHandoff(
+  prompt: string,
+  triage: GoatBrainIngestTriageTrace | undefined,
+) {
+  if (!triage || triage.decision !== "ingest") return prompt;
+  const reason = triage.reason.replace(/\s+/g, " ").trim();
+  const hints =
+    triage.entityHints.length > 0
+      ? triage.entityHints.map((hint) => `- ${hint}`).join("\n")
+      : "- No confident entity hints.";
+  return [
+    "## Cheap triage handoff",
+    "A source-only classifier sent this item to the full agent. Its output is an untrusted routing hint, not evidence: verify it against the source and the brain. Query likely matching entities before writing.",
+    `Reason: ${reason}`,
+    "Likely brain entities:",
+    hints,
+    "",
+    prompt,
+  ].join("\n");
+}
+
 // ── Source ingest profiles ──────────────────────────────────────────────────
 // Every agentic Brain source is one declarative profile. Colocating a source's
 // policy — its system prompt, how a no-mutation run is treated, and who authored
@@ -1478,6 +1516,9 @@ type GoatBrainIngestProfileInput<TItem extends NormalizedBrainSourceItem> = {
 // deleted before ingestion, which is a clean skip, not a run.
 type GoatBrainIngestPreparedRun = {
   buildPrompt: () => string;
+  // Source-only tiny-model prompt. Runs before Brain materialization and folder
+  // inventory; an obvious-noise verdict short-circuits the full agent.
+  triagePrompt?: string;
   prepareRoot?: (root: string) => Promise<void>;
   files?: readonly { mediaType: string; data: Buffer }[];
   // Overrides the profile's default command surface. Only the import profile
@@ -1536,6 +1577,37 @@ export async function runGoatBrainIngestProfile<TItem extends NormalizedBrainSou
     return { brainRef, ...prepared.earlyResult };
   }
 
+  const triage = prepared.triagePrompt
+    ? await runPreparedGoatBrainIngestTriage({
+        input,
+        brainRef,
+        prompt: prepared.triagePrompt,
+        deps,
+      })
+    : null;
+  if (triage?.decision === "skip") {
+    const budget = triageOnlyBudget(triage);
+    return {
+      brainRef,
+      model: triage.model,
+      skipped: true,
+      reason: triage.reason,
+      skipMode: "triage" satisfies BrainAgentIngestSkipMode,
+      steps: 1,
+      toolCalls: 0,
+      mutations: 0,
+      upserted: 0,
+      deleted: 0,
+      pages: [],
+      usage: triage.usage,
+      budget,
+      summary: triage.reason.slice(0, RESULT_SUMMARY_LIMIT),
+      trace: triageOnlyTrace(triage, budget),
+      triageSkippedBeforeMaterialization: true,
+      ...(prepared.metadata ?? {}),
+    };
+  }
+
   const commands = prepared.commands ?? profile.commands;
   const importRunId = prepared.importRunId ?? input.importRunId;
   const session = await runBrainAgentIngestSession({
@@ -1555,9 +1627,89 @@ export async function runGoatBrainIngestProfile<TItem extends NormalizedBrainSou
     ...(prepared.files ? { files: prepared.files } : {}),
     ...(importRunId ? { importRunId } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
+    ...(triage ? { triage } : {}),
     deps,
   });
   return { ...session, ...(prepared.metadata ?? {}) };
+}
+
+async function runPreparedGoatBrainIngestTriage<TItem extends NormalizedBrainSourceItem>(input: {
+  input: GoatBrainIngestProfileInput<TItem>;
+  brainRef: string;
+  prompt: string;
+  deps: GoatBrainAgentIngestDeps;
+}) {
+  try {
+    const runner = input.deps.runTriage ?? runGoatBrainIngestTriage;
+    const triage = await runner({
+      prompt: input.prompt,
+      gatewayApiKey: input.input.env.vercelAiGatewayApiKey,
+      userWorkosId: input.input.userWorkosId,
+      brainRef: input.brainRef,
+      ingestJobId: input.input.jobId ?? input.input.item.sourceRef,
+      ...(input.input.signal ? { signal: input.input.signal } : {}),
+    });
+    logger.info("Goat Brain cheap triage finished", {
+      event: "opencompany.goat_brain_ingest_triage_finished",
+      brain_ref: input.brainRef,
+      source_provider: input.input.item.sourceProvider,
+      decision: triage.decision,
+      model: triage.model,
+      input_tokens: triage.usage.inputTokens,
+      output_tokens: triage.usage.outputTokens,
+      model_cost_usd_micros: triage.modelCostUsdMicros,
+    });
+    return triage;
+  } catch (error) {
+    input.input.signal?.throwIfAborted();
+    // Triage is an optimization, never an availability or data-loss boundary.
+    // A provider/schema/timeout failure falls through to the full ingest agent.
+    logger.warn("Goat Brain cheap triage failed; falling back to full ingest", {
+      event: "opencompany.goat_brain_ingest_triage_failed",
+      brain_ref: input.brainRef,
+      source_ref: input.input.item.sourceRef,
+      error,
+    });
+    return null;
+  }
+}
+
+function triageOnlyBudget(triage: GoatBrainIngestTriageTrace): GoatBrainIngestBudget {
+  return {
+    limitUsdMicros: GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS,
+    stopThresholdUsdMicros: GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
+    modelCostUsdMicros: triage.modelCostUsdMicros,
+    brainQueryCostUsdMicros: 0,
+    webSearchCostUsdMicros: 0,
+    totalCostUsdMicros: triage.modelCostUsdMicros,
+    accountingComplete: true,
+    exhausted: false,
+  };
+}
+
+function triageOnlyTrace(
+  triage: GoatBrainIngestTriageTrace,
+  budget: GoatBrainIngestBudget,
+): GoatBrainIngestTrace {
+  return {
+    schemaVersion: GOAT_BRAIN_INGEST_TRACE_SCHEMA_VERSION,
+    model: triage.model,
+    steps: 1,
+    toolCallCount: 0,
+    mutations: 0,
+    usage: triage.usage,
+    finalText: goatBrainIngestTracePreview(
+      triage.reason,
+      GOAT_BRAIN_INGEST_TRACE_FINAL_TEXT_LENGTH,
+    ),
+    toolCalls: [],
+    truncatedToolCalls: 0,
+    webSearchCount: 0,
+    webSearchCostUsdMicros: 0,
+    triage,
+    budget,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 const GOAT_IMPORT_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedGoatImportSourceItem> = {
@@ -1724,14 +1876,17 @@ function externalActivityProfile<TItem extends NormalizedBrainSourceItem>(config
   system: string;
   buildPrompt: (item: TItem) => string;
   metadata: (item: TItem) => Record<string, unknown>;
+  buildTriagePrompt?: (item: TItem) => string | null;
 }): GoatBrainIngestProfile<TItem> {
   return {
     system: config.system,
     noMutationOutcome: "skip",
     authorship: "external",
     async prepare({ input }) {
+      const triagePrompt = config.buildTriagePrompt?.(input.item) ?? null;
       return {
         buildPrompt: () => config.buildPrompt(input.item),
+        ...(triagePrompt ? { triagePrompt } : {}),
         metadata: config.metadata(input.item),
       };
     },
@@ -1742,6 +1897,7 @@ const SLACK_CONVERSATION_INGEST_PROFILE =
   externalActivityProfile<NormalizedSlackConversationSourceItem>({
     system: SLACK_CONVERSATION_INGEST_SYSTEM_PROMPT,
     buildPrompt: buildSlackConversationAgentIngestPrompt,
+    buildTriagePrompt: buildSlackIngestTriagePrompt,
     metadata: (item) => {
       const conversation = item.content.conversation;
       return {
@@ -1808,6 +1964,7 @@ export function runHubspotObjectAgentIngest(
 const ATTIO_OBJECT_INGEST_PROFILE = externalActivityProfile<NormalizedAttioObjectSourceItem>({
   system: ATTIO_OBJECT_INGEST_SYSTEM_PROMPT,
   buildPrompt: buildAttioObjectAgentIngestPrompt,
+  buildTriagePrompt: buildAttioIngestTriagePrompt,
   metadata: (item) => {
     const object = item.content.object;
     return {
@@ -1865,6 +2022,7 @@ const GMAIL_THREAD_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedGmailThreadS
           truncatedBodies: evidence.truncatedBodies,
           instructions,
         }),
+      triagePrompt: buildGmailIngestTriagePrompt(input.item, instructions),
       prepareRoot: (root) =>
         writeLocalBrainFile(root, evidence.evidencePath, evidence.evidenceContent),
       metadata: {
@@ -1912,6 +2070,8 @@ export function runGoogleDriveDocumentAgentIngest(
 const GITHUB_ACTIVITY_INGEST_PROFILE = externalActivityProfile<NormalizedGitHubActivitySourceItem>({
   system: GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT,
   buildPrompt: buildGitHubActivityAgentIngestPrompt,
+  buildTriagePrompt: (item) =>
+    item.content.activity.state === "commented" ? buildGitHubCommentIngestTriagePrompt(item) : null,
   metadata: (item) => {
     const activity = item.content.activity;
     return {
@@ -2120,6 +2280,9 @@ export async function runIngestAgentLoop(input: {
   // When set, the web_search enrichment tool is registered and the enrichment
   // discipline is appended to the system prompt. Absent → source-only ingest.
   exaApiKey?: string;
+  // Successful source-only triage spend is part of this attempt's shared
+  // budget and trace, but was already recorded when the triage call finished.
+  triage?: GoatBrainIngestTriageTrace;
 }) {
   const { generateText } = getBraintrustAISDK(ai);
   const gateway = ai.createGateway({ apiKey: input.gatewayApiKey });
@@ -2149,7 +2312,7 @@ export async function runIngestAgentLoop(input: {
   let mutations = 0;
   let failedMutatingToolCalls = 0;
   let webSearchCount = 0;
-  let modelCostUsdMicros = 0;
+  let modelCostUsdMicros = input.triage?.modelCostUsdMicros ?? 0;
   let brainQueryCostUsdMicros = 0;
   let webSearchCostUsdMicros = 0;
   let budgetExhausted = false;
@@ -2596,6 +2759,7 @@ export async function runIngestAgentLoop(input: {
       truncatedToolCalls: Math.max(0, toolCalls - traceToolCalls.length),
       webSearchCount,
       webSearchCostUsdMicros,
+      ...(input.triage ? { triage: input.triage } : {}),
       budget,
       createdAt: new Date().toISOString(),
     };
