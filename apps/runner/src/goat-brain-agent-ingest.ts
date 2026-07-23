@@ -117,9 +117,9 @@ const logger = createLogger({
   runtime: "goat-brain-agent-ingest",
 });
 
-// Model tier per brain: "basic" (open-source, included in the plan) vs
-// "frontier" (cost passed through to workspace credits). Read live at ingest
-// time via goat.brains.intelligence.
+// Model tier per brain: "basic" (fast, cost-efficient) vs "frontier" (highest
+// extraction quality). Both are metered; read live at ingest time via
+// goat.brains.intelligence.
 export const GOAT_BRAIN_AGENT_INGEST_BASIC_MODEL = GOAT_BASIC_INGEST_MODEL;
 export const GOAT_BRAIN_AGENT_INGEST_FRONTIER_MODEL = GOAT_FRONTIER_INGEST_MODEL;
 
@@ -294,7 +294,7 @@ function buildGoatBrainIngestSystemPrompt(input: {
     `- ${GOAT_BRAIN_POINTER_COPY_RULE.split("\n").join("\n  ")}`,
     "- No fabrication: write only what the source or the brain supports. If the source does not say it, it does not go in.",
     ...(input.sourceDataRule ? [`- ${input.sourceDataRule}`] : []),
-    "- Status discipline: status is the curation signal. New pages start as draft; once a page's compiled truth is a durable synthesis that cites evidence with [[evidence:...]], promote it with `set <id> --status active` (the brain rejects active pages whose compiled truth has no citation). Leave a page draft only when it is genuinely uncurated.",
+    "- Status discipline: status is the curation signal. New pages start as draft; once a page's compiled truth is a durable synthesis that cites provenance with [[evidence:...]] or [[source:...]], promote it with `set <id> --status active` (the brain rejects active pages whose compiled truth has neither citation). Leave a page draft only when it is genuinely uncurated.",
     `- ${input.skipRule}`,
     "",
     "When you are done, reply with a short plain-text summary of the pages you created or updated (one line per page). Do not include markdown headings in that final reply.",
@@ -2258,7 +2258,9 @@ export function placeMovingAnthropicCacheBreakpoint(
   });
 }
 
-async function runIngestAgentLoop(input: {
+// Exported for scripts/ingest-model-bench.ts (offline model comparison); the
+// production entry point remains runBrainAgentIngestSession.
+export async function runIngestAgentLoop(input: {
   root: string;
   cliPath: string;
   gatewayApiKey: string;

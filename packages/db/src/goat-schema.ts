@@ -1213,6 +1213,13 @@ export const goatIntegrations = goat.table(
     status: text("status").$type<GoatIntegrationStatus>().notNull().default("connected"),
     statusReason: text("status_reason"),
     scopes: jsonb("scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    // Sparse per-connection capability mode overrides (capability id → "on" |
+    // "off" | "ask"). Missing keys fall back to the app-level capability
+    // registry defaults, so defaults can evolve without a backfill.
+    capabilityModes: jsonb("capability_modes")
+      .$type<Partial<Record<string, "on" | "off" | "ask">>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1724,6 +1731,33 @@ export const goatSlackBotEventClaims = goat.table("slack_bot_event_claims", {
   completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Threads the answer bot has replied in. Lets the message-event webhook decide
+// with one indexed lookup whether a reply-without-mention should get an answer,
+// instead of calling conversations.replies for every threaded message in every
+// channel the bot is in. Rows are upserted on each bot reply and pruned after
+// ~30 days of thread inactivity.
+export const goatSlackBotThreadParticipation = goat.table(
+  "slack_bot_thread_participation",
+  {
+    teamId: text("team_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    threadTs: text("thread_ts").notNull(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    lastBotReplyTs: text("last_bot_reply_ts").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      name: "slack_bot_thread_participation_pkey",
+      columns: [table.teamId, table.channelId, table.threadTs],
+    }),
+    updatedAtIdx: index("goat_sbtp_updated_at_idx").on(table.updatedAt),
+  }),
+);
 
 // Raw Slack message buffer: the events webhook inserts one row per relevant
 // message; the runner's flush sweeper batches unflushed rows per channel into a

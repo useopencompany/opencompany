@@ -4,7 +4,7 @@ import {
   GOAT_BRAIN_TRUTH_HEADING,
   type ParsedGoatBrainDocument,
 } from "./document";
-import { parseGoatBrainInlineLinks } from "./inline-links";
+import { parseGoatBrainInlineLinks, sourceLinkTargets } from "./inline-links";
 import {
   isValidGoatBrainEntityType,
   isValidGoatBrainEvidenceId,
@@ -145,13 +145,17 @@ export function validateGoatBrainDocument(
     }
   }
   const citations = extractGoatBrainCitations(doc.compiledTruth);
+  const sourceCitations = sourceLinkTargets(doc.compiledTruth);
   if (
     fm.status === "active" &&
     fm.kind !== "evidence" &&
     hasCompiledTruth(doc.compiledTruth) &&
-    citations.length === 0
+    citations.length === 0 &&
+    sourceCitations.length === 0
   ) {
-    errors.push("active compiled truth must cite evidence with [[evidence:<evidence-id>]].");
+    errors.push(
+      "active compiled truth must cite provenance with [[evidence:<evidence-id>]] or [[source:<provider>:<id>]].",
+    );
   }
   return errors.length > 0 ? { ok: false, errors } : { ok: true };
 }

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isGoatSlackBotConfigured } from "./slack-bot";
+import {
+  GOAT_SLACK_BOT_SCOPES,
+  goatSlackBotScopesSatisfied,
+  isGoatSlackBotConfigured,
+} from "./slack-bot";
 
 const REQUIRED_ENVS = {
   INTEGRATION_CREDENTIAL_ENCRYPTION_KEY: "encryption-key",
@@ -20,5 +24,25 @@ describe("isGoatSlackBotConfigured", () => {
 
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", "");
     expect(isGoatSlackBotConfigured()).toBe(false);
+  });
+});
+
+describe("goatSlackBotScopesSatisfied", () => {
+  it("is true when every required scope was granted", () => {
+    expect(goatSlackBotScopesSatisfied([...GOAT_SLACK_BOT_SCOPES])).toBe(true);
+    expect(goatSlackBotScopesSatisfied([...GOAT_SLACK_BOT_SCOPES, "extra:scope"])).toBe(true);
+  });
+
+  it("is false for pre-v2 installs missing the DM/reaction/user scopes", () => {
+    const v1Scopes = [
+      "app_mentions:read",
+      "chat:write",
+      "channels:read",
+      "groups:read",
+      "channels:history",
+      "groups:history",
+    ];
+    expect(goatSlackBotScopesSatisfied(v1Scopes)).toBe(false);
+    expect(goatSlackBotScopesSatisfied([])).toBe(false);
   });
 });

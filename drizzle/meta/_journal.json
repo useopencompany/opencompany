@@ -1037,6 +1037,20 @@
       "when": 1784652413000,
       "tag": "0147_goat_brain_pointer_hydration",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1784652414000,
+      "tag": "0148_goat_integration_capability_modes",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1784652415000,
+      "tag": "0149_goat_slack_bot_v2",
+      "breakpoints": true
     }
   ]
 }

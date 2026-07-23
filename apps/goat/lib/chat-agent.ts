@@ -2,12 +2,23 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { GoatHarnessEngine } from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
+  type GoatGatewayFeature,
   goatGatewayProviderOptions,
 } from "@opencompany/goat-observability";
-import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
+import {
+  createGateway,
+  generateText,
+  jsonSchema,
+  type LanguageModelUsage,
+  stepCountIs,
+  type ToolSet,
+  tool,
+} from "ai";
 import { MAX_ACTION_CALLS_PER_TURN } from "@/lib/actions/limits";
 import {
+  buildGoatBrainMultiBrainToolSchema,
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
+  type GoatBrainMultiBrainTarget,
   normalizeGoatBrainReadToolInput,
 } from "@/lib/brain-surface";
 import {
@@ -113,7 +124,7 @@ type EditTaskScheduleRunner = (
 type DeleteTaskScheduleRunner = (
   input: DeleteTaskScheduleToolInput,
 ) => Promise<DeleteTaskScheduleToolOutput>;
-type ActionDispatcher = {
+export type ActionDispatcher = {
   // The action catalog resolved server-side from real connection state; ids
   // become the dispatch enum, so a disconnected provider's actions cannot be
   // invoked by guessing.
@@ -124,6 +135,13 @@ type ActionDispatcher = {
     toolCallId: string;
   }) => Promise<UseActionToolOutput>;
 };
+
+// An action in "ask" mode pauses the stream on a tool-approval request the
+// user answers in the chat UI; the approved call executes on the follow-up
+// approval-continuation request with the recorded input.
+function actionNeedsApproval(catalog: GoatChatActionCatalog, actionId: string) {
+  return catalog.actions.find((action) => action.id === actionId)?.permissionMode === "ask";
+}
 
 // Main chat (and the MCP connector) get a read-only brain surface: recall and
 // inspect only. Every write path — new content and edits to existing records —
@@ -154,6 +172,10 @@ export type OpenCompanyChatAgentResult = {
   content: string;
   task: StartedTask | null;
   debugTrace: OpenCompanyChatAgentDebugTrace;
+  // Full-turn usage across all steps (unlike debugTrace.usage, which is the
+  // last step only as a context-fullness proxy). Headless surfaces need this
+  // for credit debits.
+  totalUsage: LanguageModelUsage | undefined;
 };
 
 type OpenCompanyChatSystemPromptInput = NonNullable<
@@ -171,7 +193,7 @@ export async function runOpenCompanyChatAgent(input: {
   messages: readonly OpenCompanyChatAgentMessage[];
   model: AgentModelId;
   gatewayApiKey: string;
-  startTask: (task: StartTaskRequest) => Promise<StartedTask>;
+  startTask?: (task: StartTaskRequest) => Promise<StartedTask>;
   requestedEngine?: GoatHarnessEngine;
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
@@ -179,12 +201,24 @@ export async function runOpenCompanyChatAgent(input: {
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   webSearch?: WebSearchRunner;
+  actions?: ActionDispatcher;
+  goatBrainMultiBrain?: { targets: readonly GoatBrainMultiBrainTarget[] };
   currentDate?: Date | string;
   userContext?: OpenCompanyChatSystemPromptInput["userContext"];
   recurringSchedules?: OpenCompanyChatSystemPromptInput["recurringSchedules"];
+  taskToolsEnabled?: boolean;
+  brainCaptureEnabled?: boolean;
+  activeBrain?: OpenCompanyChatSystemPromptInput["activeBrain"];
+  connectedIntegrations?: OpenCompanyChatSystemPromptInput["connectedIntegrations"];
+  // Surface-specific prompt blocks appended after the shared system prompt
+  // (e.g. Slack mrkdwn formatting rules).
+  extraSystemBlocks?: readonly string[];
+  // Gateway cost attribution surface; defaults to the main chat.
+  feature?: GoatGatewayFeature;
   userWorkosId?: string | null;
   chatSessionId?: string | null;
   brainRef?: string | null;
+  abortSignal?: AbortSignal;
   generateTextImpl?: GenerateTextLike;
 }): Promise<OpenCompanyChatAgentResult> {
   const gatewayApiKey = input.gatewayApiKey.trim();
@@ -196,14 +230,14 @@ export async function runOpenCompanyChatAgent(input: {
   const gateway = createGateway({ apiKey: gatewayApiKey });
   const attribution = createGoatGatewayAttribution({
     userWorkosId: input.userWorkosId,
-    feature: "chat",
+    feature: input.feature ?? "chat",
     ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
     ...(input.brainRef ? { brainRef: input.brainRef } : {}),
   });
   const latestUserMessage = latestUserMessageContent(input.messages);
   const toolContext = createOpenCompanyChatToolContext({
     model: input.model,
-    startTask: input.startTask,
+    ...(input.startTask ? { startTask: input.startTask } : {}),
     ...(latestUserMessage ? { latestUserMessage } : {}),
     ...(input.requestedEngine ? { requestedEngine: input.requestedEngine } : {}),
     ...(input.scheduleTask ? { scheduleTask: input.scheduleTask } : {}),
@@ -212,6 +246,8 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
+    ...(input.actions ? { actions: input.actions } : {}),
+    ...(input.goatBrainMultiBrain ? { goatBrainMultiBrain: input.goatBrainMultiBrain } : {}),
   });
 
   const systemPromptInput = {
@@ -219,11 +255,23 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.currentDate ? { currentDate: input.currentDate } : {}),
     ...(input.userContext ? { userContext: input.userContext } : {}),
     ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
+    ...(input.taskToolsEnabled !== undefined ? { taskToolsEnabled: input.taskToolsEnabled } : {}),
+    ...(input.brainCaptureEnabled !== undefined
+      ? { brainCaptureEnabled: input.brainCaptureEnabled }
+      : {}),
+    ...(input.activeBrain !== undefined ? { activeBrain: input.activeBrain } : {}),
+    ...(input.connectedIntegrations !== undefined
+      ? { connectedIntegrations: input.connectedIntegrations }
+      : {}),
   };
+  const system = [
+    createOpenCompanyChatSystemPrompt(systemPromptInput),
+    ...(input.extraSystemBlocks ?? []),
+  ].join("\n\n");
 
   const result = await generate({
     model: gateway(input.model),
-    system: createOpenCompanyChatSystemPrompt(systemPromptInput),
+    system,
     messages: input.messages.map((message) => ({
       role: message.role,
       content: message.content,
@@ -231,6 +279,7 @@ export async function runOpenCompanyChatAgent(input: {
     stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
     tools: toolContext.tools,
     providerOptions: goatGatewayProviderOptions(attribution),
+    ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
   });
 
   const startedTask = toolContext.getStartedTask();
@@ -245,6 +294,7 @@ export async function runOpenCompanyChatAgent(input: {
       steps: result.steps,
       ...(finishReason ? { finishReason } : {}),
     }),
+    totalUsage: result.totalUsage,
   };
 }
 
@@ -260,6 +310,10 @@ export function createOpenCompanyChatToolContext(input: {
   saveToBrain?: SaveToBrainRunner;
   webSearch?: WebSearchRunner;
   actions?: ActionDispatcher;
+  // When several brains are in scope (e.g. a Slack channel routed to more than
+  // one brain), the goat_brain schema grows a required `brain` enum and raw
+  // args flow to runBrainCli so the runner can pick the target and normalize.
+  goatBrainMultiBrain?: { targets: readonly GoatBrainMultiBrainTarget[] };
 }) {
   let startedTask: StartedTask | null = null;
   let startTaskInFlight: Promise<StartedTask> | null = null;
@@ -269,19 +323,29 @@ export function createOpenCompanyChatToolContext(input: {
   let webSearchCallCount = 0;
   let actionCallCount = 0;
 
+  const multiBrainTargets = input.goatBrainMultiBrain?.targets ?? [];
+  const multiBrain = multiBrainTargets.length > 1;
+  const goatBrainSchema = multiBrain
+    ? (buildGoatBrainMultiBrainToolSchema(multiBrainTargets) as unknown as Parameters<
+        typeof jsonSchema
+      >[0])
+    : GOAT_BRAIN_READ_TOOL_AI_SCHEMA;
+
   const tools: ToolSet = {
     [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
       description: GOAT_BRAIN_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<GoatBrainToolInput>(GOAT_BRAIN_READ_TOOL_AI_SCHEMA),
+      inputSchema: jsonSchema<GoatBrainToolInput>(goatBrainSchema),
       execute: async (args, executionContext?: unknown) => {
         if (!input.runBrainCli) {
           throw new Error("goat_brain is not configured for this chat.");
         }
         visibleToolActivity = true;
-        const normalized = normalizeGoatBrainToolInput(args);
+        // Multi-brain runners receive the raw args (including `brain`) and own
+        // normalization after extracting the target.
+        const toolArgs = multiBrain ? args : normalizeGoatBrainToolInput(args);
         return executionContext === undefined
-          ? input.runBrainCli(normalized)
-          : input.runBrainCli(normalized, executionContext);
+          ? input.runBrainCli(toolArgs)
+          : input.runBrainCli(toolArgs, executionContext);
       },
     }),
   };
@@ -664,6 +728,8 @@ export function createOpenCompanyChatToolContext(input: {
     });
     tools[USE_ACTION_TOOL_NAME] = tool<UseActionToolInput, UseActionToolOutput>({
       description: USE_ACTION_TOOL_DESCRIPTION,
+      needsApproval: async (args) =>
+        actionNeedsApproval(actions.catalog, typeof args.action === "string" ? args.action : ""),
       inputSchema: jsonSchema<UseActionToolInput>({
         type: "object",
         additionalProperties: false,

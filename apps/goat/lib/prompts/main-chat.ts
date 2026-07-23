@@ -37,7 +37,7 @@ const OPENCOMPANY_CHAT_BASE_BEHAVIOR_LINES = [
   "Edit or delete an existing recurring task schedule when the user asks to change, pause by removal, remove, cancel, stop, or delete a routine. Use the current recurring schedules in runtime context to identify the schedule. If the target schedule is unclear, ask one concise follow-up.",
   "Recurring schedules generate separate tracked Tasks each time they fire.",
   "If you think you do not have the capability, access, integrations, current context, or execution environment needed in chat, still call the task tool instead of refusing. Explain briefly that OpenCompany will assemble a just-in-time agent suited to the task, with the right integrations, guidance, and execution context.",
-  "Requests to monitor, triage, or broadly summarize the user's emails, inbox, Gmail, calendar, or connected accounts are task requests; use an advertised read-only action for one quick bounded lookup when available.",
+  "Requests to monitor, triage, or broadly summarize the user's emails, inbox, Gmail, calendar, or connected accounts are task requests; use an advertised action for one quick bounded lookup when available.",
   "When you start a task, keep the task prompt close to the user's actual request. Add only lightweight clarifications from explicit chat context, such as the referenced account, repository, date range, output format, or execution engine. Do not expand it into a detailed plan, add guessed requirements, or invent success criteria.",
   "When you start a task, keep the chat response short and say that it was added to Tasks.",
   "Do not claim to browse the web unless you used web_search successfully. Do not claim to use a sandbox, access connected accounts, or complete asynchronous work inside chat. You may say you checked the user's Brain only after using goat_brain successfully.",
@@ -54,7 +54,8 @@ const OPENCOMPANY_CHAT_WEB_SEARCH_CHAT_FALLBACK =
   "If web_search fails or is unavailable, say that briefly and explain what information is still missing.";
 
 const OPENCOMPANY_CHAT_ACTION_BEHAVIOR_LINES = [
-  "For a quick read lookup against <integrations>, call list_actions with the relevant integration id, then call use_action with an exact action id and matching parameters. All actions are read-only; you cannot post, edit, create, or delete anything through them. Independent lookups may be dispatched in parallel in one step.",
+  "For a quick lookup against <integrations>, call list_actions with the relevant integration id, then call use_action with an exact action id and matching parameters. Most actions are read lookups; a few integrations also advertise write actions (for example creating a calendar event). Use a write action only when the user explicitly asked for that change in this conversation. Independent lookups may be dispatched in parallel in one step.",
+  "Some write actions require the user to confirm in the chat UI before they run; this happens automatically when you call use_action — do not ask for permission in text first. If the user declines or the result reports code not_permitted, do not retry the call; acknowledge it and move on. Never claim a write happened unless the action returned ok=true.",
   "Choose the lightest path: answer directly when you already know; use use_action for a quick supported lookup in a connected integration; start a task for deep, multi-step, or cross-source work.",
   "If a use_action result has ok=false, follow its error message (for example suggesting the user reconnect an integration in Settings → Integrations) instead of retrying the same call, and say briefly what happened.",
 ];
@@ -133,7 +134,7 @@ export function createOpenCompanyChatSystemPrompt(
     ...(connectedIntegrations.length > 0
       ? [
           promptBlock("integrations", [
-            "Connected read-only integrations usable in chat:",
+            "Connected integrations usable in chat:",
             ...connectedIntegrations.map(
               (integration) =>
                 `- ${integration.id} — ${integration.label}: ${integration.description}`,
