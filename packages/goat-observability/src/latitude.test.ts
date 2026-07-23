@@ -1,3 +1,4 @@
+import { context, TraceFlags, trace } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   flushLatitude,
@@ -67,15 +68,96 @@ describe("latitudeTelemetry", () => {
     expect(typeof settings.experimental_telemetry?.tracer.startSpan).toBe("function");
     expect(typeof settings.experimental_telemetry?.tracer.startActiveSpan).toBe("function");
 
-    const span = settings.experimental_telemetry?.tracer.startSpan("ai.generateText") as
-      | { attributes?: Record<string, unknown>; end(): void }
-      | undefined;
+    const externalSpan = trace.wrapSpanContext({
+      traceId: "1".repeat(32),
+      spanId: "2".repeat(16),
+      traceFlags: TraceFlags.SAMPLED,
+    });
+    const span = context.with(
+      trace.setSpan(context.active(), externalSpan),
+      () =>
+        settings.experimental_telemetry?.tracer.startSpan("ai.generateText", {
+          attributes: {
+            "ai.model.provider": "gateway",
+            "ai.model.id": "anthropic/claude-sonnet-4.6",
+          },
+        }) as
+          | {
+              attributes?: Record<string, unknown>;
+              parentSpanContext?: { traceId: string };
+              spanContext(): { traceId: string };
+              end(): void;
+            }
+          | undefined,
+    );
     expect(span?.attributes).toMatchObject({
       "latitude.tags": '["env:test","feature:chat"]',
       "latitude.metadata": '{"model":"anthropic/claude-sonnet-4.6"}',
       "session.id": "session_abc",
       "user.id": "user_123",
+      "gen_ai.provider.name": "vercel",
     });
+    // The first AI SDK span is parented to an isolated Latitude capture root,
+    // not to the global app/request span that Latitude never exports.
+    expect(span?.parentSpanContext?.traceId).toBe(span?.spanContext().traceId);
+    expect(span?.parentSpanContext?.traceId).not.toBe(externalSpan.spanContext().traceId);
+    span?.end();
+
+    const modelSpan = latitudeTelemetry({
+      name: "chat-turn",
+      feature: "chat",
+    }).experimental_telemetry?.tracer.startSpan("ai.generateText.doGenerate", {
+      attributes: {
+        "gen_ai.system": "gateway",
+        "gen_ai.request.model": "anthropic/claude-sonnet-4.6",
+        "gen_ai.usage.input_tokens": 100,
+        "gen_ai.usage.output_tokens": 20,
+      },
+    }) as { attributes?: Record<string, unknown>; end(): void } | undefined;
+    expect(modelSpan?.attributes?.["gen_ai.provider.name"]).toBe("vercel");
+    modelSpan?.end();
+  });
+
+  it("creates the capture boundary through the AI SDK startActiveSpan path", () => {
+    process.env.LATITUDE_API_KEY = "lat_test";
+    process.env.LATITUDE_PROJECT_SLUG = "goat-test";
+    const tracer = latitudeTelemetry({
+      name: "brain-ingest",
+      feature: "brain-ingest",
+      sessionId: "job_123",
+    }).experimental_telemetry?.tracer;
+    const externalSpan = trace.wrapSpanContext({
+      traceId: "3".repeat(32),
+      spanId: "4".repeat(16),
+      traceFlags: TraceFlags.SAMPLED,
+    });
+
+    const span = context.with(trace.setSpan(context.active(), externalSpan), () =>
+      tracer?.startActiveSpan(
+        "ai.streamText",
+        {
+          attributes: {
+            "ai.model.provider": "gateway",
+            "ai.model.id": "anthropic/claude-sonnet-4.6",
+          },
+        },
+        (activeSpan) => activeSpan,
+      ),
+    ) as
+      | {
+          attributes?: Record<string, unknown>;
+          parentSpanContext?: { traceId: string };
+          spanContext(): { traceId: string };
+          end(): void;
+        }
+      | undefined;
+
+    expect(span?.attributes).toMatchObject({
+      "session.id": "job_123",
+      "gen_ai.provider.name": "vercel",
+    });
+    expect(span?.parentSpanContext?.traceId).toBe(span?.spanContext().traceId);
+    expect(span?.parentSpanContext?.traceId).not.toBe(externalSpan.spanContext().traceId);
     span?.end();
   });
 
