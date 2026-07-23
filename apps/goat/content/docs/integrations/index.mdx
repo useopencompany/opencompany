@@ -9,7 +9,7 @@ Integrations connect external systems to Goat so chat, tasks, and Brain ingestio
 
 ## Current categories
 
-- **OAuth tool connectors** let Goat call a provider API on the user's behalf. Gmail, Google Calendar, Google Drive, GitHub, Linear MCP, and Slack use this shape. Main chat exposes read-only actions for connected Attio, Slack, Gmail, Google Calendar, Google Drive, and Linear accounts; Calendar supports bounded event lookups.
+- **OAuth tool connectors** let Goat call a provider API on the user's behalf. Gmail, Google Calendar, Google Drive, GitHub, Linear MCP, and Slack use this shape. Main chat exposes curated actions for connected Attio, Slack, Gmail, Google Calendar, Google Drive, and Linear accounts. Linear can create and update issues and add comments; Calendar can create events. These writes require confirmation by default.
 - **Brain source connectors** turn external activity into `goat.brain_source_items` and enqueue durable Brain ingestion. Jamie meeting notes, Granola meeting notes, Slack conversations, Linear issue activity, and chat captures use this shape.
 - **Webhook connectors** receive provider deliveries at Goat API routes. Incoming payloads must authenticate at the route boundary before they can enqueue work.
 - **API-key poll connectors** store a provider API key and let Goat poll for new activity when the provider offers no webhooks. Granola uses this shape.

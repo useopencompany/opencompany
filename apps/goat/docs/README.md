@@ -141,18 +141,19 @@ structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects run
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
 timezone. `goat_brain` is always available. When Exa is configured, `web_fetch` reads one known URL
 through the Contents API while `web_search` discovers current public-web sources through Search.
-Connected integration lookups are dispatched through the read-only `list_actions` and `use_action`
+Connected integration actions are dispatched through `list_actions` and `use_action`
 tools. The route resolves a per-user catalog from currently connected providers, and the model must
 discover a provider's concrete action ids and parameter schemas before executing one. Slack exposes
 conversation, message, thread, member, and scope-dependent search reads. Gmail exposes message
 search plus message and thread retrieval, with an explicit account required when several are
 connected. Google Calendar exposes a bounded event-list read, while Google Drive exposes file
-search. Linear exposes a curated read catalog for issues, comments, projects, teams, members, and
-workflow statuses. Attio exposes bounded fuzzy search across available standard people, companies,
-and deals plus bounded list reads that can apply a saved-view filter from an Attio collection URL,
-with an explicit workspace required when several are connected. Actions cannot create,
-update, or delete provider data, disconnected providers are absent from the catalog, guessed action
-ids cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
+search. Linear exposes a curated catalog for reading issues and workspace context, creating and
+updating issues, and adding comments. Linear writes and Google Calendar event creation require
+confirmation by default and can be configured under Integrations. Attio exposes bounded fuzzy
+search across available standard people, companies, and deals plus bounded list reads that can
+apply a saved-view filter from an Attio collection URL, with an explicit workspace required when
+several are connected. Disconnected providers are absent from the catalog, guessed action ids
+cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
 connected-account work continues through background tasks.
 
 When connected integrations and an active brain are present, a conditional `brain_fill` prompt

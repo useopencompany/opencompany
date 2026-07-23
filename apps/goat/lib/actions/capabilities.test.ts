@@ -14,7 +14,7 @@ describe("GOAT_PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
-  it("registers Linear with read on by default and issue creation behind ask", () => {
+  it("registers Linear with read on by default and issue management behind ask", () => {
     expect(GOAT_PROVIDER_CAPABILITIES.linear).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
@@ -64,7 +64,7 @@ describe("mode helpers", () => {
 
   it("looks up registered capabilities", () => {
     expect(providerCapability("google_calendar", "write")?.label).toBe("Add events");
-    expect(providerCapability("linear", "write")?.label).toBe("Create issues");
+    expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
     expect(providerCapability("gmail", "write")).toBeUndefined();
   });
 });

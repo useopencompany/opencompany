@@ -161,7 +161,7 @@ describe("SettingsIntegrationsPanel", () => {
       name: "Read Linear permission",
     });
     const writePermission = within(linearCard as HTMLElement).getByRole("group", {
-      name: "Create issues permission",
+      name: "Manage issues permission",
     });
     expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
       "aria-pressed",
