@@ -661,12 +661,12 @@ describe("goat-brain cli", () => {
     });
 
     // Promotion is guarded by validation: active compiled truth must cite
-    // evidence.
+    // durable evidence or an external source.
     await expect(
       run(["set", "--root", root, "quick-note", "--status", "active"]),
     ).resolves.toMatchObject({
       exitCode: 1,
-      stderr: expect.stringContaining("active compiled truth must cite evidence"),
+      stderr: expect.stringContaining("active compiled truth must cite provenance"),
     });
     await expect(
       run([
@@ -697,6 +697,43 @@ describe("goat-brain cli", () => {
     ).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  it("promotes pointer-backed tracker knowledge without inventing evidence", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "projects",
+        "--type",
+        "project",
+        "--id",
+        "goat-brain",
+        "--title",
+        "Goat Brain",
+        "--truth",
+        "Goat Brain ingestion now preserves live tracker provenance. [[source:github:useopencompany/opencompany-experimental:pull:123|PR #123]]",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    await expect(
+      run(["set", "--root", root, "goat-brain", "--status", "active"]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    const health = JSON.parse((await run(["doctor", "--root", root, "--json"])).stdout) as {
+      errors: number;
+      findings: Array<{ message: string }>;
+    };
+    expect(health.errors).toBe(0);
+    expect(health.findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining("active compiled truth must cite provenance"),
+        }),
+      ]),
+    );
+  });
+
   it("adds and reads sourced timeline entries through gbrain-style commands", async () => {
     await expect(
       run([
@@ -716,22 +753,29 @@ describe("goat-brain cli", () => {
       ]),
     ).resolves.toMatchObject({ exitCode: 0 });
 
-    await expect(
-      run([
-        "timeline-add",
-        "--root",
-        root,
-        "timeline-note",
-        "2026-01-02",
-        "Met Ada about launch sequencing.",
-        "--detail",
-        "Ada recommended starting with founder-led beta.",
-        "--source-ref",
-        "goat-chat:message_1",
-        "--source-title",
-        "Launch chat",
-      ]),
-    ).resolves.toMatchObject({ exitCode: 0 });
+    const appended = await run([
+      "timeline-add",
+      "--root",
+      root,
+      "timeline-note",
+      "2026-01-02",
+      "Met Ada about launch sequencing.",
+      "--detail",
+      "Ada recommended starting with founder-led beta.",
+      "--source-ref",
+      "goat-chat:message_1",
+      "--source-title",
+      "Launch chat",
+      "--json",
+    ]);
+    expect(appended).toMatchObject({ exitCode: 0 });
+    expect(JSON.parse(appended.stdout)).toMatchObject({
+      ok: true,
+      id: "timeline-note",
+      status: "draft",
+      timelineEntryCount: 1,
+      evidenceId: expect.stringMatching(/^ev-/),
+    });
 
     const timeline = await run(["timeline", "--root", root, "timeline-note", "--json"]);
     const parsed = JSON.parse(timeline.stdout) as {

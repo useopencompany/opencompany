@@ -49,6 +49,9 @@ Validation and parsing live in `packages/goat-brain/src/schema.ts`
 - `[[source:...]]` inline links are shape-validated by
   `packages/goat-brain/src/inline-links.ts`; malformed targets are validation errors on document
   writes (`validate.ts`) and `invalid_source_link` findings in `goat-brain doctor` (`health.ts`).
+- A valid `[[source:...]]` link in compiled truth satisfies the provenance gate for promotion to
+  `active`, just like a valid `[[evidence:...]]` link. This lets pointer-only sources such as
+  tracked work items remain curated without creating stale evidence snapshots.
 - Frontmatter `sources[].ref` values that are not `provider:id` shaped surface as
   `nonstandard_source_ref` warnings in `goat-brain doctor` (warning, not error, so legacy refs do
   not break existing brains).
