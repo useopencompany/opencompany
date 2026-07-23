@@ -95,6 +95,7 @@ import {
   buildSlackConversationAgentIngestPrompt,
   formatGoatBrainFolderInventoryPrompt,
   GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT,
+  GOAT_BRAIN_AGENT_INGEST_BASIC_MODEL,
   GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS,
   GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
   GOAT_BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS,
@@ -861,7 +862,11 @@ describe("cheap source triage", () => {
     goatGmailMock.getGoatGmailBrainSourceInstructions.mockResolvedValueOnce(
       "Only investor emails.",
     );
-    const runTriage = vi.fn(async () => triageResult("skip"));
+    let triagePrompt = "";
+    const runTriage = vi.fn(async (triageInput: { prompt: string }) => {
+      triagePrompt = triageInput.prompt;
+      return triageResult("skip");
+    });
 
     const result = await runGmailThreadAgentIngest(
       {
@@ -882,6 +887,11 @@ describe("cheap source triage", () => {
         prompt: expect.stringContaining("Only investor emails."),
       }),
     );
+    expect(triagePrompt).toContain("<trusted-owner-instructions>");
+    expect(triagePrompt.indexOf("Only investor emails.")).toBeLessThan(
+      triagePrompt.indexOf("<untrusted-source-data>"),
+    );
+    expect(triagePrompt).not.toContain('"ownerIngestionInstructions"');
     expect(brainFilesMock.materializeGoatBrainFilesToRoot).not.toHaveBeenCalled();
     expect(localBrainMock.writeLocalBrainFile).not.toHaveBeenCalled();
     expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
@@ -948,12 +958,12 @@ describe("cheap source triage", () => {
     expect(result).toMatchObject({
       skipped: false,
       budget: {
-        // $0.000525 triage + $0.000295 Kimi full-agent step.
-        modelCostUsdMicros: 820,
-        totalCostUsdMicros: 820,
+        // $0.000525 triage + $0.000350 Haiku full-agent step.
+        modelCostUsdMicros: 875,
+        totalCostUsdMicros: 875,
       },
       trace: {
-        model: "moonshotai/kimi-k2.6",
+        model: GOAT_BRAIN_AGENT_INGEST_BASIC_MODEL,
         triage: {
           decision: "ingest",
           entityHints: ["Onboarding", "Acme"],
