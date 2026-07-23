@@ -36,6 +36,7 @@ vi.mock("@/lib/app-url", () => ({
 
 import {
   connectGoatAttioIntegration,
+  hasGoatAttioListReadScopes,
   parseGoatAttioScopes,
   validateGoatAttioApiKey,
 } from "@/lib/integrations/attio";
@@ -63,6 +64,15 @@ describe("Attio API key scope handling", () => {
       ),
     ).toEqual(["note:read-write", "object_configuration:read", "record_permission:read-write"]);
     expect(parseGoatAttioScopes(undefined)).toEqual([]);
+  });
+
+  it("requires both list capabilities while accepting read-write variants", () => {
+    expect(hasGoatAttioListReadScopes([])).toBe(false);
+    expect(hasGoatAttioListReadScopes(["list_configuration:read"])).toBe(false);
+    expect(hasGoatAttioListReadScopes(["list_configuration:read", "list_entry:read"])).toBe(true);
+    expect(
+      hasGoatAttioListReadScopes(["list_configuration:read-write", "list_entry:read-write"]),
+    ).toBe(true);
   });
 
   it("returns Attio scopes with the validated workspace identity", async () => {

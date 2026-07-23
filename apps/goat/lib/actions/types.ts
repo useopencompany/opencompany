@@ -1,6 +1,14 @@
 import type { JSONSchema7 } from "ai";
+import type { GoatCapabilityId } from "@/lib/actions/capabilities";
 
-export type GoatActionProviderId = "slack" | "gmail" | "linear";
+export type GoatActionProviderId =
+  | "slack"
+  | "gmail"
+  | "google_calendar"
+  | "google_drive"
+  | "linear"
+  | "attio"
+  | "github";
 
 export type GoatActionErrorCode =
   | "not_connected"
@@ -9,6 +17,7 @@ export type GoatActionErrorCode =
   | "provider_error"
   | "timeout"
   | "call_budget"
+  | "not_permitted"
   | "internal";
 
 // What discovery (list_actions) exposes for one action. The params schema is
@@ -16,6 +25,9 @@ export type GoatActionErrorCode =
 export type GoatActionDescriptor = {
   id: string;
   provider: GoatActionProviderId;
+  // Which human-readable permission capability this action belongs to (see
+  // lib/actions/capabilities.ts). Every action must declare itself.
+  capability: GoatCapabilityId;
   description: string;
   params: JSONSchema7;
 };
@@ -30,9 +42,22 @@ export type GoatActionExecuteContext = {
   userWorkosId: string;
   signal: AbortSignal;
   currentDate: Date;
+  userTimezone: string;
 };
 
 export type ResolvedGoatAction = GoatActionDescriptor & {
+  // Computed at resolve time from the connection's stored capability modes.
+  // "off" never appears here — off actions are excluded from the catalog
+  // entirely, so the model never sees them.
+  permissionMode: "on" | "ask";
+  // Present when permissionMode is "ask": what the in-chat confirm UI shows
+  // and which connections an "always allow" decision flips to "on".
+  permission?: {
+    provider: GoatActionProviderId;
+    capabilityId: GoatCapabilityId;
+    label: string;
+    integrationIds: string[];
+  };
   execute: (params: Record<string, unknown>, context: GoatActionExecuteContext) => Promise<unknown>;
 };
 
@@ -59,6 +84,19 @@ export class GoatActionAuthError extends Error {
     super(message);
     this.name = "GoatActionAuthError";
     this.code = code;
+    this.provider = provider;
+  }
+}
+
+// Thrown when a write executes against a connection whose capability was
+// turned off after the catalog was resolved (settings flip mid-turn, or a
+// multi-account call routed to an off account).
+export class GoatActionPermissionError extends Error {
+  readonly provider: GoatActionProviderId;
+
+  constructor(provider: GoatActionProviderId, message: string) {
+    super(message);
+    this.name = "GoatActionPermissionError";
     this.provider = provider;
   }
 }

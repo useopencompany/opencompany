@@ -5,16 +5,26 @@ import {
   upsertGoatBrainFile,
 } from "@opencompany/db/goat-brain-files";
 import {
+  findExistingGoatBrainPointerIngest,
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+  GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
 } from "@opencompany/db/goat-brain-ingest";
-import { normalizeGoatBrainId, normalizeGoatChatCapture, nowIso } from "@opencompany/goat-brain";
+import {
+  isValidGoatBrainSourceRef,
+  normalizeGoatBrainId,
+  normalizeGoatBrainPointerCapture,
+  normalizeGoatChatCapture,
+  nowIso,
+  parseGoatBrainSourceRef,
+} from "@opencompany/goat-brain";
 import { nextAvailableGoatBrainId } from "@/lib/brain";
 import { triggerGoatBrainIngestWake } from "@/lib/task-runner";
 
 export const GOAT_BRAIN_CAPTURE_FOLDER = "inbox";
 const CAPTURE_TITLE_MAX_LENGTH = 80;
 const CAPTURE_TEXT_MAX_BYTES = 64_000;
+const POINTER_FALLBACK_MAX_BYTES = 2_000;
 
 export type GoatBrainCaptureResult =
   | {
@@ -41,24 +51,79 @@ export type GoatBrainCaptureSource =
 export async function captureToGoatBrainInbox(input: {
   brainRef: string;
   userWorkosId: string;
-  text: string;
+  text?: string;
   title?: string;
   intent?: string;
+  sourceRef?: string;
+  integrationId?: string;
+  fallbackText?: string;
   source: GoatBrainCaptureSource;
 }): Promise<GoatBrainCaptureResult> {
-  const text = input.text.trim();
-  if (!text) return { ok: false, error: "Capture content must not be empty." };
-  if (Buffer.byteLength(text, "utf8") > CAPTURE_TEXT_MAX_BYTES) {
+  const text = input.text?.trim() ?? "";
+  const fallbackText = input.fallbackText?.trim() ?? "";
+  const sourceRef = input.sourceRef?.trim();
+  if (sourceRef && !isValidGoatBrainSourceRef(sourceRef)) {
+    return {
+      ok: false,
+      error: "Capture sourceRef must be a valid provider:id or URL.",
+    };
+  }
+  const pointerProvider = sourceRef ? hydratablePointerProvider(sourceRef) : null;
+  const isPointerCapture = !text && Boolean(pointerProvider);
+  if (!text && !isPointerCapture) {
+    return {
+      ok: false,
+      error: sourceRef
+        ? "This source needs fallback content because its provider cannot be hydrated."
+        : "Capture content must not be empty.",
+    };
+  }
+  const integrationId = input.integrationId?.trim();
+  if (isPointerCapture && !integrationId) {
+    return {
+      ok: false,
+      error: "A bare integration source needs the integrationId returned by use_action.",
+    };
+  }
+  if (text && Buffer.byteLength(text, "utf8") > CAPTURE_TEXT_MAX_BYTES) {
     return {
       ok: false,
       error: "Capture content is too large. Start a task for large documents.",
     };
   }
+  if (fallbackText && Buffer.byteLength(fallbackText, "utf8") > POINTER_FALLBACK_MAX_BYTES) {
+    return {
+      ok: false,
+      error: "Pointer fallback content must be 2 KB or smaller.",
+    };
+  }
+
+  if (isPointerCapture) {
+    const existing = await findExistingGoatBrainPointerIngest({
+      userWorkosId: input.userWorkosId,
+      integrationId: integrationId!,
+      provider: pointerProvider!,
+      sourceRef: sourceRef!,
+      brainRef: input.brainRef,
+    });
+    if (existing) {
+      return {
+        ok: true,
+        draftBrainId: existing.draftBrainId,
+        path: goatBrainFilePathFor(existing.draftFolder, existing.draftBrainId),
+        title: existing.title,
+        jobId: existing.jobId,
+        enqueued: false,
+        quotaPaused: existing.planPaused,
+      };
+    }
+  }
 
   const capturedAt = nowIso();
-  const title = input.title?.trim() || deriveCaptureTitle(text);
+  const title = input.title?.trim() || deriveCaptureTitle(text || sourceRef || "Saved source");
   const draftBrainId = await nextAvailableGoatBrainId(input.brainRef, normalizeGoatBrainId(title));
-  const sourceRef = `${input.source.kind === "mcp" ? "mcp" : "goat-chat"}:${input.source.itemId}`;
+  const resolvedSourceRef =
+    sourceRef ?? `${input.source.kind === "mcp" ? "mcp" : "goat-chat"}:${input.source.itemId}`;
   const path = goatBrainFilePathFor(GOAT_BRAIN_CAPTURE_FOLDER, draftBrainId);
   await upsertGoatBrainFile({
     brainRef: input.brainRef,
@@ -70,34 +135,51 @@ export async function captureToGoatBrainInbox(input: {
       title,
       type: "note",
       status: "draft",
-      compiledTruth: text,
+      compiledTruth:
+        text || fallbackText || `Saved source: [[source:${resolvedSourceRef}|Original source]]`,
       sources: [
         {
-          ref: sourceRef,
-          title: input.source.kind === "mcp" ? "MCP capture" : "Chat capture",
+          ref: resolvedSourceRef,
+          title: sourceRef
+            ? "Original source"
+            : input.source.kind === "mcp"
+              ? "MCP capture"
+              : "Chat capture",
           capturedAt,
         },
       ],
     }),
   });
 
-  const item = normalizeGoatChatCapture({
-    text,
-    title,
-    ...(input.intent?.trim() ? { intent: input.intent.trim() } : {}),
-    chatSessionId: input.source.connectionId,
-    userMessageId: input.source.itemId,
-    draftBrainId,
-    draftFolder: GOAT_BRAIN_CAPTURE_FOLDER,
-    capturedAt,
-    sourceRef,
-  });
+  const item = isPointerCapture
+    ? normalizeGoatBrainPointerCapture({
+        sourceRef: resolvedSourceRef,
+        title,
+        ...(fallbackText ? { fallbackText } : {}),
+        chatSessionId: input.source.connectionId,
+        userMessageId: input.source.itemId,
+        draftBrainId,
+        draftFolder: GOAT_BRAIN_CAPTURE_FOLDER,
+        capturedAt,
+      })
+    : normalizeGoatChatCapture({
+        text,
+        title,
+        ...(input.intent?.trim() ? { intent: input.intent.trim() } : {}),
+        chatSessionId: input.source.connectionId,
+        userMessageId: input.source.itemId,
+        draftBrainId,
+        draftFolder: GOAT_BRAIN_CAPTURE_FOLDER,
+        capturedAt,
+        sourceRef: resolvedSourceRef,
+      });
   const result = await upsertGoatBrainSourceItemAndEnqueue({
     userWorkosId: input.userWorkosId,
-    sourceConnectionId: input.source.connectionId,
+    sourceConnectionId: isPointerCapture ? integrationId! : input.source.connectionId,
+    ...(isPointerCapture ? { integrationId: integrationId! } : {}),
     item,
     rawPayload: item.content,
-    kind: GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
+    kind: isPointerCapture ? GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND : GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
     brainRef: input.brainRef,
   });
   captureGoatIngestionQuotaAnalytics(result.quotaUpdates);
@@ -120,6 +202,11 @@ export async function captureToGoatBrainInbox(input: {
     enqueued: result.enqueued,
     quotaPaused: Boolean(result.paused),
   };
+}
+
+function hydratablePointerProvider(sourceRef: string) {
+  const provider = parseGoatBrainSourceRef(sourceRef)?.provider;
+  return provider === "slack" || provider === "gmail" || provider === "linear" ? provider : null;
 }
 
 export function deriveCaptureTitle(text: string): string {

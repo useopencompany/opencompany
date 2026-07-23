@@ -89,7 +89,7 @@ describe("GoatSidebar", () => {
     recentChatsMock.value = [];
   });
 
-  it("renders home, the brain list, and settings in the account footer", () => {
+  it("renders home, the brain list, and footer links", () => {
     pathnameMock.value = "/";
     const { container } = render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
@@ -112,6 +112,12 @@ describe("GoatSidebar", () => {
 
     const settings = screen.getByRole("link", { name: /Ada Lovelace/ });
     expect(settings).toHaveAttribute("href", "/settings");
+
+    const feedback = screen.getByRole("button", { name: "Feedback" });
+    const changelog = screen.getByRole("link", { name: "Changelog" });
+    expect(changelog).toHaveAttribute("href", "/changelog");
+    expect(feedback.nextElementSibling).toBe(changelog);
+    expect(changelog.nextElementSibling).toBe(settings);
   });
 
   it("requests an immediate home reset on a normal Home click", async () => {

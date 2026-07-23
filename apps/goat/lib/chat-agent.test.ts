@@ -30,7 +30,7 @@ import {
 } from "@/lib/prompts";
 
 describe("runOpenCompanyChatAgent", () => {
-  it("instructs the model to delegate latest-email checks", async () => {
+  it("includes task fallback guidance for connected-account checks", async () => {
     const startTask = vi.fn();
 
     await runOpenCompanyChatAgent({
@@ -555,6 +555,14 @@ describe("runOpenCompanyChatAgent", () => {
         const empty = await executeSaveToBrainTool(options, { content: "   " });
         expect(empty).toMatchObject({ ok: false });
 
+        const pointer = await executeSaveToBrainTool(options, {
+          sourceRef: "slack:conversation:T123:C456:1234.5678",
+          integrationId: "gint_slack_1",
+          fallbackContent: "The team approved the launch plan.",
+          title: "Launch decision",
+        });
+        expect(pointer).toMatchObject({ ok: true, status: "captured" });
+
         return {
           text: "Saved. It's in your Brain inbox and will be filed shortly.",
           finishReason: "stop",
@@ -569,11 +577,17 @@ describe("runOpenCompanyChatAgent", () => {
     });
 
     expect(startTask).not.toHaveBeenCalled();
-    expect(saveToBrain).toHaveBeenCalledTimes(1);
-    expect(saveToBrain).toHaveBeenCalledWith({
+    expect(saveToBrain).toHaveBeenCalledTimes(2);
+    expect(saveToBrain).toHaveBeenNthCalledWith(1, {
       content: "https://example.com/pricing-teardown",
       title: "Pricing teardown reference",
       intent: "reference for the pricing rework",
+    });
+    expect(saveToBrain).toHaveBeenNthCalledWith(2, {
+      sourceRef: "slack:conversation:T123:C456:1234.5678",
+      integrationId: "gint_slack_1",
+      fallbackContent: "The team approved the launch plan.",
+      title: "Launch decision",
     });
     expect(result.task).toBeNull();
     expect(result.content).toContain("Saved.");
@@ -671,12 +685,14 @@ describe("list_actions and use_action tools", () => {
         provider: "slack",
         description: "Fetch recent messages from one Slack conversation.",
         params: { type: "object", properties: { channel: { type: "string" } } },
+        permissionMode: "on" as const,
       },
       {
         id: "linear.list_issues",
         provider: "linear",
         description: "List Linear issues.",
         params: { type: "object", properties: {} },
+        permissionMode: "on" as const,
       },
     ],
   };
@@ -714,6 +730,10 @@ describe("list_actions and use_action tools", () => {
       "slack.fetch_history",
       "linear.list_issues",
     ]);
+    expect(extractUseActionDescription(context.tools)).toContain(
+      `Limited to ${MAX_ACTION_CALLS_PER_TURN} calls per chat turn`,
+    );
+    expect(MAX_ACTION_CALLS_PER_TURN).toBe(16);
     const listed = await executeListActionsTool(context.tools, { integration: "slack" });
     expect(listed).toEqual({
       ok: true,
@@ -911,6 +931,11 @@ function extractUseActionEnum(tools: unknown) {
   return (
     inputSchema?.properties?.action?.enum ?? inputSchema?.jsonSchema?.properties?.action?.enum ?? []
   );
+}
+
+function extractUseActionDescription(tools: unknown) {
+  type Tools = Record<typeof USE_ACTION_TOOL_NAME, { description?: string }>;
+  return (tools as Tools)[USE_ACTION_TOOL_NAME]?.description ?? "";
 }
 
 function extractListActionsIntegrationEnum(tools: unknown) {

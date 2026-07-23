@@ -12,6 +12,7 @@ import {
   PanelLeft,
   Pin,
   PlugZap,
+  ScrollText,
   Settings,
 } from "lucide-react";
 import Link from "next/link";
@@ -176,6 +177,7 @@ export function GoatSidebar({
         {/* Account / settings footer */}
         <div className="px-2 pb-3 pt-2">
           <GoatSidebarFeedback />
+          <SidebarNavRow href="/changelog" icon={ScrollText} label="Changelog" active={false} />
           <Link
             href="/settings"
             prefetch

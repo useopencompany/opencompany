@@ -16,6 +16,7 @@ import {
   startGoatSpan,
 } from "@opencompany/goat-observability";
 import { createLogger } from "@opencompany/observability";
+import { captureStatsigServerEvent } from "@opencompany/statsig/server";
 import {
   convertToModelMessages,
   createGateway,
@@ -42,7 +43,9 @@ import {
 } from "@/lib/brain-skills";
 import {
   createDbGoatChatStore,
+  createGoatChatApprovalContinuationTurn,
   createGoatChatUserTurn,
+  dismissStaleGoatChatApprovals,
   newGoatChatMessageId,
   persistGoatChatAssistantMessage,
 } from "@/lib/chat";
@@ -116,45 +119,74 @@ export async function POST(request: Request): Promise<Response> {
   const body = await readJsonBody(request);
   if (!body.ok) return new Response(body.error, { status: 400 });
 
+  // Two request shapes share this route: a user message starting a normal
+  // turn, and the client's re-send of the latest assistant message carrying
+  // tool-approval decisions, which continues that paused turn without
+  // inserting a user message.
   const message = parseUserMessage(body.value.message);
-  if (!message) {
+  const approvalMessage = message ? null : parseApprovalContinuationMessage(body.value.message);
+  if (!message && !approvalMessage) {
     return new Response("Invalid chat message.", { status: 400 });
   }
+  const continuationSessionId = approvalMessage
+    ? (typeof body.value.sessionId === "string" ? body.value.sessionId.trim() : "") ||
+      approvalMessage.metadata?.sessionId?.trim() ||
+      null
+    : null;
+  if (approvalMessage && !continuationSessionId) {
+    return new Response("Approval responses require the chat session id.", { status: 400 });
+  }
 
-  const parsedAttachments = parseGoatChatAttachmentsInput(
-    message.metadata?.attachments,
-    context.user.workosUserId,
-  );
-  if (!parsedAttachments.ok) return new Response(parsedAttachments.error, { status: 400 });
-  const attachments = parsedAttachments.attachments;
+  const parsedAttachments = message
+    ? parseGoatChatAttachmentsInput(message.metadata?.attachments, context.user.workosUserId)
+    : null;
+  if (parsedAttachments && !parsedAttachments.ok) {
+    return new Response(parsedAttachments.error, { status: 400 });
+  }
+  const attachments = parsedAttachments?.ok ? parsedAttachments.attachments : [];
 
-  const parsed = validateGoatChatInput({
-    prompt: textFromGoatChatUiMessage(message),
-    model: body.value.model,
-    sessionId: body.value.sessionId,
-    hasAttachments: attachments.length > 0,
-  });
-  if (!parsed.ok) return new Response(parsed.error, { status: 400 });
-  const parsedNewSessionId = parseOptimisticGoatChatSessionId(body.value.newSessionId);
-  if (!parsedNewSessionId.ok) return new Response(parsedNewSessionId.error, { status: 400 });
-  if (parsed.value.sessionId && parsedNewSessionId.sessionId) {
+  const parsed = message
+    ? validateGoatChatInput({
+        prompt: textFromGoatChatUiMessage(message),
+        model: body.value.model,
+        sessionId: body.value.sessionId,
+        hasAttachments: attachments.length > 0,
+      })
+    : null;
+  if (parsed && !parsed.ok) return new Response(parsed.error, { status: 400 });
+  const userInput = parsed?.ok ? parsed.value : null;
+  const parsedNewSessionId = message
+    ? parseOptimisticGoatChatSessionId(body.value.newSessionId)
+    : null;
+  if (parsedNewSessionId && !parsedNewSessionId.ok) {
+    return new Response(parsedNewSessionId.error, { status: 400 });
+  }
+  const newSessionId = parsedNewSessionId?.ok ? parsedNewSessionId.sessionId : null;
+  if (userInput?.sessionId && newSessionId) {
     return new Response("A chat request cannot continue and create a session at the same time.", {
       status: 400,
     });
   }
 
-  const attachmentCapabilities = modelSupportsAttachments(parsed.value.model);
-  if (
-    attachments.some((attachment) => attachment.kind === "image") &&
-    !attachmentCapabilities.images
-  ) {
-    return new Response("The selected model does not support image attachments.", { status: 400 });
-  }
-  if (attachments.some((attachment) => attachment.kind === "pdf") && !attachmentCapabilities.pdf) {
-    return new Response("The selected model does not support PDF attachments.", { status: 400 });
+  if (userInput) {
+    const attachmentCapabilities = modelSupportsAttachments(userInput.model);
+    if (
+      attachments.some((attachment) => attachment.kind === "image") &&
+      !attachmentCapabilities.images
+    ) {
+      return new Response("The selected model does not support image attachments.", {
+        status: 400,
+      });
+    }
+    if (
+      attachments.some((attachment) => attachment.kind === "pdf") &&
+      !attachmentCapabilities.pdf
+    ) {
+      return new Response("The selected model does not support PDF attachments.", { status: 400 });
+    }
   }
 
-  const mentionEngine = readGoatChatMentionEngine(body.value.mentions);
+  const mentionEngine = message ? readGoatChatMentionEngine(body.value.mentions) : undefined;
   const requestedEngine =
     mentionEngine === "codex" && (await isGoatCodexConnectedForUser(context.user.workosUserId))
       ? "codex"
@@ -165,23 +197,25 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  const parsedSkillMentions = readGoatBrainSkillMentionRefs(
-    message.metadata?.mentions ?? body.value.mentions,
-  );
-  if (!parsedSkillMentions.ok) {
-    return new Response(parsedSkillMentions.error, { status: 400 });
-  }
-  let resolvedSkills;
-  try {
-    resolvedSkills = await resolveGoatBrainSkillMentions({
-      activeBrainRef: context.activeBrain?.id ?? null,
-      mentions: parsedSkillMentions.mentions,
-    });
-  } catch (error) {
-    if (error instanceof GoatBrainSkillMentionError) {
-      return new Response(error.message, { status: 400 });
+  let resolvedSkills: Awaited<ReturnType<typeof resolveGoatBrainSkillMentions>> = [];
+  if (message) {
+    const parsedSkillMentions = readGoatBrainSkillMentionRefs(
+      message.metadata?.mentions ?? body.value.mentions,
+    );
+    if (!parsedSkillMentions.ok) {
+      return new Response(parsedSkillMentions.error, { status: 400 });
     }
-    throw error;
+    try {
+      resolvedSkills = await resolveGoatBrainSkillMentions({
+        activeBrainRef: context.activeBrain?.id ?? null,
+        mentions: parsedSkillMentions.mentions,
+      });
+    } catch (error) {
+      if (error instanceof GoatBrainSkillMentionError) {
+        return new Response(error.message, { status: 400 });
+      }
+      throw error;
+    }
   }
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!gatewayApiKey) {
@@ -206,6 +240,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   const exaApiKey = process.env.EXA_API_KEY?.trim();
   const canManageWorkspaceBrain = context.role === "admin";
+  const brainCaptureEnabled = Boolean(context.activeBrain);
   const taskToolsEnabled = context.user.taskSpawningEnabled && canManageWorkspaceBrain;
 
   // Action catalog: resolved per request from real connection state. On by
@@ -214,7 +249,10 @@ export async function POST(request: Request): Promise<Response> {
   const actionsEnabled = !requestedEngine && !isGoatChatActionsKilled();
   const emptyCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
   const actionCatalog = actionsEnabled
-    ? await resolveGoatActionCatalog(context.user.workosUserId).catch((error) => {
+    ? await resolveGoatActionCatalog({
+        userWorkosId: context.user.workosUserId,
+        workspaceId: context.workspace.id,
+      }).catch((error) => {
         logger.warn("Goat chat action catalog resolution failed", {
           event: "goat.chat_action_catalog_resolution_failed",
           error,
@@ -229,10 +267,14 @@ export async function POST(request: Request): Promise<Response> {
   const currentDate = new Date();
   const userIdHash = hashGoatUserId(context.user.workosUserId);
   const elapsedChatDurationMs = () => Math.max(0, Math.round(performance.now() - startedAt));
+  // Continuations do not carry a model in the request; the session's stored
+  // model takes over once the turn is loaded.
+  let telemetryModel = userInput?.model ?? "";
   const chatSpan = startGoatSpan(GOAT_SPANS.chatTurn, {
     ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
-    "goat.model": parsed.value.model,
+    "goat.model": telemetryModel,
     "goat.task_started": false,
+    ...(approvalMessage ? { "goat.approval_continuation": true } : {}),
   });
   let chatFinished = false;
   const finishChatTelemetry = (
@@ -251,7 +293,7 @@ export async function POST(request: Request): Promise<Response> {
           : (attributes["goat.failure_category"] as string | undefined);
     const finalAttributes: Record<string, string | number | boolean | null | undefined> = {
       ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
-      "goat.model": parsed.value.model,
+      "goat.model": telemetryModel,
       "goat.outcome": outcome,
       ...(failureCategory ? { "goat.failure_category": failureCategory } : {}),
       ...attributes,
@@ -280,28 +322,81 @@ export async function POST(request: Request): Promise<Response> {
     }
   };
 
-  let turn: Awaited<ReturnType<typeof createGoatChatUserTurn>>;
+  // The two turn shapes normalize to this state so the streaming tail below
+  // stays a single code path.
+  type ChatTurnState = {
+    session: Awaited<ReturnType<typeof createGoatChatUserTurn>>["session"];
+    sessionCreated: boolean;
+    userMessageId: string;
+    userMessageContent: string;
+    storedMessages: Awaited<ReturnType<typeof createGoatChatUserTurn>>["storedMessages"];
+    messages: GoatChatUiMessage[];
+    respondedApprovalIds: string[];
+    continuationTaskId: string | null;
+  };
+  let turn: ChatTurnState;
   try {
-    // Extract docx/xlsx text once at submit time; every later turn reads the
-    // stored text instead of re-downloading the blob.
-    const attachmentTexts =
-      attachments.length > 0 ? await extractGoatChatAttachmentTexts(attachments) : null;
-    turn = await createGoatChatUserTurn(
-      {
-        userWorkosId: context.user.workosUserId,
-        prompt: parsed.value.prompt,
-        model: parsed.value.model,
-        sessionId: parsed.value.sessionId,
-        newSessionId: parsedNewSessionId.sessionId,
-        messageId: safeClientMessageId(message.id),
-        attachments: attachments.length > 0 ? attachments : null,
-        attachmentTexts,
-      },
-      store,
-    );
+    if (message && userInput) {
+      // Extract docx/xlsx text once at submit time; every later turn reads the
+      // stored text instead of re-downloading the blob.
+      const attachmentTexts =
+        attachments.length > 0 ? await extractGoatChatAttachmentTexts(attachments) : null;
+      const userTurn = await createGoatChatUserTurn(
+        {
+          userWorkosId: context.user.workosUserId,
+          prompt: userInput.prompt,
+          model: userInput.model,
+          sessionId: userInput.sessionId,
+          newSessionId,
+          messageId: safeClientMessageId(message.id),
+          attachments: attachments.length > 0 ? attachments : null,
+          attachmentTexts,
+        },
+        store,
+      );
+      // Approvals the user talked past get denied now, so the history stays
+      // convertible and the stale card resolves in the UI.
+      const dismissed = await dismissStaleGoatChatApprovals(userTurn, store);
+      turn = {
+        session: userTurn.session,
+        sessionCreated: userTurn.sessionCreated,
+        userMessageId: userTurn.userMessage.id,
+        userMessageContent: userInput.prompt,
+        storedMessages: userTurn.storedMessages,
+        messages: dismissed.changed ? dismissed.messages : userTurn.messages,
+        respondedApprovalIds: [],
+        continuationTaskId: null,
+      };
+    } else {
+      const continuation = await createGoatChatApprovalContinuationTurn(
+        {
+          userWorkosId: context.user.workosUserId,
+          sessionId: continuationSessionId ?? "",
+          message: approvalMessage as GoatChatUiMessage,
+        },
+        store,
+      );
+      if (!continuation.ok) {
+        finishChatTelemetry("failure", {
+          "goat.failure_category": "approval_continuation_invalid",
+        });
+        return new Response(continuation.error, { status: 409 });
+      }
+      turn = {
+        session: continuation.session,
+        sessionCreated: false,
+        userMessageId: continuation.lastUserMessage?.id ?? continuation.session.id,
+        userMessageContent: continuation.lastUserMessage?.content ?? "",
+        storedMessages: continuation.storedMessages,
+        messages: continuation.messages,
+        respondedApprovalIds: continuation.respondedApprovalIds,
+        continuationTaskId: continuation.storedMessages.at(-1)?.taskId ?? null,
+      };
+    }
+    telemetryModel = turn.session.model;
     chatSpan.setAttributes({
       "goat.chat_session_id": turn.session.id,
-      "goat.chat_message_id": turn.userMessage.id,
+      "goat.chat_message_id": turn.userMessageId,
       "goat.model": turn.session.model,
     });
   } catch (error) {
@@ -312,22 +407,46 @@ export async function POST(request: Request): Promise<Response> {
   try {
     sessionSkills = await activateAndListGoatChatSessionSkills({
       chatSessionId: turn.session.id,
-      activatedMessageId: turn.userMessage.id,
+      activatedMessageId: turn.userMessageId,
       brainRef: context.activeBrain?.id ?? "",
-      skills: resolvedSkills,
+      skills: message ? resolvedSkills : [],
     });
   } catch (error) {
     finishChatTelemetry("failure", {}, error);
     throw error;
   }
   const skillsByActivationMessageId = groupSessionSkillsByActivationMessage(sessionSkills);
-  after(
-    generateGoatChatTitleForMessage({
-      sessionId: turn.session.id,
-      messageId: turn.userMessage.id,
-      apiKey: gatewayApiKey,
-    }).catch(() => undefined),
-  );
+  if (message && userInput) {
+    after(
+      generateGoatChatTitleForMessage({
+        sessionId: turn.session.id,
+        messageId: turn.userMessageId,
+        apiKey: gatewayApiKey,
+      }).catch(() => undefined),
+    );
+    if (turn.sessionCreated) {
+      after(
+        captureStatsigServerEvent("chat_started", context.user.workosUserId, {
+          user_id: context.user.workosUserId,
+          workspace_id: context.workspace.id,
+          session_id: turn.session.id,
+        }),
+      );
+    }
+    // Fires on every user turn (new chats and follow-ups). `is_first_message` lets the PM
+    // segment new conversations from continued ones, while the raw count measures engagement
+    // volume and per-session grouping gives conversation depth.
+    after(
+      captureStatsigServerEvent("chat_message_sent", context.user.workosUserId, {
+        user_id: context.user.workosUserId,
+        workspace_id: context.workspace.id,
+        session_id: turn.session.id,
+        is_first_message: turn.sessionCreated,
+        model: turn.session.model,
+        message_length: userInput.prompt.length,
+      }),
+    );
+  }
 
   // With resumable streams, a client disconnect (refresh, tab close, stop())
   // is just a dropped connection: generation keeps running and the client can
@@ -350,11 +469,11 @@ export async function POST(request: Request): Promise<Response> {
 
   const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
-    latestUserMessage: parsed.value.prompt,
+    latestUserMessage: turn.userMessageContent,
     ...(requestedEngine ? { requestedEngine } : {}),
     // goat_brain is read-only for everyone (recall/inspect). The only write path
-    // in chat is save_to_brain, which is wired below for admins and enqueues the
-    // durable ingestion agent. No per-command role branching needed here.
+    // in chat is save_to_brain, which is available to every workspace member
+    // with an active brain and enqueues the durable ingestion agent.
     runBrainCli: (toolInput, toolExecutionContext) => {
       const toolCallId = goatBrainToolCallId(toolExecutionContext);
       const activeBrain = context.activeBrain;
@@ -372,14 +491,14 @@ export async function POST(request: Request): Promise<Response> {
         userWorkosId: context.user.workosUserId,
         toolInput,
         gatewayApiKey,
-        sourceRef: `goat-chat:${turn.userMessage.id}`,
+        sourceRef: `goat-chat:${turn.userMessageId}`,
         chatSessionId: turn.session.id,
-        userMessageId: turn.userMessage.id,
+        userMessageId: turn.userMessageId,
         ...(toolCallId ? { toolCallId } : {}),
         signal: generationSignal,
       });
     },
-    ...(canManageWorkspaceBrain
+    ...(brainCaptureEnabled
       ? {
           saveToBrain: async (toolInput) => {
             const activeBrain = context.activeBrain;
@@ -399,22 +518,26 @@ export async function POST(request: Request): Promise<Response> {
               });
             }
             const content = toolInput.content?.trim();
-            if (!content) {
+            const sourceRef = toolInput.sourceRef?.trim();
+            if (!content && !sourceRef) {
               return {
                 ok: false,
-                error: "Provide content or attachmentIds to save.",
+                error: "Provide content, sourceRef, or attachmentIds to save.",
               };
             }
             const captured = await captureToGoatBrainInbox({
               brainRef: activeBrain.id,
               userWorkosId: context.user.workosUserId,
-              text: content,
+              ...(content ? { text: content } : {}),
               ...(toolInput.title ? { title: toolInput.title } : {}),
               ...(toolInput.intent ? { intent: toolInput.intent } : {}),
+              ...(sourceRef ? { sourceRef } : {}),
+              ...(toolInput.integrationId ? { integrationId: toolInput.integrationId } : {}),
+              ...(toolInput.fallbackContent ? { fallbackText: toolInput.fallbackContent } : {}),
               source: {
                 kind: "chat",
                 connectionId: turn.session.id,
-                itemId: turn.userMessage.id,
+                itemId: turn.userMessageId,
               },
             });
             if (!captured.ok) return captured;
@@ -445,7 +568,7 @@ export async function POST(request: Request): Promise<Response> {
               attributes: {
                 ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
                 "goat.chat_session_id": turn.session.id,
-                "goat.chat_message_id": turn.userMessage.id,
+                "goat.chat_message_id": turn.userMessageId,
                 "goat.model": turn.session.model,
               },
               chatSpan,
@@ -462,6 +585,7 @@ export async function POST(request: Request): Promise<Response> {
                 provider: action.provider,
                 description: action.description,
                 params: action.params,
+                permissionMode: action.permissionMode,
               })),
             },
             execute: (call) =>
@@ -471,12 +595,13 @@ export async function POST(request: Request): Promise<Response> {
                 params: call.params,
                 signal: generationSignal,
                 currentDate,
+                userTimezone: context.user.timezone?.trim() || "UTC",
                 userWorkosId: context.user.workosUserId,
                 chatSessionId: turn.session.id,
                 attributes: {
                   ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
                   "goat.chat_session_id": turn.session.id,
-                  "goat.chat_message_id": turn.userMessage.id,
+                  "goat.chat_message_id": turn.userMessageId,
                 },
                 chatSpan,
               }),
@@ -496,7 +621,7 @@ export async function POST(request: Request): Promise<Response> {
             const attributes = {
               ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
               "goat.chat_session_id": turn.session.id,
-              "goat.chat_message_id": turn.userMessage.id,
+              "goat.chat_message_id": turn.userMessageId,
               "goat.model": turn.session.model,
               "goat.task_id": created.id,
             };
@@ -617,7 +742,7 @@ export async function POST(request: Request): Promise<Response> {
       generationSignal.aborted ? "aborted" : "failure",
       {
         "goat.chat_session_id": turn.session.id,
-        "goat.chat_message_id": turn.userMessage.id,
+        "goat.chat_message_id": turn.userMessageId,
         "goat.model": turn.session.model,
         "goat.task_started": Boolean(startedTask),
         "goat.task_id": startedTask?.id,
@@ -674,10 +799,9 @@ export async function POST(request: Request): Promise<Response> {
         ? {
             name: context.activeBrain.name,
             workspaceName: context.workspace.name,
-            readOnly: !canManageWorkspaceBrain,
           }
         : null,
-      brainCaptureEnabled: canManageWorkspaceBrain,
+      brainCaptureEnabled,
       taskToolsEnabled,
       scheduleToolsEnabled: taskToolsEnabled,
       recurringSchedules,
@@ -720,7 +844,12 @@ export async function POST(request: Request): Promise<Response> {
         workspaceId: context.workspace.id,
         userWorkosId: context.user.workosUserId,
         chatSessionId: turn.session.id,
-        userMessageId: turn.userMessage.id,
+        userMessageId: turn.userMessageId,
+        // A continuation is a second debit for the same user message; suffix
+        // the key so it is not deduped against the paused turn's debit.
+        ...(turn.respondedApprovalIds.length > 0
+          ? { idempotencyKeySuffix: `:approval:${turn.respondedApprovalIds[0]}` }
+          : {}),
       });
       debugTrace = createOpenCompanyChatDebugTrace({
         model: turn.session.model,
@@ -733,7 +862,7 @@ export async function POST(request: Request): Promise<Response> {
         "failure",
         {
           "goat.chat_session_id": turn.session.id,
-          "goat.chat_message_id": turn.userMessage.id,
+          "goat.chat_message_id": turn.userMessageId,
           "goat.model": turn.session.model,
           "goat.task_started": Boolean(toolContext.getStartedTask()),
           "goat.task_id": toolContext.getStartedTask()?.id,
@@ -802,7 +931,7 @@ export async function POST(request: Request): Promise<Response> {
       if (isAborted && !rawContent && !startedTask && !hasAssistantParts) {
         finishChatTelemetry("aborted", {
           "goat.chat_session_id": turn.session.id,
-          "goat.chat_message_id": turn.userMessage.id,
+          "goat.chat_message_id": turn.userMessageId,
           "goat.model": turn.session.model,
           "goat.task_started": false,
         });
@@ -825,7 +954,9 @@ export async function POST(request: Request): Promise<Response> {
           isAborted && !rawContent && hasAssistantParts && !startedTask
             ? ""
             : normalizeAgentText(rawContent, startedTask),
-        taskId: startedTask?.id ?? null,
+        // A continuation upsert must not drop a task the paused turn already
+        // linked to this message.
+        taskId: startedTask?.id ?? turn.continuationTaskId ?? null,
         debugTrace: finalTrace,
       };
       try {
@@ -848,7 +979,7 @@ export async function POST(request: Request): Promise<Response> {
       assistantPersisted = true;
       finishChatTelemetry(isAborted ? "aborted" : "success", {
         "goat.chat_session_id": turn.session.id,
-        "goat.chat_message_id": turn.userMessage.id,
+        "goat.chat_message_id": turn.userMessageId,
         "goat.model": turn.session.model,
         "goat.task_started": Boolean(startedTask),
         "goat.task_id": startedTask?.id,
@@ -936,6 +1067,7 @@ async function executeChatActionCall(input: {
   params: Record<string, unknown>;
   signal: AbortSignal;
   currentDate: Date;
+  userTimezone: string;
   userWorkosId: string;
   chatSessionId: string;
   attributes: Record<string, string | number | boolean | null | undefined>;
@@ -964,6 +1096,7 @@ async function executeChatActionCall(input: {
       userWorkosId: input.userWorkosId,
       signal: input.signal,
       currentDate: input.currentDate,
+      userTimezone: input.userTimezone,
     });
     actionSpan.end({
       "goat.outcome": result.ok ? "success" : "failure",
@@ -1056,6 +1189,7 @@ async function recordChatModelCost(input: {
   userWorkosId: string;
   chatSessionId: string;
   userMessageId: string;
+  idempotencyKeySuffix?: string;
 }) {
   if (!input.usage) return;
   const cost = calculateModelUsageCost({
@@ -1083,7 +1217,7 @@ async function recordChatModelCost(input: {
       workspaceId: input.workspaceId,
       userWorkosId: input.userWorkosId,
       source: "chat_model_usage",
-      idempotencyKey: `chat:${input.userMessageId}`,
+      idempotencyKey: `chat:${input.userMessageId}${input.idempotencyKeySuffix ?? ""}`,
       chatSessionId: input.chatSessionId,
       providerCostUsdMicros: cost.providerCostUsdMicros,
       platformFeeUsdMicros: cost.platformFeeUsdMicros,
@@ -1186,6 +1320,15 @@ async function readJsonBody(
 
 function parseUserMessage(value: unknown): GoatChatUiMessage | null {
   if (!isRecord(value) || value.role !== "user" || typeof value.id !== "string") return null;
+  if (!Array.isArray(value.parts)) return null;
+  return value as unknown as GoatChatUiMessage;
+}
+
+// The auto-resend after the user answers a tool-approval card carries the
+// assistant message itself. Only its approval decisions are trusted — the
+// continuation turn re-reads everything else from the stored copy.
+function parseApprovalContinuationMessage(value: unknown): GoatChatUiMessage | null {
+  if (!isRecord(value) || value.role !== "assistant" || typeof value.id !== "string") return null;
   if (!Array.isArray(value.parts)) return null;
   return value as unknown as GoatChatUiMessage;
 }

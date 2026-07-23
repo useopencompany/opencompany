@@ -5,6 +5,7 @@ import {
   goatGatewayProviderOptions,
 } from "@opencompany/goat-observability";
 import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
+import { MAX_ACTION_CALLS_PER_TURN } from "@/lib/actions/limits";
 import {
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
   normalizeGoatBrainReadToolInput,
@@ -48,7 +49,10 @@ import {
   LIST_ACTIONS_TOOL_DESCRIPTION,
   SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION,
   SAVE_TO_BRAIN_CONTENT_DESCRIPTION,
+  SAVE_TO_BRAIN_FALLBACK_CONTENT_DESCRIPTION,
+  SAVE_TO_BRAIN_INTEGRATION_ID_DESCRIPTION,
   SAVE_TO_BRAIN_INTENT_DESCRIPTION,
+  SAVE_TO_BRAIN_SOURCE_REF_DESCRIPTION,
   SAVE_TO_BRAIN_TITLE_DESCRIPTION,
   SAVE_TO_BRAIN_TOOL_DESCRIPTION,
   SCHEDULE_TASK_CRON_DESCRIPTION,
@@ -72,6 +76,7 @@ import {
   WEB_SEARCH_TOOL_DESCRIPTION,
 } from "@/lib/prompts";
 
+export { MAX_ACTION_CALLS_PER_TURN } from "@/lib/actions/limits";
 export {
   createOpenCompanyChatSystemPrompt,
   OPENCOMPANY_CHAT_SYSTEM_PROMPT,
@@ -120,9 +125,12 @@ type ActionDispatcher = {
   }) => Promise<UseActionToolOutput>;
 };
 
-// Direct provider calls are cheap compared to the old sub-agent workers, so
-// the per-turn budget is looser.
-export const MAX_ACTION_CALLS_PER_TURN = 10;
+// An action in "ask" mode pauses the stream on a tool-approval request the
+// user answers in the chat UI; the approved call executes on the follow-up
+// approval-continuation request with the recorded input.
+function actionNeedsApproval(catalog: GoatChatActionCatalog, actionId: string) {
+  return catalog.actions.find((action) => action.id === actionId)?.permissionMode === "ask";
+}
 
 // Main chat (and the MCP connector) get a read-only brain surface: recall and
 // inspect only. Every write path — new content and edits to existing records —
@@ -370,6 +378,18 @@ export function createOpenCompanyChatToolContext(input: {
             type: "string",
             description: SAVE_TO_BRAIN_INTENT_DESCRIPTION,
           },
+          sourceRef: {
+            type: "string",
+            description: SAVE_TO_BRAIN_SOURCE_REF_DESCRIPTION,
+          },
+          integrationId: {
+            type: "string",
+            description: SAVE_TO_BRAIN_INTEGRATION_ID_DESCRIPTION,
+          },
+          fallbackContent: {
+            type: "string",
+            description: SAVE_TO_BRAIN_FALLBACK_CONTENT_DESCRIPTION,
+          },
           attachmentIds: {
             type: "array",
             items: { type: "string" },
@@ -380,6 +400,11 @@ export function createOpenCompanyChatToolContext(input: {
       execute: async (args) => {
         visibleToolActivity = true;
         const content = typeof args.content === "string" ? args.content.trim() : "";
+        const sourceRef = typeof args.sourceRef === "string" ? args.sourceRef.trim() : "";
+        const integrationId =
+          typeof args.integrationId === "string" ? args.integrationId.trim() : "";
+        const fallbackContent =
+          typeof args.fallbackContent === "string" ? args.fallbackContent.trim() : "";
         const attachmentIds = Array.isArray(args.attachmentIds)
           ? [
               ...new Set(
@@ -389,10 +414,10 @@ export function createOpenCompanyChatToolContext(input: {
               ),
             ]
           : [];
-        if (!content && attachmentIds.length === 0) {
+        if (!content && !sourceRef && attachmentIds.length === 0) {
           return {
             ok: false,
-            error: "save_to_brain needs content or attachmentIds.",
+            error: "save_to_brain needs content, sourceRef, or attachmentIds.",
           };
         }
         const title = typeof args.title === "string" ? args.title.trim() : "";
@@ -400,7 +425,7 @@ export function createOpenCompanyChatToolContext(input: {
 
         // Duplicate calls within one turn return the first capture instead of
         // minting another inbox draft / asset copy.
-        const key = `${title}\n${content}\n${attachmentIds.join(",")}`;
+        const key = `${title}\n${content}\n${sourceRef}\n${integrationId}\n${fallbackContent}\n${attachmentIds.join(",")}`;
         const already = capturedByKey.get(key);
         if (already?.ok) return { ...already, status: "already_captured" };
 
@@ -408,6 +433,9 @@ export function createOpenCompanyChatToolContext(input: {
           ...(content ? { content } : {}),
           ...(title ? { title } : {}),
           ...(intent ? { intent } : {}),
+          ...(sourceRef ? { sourceRef } : {}),
+          ...(integrationId ? { integrationId } : {}),
+          ...(fallbackContent ? { fallbackContent } : {}),
           ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
         });
         if (output.ok) capturedByKey.set(key, output);
@@ -643,6 +671,8 @@ export function createOpenCompanyChatToolContext(input: {
     });
     tools[USE_ACTION_TOOL_NAME] = tool<UseActionToolInput, UseActionToolOutput>({
       description: USE_ACTION_TOOL_DESCRIPTION,
+      needsApproval: async (args) =>
+        actionNeedsApproval(actions.catalog, typeof args.action === "string" ? args.action : ""),
       inputSchema: jsonSchema<UseActionToolInput>({
         type: "object",
         additionalProperties: false,

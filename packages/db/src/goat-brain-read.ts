@@ -35,6 +35,10 @@ const MAX_SEARCH_LIMIT = 50;
 const FTS_CANDIDATE_LIMIT = 50;
 const NAME_CANDIDATE_LIMIT = 20;
 const VECTOR_CANDIDATE_LIMIT = 50;
+// Cosine-distance cutoff for vector candidates. Beyond this an embedding neighbor is treated as
+// semantic noise and dropped before RRF, so a gibberish query returns nothing rather than the
+// nearest-but-irrelevant page. Conservative default for text-embedding-3-small, tunable per deploy.
+const VECTOR_MAX_DISTANCE_DEFAULT = 0.8;
 // Per-query cap on write-through embedding backfill. After a large ingest the first semantic
 // query warms up to this many documents; anything beyond stays lexical-only until later queries.
 const EMBED_BACKFILL_LIMIT = 64;
@@ -114,6 +118,11 @@ export type GoatBrainSearchOptions = {
   // hidden from search/list by default so they cannot outrank the canonical page.
   includeConflicts?: boolean;
   lexicalOnly?: boolean;
+  // Linked-page neighbors are the biggest per-hit payload; callers that only need ids
+  // (e.g. the MCP surface) can opt out. Defaults to true for CLI/chat parity.
+  includeNeighbors?: boolean;
+  // Truncation length for each hit's snippet, clamped to 0..SNIPPET_MAX_CHARS. 0 → no snippet.
+  snippetChars?: number;
 };
 
 export type GoatBrainSearchSignal = "lexical" | "name" | "vector" | "graph";
@@ -128,10 +137,15 @@ export type GoatBrainSearchHit = {
   updatedAt: string;
   score: number;
   signals: GoatBrainSearchSignal[];
+  // Absolute cosine similarity (1 - distance) for hits that surfaced via the vector index. The
+  // relative `score` is a within-response rank; this is the trustworthy confidence number.
+  vectorSimilarity?: number;
   snippet: string;
   neighbors: GoatBrainDocumentLink[];
   via?: GoatBrainGraphHop[];
 };
+
+type VectorCandidate = { id: string; distance: number };
 
 export type GoatBrainDocumentLink = {
   id: string;
@@ -195,6 +209,8 @@ export async function searchGoatBrain(
   const db = ctx.db ?? getDb();
   const text = options.text?.trim() ?? "";
   const limit = clamp(options.limit ?? DEFAULT_SEARCH_LIMIT, 1, MAX_SEARCH_LIMIT);
+  const snippetChars = clamp(options.snippetChars ?? SNIPPET_MAX_CHARS, 0, SNIPPET_MAX_CHARS);
+  const includeNeighbors = options.includeNeighbors ?? true;
   const hops = Math.max(0, options.hops ?? 0);
   const conditions = documentFilters(ctx.brainRef, options, hops, now);
 
@@ -202,25 +218,31 @@ export async function searchGoatBrain(
   // gets relevance 1 and the recency blend decides).
   if (!text) {
     const rows = await fetchDocumentMetaWhere(db, and(...conditions), limit);
-    const neighborsById = await fetchNeighbors(
-      db,
-      ctx.brainRef,
-      rows.map((row) => row.brainId),
-      null,
-    );
+    const neighborsById = includeNeighbors
+      ? await fetchNeighbors(
+          db,
+          ctx.brainRef,
+          rows.map((row) => row.brainId),
+          null,
+        )
+      : new Map<string, GoatBrainDocumentLink[]>();
     return rows.map((row) => ({
-      ...hitFromMeta(row, blendScore(1, 1, row.updatedAt, now)),
+      ...hitFromMeta(row, blendScore(1, 1, row.updatedAt, now), snippetChars),
       neighbors: neighborsById.get(row.brainId) ?? [],
     }));
   }
 
-  const [ftsIds, nameIds, vectorIds] = await Promise.all([
+  const [ftsIds, nameIds, vectorHits] = await Promise.all([
     ftsCandidates(db, conditions, text),
     nameCandidates(db, conditions, text),
     options.lexicalOnly || !ctx.gatewayApiKey
-      ? Promise.resolve([] as string[])
+      ? Promise.resolve([] as VectorCandidate[])
       : vectorCandidates(db, ctx, conditions, text),
   ]);
+  const vectorIds = vectorHits.map((hit) => hit.id);
+  const vectorSimilarityById = new Map(
+    vectorHits.map((hit) => [hit.id, Number((1 - hit.distance).toFixed(4))]),
+  );
 
   const lists = [ftsIds, nameIds, vectorIds].filter((list) => list.length > 0);
   const relevance = reciprocalRankFusion(lists);
@@ -253,19 +275,23 @@ export async function searchGoatBrain(
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 
-  const neighborsById = await fetchNeighbors(
-    db,
-    ctx.brainRef,
-    ranked.map(({ record }) => record.brainId),
-    adjacency,
-  );
+  const neighborsById = includeNeighbors
+    ? await fetchNeighbors(
+        db,
+        ctx.brainRef,
+        ranked.map(({ record }) => record.brainId),
+        adjacency,
+      )
+    : new Map<string, GoatBrainDocumentLink[]>();
 
   return ranked.map(({ record, score }) => {
     const via = graphPaths.get(record.brainId);
+    const vectorSimilarity = vectorSimilarityById.get(record.brainId);
     return {
-      ...hitFromMeta(record, score),
+      ...hitFromMeta(record, score, snippetChars),
       signals: [...(signalsById.get(record.brainId) ?? [])],
       neighbors: neighborsById.get(record.brainId) ?? [],
+      ...(vectorSimilarity !== undefined ? { vectorSimilarity } : {}),
       ...(via ? { via } : {}),
     };
   });
@@ -574,12 +600,25 @@ async function nameCandidates(db: DbClient, conditions: SQL[], text: string): Pr
   return rows.map((row) => row.id);
 }
 
+// Pure cutoff filter, extracted so the distance threshold is unit-testable without a DB harness.
+export function filterVectorCandidates(
+  rows: VectorCandidate[],
+  maxDistance: number,
+): VectorCandidate[] {
+  return rows.filter((row) => Number.isFinite(row.distance) && row.distance <= maxDistance);
+}
+
+function vectorMaxDistance(): number {
+  const raw = Number(process.env.GOAT_BRAIN_VECTOR_MAX_DISTANCE);
+  return Number.isFinite(raw) && raw > 0 ? raw : VECTOR_MAX_DISTANCE_DEFAULT;
+}
+
 async function vectorCandidates(
   db: DbClient,
   ctx: GoatBrainReadContext,
   conditions: SQL[],
   text: string,
-): Promise<string[]> {
+): Promise<VectorCandidate[]> {
   // Ranking assist only: any gateway or pgvector failure degrades this list to empty and the
   // query stays lexical, mirroring the CLI's silent degrade.
   try {
@@ -625,7 +664,7 @@ async function vectorCandidates(
       ...missing.map((doc) => embeddingTextFor(doc.title ?? "", doc.aliases ?? [], doc.body)),
     ]);
     const queryVector = vectors[0];
-    if (!queryVector) return [];
+    if (!queryVector) return [] as VectorCandidate[];
 
     const upserts = missing.flatMap((doc, index) => {
       const vector = vectors[index + 1];
@@ -656,8 +695,9 @@ async function vectorCandidates(
         });
     }
 
-    const rows: Array<{ id: string }> = await db
-      .select({ id: goatBrainDocuments.brainId })
+    const distanceExpr = sql<number>`${goatBrainDocumentEmbeddings.embedding} <=> ${JSON.stringify(queryVector)}::vector`;
+    const rows: Array<{ id: string; distance: number }> = await db
+      .select({ id: goatBrainDocuments.brainId, distance: distanceExpr })
       .from(goatBrainDocumentEmbeddings)
       .innerJoin(
         goatBrainDocuments,
@@ -667,13 +707,13 @@ async function vectorCandidates(
         ),
       )
       .where(and(...conditions, eq(goatBrainDocumentEmbeddings.model, model)))
-      .orderBy(
-        sql`${goatBrainDocumentEmbeddings.embedding} <=> ${JSON.stringify(queryVector)}::vector`,
-      )
+      .orderBy(distanceExpr)
       .limit(VECTOR_CANDIDATE_LIMIT);
-    return rows.map((row) => row.id);
+    // Distance can arrive as a numeric string over some drivers; coerce before the cutoff.
+    const candidates = rows.map((row) => ({ id: row.id, distance: Number(row.distance) }));
+    return filterVectorCandidates(candidates, vectorMaxDistance());
   } catch {
-    return [];
+    return [] as VectorCandidate[];
   }
 }
 
@@ -993,7 +1033,11 @@ function blendScore(relevance: number, maxRelevance: number, updatedAt: Date, no
   );
 }
 
-function hitFromMeta(record: DocumentMetaRow, score: number): GoatBrainSearchHit {
+function hitFromMeta(
+  record: DocumentMetaRow,
+  score: number,
+  snippetChars: number,
+): GoatBrainSearchHit {
   return {
     id: record.brainId,
     title: record.title ?? record.brainId,
@@ -1004,16 +1048,17 @@ function hitFromMeta(record: DocumentMetaRow, score: number): GoatBrainSearchHit
     updatedAt: record.updatedAt.toISOString(),
     score: Number(score.toFixed(4)),
     signals: [],
-    snippet: snippetFor(record),
+    snippet: snippetFor(record, snippetChars),
     neighbors: [],
   };
 }
 
-function snippetFor(record: DocumentMetaRow): string {
+function snippetFor(record: DocumentMetaRow, maxChars: number): string {
+  if (maxChars <= 0) return "";
   const truth = record.snippetSource.trim();
   if (!truth) return "_No compiled truth yet._";
-  if (record.bodyLength <= SNIPPET_MAX_CHARS) return truth;
-  return `${truth.slice(0, SNIPPET_MAX_CHARS).trimEnd()}... [truncated; fetch the full document with get ${record.brainId}]`;
+  if (record.bodyLength <= maxChars) return truth;
+  return `${truth.slice(0, maxChars).trimEnd()}... [truncated; fetch the full document by id]`;
 }
 
 function mergedInto(row: DocumentRow): string | null {

@@ -1,6 +1,7 @@
 import { connectGoatSlackIntegration } from "@opencompany/db/goat-integrations";
 import { NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
   appendGoatSlackIntegrationStatus,
   exchangeGoatSlackCode,
@@ -66,6 +67,11 @@ export async function GET(request: Request) {
       accountEmail: identity.userEmail,
       accessToken: oauth.accessToken,
       scopes: oauth.scopes,
+    });
+    await captureGoatIntegrationAddedAnalytics({
+      userWorkosId: current.user.workosUserId,
+      workspaceId: current.workspace.id,
+      provider: "slack",
     });
 
     return NextResponse.redirect(

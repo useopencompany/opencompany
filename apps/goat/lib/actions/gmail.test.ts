@@ -24,6 +24,7 @@ vi.mock("@opencompany/db/goat-integrations", () => ({
   markGoatIntegrationStatus: mocks.markStatus,
 }));
 
+import { executeGoatAction } from "@/lib/actions/execute";
 import { resolveGmailActions } from "@/lib/actions/gmail";
 import { GoatActionAuthError, type GoatActionExecuteContext } from "@/lib/actions/types";
 
@@ -31,6 +32,7 @@ const CONTEXT: GoatActionExecuteContext = {
   userWorkosId: "user_1",
   signal: new AbortController().signal,
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
+  userTimezone: "UTC",
 };
 
 function connectedRow(email = "louis@example.com") {
@@ -89,10 +91,14 @@ describe("gmail.search_messages", () => {
   it("lists matches and hydrates metadata headers", async () => {
     mocks.dbRows = [connectedRow()];
     mocks.loadCredential.mockResolvedValue(freshCredential());
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      const input = args[0];
       const url = String(input);
       if (url.includes("/messages?") || url.includes("q=")) {
-        return jsonResponse({ messages: [{ id: "m1", threadId: "t1" }] });
+        return jsonResponse({
+          messages: [{ id: "m1", threadId: "t1" }],
+          nextPageToken: "page_2",
+        });
       }
       return jsonResponse({
         id: "m1",
@@ -111,19 +117,41 @@ describe("gmail.search_messages", () => {
 
     const catalog = await resolveGmailActions("user_1");
     const search = findAction(catalog, "gmail.search_messages");
-    const result = (await search.execute({ query: "from:jane", limit: 5 }, CONTEXT)) as {
-      messages: Array<{ id?: string; from?: string; subject?: string }>;
+    const result = (await search.execute(
+      { query: "from:jane", limit: 5, pageToken: "page_1" },
+      CONTEXT,
+    )) as {
+      integrationId: string;
+      nextPageToken?: string;
+      messages: Array<{
+        id?: string;
+        from?: string;
+        subject?: string;
+        sourceRef?: string;
+        integrationId?: string;
+        url?: string;
+      }>;
     };
 
     const listUrl = String(fetchMock.mock.calls[0]?.[0]);
     expect(listUrl).toContain("q=from%3Ajane");
     expect(listUrl).toContain("maxResults=5");
+    expect(listUrl).toContain("pageToken=page_1");
     const hydrateUrl = String(fetchMock.mock.calls[1]?.[0]);
     expect(hydrateUrl).toContain("/messages/m1");
     expect(hydrateUrl).toContain("format=metadata");
     expect(result.messages).toEqual([
-      expect.objectContaining({ id: "m1", from: "jane@example.com", subject: "Invoice" }),
+      expect.objectContaining({
+        id: "m1",
+        from: "jane@example.com",
+        subject: "Invoice",
+        sourceRef: "gmail:thread:t1",
+        integrationId: "gint_gmail_1",
+        url: "https://mail.google.com/mail/u/louis%40example.com/#all/t1",
+      }),
     ]);
+    expect(result.integrationId).toBe("gint_gmail_1");
+    expect(result.nextPageToken).toBe("page_2");
   });
 
   it("refreshes an expired token before calling the API", async () => {
@@ -134,7 +162,8 @@ describe("gmail.search_messages", () => {
     });
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_ID", "client");
     vi.stubEnv("GOOGLE_OAUTH_CLIENT_SECRET", "secret");
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      const input = args[0];
       const url = String(input);
       if (url.includes("oauth2.googleapis.com/token")) {
         return jsonResponse({ access_token: "ya29.new", expires_in: 3600 });
@@ -154,6 +183,73 @@ describe("gmail.search_messages", () => {
     const apiCall = fetchMock.mock.calls[1];
     expect((apiCall?.[1] as RequestInit).headers).toEqual(
       expect.objectContaining({ Authorization: "Bearer ya29.new" }),
+    );
+  });
+
+  it("surfaces a bounded Google error reason as provider_error", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.loadCredential.mockResolvedValue(freshCredential());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(
+          {
+            error: {
+              message: "Invalid id value",
+              errors: [{ reason: "invalid" }],
+              status: "INVALID_ARGUMENT",
+            },
+          },
+          400,
+        ),
+      ),
+    );
+    const providerCatalog = await resolveGmailActions("user_1");
+    if (!providerCatalog) throw new Error("missing Gmail catalog");
+
+    const result = await executeGoatAction({
+      catalog: {
+        providers: [
+          {
+            id: providerCatalog.id,
+            label: providerCatalog.label,
+            description: providerCatalog.description,
+          },
+        ],
+        actions: providerCatalog.actions,
+      },
+      actionId: "gmail.search_messages",
+      params: { query: "is:unread" },
+      userWorkosId: CONTEXT.userWorkosId,
+      signal: CONTEXT.signal,
+      currentDate: CONTEXT.currentDate,
+      userTimezone: CONTEXT.userTimezone,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      action: "gmail.search_messages",
+      error: {
+        code: "provider_error",
+        provider: "gmail",
+        message:
+          "Google API request failed with 400: Invalid id value (invalid, INVALID_ARGUMENT).",
+      },
+    });
+  });
+
+  it("falls back to a status-only Google error for a non-JSON response", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.loadCredential.mockResolvedValue(freshCredential());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<html>upstream failed</html>", { status: 502 })),
+    );
+    const catalog = await resolveGmailActions("user_1");
+    const search = findAction(catalog, "gmail.search_messages");
+
+    await expect(search.execute({ query: "is:unread" }, CONTEXT)).rejects.toThrow(
+      "Google API request failed with 502.",
     );
   });
 

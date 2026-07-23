@@ -57,7 +57,9 @@ vi.mock("@/lib/brain-skills", async (importOriginal) => {
 
 vi.mock("@/lib/chat", () => ({
   createDbGoatChatStore: vi.fn(() => ({})),
+  createGoatChatApprovalContinuationTurn: vi.fn(),
   createGoatChatUserTurn: vi.fn(),
+  dismissStaleGoatChatApprovals: vi.fn(async () => ({ changed: false, messages: [] })),
   newGoatChatMessageId: vi.fn(() => "assistant_1"),
   persistGoatChatAssistantMessage: vi.fn(),
 }));
@@ -168,7 +170,10 @@ describe("POST /api/chat", () => {
 
     const response = await POST(validChatRequest("What's new in #general?"));
     expect(response.status).toBe(200);
-    expect(resolveGoatActionCatalog).toHaveBeenCalledWith("user_1");
+    expect(resolveGoatActionCatalog).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceId: "goat_ws_user_1",
+    });
   });
 
   it("honors the actions kill switch", async () => {
@@ -190,7 +195,7 @@ describe("POST /api/chat", () => {
   });
 
   it("forwards use_action calls to the executor and returns its result", async () => {
-    mockAuth();
+    mockAuth({ timezone: "" });
     mockCreateTurn();
     mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
     const catalog = sampleActionCatalog();
@@ -249,6 +254,7 @@ describe("POST /api/chat", () => {
         actionId: "slack.fetch_history",
         params: { channel: "C123" },
         userWorkosId: "user_1",
+        userTimezone: "UTC",
       }),
     );
     expect(actionOutput).toEqual(
@@ -609,6 +615,7 @@ describe("POST /api/chat", () => {
         content: "Acme is a company building billing tools.",
         title: "Acme",
         intent: "company note from chat",
+        sourceRef: "linear:issue:ENG-1",
       }) as Promise<unknown>;
       return {
         toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
@@ -641,6 +648,7 @@ describe("POST /api/chat", () => {
       text: "Acme is a company building billing tools.",
       title: "Acme",
       intent: "company note from chat",
+      sourceRef: "linear:issue:ENG-1",
       source: {
         kind: "chat",
         connectionId: "session_1",
@@ -696,19 +704,29 @@ describe("POST /api/chat", () => {
     expect(runGoatBrainToolForUser).not.toHaveBeenCalled();
   });
 
-  it("limits member chats to read-only brain tools and no background work", async () => {
+  it("lets members capture through save_to_brain while keeping direct writes and tasks disabled", async () => {
     mockAuth({ role: "member" });
     mockCreateTurn();
+    mockCaptureToGoatBrainInbox().mockResolvedValue({
+      ok: true,
+      draftBrainId: "member-note",
+      path: "inbox/member-note.md",
+      title: "Member note",
+      jobId: "goat_brain_ingest_job_member",
+      enqueued: true,
+    });
     let brainToolPromise: Promise<unknown> | null = null;
+    let saveToolPromise: Promise<unknown> | null = null;
     mockStreamText().mockImplementation((options: unknown) => {
       const typedOptions = options as {
         system?: string;
         tools?: Record<string, { inputSchema?: unknown; execute?: unknown }>;
       };
-      expect(typedOptions.system).toContain("browse-only access");
-      expect(typedOptions.system).not.toContain("save_to_brain");
+      expect(typedOptions.system).not.toContain("browse-only access");
+      expect(typedOptions.system).toContain("save_to_brain");
       expect(typedOptions.system).not.toContain("Start a task when the user asks");
-      expect(typedOptions.tools?.[SAVE_TO_BRAIN_TOOL_NAME]).toBeUndefined();
+      const saveTool = typedOptions.tools?.[SAVE_TO_BRAIN_TOOL_NAME];
+      expect(saveTool).toBeDefined();
       expect(typedOptions.tools?.[START_TASK_TOOL_NAME]).toBeUndefined();
       expect(typedOptions.tools?.[SCHEDULE_TASK_TOOL_NAME]).toBeUndefined();
       expect(typedOptions.tools?.[EDIT_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
@@ -727,6 +745,15 @@ describe("POST /api/chat", () => {
       brainToolPromise = brainTool.execute({
         command: "append-evidence",
         flags: { id: "acme", body: "member write" },
+      }) as Promise<unknown>;
+      if (typeof saveTool?.execute !== "function") {
+        throw new Error("save_to_brain execute function was not configured.");
+      }
+      saveToolPromise = saveTool.execute({
+        sourceRef: "gmail:thread:thread_1",
+        integrationId: "gint_gmail_1",
+        fallbackContent: "Customer context from the thread.",
+        title: "Member note",
       }) as Promise<unknown>;
       return {
         toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
@@ -748,8 +775,27 @@ describe("POST /api/chat", () => {
     // Write commands are not in the read-only enum, so they never reach the
     // runner: normalization rejects them before runBrainCli is called.
     await expect(brainToolPromise).rejects.toThrow("goat_brain command is invalid");
+    await expect(saveToolPromise).resolves.toEqual({
+      ok: true,
+      draftId: "member-note",
+      path: "inbox/member-note.md",
+      title: "Member note",
+      status: "captured",
+    });
     expect(runGoatBrainToolForUser).not.toHaveBeenCalled();
-    expect(captureToGoatBrainInbox).not.toHaveBeenCalled();
+    expect(captureToGoatBrainInbox).toHaveBeenCalledWith({
+      brainRef: "goat_brain_user_1",
+      userWorkosId: "user_1",
+      sourceRef: "gmail:thread:thread_1",
+      integrationId: "gint_gmail_1",
+      fallbackText: "Customer context from the thread.",
+      title: "Member note",
+      source: {
+        kind: "chat",
+        connectionId: "session_1",
+        itemId: "user_message_1",
+      },
+    });
     expect(createGoatTaskForUser).not.toHaveBeenCalled();
     expect(listCurrentUserGoatTaskSchedules).not.toHaveBeenCalled();
   });
@@ -1568,6 +1614,8 @@ function sampleActionCatalog() {
       {
         id: "slack.fetch_history",
         provider: "slack" as const,
+        capability: "read" as const,
+        permissionMode: "on" as const,
         description: "Fetch recent messages from one Slack conversation.",
         params: { type: "object" as const, properties: {} },
         execute: vi.fn(),

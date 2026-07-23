@@ -2,6 +2,7 @@ import {
   GoatActionAuthError,
   type GoatActionErrorCode,
   GoatActionInvalidParamsError,
+  GoatActionPermissionError,
   type GoatActionProviderId,
   type GoatResolvedActionCatalog,
 } from "@/lib/actions/types";
@@ -24,6 +25,7 @@ export async function executeGoatAction(input: {
   userWorkosId: string;
   signal: AbortSignal;
   currentDate: Date;
+  userTimezone: string;
 }): Promise<GoatActionResult> {
   const action = input.catalog.actions.find((entry) => entry.id === input.actionId);
   if (!action) {
@@ -45,6 +47,7 @@ export async function executeGoatAction(input: {
       userWorkosId: input.userWorkosId,
       signal,
       currentDate: input.currentDate,
+      userTimezone: input.userTimezone,
     });
     return { ok: true, action: action.id, result: clampActionResult(result) };
   } catch (error) {
@@ -56,6 +59,13 @@ export async function executeGoatAction(input: {
         ok: false,
         action: action.id,
         error: { code: error.code, provider: error.provider, message: error.message },
+      };
+    }
+    if (error instanceof GoatActionPermissionError) {
+      return {
+        ok: false,
+        action: action.id,
+        error: { code: "not_permitted", provider: error.provider, message: error.message },
       };
     }
     if (error instanceof GoatActionInvalidParamsError) {

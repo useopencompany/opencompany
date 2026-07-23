@@ -29,10 +29,14 @@ const nextConfig = {
       ignore: [SENSITIVE_CALLBACK_REQUEST_PATTERN],
     },
   },
+  // The Statsig server SDK is a native NAPI addon; keep it external so Next never
+  // tries to bundle the .node binary into the server output.
+  serverExternalPackages: ["@statsig/statsig-node-core"],
   transpilePackages: [
     "@opencompany/agent-runtime",
     "@opencompany/db",
     "@opencompany/goat-brain",
+    "@opencompany/statsig",
     "@opencompany/ui",
   ],
 };

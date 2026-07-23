@@ -14,6 +14,7 @@ import {
   connectGoatAttioIntegration,
   deleteGoatAttioWebhook,
   getGoatAttioIntegrationState,
+  hasGoatAttioListReadScopes,
   isValidAttioApiKey,
   validateGoatAttioApiKey,
 } from "@/lib/integrations/attio";
@@ -34,6 +35,13 @@ export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnec
   try {
     const validation = await validateGoatAttioApiKey(trimmed);
     if (!validation.ok) return { ok: false, error: validation.error };
+    if (!hasGoatAttioListReadScopes(validation.identity.scopes)) {
+      return {
+        ok: false,
+        error:
+          "This Attio API key needs list_configuration:read and list_entry:read so Chat can read lists and saved views.",
+      };
+    }
     await connectGoatAttioIntegration({
       userWorkosId: user.workosUserId,
       apiKey: trimmed,
@@ -46,7 +54,7 @@ export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnec
     return {
       ok: false,
       error:
-        "Could not connect Attio. Make sure the key has object_configuration:read, record_permission:read-write, note:read-write, and webhook:read-write, then try again.",
+        "Could not connect Attio. Make sure the key has object_configuration:read, record_permission:read-write, list_configuration:read, list_entry:read, note:read-write, and webhook:read-write, then try again.",
     };
   }
 }

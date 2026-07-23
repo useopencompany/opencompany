@@ -26,6 +26,7 @@
     "@opencompany/goat-brain": "workspace:*",
     "@opencompany/goat-observability": "workspace:*",
     "@opencompany/observability": "workspace:*",
+    "@opencompany/statsig": "workspace:*",
     "@opencompany/ui": "workspace:*",
     "@tanstack/electric-db-collection": "^0.3.5",
     "@tanstack/react-db": "^0.1.85",

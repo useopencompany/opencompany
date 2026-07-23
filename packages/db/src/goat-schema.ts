@@ -127,6 +127,7 @@ export type GoatBrainSourceType =
   | "meeting"
   | "run"
   | "capture"
+  | "pointer"
   | "asset"
   | "conversation"
   | "issue"
@@ -143,7 +144,10 @@ export type GoatHubspotEventAction = "create" | "update";
 export type GoatAttioObjectType = "person" | "company" | "deal";
 export type GoatAttioEventAction = "create" | "update" | "note";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
-export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
+export type GoatBrainIngestJobKind =
+  | "brain_source_item_ingest"
+  | "brain_agent_ingest"
+  | "brain_pointer_hydrate";
 export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 export type GoatBrainImportStatus =
   | "discovering"
@@ -526,9 +530,11 @@ export const goatOnboarding = goat.table("onboarding", {
   }),
   referralSource: text("referral_source"),
   // Self-reported profile captured on the first onboarding step. `role` is one
-  // of the ROLE_PROFILES ids in the wizard and seeds the tailored brain folders;
-  // `building` is a free-form one-liner describing what they're working on.
+  // of the ROLE_PROFILES ids in the wizard and seeds the tailored brain folders.
   role: text("role"),
+  // Legacy free-text field retained for existing rows. New Goat onboarding
+  // stores the normalized hostname in companyDomain and the homepage URL in
+  // contextUrls.
   building: text("building"),
   companyDomain: text("company_domain"),
   contextUrls: jsonb("context_urls").$type<string[]>(),
@@ -1207,6 +1213,13 @@ export const goatIntegrations = goat.table(
     status: text("status").$type<GoatIntegrationStatus>().notNull().default("connected"),
     statusReason: text("status_reason"),
     scopes: jsonb("scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    // Sparse per-connection capability mode overrides (capability id → "on" |
+    // "off" | "ask"). Missing keys fall back to the app-level capability
+    // registry defaults, so defaults can evolve without a backfill.
+    capabilityModes: jsonb("capability_modes")
+      .$type<Partial<Record<string, "on" | "off" | "ask">>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1509,7 +1522,7 @@ export const goatBrainSourceItems = goat.table(
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting', 'run', 'capture', 'asset', 'conversation', 'issue', 'activity', 'thread', 'document')`,
+      sql`${table.sourceType} IN ('meeting', 'run', 'capture', 'pointer', 'asset', 'conversation', 'issue', 'activity', 'thread', 'document')`,
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
@@ -1589,7 +1602,7 @@ export const goatBrainIngestJobs = goat.table(
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
-      sql`${table.kind} IN ('brain_source_item_ingest', 'brain_agent_ingest')`,
+      sql`${table.kind} IN ('brain_source_item_ingest', 'brain_agent_ingest', 'brain_pointer_hydrate')`,
     ),
     statusCheck: check(
       "goat_brain_ingest_jobs_status_check",

@@ -23,7 +23,7 @@ A brain document is a markdown file with YAML frontmatter, stored at `folder/id.
 - **`kind`** — `page` or `evidence`. This is the only structural rule in the system: evidence documents must live under the `evidence/` zone, pages must live outside it. A database constraint enforces it.
 - **`type`** — what the record represents, one of eight: `person`, `company`, `project`, `meeting`, `concept`, `source`, `analysis`, `note`. External artifacts of any format (articles, videos, email threads, repos) are `source`; synthesized prose is `analysis`. Types are pure metadata; they do not dictate where a document lives. Retired v1 names (`media`, `email` → `source`; `writing` → `analysis`) still parse via legacy aliases.
 - **`folder`** — free-form navigation, up to six path segments. There is an opinionated default per type (`person` → `people`, `note` → `inbox`, and so on in `packages/goat-brain/src/schemas.ts`), but users and agents can organize folders however they like.
-- **`status`** — the curation signal: `draft` (captured, not yet curated), `active` (curated synthesis; must cite at least one evidence record in its compiled truth — validation enforces it on write), `archived` (deliberately retired), or `merged` (tombstone pointing at `mergedInto`). Ingestion agents promote pages to `active` once their compiled truth cites evidence. Retrieval (`query`) excludes merged and archived documents unless `--include-merged` / `--include-archived` is passed; the UI shows archived documents in a collapsed sidebar section and hides merged ones entirely.
+- **`status`** — the curation signal: `draft` (captured, not yet curated), `active` (curated synthesis; must cite at least one valid evidence record or external source in its compiled truth — validation enforces it on write), `archived` (deliberately retired), or `merged` (tombstone pointing at `mergedInto`). Ingestion agents promote pages to `active` once their compiled truth cites `[[evidence:...]]` or `[[source:...]]` provenance. Retrieval (`query`) excludes merged and archived documents unless `--include-merged` / `--include-archived` is passed; the UI shows archived documents in a collapsed sidebar section and hides merged ones entirely.
 - **`aliases`, `relations`, `sources`** — additional frontmatter used for lookup and graph derivation.
 
 The body has two zones: a **compiled truth** section that writers rewrite in place (never append-only), and a **timeline** of dated evidence entries, each with a deterministic `ev-` id, a timestamp, and a source reference. Timeline entries are also denormalized into their own table so the UI can query them efficiently.
@@ -78,16 +78,20 @@ The Brain page (`/brain/...`) renders `GoatBrainView` with a Tiptap markdown edi
 
 When the user asks chat to keep something — "save this reference", "here's an idea" — the chat agent calls `save_to_brain`. The flow is deliberately capture-first, in two phases:
 
-1. **Capture now.** `captureToGoatBrainInbox` (`apps/goat/lib/brain-capture.ts`) immediately writes the content as a draft page in `inbox/` (type `note`, status `draft`, sourced to `goat-chat:<messageId>`) in the same request. Nothing the user saves can be lost, even if everything downstream fails, and the draft appears in the Brain UI instantly.
-2. **Curate later.** The same call normalizes a `goat-chat`/`capture` source item, enqueues a `brain_agent_ingest` job pinned to the active brain, and wakes the runner. The capture-curation agent then reads the draft, checks the brain for an existing home, and either folds the content into an existing page (retiring the draft via `merge`) or promotes the draft in place: `append-evidence` to snapshot the raw capture, `rewrite` compiled truth citing it, `set` the proper title and type, `move` it to the right folder, and mark it `active`.
+1. **Capture now.** `captureToGoatBrainInbox` (`apps/goat/lib/brain-capture.ts`) immediately writes the content as a draft page in `inbox/` (type `note`, status `draft`) in the same request. Plain chat saves use `goat-chat:<messageId>` provenance; integration and web saves preserve the canonical `sourceRef` returned by the action. Nothing the user saves can be lost, even if everything downstream fails, and the draft appears in the Brain UI instantly.
+2. **Curate later.** A copied-content save normalizes a `goat-chat`/`capture` source item and enqueues a `brain_agent_ingest` job. A ref-only Slack, Gmail, or Linear save instead normalizes a provider `pointer` and enqueues `brain_pointer_hydrate`; the runner re-fetches the full provider content before delegating to the existing provider ingest profile. Both paths are pinned to the active brain and wake the runner. The capture-curation agent checks the brain for an existing home, then folds the finding into an existing page or promotes the draft in place.
 
 Duplicate `save_to_brain` calls within one chat turn dedupe to a single draft; identical webhook re-deliveries dedupe at the source-item layer via content hash.
+
+Every workspace member with access to the active brain can use the chat capture path. Direct
+`goat_brain` mutations and task/schedule tools remain unavailable to non-admin members. Each save
+reserves workspace ingestion credits.
 
 For ideas and thoughts, the curation agent applies an authorship test before topical filing. A user or team-authored idea with future value belongs in Brain even when rough; an agent behavior preference belongs in Memory; conversation-only scratch stays in chat. Brain-worthy ideas use the existing type and folder model: reusable abstractions become `concept` pages, concrete initiatives update `project` pages, choices or rationales go to the natural subject or `decisions/`, durable raw reflections move to `thoughts/` as `note` pages, and unresolved material remains a draft `note` in `inbox/`.
 
 ### 3. The `goat_brain` chat tool
 
-Foreground chat (`apps/goat/lib/chat-agent.ts`) also exposes the brain CLI directly, for recall and precise edits the user dictates: `get`, `list`, `query`, `timeline`, `rewrite`, `set`, `append-timeline`, `append-evidence`, `alias`, `link`, `merge`, `move`, `delete` (dry-run only), `folder`, `doctor`. Ordinary saves route through `save_to_brain` instead; direct `create` is reserved for records the user spells out explicitly. Mutations are serialized per brain so concurrent chat turns don't clobber each other.
+Foreground chat (`apps/goat/lib/chat-agent.ts`) exposes a read-only Brain surface: `get`, `list`, `query`, `timeline`, `help`, and `doctor`. All chat writes route through `save_to_brain`; raw CLI mutation commands are not exposed.
 
 ### 4. The durable ingestion agents
 
@@ -142,7 +146,7 @@ Brains belong to workspaces. `visibility: "workspace"` brains are readable by ev
 
 ## Validation and health
 
-`validateGoatBrainDocument` enforces the format on every write: id/folder shape, kind/zone alignment, status values, timestamps, link syntax, and that active pages cite evidence. `goat-brain doctor` (also exposed to agents) runs `checkGoatBrainHealth` across the whole brain and reports duplicate ids, parse errors, broken relations and links, broken citations, alias collisions, orphan nodes, weak provenance (active pages without evidence), and nonstandard source refs.
+`validateGoatBrainDocument` enforces the format on every write: id/folder shape, kind/zone alignment, status values, timestamps, link syntax, and that active pages cite valid evidence or source provenance. `goat-brain doctor` (also exposed to agents) runs `checkGoatBrainHealth` across the whole brain and reports duplicate ids, parse errors, broken relations and links, broken citations, alias collisions, orphan nodes, weak provenance (compiled truth without timeline or frontmatter sources), and nonstandard source refs.
 
 ## Where to change things
 

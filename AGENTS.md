@@ -89,6 +89,7 @@ GitHub is the source of truth for managed workspace repos, while the app stores 
 - Any change to `packages/db/src/schema.ts` needs a Drizzle migration.
 - Migration or data-destructive work gets extra scrutiny. Explain rollback implications before running one-way operations.
 - New env vars require `.env.example` and the relevant docs update.
+- Production env vars must be added to the runtime-specific Infisical path and verified in the hosted service before release: Goat uses `prod` + `/goat`, legacy web uses `prod` + `/web`, and the runner uses `prod` + `/runner`. Do not assume a value in `/web` reaches Goat. Add required variables to the matching release preflight so a missing sync fails the release instead of silently disabling behavior.
 - Local setup should use branch-isolated Neon DBs through `bun run setup`. Avoid shared database mode unless explicitly needed.
 - Do not run production migrations or production-affecting scripts unless the user explicitly asks.
 

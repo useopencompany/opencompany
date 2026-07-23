@@ -18,6 +18,8 @@ function catalogWith(execute: ResolvedGoatAction["execute"]): GoatResolvedAction
       {
         id: "slack.fetch_history",
         provider: "slack",
+        capability: "read",
+        permissionMode: "on",
         description: "fetch",
         params: { type: "object" },
         execute,
@@ -34,6 +36,7 @@ function baseInput(catalog: GoatResolvedActionCatalog) {
     userWorkosId: "user_1",
     signal: new AbortController().signal,
     currentDate: new Date("2026-07-18T00:00:00.000Z"),
+    userTimezone: "UTC",
   };
 }
 
@@ -53,14 +56,17 @@ describe("executeGoatAction", () => {
   });
 
   it("returns the clamped result on success", async () => {
-    const result = await executeGoatAction(
-      baseInput(catalogWith(async () => ({ messages: ["hi"] }))),
-    );
+    const execute = vi.fn(async () => ({ messages: ["hi"] }));
+    const result = await executeGoatAction(baseInput(catalogWith(execute)));
     expect(result).toEqual({
       ok: true,
       action: "slack.fetch_history",
       result: { messages: ["hi"] },
     });
+    expect(execute).toHaveBeenCalledWith(
+      { channel: "C1" },
+      expect.objectContaining({ userTimezone: "UTC" }),
+    );
   });
 
   it("maps auth errors to structured results with the reconnect hint", async () => {

@@ -11,7 +11,8 @@ For the Brain (Goat's knowledge store — data model, ingestion, tools, contract
 Goat has four LLM paths:
 
 1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
-   This agent answers directly, calls `goat_brain`, or calls `start_task`.
+   This agent answers directly, reads connected integrations, calls `goat_brain`, captures with
+   `save_to_brain`, or calls `start_task`.
 2. **Background task:** a durable row in `goat.tasks` claimed by `apps/runner`, planned into a
    `goat.harness.v1` config, then executed by an AI SDK model loop in the runner process.
 3. **Local Codex chat:** a Goat chat engine mode that queues commands for a user-run local bridge.
@@ -40,6 +41,8 @@ Browser
       streamText(default Goat chat agent)
         answer directly
         OR call goat_brain
+        OR survey connected integrations with list_actions/use_action
+           and capture focused findings with save_to_brain
         OR, when Background tasks is enabled in Preferences, call start_task
           insert goat.tasks row
           POST /internal/goat/tasks/:taskId/run
@@ -116,7 +119,9 @@ optionally stops the active stream, and marks the chat session closed through
 3. Requires `VERCEL_AI_GATEWAY_API_KEY`.
 4. Finds or creates an open `goat.chat_sessions` row.
 5. Persists the user message in `goat.chat_messages`.
-6. Creates the chat tool context for `start_task`, `goat_brain`, and optional `web_search`.
+6. Resolves read-only connected-integration actions and creates the chat tool context for
+   `goat_brain`, `save_to_brain`, `list_actions`/`use_action`, optional `start_task`, and optional
+   `web_search`.
 7. Calls `streamText` through Vercel AI Gateway with the selected model.
 8. Streams the UI message response back to the browser.
 9. Persists the assistant message, debug trace, and optional task link on finish.
@@ -131,21 +136,24 @@ The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, 
 structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
 timezone. `goat_brain` is always available and `web_search` is available when Exa is configured.
-Connected chat capabilities are dispatched through `use_capability` with an explicit operation:
-`read` for retrieval, or an advertised `create` or `write` for mutations. Slack and YouTube remain
-read-only. Linear advertises `write`; its read calls receive only read tools, while an explicitly
-requested write call additionally receives bounded `create_issue` access. Attio advertises read
-access for available standard records, interaction-recency queries, workspace lists and their
-entries, and notes. It advertises scope-dependent `create` access for standard people, companies,
-enabled deals, and notes, with one successful creation per call. Google Calendar advertises `create`
-and `write` only for accounts connected with the `calendar.events` scope. Calendar read workers can
-list events and free/busy
-windows; create workers receive one event-create tool, while write workers receive event-update and
-event-delete tools. A Calendar worker can make at most one mutation attempt and never changes
-attendees or sends invitations. Existing read-only Calendar connections must be reconnected before
-the mutation operations are advertised by using **Reconnect or add** and selecting the same Google
-account. Linear updates, comments, deletes, and every other unlisted mutation remain unavailable, as
-do Attio updates and deletes.
+Connected integration lookups are dispatched through the read-only `list_actions` and `use_action`
+tools. The route resolves a per-user catalog from currently connected providers, and the model must
+discover a provider's concrete action ids and parameter schemas before executing one. Slack exposes
+conversation, message, thread, member, and scope-dependent search reads. Gmail exposes message
+search plus message and thread retrieval, with an explicit account required when several are
+connected. Google Calendar exposes a bounded event-list read, while Google Drive exposes file
+search. Linear exposes a curated read catalog for issues, comments, projects, teams, members, and
+workflow statuses. Attio exposes bounded fuzzy search across available standard people, companies,
+and deals plus bounded list reads that can apply a saved-view filter from an Attio collection URL,
+with an explicit workspace required when several are connected. Actions cannot create,
+update, or delete provider data, disconnected providers are absent from the catalog, guessed action
+ids cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
+connected-account work continues through background tasks.
+
+When connected integrations and an active brain are present, a conditional `brain_fill` prompt
+teaches the agent to survey breadth before depth, page promising sources, save focused findings
+with canonical provenance, summarize the pass, and ask what to deepen. This fill workflow stays in
+main chat even though ordinary deeper or multi-source work routes to a background task.
 `start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The

@@ -30,6 +30,12 @@ function ConnectionNotifier() {
       JSON.stringify({ ...message, completedAt: Date.now() }),
     );
 
+    // A popup-blocked fallback opens this route in a plain tab with no usable
+    // window.opener, so the storage write above drives the wizard tab. Try to
+    // self-close; keep the redirect below as the safety net for tabs that
+    // can't close themselves (and for direct navigation back to onboarding).
+    window.close();
+
     const next = new URL("/onboarding", window.location.origin);
     for (const key of ["integration", "setup", "reason"] as const) {
       const value = params.get(key);

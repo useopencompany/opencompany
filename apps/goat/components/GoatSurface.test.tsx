@@ -15,6 +15,10 @@ import {
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import {
+  buildGoatOnboardingKickoffPrompt,
+  queueGoatOnboardingKickoff,
+} from "@/lib/onboarding-kickoff";
 import { GoatSurface, type GoatTaskView } from "./GoatSurface";
 
 const chatMock = vi.hoisted(() => ({
@@ -53,6 +57,11 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/chat-actions", () => ({
   closeGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
+}));
+
+// Server action module; importing it for real drags authkit into jsdom.
+vi.mock("@/lib/integration-account-actions", () => ({
+  alwaysAllowGoatChatActionAction: vi.fn(async () => ({ ok: true })),
 }));
 
 vi.mock("@/lib/chat-attachment-upload", () => ({
@@ -183,6 +192,8 @@ function requestChatSessionId(init: RequestInit | undefined, fallback: string) {
 
 describe("GoatSurface chat streaming UI", () => {
   beforeEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
     pathnameMock.value = "/";
     chatMock.status = "ready";
     chatMock.finishSessionId = null;
@@ -237,6 +248,22 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
     expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
+  });
+
+  it("consumes the onboarding kickoff and sends it once through main chat", async () => {
+    const companyUrl = "https://opencompany.ai/";
+    expect(queueGoatOnboardingKickoff(companyUrl)).toBe(true);
+
+    const { rerender } = render(
+      <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />,
+    );
+
+    const prompt = buildGoatOnboardingKickoffPrompt(companyUrl);
+    await waitFor(() => expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: prompt }));
+    expect(chatMock.sendMessage).toHaveBeenCalledTimes(1);
+
+    rerender(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    expect(chatMock.sendMessage).toHaveBeenCalledTimes(1);
   });
 
   it("updates the URL without a server navigation and sends the reserved id", async () => {
@@ -367,6 +394,66 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       model: "moonshotai/kimi-k3",
     });
+  });
+
+  it("remembers the last main chat model when returning Home and remounting", async () => {
+    const user = userEvent.setup();
+    const props = {
+      tasks: [],
+      defaultModel: DEFAULT_GOAT_MODEL,
+      initialChat: null,
+      userWorkosId: "user_1",
+    } as const;
+    const { unmount } = render(<GoatSurface {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Kimi K3"));
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Use Kimi");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
+
+    unmount();
+    render(<GoatSurface {...props} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3"),
+    );
+  });
+
+  it("remembers the last main chat engine when returning Home and remounting", async () => {
+    const user = userEvent.setup();
+    const sharedProps = {
+      tasks: [],
+      defaultModel: DEFAULT_GOAT_MODEL,
+      codexConnected: true,
+      userWorkosId: "user_1",
+    } as const;
+    const { unmount } = render(
+      <GoatSurface
+        {...sharedProps}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
+
+    unmount();
+    render(<GoatSurface {...sharedProps} initialChat={null} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex"),
+    );
   });
 
   it("shows Local Codex only when the beta flag is enabled and submits to the local endpoint", async () => {

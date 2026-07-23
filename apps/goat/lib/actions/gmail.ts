@@ -1,5 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import { goatIntegrations } from "@opencompany/db/goat-schema";
+import { isValidGoatBrainSourceRef } from "@opencompany/goat-brain";
 import { and, desc, eq, ne } from "drizzle-orm";
 import {
   clampCount,
@@ -67,8 +68,10 @@ export async function resolveGmailActions(
     {
       id: "gmail.search_messages",
       provider: "gmail",
+      capability: "read",
+      permissionMode: "on",
       description:
-        'Search the user\'s Gmail with Gmail search syntax, e.g. "from:jane after:2026/07/01 subject:invoice is:unread". Returns message ids with From/To/Subject/Date and a snippet; use gmail.get_message or gmail.get_thread for full content.',
+        'Search one page of the user\'s Gmail with Gmail search syntax, e.g. "from:jane after:2026/07/01 subject:invoice is:unread". Returns message ids with From/To/Subject/Date and a snippet; use gmail.get_message or gmail.get_thread for full content. Pass nextPageToken as pageToken to continue.',
       params: {
         type: "object",
         additionalProperties: false,
@@ -76,6 +79,10 @@ export async function resolveGmailActions(
         properties: {
           query: { type: "string", description: "Gmail search query, including any operators." },
           limit: { type: "number", description: "Max messages to return (default 10, max 25)." },
+          pageToken: {
+            type: "string",
+            description: "Next-page token returned by an earlier gmail.search_messages call.",
+          },
           ...accountParam,
         },
       },
@@ -86,8 +93,11 @@ export async function resolveGmailActions(
         const url = new URL(`${GMAIL_BASE}/messages`);
         url.searchParams.set("q", query);
         url.searchParams.set("maxResults", String(limit));
+        const pageToken = optionalStringParam(params, "pageToken");
+        if (pageToken) url.searchParams.set("pageToken", pageToken);
         const listing = (await gmailApiCall(context, connection, url)) as {
           messages?: Array<{ id?: string; threadId?: string }>;
+          nextPageToken?: string;
         };
         const refs = (listing.messages ?? []).filter((entry) => entry.id);
         const messages = await Promise.all(
@@ -98,15 +108,22 @@ export async function resolveGmailActions(
               messageUrl.searchParams.append("metadataHeaders", header);
             }
             const message = (await gmailApiCall(context, connection, messageUrl)) as GmailMessage;
-            return compactMessageMetadata(message);
+            return withGmailSource(compactMessageMetadata(message), connection);
           }),
         );
-        return { account: connectionLabel(connection), messages };
+        return {
+          account: connectionLabel(connection),
+          integrationId: connection.integrationId,
+          messages,
+          ...(listing.nextPageToken ? { nextPageToken: listing.nextPageToken } : {}),
+        };
       },
     },
     {
       id: "gmail.get_message",
       provider: "gmail",
+      capability: "read",
+      permissionMode: "on",
       description:
         "Fetch one Gmail message by id, including its plain-text body (truncated). Prefer gmail.get_thread when the conversation context matters.",
       params: {
@@ -126,13 +143,16 @@ export async function resolveGmailActions(
         const message = (await gmailApiCall(context, connection, url)) as GmailMessage;
         return {
           account: connectionLabel(connection),
-          message: compactFullMessage(message, MAX_MESSAGE_BODY_CHARS),
+          integrationId: connection.integrationId,
+          message: withGmailSource(compactFullMessage(message, MAX_MESSAGE_BODY_CHARS), connection),
         };
       },
     },
     {
       id: "gmail.get_thread",
       provider: "gmail",
+      capability: "read",
+      permissionMode: "on",
       description:
         "Fetch one Gmail thread by id with each message's headers and truncated plain-text body (newest 15 messages).",
       params: {
@@ -157,10 +177,17 @@ export async function resolveGmailActions(
         const kept = all.slice(Math.max(0, all.length - MAX_THREAD_MESSAGES));
         return {
           account: connectionLabel(connection),
+          integrationId: connection.integrationId,
           threadId: thread.id,
+          ...(thread.id
+            ? {
+                sourceRef: gmailThreadSourceRef(thread.id),
+                url: gmailThreadPermalink(connection, thread.id),
+              }
+            : {}),
           totalMessages: all.length,
           messages: kept.map((message) =>
-            compactFullMessage(message, MAX_THREAD_MESSAGE_BODY_CHARS),
+            withGmailSource(compactFullMessage(message, MAX_THREAD_MESSAGE_BODY_CHARS), connection),
           ),
         };
       },
@@ -290,6 +317,32 @@ function compactFullMessage(message: GmailMessage, maxBodyChars: number) {
     snippet: truncateText(message.snippet, 300),
     bodyText: truncateText(extractBodyText(message.payload), maxBodyChars),
   };
+}
+
+function withGmailSource<T extends { threadId?: string | undefined }>(
+  value: T,
+  connection: GmailConnection,
+) {
+  if (!value.threadId) return { ...value, integrationId: connection.integrationId };
+  return {
+    ...value,
+    sourceRef: gmailThreadSourceRef(value.threadId),
+    url: gmailThreadPermalink(connection, value.threadId),
+    integrationId: connection.integrationId,
+  };
+}
+
+function gmailThreadSourceRef(threadId: string) {
+  const sourceRef = `gmail:thread:${threadId}`;
+  if (!isValidGoatBrainSourceRef(sourceRef)) {
+    throw new Error("Gmail returned a thread id that cannot form a Brain source reference.");
+  }
+  return sourceRef;
+}
+
+function gmailThreadPermalink(connection: GmailConnection, threadId: string) {
+  const account = encodeURIComponent(connection.accountEmail?.trim() || "0");
+  return `https://mail.google.com/mail/u/${account}/#all/${encodeURIComponent(threadId)}`;
 }
 
 function headerMap(headers: GmailHeader[] | undefined) {

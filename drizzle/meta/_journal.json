@@ -1030,6 +1030,20 @@
       "when": 1784652412000,
       "tag": "0146_goat_codex_chat_handoff",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1784652413000,
+      "tag": "0147_goat_brain_pointer_hydration",
+      "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1784652414000,
+      "tag": "0148_goat_integration_capability_modes",
+      "breakpoints": true
     }
   ]
 }

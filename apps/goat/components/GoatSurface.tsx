@@ -1,7 +1,6 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import type { AgentModelId } from "@opencompany/agent-runtime";
 import { CODEX_REASONING_EFFORTS } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { GoatChatEngine, GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
@@ -21,7 +20,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/compone
 import { AnthropicIcon, MoonshotIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import {
   AlertCircle,
   Archive,
@@ -60,6 +59,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   useTransition,
 } from "react";
 import { buildChatTaskLookup } from "@/components/chat/assistant-items";
@@ -69,13 +69,19 @@ import {
 } from "@/components/chat/ChatComposerAttachments";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
-import type { CodexToolAction } from "@/components/chat/ToolCallItem";
+import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useGoatCreditBalance } from "@/components/chat/useGoatCreditBalance";
 import { useHydrated } from "@/components/useHydrated";
 import type { GoatBrainSkillCatalogItem } from "@/lib/brain-skills";
 import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
+import {
+  type GoatChatModelSelection,
+  persistLastGoatChatSelection,
+  readLastGoatChatSelection,
+  subscribeLastGoatChatSelection,
+} from "@/lib/chat-composer-selection";
 import { GOAT_HOME_NAVIGATION_EVENT, newOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
 import {
   compareGoatChatMessageOrder,
@@ -95,7 +101,6 @@ import {
   CODEX_CHAT_DEFAULT_MODEL_ID,
   CODEX_PICKER_VALUE,
   type CodexChatModelId,
-  type CodexPickerValue,
   normalizeCodexChatModelId,
 } from "@/lib/codex-chat-constants";
 import {
@@ -105,7 +110,8 @@ import {
 } from "@/lib/codex-chat-settings";
 import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
-import { LOCAL_CODEX_PICKER_VALUE, type LocalCodexPickerValue } from "@/lib/local-codex-constants";
+import { alwaysAllowGoatChatActionAction } from "@/lib/integration-account-actions";
+import { LOCAL_CODEX_PICKER_VALUE } from "@/lib/local-codex-constants";
 import {
   CODEX_MODELS,
   DEFAULT_GOAT_MODEL,
@@ -113,6 +119,7 @@ import {
   goatModelContextWindowTokens,
   normalizeGoatModel,
 } from "@/lib/model-options";
+import { consumeGoatOnboardingKickoffPrompt } from "@/lib/onboarding-kickoff";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
@@ -156,8 +163,6 @@ type MentionOption =
       description: string;
       mention: GoatChatMention;
     };
-
-type GoatChatModelSelection = AgentModelId | LocalCodexPickerValue | CodexPickerValue;
 
 // Engine chats (Local Codex bridge, cloud Codex sandbox) bypass useChat entirely: sends go to an
 // engine endpoint, streaming arrives as Electric row updates, and stop is an interrupt call.
@@ -266,6 +271,7 @@ export function GoatSurface({
   const routedChatSessionIdRef = useRef(initialChat?.id ?? null);
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
+  const onboardingKickoffReadRef = useRef(false);
   const initialCodexComposerUiState = codexComposerUiStateForChat(initialChat);
   const activeTurnStartedAtRef = useRef<number | null>(null);
   const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
@@ -291,12 +297,23 @@ export function GoatSurface({
     sessionId: string;
     messages: GoatChatUiMessage[];
   } | null>(null);
-  const [chatModel, setChatModel] = useState<GoatChatModelSelection>(() => {
+  const rememberedChatModel = useSyncExternalStore(
+    subscribeLastGoatChatSelection,
+    () =>
+      readLastGoatChatSelection(userWorkosId, {
+        codexConnected,
+        localCodexBetaEnabled,
+      }),
+    () => normalizeGoatModel(defaultModel),
+  );
+  const [chatModelOverride, setChatModelOverride] = useState<GoatChatModelSelection | null>(() => {
+    if (!initialChat) return null;
     const engine = engineChatKindFromChat(initialChat, localCodexBetaEnabled);
     if (engine === "codex") return CODEX_PICKER_VALUE;
     if (engine === "local_codex") return LOCAL_CODEX_PICKER_VALUE;
-    return normalizeGoatModel(initialChat?.model ?? defaultModel);
+    return normalizeGoatModel(initialChat.model);
   });
+  const chatModel = chatModelOverride ?? rememberedChatModel;
   const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
     normalizeCodexChatModelId(initialChat?.model),
   );
@@ -453,7 +470,14 @@ export function GoatSurface({
     }) => {
       const message = messages.at(-1);
       const mentions = mentionsFromMessageMetadata(message?.metadata);
-      const requestSessionId = typeof body?.sessionId === "string" ? body.sessionId : null;
+      // Approval continuations are auto-resent without a custom body; the
+      // assistant message's own metadata carries the session id then.
+      const requestSessionId =
+        typeof body?.sessionId === "string"
+          ? body.sessionId
+          : message?.role === "assistant"
+            ? (message.metadata?.sessionId ?? null)
+            : null;
       const requestNewSessionId =
         typeof body?.newSessionId === "string" ? body.newSessionId : undefined;
       const requestModel = typeof body?.model === "string" ? body.model : undefined;
@@ -487,6 +511,7 @@ export function GoatSurface({
     stop,
     error: chatError,
     clearError,
+    addToolApprovalResponse,
   } = useChat<GoatChatUiMessage>({
     id: chatInstanceKey,
     // useChat holds only this surface's in-flight overlay; persisted history
@@ -499,6 +524,10 @@ export function GoatSurface({
     // whole thread on every token.
     experimental_throttle: 50,
     transport,
+    // Once every pending tool approval on the last assistant message has a
+    // decision, auto-resend it so the server executes the approved calls and
+    // the model continues the turn.
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onFinish: ({ message }) => {
       if (!mountedRef.current) return;
       void refetchCreditBalance();
@@ -628,8 +657,18 @@ export function GoatSurface({
     if (persistedMessages.length === 0) return messages;
     const persistedIds = new Set(persistedMessages.map((message) => message.id));
     const overlay = messages.filter((message) => !persistedIds.has(message.id));
-    return overlay.length > 0 ? [...persistedMessages, ...overlay] : persistedMessages;
-  }, [messages, persistedMessages]);
+    // An approval continuation streams into an assistant id that is already
+    // persisted (the paused turn wrote it); while streaming, the overlay copy
+    // is fresher than the Electric row, so it replaces in place.
+    const streaming = status === "submitted" || status === "streaming";
+    const base = streaming
+      ? (() => {
+          const overlayById = new Map(messages.map((message) => [message.id, message]));
+          return persistedMessages.map((message) => overlayById.get(message.id) ?? message);
+        })()
+      : persistedMessages;
+    return overlay.length > 0 ? [...base, ...overlay] : base;
+  }, [messages, persistedMessages, status]);
   const latestAssistantMessageId = useMemo(() => {
     for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
       if (chatMessages[index]?.role === "assistant") return chatMessages[index]?.id ?? null;
@@ -761,12 +800,14 @@ export function GoatSurface({
       setChatSessionId(chat?.id ?? null);
       setPersistedChatSessionId(chat?.id ?? null);
       setChatInstanceKey(chat?.id ?? `goat-chat-main-${crypto.randomUUID()}`);
-      setChatModel(
+      setChatModelOverride(
         engineTarget === "local_codex"
           ? LOCAL_CODEX_PICKER_VALUE
           : engineTarget === "codex"
             ? CODEX_PICKER_VALUE
-            : normalizeGoatModel(chat?.model ?? defaultModel),
+            : chat
+              ? normalizeGoatModel(chat.model)
+              : null,
       );
       setCodexModel(normalizeCodexChatModelId(chat?.model));
       setEngineChatSession(
@@ -794,7 +835,6 @@ export function GoatSurface({
       codexGoalTokenBudget,
       codexPlanModeEnabled,
       codexReasoningEffort,
-      defaultModel,
       isEngineChat,
       localCodexBetaEnabled,
       localCodexFeatureDisabledForChat,
@@ -1214,6 +1254,47 @@ export function GoatSurface({
       }
       toast.error(error instanceof Error ? error.message : "Goat could not answer that right now.");
     });
+  };
+
+  useEffect(() => {
+    if (onboardingKickoffReadRef.current) return;
+    onboardingKickoffReadRef.current = true;
+    const prompt = consumeGoatOnboardingKickoffPrompt();
+    if (!prompt) return;
+
+    // This synchronizes one-time browser storage with the normal form submit
+    // path. Defer the state update so React can finish the mount (including the
+    // development Strict Mode setup/cleanup cycle) before the automatic send.
+    queueMicrotask(() => {
+      if (!mountedRef.current) return;
+      setChatModelOverride(normalizeGoatModel(defaultModel));
+      setInput(prompt);
+      requestAnimationFrame(() => {
+        if (mountedRef.current) formRef.current?.requestSubmit();
+      });
+    });
+  }, [defaultModel]);
+
+  const handleActionApproval = async ({ approvalId, action, decision }: ActionApprovalRequest) => {
+    // After a reload the useChat overlay is empty; seed it from the merged
+    // thread so addToolApprovalResponse has the approval message to mutate.
+    const lastChatMessage = chatMessages.at(-1);
+    if (lastChatMessage && messages.at(-1)?.id !== lastChatMessage.id) {
+      setMessages(chatMessages);
+    }
+    if (decision === "accept_always") {
+      const saved = await alwaysAllowGoatChatActionAction(action).catch(() => null);
+      if (!saved?.ok) {
+        // The one-off approval still goes through; only the standing
+        // permission failed to save.
+        toast.error("Could not save the permission. Running this action once.");
+      }
+    }
+    await addToolApprovalResponse(
+      decision === "decline"
+        ? { id: approvalId, approved: false, reason: "Declined by user." }
+        : { id: approvalId, approved: true },
+    );
   };
 
   const handleCodexToolAction = async (action: CodexToolAction) => {
@@ -1671,6 +1752,8 @@ export function GoatSurface({
                   durationMs={chatMessageDurationMs(message, optimisticTurnDurations)}
                   onCodexAction={handleCodexToolAction}
                   allowCodexPlanActions={message.id === latestAssistantMessageId}
+                  onActionApproval={handleActionApproval}
+                  allowActionApproval={message.id === latestAssistantMessageId}
                 />
               ))}
               {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
@@ -1924,7 +2007,8 @@ export function GoatSurface({
               <GoatModelPicker
                 value={chatModel}
                 onChange={(model) => {
-                  setChatModel(model);
+                  setChatModelOverride(model);
+                  persistLastGoatChatSelection(userWorkosId, model);
                   if (model === CODEX_PICKER_VALUE && model !== chatModel) {
                     setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
                   } else if (model === LOCAL_CODEX_PICKER_VALUE && model !== chatModel) {
