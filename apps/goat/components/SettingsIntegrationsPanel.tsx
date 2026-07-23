@@ -500,10 +500,19 @@ function IntegrationCardRow({
           : integration.provider === "slack"
             ? [integration.teamName, integration.accountName].filter(Boolean).join(" · ") || null
             : (integration.accountEmail ?? integration.accountName);
+  const capabilityBody =
+    connected && integration.provider === "linear" && integration.integrationId ? (
+      <CapabilityModeRows
+        integrationId={integration.integrationId}
+        provider={integration.provider}
+        capabilityModes={integration.capabilityModes}
+      />
+    ) : undefined;
 
   return (
     <IntegrationCard
       meta={meta}
+      body={capabilityBody}
       footer={
         connected ? (
           <div className="flex min-w-0 items-center gap-1.5">
@@ -640,7 +649,13 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
           </button>
         </div>
       </div>
-      {account.connected ? <CapabilityModeRows account={account} /> : null}
+      {account.connected ? (
+        <CapabilityModeRows
+          integrationId={account.integrationId}
+          provider={account.provider}
+          capabilityModes={account.capabilityModes}
+        />
+      ) : null}
       {confirming ? (
         <div className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
           <span>
@@ -673,20 +688,27 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
   );
 }
 
-// What the chat is allowed to do with this account: one row per registered
-// capability with an On / Ask / Off pill. Providers without registry entries
-// (everything except Google Calendar today) render nothing.
-function CapabilityModeRows({ account }: { account: GoatIntegrationAccountView }) {
-  const capabilities = providerCapabilities(account.provider);
+// What the chat is allowed to do with this connection: one row per registered
+// capability with an On / Ask / Off pill.
+function CapabilityModeRows({
+  integrationId,
+  provider,
+  capabilityModes,
+}: {
+  integrationId: string;
+  provider: GoatPersonalAccountProvider;
+  capabilityModes: Record<string, unknown>;
+}) {
+  const capabilities = providerCapabilities(provider);
   if (capabilities.length === 0) return null;
   return (
     <div className="flex flex-col gap-1 border-t border-border/60 pt-1.5">
       {capabilities.map((capability) => (
         <CapabilityModeRow
           key={capability.id}
-          integrationId={account.integrationId}
+          integrationId={integrationId}
           capability={capability}
-          mode={effectiveCapabilityMode(account.provider, capability.id, account.capabilityModes)}
+          mode={effectiveCapabilityMode(provider, capability.id, capabilityModes)}
         />
       ))}
     </div>

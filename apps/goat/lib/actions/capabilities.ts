@@ -38,6 +38,20 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  linear: [
+    {
+      id: "read",
+      label: "Read Linear",
+      description: "Look up issues, comments, projects, teams, and members.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Create issues",
+      description: "Create new issues in your Linear workspace.",
+      defaultMode: "ask",
+    },
+  ],
 };
 
 export function isGoatCapabilityMode(value: unknown): value is GoatCapabilityMode {

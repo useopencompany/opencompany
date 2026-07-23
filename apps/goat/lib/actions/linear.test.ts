@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getGoatLinearIntegrationState: vi.fn(async () => ({ connected: true })),
+  getGoatLinearIntegrationState: vi.fn(),
   loadGoatLinearMcpWorkerConnection: vi.fn(),
   createMCPClient: vi.fn(),
 }));
@@ -15,8 +15,16 @@ vi.mock("@ai-sdk/mcp", () => ({
   createMCPClient: mocks.createMCPClient,
 }));
 
-import { normalizeLinearListIssuesInput, resolveLinearActions } from "@/lib/actions/linear";
-import { GoatActionAuthError, type GoatActionExecuteContext } from "@/lib/actions/types";
+import {
+  normalizeLinearCreateIssueInput,
+  normalizeLinearListIssuesInput,
+  resolveLinearActions,
+} from "@/lib/actions/linear";
+import {
+  GoatActionAuthError,
+  type GoatActionExecuteContext,
+  GoatActionPermissionError,
+} from "@/lib/actions/types";
 
 const CONTEXT: GoatActionExecuteContext = {
   userWorkosId: "user_1",
@@ -24,6 +32,18 @@ const CONTEXT: GoatActionExecuteContext = {
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
   userTimezone: "UTC",
 };
+
+function connectedLinearState(capabilityModes: Record<string, unknown> = {}) {
+  return {
+    provider: "linear",
+    connected: true,
+    status: "connected",
+    integrationId: "gint_linear_1",
+    accountName: "Linear",
+    statusReason: null,
+    capabilityModes,
+  };
+}
 
 function mockClient(remoteTools: Record<string, { execute?: unknown }>) {
   const close = vi.fn(async () => {});
@@ -34,6 +54,11 @@ function mockClient(remoteTools: Record<string, { execute?: unknown }>) {
   });
   return { close };
 }
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.getGoatLinearIntegrationState.mockResolvedValue(connectedLinearState());
+});
 
 describe("normalizeLinearListIssuesInput", () => {
   it("drops model placeholder values that Linear treats as active filters", () => {
@@ -87,21 +112,104 @@ describe("normalizeLinearListIssuesInput", () => {
   });
 });
 
+describe("normalizeLinearCreateIssueInput", () => {
+  it("normalizes useful issue fields and deduplicates labels", () => {
+    expect(
+      normalizeLinearCreateIssueInput({
+        title: "  Add export flow  ",
+        team: " GOAT ",
+        description: " Ship the first cut. ",
+        assignee: " me ",
+        state: " Todo ",
+        project: " Company Brain ",
+        priority: 2,
+        labels: ["Feature", " feature ", "Customer"],
+        parentId: " GOAT-10 ",
+      }),
+    ).toEqual({
+      title: "Add export flow",
+      team: "GOAT",
+      description: "Ship the first cut.",
+      assignee: "me",
+      state: "Todo",
+      project: "Company Brain",
+      priority: 2,
+      labels: ["Feature", "Customer"],
+      parentId: "GOAT-10",
+    });
+  });
+
+  it("requires a title and team and rejects unsafe or unknown fields", () => {
+    expect(() => normalizeLinearCreateIssueInput({ team: "GOAT" })).toThrow('"title" is required');
+    expect(() =>
+      normalizeLinearCreateIssueInput({ title: "Ship", team: "GOAT", priority: 5 }),
+    ).toThrow('"priority" must be an integer');
+    expect(() =>
+      normalizeLinearCreateIssueInput({ title: "Ship", team: "GOAT", deleteAll: true }),
+    ).toThrow("Unknown parameter");
+  });
+});
+
 describe("resolveLinearActions", () => {
   it("is absent when Linear is not connected", async () => {
-    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce({ connected: false });
+    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce({
+      ...connectedLinearState(),
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+    });
     expect(await resolveLinearActions("user_1")).toBeNull();
   });
 
-  it("exposes a static read-only catalog without touching the MCP server", async () => {
+  it("exposes read actions and an ask-before-create action without touching the MCP server", async () => {
     mocks.createMCPClient.mockClear();
     const catalog = await resolveLinearActions("user_1");
     const ids = catalog?.actions.map((action) => action.id) ?? [];
     expect(ids).toContain("linear.list_issues");
     expect(ids).toContain("linear.get_issue");
     expect(ids).toContain("linear.list_teams");
-    expect(ids.every((id) => !/create|update|delete|save/.test(id))).toBe(true);
+    expect(ids).toContain("linear.create_issue");
+    expect(catalog?.actions.find((action) => action.id === "linear.create_issue")).toMatchObject({
+      capability: "write",
+      permissionMode: "ask",
+      permission: {
+        provider: "linear",
+        capabilityId: "write",
+        label: "Create issues",
+        integrationIds: ["gint_linear_1"],
+      },
+      params: {
+        required: ["title", "team"],
+      },
+    });
     expect(mocks.createMCPClient).not.toHaveBeenCalled();
+  });
+
+  it("honors read and write permission modes", async () => {
+    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
+      connectedLinearState({ write: "on" }),
+    );
+    let catalog = await resolveLinearActions("user_1");
+    expect(catalog?.actions.find((action) => action.id === "linear.create_issue")).toMatchObject({
+      permissionMode: "on",
+    });
+
+    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
+      connectedLinearState({ write: "off" }),
+    );
+    catalog = await resolveLinearActions("user_1");
+    expect(catalog?.actions.some((action) => action.capability === "write")).toBe(false);
+
+    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
+      connectedLinearState({ read: "off" }),
+    );
+    catalog = await resolveLinearActions("user_1");
+    expect(catalog?.actions.map((action) => action.id)).toEqual(["linear.create_issue"]);
+
+    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
+      connectedLinearState({ read: "off", write: "off" }),
+    );
+    expect(await resolveLinearActions("user_1")).toBeNull();
   });
 });
 
@@ -179,5 +287,67 @@ describe("linear action execution", () => {
     const catalog = await resolveLinearActions("user_1");
     const listIssues = catalog?.actions.find((action) => action.id === "linear.list_issues");
     await expect(listIssues?.execute({}, CONTEXT)).rejects.toThrow("Team not found");
+  });
+
+  it("creates an issue with selected fields and returns canonical source metadata", async () => {
+    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+      ok: true,
+      integrationId: "gint_linear_1",
+      authProvider: {},
+    });
+    const remoteExecute = vi.fn(async () => ({
+      content: [
+        {
+          type: "text",
+          text: '{"id":"issue_1","identifier":"GOAT-123","url":"https://linear.app/acme/issue/GOAT-123"}',
+        },
+      ],
+    }));
+    const { close } = mockClient({ save_issue: { execute: remoteExecute } });
+
+    const catalog = await resolveLinearActions("user_1");
+    const createIssue = catalog?.actions.find((action) => action.id === "linear.create_issue");
+    const result = await createIssue?.execute(
+      {
+        title: " Add ticket creation ",
+        team: " GOAT ",
+        assignee: "me",
+        priority: 2,
+        labels: ["Feature"],
+      },
+      CONTEXT,
+    );
+
+    expect(remoteExecute).toHaveBeenCalledWith(
+      {
+        title: "Add ticket creation",
+        team: "GOAT",
+        assignee: "me",
+        priority: 2,
+        labels: ["Feature"],
+      },
+      expect.anything(),
+    );
+    expect(result).toEqual({
+      id: "issue_1",
+      identifier: "GOAT-123",
+      url: "https://linear.app/acme/issue/GOAT-123",
+      sourceRef: "linear:issue:GOAT-123",
+      integrationId: "gint_linear_1",
+    });
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("blocks a stale write when issue creation was turned off after catalog resolution", async () => {
+    const catalog = await resolveLinearActions("user_1");
+    mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
+      connectedLinearState({ write: "off" }),
+    );
+    const createIssue = catalog?.actions.find((action) => action.id === "linear.create_issue");
+
+    await expect(
+      createIssue?.execute({ title: "Should not happen", team: "GOAT" }, CONTEXT),
+    ).rejects.toBeInstanceOf(GoatActionPermissionError);
+    expect(mocks.createMCPClient).not.toHaveBeenCalled();
   });
 });
