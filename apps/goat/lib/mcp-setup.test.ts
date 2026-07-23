@@ -5,9 +5,10 @@ import {
   buildGoatMcpFirstPrompt,
   isGoatMcpClient,
   isGoatMcpSetupCompletionRun,
+  OPENCOMPANY_MCP_SERVER_NAME,
 } from "@/lib/mcp-setup";
 
-describe("Goat MCP setup", () => {
+describe("OpenCompany MCP setup", () => {
   it("accepts only supported client preferences", () => {
     expect(isGoatMcpClient("claude")).toBe(true);
     expect(isGoatMcpClient("chatgpt")).toBe(true);
@@ -32,22 +33,24 @@ describe("Goat MCP setup", () => {
       workspaceName: "Analytical Engines",
     });
 
+    expect(prompt).toContain("Use the OpenCompany connector");
     expect(prompt).toContain('query for "Ada Lovelace"');
     expect(prompt).toContain("at Analytical Engines");
     expect(prompt).toContain("list my brains");
     expect(prompt).toContain("Cite the brain pages");
+    expect(prompt).not.toContain("Goat");
     expect(prompt).not.toContain("@");
   });
 
   it("builds Cursor config and an install deeplink for the remote URL", () => {
     const input = {
-      name: "goat",
-      url: "https://goat.example/mcp",
+      name: OPENCOMPANY_MCP_SERVER_NAME,
+      url: "https://opencompany.example/mcp",
     };
 
     expect(buildCursorMcpConfig(input)).toEqual({
       mcpServers: {
-        goat: { url: input.url },
+        opencompany: { url: input.url },
       },
     });
 
