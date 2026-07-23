@@ -102,6 +102,40 @@ export function resolveGoatBrainSourceState(
   };
 }
 
+// Whether a source has enough ingestion scope selected to actually feed the
+// brain. Toggling a source "on" is not enough for the scope-required providers
+// (Slack/Linear/GitHub/Drive/HubSpot/Attio) — until a channel/team/repo/object
+// is picked, nothing flows. Used to distinguish "authorized" from "feeding" so
+// onboarding never leaves a source silently ingesting nothing.
+export function goatBrainSourceHasScope(
+  providerId: GoatBrainSourceProviderDef["id"],
+  config: Record<string, unknown> | undefined,
+): boolean {
+  switch (providerId) {
+    case "slack": {
+      const selection = slackSelectionFromConfig(config);
+      return selection.channels.length + selection.dms.length > 0;
+    }
+    case "linear":
+      return linearTeamsFromConfig(config).length > 0;
+    case "github":
+      return githubReposFromConfig(config).length > 0;
+    case "hubspot":
+      return hubspotObjectTypesFromConfig(config).length > 0;
+    case "attio":
+      return attioObjectTypesFromConfig(config).length > 0;
+    case "google_drive":
+      return googleDriveAllFilesFromConfig(config) || googleDriveResourceIds(config).length > 0;
+    case "gmail":
+      // Gmail defaults to both sent + received when unconfigured, so an enabled
+      // source is always feeding once the user confirms.
+      return gmailEventsFromConfig(config).length > 0;
+    default:
+      // Jamie / Granola / Fathom have no scope to pick — connecting is enough.
+      return true;
+  }
+}
+
 export function BrainSourcesSection({ brainRef }: { brainRef: string }) {
   const [details, setDetails] = useState<GoatBrainSourcesDetails | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -858,19 +892,21 @@ function slackSelectionFromConfig(
   return { channels: parse(config?.channels), dms: parse(config?.dms) };
 }
 
-function SlackChannelPicker({
+export function SlackChannelPicker({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => slackSelectionFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [conversations, setConversations] = useState<GoatSlackConversationListResult | null>(null);
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<Map<string, { name: string; kind: "channel" | "dm" }>>(
@@ -1241,20 +1277,22 @@ function githubEventsFromConfig(
   );
 }
 
-function GitHubRepoPicker({
+export function GitHubRepoPicker({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => githubReposFromConfig(source?.config), [source]);
   const savedEvents = useMemo(() => githubEventsFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [repos, setRepos] = useState<GoatGitHubRepositoryListResult | null>(null);
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<Map<string, string>>(
@@ -1507,20 +1545,22 @@ function linearEventsFromConfig(
   return [...seen];
 }
 
-function LinearTeamPicker({
+export function LinearTeamPicker({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => linearTeamsFromConfig(source?.config), [source]);
   const savedEvents = useMemo(() => linearEventsFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [teams, setTeams] = useState<GoatLinearTeamListResult | null>(null);
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<Map<string, { name: string; key?: string }>>(
@@ -1782,20 +1822,22 @@ function hubspotEventsFromConfig(
   return [...seen];
 }
 
-function HubspotObjectPicker({
+export function HubspotObjectPicker({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => hubspotObjectTypesFromConfig(source?.config), [source]);
   const savedEvents = useMemo(() => hubspotEventsFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [selection, setSelection] = useState<Set<HubspotObjectSelection>>(() => new Set(saved));
   const [eventSelection, setEventSelection] = useState<Set<HubspotEventSelection>>(
     () => new Set(savedEvents),
@@ -1995,20 +2037,22 @@ function attioEventsFromConfig(config: Record<string, unknown> | undefined): Att
   return [...seen];
 }
 
-function AttioObjectPicker({
+export function AttioObjectPicker({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => attioObjectTypesFromConfig(source?.config), [source]);
   const savedEvents = useMemo(() => attioEventsFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [selection, setSelection] = useState<Set<AttioObjectSelection>>(() => new Set(saved));
   const [eventSelection, setEventSelection] = useState<Set<AttioEventSelection>>(
     () => new Set(savedEvents),
@@ -2163,6 +2207,12 @@ const GMAIL_EVENT_OPTIONS: Array<{ id: GmailEventSelection; label: string }> = [
 
 const GMAIL_INSTRUCTIONS_MAX_LENGTH = 2000;
 
+// Sensible starting instruction for a freshly connected Gmail source so the
+// ingestion agent filters inbox noise from day one. Pre-filled (and fully
+// editable) for new sources only; existing sources keep whatever was saved.
+const GMAIL_DEFAULT_INSTRUCTIONS =
+  "Ignore transactional emails, spam, and personal emails. Only ingest emails that directly relate to our company.";
+
 function gmailEventsFromConfig(config: Record<string, unknown> | undefined): GmailEventSelection[] {
   const value = config?.events;
   if (!Array.isArray(value)) return GMAIL_EVENT_OPTIONS.map((option) => option.id);
@@ -2186,25 +2236,33 @@ function gmailInstructionsFromConfig(config: Record<string, unknown> | undefined
   return typeof value === "string" ? value : "";
 }
 
-function GmailSourceEditor({
+export function GmailSourceEditor({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const savedEvents = useMemo(() => gmailEventsFromConfig(source?.config), [source]);
   const savedInstructions = useMemo(() => gmailInstructionsFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  // A brand-new source (no row yet) starts from the default instruction and is
+  // immediately saveable, so accepting the defaults is one click. Existing
+  // sources keep exactly what was saved — including a deliberately empty value.
+  const isNewSource = !source;
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [eventSelection, setEventSelection] = useState<Set<GmailEventSelection>>(
     () => new Set(savedEvents),
   );
-  const [instructions, setInstructions] = useState(savedInstructions);
-  const [dirty, setDirty] = useState(false);
+  const [instructions, setInstructions] = useState(
+    isNewSource ? GMAIL_DEFAULT_INSTRUCTIONS : savedInstructions,
+  );
+  const [dirty, setDirty] = useState(isNewSource);
   const [isPending, startTransition] = useTransition();
 
   const toggleEvent = (eventId: GmailEventSelection) => {
@@ -2387,20 +2445,22 @@ function googleDriveAllFilesFromConfig(config: Record<string, unknown> | undefin
   return Boolean(allFiles && typeof allFiles === "object" && !Array.isArray(allFiles));
 }
 
-function GoogleDriveSourceEditor({
+export function GoogleDriveSourceEditor({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => googleDriveSelectionsFromConfig(source?.config), [source]);
   const savedAllFiles = useMemo(() => googleDriveAllFilesFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [allFiles, setAllFiles] = useState(savedAllFiles);
   const [selection, setSelection] = useState<Map<string, GoogleDriveSelection>>(
     () => new Map(saved.map((resource) => [resource.id, resource])),
@@ -2667,7 +2727,7 @@ function GoogleDriveSourceEditor({
   );
 }
 
-function SourceToggle({
+export function SourceToggle({
   enabled,
   disabled,
   onToggle,

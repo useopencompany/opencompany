@@ -127,3 +127,24 @@ export const GOAT_BRAIN_SOURCE_PROVIDERS: GoatBrainSourceProviderDef[] = [
     docsHref: "/docs/integrations/attio",
   },
 ];
+
+// Providers whose ingestion scope must be chosen after the account connects —
+// channels, teams, repos, CRM objects, Drive files, or (for Gmail) confirmed
+// email events. Authorizing the account is not enough for these: nothing feeds
+// the brain until the user picks what to ingest, so onboarding opens a focused
+// config surface right after connect.
+//
+// The meeting-note providers (Jamie, Granola, Fathom) have nothing to scope —
+// once connected, every meeting flows in — so onboarding auto-enables them on
+// connect instead of prompting for config.
+export function goatBrainSourceNeedsConfig(id: GoatBrainSourceConfigProvider): boolean {
+  return (
+    id === "slack" ||
+    id === "linear" ||
+    id === "github" ||
+    id === "gmail" ||
+    id === "google_drive" ||
+    id === "hubspot" ||
+    id === "attio"
+  );
+}
