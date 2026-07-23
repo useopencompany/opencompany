@@ -2,9 +2,15 @@ import { getDb } from "@opencompany/db/client";
 import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, desc, eq, ne } from "drizzle-orm";
 import {
+  effectiveCapabilityMode,
+  type GoatCapabilityId,
+  providerCapability,
+} from "@/lib/actions/capabilities";
+import {
   GoatActionAuthError,
   type GoatActionExecuteContext,
   GoatActionInvalidParamsError,
+  GoatActionPermissionError,
   type GoatActionProviderCatalog,
   type ResolvedGoatAction,
   requiredStringParam,
@@ -21,132 +27,434 @@ const MAX_EVENT_DESCRIPTION_CHARS = 1_000;
 const MAX_EVENT_LOCATION_CHARS = 500;
 const MAX_EVENT_ATTENDEES = 20;
 
+const MAX_ATTENDEE_EMAIL_CHARS = 320;
+
 type GoogleCalendarConnection = {
   integrationId: string;
   accountEmail: string | null;
   accountName: string | null;
+  capabilityModes: unknown;
 };
 
 export async function resolveGoogleCalendarActions(
   userWorkosId: string,
 ): Promise<GoatActionProviderCatalog | null> {
-  const connections = await loadGoogleCalendarConnections(userWorkosId);
-  if (connections.length === 0) return null;
+  const allConnections = await loadGoogleCalendarConnections(userWorkosId);
+  if (allConnections.length === 0) return null;
 
-  const accountParam =
-    connections.length > 1
-      ? {
-          account: {
-            type: "string" as const,
-            minLength: 1,
-            maxLength: 400,
-            description: `Which connected Google Calendar account to use. One of: ${connections
-              .map((connection) => JSON.stringify(accountSelector(connection, connections)))
-              .join(", ")}.`,
-          },
-        }
-      : {};
-  const required = ["time_min", "time_max"];
-  if (connections.length > 1) required.push("account");
+  // Connections whose capability is "off" are dropped per action; an action
+  // with no eligible connection is omitted entirely, so the model never sees
+  // capabilities the user turned off.
+  const readConnections = eligibleConnections(allConnections, "read");
+  const writeConnections = eligibleConnections(allConnections, "write");
+  if (readConnections.length === 0 && writeConnections.length === 0) return null;
 
-  const actions: ResolvedGoatAction[] = [
-    {
-      id: "google_calendar.list_events",
-      provider: "google_calendar",
-      description:
-        "List events from a connected Google Calendar in a bounded time window, optionally filtering by text. Returns compact event details including times, location, attendees, and meeting links.",
-      params: {
-        type: "object",
-        additionalProperties: false,
-        required,
-        properties: {
-          calendar_id: {
-            type: "string",
-            minLength: 1,
-            maxLength: MAX_CALENDAR_ID_CHARS,
-            description: 'Calendar id. Defaults to "primary".',
-          },
-          time_min: {
-            type: "string",
-            description:
-              'Inclusive RFC 3339 date-time ("2026-07-22T09:00:00Z") or a plain date ("2026-07-22") interpreted as 00:00 in the user\'s timezone.',
-          },
-          time_max: {
-            type: "string",
-            description:
-              'Exclusive RFC 3339 date-time ("2026-07-23T09:00:00Z") or a plain date ("2026-07-22") interpreted as 00:00 on the next day in the user\'s timezone. Matching plain dates select that full local day.',
-          },
-          query: {
-            type: "string",
-            minLength: 1,
-            maxLength: MAX_QUERY_CHARS,
-            description: "Optional free-text search across event fields.",
-          },
-          limit: {
-            type: "integer",
-            minimum: 1,
-            maximum: MAX_EVENTS,
-            description: "Maximum events to return (default 10, max 25).",
-          },
-          ...accountParam,
-        },
-      },
-      execute: async (params, context) => {
-        const hasMultipleAccounts = connections.length > 1;
-        assertOnlyKnownParams(params, hasMultipleAccounts);
-        const account = hasMultipleAccounts
-          ? boundedOptionalString(params, "account", 400)
-          : undefined;
-        const connection = resolveConnection(connections, account);
-        const { timeMin, timeMax } = validateTimeWindow(
-          requiredStringParam(params, "time_min"),
-          requiredStringParam(params, "time_max"),
-          context.userTimezone,
-        );
-        const calendarId =
-          boundedOptionalString(params, "calendar_id", MAX_CALENDAR_ID_CHARS) ?? "primary";
-        const query = boundedOptionalString(params, "query", MAX_QUERY_CHARS);
-        const limit = validateLimit(params.limit);
-        const url = new URL(`${CALENDAR_BASE}/calendars/${encodeURIComponent(calendarId)}/events`);
-        url.searchParams.set("singleEvents", "true");
-        url.searchParams.set("orderBy", "startTime");
-        url.searchParams.set("showDeleted", "false");
-        url.searchParams.set("timeMin", timeMin);
-        url.searchParams.set("timeMax", timeMax);
-        url.searchParams.set("maxResults", String(limit));
-        url.searchParams.set(
-          "fields",
-          "nextPageToken,timeZone,items(id,status,summary,description,location,htmlLink,hangoutLink,start,end,organizer(email,displayName,self),attendees(email,displayName,responseStatus,self))",
-        );
-        if (query) url.searchParams.set("q", query);
+  const actions: ResolvedGoatAction[] = [];
+  if (readConnections.length > 0) actions.push(listEventsAction(readConnections));
+  if (writeConnections.length > 0) actions.push(createEventAction(writeConnections));
 
-        const response = asRecord(await calendarApiCall(context, connection, url));
-        const rawEvents = asArray(response.items);
-        return {
-          account: connectionLabel(connection),
-          calendarId,
-          timeMin,
-          timeMax,
-          timeZone: readBoundedString(response.timeZone, 100),
-          events: rawEvents.slice(0, limit).flatMap((event) => {
-            const compact = compactEvent(asRecord(event));
-            return compact ? [compact] : [];
-          }),
-          hasMore: rawEvents.length > limit || Boolean(readString(response.nextPageToken)),
-        };
-      },
-    },
-  ];
-
+  const labelConnections = readConnections.length > 0 ? readConnections : writeConnections;
   return {
     id: "google_calendar",
     label:
-      connections.length === 1
-        ? `Google Calendar (${connectionLabel(connections[0]!)})`
-        : `Google Calendar (${connections.length} accounts)`,
-    description: "List calendar events in a bounded time window.",
+      labelConnections.length === 1
+        ? `Google Calendar (${connectionLabel(labelConnections[0]!)})`
+        : `Google Calendar (${labelConnections.length} accounts)`,
+    description:
+      writeConnections.length > 0
+        ? "List calendar events in a bounded time window, and add new events."
+        : "List calendar events in a bounded time window.",
     actions,
   };
+}
+
+function eligibleConnections(
+  connections: readonly GoogleCalendarConnection[],
+  capabilityId: GoatCapabilityId,
+): GoogleCalendarConnection[] {
+  return connections.filter(
+    (connection) =>
+      effectiveCapabilityMode("google_calendar", capabilityId, connection.capabilityModes) !==
+      "off",
+  );
+}
+
+// permissionMode/permission for an action over the given eligible connections:
+// "ask" as soon as any connection wants confirmation (exact for the common
+// single-account case), carrying the connection ids an "always allow" flips.
+function permissionAnnotation(
+  capabilityId: GoatCapabilityId,
+  connections: readonly GoogleCalendarConnection[],
+): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+  const askIntegrationIds = connections
+    .filter(
+      (connection) =>
+        effectiveCapabilityMode("google_calendar", capabilityId, connection.capabilityModes) ===
+        "ask",
+    )
+    .map((connection) => connection.integrationId);
+  if (askIntegrationIds.length === 0) return { permissionMode: "on" };
+  return {
+    permissionMode: "ask",
+    permission: {
+      provider: "google_calendar",
+      capabilityId,
+      label: providerCapability("google_calendar", capabilityId)?.label ?? capabilityId,
+      integrationIds: askIntegrationIds,
+    },
+  };
+}
+
+function accountParamSchema(connections: readonly GoogleCalendarConnection[]) {
+  return connections.length > 1
+    ? {
+        account: {
+          type: "string" as const,
+          minLength: 1,
+          maxLength: 400,
+          description: `Which connected Google Calendar account to use. One of: ${connections
+            .map((connection) => JSON.stringify(accountSelector(connection, connections)))
+            .join(", ")}.`,
+        },
+      }
+    : {};
+}
+
+function listEventsAction(connections: readonly GoogleCalendarConnection[]): ResolvedGoatAction {
+  const accountParam = accountParamSchema(connections);
+  const required = ["time_min", "time_max"];
+  if (connections.length > 1) required.push("account");
+
+  return {
+    id: "google_calendar.list_events",
+    provider: "google_calendar",
+    capability: "read",
+    ...permissionAnnotation("read", connections),
+    description:
+      "List events from a connected Google Calendar in a bounded time window, optionally filtering by text. Returns compact event details including times, location, attendees, and meeting links.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      required,
+      properties: {
+        calendar_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_CALENDAR_ID_CHARS,
+          description: 'Calendar id. Defaults to "primary".',
+        },
+        time_min: {
+          type: "string",
+          description:
+            'Inclusive RFC 3339 date-time ("2026-07-22T09:00:00Z") or a plain date ("2026-07-22") interpreted as 00:00 in the user\'s timezone.',
+        },
+        time_max: {
+          type: "string",
+          description:
+            'Exclusive RFC 3339 date-time ("2026-07-23T09:00:00Z") or a plain date ("2026-07-22") interpreted as 00:00 on the next day in the user\'s timezone. Matching plain dates select that full local day.',
+        },
+        query: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_QUERY_CHARS,
+          description: "Optional free-text search across event fields.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_EVENTS,
+          description: "Maximum events to return (default 10, max 25).",
+        },
+        ...accountParam,
+      },
+    },
+    execute: async (params, context) => {
+      const hasMultipleAccounts = connections.length > 1;
+      assertOnlyKnownParams(params, LIST_EVENTS_PARAM_KEYS, hasMultipleAccounts);
+      const account = hasMultipleAccounts
+        ? boundedOptionalString(params, "account", 400)
+        : undefined;
+      const connection = resolveConnection(connections, account);
+      const { timeMin, timeMax } = validateTimeWindow(
+        requiredStringParam(params, "time_min"),
+        requiredStringParam(params, "time_max"),
+        context.userTimezone,
+      );
+      const calendarId =
+        boundedOptionalString(params, "calendar_id", MAX_CALENDAR_ID_CHARS) ?? "primary";
+      const query = boundedOptionalString(params, "query", MAX_QUERY_CHARS);
+      const limit = validateLimit(params.limit);
+      const url = new URL(`${CALENDAR_BASE}/calendars/${encodeURIComponent(calendarId)}/events`);
+      url.searchParams.set("singleEvents", "true");
+      url.searchParams.set("orderBy", "startTime");
+      url.searchParams.set("showDeleted", "false");
+      url.searchParams.set("timeMin", timeMin);
+      url.searchParams.set("timeMax", timeMax);
+      url.searchParams.set("maxResults", String(limit));
+      url.searchParams.set(
+        "fields",
+        "nextPageToken,timeZone,items(id,status,summary,description,location,htmlLink,hangoutLink,start,end,organizer(email,displayName,self),attendees(email,displayName,responseStatus,self))",
+      );
+      if (query) url.searchParams.set("q", query);
+
+      const response = asRecord(await calendarApiCall(context, connection, url));
+      const rawEvents = asArray(response.items);
+      return {
+        account: connectionLabel(connection),
+        calendarId,
+        timeMin,
+        timeMax,
+        timeZone: readBoundedString(response.timeZone, 100),
+        events: rawEvents.slice(0, limit).flatMap((event) => {
+          const compact = compactEvent(asRecord(event));
+          return compact ? [compact] : [];
+        }),
+        hasMore: rawEvents.length > limit || Boolean(readString(response.nextPageToken)),
+      };
+    },
+  };
+}
+
+function createEventAction(connections: readonly GoogleCalendarConnection[]): ResolvedGoatAction {
+  const accountParam = accountParamSchema(connections);
+  const required = ["summary", "start", "end"];
+  if (connections.length > 1) required.push("account");
+
+  return {
+    id: "google_calendar.create_event",
+    provider: "google_calendar",
+    capability: "write",
+    ...permissionAnnotation("write", connections),
+    description:
+      "Create a new event on a connected Google Calendar. Use only when the user asked to add something to their calendar. Attendees receive an email invite.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      required,
+      properties: {
+        summary: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_EVENT_SUMMARY_CHARS,
+          description: "Event title.",
+        },
+        start: {
+          type: "string",
+          description:
+            'Event start: an RFC 3339 date-time with Z or a numeric UTC offset ("2026-07-22T09:00:00+02:00") for a timed event, or a plain date ("2026-07-22") for an all-day event. "start" and "end" must use the same form.',
+        },
+        end: {
+          type: "string",
+          description:
+            'Event end (exclusive), in the same form as "start". For a single-day all-day event, pass the same date as "start".',
+        },
+        time_zone: {
+          type: "string",
+          minLength: 1,
+          maxLength: 100,
+          description:
+            'Optional IANA timezone for a timed event (e.g. "Europe/Berlin"). Defaults to the user\'s timezone.',
+        },
+        description: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_EVENT_DESCRIPTION_CHARS,
+          description: "Optional event description.",
+        },
+        location: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_EVENT_LOCATION_CHARS,
+          description: "Optional free-text location.",
+        },
+        attendees: {
+          type: "array",
+          maxItems: MAX_EVENT_ATTENDEES,
+          items: { type: "string" },
+          description:
+            "Optional attendee email addresses. Each attendee receives an email invite when the event is created.",
+        },
+        calendar_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_CALENDAR_ID_CHARS,
+          description: 'Calendar id. Defaults to "primary".',
+        },
+        ...accountParam,
+      },
+    },
+    execute: async (params, context) => {
+      const hasMultipleAccounts = connections.length > 1;
+      assertOnlyKnownParams(params, CREATE_EVENT_PARAM_KEYS, hasMultipleAccounts);
+      const account = hasMultipleAccounts
+        ? boundedOptionalString(params, "account", 400)
+        : undefined;
+      const connection = resolveConnection(connections, account);
+      // The catalog was resolved at turn start; re-check the stored mode so a
+      // settings flip (or an approval raced against it) cannot write anyway.
+      await assertWriteStillEnabled(connection);
+      const summary = requiredBoundedString(params, "summary", MAX_EVENT_SUMMARY_CHARS);
+      const times = validateEventTimes(params, context.userTimezone);
+      const description = boundedOptionalString(params, "description", MAX_EVENT_DESCRIPTION_CHARS);
+      const location = boundedOptionalString(params, "location", MAX_EVENT_LOCATION_CHARS);
+      const attendees = validateAttendees(params.attendees);
+      const calendarId =
+        boundedOptionalString(params, "calendar_id", MAX_CALENDAR_ID_CHARS) ?? "primary";
+
+      const url = new URL(`${CALENDAR_BASE}/calendars/${encodeURIComponent(calendarId)}/events`);
+      url.searchParams.set("sendUpdates", "all");
+      url.searchParams.set(
+        "fields",
+        "id,status,summary,description,location,htmlLink,hangoutLink,start,end,organizer(email,displayName,self),attendees(email,displayName,responseStatus,self)",
+      );
+
+      const response = asRecord(
+        await calendarApiCall(context, connection, url, {
+          method: "POST",
+          body: {
+            summary,
+            ...(description ? { description } : {}),
+            ...(location ? { location } : {}),
+            ...times,
+            ...(attendees ? { attendees } : {}),
+          },
+        }),
+      );
+      const event = compactEvent(response);
+      if (!event) {
+        throw new Error("Google Calendar did not return the created event.");
+      }
+      return { account: connectionLabel(connection), calendarId, event };
+    },
+  };
+}
+
+const LIST_EVENTS_PARAM_KEYS = ["calendar_id", "time_min", "time_max", "query", "limit"] as const;
+
+const CREATE_EVENT_PARAM_KEYS = [
+  "summary",
+  "start",
+  "end",
+  "time_zone",
+  "description",
+  "location",
+  "attendees",
+  "calendar_id",
+] as const;
+
+async function assertWriteStillEnabled(connection: GoogleCalendarConnection) {
+  const rows = await getDb()
+    .select({ capabilityModes: goatIntegrations.capabilityModes })
+    .from(goatIntegrations)
+    .where(eq(goatIntegrations.id, connection.integrationId))
+    .limit(1);
+  const mode = effectiveCapabilityMode("google_calendar", "write", rows[0]?.capabilityModes);
+  if (mode === "off") {
+    throw new GoatActionPermissionError(
+      "google_calendar",
+      `Adding events is turned off for ${connectionLabel(connection)}. It can be changed under Settings → Integrations.`,
+    );
+  }
+}
+
+// Timed events need matching RFC 3339 date-times; all-day events need matching
+// plain dates (Google treats end.date as exclusive, so a same-day request
+// becomes start + 1 day).
+function validateEventTimes(params: Record<string, unknown>, userTimezone: string) {
+  const startRaw = requiredStringParam(params, "start");
+  const endRaw = requiredStringParam(params, "end");
+  const timeZoneParam = boundedOptionalString(params, "time_zone", 100);
+  const startDate = parsePlainDate(startRaw);
+  const endDate = parsePlainDate(endRaw);
+
+  if (startDate && endDate) {
+    if (timeZoneParam) {
+      throw new GoatActionInvalidParamsError(
+        '"time_zone" only applies to timed events; omit it for all-day events.',
+      );
+    }
+    const startMs = Date.UTC(startDate.year, startDate.month - 1, startDate.day);
+    const endMs = Date.UTC(endDate.year, endDate.month - 1, endDate.day);
+    if (endMs < startMs) {
+      throw new GoatActionInvalidParamsError('"end" must not be before "start".');
+    }
+    const exclusiveEnd = endMs === startMs ? addUtcDays(endDate, 1) : endDate;
+    return {
+      start: { date: formatCalendarDate(startDate) },
+      end: { date: formatCalendarDate(exclusiveEnd) },
+    };
+  }
+  if (startDate || endDate) {
+    throw new GoatActionInvalidParamsError(
+      '"start" and "end" must use the same form: both RFC 3339 date-times or both plain dates.',
+    );
+  }
+
+  const start = validateRfc3339Timestamp(startRaw, "start");
+  const end = validateRfc3339Timestamp(endRaw, "end");
+  if (Date.parse(end) <= Date.parse(start)) {
+    throw new GoatActionInvalidParamsError('"end" must be after "start".');
+  }
+  const timeZone = timeZoneParam
+    ? validateExplicitTimezone(timeZoneParam)
+    : validIanaTimezone(userTimezone);
+  return {
+    start: { dateTime: start, timeZone },
+    end: { dateTime: end, timeZone },
+  };
+}
+
+function validateExplicitTimezone(value: string) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(0);
+    return value;
+  } catch {
+    throw new GoatActionInvalidParamsError(
+      `"time_zone" must be a valid IANA timezone, got ${JSON.stringify(value)}.`,
+    );
+  }
+}
+
+function validateAttendees(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) {
+    throw new GoatActionInvalidParamsError('"attendees" must be an array of email addresses.');
+  }
+  if (value.length > MAX_EVENT_ATTENDEES) {
+    throw new GoatActionInvalidParamsError(
+      `"attendees" allows at most ${MAX_EVENT_ATTENDEES} entries.`,
+    );
+  }
+  const seen = new Set<string>();
+  const attendees: Array<{ email: string }> = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") {
+      throw new GoatActionInvalidParamsError('"attendees" must be an array of email addresses.');
+    }
+    const email = entry.trim();
+    if (
+      !email ||
+      email.length > MAX_ATTENDEE_EMAIL_CHARS ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ) {
+      throw new GoatActionInvalidParamsError(
+        `${JSON.stringify(entry)} is not a valid attendee email address.`,
+      );
+    }
+    const normalized = email.toLowerCase();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    attendees.push({ email });
+  }
+  return attendees.length > 0 ? attendees : undefined;
+}
+
+function requiredBoundedString(params: Record<string, unknown>, key: string, maxChars: number) {
+  const value = requiredStringParam(params, key);
+  if (value.length > maxChars) {
+    throw new GoatActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
+  }
+  return value;
 }
 
 async function loadGoogleCalendarConnections(
@@ -158,6 +466,7 @@ async function loadGoogleCalendarConnections(
       accountEmail: goatIntegrations.accountEmail,
       accountName: goatIntegrations.accountName,
       status: goatIntegrations.status,
+      capabilityModes: goatIntegrations.capabilityModes,
     })
     .from(goatIntegrations)
     .where(
@@ -175,6 +484,7 @@ async function loadGoogleCalendarConnections(
       integrationId: row.integrationId,
       accountEmail: row.accountEmail,
       accountName: row.accountName,
+      capabilityModes: row.capabilityModes,
     }));
 }
 
@@ -206,6 +516,7 @@ async function calendarApiCall(
   context: GoatActionExecuteContext,
   connection: GoogleCalendarConnection,
   url: URL,
+  init?: { method?: "GET" | "POST"; body?: unknown },
 ) {
   try {
     return await googleApiCall(
@@ -214,9 +525,12 @@ async function calendarApiCall(
         integrationId: connection.integrationId,
         provider: "google_calendar",
       },
-      "GET",
+      init?.method ?? "GET",
       url,
-      { signal: context.signal },
+      {
+        signal: context.signal,
+        ...(init?.body !== undefined ? { body: init.body } : {}),
+      },
     );
   } catch (error) {
     if (error instanceof GoogleAccessAuthError) {
@@ -252,6 +566,11 @@ function validateRfc3339(
     const boundary = nextDayForPlainDate ? addUtcDays(plainDate, 1) : plainDate;
     return localMidnightRfc3339(boundary, timezone);
   }
+  return validateRfc3339Timestamp(trimmed, field);
+}
+
+function validateRfc3339Timestamp(value: string, field: string) {
+  const trimmed = value.trim();
   const date = new Date(`${trimmed.slice(0, 10)}T00:00:00Z`);
   if (
     trimmed.length > 100 ||
@@ -347,15 +666,13 @@ function validateLimit(value: unknown) {
   return value;
 }
 
-function assertOnlyKnownParams(params: Record<string, unknown>, allowAccount: boolean) {
+function assertOnlyKnownParams(
+  params: Record<string, unknown>,
+  allowedKeys: readonly string[],
+  allowAccount: boolean,
+) {
   const unknown = Object.keys(params).filter(
-    (key) =>
-      key !== "calendar_id" &&
-      key !== "time_min" &&
-      key !== "time_max" &&
-      key !== "query" &&
-      key !== "limit" &&
-      !(allowAccount && key === "account"),
+    (key) => !allowedKeys.includes(key) && !(allowAccount && key === "account"),
   );
   if (unknown.length > 0) {
     throw new GoatActionInvalidParamsError(

@@ -685,12 +685,14 @@ describe("list_actions and use_action tools", () => {
         provider: "slack",
         description: "Fetch recent messages from one Slack conversation.",
         params: { type: "object", properties: { channel: { type: "string" } } },
+        permissionMode: "on" as const,
       },
       {
         id: "linear.list_issues",
         provider: "linear",
         description: "List Linear issues.",
         params: { type: "object", properties: {} },
+        permissionMode: "on" as const,
       },
     ],
   };

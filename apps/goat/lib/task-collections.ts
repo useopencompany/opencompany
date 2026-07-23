@@ -235,6 +235,7 @@ export type GoatIntegrationRow = {
   status: GoatIntegrationStatus;
   status_reason: string | null;
   scopes: string[];
+  capability_modes: Record<string, unknown>;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;

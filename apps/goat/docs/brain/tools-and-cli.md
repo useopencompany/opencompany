@@ -29,7 +29,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 | `create` | New doc: `--type` (one of the [8 entity types](./data-model.md#entity-types-the-8-type-contract)), `--id`, `--title`, `--truth`/`--truth-stdin`; optional `--folder`, `--kind`, `--alias`, `--tag`, `--relation type:id`, `--source-ref`. |
 | `ingest` | One-shot LLM planner from source text (`--text`/`--text-stdin`, required `--source-ref`, `--dry-run`). |
 | `rewrite <id>` | Replace compiled truth. |
-| `set <id>` | Update `--title`, `--type`, `--status`. Promoting to `--status active` requires the truth to cite `[[evidence:...]]`. |
+| `set <id>` | Update `--title`, `--type`, `--status`. Promoting to `--status active` requires the truth to cite valid provenance with `[[evidence:...]]` or `[[source:...]]`. |
 | `timeline-add <id>` | Append a dated evidence entry (`--at`, `--body`, `--source-ref`, `--evidence-id`). `append-timeline` is a compatibility alias. |
 | `append-evidence <subject-id>` | Create an immutable `ev-*` record in `evidence/` and link it to the subject (`--relation`, default `about`). |
 | `alias <id>` | `--add`/`--remove` aliases. |

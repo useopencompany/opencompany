@@ -37,6 +37,7 @@ vi.mock("@/lib/integration-account-actions", () => ({
     ok: true,
     affectedBrainSourceCount: 0,
   })),
+  setGoatIntegrationCapabilityModeAction: vi.fn(async () => ({ ok: true })),
 }));
 
 describe("SettingsIntegrationsPanel", () => {

@@ -125,6 +125,13 @@ type ActionDispatcher = {
   }) => Promise<UseActionToolOutput>;
 };
 
+// An action in "ask" mode pauses the stream on a tool-approval request the
+// user answers in the chat UI; the approved call executes on the follow-up
+// approval-continuation request with the recorded input.
+function actionNeedsApproval(catalog: GoatChatActionCatalog, actionId: string) {
+  return catalog.actions.find((action) => action.id === actionId)?.permissionMode === "ask";
+}
+
 // Main chat (and the MCP connector) get a read-only brain surface: recall and
 // inspect only. Every write path — new content and edits to existing records —
 // goes through save_to_brain, which enqueues the durable ingestion/curation
@@ -664,6 +671,8 @@ export function createOpenCompanyChatToolContext(input: {
     });
     tools[USE_ACTION_TOOL_NAME] = tool<UseActionToolInput, UseActionToolOutput>({
       description: USE_ACTION_TOOL_DESCRIPTION,
+      needsApproval: async (args) =>
+        actionNeedsApproval(actions.catalog, typeof args.action === "string" ? args.action : ""),
       inputSchema: jsonSchema<UseActionToolInput>({
         type: "object",
         additionalProperties: false,

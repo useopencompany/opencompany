@@ -11,6 +11,8 @@ vi.mock("@opencompany/db/client", () => ({
       from: () => ({
         where: () => ({
           orderBy: async () => mocks.dbRows,
+          // The execute-time capability re-check reads one integration row.
+          limit: async () => mocks.dbRows,
         }),
       }),
     }),
@@ -26,6 +28,7 @@ import {
   GoatActionAuthError,
   type GoatActionExecuteContext,
   GoatActionInvalidParamsError,
+  GoatActionPermissionError,
 } from "@/lib/actions/types";
 import { GoogleAccessAuthError } from "@/lib/integrations/google-access-token";
 
@@ -46,12 +49,19 @@ function connectedRow(email = "louis@example.com", integrationId = "gint_calenda
     accountEmail: email,
     accountName: "Louis",
     status: "connected",
+    capabilityModes: {},
   };
 }
 
 function findListEvents(catalog: Awaited<ReturnType<typeof resolveGoogleCalendarActions>>) {
   const action = catalog?.actions.find((entry) => entry.id === "google_calendar.list_events");
   if (!action) throw new Error("missing google_calendar.list_events");
+  return action;
+}
+
+function findCreateEvent(catalog: Awaited<ReturnType<typeof resolveGoogleCalendarActions>>) {
+  const action = catalog?.actions.find((entry) => entry.id === "google_calendar.create_event");
+  if (!action) throw new Error("missing google_calendar.create_event");
   return action;
 }
 
@@ -71,7 +81,7 @@ describe("resolveGoogleCalendarActions", () => {
     expect(await resolveGoogleCalendarActions("user_1")).toBeNull();
   });
 
-  it("exposes one read-only action with a strict bounded-window schema", async () => {
+  it("exposes the read action with a strict bounded-window schema", async () => {
     mocks.dbRows = [connectedRow()];
     const catalog = await resolveGoogleCalendarActions("user_1");
     const action = findListEvents(catalog);
@@ -79,12 +89,17 @@ describe("resolveGoogleCalendarActions", () => {
     expect(catalog).toMatchObject({
       id: "google_calendar",
       label: "Google Calendar (louis@example.com)",
-      description: "List calendar events in a bounded time window.",
+      description: "List calendar events in a bounded time window, and add new events.",
     });
-    expect(catalog?.actions).toHaveLength(1);
+    expect(catalog?.actions.map((entry) => entry.id)).toEqual([
+      "google_calendar.list_events",
+      "google_calendar.create_event",
+    ]);
     expect(action).toMatchObject({
       id: "google_calendar.list_events",
       provider: "google_calendar",
+      capability: "read",
+      permissionMode: "on",
       params: {
         type: "object",
         additionalProperties: false,
@@ -97,7 +112,70 @@ describe("resolveGoogleCalendarActions", () => {
       },
     });
     expect(action.description).toContain("bounded time window");
-    expect(action.id).not.toMatch(/create|update|delete|write/);
+  });
+
+  it("marks the write action as ask by default with the connections an always-allow flips", async () => {
+    mocks.dbRows = [connectedRow()];
+    const action = findCreateEvent(await resolveGoogleCalendarActions("user_1"));
+
+    expect(action).toMatchObject({
+      capability: "write",
+      permissionMode: "ask",
+      permission: {
+        provider: "google_calendar",
+        capabilityId: "write",
+        label: "Add events",
+        integrationIds: ["gint_calendar_1"],
+      },
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: ["summary", "start", "end"],
+      },
+    });
+  });
+
+  it("runs the write action without asking once its mode is on", async () => {
+    mocks.dbRows = [{ ...connectedRow(), capabilityModes: { write: "on" } }];
+    const action = findCreateEvent(await resolveGoogleCalendarActions("user_1"));
+
+    expect(action.permissionMode).toBe("on");
+    expect(action.permission).toBeUndefined();
+  });
+
+  it("omits the write action when adding events is turned off", async () => {
+    mocks.dbRows = [{ ...connectedRow(), capabilityModes: { write: "off" } }];
+    const catalog = await resolveGoogleCalendarActions("user_1");
+
+    expect(catalog?.actions.map((entry) => entry.id)).toEqual(["google_calendar.list_events"]);
+    expect(catalog?.description).toBe("List calendar events in a bounded time window.");
+  });
+
+  it("omits the read action when reading is turned off", async () => {
+    mocks.dbRows = [{ ...connectedRow(), capabilityModes: { read: "off" } }];
+    const catalog = await resolveGoogleCalendarActions("user_1");
+
+    expect(catalog?.actions.map((entry) => entry.id)).toEqual(["google_calendar.create_event"]);
+  });
+
+  it("disappears entirely when every capability is turned off", async () => {
+    mocks.dbRows = [{ ...connectedRow(), capabilityModes: { read: "off", write: "off" } }];
+    expect(await resolveGoogleCalendarActions("user_1")).toBeNull();
+  });
+
+  it("scopes each action to the accounts whose capability allows it", async () => {
+    mocks.dbRows = [
+      { ...connectedRow("a@example.com", "gint_calendar_a"), capabilityModes: { write: "off" } },
+      { ...connectedRow("b@example.com", "gint_calendar_b"), capabilityModes: { write: "ask" } },
+    ];
+    const catalog = await resolveGoogleCalendarActions("user_1");
+    const createEvent = findCreateEvent(catalog);
+
+    // Both accounts can read, so list_events keeps its account selector...
+    expect(findListEvents(catalog).params.required).toContain("account");
+    // ...but only account b can write, so create_event pins to it.
+    expect(createEvent.params.required).toEqual(["summary", "start", "end"]);
+    expect(createEvent.permission?.integrationIds).toEqual(["gint_calendar_b"]);
   });
 });
 
@@ -389,6 +467,190 @@ describe("google_calendar.list_events", () => {
 
     await expect(action.execute({ ...WINDOW, limit: 0 }, CONTEXT)).rejects.toBeInstanceOf(
       GoatActionInvalidParamsError,
+    );
+  });
+});
+
+describe("google_calendar.create_event", () => {
+  const TIMED_EVENT = {
+    summary: "Planning sync",
+    start: "2026-07-24T09:00:00Z",
+    end: "2026-07-24T09:30:00Z",
+  };
+
+  it("creates a timed event with invites and returns the compact created event", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({
+      id: "evt_new",
+      status: "confirmed",
+      summary: "Planning sync",
+      htmlLink: "https://calendar.google.com/event?eid=evt_new",
+      start: { dateTime: "2026-07-24T09:00:00Z", timeZone: "UTC" },
+      end: { dateTime: "2026-07-24T09:30:00Z", timeZone: "UTC" },
+      attendees: [{ email: "guest@example.com", responseStatus: "needsAction" }],
+    });
+    const action = findCreateEvent(await resolveGoogleCalendarActions("user_1"));
+
+    const result = (await action.execute(
+      {
+        ...TIMED_EVENT,
+        description: "Quarterly planning",
+        location: "Room 2",
+        attendees: ["guest@example.com", "GUEST@example.com"],
+        calendar_id: "team@example.com",
+      },
+      CONTEXT,
+    )) as { account: string; calendarId: string; event: Record<string, unknown> };
+
+    expect(mocks.googleApiCall).toHaveBeenCalledWith(
+      { userWorkosId: "user_1", integrationId: "gint_calendar_1", provider: "google_calendar" },
+      "POST",
+      expect.any(URL),
+      {
+        signal: CONTEXT.signal,
+        body: {
+          summary: "Planning sync",
+          description: "Quarterly planning",
+          location: "Room 2",
+          start: { dateTime: "2026-07-24T09:00:00Z", timeZone: "UTC" },
+          end: { dateTime: "2026-07-24T09:30:00Z", timeZone: "UTC" },
+          attendees: [{ email: "guest@example.com" }],
+        },
+      },
+    );
+    const url = mocks.googleApiCall.mock.calls[0]?.[2] as URL;
+    expect(url.pathname).toBe("/calendar/v3/calendars/team%40example.com/events");
+    expect(url.searchParams.get("sendUpdates")).toBe("all");
+    expect(result).toMatchObject({
+      account: "louis@example.com",
+      calendarId: "team@example.com",
+      event: {
+        id: "evt_new",
+        htmlLink: "https://calendar.google.com/event?eid=evt_new",
+      },
+    });
+  });
+
+  it("honors an explicit valid timezone and rejects an invalid one", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({
+      id: "evt_tz",
+      start: { dateTime: "2026-07-24T09:00:00+02:00" },
+      end: { dateTime: "2026-07-24T09:30:00+02:00" },
+    });
+    const action = findCreateEvent(await resolveGoogleCalendarActions("user_1"));
+
+    await action.execute(
+      {
+        ...TIMED_EVENT,
+        start: "2026-07-24T09:00:00+02:00",
+        end: "2026-07-24T09:30:00+02:00",
+        time_zone: "Europe/Berlin",
+      },
+      CONTEXT,
+    );
+    const body = (mocks.googleApiCall.mock.calls[0]?.[3] as { body: Record<string, unknown> }).body;
+    expect(body.start).toEqual({
+      dateTime: "2026-07-24T09:00:00+02:00",
+      timeZone: "Europe/Berlin",
+    });
+
+    await expect(
+      action.execute({ ...TIMED_EVENT, time_zone: "Not/A_Timezone" }, CONTEXT),
+    ).rejects.toThrow('"time_zone" must be a valid IANA timezone');
+  });
+
+  it("creates an all-day event with Google's exclusive end date", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({
+      id: "evt_allday",
+      start: { date: "2026-07-24" },
+      end: { date: "2026-07-25" },
+    });
+    const action = findCreateEvent(await resolveGoogleCalendarActions("user_1"));
+
+    await action.execute({ summary: "Offsite", start: "2026-07-24", end: "2026-07-24" }, CONTEXT);
+    const body = (mocks.googleApiCall.mock.calls[0]?.[3] as { body: Record<string, unknown> }).body;
+    expect(body.start).toEqual({ date: "2026-07-24" });
+    expect(body.end).toEqual({ date: "2026-07-25" });
+  });
+
+  it("validates times, attendees, and unknown parameters before calling Google", async () => {
+    mocks.dbRows = [connectedRow()];
+    const action = findCreateEvent(await resolveGoogleCalendarActions("user_1"));
+
+    await expect(action.execute({ summary: "x", start: "2026-07-24" }, CONTEXT)).rejects.toThrow(
+      '"end" is required',
+    );
+    await expect(
+      action.execute({ summary: "x", start: "2026-07-24", end: "2026-07-24T10:00:00Z" }, CONTEXT),
+    ).rejects.toThrow("same form");
+    await expect(
+      action.execute(
+        { summary: "x", start: "2026-07-24T10:00:00Z", end: "2026-07-24T10:00:00Z" },
+        CONTEXT,
+      ),
+    ).rejects.toThrow('"end" must be after "start"');
+    await expect(
+      action.execute({ summary: "x", start: "2026-07-25", end: "2026-07-24" }, CONTEXT),
+    ).rejects.toThrow('"end" must not be before "start"');
+    await expect(
+      action.execute(
+        { summary: "x", start: "2026-07-24", end: "2026-07-25", time_zone: "Europe/Berlin" },
+        CONTEXT,
+      ),
+    ).rejects.toThrow("only applies to timed events");
+    await expect(
+      action.execute({ ...TIMED_EVENT, attendees: ["not-an-email"] }, CONTEXT),
+    ).rejects.toThrow("not a valid attendee email");
+    await expect(
+      action.execute(
+        { ...TIMED_EVENT, attendees: Array.from({ length: 21 }, (_, i) => `p${i}@example.com`) },
+        CONTEXT,
+      ),
+    ).rejects.toThrow("at most 20");
+    await expect(action.execute({ ...TIMED_EVENT, unexpected: true }, CONTEXT)).rejects.toThrow(
+      "Unknown parameter",
+    );
+    expect(mocks.googleApiCall).not.toHaveBeenCalled();
+  });
+
+  it("refuses to write when the capability was turned off after the catalog resolved", async () => {
+    mocks.dbRows = [connectedRow()];
+    const action = findCreateEvent(await resolveGoogleCalendarActions("user_1"));
+
+    mocks.dbRows = [{ ...connectedRow(), capabilityModes: { write: "off" } }];
+    const execution = action.execute(TIMED_EVENT, CONTEXT);
+    await expect(execution).rejects.toBeInstanceOf(GoatActionPermissionError);
+    await expect(execution).rejects.toMatchObject({
+      message: expect.stringContaining("turned off"),
+    });
+    expect(mocks.googleApiCall).not.toHaveBeenCalled();
+  });
+
+  it("targets the selected account when multiple accounts can write", async () => {
+    mocks.dbRows = [
+      connectedRow("a@example.com", "gint_calendar_a"),
+      connectedRow("b@example.com", "gint_calendar_b"),
+    ];
+    mocks.googleApiCall.mockResolvedValue({
+      id: "evt_multi",
+      start: { dateTime: "2026-07-24T09:00:00Z" },
+      end: { dateTime: "2026-07-24T09:30:00Z" },
+    });
+    const action = findCreateEvent(await resolveGoogleCalendarActions("user_1"));
+
+    expect(action.params.required).toEqual(["summary", "start", "end", "account"]);
+    await expect(action.execute(TIMED_EVENT, CONTEXT)).rejects.toThrow(
+      "Multiple Google Calendar accounts",
+    );
+
+    await action.execute({ ...TIMED_EVENT, account: "b@example.com" }, CONTEXT);
+    expect(mocks.googleApiCall).toHaveBeenCalledWith(
+      expect.objectContaining({ integrationId: "gint_calendar_b" }),
+      "POST",
+      expect.any(URL),
+      expect.anything(),
     );
   });
 });

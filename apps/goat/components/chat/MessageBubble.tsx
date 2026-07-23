@@ -6,7 +6,7 @@ import { type ChatTaskLookup, getOrderedAssistantItems } from "./assistant-items
 import { ReasoningItem } from "./ReasoningItem";
 import { TaskCard } from "./TaskCard";
 import { TurnDuration } from "./ThinkingIndicator";
-import { type CodexToolAction, ToolCallItem } from "./ToolCallItem";
+import { type ActionApprovalRequest, type CodexToolAction, ToolCallItem } from "./ToolCallItem";
 import { UserMessageBubble } from "./UserMessageBubble";
 
 export function MessageBubble({
@@ -16,6 +16,8 @@ export function MessageBubble({
   durationMs,
   onCodexAction,
   allowCodexPlanActions = false,
+  onActionApproval,
+  allowActionApproval = false,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -23,6 +25,8 @@ export function MessageBubble({
   durationMs?: number | null | undefined;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   allowCodexPlanActions?: boolean;
+  onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
+  allowActionApproval?: boolean;
 }) {
   if (message.role === "user") {
     return <UserMessageBubble message={message} />;
@@ -35,6 +39,8 @@ export function MessageBubble({
       durationMs={durationMs}
       onCodexAction={onCodexAction}
       allowCodexPlanActions={allowCodexPlanActions}
+      onActionApproval={onActionApproval}
+      allowActionApproval={allowActionApproval}
     />
   );
 }
@@ -46,6 +52,8 @@ function AssistantTurn({
   durationMs,
   onCodexAction,
   allowCodexPlanActions,
+  onActionApproval,
+  allowActionApproval,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -53,6 +61,8 @@ function AssistantTurn({
   durationMs?: number | null | undefined;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   allowCodexPlanActions: boolean;
+  onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
+  allowActionApproval: boolean;
 }) {
   const error = message.metadata?.error;
   const items = getOrderedAssistantItems(
@@ -85,6 +95,8 @@ function AssistantTurn({
             tool={item.tool}
             onCodexAction={onCodexAction}
             allowCodexPlanActions={allowCodexPlanActions}
+            onActionApproval={onActionApproval}
+            allowActionApproval={allowActionApproval}
           />
         );
       })}

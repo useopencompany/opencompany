@@ -49,6 +49,8 @@ export async function resolveGoogleDriveActions(
     {
       id: "google_drive.search_files",
       provider: "google_drive",
+      capability: "read",
+      permissionMode: "on",
       description:
         "Search the user's Google Drive, including shared files and shared drives, by file name or indexed text. Returns compact file metadata and links, not file contents.",
       params: {

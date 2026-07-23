@@ -18,10 +18,13 @@ import {
 import { and, asc, desc, eq, exists, gte, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
+  applyApprovalResponsesToStoredParts,
   compareGoatChatMessageOrder,
+  dismissPendingApprovalsInStoredParts,
   GOAT_PINNED_CHAT_LIMIT,
   type GoatChatSessionView,
   type GoatChatSummaryView,
+  type GoatChatUiMessage,
   type GoatCodexRuntimeView,
   type GoatStoredChatMessage,
   toGoatChatUiMessage,
@@ -236,6 +239,117 @@ export async function createGoatChatUserTurn(
     sessionCreated,
     userMessage,
     storedMessages,
+    messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
+  };
+}
+
+// Continues the latest assistant message after the user answered its tool
+// approval request(s). No user message is inserted: the client re-sends the
+// assistant message carrying approval decisions, which are merged into the
+// stored copy (never trusting client-supplied inputs/outputs) and persisted so
+// the decided state survives a crash before the continuation stream lands.
+export async function createGoatChatApprovalContinuationTurn(
+  input: { userWorkosId: string; sessionId: string; message: GoatChatUiMessage },
+  store: GoatChatStore = createDbGoatChatStore(),
+): Promise<
+  | {
+      ok: true;
+      session: GoatChatSession;
+      lastUserMessage: GoatStoredChatMessage | null;
+      storedMessages: GoatStoredChatMessage[];
+      messages: GoatChatUiMessage[];
+      respondedApprovalIds: string[];
+    }
+  | { ok: false; error: string }
+> {
+  const session = await store.findOpenSession({
+    userWorkosId: input.userWorkosId,
+    sessionId: input.sessionId,
+  });
+  if (!session) return { ok: false, error: "Chat session not found." };
+
+  const stored = await store.listMessages(session.id);
+  const lastStored = stored.at(-1);
+  if (
+    !lastStored ||
+    lastStored.role !== "assistant" ||
+    lastStored.id !== input.message.id ||
+    !lastStored.debugTrace
+  ) {
+    return {
+      ok: false,
+      error: "Approval responses can only continue the latest assistant message.",
+    };
+  }
+
+  const { parts, respondedApprovalIds } = applyApprovalResponsesToStoredParts(
+    lastStored.debugTrace.uiMessageParts,
+    input.message.parts,
+  );
+  if (respondedApprovalIds.length === 0) {
+    return { ok: false, error: "No pending approvals to respond to." };
+  }
+
+  const mergedTrace = { ...lastStored.debugTrace, uiMessageParts: parts };
+  await persistGoatChatAssistantMessage(
+    {
+      sessionId: session.id,
+      messageId: lastStored.id,
+      content: lastStored.content,
+      taskId: lastStored.taskId,
+      debugTrace: mergedTrace,
+    },
+    store,
+  );
+
+  const storedMessages = stored.map((message) =>
+    message.id === lastStored.id ? { ...message, debugTrace: mergedTrace } : message,
+  );
+  const lastUserMessage =
+    [...storedMessages].reverse().find((message) => message.role === "user") ?? null;
+  return {
+    ok: true,
+    session,
+    lastUserMessage,
+    storedMessages,
+    messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
+    respondedApprovalIds,
+  };
+}
+
+// Called on normal user turns before the history goes to the model: approval
+// requests the user talked past get denied as dismissed (an unresolved
+// approval request is a tool call with no result, which the model conversion
+// rejects). Changes are persisted so the chat UI resolves the stale card.
+export async function dismissStaleGoatChatApprovals(
+  turn: { storedMessages: GoatStoredChatMessage[] },
+  store: GoatChatStore = createDbGoatChatStore(),
+): Promise<{ changed: boolean; messages: GoatChatUiMessage[] }> {
+  let changedAny = false;
+  const storedMessages = await Promise.all(
+    turn.storedMessages.map(async (message) => {
+      if (message.role !== "assistant" || !message.debugTrace?.uiMessageParts) return message;
+      const { parts, changed } = dismissPendingApprovalsInStoredParts(
+        message.debugTrace.uiMessageParts,
+      );
+      if (!changed) return message;
+      changedAny = true;
+      const debugTrace = { ...message.debugTrace, uiMessageParts: parts };
+      await persistGoatChatAssistantMessage(
+        {
+          sessionId: message.sessionId,
+          messageId: message.id,
+          content: message.content,
+          taskId: message.taskId,
+          debugTrace,
+        },
+        store,
+      );
+      return { ...message, debugTrace };
+    }),
+  );
+  return {
+    changed: changedAny,
     messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
   };
 }
@@ -466,21 +580,36 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
 
     async insertMessage(input) {
       const now = new Date();
-      const [message] = await db
-        .insert(goatChatMessages)
-        .values({
-          id: input.id ?? newGoatChatMessageId(),
-          sessionId: input.sessionId,
-          role: input.role,
-          content: input.content,
-          taskId: input.taskId ?? null,
-          debugTrace: input.debugTrace ?? null,
-          attachments: input.attachments ?? null,
-          attachmentTexts: input.attachmentTexts ?? null,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
+      const insert = db.insert(goatChatMessages).values({
+        id: input.id ?? newGoatChatMessageId(),
+        sessionId: input.sessionId,
+        role: input.role,
+        content: input.content,
+        taskId: input.taskId ?? null,
+        debugTrace: input.debugTrace ?? null,
+        attachments: input.attachments ?? null,
+        attachmentTexts: input.attachmentTexts ?? null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      // Assistant messages are upserts: an approval continuation finishes the
+      // stream under the same message id the paused turn already persisted.
+      // The guard keeps a colliding id from ever rewriting another session's
+      // (or a user's) message — the update is skipped and the throw below
+      // surfaces the conflict like the plain insert used to.
+      const [message] = await (input.role === "assistant"
+        ? insert.onConflictDoUpdate({
+            target: goatChatMessages.id,
+            set: {
+              content: input.content,
+              taskId: input.taskId ?? null,
+              debugTrace: input.debugTrace ?? null,
+              updatedAt: now,
+            },
+            setWhere: sql`${goatChatMessages.sessionId} = ${input.sessionId} and ${goatChatMessages.role} = 'assistant'`,
+          })
+        : insert
+      ).returning();
       if (!message) throw new Error("Unable to create Goat chat message.");
       return message;
     },

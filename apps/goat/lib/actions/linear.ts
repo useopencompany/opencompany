@@ -213,6 +213,8 @@ export async function resolveLinearActions(
   const actions: ResolvedGoatAction[] = LINEAR_ACTION_SPECS.map((spec) => ({
     id: spec.id,
     provider: "linear",
+    capability: "read",
+    permissionMode: "on",
     description: spec.description,
     params: spec.params,
     execute: (params, context) =>
