@@ -2,12 +2,25 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { GoatHarnessEngine } from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
+  type GoatGatewayFeature,
   goatGatewayProviderOptions,
 } from "@opencompany/goat-observability";
-import { createGateway, generateText, jsonSchema, stepCountIs, type ToolSet, tool } from "ai";
+import { flushLatitude, latitudeTelemetry } from "@opencompany/goat-observability/latitude";
+import {
+  createGateway,
+  generateText,
+  jsonSchema,
+  type LanguageModelUsage,
+  stepCountIs,
+  type ToolCallRepairFunction,
+  type ToolSet,
+  tool,
+} from "ai";
 import { MAX_ACTION_CALLS_PER_TURN } from "@/lib/actions/limits";
 import {
+  buildGoatBrainMultiBrainToolSchema,
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
+  type GoatBrainMultiBrainTarget,
   normalizeGoatBrainReadToolInput,
 } from "@/lib/brain-surface";
 import {
@@ -113,7 +126,7 @@ type EditTaskScheduleRunner = (
 type DeleteTaskScheduleRunner = (
   input: DeleteTaskScheduleToolInput,
 ) => Promise<DeleteTaskScheduleToolOutput>;
-type ActionDispatcher = {
+export type ActionDispatcher = {
   // The action catalog resolved server-side from real connection state; ids
   // become the dispatch enum, so a disconnected provider's actions cannot be
   // invoked by guessing.
@@ -124,6 +137,13 @@ type ActionDispatcher = {
     toolCallId: string;
   }) => Promise<UseActionToolOutput>;
 };
+
+// An action in "ask" mode pauses the stream on a tool-approval request the
+// user answers in the chat UI; the approved call executes on the follow-up
+// approval-continuation request with the recorded input.
+function actionNeedsApproval(catalog: GoatChatActionCatalog, actionId: string) {
+  return catalog.actions.find((action) => action.id === actionId)?.permissionMode === "ask";
+}
 
 // Main chat (and the MCP connector) get a read-only brain surface: recall and
 // inspect only. Every write path — new content and edits to existing records —
@@ -154,6 +174,10 @@ export type OpenCompanyChatAgentResult = {
   content: string;
   task: StartedTask | null;
   debugTrace: OpenCompanyChatAgentDebugTrace;
+  // Full-turn usage across all steps (unlike debugTrace.usage, which is the
+  // last step only as a context-fullness proxy). Headless surfaces need this
+  // for credit debits.
+  totalUsage: LanguageModelUsage | undefined;
 };
 
 type OpenCompanyChatSystemPromptInput = NonNullable<
@@ -171,7 +195,7 @@ export async function runOpenCompanyChatAgent(input: {
   messages: readonly OpenCompanyChatAgentMessage[];
   model: AgentModelId;
   gatewayApiKey: string;
-  startTask: (task: StartTaskRequest) => Promise<StartedTask>;
+  startTask?: (task: StartTaskRequest) => Promise<StartedTask>;
   requestedEngine?: GoatHarnessEngine;
   scheduleTask?: ScheduleTaskRunner;
   editTaskSchedule?: EditTaskScheduleRunner;
@@ -179,12 +203,27 @@ export async function runOpenCompanyChatAgent(input: {
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   webSearch?: WebSearchRunner;
+  actions?: ActionDispatcher;
+  goatBrainMultiBrain?: { targets: readonly GoatBrainMultiBrainTarget[] };
   currentDate?: Date | string;
   userContext?: OpenCompanyChatSystemPromptInput["userContext"];
   recurringSchedules?: OpenCompanyChatSystemPromptInput["recurringSchedules"];
+  taskToolsEnabled?: boolean;
+  brainCaptureEnabled?: boolean;
+  activeBrain?: OpenCompanyChatSystemPromptInput["activeBrain"];
+  connectedIntegrations?: OpenCompanyChatSystemPromptInput["connectedIntegrations"];
+  // Surface-specific prompt blocks appended after the shared system prompt
+  // (e.g. Slack mrkdwn formatting rules).
+  extraSystemBlocks?: readonly string[];
+  // Gateway cost attribution surface; defaults to the main chat.
+  feature?: GoatGatewayFeature;
   userWorkosId?: string | null;
   chatSessionId?: string | null;
+  // Latitude session grouping for surfaces without a chat session (e.g. a
+  // Slack thread ref); chatSessionId wins when both are set.
+  telemetrySessionId?: string | null;
   brainRef?: string | null;
+  abortSignal?: AbortSignal;
   generateTextImpl?: GenerateTextLike;
 }): Promise<OpenCompanyChatAgentResult> {
   const gatewayApiKey = input.gatewayApiKey.trim();
@@ -196,14 +235,14 @@ export async function runOpenCompanyChatAgent(input: {
   const gateway = createGateway({ apiKey: gatewayApiKey });
   const attribution = createGoatGatewayAttribution({
     userWorkosId: input.userWorkosId,
-    feature: "chat",
+    feature: input.feature ?? "chat",
     ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
     ...(input.brainRef ? { brainRef: input.brainRef } : {}),
   });
   const latestUserMessage = latestUserMessageContent(input.messages);
   const toolContext = createOpenCompanyChatToolContext({
     model: input.model,
-    startTask: input.startTask,
+    ...(input.startTask ? { startTask: input.startTask } : {}),
     ...(latestUserMessage ? { latestUserMessage } : {}),
     ...(input.requestedEngine ? { requestedEngine: input.requestedEngine } : {}),
     ...(input.scheduleTask ? { scheduleTask: input.scheduleTask } : {}),
@@ -212,6 +251,8 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
+    ...(input.actions ? { actions: input.actions } : {}),
+    ...(input.goatBrainMultiBrain ? { goatBrainMultiBrain: input.goatBrainMultiBrain } : {}),
   });
 
   const systemPromptInput = {
@@ -219,19 +260,53 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.currentDate ? { currentDate: input.currentDate } : {}),
     ...(input.userContext ? { userContext: input.userContext } : {}),
     ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
+    ...(input.taskToolsEnabled !== undefined ? { taskToolsEnabled: input.taskToolsEnabled } : {}),
+    ...(input.brainCaptureEnabled !== undefined
+      ? { brainCaptureEnabled: input.brainCaptureEnabled }
+      : {}),
+    ...(input.activeBrain !== undefined ? { activeBrain: input.activeBrain } : {}),
+    ...(input.connectedIntegrations !== undefined
+      ? { connectedIntegrations: input.connectedIntegrations }
+      : {}),
   };
+  const system = [
+    createOpenCompanyChatSystemPrompt(systemPromptInput),
+    ...(input.extraSystemBlocks ?? []),
+  ].join("\n\n");
 
-  const result = await generate({
-    model: gateway(input.model),
-    system: createOpenCompanyChatSystemPrompt(systemPromptInput),
-    messages: input.messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-    })),
-    stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
-    tools: toolContext.tools,
-    providerOptions: goatGatewayProviderOptions(attribution),
-  });
+  const feature = input.feature ?? "chat";
+  let result: Awaited<ReturnType<GenerateTextLike>>;
+  try {
+    result = await generate({
+      model: gateway(input.model),
+      system,
+      messages: input.messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+      stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
+      tools: toolContext.tools,
+      ...(toolContext.repairToolCall
+        ? { experimental_repairToolCall: toolContext.repairToolCall }
+        : {}),
+      providerOptions: goatGatewayProviderOptions(attribution),
+      ...latitudeTelemetry({
+        name: feature === "slack-bot" ? "slack-answer" : "chat-agent",
+        feature,
+        userId: input.userWorkosId,
+        sessionId: input.chatSessionId ?? input.telemetrySessionId,
+        metadata: {
+          model: input.model,
+          ...(input.brainRef ? { brainRef: input.brainRef } : {}),
+        },
+      }),
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    });
+  } finally {
+    // Headless callers (Slack bot, schedulers) have no response lifecycle to
+    // hook a flush onto, so export before returning. No-op when disabled.
+    await flushLatitude();
+  }
 
   const startedTask = toolContext.getStartedTask();
   const content = normalizeAgentText(result.text, startedTask);
@@ -245,6 +320,7 @@ export async function runOpenCompanyChatAgent(input: {
       steps: result.steps,
       ...(finishReason ? { finishReason } : {}),
     }),
+    totalUsage: result.totalUsage,
   };
 }
 
@@ -260,6 +336,10 @@ export function createOpenCompanyChatToolContext(input: {
   saveToBrain?: SaveToBrainRunner;
   webSearch?: WebSearchRunner;
   actions?: ActionDispatcher;
+  // When several brains are in scope (e.g. a Slack channel routed to more than
+  // one brain), the goat_brain schema grows a required `brain` enum and raw
+  // args flow to runBrainCli so the runner can pick the target and normalize.
+  goatBrainMultiBrain?: { targets: readonly GoatBrainMultiBrainTarget[] };
 }) {
   let startedTask: StartedTask | null = null;
   let startTaskInFlight: Promise<StartedTask> | null = null;
@@ -268,20 +348,31 @@ export function createOpenCompanyChatToolContext(input: {
   let visibleToolActivity = false;
   let webSearchCallCount = 0;
   let actionCallCount = 0;
+  let repairToolCall: ToolCallRepairFunction<ToolSet> | undefined;
+
+  const multiBrainTargets = input.goatBrainMultiBrain?.targets ?? [];
+  const multiBrain = multiBrainTargets.length > 1;
+  const goatBrainSchema = multiBrain
+    ? (buildGoatBrainMultiBrainToolSchema(multiBrainTargets) as unknown as Parameters<
+        typeof jsonSchema
+      >[0])
+    : GOAT_BRAIN_READ_TOOL_AI_SCHEMA;
 
   const tools: ToolSet = {
     [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
       description: GOAT_BRAIN_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<GoatBrainToolInput>(GOAT_BRAIN_READ_TOOL_AI_SCHEMA),
+      inputSchema: jsonSchema<GoatBrainToolInput>(goatBrainSchema),
       execute: async (args, executionContext?: unknown) => {
         if (!input.runBrainCli) {
           throw new Error("goat_brain is not configured for this chat.");
         }
         visibleToolActivity = true;
-        const normalized = normalizeGoatBrainToolInput(args);
+        // Multi-brain runners receive the raw args (including `brain`) and own
+        // normalization after extracting the target.
+        const toolArgs = multiBrain ? args : normalizeGoatBrainToolInput(args);
         return executionContext === undefined
-          ? input.runBrainCli(normalized)
-          : input.runBrainCli(normalized, executionContext);
+          ? input.runBrainCli(toolArgs)
+          : input.runBrainCli(toolArgs, executionContext);
       },
     }),
   };
@@ -624,6 +715,24 @@ export function createOpenCompanyChatToolContext(input: {
   if (actions && actions.catalog.actions.length > 0) {
     const integrationIds = actions.catalog.providers.map((provider) => provider.id);
     const actionIds = actions.catalog.actions.map((action) => action.id);
+    const actionIdSet = new Set(actionIds);
+    // Models sometimes emit an action id from discovery (for example
+    // "linear.get_project") as the tool name instead of wrapping it in
+    // use_action. Repair only exact ids from this user's current catalog so
+    // normal validation and write approval still happen inside use_action.
+    repairToolCall = async ({ toolCall }) => {
+      if (!actionIdSet.has(toolCall.toolName)) return null;
+      const params = parseToolCallParams(toolCall.input);
+      if (!params) return null;
+      return {
+        ...toolCall,
+        toolName: USE_ACTION_TOOL_NAME,
+        input: JSON.stringify({
+          action: toolCall.toolName,
+          params,
+        }),
+      };
+    };
     tools[LIST_ACTIONS_TOOL_NAME] = tool<ListActionsToolInput, ListActionsToolOutput>({
       description: LIST_ACTIONS_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<ListActionsToolInput>({
@@ -664,6 +773,8 @@ export function createOpenCompanyChatToolContext(input: {
     });
     tools[USE_ACTION_TOOL_NAME] = tool<UseActionToolInput, UseActionToolOutput>({
       description: USE_ACTION_TOOL_DESCRIPTION,
+      needsApproval: async (args) =>
+        actionNeedsApproval(actions.catalog, typeof args.action === "string" ? args.action : ""),
       inputSchema: jsonSchema<UseActionToolInput>({
         type: "object",
         additionalProperties: false,
@@ -726,6 +837,7 @@ export function createOpenCompanyChatToolContext(input: {
   return {
     getStartedTask: () => startedTask,
     hasVisibleToolActivity: () => visibleToolActivity,
+    repairToolCall,
     tools,
   };
 }
@@ -775,6 +887,18 @@ function latestUserMessageContent(messages: readonly OpenCompanyChatAgentMessage
     if (trimmed) return trimmed;
   }
   return undefined;
+}
+
+function parseToolCallParams(input: string): Record<string, unknown> | null {
+  if (!input.trim()) return {};
+  try {
+    const parsed = JSON.parse(input);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeStartTaskEngine(value: unknown): GoatHarnessEngine | undefined {

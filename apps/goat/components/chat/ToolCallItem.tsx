@@ -22,6 +22,7 @@ import {
   EDIT_TASK_SCHEDULE_TOOL_NAME,
   GOAT_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
+  USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
 import {
   formatDebugValue,
@@ -39,14 +40,26 @@ export type CodexToolAction =
       answers: Record<string, { answers: string[] }>;
     };
 
+export type ActionApprovalDecision = "accept" | "accept_always" | "decline";
+
+export type ActionApprovalRequest = {
+  approvalId: string;
+  action: string;
+  decision: ActionApprovalDecision;
+};
+
 export function ToolCallItem({
   tool,
   onCodexAction,
   allowCodexPlanActions = false,
+  onActionApproval,
+  allowActionApproval = false,
 }: {
   tool: ToolCallView;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   allowCodexPlanActions?: boolean;
+  onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
+  allowActionApproval?: boolean;
 }) {
   if (tool.name === GOAT_BRAIN_TOOL_NAME) {
     return <BrainToolCallRow tool={tool} />;
@@ -62,7 +75,172 @@ export function ToolCallItem({
   if (tool.name === CODEX_QUESTION_TOOL_NAME && codexQuestionInput(tool.input)) {
     return <CodexQuestionRow tool={tool} onAction={onCodexAction} />;
   }
+  if (
+    tool.name === USE_ACTION_TOOL_NAME &&
+    tool.state === "approval-requested" &&
+    tool.approvalId
+  ) {
+    // A pending approval mid-thread (the user kept chatting past it) stays a
+    // plain row: only the latest assistant message is actionable.
+    if (allowActionApproval && onActionApproval) {
+      return <ActionApprovalCard tool={tool} onDecision={onActionApproval} />;
+    }
+  }
   return <ToolCallRow tool={tool} />;
+}
+
+function ActionApprovalCard({
+  tool,
+  onDecision,
+}: {
+  tool: ToolCallView;
+  onDecision: (request: ActionApprovalRequest) => Promise<void>;
+}) {
+  const [submitting, setSubmitting] = useState<ActionApprovalDecision | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const summary = actionApprovalSummary(tool.input);
+  const approvalId = tool.approvalId;
+  const action =
+    isRecord(tool.input) && typeof tool.input.action === "string" ? tool.input.action : "";
+  if (!approvalId) return <ToolCallRow tool={tool} />;
+
+  const decide = (decision: ActionApprovalDecision) => {
+    if (submitting) return;
+    setError(null);
+    setSubmitting(decision);
+    void onDecision({ approvalId, action, decision }).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : "Could not send your decision.");
+      setSubmitting(null);
+    });
+    // No .finally reset on success: the part state flips to approval-responded
+    // and this card unmounts into the resolved row.
+  };
+
+  return (
+    <div
+      data-testid="chat-action-approval"
+      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <div className="text-[12px] font-semibold text-ink">{summary.heading}</div>
+      {summary.lines.length > 0 ? (
+        <dl className="mt-2 space-y-1">
+          {summary.lines.map((line) => (
+            <div key={line.label} className="flex gap-2 text-[12px] leading-5">
+              <dt className="w-20 shrink-0 text-ink-subtle">{line.label}</dt>
+              <dd className="min-w-0 break-words text-ink-muted">{line.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={submitting !== null}
+          onClick={() => decide("accept")}
+          className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {submitting === "accept" ? "Running..." : "Accept"}
+        </button>
+        <button
+          type="button"
+          disabled={submitting !== null}
+          onClick={() => decide("accept_always")}
+          className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
+        >
+          {submitting === "accept_always" ? "Saving..." : "Always allow"}
+        </button>
+        <button
+          type="button"
+          disabled={submitting !== null}
+          onClick={() => decide("decline")}
+          className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
+        >
+          Decline
+        </button>
+      </div>
+      {error ? (
+        <p className="mt-2 text-[11px] text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// Human-readable confirmation content per action; the raw JSON stays behind
+// the regular expandable tool row, never on the card.
+function actionApprovalSummary(input: unknown): {
+  heading: string;
+  lines: Array<{ label: string; value: string }>;
+} {
+  const record = isRecord(input) ? input : {};
+  const action = typeof record.action === "string" ? record.action : "";
+  const params = isRecord(record.params) ? record.params : {};
+
+  if (action === "google_calendar.create_event") {
+    const lines: Array<{ label: string; value: string }> = [];
+    if (typeof params.summary === "string") lines.push({ label: "Event", value: params.summary });
+    const when = formatEventWindow(params.start, params.end, params.time_zone);
+    if (when) lines.push({ label: "When", value: when });
+    if (typeof params.location === "string") {
+      lines.push({ label: "Where", value: params.location });
+    }
+    if (Array.isArray(params.attendees) && params.attendees.length > 0) {
+      lines.push({
+        label: "Invites",
+        value: params.attendees.filter((entry) => typeof entry === "string").join(", "),
+      });
+    }
+    if (typeof params.calendar_id === "string" && params.calendar_id !== "primary") {
+      lines.push({ label: "Calendar", value: params.calendar_id });
+    }
+    if (typeof params.account === "string") {
+      lines.push({ label: "Account", value: params.account });
+    }
+    return { heading: "Add this event to your Google Calendar?", lines };
+  }
+
+  return {
+    heading: action
+      ? `Run ${action.split(".").join(" · ").split("_").join(" ")}?`
+      : "Run this action?",
+    lines: Object.entries(params).flatMap(([key, value]) => {
+      if (value === undefined || value === null) return [];
+      const rendered =
+        typeof value === "string" ? value : Array.isArray(value) ? value.join(", ") : String(value);
+      return rendered ? [{ label: key.split("_").join(" "), value: rendered }] : [];
+    }),
+  };
+}
+
+function formatEventWindow(start: unknown, end: unknown, timeZone: unknown) {
+  if (typeof start !== "string" || typeof end !== "string") return null;
+  const allDay = /^\d{4}-\d{2}-\d{2}$/.test(start);
+  if (allDay) {
+    return start === end ? `${start} (all day)` : `${start} – ${end} (all day)`;
+  }
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return `${start} – ${end}`;
+  }
+  const zone = typeof timeZone === "string" && timeZone ? timeZone : undefined;
+  try {
+    const dayFormat = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      ...(zone ? { timeZone: zone } : {}),
+    });
+    const timeFormat = new Intl.DateTimeFormat(undefined, {
+      timeStyle: "short",
+      ...(zone ? { timeZone: zone } : {}),
+    });
+    const sameDay = dayFormat.format(startDate) === dayFormat.format(endDate);
+    return sameDay
+      ? `${dayFormat.format(startDate)}, ${timeFormat.format(startDate)} – ${timeFormat.format(endDate)}`
+      : `${dayFormat.format(startDate)} ${timeFormat.format(startDate)} – ${dayFormat.format(endDate)} ${timeFormat.format(endDate)}`;
+  } catch {
+    return `${start} – ${end}`;
+  }
 }
 
 function CodexPlanRow({

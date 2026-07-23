@@ -89,6 +89,10 @@ const optionalRunnerRuntimeEnv = optionalEnvMap([
   "BRAINTRUST_API_KEY",
   "BRAINTRUST_PROJECT_ID",
   "BRAINTRUST_PROJECT_NAME",
+  "LATITUDE_API_KEY",
+  "LATITUDE_PROJECT_SLUG",
+  "LATITUDE_SERVICE_NAME",
+  "LATITUDE_TELEMETRY_DISABLED",
 ]);
 
 // Per-PR shared secrets: minted here, injected into both producer and consumer sides.

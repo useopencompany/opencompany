@@ -1,4 +1,5 @@
 import "./load-env";
+import { flushLatitude } from "@opencompany/goat-observability/latitude";
 import {
   registerGoatNodeObservability,
   shutdownGoatNodeObservability,
@@ -235,6 +236,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
         return Promise.allSettled([
           flushObservability(),
           flushBraintrust(),
+          flushLatitude(),
           shutdownGoatNodeObservability(),
         ]);
       })

@@ -12,6 +12,10 @@ export type GoatSlackBotSettingsData = {
   configured: boolean;
   installed: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  // Installed before the current scope set: mentions keep working, but the
+  // newer features (DMs, mention-free follow-ups, status reactions) need a
+  // reconnect to grant the added scopes.
+  needsScopeUpgrade: boolean;
   teamName: string | null;
   statusReason: string | null;
   destinationCount: number;
@@ -135,7 +139,21 @@ function SlackBotPanel({ data }: { data: GoatSlackBotSettingsData }) {
         >
           Reconnect Slack
         </a>
-      ) : (
+      ) : data.needsScopeUpgrade ? (
+        <div className="flex flex-col gap-3">
+          <Banner tone="success">
+            Reconnect Slack to enable the newest bot features: answers in DMs, thread replies
+            without re-mentioning, and live status reactions.
+          </Banner>
+          <a
+            href={connectHref}
+            className="w-fit rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            Reconnect Slack
+          </a>
+        </div>
+      ) : null}
+      {data.status === "connected" ? (
         <div className="flex flex-col gap-2">
           <span className="text-[13px] font-medium text-ink">Next steps</span>
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-[13px] leading-5 text-ink-subtle">
@@ -147,7 +165,11 @@ function SlackBotPanel({ data }: { data: GoatSlackBotSettingsData }) {
               </Link>{" "}
               and pick its channels.
             </li>
-            <li>Mention @opencompany in one of those channels and ask a question.</li>
+            <li>
+              Mention @opencompany in one of those channels and ask a question — replies in the
+              thread continue the conversation without another mention, and team members can DM the
+              bot directly.
+            </li>
           </ol>
           <p className="text-[12px] leading-4 text-ink-subtle">
             {data.destinationCount > 0
@@ -155,7 +177,7 @@ function SlackBotPanel({ data }: { data: GoatSlackBotSettingsData }) {
               : "No brains are connected to Slack channels yet."}
           </p>
         </div>
-      )}
+      ) : null}
 
       <div className="flex flex-col gap-2">
         <button

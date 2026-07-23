@@ -4,7 +4,10 @@ import { getGoatSlackBotIntegrationForWorkspace } from "@opencompany/db/goat-sla
 import { and, count, eq } from "drizzle-orm";
 import { GoatSlackBotSettings } from "@/components/GoatSlackBotSettings";
 import { currentGoatUser } from "@/lib/auth";
-import { isGoatSlackBotConfigured } from "@/lib/integrations/slack-bot";
+import {
+  goatSlackBotScopesSatisfied,
+  isGoatSlackBotConfigured,
+} from "@/lib/integrations/slack-bot";
 
 export default async function WorkspaceSlackBotSettingsPage({
   searchParams,
@@ -41,6 +44,12 @@ export default async function WorkspaceSlackBotSettingsPage({
         configured: isGoatSlackBotConfigured(),
         installed,
         status: integration && installed ? integration.status : "not_connected",
+        needsScopeUpgrade: Boolean(
+          integration &&
+            installed &&
+            integration.status === "connected" &&
+            !goatSlackBotScopesSatisfied(integration.scopes),
+        ),
         teamName: integration?.connectionLabel ?? null,
         statusReason: integration?.statusReason ?? null,
         destinationCount,

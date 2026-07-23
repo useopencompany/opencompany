@@ -43,6 +43,7 @@ import {
   startGoatSpan,
   withGoatSpan,
 } from "@opencompany/goat-observability";
+import { flushLatitude } from "@opencompany/goat-observability/latitude";
 import { captureException, createLogger } from "@opencompany/observability";
 import { flushBraintrust, traceBraintrust } from "@opencompany/observability/braintrust";
 import { captureStatsigServerEvent } from "@opencompany/statsig/server";
@@ -667,16 +668,12 @@ export async function runClaimedGoatBrainIngestJob(input: {
   const runSpan = startGoatSpan(GOAT_SPANS.brainIngestRun, baseAttributes);
   // Product-analytics counterpart to the observability span: one event per ingestion agent
   // run. No-ops unless STATSIG_SERVER_SECRET_KEY is present in the runner env.
-  await captureStatsigServerEvent(
-    "brain_ingestion_run",
-    input.job.workspaceId ?? input.job.userWorkosId,
-    {
-      source: input.job.sourceProvider,
-      run_id: input.job.id,
-      ...(input.job.workspaceId ? { workspace_id: input.job.workspaceId } : {}),
-      ...(input.job.brainRef ? { brain_id: input.job.brainRef } : {}),
-    },
-  );
+  await captureStatsigServerEvent("brain_ingestion_run", input.job.userWorkosId, {
+    source: input.job.sourceProvider,
+    run_id: input.job.id,
+    ...(input.job.workspaceId ? { workspace_id: input.job.workspaceId } : {}),
+    ...(input.job.brainRef ? { brain_id: input.job.brainRef } : {}),
+  });
   let leaseActive = true;
   let telemetryFinished = false;
   const runAbort = new AbortController();
@@ -964,6 +961,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
     // Flush the job's spans promptly; the runner is long-lived and may not shut
     // down (its only other flush point) for a long time. No-ops when disabled.
     await flushBraintrust();
+    await flushLatitude();
   }
 }
 
@@ -1020,6 +1018,16 @@ async function debitIngestModelCost(
         brainQueryCostUsdMicros: budget?.brainQueryCostUsdMicros ?? 0,
         webSearchCostUsdMicros: budget?.webSearchCostUsdMicros ?? 0,
         usage: trace.usage,
+        ...(trace.triage
+          ? {
+              triage: {
+                model: trace.triage.model,
+                decision: trace.triage.decision,
+                modelCostUsdMicros: trace.triage.modelCostUsdMicros,
+                usage: trace.triage.usage,
+              },
+            }
+          : {}),
       },
     });
   } catch (error) {
@@ -1037,22 +1045,40 @@ function recordBrainIngestModelCost(result: Record<string, unknown>) {
   const trace = normalizeGoatBrainIngestTrace(result.trace);
   if (!trace) return;
 
-  const inputTokens = trace.usage.inputTokens ?? 0;
-  const inputCacheReadTokens = trace.usage.cacheReadInputTokens ?? 0;
-  const inputCacheWriteTokens = trace.usage.cacheWriteInputTokens ?? 0;
+  if (trace.triage) {
+    recordBrainIngestModelUsageCost(trace.triage.model, trace.triage.usage);
+  }
+  // A triage skip has no second/full-agent model call; its top-level model and
+  // usage mirror the triage fields for backwards-compatible activity views.
+  if (trace.triage?.decision === "skip") return;
+  recordBrainIngestModelUsageCost(trace.model, trace.usage);
+}
+
+function recordBrainIngestModelUsageCost(
+  model: string,
+  usage: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+    cacheReadInputTokens?: number | null;
+    cacheWriteInputTokens?: number | null;
+  },
+) {
+  const inputTokens = usage.inputTokens ?? 0;
+  const inputCacheReadTokens = usage.cacheReadInputTokens ?? 0;
+  const inputCacheWriteTokens = usage.cacheWriteInputTokens ?? 0;
   const cost = calculateModelUsageCost({
-    modelName: trace.model,
+    modelName: model,
     inputTokens,
     inputNoCacheTokens: Math.max(inputTokens - inputCacheReadTokens - inputCacheWriteTokens, 0),
     inputCacheReadTokens,
     inputCacheWriteTokens,
-    outputTokens: trace.usage.outputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
   });
 
   recordGoatModelCost({
     costUsdMicros: cost.totalCostUsdMicros,
     attributes: {
-      "goat.model": trace.model,
+      "goat.model": model,
       "goat.surface": "brain_ingest",
     },
   });

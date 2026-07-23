@@ -32,6 +32,7 @@ const eventMocks = vi.hoisted(() => ({
 }));
 
 const sandboxMocks = vi.hoisted(() => ({
+  armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
 }));
@@ -72,6 +73,7 @@ vi.mock("./goat-codex-chat-events", () => ({
 }));
 
 vi.mock("./sandbox", () => ({
+  armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
   writeSandboxTextFiles: vi.fn(
@@ -107,6 +109,7 @@ describe("runGoatCodexChatTurn", () => {
       interrupted: vi.fn(async () => undefined),
       cancelPendingInteractions: vi.fn(async () => false),
     });
+    sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     appServerMocks.runCodexAppServerTurn.mockResolvedValue({
@@ -286,6 +289,73 @@ describe("runGoatCodexChatTurn", () => {
     expect(projector.fail).not.toHaveBeenCalled();
     expect(projector.interrupted).not.toHaveBeenCalled();
     expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 600_000);
+  });
+
+  it("treats a setup timeout after shutdown starts as a handoff", async () => {
+    dbMocks.selectRows.push([]);
+    const sandbox = fakeSandbox("sbx_existing");
+    let handoffRequested = false;
+    const timeout = new Error("the operation timed out");
+    timeout.name = "TimeoutError";
+    sandbox.commands.run.mockImplementationOnce(async () => {
+      handoffRequested = true;
+      throw timeout;
+    });
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+
+    await expect(
+      runGoatCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        env: env(),
+        shouldAbort: () => (handoffRequested ? new GoatCodexChatHandoffError() : null),
+      }),
+    ).resolves.toBe("handed_off");
+
+    const projector = eventMocks.createGoatCodexChatProjector.mock.results[0]?.value;
+    expect(projector.cancelPendingInteractions).toHaveBeenCalledOnce();
+    expect(projector.fail).not.toHaveBeenCalled();
+    expect(appServerMocks.runCodexAppServerTurn).not.toHaveBeenCalled();
+    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 600_000);
+  });
+
+  it("does not park a sandbox after shutdown already released the lease", async () => {
+    dbMocks.selectRows.push([]);
+    dbMocks.execute.mockResolvedValueOnce({ rows: [] });
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new GoatCodexChatHandoffError());
+
+    await expect(
+      runGoatCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("handed_off");
+
+    expect(sandboxMocks.armSandboxIdleTimeout).not.toHaveBeenCalled();
+  });
+
+  it("restores the active sandbox timeout when lease handoff wins the parking race", async () => {
+    dbMocks.selectRows.push([]);
+    dbMocks.execute
+      .mockResolvedValueOnce({ rows: [{ id: "owned" }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new GoatCodexChatHandoffError());
+
+    await expect(
+      runGoatCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("handed_off");
+
+    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 600_000);
+    expect(sandboxMocks.armSandboxActiveTimeoutById).toHaveBeenCalledWith("sbx_existing");
   });
 
   it("persists first-turn engine ids before a handoff can detach the proxy", async () => {

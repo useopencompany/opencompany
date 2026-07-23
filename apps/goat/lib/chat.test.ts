@@ -1,4 +1,5 @@
 import type {
+  GoatChatMessageDebugTrace,
   GoatChatSession,
   GoatCodexChatTurnSettings,
   GoatTaskStatus,
@@ -8,8 +9,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeGoatChatSessionForUser,
   createDbGoatChatStore,
+  createGoatChatApprovalContinuationTurn,
   createGoatChatUserTurn,
+  dismissStaleGoatChatApprovals,
   type GoatChatStore,
+  type GoatChatUiMessage,
   listRecentGoatChatsForUser,
   loadGoatChatSessionByIdForUser,
   persistGoatChatAssistantMessage,
@@ -286,6 +290,195 @@ describe("persistGoatChatAssistantMessage", () => {
         finishReason: "stop",
       },
     });
+  });
+});
+
+function pendingApprovalPart(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    type: "tool-use_action",
+    toolCallId: "call_1",
+    state: "approval-requested",
+    input: { action: "google_calendar.create_event", params: { summary: "Sync" } },
+    approval: { id: "appr_1" },
+    ...overrides,
+  };
+}
+
+function assistantApprovalTrace(parts: unknown[]): GoatChatMessageDebugTrace {
+  return {
+    schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
+    model: DEFAULT_GOAT_MODEL,
+    uiMessageParts: parts,
+  };
+}
+
+async function seedTurnAwaitingApproval(store: GoatChatStore, parts: unknown[]) {
+  const turn = await createGoatChatUserTurn(
+    { userWorkosId: "user_1", prompt: "add my sync", model: DEFAULT_GOAT_MODEL },
+    store,
+  );
+  const assistant = await persistGoatChatAssistantMessage(
+    {
+      sessionId: turn.session.id,
+      messageId: "assistant_1",
+      content: "",
+      debugTrace: assistantApprovalTrace(parts),
+    },
+    store,
+  );
+  return { turn, assistant };
+}
+
+describe("createGoatChatApprovalContinuationTurn", () => {
+  it("merges only the approval decision, denies unanswered requests, and persists", async () => {
+    const { store, messages } = createInMemoryChatStore();
+    const { turn } = await seedTurnAwaitingApproval(store, [
+      pendingApprovalPart(),
+      pendingApprovalPart({ toolCallId: "call_2", approval: { id: "appr_2" } }),
+    ]);
+
+    const result = await createGoatChatApprovalContinuationTurn(
+      {
+        userWorkosId: "user_1",
+        sessionId: turn.session.id,
+        message: {
+          id: "assistant_1",
+          role: "assistant",
+          parts: [
+            pendingApprovalPart({
+              state: "approval-responded",
+              approval: { id: "appr_1", approved: true },
+              // A tampered client input must not survive the merge.
+              input: { action: "google_calendar.create_event", params: { summary: "HACKED" } },
+            }),
+          ],
+        } as unknown as GoatChatUiMessage,
+      },
+      store,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.respondedApprovalIds).toEqual(["appr_1"]);
+    expect(result.lastUserMessage?.content).toBe("add my sync");
+
+    const persisted = messages.find((message) => message.id === "assistant_1");
+    const parts = persisted?.debugTrace?.uiMessageParts as Array<Record<string, unknown>>;
+    expect(parts[0]).toMatchObject({
+      state: "approval-responded",
+      approval: { id: "appr_1", approved: true },
+      input: { params: { summary: "Sync" } },
+    });
+    expect(parts[1]).toMatchObject({
+      state: "output-denied",
+      approval: { id: "appr_2", approved: false },
+    });
+  });
+
+  it("only continues the latest assistant message", async () => {
+    const { store, turnFollowUp } = await (async () => {
+      const memory = createInMemoryChatStore();
+      const { turn } = await seedTurnAwaitingApproval(memory.store, [pendingApprovalPart()]);
+      // A newer user message makes assistant_1 stale.
+      const followUp = await createGoatChatUserTurn(
+        {
+          userWorkosId: "user_1",
+          prompt: "actually nevermind",
+          model: DEFAULT_GOAT_MODEL,
+          sessionId: turn.session.id,
+        },
+        memory.store,
+      );
+      return { store: memory.store, turnFollowUp: followUp };
+    })();
+
+    const result = await createGoatChatApprovalContinuationTurn(
+      {
+        userWorkosId: "user_1",
+        sessionId: turnFollowUp.session.id,
+        message: {
+          id: "assistant_1",
+          role: "assistant",
+          parts: [],
+        } as unknown as GoatChatUiMessage,
+      },
+      store,
+    );
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("latest") });
+  });
+
+  it("rejects when there is nothing pending and when the session is unknown", async () => {
+    const { store } = createInMemoryChatStore();
+    const { turn } = await seedTurnAwaitingApproval(store, [
+      pendingApprovalPart({ state: "output-available", output: { ok: true } }),
+    ]);
+
+    const noPending = await createGoatChatApprovalContinuationTurn(
+      {
+        userWorkosId: "user_1",
+        sessionId: turn.session.id,
+        message: {
+          id: "assistant_1",
+          role: "assistant",
+          parts: [],
+        } as unknown as GoatChatUiMessage,
+      },
+      store,
+    );
+    expect(noPending).toMatchObject({ ok: false, error: expect.stringContaining("pending") });
+
+    const wrongSession = await createGoatChatApprovalContinuationTurn(
+      {
+        userWorkosId: "user_1",
+        sessionId: "missing",
+        message: {
+          id: "assistant_1",
+          role: "assistant",
+          parts: [],
+        } as unknown as GoatChatUiMessage,
+      },
+      store,
+    );
+    expect(wrongSession).toMatchObject({ ok: false, error: expect.stringContaining("not found") });
+  });
+});
+
+describe("dismissStaleGoatChatApprovals", () => {
+  it("denies pending approvals the user talked past and persists the rewrite", async () => {
+    const { store, messages } = createInMemoryChatStore();
+    const { turn } = await seedTurnAwaitingApproval(store, [pendingApprovalPart()]);
+    const followUp = await createGoatChatUserTurn(
+      {
+        userWorkosId: "user_1",
+        prompt: "different question",
+        model: DEFAULT_GOAT_MODEL,
+        sessionId: turn.session.id,
+      },
+      store,
+    );
+
+    const result = await dismissStaleGoatChatApprovals(followUp, store);
+    expect(result.changed).toBe(true);
+
+    const persisted = messages.find((message) => message.id === "assistant_1");
+    const parts = persisted?.debugTrace?.uiMessageParts as Array<Record<string, unknown>>;
+    expect(parts[0]).toMatchObject({
+      state: "output-denied",
+      approval: {
+        id: "appr_1",
+        approved: false,
+        reason: expect.stringContaining("did not respond"),
+      },
+    });
+  });
+
+  it("leaves resolved histories untouched", async () => {
+    const { store } = createInMemoryChatStore();
+    const { turn } = await seedTurnAwaitingApproval(store, [
+      pendingApprovalPart({ state: "output-available", output: { ok: true } }),
+    ]);
+    const result = await dismissStaleGoatChatApprovals(turn, store);
+    expect(result.changed).toBe(false);
   });
 });
 
@@ -638,6 +831,23 @@ function createInMemoryChatStore(
     async insertMessage(input) {
       const now = new Date();
       const task = options.tasks?.[input.taskId ?? ""];
+      // Mirror the db store: assistant messages upsert by id (approval
+      // continuations re-persist the same message id).
+      if (input.role === "assistant" && input.id) {
+        const existing = messages.find(
+          (message) =>
+            message.id === input.id &&
+            message.sessionId === input.sessionId &&
+            message.role === "assistant",
+        );
+        if (existing) {
+          existing.content = input.content;
+          existing.taskId = input.taskId ?? null;
+          existing.debugTrace = input.debugTrace ?? null;
+          existing.updatedAt = now;
+          return existing;
+        }
+      }
       const message: StoredChatMessage = {
         id: input.id ?? `message_${++messageCount}`,
         sessionId: input.sessionId,

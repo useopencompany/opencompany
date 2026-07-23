@@ -30,8 +30,9 @@ const GOAT_SLACK_BOT_ENVS = [
   "GOAT_SLACK_BOT_STATE_SECRET",
 ] as const;
 
-// Minimal bot scopes: receive mentions, reply, list channels for the picker,
-// and read thread context (best-effort). No DM/mpim scopes in v1.
+// Bot scopes: receive mentions and channel/DM messages, reply, list channels
+// for the picker, read thread context, react for status acks, and resolve the
+// asking Slack user's email for goat-identity mapping.
 export const GOAT_SLACK_BOT_SCOPES = [
   "app_mentions:read",
   "chat:write",
@@ -39,7 +40,25 @@ export const GOAT_SLACK_BOT_SCOPES = [
   "groups:read",
   "channels:history",
   "groups:history",
+  "im:history",
+  "reactions:write",
+  "users:read",
+  "users:read.email",
 ] as const;
+
+// Installs made before a scope was added keep working for mentions; the
+// settings UI surfaces a reconnect banner until the granted set catches up.
+export function goatSlackBotScopesSatisfied(grantedScopes: readonly string[]): boolean {
+  const granted = new Set(grantedScopes);
+  return GOAT_SLACK_BOT_SCOPES.every((scope) => granted.has(scope));
+}
+
+export function goatSlackBotHasScope(
+  grantedScopes: readonly string[],
+  scope: (typeof GOAT_SLACK_BOT_SCOPES)[number],
+): boolean {
+  return grantedScopes.includes(scope);
+}
 
 export function isGoatSlackBotConfigured() {
   return GOAT_SLACK_BOT_ENVS.every((name) => Boolean(process.env[name]?.trim()));

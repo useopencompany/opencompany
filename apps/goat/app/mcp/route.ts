@@ -6,6 +6,7 @@ import {
   verifyGoatMcpBearerToken,
 } from "@/lib/mcp-oauth";
 import { registerGoatBrainTools } from "@/lib/mcp-server";
+import { OPENCOMPANY_MCP_SERVER_NAME } from "@/lib/mcp-setup";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -30,7 +31,7 @@ async function handleMcpRequest(request: Request) {
 
       const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
       if (!gatewayApiKey) {
-        return Response.json({ error: "Goat MCP is not configured." }, { status: 503 });
+        return Response.json({ error: "OpenCompany MCP is not configured." }, { status: 503 });
       }
 
       const handler = createMcpHandler(
@@ -43,7 +44,7 @@ async function handleMcpRequest(request: Request) {
         },
         {
           serverInfo: {
-            name: "goat",
+            name: OPENCOMPANY_MCP_SERVER_NAME,
             version: "0.1.0",
           },
           instructions:

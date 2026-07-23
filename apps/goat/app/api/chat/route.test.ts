@@ -57,7 +57,9 @@ vi.mock("@/lib/brain-skills", async (importOriginal) => {
 
 vi.mock("@/lib/chat", () => ({
   createDbGoatChatStore: vi.fn(() => ({})),
+  createGoatChatApprovalContinuationTurn: vi.fn(),
   createGoatChatUserTurn: vi.fn(),
+  dismissStaleGoatChatApprovals: vi.fn(async () => ({ changed: false, messages: [] })),
   newGoatChatMessageId: vi.fn(() => "assistant_1"),
   persistGoatChatAssistantMessage: vi.fn(),
 }));
@@ -158,9 +160,14 @@ describe("POST /api/chat", () => {
     mockCreateTurn();
     mockResolveGoatActionCatalog().mockResolvedValue(sampleActionCatalog());
     mockStreamText().mockImplementation((options: unknown) => {
-      const tools = (options as { tools?: Record<string, unknown> }).tools ?? {};
+      const streamOptions = options as {
+        tools?: Record<string, unknown>;
+        experimental_repairToolCall?: unknown;
+      };
+      const tools = streamOptions.tools ?? {};
       expect(tools[LIST_ACTIONS_TOOL_NAME]).toBeDefined();
       expect(tools[USE_ACTION_TOOL_NAME]).toBeDefined();
+      expect(streamOptions.experimental_repairToolCall).toBeTypeOf("function");
       return {
         toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
       } as never;
@@ -1612,6 +1619,8 @@ function sampleActionCatalog() {
       {
         id: "slack.fetch_history",
         provider: "slack" as const,
+        capability: "read" as const,
+        permissionMode: "on" as const,
         description: "Fetch recent messages from one Slack conversation.",
         params: { type: "object" as const, properties: {} },
         execute: vi.fn(),

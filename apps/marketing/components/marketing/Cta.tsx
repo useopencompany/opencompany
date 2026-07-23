@@ -18,6 +18,7 @@ export function Cta({
   return (
     <a
       href={href}
+      data-visitors-event={variant === "primary" ? "signup" : undefined}
       className={cn(
         "inline-flex items-center rounded-none font-medium font-mono tracking-tight transition",
         variant === "primary"
