@@ -1213,6 +1213,13 @@ export const goatIntegrations = goat.table(
     status: text("status").$type<GoatIntegrationStatus>().notNull().default("connected"),
     statusReason: text("status_reason"),
     scopes: jsonb("scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    // Sparse per-connection capability mode overrides (capability id → "on" |
+    // "off" | "ask"). Missing keys fall back to the app-level capability
+    // registry defaults, so defaults can evolve without a backfill.
+    capabilityModes: jsonb("capability_modes")
+      .$type<Partial<Record<string, "on" | "off" | "ask">>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

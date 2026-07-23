@@ -58,6 +58,10 @@ export type ToolCallView = {
   input: unknown;
   output: unknown;
   errorText: string | null;
+  // Raw part state, so approval-aware rows (use_action) can tell a pending
+  // approval request apart from an in-flight call.
+  state: string;
+  approvalId: string | null;
 };
 
 export function getOrderedAssistantItems(
@@ -196,6 +200,9 @@ export function toolCallViewFromPart(
     input: part.input,
     output: part.output,
     errorText: typeof part.errorText === "string" ? part.errorText : null,
+    state,
+    approvalId:
+      isRecord(part.approval) && typeof part.approval.id === "string" ? part.approval.id : null,
   };
 }
 
@@ -231,7 +238,7 @@ export function toolStatusFromState(state: string, stopped = false): ToolCallVie
 }
 
 export function toolStatusText(status: ToolCallView["status"], state: string) {
-  if (state === "output-denied") return "Denied";
+  if (state === "output-denied") return "Declined";
   if (state === "approval-requested") return "Waiting";
   if (state === "approval-responded") return "Approved";
   if (status === "completed") return "Done";

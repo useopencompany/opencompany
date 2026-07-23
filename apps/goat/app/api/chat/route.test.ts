@@ -57,7 +57,9 @@ vi.mock("@/lib/brain-skills", async (importOriginal) => {
 
 vi.mock("@/lib/chat", () => ({
   createDbGoatChatStore: vi.fn(() => ({})),
+  createGoatChatApprovalContinuationTurn: vi.fn(),
   createGoatChatUserTurn: vi.fn(),
+  dismissStaleGoatChatApprovals: vi.fn(async () => ({ changed: false, messages: [] })),
   newGoatChatMessageId: vi.fn(() => "assistant_1"),
   persistGoatChatAssistantMessage: vi.fn(),
 }));
@@ -1612,6 +1614,8 @@ function sampleActionCatalog() {
       {
         id: "slack.fetch_history",
         provider: "slack" as const,
+        capability: "read" as const,
+        permissionMode: "on" as const,
         description: "Fetch recent messages from one Slack conversation.",
         params: { type: "object" as const, properties: {} },
         execute: vi.fn(),

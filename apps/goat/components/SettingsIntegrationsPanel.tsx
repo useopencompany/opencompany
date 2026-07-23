@@ -21,6 +21,12 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import {
+  effectiveCapabilityMode,
+  type GoatCapabilityMode,
+  type GoatProviderCapability,
+  providerCapabilities,
+} from "@/lib/actions/capabilities";
+import {
   disconnectGoatCodexAuth,
   type GoatCodexDeviceAuthFlow,
   pollGoatCodexDeviceAuth,
@@ -29,6 +35,7 @@ import {
 import {
   disconnectGoatIntegrationAccountAction,
   getGoatIntegrationAccountUsageAction,
+  setGoatIntegrationCapabilityModeAction,
 } from "@/lib/integration-account-actions";
 import {
   type GoatCodexProviderState,
@@ -633,6 +640,7 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
           </button>
         </div>
       </div>
+      {account.connected ? <CapabilityModeRows account={account} /> : null}
       {confirming ? (
         <div className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
           <span>
@@ -661,6 +669,106 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
         </div>
       ) : null}
       {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
+    </div>
+  );
+}
+
+// What the chat is allowed to do with this account: one row per registered
+// capability with an On / Ask / Off pill. Providers without registry entries
+// (everything except Google Calendar today) render nothing.
+function CapabilityModeRows({ account }: { account: GoatIntegrationAccountView }) {
+  const capabilities = providerCapabilities(account.provider);
+  if (capabilities.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1 border-t border-border/60 pt-1.5">
+      {capabilities.map((capability) => (
+        <CapabilityModeRow
+          key={capability.id}
+          integrationId={account.integrationId}
+          capability={capability}
+          mode={effectiveCapabilityMode(account.provider, capability.id, account.capabilityModes)}
+        />
+      ))}
+    </div>
+  );
+}
+
+const CAPABILITY_MODE_OPTIONS: Array<{ mode: GoatCapabilityMode; label: string }> = [
+  { mode: "on", label: "On" },
+  { mode: "ask", label: "Ask" },
+  { mode: "off", label: "Off" },
+];
+
+function CapabilityModeRow({
+  integrationId,
+  capability,
+  mode,
+}: {
+  integrationId: string;
+  capability: GoatProviderCapability;
+  mode: GoatCapabilityMode;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  // Optimistic selection so the pill flips immediately; the Electric row (or
+  // router refresh) confirms it.
+  const [pendingMode, setPendingMode] = useState<GoatCapabilityMode | null>(null);
+  const currentMode = pendingMode ?? mode;
+
+  const select = (nextMode: GoatCapabilityMode) => {
+    if (nextMode === currentMode || isPending) return;
+    setPendingMode(nextMode);
+    startTransition(async () => {
+      const result = await setGoatIntegrationCapabilityModeAction(
+        integrationId,
+        capability.id,
+        nextMode,
+      );
+      if (!result.ok) {
+        setPendingMode(null);
+        toast.error(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1">
+        <div
+          className="truncate text-[12px] leading-4 text-ink-muted"
+          title={capability.description}
+        >
+          {capability.label}
+        </div>
+      </div>
+      <div
+        role="group"
+        aria-label={`${capability.label} permission`}
+        className="flex shrink-0 items-center rounded-full bg-surface-muted p-0.5"
+      >
+        {CAPABILITY_MODE_OPTIONS.map((option) => {
+          const active = option.mode === currentMode;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              aria-pressed={active}
+              disabled={isPending}
+              onClick={() => select(option.mode)}
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[11px] font-medium leading-4 transition-colors duration-150",
+                active
+                  ? "bg-surface text-ink shadow-sm"
+                  : "text-ink-subtle hover:text-ink disabled:opacity-60",
+              )}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
