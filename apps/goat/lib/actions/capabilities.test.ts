@@ -21,6 +21,13 @@ describe("GOAT_PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
+  it("registers Attio reads on by default and updates behind ask", () => {
+    expect(GOAT_PROVIDER_CAPABILITIES.attio).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
   it("uses human-readable labels for every registered capability", () => {
     for (const capabilities of Object.values(GOAT_PROVIDER_CAPABILITIES)) {
       for (const capability of capabilities) {
@@ -65,6 +72,7 @@ describe("mode helpers", () => {
   it("looks up registered capabilities", () => {
     expect(providerCapability("google_calendar", "write")?.label).toBe("Add events");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
+    expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
     expect(providerCapability("gmail", "write")).toBeUndefined();
   });
 });

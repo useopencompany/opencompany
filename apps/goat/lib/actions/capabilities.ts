@@ -52,6 +52,20 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  attio: [
+    {
+      id: "read",
+      label: "Read Attio",
+      description: "Look up CRM records, lists, fields, and pipeline entries.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Update Attio",
+      description: "Update CRM records and fields on existing list entries.",
+      defaultMode: "ask",
+    },
+  ],
 };
 
 export function isGoatCapabilityMode(value: unknown): value is GoatCapabilityMode {

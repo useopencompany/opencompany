@@ -150,11 +150,12 @@ conversation, message, thread, member, and scope-dependent search reads. Gmail e
 search plus message and thread retrieval, with an explicit account required when several are
 connected. Google Calendar exposes a bounded event-list read, while Google Drive exposes file
 search. Linear exposes a curated catalog for reading issues and workspace context, creating and
-updating issues, and adding comments. Linear writes and Google Calendar event creation require
-confirmation by default and can be configured under Integrations. Attio exposes bounded fuzzy
-search across available standard people, companies, and deals plus bounded list reads that can
-apply a saved-view filter from an Attio collection URL, with an explicit workspace required when
-several are connected. Disconnected providers are absent from the catalog, guessed action ids
+updating issues, and adding comments. Attio exposes bounded fuzzy search across standard people,
+companies, and deals; list, field, and membership discovery; and bounded list reads with saved-view
+filters, explicit filters, sorting, and pagination. Explicitly requested Attio record and list-entry
+updates, Linear writes, and Google Calendar event creation require confirmation by default and can
+be configured under Integrations. An explicit account or workspace is required when several are
+connected. Disconnected or disabled capabilities are absent from the catalog, guessed action ids
 cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
 connected-account work continues through background tasks.
 

@@ -12,27 +12,52 @@ import {
 import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, desc, eq } from "drizzle-orm";
 import {
+  effectiveCapabilityMode,
+  type GoatCapabilityId,
+  providerCapability,
+} from "@/lib/actions/capabilities";
+import {
   GoatActionAuthError,
   type GoatActionExecuteContext,
   GoatActionInvalidParamsError,
+  GoatActionPermissionError,
   type GoatActionProviderCatalog,
+  type ResolvedGoatAction,
   requiredStringParam,
 } from "@/lib/actions/types";
 import {
   GoatAttioApiRequestError,
   hasGoatAttioListReadScopes,
+  hasGoatAttioListWriteScopes,
+  hasGoatAttioRecordWriteScopes,
   requestGoatAttioApi,
 } from "@/lib/integrations/attio";
 
 const STANDARD_OBJECTS = ["people", "companies", "deals"] as const;
 const MAX_SEARCH_RECORDS = 10;
 const DEFAULT_SEARCH_RECORDS = 5;
+const MAX_LISTS = 50;
+const DEFAULT_LISTS = 25;
 const MAX_LIST_ENTRIES = 20;
 const DEFAULT_LIST_ENTRIES = 10;
+const MAX_RECORD_ENTRIES = 50;
+const DEFAULT_RECORD_ENTRIES = 25;
 const MAX_LIST_OFFSET = 10_000;
 const MAX_QUERY_CHARS = 256;
 const MAX_LIST_REFERENCE_CHARS = 2_000;
 const MAX_RECORD_ID_CHARS = 200;
+const MAX_ENTRY_ID_CHARS = 200;
+const MAX_ATTRIBUTES = 30;
+const MAX_ATTRIBUTE_OPTIONS = 25;
+const MAX_FILTER_PROPERTIES = 12;
+const MAX_SORTS = 3;
+const MAX_WRITE_PROPERTIES = 20;
+const MAX_WRITE_JSON_CHARS = 12_000;
+const MAX_FILTER_JSON_CHARS = 6_000;
+const MAX_JSON_DEPTH = 5;
+const MAX_JSON_ARRAY_ITEMS = 50;
+const MAX_JSON_OBJECT_PROPERTIES = 50;
+const MAX_JSON_STRING_CHARS = 2_000;
 const MAX_SEARCH_PROPERTIES = 8;
 const MAX_DETAIL_PROPERTIES = 24;
 const MAX_LIST_PROPERTIES = 12;
@@ -47,6 +72,7 @@ type AttioConnection = {
   workspaceName: string | null;
   selector: string;
   scopes: string[];
+  capabilityModes: unknown;
 };
 
 type AttioCredential = {
@@ -75,19 +101,54 @@ type AttioListEntryInput = {
   entry_values?: unknown;
 };
 
+type AttioRecordEntryInput = {
+  list_id?: unknown;
+  list_api_slug?: unknown;
+  entry_id?: unknown;
+  created_at?: unknown;
+};
+
+type AttioAttributeInput = {
+  id?: { attribute_id?: unknown };
+  title?: unknown;
+  description?: unknown;
+  api_slug?: unknown;
+  type?: unknown;
+  is_system_attribute?: unknown;
+  is_writable?: unknown;
+  is_required?: unknown;
+  is_unique?: unknown;
+  is_multiselect?: unknown;
+  is_archived?: unknown;
+};
+
 export async function resolveAttioActions(
   userWorkosId: string,
 ): Promise<GoatActionProviderCatalog | null> {
   const connections = await loadAttioConnections(userWorkosId);
   if (connections.length === 0) return null;
 
-  const multipleAccounts = connections.length > 1;
-  const accountParam = attioAccountParam(connections, "use");
-  const listConnections = connections.filter((connection) =>
+  const readConnections = eligibleConnections(connections, "read");
+  const writeConnections = eligibleConnections(connections, "write");
+  const listReadConnections = readConnections.filter((connection) =>
     hasGoatAttioListReadScopes(connection.scopes),
   );
-  const multipleListAccounts = listConnections.length > 1;
-  const listAccountParam = attioAccountParam(listConnections, "query");
+  // Reads remain backward-compatible with connections saved before scope
+  // tracking, but mutations fail closed unless Attio explicitly reported the
+  // required read-write scope.
+  const recordWriteConnections = writeConnections.filter((connection) =>
+    hasGoatAttioRecordWriteScopes(connection.scopes),
+  );
+  const listWriteConnections = writeConnections.filter((connection) =>
+    hasGoatAttioListWriteScopes(connection.scopes),
+  );
+  if (
+    readConnections.length === 0 &&
+    recordWriteConnections.length === 0 &&
+    listWriteConnections.length === 0
+  ) {
+    return null;
+  }
 
   const credentialPromises = new Map<string, Promise<AttioCredential>>();
   const getCredential = (context: GoatActionExecuteContext, connection: AttioConnection) => {
@@ -101,12 +162,16 @@ export async function resolveAttioActions(
     return pending;
   };
 
-  const actions: GoatActionProviderCatalog["actions"] = [
-    {
+  const actions: ResolvedGoatAction[] = [];
+
+  if (readConnections.length > 0) {
+    const multipleAccounts = readConnections.length > 1;
+    const accountParam = attioAccountParam(readConnections, "read");
+    actions.push({
       id: "attio.search_records",
       provider: "attio",
       capability: "read",
-      permissionMode: "on",
+      ...permissionAnnotation("read", readConnections),
       description:
         "Fuzzy-search Attio people, companies, and deals by name, domain, email, phone number, social handle, or deal label. Returns compact matches only; call attio.get_record with the returned object and id for full properties such as company domain or deal stage and value.",
       params: {
@@ -151,7 +216,7 @@ export async function resolveAttioActions(
           );
         }
         const connection = resolveConnection(
-          connections,
+          readConnections,
           multipleAccounts ? requiredStringParam(params, "account") : undefined,
         );
         const limit = parseLimit(params.limit, {
@@ -180,12 +245,13 @@ export async function resolveAttioActions(
           }),
         };
       },
-    },
-    {
+    });
+
+    actions.push({
       id: "attio.get_record",
       provider: "attio",
       capability: "read",
-      permissionMode: "on",
+      ...permissionAnnotation("read", readConnections),
       description:
         "Get one Attio person, company, or deal by object and record id. Returns a detailed CRM record with a larger property set than attio.search_records.",
       params: {
@@ -213,7 +279,7 @@ export async function resolveAttioActions(
           multipleAccounts ? ["object", "record_id", "account"] : ["object", "record_id"],
         );
         const connection = resolveConnection(
-          connections,
+          readConnections,
           multipleAccounts ? requiredStringParam(params, "account") : undefined,
         );
         const credential = await getCredential(context, connection);
@@ -227,7 +293,7 @@ export async function resolveAttioActions(
             `"record_id" must be at most ${MAX_RECORD_ID_CHARS} characters.`,
           );
         }
-        const response = await callAttioRecordsApi({
+        const response = await callAttioApi({
           context,
           connection,
           credential,
@@ -242,17 +308,262 @@ export async function resolveAttioActions(
         }
         return { workspace: connection.selector, record: compact };
       },
-    },
-  ];
+    });
 
-  if (listConnections.length > 0) {
+    actions.push({
+      id: "attio.list_record_attributes",
+      provider: "attio",
+      capability: "read",
+      ...permissionAnnotation("read", readConnections),
+      description:
+        "List the fields available on an Attio people, companies, or deals object, including writable flags and valid status/select options. Use this before attio.update_record when the field slug or accepted value is unclear.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleAccounts ? ["object", "account"] : ["object"],
+        properties: {
+          object: {
+            type: "string",
+            enum: [...STANDARD_OBJECTS],
+            description: "The Attio record type whose fields should be described.",
+          },
+          ...accountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(params, multipleAccounts ? ["object", "account"] : ["object"]);
+        const connection = resolveConnection(
+          readConnections,
+          multipleAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const credential = await getCredential(context, connection);
+        const object = parseObject(
+          requiredStringParam(params, "object"),
+          credential.availableObjects,
+        );
+        return await listAttioAttributes({
+          context,
+          connection,
+          credential,
+          target: "objects",
+          identifier: object,
+        });
+      },
+    });
+  }
+
+  if (listReadConnections.length > 0) {
+    const multipleListAccounts = listReadConnections.length > 1;
+    const listAccountParam = attioAccountParam(listReadConnections, "read");
+
+    actions.push({
+      id: "attio.list_lists",
+      provider: "attio",
+      capability: "read",
+      ...permissionAnnotation("read", listReadConnections),
+      description:
+        "List the Attio lists/collections available in a workspace. Use this to resolve a human list name to the UUID or API slug accepted by attio.query_list and the list-entry actions.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleListAccounts ? ["account"] : [],
+        properties: {
+          query: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_QUERY_CHARS,
+            description: "Optional case-insensitive text match against list names and API slugs.",
+          },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: MAX_LISTS,
+            description: `Maximum lists to return (default ${DEFAULT_LISTS}, max ${MAX_LISTS}).`,
+          },
+          offset: {
+            type: "integer",
+            minimum: 0,
+            maximum: MAX_LIST_OFFSET,
+            description: "Number of matching lists to skip (default 0).",
+          },
+          ...listAccountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(
+          params,
+          multipleListAccounts
+            ? ["query", "limit", "offset", "account"]
+            : ["query", "limit", "offset"],
+        );
+        const connection = resolveConnection(
+          listReadConnections,
+          multipleListAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const query = optionalAttioStringParam(params, "query");
+        if (query && query.length > MAX_QUERY_CHARS) {
+          throw new GoatActionInvalidParamsError(
+            `"query" must be at most ${MAX_QUERY_CHARS} characters.`,
+          );
+        }
+        const limit = parseLimit(params.limit, { fallback: DEFAULT_LISTS, max: MAX_LISTS });
+        const offset = parseOffset(params.offset);
+        const credential = await getCredential(context, connection);
+        const response = await callAttioApi({
+          context,
+          connection,
+          credential,
+          path: "/lists",
+        });
+        const normalizedQuery = query?.toLowerCase();
+        const matches = attioListList(response).filter((list) => {
+          if (!normalizedQuery) return true;
+          return (
+            list.name?.toLowerCase().includes(normalizedQuery) ||
+            list.apiSlug?.toLowerCase().includes(normalizedQuery)
+          );
+        });
+        const lists = matches.slice(offset, offset + limit);
+        const hasMore = matches.length > offset + limit;
+        return {
+          workspace: connection.selector,
+          lists,
+          offset,
+          limit,
+          hasMore,
+          ...(hasMore ? { nextOffset: offset + limit } : {}),
+        };
+      },
+    });
+
+    actions.push({
+      id: "attio.list_list_attributes",
+      provider: "attio",
+      capability: "read",
+      ...permissionAnnotation("read", listReadConnections),
+      description:
+        "List the fields available on an Attio list/collection entry, including writable flags and valid status/select options. Use this before attio.update_list_entry when the field slug or accepted value is unclear.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleListAccounts ? ["list", "account"] : ["list"],
+        properties: {
+          list: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_LIST_REFERENCE_CHARS,
+            description: "An Attio list UUID, API slug, or full collection/view URL.",
+          },
+          ...listAccountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(params, multipleListAccounts ? ["list", "account"] : ["list"]);
+        const connection = resolveConnection(
+          listReadConnections,
+          multipleListAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const reference = parseAttioListReference(requiredStringParam(params, "list"));
+        const credential = await getCredential(context, connection);
+        return await listAttioAttributes({
+          context,
+          connection,
+          credential,
+          target: "lists",
+          identifier: reference.list,
+        });
+      },
+    });
+
+    actions.push({
+      id: "attio.list_record_entries",
+      provider: "attio",
+      capability: "read",
+      ...permissionAnnotation("read", listReadConnections),
+      description:
+        "List every Attio list/collection entry that a person, company, or deal belongs to. Returns list ids/slugs and entry ids; use it to locate the pipeline entry for attio.update_list_entry.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleListAccounts
+          ? ["object", "record_id", "account"]
+          : ["object", "record_id"],
+        properties: {
+          object: {
+            type: "string",
+            enum: [...STANDARD_OBJECTS],
+            description: "The record type returned by attio.search_records.",
+          },
+          record_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_RECORD_ID_CHARS,
+            description: "The record id returned by attio.search_records.",
+          },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: MAX_RECORD_ENTRIES,
+            description: `Maximum memberships to return (default ${DEFAULT_RECORD_ENTRIES}, max ${MAX_RECORD_ENTRIES}).`,
+          },
+          offset: {
+            type: "integer",
+            minimum: 0,
+            maximum: MAX_LIST_OFFSET,
+            description: "Number of memberships to skip (default 0).",
+          },
+          ...listAccountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(
+          params,
+          multipleListAccounts
+            ? ["object", "record_id", "limit", "offset", "account"]
+            : ["object", "record_id", "limit", "offset"],
+        );
+        const connection = resolveConnection(
+          listReadConnections,
+          multipleListAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const credential = await getCredential(context, connection);
+        const object = parseObject(
+          requiredStringParam(params, "object"),
+          credential.availableObjects,
+        );
+        const recordId = parseBoundedId(params, "record_id", MAX_RECORD_ID_CHARS);
+        const limit = parseLimit(params.limit, {
+          fallback: DEFAULT_RECORD_ENTRIES,
+          max: MAX_RECORD_ENTRIES,
+        });
+        const offset = parseOffset(params.offset);
+        const response = await callAttioApi({
+          context,
+          connection,
+          credential,
+          path: `/objects/${encodeURIComponent(object)}/records/${encodeURIComponent(recordId)}/entries?limit=${limit}&offset=${offset}`,
+        });
+        const entries = attioRecordEntryList(response, limit);
+        return {
+          workspace: connection.selector,
+          object,
+          recordId,
+          entries,
+          offset,
+          limit,
+          hasMore: entries.length === limit,
+          ...(entries.length === limit ? { nextOffset: offset + limit } : {}),
+        };
+      },
+    });
+
     actions.push({
       id: "attio.query_list",
       provider: "attio",
       capability: "read",
-      permissionMode: "on",
+      ...permissionAnnotation("read", listReadConnections),
       description:
-        "Read entries from an Attio list, optionally using the saved-view filter from a full Attio collection URL. Returns bounded list values plus hydrated parent CRM records.",
+        "Read entries from an Attio list, optionally using a saved view, bounded Attio filter, and field sorting. Returns list values plus hydrated parent CRM records and entry ids.",
       params: {
         type: "object",
         additionalProperties: false,
@@ -271,6 +582,32 @@ export async function resolveAttioActions(
             maxLength: MAX_LIST_REFERENCE_CHARS,
             description:
               "Optional saved-view UUID or full Attio collection URL. Omit when the list URL already contains /view/{uuid}.",
+          },
+          filter: {
+            type: "object",
+            description:
+              'Optional Attio filter object. Simple equality example: {"status":"In Progress"}. Advanced Attio $and/$or/comparison/path filters are also accepted. Cannot be combined with a saved view.',
+          },
+          sorts: {
+            type: "array",
+            maxItems: MAX_SORTS,
+            description: "Optional field sorts, evaluated in order.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["direction", "attribute"],
+              properties: {
+                direction: { type: "string", enum: ["asc", "desc"] },
+                attribute: {
+                  type: "string",
+                  description: "List attribute slug or UUID.",
+                },
+                field: {
+                  type: "string",
+                  description: "Optional subfield for composite values.",
+                },
+              },
+            },
           },
           limit: {
             type: "integer",
@@ -291,15 +628,22 @@ export async function resolveAttioActions(
         assertKnownParams(
           params,
           multipleListAccounts
-            ? ["list", "view", "limit", "offset", "account"]
-            : ["list", "view", "limit", "offset"],
+            ? ["list", "view", "filter", "sorts", "limit", "offset", "account"]
+            : ["list", "view", "filter", "sorts", "limit", "offset"],
         );
         const reference = parseAttioListReference(
           requiredStringParam(params, "list"),
           optionalAttioStringParam(params, "view"),
         );
+        const filter = parseAttioFilter(params.filter);
+        if (reference.viewId && filter) {
+          throw new GoatActionInvalidParamsError(
+            '"filter" cannot be combined with a saved view; use either "view" or "filter".',
+          );
+        }
+        const sorts = parseAttioSorts(params.sorts);
         const connection = resolveConnection(
-          listConnections,
+          listReadConnections,
           multipleListAccounts ? requiredStringParam(params, "account") : undefined,
         );
         const limit = parseLimit(params.limit, {
@@ -314,6 +658,8 @@ export async function resolveAttioActions(
           credential,
           list: reference.list,
           ...(reference.viewId ? { viewId: reference.viewId } : {}),
+          ...(filter ? { filter } : {}),
+          ...(sorts ? { sorts } : {}),
           limit,
           offset,
         });
@@ -321,18 +667,221 @@ export async function resolveAttioActions(
     });
   }
 
+  if (recordWriteConnections.length > 0) {
+    const multipleWriteAccounts = recordWriteConnections.length > 1;
+    const writeAccountParam = attioAccountParam(recordWriteConnections, "update");
+    actions.push({
+      id: "attio.update_record",
+      provider: "attio",
+      capability: "write",
+      ...permissionAnnotation("write", recordWriteConnections),
+      description:
+        "Update fields on an existing Attio person, company, or deal. This sets the supplied fields only and overwrites multiselect fields; use an empty array to clear a multiselect. Use only when the user explicitly asked to change the CRM record.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleWriteAccounts
+          ? ["object", "record_id", "values", "account"]
+          : ["object", "record_id", "values"],
+        properties: {
+          object: {
+            type: "string",
+            enum: [...STANDARD_OBJECTS],
+            description: "The record type returned by attio.search_records.",
+          },
+          record_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_RECORD_ID_CHARS,
+            description: "The record id returned by attio.search_records.",
+          },
+          values: {
+            type: "object",
+            minProperties: 1,
+            maxProperties: MAX_WRITE_PROPERTIES,
+            description:
+              "Fields to set, keyed by attribute API slug or UUID. Values follow Attio's write format; status/select values may use their title strings.",
+          },
+          ...writeAccountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(
+          params,
+          multipleWriteAccounts
+            ? ["object", "record_id", "values", "account"]
+            : ["object", "record_id", "values"],
+        );
+        const connection = resolveConnection(
+          recordWriteConnections,
+          multipleWriteAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const credential = await getCredential(context, connection);
+        const object = parseObject(
+          requiredStringParam(params, "object"),
+          credential.availableObjects,
+        );
+        const recordId = parseBoundedId(params, "record_id", MAX_RECORD_ID_CHARS);
+        const values = parseAttioWriteValues(params.values);
+        await assertAttioWriteStillEnabled(context, connection, "record");
+        const response = await callAttioApi({
+          context,
+          connection,
+          credential,
+          path: `/objects/${encodeURIComponent(object)}/records/${encodeURIComponent(recordId)}`,
+          method: "PUT",
+          body: { data: { values } },
+        });
+        const record = asRecord(asRecord(response)?.data) as AttioRecordInput | null;
+        const compact = record
+          ? compactAttioRecord(record, credential.objectSlugById, MAX_DETAIL_PROPERTIES)
+          : null;
+        if (!compact) {
+          throw new Error("Attio returned an invalid updated record response.");
+        }
+        return { workspace: connection.selector, record: compact };
+      },
+    });
+  }
+
+  if (listWriteConnections.length > 0) {
+    const multipleWriteAccounts = listWriteConnections.length > 1;
+    const writeAccountParam = attioAccountParam(listWriteConnections, "update");
+    actions.push({
+      id: "attio.update_list_entry",
+      provider: "attio",
+      capability: "write",
+      ...permissionAnnotation("write", listWriteConnections),
+      description:
+        "Update pipeline/list fields such as stage, status, or owner on one existing Attio list entry. This sets supplied fields only and overwrites multiselect fields; use the entry id returned by attio.query_list or attio.list_record_entries. Use only when the user explicitly asked for the change.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleWriteAccounts
+          ? ["list", "entry_id", "values", "account"]
+          : ["list", "entry_id", "values"],
+        properties: {
+          list: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_LIST_REFERENCE_CHARS,
+            description: "An Attio list UUID, API slug, or full collection/view URL.",
+          },
+          entry_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_ENTRY_ID_CHARS,
+            description:
+              "The list entry id returned by attio.query_list or attio.list_record_entries.",
+          },
+          values: {
+            type: "object",
+            minProperties: 1,
+            maxProperties: MAX_WRITE_PROPERTIES,
+            description:
+              "List fields to set, keyed by attribute API slug or UUID. Values follow Attio's write format; status/select values may use their title strings.",
+          },
+          ...writeAccountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(
+          params,
+          multipleWriteAccounts
+            ? ["list", "entry_id", "values", "account"]
+            : ["list", "entry_id", "values"],
+        );
+        const connection = resolveConnection(
+          listWriteConnections,
+          multipleWriteAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const reference = parseAttioListReference(requiredStringParam(params, "list"));
+        const entryId = parseBoundedId(params, "entry_id", MAX_ENTRY_ID_CHARS);
+        const values = parseAttioWriteValues(params.values);
+        const credential = await getCredential(context, connection);
+        await assertAttioWriteStillEnabled(context, connection, "list_entry");
+        const response = await callAttioApi({
+          context,
+          connection,
+          credential,
+          path: `/lists/${encodeURIComponent(reference.list)}/entries/${encodeURIComponent(entryId)}`,
+          method: "PUT",
+          body: { data: { entry_values: values } },
+        });
+        const entry = asRecord(asRecord(response)?.data) as AttioListEntryInput | null;
+        const compact = entry ? compactAttioListEntry(entry, new Map()) : null;
+        if (!compact) {
+          throw new Error("Attio returned an invalid updated list entry response.");
+        }
+        return {
+          workspace: connection.selector,
+          list: reference.list,
+          entry: compact,
+        };
+      },
+    });
+  }
+
+  const hasWrites = actions.some((action) => action.capability === "write");
+  const hasLists = actions.some((action) => action.id.includes("list"));
+  const labelConnections = uniqueConnections([
+    ...readConnections,
+    ...recordWriteConnections,
+    ...listWriteConnections,
+  ]);
   return {
     id: "attio",
     label:
-      connections.length === 1
-        ? `Attio (${connections[0]!.selector})`
-        : `Attio (${connections.length} workspaces)`,
-    description:
-      listConnections.length > 0
-        ? "Search and inspect CRM records, and read lists in Attio."
+      labelConnections.length === 1
+        ? `Attio (${labelConnections[0]!.selector})`
+        : `Attio (${labelConnections.length} workspaces)`,
+    description: hasWrites
+      ? hasLists
+        ? "Search and inspect CRM records and lists, and update records or pipeline entries in Attio."
+        : "Search, inspect, and update people, companies, and deals in Attio."
+      : hasLists
+        ? "Search and inspect CRM records and lists in Attio."
         : "Search and inspect people, companies, and deals in Attio.",
     actions,
   };
+}
+
+function eligibleConnections(
+  connections: readonly AttioConnection[],
+  capabilityId: GoatCapabilityId,
+): AttioConnection[] {
+  return connections.filter(
+    (connection) =>
+      effectiveCapabilityMode("attio", capabilityId, connection.capabilityModes) !== "off",
+  );
+}
+
+function permissionAnnotation(
+  capabilityId: GoatCapabilityId,
+  connections: readonly AttioConnection[],
+): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+  const askIntegrationIds = connections
+    .filter(
+      (connection) =>
+        effectiveCapabilityMode("attio", capabilityId, connection.capabilityModes) === "ask",
+    )
+    .map((connection) => connection.integrationId);
+  if (askIntegrationIds.length === 0) return { permissionMode: "on" };
+  return {
+    permissionMode: "ask",
+    permission: {
+      provider: "attio",
+      capabilityId,
+      label: providerCapability("attio", capabilityId)?.label ?? capabilityId,
+      integrationIds: askIntegrationIds,
+    },
+  };
+}
+
+function uniqueConnections(connections: readonly AttioConnection[]): AttioConnection[] {
+  return [
+    ...new Map(connections.map((connection) => [connection.integrationId, connection])).values(),
+  ];
 }
 
 async function loadAttioConnections(userWorkosId: string): Promise<AttioConnection[]> {
@@ -343,6 +892,7 @@ async function loadAttioConnections(userWorkosId: string): Promise<AttioConnecti
       workspaceName: goatIntegrations.connectionLabel,
       scopes: goatIntegrations.scopes,
       status: goatIntegrations.status,
+      capabilityModes: goatIntegrations.capabilityModes,
     })
     .from(goatIntegrations)
     .where(
@@ -361,6 +911,7 @@ async function loadAttioConnections(userWorkosId: string): Promise<AttioConnecti
       workspaceId: row.workspaceId,
       workspaceName: row.workspaceName,
       scopes: row.scopes,
+      capabilityModes: row.capabilityModes,
     }));
   const baseLabelCounts = new Map<string, number>();
   for (const connection of readable) {
@@ -480,7 +1031,7 @@ async function searchAttioRecords(input: {
   objects: AttioObjectSlug[];
   limit: number;
 }) {
-  return await callAttioRecordsApi({
+  return await callAttioApi({
     context: input.context,
     connection: input.connection,
     credential: input.credential,
@@ -495,7 +1046,7 @@ async function searchAttioRecords(input: {
   });
 }
 
-async function callAttioRecordsApi(input: {
+async function callAttioApi(input: {
   context: GoatActionExecuteContext;
   connection: AttioConnection;
   credential: AttioCredential;
@@ -512,7 +1063,113 @@ async function callAttioRecordsApi(input: {
       signal: input.context.signal,
     });
   } catch (error) {
-    return await rethrowAttioReadError(error, input);
+    return await rethrowAttioError(error, input);
+  }
+}
+
+async function listAttioAttributes(input: {
+  context: GoatActionExecuteContext;
+  connection: AttioConnection;
+  credential: AttioCredential;
+  target: "objects" | "lists";
+  identifier: string;
+}) {
+  const encodedIdentifier = encodeURIComponent(input.identifier);
+  const response = await callAttioApi({
+    context: input.context,
+    connection: input.connection,
+    credential: input.credential,
+    path: `/${input.target}/${encodedIdentifier}/attributes`,
+  });
+  const source = asRecord(response)?.data;
+  const compactAttributes = Array.isArray(source)
+    ? source.flatMap((raw) => {
+        const attribute = compactAttioAttribute(raw);
+        return attribute && !attribute.isArchived ? [attribute] : [];
+      })
+    : [];
+  const attributes = await Promise.all(
+    compactAttributes
+      .slice(0, MAX_ATTRIBUTES)
+      .map((attribute) => hydrateAttioAttributeOptions(input, attribute)),
+  );
+  return {
+    workspace: input.connection.selector,
+    target: input.target,
+    identifier: input.identifier,
+    attributes,
+    truncated: compactAttributes.length > MAX_ATTRIBUTES,
+  };
+}
+
+async function hydrateAttioAttributeOptions(
+  input: {
+    context: GoatActionExecuteContext;
+    connection: AttioConnection;
+    credential: AttioCredential;
+    target: "objects" | "lists";
+    identifier: string;
+  },
+  attribute: NonNullable<ReturnType<typeof compactAttioAttribute>>,
+) {
+  const optionResource =
+    attribute.type === "status" ? "statuses" : attribute.type === "select" ? "options" : null;
+  if (!optionResource) return attribute;
+  const response = await callAttioApi({
+    context: input.context,
+    connection: input.connection,
+    credential: input.credential,
+    path: `/${input.target}/${encodeURIComponent(input.identifier)}/attributes/${encodeURIComponent(attribute.apiSlug ?? attribute.id)}/${optionResource}`,
+  });
+  const options = compactAttioAttributeOptions(response);
+  return {
+    ...attribute,
+    options: options.values,
+    optionsTruncated: options.truncated,
+  };
+}
+
+async function assertAttioWriteStillEnabled(
+  context: GoatActionExecuteContext,
+  connection: AttioConnection,
+  resource: "record" | "list_entry",
+) {
+  const [row] = await getDb()
+    .select({
+      status: goatIntegrations.status,
+      scopes: goatIntegrations.scopes,
+      capabilityModes: goatIntegrations.capabilityModes,
+    })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.id, connection.integrationId),
+        eq(goatIntegrations.userWorkosId, context.userWorkosId),
+        eq(goatIntegrations.provider, GOAT_ATTIO_PROVIDER),
+      ),
+    )
+    .limit(1);
+  if (!row || row.status !== "connected") {
+    throw new GoatActionPermissionError(
+      "attio",
+      `The Attio connection for ${connection.selector} changed before the update. Retry so Goat can use the current connection and permission.`,
+    );
+  }
+  if (effectiveCapabilityMode("attio", "write", row.capabilityModes) === "off") {
+    throw new GoatActionPermissionError(
+      "attio",
+      `Updating Attio is turned off for ${connection.selector}. It can be changed under Settings → Integrations.`,
+    );
+  }
+  const hasWriteScope =
+    resource === "record"
+      ? hasGoatAttioRecordWriteScopes(row.scopes)
+      : hasGoatAttioListWriteScopes(row.scopes);
+  if (!hasWriteScope) {
+    throw new GoatActionPermissionError(
+      "attio",
+      `The Attio API key for ${connection.selector} does not allow this update. Reconnect Attio with the read-write scopes shown in Settings → Integrations.`,
+    );
   }
 }
 
@@ -522,6 +1179,8 @@ async function queryAttioList(input: {
   credential: AttioCredential;
   list: string;
   viewId?: string;
+  filter?: Record<string, unknown>;
+  sorts?: Array<{ direction: "asc" | "desc"; attribute: string; field?: string }>;
   limit: number;
   offset: number;
 }) {
@@ -539,6 +1198,8 @@ async function queryAttioList(input: {
         method: "POST",
         body: {
           ...(input.viewId ? { filter_view_id: input.viewId } : {}),
+          ...(input.filter ? { filter: input.filter } : {}),
+          ...(input.sorts ? { sorts: input.sorts } : {}),
           limit: input.limit,
           offset: input.offset,
         },
@@ -565,11 +1226,11 @@ async function queryAttioList(input: {
       ...(entries.length === input.limit ? { nextOffset: input.offset + input.limit } : {}),
     };
   } catch (error) {
-    return await rethrowAttioReadError(error, input);
+    return await rethrowAttioError(error, input);
   }
 }
 
-async function rethrowAttioReadError(
+async function rethrowAttioError(
   error: unknown,
   input: { context: GoatActionExecuteContext; connection: AttioConnection },
 ): Promise<never> {
@@ -633,6 +1294,14 @@ function parseOffset(value: unknown) {
   return value;
 }
 
+function parseBoundedId(params: Record<string, unknown>, key: string, maxChars: number): string {
+  const value = requiredStringParam(params, key);
+  if (value.length > maxChars) {
+    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
+  }
+  return value;
+}
+
 function optionalAttioStringParam(params: Record<string, unknown>, key: string) {
   const value = params[key];
   if (value === undefined || value === null) return undefined;
@@ -640,6 +1309,152 @@ function optionalAttioStringParam(params: Record<string, unknown>, key: string) 
     throw new GoatActionInvalidParamsError(`"${key}" must be a non-empty string.`);
   }
   return value.trim();
+}
+
+function parseAttioFilter(value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined || value === null) return undefined;
+  const filter = asRecord(value);
+  if (!filter || Object.keys(filter).length === 0) {
+    throw new GoatActionInvalidParamsError('"filter" must be a non-empty object.');
+  }
+  if (Object.keys(filter).length > MAX_FILTER_PROPERTIES) {
+    throw new GoatActionInvalidParamsError(
+      `"filter" allows at most ${MAX_FILTER_PROPERTIES} top-level properties.`,
+    );
+  }
+  const normalized = normalizeAttioJson(filter, "filter", 0);
+  assertAttioJsonSize(normalized, "filter", MAX_FILTER_JSON_CHARS);
+  return normalized as Record<string, unknown>;
+}
+
+function parseAttioSorts(
+  value: unknown,
+): Array<{ direction: "asc" | "desc"; attribute: string; field?: string }> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_SORTS) {
+    throw new GoatActionInvalidParamsError(
+      `"sorts" must be an array of at most ${MAX_SORTS} sorts.`,
+    );
+  }
+  if (value.length === 0) return undefined;
+  return value.map((raw, index) => {
+    const sort = asRecord(raw);
+    if (!sort) {
+      throw new GoatActionInvalidParamsError(`"sorts[${index}]" must be an object.`);
+    }
+    assertKnownParams(sort, ["direction", "attribute", "field"]);
+    if (sort.direction !== "asc" && sort.direction !== "desc") {
+      throw new GoatActionInvalidParamsError(
+        `"sorts[${index}].direction" must be "asc" or "desc".`,
+      );
+    }
+    const attribute = parseSafeAttioIdentifier(sort.attribute, `sorts[${index}].attribute`);
+    const field =
+      sort.field === undefined || sort.field === null
+        ? undefined
+        : parseSafeAttioIdentifier(sort.field, `sorts[${index}].field`);
+    return {
+      direction: sort.direction,
+      attribute,
+      ...(field ? { field } : {}),
+    };
+  });
+}
+
+function parseAttioWriteValues(value: unknown): Record<string, unknown> {
+  const values = asRecord(value);
+  if (!values || Object.keys(values).length === 0) {
+    throw new GoatActionInvalidParamsError('"values" must be a non-empty object.');
+  }
+  if (Object.keys(values).length > MAX_WRITE_PROPERTIES) {
+    throw new GoatActionInvalidParamsError(
+      `"values" allows at most ${MAX_WRITE_PROPERTIES} fields per update.`,
+    );
+  }
+  for (const key of Object.keys(values)) {
+    if (!safeAttioApiIdentifier(key)) {
+      throw new GoatActionInvalidParamsError(
+        `"values" key ${JSON.stringify(key)} must be an Attio attribute slug or UUID.`,
+      );
+    }
+  }
+  const normalized = normalizeAttioJson(values, "values", 0);
+  assertAttioJsonSize(normalized, "values", MAX_WRITE_JSON_CHARS);
+  return normalized as Record<string, unknown>;
+}
+
+function normalizeAttioJson(value: unknown, path: string, depth: number): unknown {
+  if (depth > MAX_JSON_DEPTH) {
+    throw new GoatActionInvalidParamsError(
+      `"${path}" is nested too deeply (maximum depth ${MAX_JSON_DEPTH}).`,
+    );
+  }
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new GoatActionInvalidParamsError(`"${path}" must contain only finite numbers.`);
+    }
+    return value;
+  }
+  if (typeof value === "string") {
+    if (value.length > MAX_JSON_STRING_CHARS) {
+      throw new GoatActionInvalidParamsError(
+        `"${path}" strings must be at most ${MAX_JSON_STRING_CHARS} characters.`,
+      );
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > MAX_JSON_ARRAY_ITEMS) {
+      throw new GoatActionInvalidParamsError(
+        `"${path}" arrays allow at most ${MAX_JSON_ARRAY_ITEMS} items.`,
+      );
+    }
+    return value.map((entry, index) => normalizeAttioJson(entry, `${path}[${index}]`, depth + 1));
+  }
+  const record = asRecord(value);
+  if (!record) {
+    throw new GoatActionInvalidParamsError(
+      `"${path}" must contain only JSON strings, numbers, booleans, nulls, arrays, and objects.`,
+    );
+  }
+  const keys = Object.keys(record);
+  if (keys.length > MAX_JSON_OBJECT_PROPERTIES) {
+    throw new GoatActionInvalidParamsError(
+      `"${path}" objects allow at most ${MAX_JSON_OBJECT_PROPERTIES} properties.`,
+    );
+  }
+  const normalized = Object.create(null) as Record<string, unknown>;
+  for (const key of keys) {
+    if (
+      !key ||
+      key.length > 200 ||
+      key === "__proto__" ||
+      key === "constructor" ||
+      key === "prototype"
+    ) {
+      throw new GoatActionInvalidParamsError(`"${path}" contains an invalid property name.`);
+    }
+    normalized[key] = normalizeAttioJson(record[key], `${path}.${key}`, depth + 1);
+  }
+  return normalized;
+}
+
+function assertAttioJsonSize(value: unknown, key: string, maxChars: number) {
+  const serialized = JSON.stringify(value);
+  if (serialized.length > maxChars) {
+    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxChars} JSON characters.`);
+  }
+}
+
+function parseSafeAttioIdentifier(value: unknown, path: string): string {
+  const identifier = safeAttioApiIdentifier(value);
+  if (!identifier) {
+    throw new GoatActionInvalidParamsError(
+      `"${path}" must be an Attio attribute slug, field, or UUID.`,
+    );
+  }
+  return identifier;
 }
 
 function parseAttioListReference(listInput: string, viewInput?: string) {
@@ -788,6 +1603,75 @@ function attioListEntryList(response: unknown, limit: number): AttioListEntryInp
     : [];
 }
 
+function attioListList(response: unknown) {
+  const data = asRecord(response)?.data;
+  if (!Array.isArray(data)) return [];
+  return data.flatMap((entry) => {
+    const compact = compactAttioListData(entry);
+    return compact ? [compact] : [];
+  });
+}
+
+function attioRecordEntryList(response: unknown, limit: number) {
+  const data = asRecord(response)?.data;
+  if (!Array.isArray(data)) return [];
+  return data.slice(0, limit).flatMap((raw) => {
+    const entry = asRecord(raw) as AttioRecordEntryInput | null;
+    if (!entry) return [];
+    const listId = boundedIdentifier(entry.list_id, 200);
+    const listApiSlug = safeAttioApiIdentifier(entry.list_api_slug);
+    const entryId = boundedIdentifier(entry.entry_id, MAX_ENTRY_ID_CHARS);
+    if (!listId || !entryId) return [];
+    const createdAt = boundedString(entry.created_at, 80);
+    return [
+      {
+        listId,
+        ...(listApiSlug ? { listApiSlug } : {}),
+        entryId,
+        ...(createdAt ? { createdAt } : {}),
+      },
+    ];
+  });
+}
+
+function compactAttioAttribute(value: unknown) {
+  const attribute = asRecord(value) as AttioAttributeInput | null;
+  if (!attribute) return null;
+  const id = boundedIdentifier(attribute.id?.attribute_id, 200);
+  const apiSlug = safeAttioApiIdentifier(attribute.api_slug);
+  const type = safeAttioApiIdentifier(attribute.type);
+  const title = boundedString(attribute.title, MAX_TITLE_CHARS);
+  if (!id || !type || !title) return null;
+  const description = boundedString(attribute.description, MAX_PROPERTY_CHARS);
+  return {
+    id,
+    ...(apiSlug ? { apiSlug } : {}),
+    title,
+    type,
+    ...(description ? { description } : {}),
+    isSystem: attribute.is_system_attribute === true,
+    isWritable: attribute.is_writable === true,
+    isRequired: attribute.is_required === true,
+    isUnique: attribute.is_unique === true,
+    isMultiselect: attribute.is_multiselect === true,
+    isArchived: attribute.is_archived === true,
+  };
+}
+
+function compactAttioAttributeOptions(response: unknown) {
+  const data = asRecord(response)?.data;
+  if (!Array.isArray(data)) return { values: [], truncated: false };
+  const values = data.slice(0, MAX_ATTRIBUTE_OPTIONS).flatMap((raw) => {
+    const option = asRecord(raw);
+    if (!option || option.is_archived === true) return [];
+    const ids = asRecord(option.id);
+    const id = boundedIdentifier(ids?.status_id, 200) ?? boundedIdentifier(ids?.option_id, 200);
+    const title = boundedString(option.title, MAX_TITLE_CHARS);
+    return id && title ? [{ id, title }] : [];
+  });
+  return { values, truncated: data.length > MAX_ATTRIBUTE_OPTIONS };
+}
+
 async function fetchAttioListParentRecords(input: {
   apiKey: string;
   signal: AbortSignal;
@@ -827,8 +1711,18 @@ async function fetchAttioListParentRecords(input: {
 }
 
 function compactAttioList(response: unknown, fallbackIdentifier: string) {
-  const data = asRecord(asRecord(response)?.data) ?? {};
-  const id = boundedIdentifier(asRecord(data.id)?.list_id, 200) ?? fallbackIdentifier;
+  return (
+    compactAttioListData(asRecord(response)?.data) ?? {
+      id: fallbackIdentifier,
+    }
+  );
+}
+
+function compactAttioListData(value: unknown) {
+  const data = asRecord(value);
+  if (!data) return null;
+  const id = boundedIdentifier(asRecord(data.id)?.list_id, 200);
+  if (!id) return null;
   const name = boundedString(data.name, MAX_TITLE_CHARS);
   const apiSlug = safeAttioApiIdentifier(data.api_slug);
   const parentObjects = Array.isArray(data.parent_object)

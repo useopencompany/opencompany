@@ -170,7 +170,7 @@ export function AttioIntegrationSetup({
           <li>
             Create an integration and generate an access token with these scopes:{" "}
             <code>object_configuration:read</code>, <code>record_permission:read-write</code>,{" "}
-            <code>list_configuration:read</code>, <code>list_entry:read</code>,{" "}
+            <code>list_configuration:read</code>, <code>list_entry:read-write</code>,{" "}
             <code>note:read-write</code>, and <code>webhook:read-write</code>.
           </li>
           <li>Copy the token, paste it here, and save it.</li>

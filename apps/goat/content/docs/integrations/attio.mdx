@@ -12,14 +12,14 @@ The connection is personal: the API key is minted in your Attio workspace's deve
 ## Setup steps
 
 1. In Attio, open **Workspace settings → Developers** and create an integration.
-2. Generate an access token with `object_configuration:read`, `record_permission:read-write`, `note:read-write`, and `webhook:read-write`. The object, record, and note scopes let Goat retrieve live CRM context for Brain ingestion and read-only Chat lookup; the webhook scope lets Goat register its event subscription for you.
+2. Generate an access token with `object_configuration:read`, `record_permission:read-write`, `list_configuration:read`, `list_entry:read-write`, `note:read-write`, and `webhook:read-write`. The object, record, list, and note scopes let Goat retrieve live CRM context and update records or existing pipeline entries after confirmation; the webhook scope lets Goat register its event subscription for you.
 3. Copy the token.
 4. In Goat, open **Settings → Attio** (or choose **Set up** on the Attio source card).
 5. Paste the token and save it. Goat validates it against the Attio API, registers the webhook, and stores the signing secret.
 
-Goat saves the scopes reported by Attio when the key is validated. Chat provides one read-only quick lookup: fuzzy-searching available standard people, companies, and deals by name, domain, email, phone number, social handle, or deal label. Results are bounded and compact, and Chat cannot create, update, or delete Attio data.
+Goat saves the scopes reported by Attio when the key is validated. Chat can search and inspect standard people, companies, and deals; discover lists and their fields; read saved views with bounded filtering, sorting, and pagination; and locate the list entries attached to a record. When you explicitly ask for a CRM change, Chat can update supplied record fields or an existing list entry. Writes default to **Ask**, so they pause for in-chat confirmation, and you can set Attio reads and writes to **On**, **Ask**, or **Off** under Settings → Integrations. Chat does not create or delete Attio records or list entries.
 
-Attio documents the relevant permissions in its [record search](https://docs.attio.com/rest-api/endpoint-reference/records/search-records) and [webhook creation](https://docs.attio.com/rest-api/endpoint-reference/webhooks/create-a-webhook) API contracts.
+Attio documents the relevant permissions in its [record search](https://docs.attio.com/rest-api/endpoint-reference/records/search-records), [record update](https://docs.attio.com/rest-api/endpoint-reference/records/update-a-record-overwrite-multiselect-values), [list entry update](https://docs.attio.com/rest-api/endpoint-reference/entries/update-a-list-entry-overwrite-multiselect-values), and [webhook creation](https://docs.attio.com/rest-api/endpoint-reference/webhooks/create-a-webhook) API contracts.
 
 ## Brain routing
 
