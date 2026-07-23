@@ -454,6 +454,36 @@ describe("buildGoatChatCaptureAgentIngestPrompt", () => {
     );
   });
 
+  it("documents complete write-command syntax without requiring help calls", () => {
+    const writeCommands = [
+      "create",
+      "rewrite",
+      "set",
+      "timeline-add",
+      "append-timeline",
+      "append-evidence",
+    ];
+
+    for (const command of writeCommands) {
+      expect(GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT).toContain(`- ${command} usage:`);
+      expect(GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT).toContain(`"command":"${command}"`);
+    }
+    expect(GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT).toContain(
+      "create --type <type> --id <id> --title <title> (--truth <text> | --truth-stdin)",
+    );
+    expect(GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT).toContain(
+      "timeline-add <id> [--at <iso-date>] (--body <text>",
+    );
+    expect(GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT).toContain(
+      "append-evidence <subject-id> --source-ref <ref> [--at <iso-date>]",
+    );
+    expect(GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT).toContain("Use --at, never --date.");
+    expect(GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT).toContain("there is no generic --stdin flag");
+    expect(GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT).toContain(
+      "Body-writing commands always require --body or --body-stdin.",
+    );
+  });
+
   it("carries the draft pointer, source ref, intent, and capture text", () => {
     const item = captureItem();
     const prompt = buildGoatChatCaptureAgentIngestPrompt(item);
