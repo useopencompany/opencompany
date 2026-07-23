@@ -1,4 +1,4 @@
-import { executeExaSearchRequest, modelSupportsAttachments } from "@opencompany/agent-runtime";
+import { modelSupportsAttachments } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
 import { hasPositiveGoatCreditBalance, recordGoatCreditDebit } from "@opencompany/db/goat-credits";
@@ -86,6 +86,7 @@ import {
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, validateGoatChatInput } from "@/lib/chat-validation";
+import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
   createGoatTaskScheduleForUser,
@@ -1137,49 +1138,6 @@ async function executeChatActionCall(input: {
       },
     };
   }
-}
-
-async function executeGoatChatExaSearch(input: {
-  toolInput: WebSearchToolInput;
-  apiKey: string;
-  signal: AbortSignal;
-  currentDate: Date;
-}): Promise<Extract<WebSearchToolOutput, { ok: true }>> {
-  const startPublishedDate = recencyStartPublishedDate(
-    input.toolInput.recencyDays,
-    input.currentDate,
-  );
-  const search = await executeExaSearchRequest({
-    apiKey: input.apiKey,
-    args: {
-      query: input.toolInput.query,
-      type: "fast",
-      numResults: 5,
-      ...(startPublishedDate ? { startPublishedDate } : {}),
-    },
-    signal: input.signal,
-    defaults: { type: "fast", numResults: 5 },
-  });
-
-  return {
-    ok: true,
-    query: input.toolInput.query,
-    searchedAt: input.currentDate.toISOString(),
-    results: search.output.results.map((result) => ({
-      ...(result.title ? { title: result.title } : {}),
-      ...(result.url ? { url: result.url } : {}),
-      ...(result.publishedDate ? { publishedDate: result.publishedDate } : {}),
-      ...(result.author ? { author: result.author } : {}),
-      highlights: result.highlights ?? [],
-    })),
-    ...(search.output.requestId ? { requestId: search.output.requestId } : {}),
-    costUsdMicros: search.usage.costUsdMicros,
-  };
-}
-
-function recencyStartPublishedDate(recencyDays: WebSearchToolInput["recencyDays"], now: Date) {
-  if (recencyDays !== 7 && recencyDays !== 30 && recencyDays !== 90) return undefined;
-  return new Date(now.getTime() - recencyDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
 async function recordChatModelCost(input: {
