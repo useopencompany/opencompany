@@ -716,22 +716,29 @@ describe("goat-brain cli", () => {
       ]),
     ).resolves.toMatchObject({ exitCode: 0 });
 
-    await expect(
-      run([
-        "timeline-add",
-        "--root",
-        root,
-        "timeline-note",
-        "2026-01-02",
-        "Met Ada about launch sequencing.",
-        "--detail",
-        "Ada recommended starting with founder-led beta.",
-        "--source-ref",
-        "goat-chat:message_1",
-        "--source-title",
-        "Launch chat",
-      ]),
-    ).resolves.toMatchObject({ exitCode: 0 });
+    const appended = await run([
+      "timeline-add",
+      "--root",
+      root,
+      "timeline-note",
+      "2026-01-02",
+      "Met Ada about launch sequencing.",
+      "--detail",
+      "Ada recommended starting with founder-led beta.",
+      "--source-ref",
+      "goat-chat:message_1",
+      "--source-title",
+      "Launch chat",
+      "--json",
+    ]);
+    expect(appended).toMatchObject({ exitCode: 0 });
+    expect(JSON.parse(appended.stdout)).toMatchObject({
+      ok: true,
+      id: "timeline-note",
+      status: "draft",
+      timelineEntryCount: 1,
+      evidenceId: expect.stringMatching(/^ev-/),
+    });
 
     const timeline = await run(["timeline", "--root", root, "timeline-note", "--json"]);
     const parsed = JSON.parse(timeline.stdout) as {

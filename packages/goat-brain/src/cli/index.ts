@@ -529,13 +529,18 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
     timeline: evidenceEntry ? [evidenceEntry] : [],
   };
   const relativePath = await persist(ctx.root, doc);
-  return ok(`Created "${id}" at ${relativePath}.`, {
-    id,
-    folder,
-    path: relativePath,
-    ...(evidenceEntry ? { evidenceId: evidenceEntry.evidenceId } : {}),
-    ...(possibleDuplicates.length > 0 ? { warnings: { possibleDuplicates } } : {}),
-  });
+  return ok(
+    `Created "${id}" at ${relativePath} (status ${doc.frontmatter.status}; timeline entries ${doc.timeline.length}).`,
+    {
+      id,
+      folder,
+      path: relativePath,
+      status: doc.frontmatter.status,
+      timelineEntryCount: doc.timeline.length,
+      ...(evidenceEntry ? { evidenceId: evidenceEntry.evidenceId } : {}),
+      ...(possibleDuplicates.length > 0 ? { warnings: { possibleDuplicates } } : {}),
+    },
+  );
 }
 
 async function get(ctx: CommandContext): Promise<CommandResult> {
@@ -803,7 +808,15 @@ async function rewrite(ctx: CommandContext): Promise<CommandResult> {
   loaded.doc.compiledTruth = truth;
   loaded.doc.frontmatter.updatedAt = nowIso();
   const relativePath = await persist(ctx.root, loaded.doc);
-  return ok(`Rewrote compiled truth for "${id}".`, { id, path: relativePath });
+  return ok(
+    `Rewrote compiled truth for "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
 }
 
 async function set(ctx: CommandContext): Promise<CommandResult> {
@@ -845,13 +858,17 @@ async function set(ctx: CommandContext): Promise<CommandResult> {
   if (status) loaded.doc.frontmatter.status = status;
   loaded.doc.frontmatter.updatedAt = nowIso();
   const relativePath = await persist(ctx.root, loaded.doc);
-  return ok(`Updated "${id}".`, {
-    id,
-    path: relativePath,
-    title: loaded.doc.frontmatter.title,
-    type: loaded.doc.frontmatter.type,
-    status: loaded.doc.frontmatter.status,
-  });
+  return ok(
+    `Updated "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      title: loaded.doc.frontmatter.title,
+      type: loaded.doc.frontmatter.type,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
 }
 
 async function appendTimeline(ctx: CommandContext): Promise<CommandResult> {
@@ -899,11 +916,16 @@ async function appendTimeline(ctx: CommandContext): Promise<CommandResult> {
     loaded.doc.frontmatter.sources = sources;
   }
   const relativePath = await persist(ctx.root, loaded.doc);
-  return ok(`Appended timeline entry to "${id}".`, {
-    id,
-    path: relativePath,
-    evidenceId: entry.evidenceId,
-  });
+  return ok(
+    `Appended timeline entry to "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}; evidence ${entry.evidenceId}).`,
+    {
+      id,
+      path: relativePath,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+      evidenceId: entry.evidenceId,
+    },
+  );
 }
 
 async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
@@ -998,12 +1020,18 @@ async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
 
   const evidencePath = await persist(ctx.root, evidenceDoc);
   const subjectPath = await persist(ctx.root, subject.doc);
-  return ok(`Created evidence "${evidenceId}" and linked it to "${subjectId}".`, {
-    id: subjectId,
-    path: subjectPath,
-    evidenceId,
-    evidencePath,
-  });
+  return ok(
+    `Created active evidence "${evidenceId}" and linked it to "${subjectId}" (subject status ${subject.doc.frontmatter.status}; timeline entries ${subject.doc.timeline.length}).`,
+    {
+      id: subjectId,
+      path: subjectPath,
+      status: subject.doc.frontmatter.status,
+      timelineEntryCount: subject.doc.timeline.length,
+      evidenceId,
+      evidencePath,
+      evidenceStatus: evidenceDoc.frontmatter.status,
+    },
+  );
 }
 
 function sortedTimelineEntries(entries: GoatBrainDocument["timeline"]) {
@@ -1035,11 +1063,16 @@ async function alias(ctx: CommandContext): Promise<CommandResult> {
   loaded.doc.frontmatter.aliases = [...aliases].sort((a, b) => a.localeCompare(b));
   loaded.doc.frontmatter.updatedAt = nowIso();
   const relativePath = await persist(ctx.root, loaded.doc);
-  return ok(`Updated aliases for "${id}".`, {
-    id,
-    path: relativePath,
-    aliases: loaded.doc.frontmatter.aliases,
-  });
+  return ok(
+    `Updated aliases for "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      aliases: loaded.doc.frontmatter.aliases,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
 }
 
 async function link(ctx: CommandContext): Promise<CommandResult> {
@@ -1072,11 +1105,16 @@ async function link(ctx: CommandContext): Promise<CommandResult> {
   );
   loaded.doc.frontmatter.updatedAt = nowIso();
   const relativePath = await persist(ctx.root, loaded.doc);
-  return ok(`Updated related links for "${id}".`, {
-    id,
-    path: relativePath,
-    relations: loaded.doc.frontmatter.relations,
-  });
+  return ok(
+    `Updated related links for "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      relations: loaded.doc.frontmatter.relations,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
 }
 
 async function merge(ctx: CommandContext): Promise<CommandResult> {
@@ -1114,12 +1152,19 @@ async function merge(ctx: CommandContext): Promise<CommandResult> {
 
   const targetPath = await persist(ctx.root, target.doc);
   const sourcePath = await persist(ctx.root, source.doc);
-  return ok(`Marked "${from}" as merged into "${into}".`, {
-    from,
-    into,
-    sourcePath,
-    targetPath,
-  });
+  return ok(
+    `Marked "${from}" as merged into "${into}" (target status ${target.doc.frontmatter.status}; timeline entries ${target.doc.timeline.length}).`,
+    {
+      from,
+      into,
+      sourcePath,
+      targetPath,
+      sourceStatus: source.doc.frontmatter.status,
+      sourceTimelineEntryCount: source.doc.timeline.length,
+      targetStatus: target.doc.frontmatter.status,
+      targetTimelineEntryCount: target.doc.timeline.length,
+    },
+  );
 }
 
 async function move(ctx: CommandContext): Promise<CommandResult> {
@@ -1142,7 +1187,16 @@ async function move(ctx: CommandContext): Promise<CommandResult> {
   loaded.doc.frontmatter.updatedAt = nowIso();
   const newPath = await persist(ctx.root, loaded.doc);
   if (newPath !== oldPath) await removeGoatBrainFile(ctx.root, oldPath);
-  return ok(`Moved "${id}" to ${folder}.`, { id, path: newPath, oldPath });
+  return ok(
+    `Moved "${id}" to ${folder} (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: newPath,
+      oldPath,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
 }
 
 async function del(ctx: CommandContext): Promise<CommandResult> {
