@@ -1,38 +1,66 @@
 import { calculateModelUsageCost } from "@opencompany/billing";
+import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
 import { hasPositiveGoatCreditBalance, recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
+import { goatWorkspaces } from "@opencompany/db/goat-schema";
 import { goatSlackSelectedConversationIds } from "@opencompany/db/goat-slack";
 import {
   type GoatSlackBotIntegrationForTeam,
+  getGoatSlackBotThreadParticipation,
   listEnabledGoatSlackBotBrainRoutes,
   listGoatSlackBotIntegrationsForTeam,
+  pruneGoatSlackBotThreadParticipation,
+  recordGoatSlackBotThreadParticipation,
 } from "@opencompany/db/goat-slack-bot";
+import { DEFAULT_GOAT_BRAIN_SLUG, listAccessibleGoatBrains } from "@opencompany/db/goat-workspaces";
 import { recordGoatModelCost } from "@opencompany/goat-observability";
 import type { LanguageModelUsage } from "ai";
+import { eq } from "drizzle-orm";
+import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
+import { executeGoatAction, type GoatActionResult } from "@/lib/actions/execute";
+import type { GoatResolvedActionCatalog } from "@/lib/actions/types";
+import { captureToGoatBrainInbox } from "@/lib/brain-capture";
+import { runGoatBrainToolForUser } from "@/lib/brain-cli";
+import {
+  type GoatBrainMultiBrainTarget,
+  normalizeGoatBrainReadToolInput,
+} from "@/lib/brain-surface";
+import { runOpenCompanyChatAgent } from "@/lib/chat-agent";
+import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
 import { slackApiRequest } from "@/lib/integrations/slack";
-import { runGoatSlackBotAgent } from "@/lib/slack-bot/agent";
+import { goatSlackBotHasScope } from "@/lib/integrations/slack-bot";
+import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import { createGoatSlackSurfacePromptBlock } from "@/lib/prompts/slack-surface";
+import {
+  mentionsSlackUser,
+  stripSlackBotMention,
+  toSlackMrkdwn,
+  truncateForSlack,
+} from "@/lib/slack-bot/format";
+import {
+  type GoatSlackSenderResolution,
+  getGoatUserBasics,
+  resolveGoatSlackSender,
+} from "@/lib/slack-bot/identity";
+import {
+  createGoatSlackBotStatusReporter,
+  type GoatSlackBotStatusReporter,
+} from "@/lib/slack-bot/status";
+import {
+  fetchGoatSlackConversationContext,
+  formatSpeaker,
+  type SlackContextMessage,
+} from "@/lib/slack-bot/thread-context";
+
+export { stripSlackBotMention, toSlackMrkdwn, truncateForSlack } from "@/lib/slack-bot/format";
 
 const SLACK_ANSWER_MAX_CHARS = 3000;
-const THREAD_CONTEXT_MESSAGE_LIMIT = 20;
-const THREAD_CONTEXT_PAGE_LIMIT = 200;
-const THREAD_CONTEXT_MESSAGE_MAX_CHARS = 2000;
-const THREAD_CONTEXT_TOTAL_MAX_CHARS = 12_000;
+// Leave headroom under the webhook route's maxDuration (240s) for the Slack
+// posting/cleanup that follows the agent turn.
+const SLACK_AGENT_TIMEOUT_MS = 200_000;
 
-type SlackThreadMessage = {
-  user?: string;
-  bot_id?: string;
-  text?: string;
-  ts?: string;
-};
-
-type SlackThreadPage = {
-  messages?: SlackThreadMessage[];
-  has_more?: boolean;
-  response_metadata?: { next_cursor?: string };
-};
-
-export type GoatSlackBotMentionInput = {
+export type GoatSlackBotEventInput = {
   teamId: string;
   channelId: string;
   messageTs: string;
@@ -41,33 +69,91 @@ export type GoatSlackBotMentionInput = {
   slackUserId: string;
 };
 
+export type GoatSlackBotMentionInput = GoatSlackBotEventInput;
+
+type SlackAnswerMode = "mention" | "follow_up" | "dm";
+
 // Runs after the webhook has already acked Slack (via next/server after()):
 // resolve the install → route to brains by channel → answer → post in-thread.
 // Individual integration failures reply best-effort and are logged so another
 // Goat workspace connected to the same Slack team can still answer.
 export async function processGoatSlackBotMention(input: GoatSlackBotMentionInput) {
-  const integrations = await listGoatSlackBotIntegrationsForTeam(input.teamId);
-  const active = integrations.filter((integration) => integration.status === "connected");
-  if (active.length === 0) return;
+  // Mentioning the bot inside its DM raises app_mention too; that conversation
+  // is personal, so route it through the DM rules (identity required).
+  if (isDirectMessageChannel(input.channelId)) {
+    return processGoatSlackBotDirectMessage(input, { viaMention: true });
+  }
+  const active = await connectedIntegrations(input.teamId);
 
   // Normally one install per team; two goat workspaces installing the same
   // Slack team both answer (accepted beta caveat, scoping keeps it unlikely).
   for (const integration of active) {
-    await answerForIntegration(integration, input).catch((error) => {
-      console.error("[goat-slack-bot] Failed to answer mention", {
-        teamId: input.teamId,
-        channelId: input.channelId,
-        integrationId: integration.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    await answerForIntegration(integration, input, "mention").catch((error) => {
+      logAnswerFailure("mention", integration.id, input, error);
     });
   }
 }
 
+// A reply in a thread the bot already participates in answers without a fresh
+// mention. The webhook has verified the participation row exists; here the
+// reply is routed to the integration that recorded it.
+export async function processGoatSlackBotThreadFollowUp(input: GoatSlackBotEventInput) {
+  const threadTs = input.threadTs;
+  if (!threadTs) return;
+  const participation = await getGoatSlackBotThreadParticipation({
+    teamId: input.teamId,
+    channelId: input.channelId,
+    threadTs,
+  });
+  if (!participation) return;
+
+  const active = await connectedIntegrations(input.teamId);
+  const integration = active.find((candidate) => candidate.id === participation.integrationId);
+  if (!integration) return;
+  await answerForIntegration(integration, input, "follow_up").catch((error) => {
+    logAnswerFailure("follow_up", integration.id, input, error);
+  });
+}
+
+export async function processGoatSlackBotDirectMessage(
+  input: GoatSlackBotEventInput,
+  options: { viaMention?: boolean } = {},
+) {
+  const active = await connectedIntegrations(input.teamId);
+  if (active.length === 0) return;
+
+  let refusalReply: (() => Promise<void>) | null = null;
+  for (const integration of active) {
+    const outcome = await answerForIntegration(integration, input, "dm", options).catch((error) => {
+      logAnswerFailure("dm", integration.id, input, error);
+      return "handled" as const;
+    });
+    if (outcome === "handled") return;
+    if (outcome === "duplicate") return;
+    if (!refusalReply && outcome.kind === "unmapped_dm") {
+      const { botToken } = outcome;
+      refusalReply = () =>
+        postPlainSlackReply(
+          botToken,
+          input.channelId,
+          input.threadTs,
+          "I couldn't match your Slack account to an OpenCompany member in this workspace, so I can't answer here. Ask a workspace admin to invite you with this email, then message me again.",
+        );
+    }
+  }
+  // DMs are personal: never run a stranger's private question under the
+  // installing admin's identity — refuse once instead.
+  await refusalReply?.().catch(() => {});
+}
+
+type AnswerOutcome = "handled" | "duplicate" | { kind: "unmapped_dm"; botToken: string };
+
 async function answerForIntegration(
   integration: GoatSlackBotIntegrationForTeam,
-  input: GoatSlackBotMentionInput,
-) {
+  input: GoatSlackBotEventInput,
+  mode: SlackAnswerMode,
+  options: { viaMention?: boolean } = {},
+): Promise<AnswerOutcome> {
   const credential = await loadGoatIntegrationCredential({
     userWorkosId: integration.userWorkosId,
     integrationId: integration.id,
@@ -80,22 +166,45 @@ async function answerForIntegration(
     typeof credential?.payload.bot_user_id === "string" ? credential.payload.bot_user_id : null;
   if (!botToken) {
     console.error("[goat-slack-bot] Missing bot credential", { integrationId: integration.id });
-    return;
+    return "handled";
   }
 
-  const replyThreadTs = input.threadTs ?? input.messageTs;
-  const reply = (text: string) => postSlackBotReply(botToken, input.channelId, replyThreadTs, text);
-
-  const routes = await listEnabledGoatSlackBotBrainRoutes(integration.id);
-  const brains = routes.filter((route) =>
-    goatSlackSelectedConversationIds(route.config).has(input.channelId),
-  );
-  if (brains.length === 0) {
-    await reply(
-      "This channel isn't connected to a brain yet. A workspace admin can enable it under Brain settings → Destinations.",
-    );
-    return;
+  // A DM that mentions the bot arrives both as message.im and app_mention; the
+  // app_mention delivery owns it.
+  if (mode === "dm" && !options.viaMention && mentionsSlackUser(input.text, botUserId)) {
+    return "duplicate";
   }
+
+  const replyThreadTs = mode === "dm" ? input.threadTs : (input.threadTs ?? input.messageTs);
+  const reply = (text: string) =>
+    postPlainSlackReply(botToken, input.channelId, replyThreadTs, text);
+
+  const sender = await resolveGoatSlackSender({
+    botToken,
+    teamId: input.teamId,
+    slackUserId: input.slackUserId,
+    workspaceId: integration.workspaceId,
+  });
+  if (mode === "dm" && sender.kind !== "member") {
+    return { kind: "unmapped_dm", botToken };
+  }
+
+  const brains = await resolveBrainTargets(integration, input.channelId, mode, sender);
+  if (brains.kind === "none") {
+    if (mode === "mention") {
+      await reply(
+        "This channel isn't connected to a brain yet. A workspace admin can enable it under Brain settings → Destinations.",
+      );
+    } else if (mode === "dm") {
+      await reply("No brain is available in this workspace yet, so I can't answer here.");
+    }
+    // Follow-ups stay silent when routing was removed mid-thread.
+    return "handled";
+  }
+  const identity =
+    sender.kind === "member" && !brains.degradedToFallback
+      ? { userWorkosId: sender.member.workosUserId, member: sender.member }
+      : { userWorkosId: integration.userWorkosId, member: null };
 
   // Same rollout gate as the chat 402: debits always record, but the hard
   // stop only fires once enforcement is on.
@@ -104,132 +213,402 @@ async function answerForIntegration(
     !(await hasPositiveGoatCreditBalance(integration.workspaceId))
   ) {
     await reply("This workspace is out of credits, so I can't answer right now.");
-    return;
+    return "handled";
   }
 
-  const question = stripSlackBotMention(input.text, botUserId);
+  const question =
+    mode === "mention" || options.viaMention
+      ? stripSlackBotMention(input.text, botUserId)
+      : input.text.trim();
   if (!question) {
-    await reply(
-      "Ask me something, e.g. `@opencompany what did we learn from customers this week?`",
-    );
-    return;
+    if (mode === "mention") {
+      await reply(
+        "Ask me something, e.g. `@opencompany what did we learn from customers this week?`",
+      );
+    }
+    return "handled";
   }
+
+  const status = createGoatSlackBotStatusReporter({
+    botToken,
+    channelId: input.channelId,
+    triggerTs: input.messageTs,
+    threadTs: replyThreadTs,
+    canReact:
+      integration.scopes.length === 0 ||
+      goatSlackBotHasScope(integration.scopes, "reactions:write"),
+  });
 
   try {
-    const threadContext = input.threadTs
-      ? await fetchThreadContext(botToken, input.channelId, input.threadTs, input.messageTs)
-      : null;
+    // DMs pull recent conversation history even outside a thread; channel
+    // mentions only carry context when they happen inside a thread.
+    const contextMessages: SlackContextMessage[] =
+      mode === "dm" || input.threadTs
+        ? await fetchGoatSlackConversationContext({
+            botToken,
+            channelId: input.channelId,
+            threadTs: input.threadTs,
+            excludeTs: input.messageTs,
+            botUserId,
+          })
+        : [];
 
-    const answer = await runGoatSlackBotAgent({
+    const answer = await runSlackChatAgent({
+      integration,
+      identity,
+      brains: brains.targets,
+      mode,
+      status,
       question,
-      threadContext,
-      brains: brains.map((route) => ({ brainRef: route.brainRef, brainName: route.brainName })),
-      gatewayApiKey: requiredGatewayApiKey(),
-      userWorkosId: integration.userWorkosId,
+      contextMessages,
+      slackUserId: input.slackUserId,
       sourceRef: `slack:${input.teamId}:${input.channelId}:${input.messageTs}`,
     });
 
-    await reply(truncateForSlack(toSlackMrkdwn(answer.text), SLACK_ANSWER_MAX_CHARS));
+    const { replyTs } = await status.finish(
+      truncateForSlack(toSlackMrkdwn(answer.content), SLACK_ANSWER_MAX_CHARS),
+    );
+
+    if (mode !== "dm") {
+      const participationThreadTs = replyThreadTs ?? input.messageTs;
+      await recordGoatSlackBotThreadParticipation({
+        teamId: input.teamId,
+        channelId: input.channelId,
+        threadTs: participationThreadTs,
+        integrationId: integration.id,
+        botReplyTs: replyTs ?? input.messageTs,
+      }).catch(() => {});
+      await pruneGoatSlackBotThreadParticipation().catch(() => {});
+    }
 
     await recordSlackBotUsage({
       workspaceId: integration.workspaceId,
-      userWorkosId: integration.userWorkosId,
-      model: answer.model,
-      usage: answer.usage,
+      userWorkosId: identity.userWorkosId,
+      model: DEFAULT_GOAT_MODEL,
+      usage: answer.totalUsage,
       idempotencyKey: `slack_bot:${input.teamId}:${input.channelId}:${input.messageTs}`,
     });
   } catch (error) {
     console.error("[goat-slack-bot] Answer generation or delivery failed", {
       integrationId: integration.id,
       channelId: input.channelId,
+      mode,
       error: error instanceof Error ? error.message : String(error),
     });
-    await reply("Something went wrong answering that. Try again in a minute.").catch(() => {});
+    await status
+      .fail("Something went wrong answering that. Try again in a minute.")
+      .catch(() => {});
   }
+  return "handled";
 }
 
-export function stripSlackBotMention(text: string, botUserId: string | null): string {
-  const withoutBot = botUserId
-    ? text.replaceAll(new RegExp(`<@${escapeRegExp(botUserId)}(\\|[^>]*)?>`, "g"), " ")
-    : // Without a known bot id, strip only a leading mention.
-      text.replace(/^\s*<@[A-Z0-9]+(\|[^>]*)?>/i, " ");
-  return withoutBot.replace(/\s+/g, " ").trim();
-}
+type BrainResolution =
+  | { kind: "none" }
+  | { kind: "targets"; targets: GoatBrainMultiBrainTarget[]; degradedToFallback: boolean };
 
-// Safety net for models slipping into Markdown: Slack renders ** literally
-// and has no heading syntax.
-export function toSlackMrkdwn(text: string): string {
-  return text.replaceAll(/\*\*(.+?)\*\*/gs, "*$1*").replace(/^#{1,6}\s+(.*)$/gm, "*$1*");
-}
-
-export function truncateForSlack(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  return `${text.slice(0, maxChars - 2).trimEnd()} …`;
-}
-
-async function fetchThreadContext(
-  botToken: string,
+async function resolveBrainTargets(
+  integration: GoatSlackBotIntegrationForTeam,
   channelId: string,
-  threadTs: string,
-  messageTs: string,
-): Promise<string | null> {
-  // Best-effort: missing history scope or membership just degrades to no context.
-  try {
-    const result = await slackApiRequest<SlackThreadPage>({
-      method: "conversations.replies",
-      token: botToken,
-      form: {
-        channel: channelId,
-        ts: threadTs,
-        latest: messageTs,
-        inclusive: "false",
-        limit: String(THREAD_CONTEXT_PAGE_LIMIT),
-      },
+  mode: SlackAnswerMode,
+  sender: GoatSlackSenderResolution,
+): Promise<BrainResolution & { degradedToFallback?: boolean }> {
+  if (mode === "dm") {
+    if (sender.kind !== "member") return { kind: "none" };
+    const brains = await listAccessibleGoatBrains({
+      userWorkosId: sender.member.workosUserId,
+      workspaceId: integration.workspaceId,
     });
-    // conversations.replies returns oldest-first. If Slack paginated the
-    // result, this page is not the recent tail; omitting context is safer than
-    // grounding the answer in stale discussion or making rate-limited followups.
-    return formatSlackThreadContextPage(result);
+    if (brains.length === 0) return { kind: "none" };
+    const ordered = [...brains].sort((a, b) =>
+      a.slug === DEFAULT_GOAT_BRAIN_SLUG ? -1 : b.slug === DEFAULT_GOAT_BRAIN_SLUG ? 1 : 0,
+    );
+    return {
+      kind: "targets",
+      targets: ordered.map((brain) => ({ brainRef: brain.id, brainName: brain.name })),
+      degradedToFallback: false,
+    };
+  }
+
+  const routes = await listEnabledGoatSlackBotBrainRoutes(integration.id);
+  const routed = routes.filter((route) =>
+    goatSlackSelectedConversationIds(route.config).has(channelId),
+  );
+  if (routed.length === 0) return { kind: "none" };
+
+  // A mapped member only reads brains they can access in the app. If none of
+  // the routed brains are accessible to them, the whole turn degrades to the
+  // workspace fallback identity so attribution stays coherent.
+  if (sender.kind === "member") {
+    const accessible = await listAccessibleGoatBrains({
+      userWorkosId: sender.member.workosUserId,
+      workspaceId: integration.workspaceId,
+    });
+    const accessibleIds = new Set(accessible.map((brain) => brain.id));
+    const memberRouted = routed.filter((route) => accessibleIds.has(route.brainRef));
+    if (memberRouted.length > 0) {
+      return {
+        kind: "targets",
+        targets: memberRouted.map((route) => ({
+          brainRef: route.brainRef,
+          brainName: route.brainName,
+        })),
+        degradedToFallback: false,
+      };
+    }
+    console.warn("[goat-slack-bot] Mapped member lacks access to routed brains; using fallback", {
+      integrationId: integration.id,
+      channelId,
+    });
+  }
+
+  return {
+    kind: "targets",
+    targets: routed.map((route) => ({ brainRef: route.brainRef, brainName: route.brainName })),
+    degradedToFallback: sender.kind === "member",
+  };
+}
+
+// Drives the shared main-chat agent loop headlessly: same system prompt, same
+// toolset (brain read, save_to_brain, web search, integration actions), no
+// task/schedule tools, no persisted chat session — the Slack reply is the
+// entire output.
+async function runSlackChatAgent(input: {
+  integration: GoatSlackBotIntegrationForTeam;
+  identity: {
+    userWorkosId: string;
+    member: {
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+      timezone: string;
+    } | null;
+  };
+  brains: GoatBrainMultiBrainTarget[];
+  mode: SlackAnswerMode;
+  status: GoatSlackBotStatusReporter;
+  question: string;
+  contextMessages: SlackContextMessage[];
+  slackUserId: string;
+  sourceRef: string;
+}) {
+  const gatewayApiKey = requiredGatewayApiKey();
+  const signal = AbortSignal.timeout(SLACK_AGENT_TIMEOUT_MS);
+  const currentDate = new Date();
+
+  const primaryBrain = input.brains[0];
+  if (!primaryBrain) throw new Error("Slack bot agent needs at least one brain.");
+  const multiBrain = input.brains.length > 1;
+  const brainByRef = new Map(input.brains.map((brain) => [brain.brainRef, brain]));
+
+  const userContext = input.identity.member
+    ? {
+        email: input.identity.member.email,
+        firstName: input.identity.member.firstName,
+        lastName: input.identity.member.lastName,
+        timezone: input.identity.member.timezone,
+      }
+    : ((await getGoatUserBasics(input.identity.userWorkosId)) ?? undefined);
+  const userTimezone = userContext?.timezone || "UTC";
+
+  const actions = await resolveSlackActionDispatcher({
+    userWorkosId: input.identity.userWorkosId,
+    workspaceId: input.integration.workspaceId,
+    status: input.status,
+    signal,
+    currentDate,
+    userTimezone,
+  });
+
+  const workspaceName = await getWorkspaceName(input.integration.workspaceId);
+
+  // In channels the final turn names the asker like the reconstructed history
+  // does, so the model knows who to address among several humans.
+  const speakerName = input.identity.member
+    ? [input.identity.member.firstName, input.identity.member.lastName]
+        .filter(Boolean)
+        .join(" ")
+        .trim() || null
+    : null;
+  const finalUserContent =
+    input.mode === "dm"
+      ? input.question
+      : `${
+          speakerName
+            ? `[${speakerName} (<@${input.slackUserId}>)]`
+            : formatSpeaker(input.slackUserId)
+        }: ${input.question}`;
+
+  return runOpenCompanyChatAgent({
+    messages: [...input.contextMessages, { role: "user", content: finalUserContent }],
+    model: DEFAULT_GOAT_MODEL,
+    gatewayApiKey,
+    feature: "slack-bot",
+    taskToolsEnabled: false,
+    brainCaptureEnabled: true,
+    activeBrain: {
+      name: primaryBrain.brainName,
+      workspaceName: workspaceName ?? "this workspace",
+    },
+    ...(actions ? { connectedIntegrations: actions.catalog.providers } : {}),
+    extraSystemBlocks: [
+      createGoatSlackSurfacePromptBlock({ isDirectMessage: input.mode === "dm" }),
+    ],
+    ...(multiBrain ? { goatBrainMultiBrain: { targets: input.brains } } : {}),
+    userWorkosId: input.identity.userWorkosId,
+    brainRef: primaryBrain.brainRef,
+    currentDate,
+    ...(userContext ? { userContext } : {}),
+    abortSignal: signal,
+    runBrainCli: async (args) => {
+      input.status.setPhase("Searching the brain…");
+      // Multi-brain turns receive raw args with a required `brain` enum value;
+      // single-brain turns arrive already normalized from the tool context.
+      const record = (args ?? {}) as Record<string, unknown>;
+      const requestedBrain =
+        multiBrain && typeof record.brain === "string" ? record.brain : primaryBrain.brainRef;
+      const target = brainByRef.get(requestedBrain) ?? primaryBrain;
+      const toolArgs = { ...record };
+      delete toolArgs.brain;
+      const normalized = multiBrain
+        ? normalizeGoatBrainReadToolInput(toolArgs)
+        : (args as Parameters<typeof runGoatBrainToolForUser>[0]["toolInput"]);
+      return runGoatBrainToolForUser({
+        brainRef: target.brainRef,
+        userWorkosId: input.identity.userWorkosId,
+        toolInput: normalized,
+        gatewayApiKey,
+        sourceRef: input.sourceRef,
+        signal,
+      });
+    },
+    saveToBrain: async (toolInput) => {
+      input.status.setPhase("Saving to the brain…");
+      const content = toolInput.content?.trim();
+      const sourceRef = toolInput.sourceRef?.trim();
+      if (!content && !sourceRef) {
+        return { ok: false, error: "Provide content or sourceRef to save." };
+      }
+      const captured = await captureToGoatBrainInbox({
+        brainRef: primaryBrain.brainRef,
+        userWorkosId: input.identity.userWorkosId,
+        ...(content ? { text: content } : {}),
+        ...(toolInput.title ? { title: toolInput.title } : {}),
+        ...(toolInput.intent ? { intent: toolInput.intent } : {}),
+        ...(sourceRef ? { sourceRef } : {}),
+        ...(toolInput.integrationId ? { integrationId: toolInput.integrationId } : {}),
+        ...(toolInput.fallbackContent ? { fallbackText: toolInput.fallbackContent } : {}),
+        source: {
+          kind: "chat",
+          connectionId: input.sourceRef,
+          itemId: input.sourceRef,
+        },
+      });
+      if (!captured.ok) return captured;
+      return {
+        ok: true,
+        draftId: captured.draftBrainId,
+        path: captured.path,
+        title: captured.title,
+        status: captured.quotaPaused ? "paused_by_plan" : "captured",
+      };
+    },
+    ...(process.env.EXA_API_KEY?.trim()
+      ? {
+          webSearch: (toolInput) => {
+            input.status.setPhase("Searching the web…");
+            return executeGoatChatExaSearch({
+              toolInput,
+              apiKey: process.env.EXA_API_KEY?.trim() ?? "",
+              signal,
+              currentDate,
+            });
+          },
+        }
+      : {}),
+    ...(actions ? { actions: actions.dispatcher } : {}),
+  });
+}
+
+async function resolveSlackActionDispatcher(input: {
+  userWorkosId: string;
+  workspaceId: string;
+  status: GoatSlackBotStatusReporter;
+  signal: AbortSignal;
+  currentDate: Date;
+  userTimezone: string;
+}) {
+  if (isGoatChatActionsKilled()) return null;
+  let catalog: GoatResolvedActionCatalog;
+  try {
+    catalog = await resolveGoatActionCatalog({
+      userWorkosId: input.userWorkosId,
+      workspaceId: input.workspaceId,
+    });
   } catch {
     return null;
   }
+  if (catalog.actions.length === 0) return null;
+
+  const providerLabelById = new Map(
+    catalog.providers.map((provider) => [provider.id, provider.label]),
+  );
+  return {
+    catalog,
+    dispatcher: {
+      catalog: {
+        providers: catalog.providers,
+        actions: catalog.actions.map((action) => ({
+          id: action.id,
+          provider: action.provider,
+          description: action.description,
+          params: action.params,
+        })),
+      },
+      execute: async (call: {
+        action: string;
+        params: Record<string, unknown>;
+        toolCallId: string;
+      }): Promise<GoatActionResult> => {
+        const provider = catalog.actions.find((action) => action.id === call.action)?.provider;
+        input.status.setPhase(
+          `Checking ${provider ? (providerLabelById.get(provider) ?? provider) : "integrations"}…`,
+        );
+        return executeGoatAction({
+          catalog,
+          actionId: call.action,
+          params: call.params,
+          userWorkosId: input.userWorkosId,
+          signal: input.signal,
+          currentDate: input.currentDate,
+          userTimezone: input.userTimezone,
+        });
+      },
+    },
+  };
 }
 
-export function formatSlackThreadContextPage(page: SlackThreadPage): string | null {
-  if (page.has_more || page.response_metadata?.next_cursor) return null;
-  return formatSlackThreadContext(page.messages ?? []);
+async function connectedIntegrations(teamId: string) {
+  const integrations = await listGoatSlackBotIntegrationsForTeam(teamId);
+  return integrations.filter((integration) => integration.status === "connected");
 }
 
-export function formatSlackThreadContext(messages: SlackThreadMessage[]): string | null {
-  const candidates = messages
-    .filter(
-      (message): message is SlackThreadMessage & { text: string } =>
-        typeof message.text === "string" && Boolean(message.text.trim()),
-    )
-    .slice(-THREAD_CONTEXT_MESSAGE_LIMIT)
-    .map((message) => {
-      const author = message.bot_id ? "bot" : (message.user ?? "user");
-      const text = truncateForSlack(message.text.trim(), THREAD_CONTEXT_MESSAGE_MAX_CHARS);
-      return `${author}: ${text}`;
-    });
-
-  const selected: string[] = [];
-  let totalChars = 0;
-  for (let index = candidates.length - 1; index >= 0; index -= 1) {
-    const line = candidates[index];
-    if (!line) continue;
-    const nextChars = line.length + (selected.length > 0 ? 1 : 0);
-    if (totalChars + nextChars > THREAD_CONTEXT_TOTAL_MAX_CHARS) break;
-    selected.unshift(line);
-    totalChars += nextChars;
-  }
-  return selected.length > 0 ? selected.join("\n") : null;
+export function isDirectMessageChannel(channelId: string) {
+  return channelId.startsWith("D");
 }
 
-async function postSlackBotReply(
+async function getWorkspaceName(workspaceId: string): Promise<string | null> {
+  const [row] = await getDb()
+    .select({ name: goatWorkspaces.name })
+    .from(goatWorkspaces)
+    .where(eq(goatWorkspaces.id, workspaceId))
+    .limit(1);
+  return row?.name ?? null;
+}
+
+async function postPlainSlackReply(
   botToken: string,
   channelId: string,
-  threadTs: string,
+  threadTs: string | null,
   text: string,
 ) {
   await slackApiRequest({
@@ -237,7 +616,7 @@ async function postSlackBotReply(
     token: botToken,
     form: {
       channel: channelId,
-      thread_ts: threadTs,
+      ...(threadTs ? { thread_ts: threadTs } : {}),
       text,
       unfurl_links: "false",
     },
@@ -299,6 +678,17 @@ function requiredGatewayApiKey() {
   return value;
 }
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function logAnswerFailure(
+  mode: SlackAnswerMode,
+  integrationId: string,
+  input: GoatSlackBotEventInput,
+  error: unknown,
+) {
+  console.error("[goat-slack-bot] Failed to answer", {
+    mode,
+    teamId: input.teamId,
+    channelId: input.channelId,
+    integrationId,
+    error: error instanceof Error ? error.message : String(error),
+  });
 }
