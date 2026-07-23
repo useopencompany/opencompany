@@ -5,6 +5,7 @@ import {
   MAX_ACTION_CALLS_PER_TURN,
   runOpenCompanyChatAgent,
 } from "@/lib/chat-agent";
+import { MAX_WEB_SEARCH_CALLS_PER_TURN } from "@/lib/chat-limits";
 import {
   GOAT_BRAIN_TOOL_NAME,
   type GoatBrainToolInput,
@@ -696,7 +697,7 @@ describe("runOpenCompanyChatAgent", () => {
     expect(result.content).toContain("[Source](https://example.com/article)");
   });
 
-  it("can call web_search inside the chat loop without starting a task", async () => {
+  it("can call web_search four times inside the chat loop without starting a task", async () => {
     const startTask = vi.fn();
     const webSearch = vi.fn(
       async (input: WebSearchToolInput): Promise<WebSearchToolOutput> => ({
@@ -729,18 +730,30 @@ describe("runOpenCompanyChatAgent", () => {
         expect(system).toContain("Current date: 2026-07-04.");
         expect(system).toContain("Use the web_search tool inside chat");
         expect(system).toContain("Start a task when the user asks for deep research");
-        expect(extractWebSearchToolDescription(options)).toContain("one-shot");
+        expect(extractWebSearchToolDescription(options)).toContain(
+          `up to ${MAX_WEB_SEARCH_CALLS_PER_TURN} focused searches`,
+        );
 
-        const firstToolResult = await executeWebSearchTool(options, {
-          query: "latest Google updates",
-          recencyDays: 30,
-        });
+        const toolResults = [];
+        for (const query of [
+          "latest Google updates",
+          "latest Google product launches",
+          "latest Google AI updates",
+          "latest Google company news",
+        ]) {
+          toolResults.push(
+            await executeWebSearchTool(options, {
+              query,
+              recencyDays: 30,
+            }),
+          );
+        }
         const cappedToolResult = await executeWebSearchTool(options, {
-          query: "another Google update",
+          query: "fifth Google update query",
         });
         expect(cappedToolResult).toMatchObject({
           ok: false,
-          error: expect.stringContaining("limited to one search"),
+          error: expect.stringContaining(`limited to ${MAX_WEB_SEARCH_CALLS_PER_TURN} searches`),
         });
 
         return {
@@ -748,8 +761,8 @@ describe("runOpenCompanyChatAgent", () => {
           finishReason: "stop",
           steps: [
             {
-              toolCalls: [{ toolName: WEB_SEARCH_TOOL_NAME }],
-              toolResults: [firstToolResult],
+              toolCalls: toolResults.map(() => ({ toolName: WEB_SEARCH_TOOL_NAME })),
+              toolResults,
             },
           ],
         };
@@ -757,9 +770,13 @@ describe("runOpenCompanyChatAgent", () => {
     });
 
     expect(startTask).not.toHaveBeenCalled();
-    expect(webSearch).toHaveBeenCalledTimes(1);
-    expect(webSearch).toHaveBeenCalledWith({
+    expect(webSearch).toHaveBeenCalledTimes(MAX_WEB_SEARCH_CALLS_PER_TURN);
+    expect(webSearch).toHaveBeenNthCalledWith(1, {
       query: "latest Google updates",
+      recencyDays: 30,
+    });
+    expect(webSearch).toHaveBeenNthCalledWith(4, {
+      query: "latest Google company news",
       recencyDays: 30,
     });
     expect(result.task).toBeNull();
