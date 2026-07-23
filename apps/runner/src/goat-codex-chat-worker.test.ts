@@ -124,7 +124,7 @@ describe("Goat Codex chat worker shutdown", () => {
     expect(sqlText(dbMock.execute.mock.calls.at(-1)?.[0])).toContain("SET lease_id = NULL");
   });
 
-  it("returns after the post-handoff deadline even when setup has not reached an abort check", async () => {
+  it("expires the lease after the post-handoff deadline when setup cannot observe the abort", async () => {
     vi.clearAllMocks();
     let claimed = false;
     dbMock.execute.mockImplementation(async (query) => {
@@ -149,6 +149,9 @@ describe("Goat Codex chat worker shutdown", () => {
     await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledOnce());
     await expect(worker.stop({ handoffAfterMs: 1, postHandoffWaitMs: 1 })).resolves.toBeUndefined();
     expect(worker.activeCount()).toBe(1);
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("SET lease_id = NULL")),
+    ).toBe(true);
 
     finishTurn?.();
     await vi.waitFor(() => expect(worker.activeCount()).toBe(0));
