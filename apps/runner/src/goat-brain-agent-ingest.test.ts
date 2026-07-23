@@ -89,6 +89,7 @@ import {
   buildJamieMeetingAgentIngestPrompt,
   buildSlackConversationAgentIngestPrompt,
   formatGoatBrainFolderInventoryPrompt,
+  GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT,
   GOAT_BRAIN_AGENT_INGEST_BUDGET_LIMIT_USD_MICROS,
   GOAT_BRAIN_AGENT_INGEST_BUDGET_STOP_THRESHOLD_USD_MICROS,
   GOAT_BRAIN_AGENT_INGEST_MAX_OUTPUT_TOKENS,
@@ -98,6 +99,7 @@ import {
   GoatBrainAgentOutcomeError,
   GoatBrainIngestBudgetError,
   HUBSPOT_OBJECT_INGEST_SYSTEM_PROMPT,
+  LINEAR_ISSUE_INGEST_SYSTEM_PROMPT,
   placeMovingAnthropicCacheBreakpoint,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
@@ -427,6 +429,16 @@ describe("capture-first ingest profiles", () => {
   it("attributes the captured/uploaded content to the acting user", () => {
     expect(GOAT_CHAT_CAPTURE_INGEST_PROFILE.authorship).toBe("acting_user");
     expect(UPLOAD_ASSET_INGEST_PROFILE.authorship).toBe("acting_user");
+  });
+});
+
+describe("tracker ingest profiles", () => {
+  it.each([
+    LINEAR_ISSUE_INGEST_SYSTEM_PROMPT,
+    GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT,
+  ])("allows pointer-backed pages to become active without evidence snapshots", (prompt) => {
+    expect(prompt).toContain("cites provenance with [[evidence:...]] or [[source:...]]");
+    expect(prompt).toContain("compiled truth has neither citation");
   });
 });
 

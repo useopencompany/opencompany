@@ -283,7 +283,7 @@ function buildGoatBrainIngestSystemPrompt(input: {
     `- ${GOAT_BRAIN_POINTER_COPY_RULE.split("\n").join("\n  ")}`,
     "- No fabrication: write only what the source or the brain supports. If the source does not say it, it does not go in.",
     ...(input.sourceDataRule ? [`- ${input.sourceDataRule}`] : []),
-    "- Status discipline: status is the curation signal. New pages start as draft; once a page's compiled truth is a durable synthesis that cites evidence with [[evidence:...]], promote it with `set <id> --status active` (the brain rejects active pages whose compiled truth has no citation). Leave a page draft only when it is genuinely uncurated.",
+    "- Status discipline: status is the curation signal. New pages start as draft; once a page's compiled truth is a durable synthesis that cites provenance with [[evidence:...]] or [[source:...]], promote it with `set <id> --status active` (the brain rejects active pages whose compiled truth has neither citation). Leave a page draft only when it is genuinely uncurated.",
     `- ${input.skipRule}`,
     "",
     "When you are done, reply with a short plain-text summary of the pages you created or updated (one line per page). Do not include markdown headings in that final reply.",

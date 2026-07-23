@@ -661,12 +661,12 @@ describe("goat-brain cli", () => {
     });
 
     // Promotion is guarded by validation: active compiled truth must cite
-    // evidence.
+    // durable evidence or an external source.
     await expect(
       run(["set", "--root", root, "quick-note", "--status", "active"]),
     ).resolves.toMatchObject({
       exitCode: 1,
-      stderr: expect.stringContaining("active compiled truth must cite evidence"),
+      stderr: expect.stringContaining("active compiled truth must cite provenance"),
     });
     await expect(
       run([
@@ -694,6 +694,30 @@ describe("goat-brain cli", () => {
     ).resolves.toMatchObject({ exitCode: 0 });
     await expect(
       run(["set", "--root", root, "quick-note", "--status", "active"]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+  });
+
+  it("promotes pointer-backed tracker knowledge without inventing evidence", async () => {
+    await expect(
+      run([
+        "create",
+        "--root",
+        root,
+        "--folder",
+        "projects",
+        "--type",
+        "project",
+        "--id",
+        "goat-brain",
+        "--title",
+        "Goat Brain",
+        "--truth",
+        "Goat Brain ingestion now preserves live tracker provenance. [[source:github:useopencompany/opencompany-experimental:pull:123|PR #123]]",
+      ]),
+    ).resolves.toMatchObject({ exitCode: 0 });
+
+    await expect(
+      run(["set", "--root", root, "goat-brain", "--status", "active"]),
     ).resolves.toMatchObject({ exitCode: 0 });
   });
 
