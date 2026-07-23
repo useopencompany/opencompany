@@ -139,6 +139,10 @@ export type GoatGmailMessageDirection = "sent" | "received";
 export type GoatSlackChannelType = "channel" | "group" | "im" | "mpim";
 export type GoatLinearEventEntityType = "issue" | "comment";
 export type GoatLinearEventAction = "create" | "update" | "remove";
+export type GoatGitHubPullRequestEventType =
+  | "pull_request_opened"
+  | "pull_request_merged"
+  | "pull_request_commented";
 export type GoatHubspotObjectType = "contact" | "company" | "deal";
 export type GoatHubspotEventAction = "create" | "update";
 export type GoatAttioObjectType = "person" | "company" | "deal";
@@ -1823,6 +1827,51 @@ export const goatLinearIssueEvents = goat.table(
     actionCheck: check(
       "goat_linear_issue_events_action_check",
       sql`${table.action} IN ('create', 'update', 'remove')`,
+    ),
+  }),
+);
+
+// Raw GitHub pull-request activity buffer: the webhook inserts one row per
+// opened, commented, or merged event; the runner's flush sweeper batches
+// unflushed rows per pull request into one activity-window source item after a
+// quiet period (source_item_id NULL = unflushed). Issue activity remains
+// direct-enqueue because it does not have the open-to-merge lifecycle that
+// causes repeated PR ingestion.
+export const goatGitHubPullRequestEvents = goat.table(
+  "github_pull_request_events",
+  {
+    id: text("id").primaryKey(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    installationId: text("installation_id").notNull(),
+    repositoryId: text("repository_id").notNull(),
+    pullRequestNumber: integer("pull_request_number").notNull(),
+    // GitHub's X-GitHub-Delivery UUID is stable across redelivery attempts.
+    deliveryId: text("delivery_id").notNull(),
+    eventType: text("event_type").$type<GoatGitHubPullRequestEventType>().notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    sourceItemId: text("source_item_id").references(() => goatBrainSourceItems.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    integrationDeliveryIdx: uniqueIndex(
+      "goat_github_pull_request_events_integration_delivery_idx",
+    ).on(table.integrationId, table.deliveryId),
+    pendingIdx: index("goat_github_pull_request_events_pending_idx")
+      .on(table.integrationId, table.repositoryId, table.pullRequestNumber, table.receivedAt)
+      .where(sql`${table.sourceItemId} IS NULL`),
+    sourceItemIdx: index("goat_github_pull_request_events_source_item_idx").on(table.sourceItemId),
+    eventTypeCheck: check(
+      "goat_github_pull_request_events_event_type_check",
+      sql`${table.eventType} IN ('pull_request_opened', 'pull_request_merged', 'pull_request_commented')`,
     ),
   }),
 );
