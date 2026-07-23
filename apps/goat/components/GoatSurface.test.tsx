@@ -520,9 +520,9 @@ describe("GoatSurface chat streaming UI", () => {
     await user.keyboard("{Enter}");
 
     expect(textarea).toHaveValue("Follow up after this");
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/local-codex/messages")).toHaveLength(
-      1,
-    );
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url === "/api/local-codex/messages"),
+    ).toHaveLength(1);
   });
 
   it("shows the Codex engine only when Codex is connected", async () => {
