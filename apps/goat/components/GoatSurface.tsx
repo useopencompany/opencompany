@@ -69,7 +69,11 @@ import {
 } from "@/components/chat/ChatComposerAttachments";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
-import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
+import type {
+  ActionApprovalRequest,
+  CapabilityApprovalAction,
+  CodexToolAction,
+} from "@/components/chat/ToolCallItem";
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useGoatCreditBalance } from "@/components/chat/useGoatCreditBalance";
 import { useHydrated } from "@/components/useHydrated";
@@ -483,11 +487,16 @@ export function GoatSurface({
       const requestNewSessionId =
         typeof body?.newSessionId === "string" ? body.newSessionId : undefined;
       const requestModel = typeof body?.model === "string" ? body.model : undefined;
+      const capabilityApproval =
+        body?.capabilityApproval && typeof body.capabilityApproval === "object"
+          ? body.capabilityApproval
+          : undefined;
       return {
         body: {
           sessionId: requestSessionId,
           ...(requestNewSessionId ? { newSessionId: requestNewSessionId } : {}),
           ...(requestModel ? { model: requestModel } : {}),
+          ...(capabilityApproval ? { capabilityApproval } : {}),
           message,
           ...(mentions.length ? { mentions } : {}),
         },
@@ -1380,6 +1389,61 @@ export function GoatSurface({
     }
   };
 
+  const handleCapabilityApproval = async (action: CapabilityApprovalAction) => {
+    if (status === "submitted" || status === "streaming") {
+      throw new Error("Wait for the current chat turn to finish.");
+    }
+    if (activeChatEngine !== "opencompany" || !chatSessionId) {
+      throw new Error("This paid capability belongs to a chat that is no longer active.");
+    }
+    const response = await fetch(
+      `/api/capabilities/approvals/${encodeURIComponent(action.runId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision: action.decision }),
+      },
+    );
+    const result = (await response.json().catch(() => null)) as {
+      status?: unknown;
+      error?: unknown;
+    } | null;
+    if (!response.ok || typeof result?.status !== "string") {
+      throw new Error(
+        typeof result?.error === "string"
+          ? result.error
+          : "Could not update this capability approval.",
+      );
+    }
+    if (action.decision === "cancel" || result.status !== "approved") {
+      return result.status;
+    }
+
+    const prompt = `Continue the approved paid capability exactly as requested. Use action ${action.action} with these unchanged parameters: ${JSON.stringify(action.params)}`;
+    clearError();
+    beginActiveTurn();
+    try {
+      await sendMessage(
+        { text: prompt },
+        {
+          body: {
+            sessionId: chatSessionId,
+            model: activeChatModel,
+            capabilityApproval: {
+              runId: action.runId,
+              action: action.action,
+              params: action.params,
+            },
+          },
+        },
+      );
+      return "approved";
+    } catch (cause) {
+      clearActiveTurn();
+      throw cause;
+    }
+  };
+
   const closeChat = useCallback(() => {
     if (isGenerating) void stop();
     openChat(null);
@@ -1755,6 +1819,7 @@ export function GoatSurface({
                   stopped={locallyStoppedAssistantMessageIds.has(message.id)}
                   durationMs={chatMessageDurationMs(message, optimisticTurnDurations)}
                   onCodexAction={handleCodexToolAction}
+                  onCapabilityApproval={handleCapabilityApproval}
                   allowCodexPlanActions={message.id === latestAssistantMessageId}
                   onActionApproval={handleActionApproval}
                   allowActionApproval={message.id === latestAssistantMessageId}

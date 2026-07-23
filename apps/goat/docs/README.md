@@ -119,7 +119,8 @@ optionally stops the active stream, and marks the chat session closed through
 3. Requires `VERCEL_AI_GATEWAY_API_KEY`.
 4. Finds or creates an open `goat.chat_sessions` row.
 5. Persists the user message in `goat.chat_messages`.
-6. Resolves read-only connected-integration actions and creates the chat tool context for
+6. Resolves connected-integration actions plus the workspace's managed social/lead capabilities and
+   creates the chat tool context for
    `goat_brain`, `save_to_brain`, `list_actions`/`use_action`, optional `start_task`, and optional
    `web_fetch`/`web_search`.
 7. Calls `streamText` through Vercel AI Gateway with the session's model.
@@ -141,9 +142,10 @@ structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects run
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
 timezone. `goat_brain` is always available. When Exa is configured, `web_fetch` reads one known URL
 through the Contents API while `web_search` discovers current public-web sources through Search.
-Connected integration actions are dispatched through `list_actions` and `use_action`
-tools. The route resolves a per-user catalog from currently connected providers, and the model must
-discover a provider's concrete action ids and parameter schemas before executing one. Slack exposes
+Connected integration and managed capability actions are dispatched through `list_actions` and
+`use_action`. The route resolves one compact source catalog from currently connected providers and
+the workspace's enabled managed capabilities, and the model must discover a source's concrete action
+ids and parameter schemas before executing one. Slack exposes
 conversation, message, thread, member, and scope-dependent search reads. Gmail exposes message
 search plus message and thread retrieval, with an explicit account required when several are
 connected. Google Calendar exposes a bounded event-list read, while Google Drive exposes file
@@ -155,6 +157,23 @@ apply a saved-view filter from an Attio collection URL, with an explicit workspa
 several are connected. Disconnected providers are absent from the catalog, guessed action ids
 cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
 connected-account work continues through background tasks.
+
+Managed X, LinkedIn, YouTube, Instagram, TikTok, and lead-enrichment actions use a fixed
+server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Every paid execution
+inspects its live endpoint schema and price before running, checks shared workspace credits, and
+requires a one-time approval above the per-action or per-turn thresholds. Provider data is treated
+as hostile input, redacted and bounded before it enters the chat trace, and billed once from the
+settled provider cost plus the platform fee. The durable `goat.capability_runs` row stores only the
+parameter hash and lifecycle/cost metadata; raw results stay in the requesting chat. The hourly
+billing reconciler settles interrupted or delayed runs. `MONID_API_KEY` belongs in Infisical
+`prod` + `/goat`, and `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new
+turns. `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint
+isolation. Managed sources never participate in automatic Brain-fill surveying; the user must
+explicitly ask to save their results.
+
+Run `bun run goat:capabilities:contract` with `MONID_API_KEY` to inspect every allowlisted
+endpoint and fail on removal or pricing/input-contract drift. The command never calls the paid run
+API and is intentionally opt-in.
 
 When connected integrations and an active brain are present, a conditional `brain_fill` prompt
 teaches the agent to survey breadth before depth, page promising sources, save focused findings
@@ -657,6 +676,10 @@ Common changes and where they belong:
   `apps/goat/lib/chat-agent.ts`.
 - Change lightweight chat web access: `web_fetch`/`web_search` in
   `apps/goat/lib/chat-agent.ts` and their Exa callbacks in `apps/goat/app/api/chat/route.ts`.
+- Change managed chat capabilities: the endpoint allowlist and validators in
+  `apps/goat/lib/capabilities/catalog.ts`, execution policy in
+  `apps/goat/lib/capabilities/execute.ts`, and workspace controls in
+  `apps/goat/app/(app)/settings/workspace/capabilities`.
 - Change chat streaming behavior: `apps/goat/app/api/chat/route.ts` and
   `apps/goat/components/GoatSurface.tsx`.
 - Change task creation defaults: `createGoatTaskForUser` in `apps/goat/lib/tasks.ts`.

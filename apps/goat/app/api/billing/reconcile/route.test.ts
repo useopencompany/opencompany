@@ -1,6 +1,7 @@
 import { releasePendingGoatIngestionReservations } from "@opencompany/db/goat-billing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sweepGoatAutoRefills } from "@/lib/billing/auto-refill";
+import { reconcileGoatCapabilities } from "@/lib/capabilities/reconcile";
 import { GET } from "./route";
 
 vi.mock("@opencompany/db/goat-billing", () => ({
@@ -9,6 +10,10 @@ vi.mock("@opencompany/db/goat-billing", () => ({
 
 vi.mock("@/lib/billing/auto-refill", () => ({
   sweepGoatAutoRefills: vi.fn(),
+}));
+
+vi.mock("@/lib/capabilities/reconcile", () => ({
+  reconcileGoatCapabilities: vi.fn(),
 }));
 
 describe("GET /api/billing/reconcile", () => {
@@ -22,17 +27,23 @@ describe("GET /api/billing/reconcile", () => {
     expect(response.status).toBe(401);
     expect(releasePendingGoatIngestionReservations).not.toHaveBeenCalled();
     expect(sweepGoatAutoRefills).not.toHaveBeenCalled();
+    expect(reconcileGoatCapabilities).not.toHaveBeenCalled();
   });
 
-  it("sweeps auto-refills before releasing backlogs so a fresh balance can admit them", async () => {
-    const order: string[] = [];
+  it("reconciles capabilities and ingestion before sweeping auto-refills", async () => {
     vi.mocked(sweepGoatAutoRefills).mockImplementation(async () => {
-      order.push("autoRefills");
       return { candidates: 2, charged: 1 };
     });
     vi.mocked(releasePendingGoatIngestionReservations).mockImplementation(async () => {
-      order.push("release");
       return { released: 4, failed: 1 };
+    });
+    vi.mocked(reconcileGoatCapabilities).mockResolvedValue({
+      expiredApprovals: 1,
+      candidates: 3,
+      settled: 2,
+      pending: 1,
+      failed: 0,
+      wallet: null,
     });
     const response = await GET(
       new Request("https://goat.test/api/billing/reconcile", {
@@ -44,7 +55,16 @@ describe("GET /api/billing/reconcile", () => {
       released: 4,
       failed: 1,
       autoRefills: { candidates: 2, charged: 1 },
+      capabilities: {
+        expiredApprovals: 1,
+        candidates: 3,
+        settled: 2,
+        pending: 1,
+        failed: 0,
+        wallet: null,
+      },
     });
-    expect(order).toEqual(["autoRefills", "release"]);
+    expect(reconcileGoatCapabilities).toHaveBeenCalledWith(100);
+    expect(sweepGoatAutoRefills).toHaveBeenCalledWith(25);
   });
 });

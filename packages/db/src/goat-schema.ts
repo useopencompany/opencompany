@@ -273,11 +273,31 @@ export type GoatCreditLedgerSource =
   | "starter_grant"
   | "stripe_topup"
   | "chat_model_usage"
+  | "capability_usage"
   | "frontier_ingest"
   | "ingest_overage"
   | "ingest_model_usage"
   | "ingest_fee"
   | "adjustment";
+export type GoatManagedCapabilitySource =
+  | "x"
+  | "linkedin"
+  | "youtube"
+  | "instagram"
+  | "tiktok"
+  | "lead";
+export type GoatCapabilityRunStatus =
+  | "awaiting_approval"
+  | "approved"
+  | "canceled"
+  | "expired"
+  | "executing"
+  | "running"
+  | "stopping"
+  | "succeeded"
+  | "failed"
+  | "stopped"
+  | "timed_out";
 export type GoatCheckoutSessionStatus = "pending" | "open" | "fulfilled" | "failed";
 export type GoatBrainVisibility = "workspace" | "restricted";
 export type GoatBrainFolderSource = "system" | "custom";
@@ -573,6 +593,32 @@ export const goatWorkspaceMembers = goat.table(
   }),
 );
 
+// OpenCompany-managed paid capabilities are workspace features, not user
+// integrations. Missing rows mean enabled; this table stores only explicit
+// workspace overrides.
+export const goatWorkspaceCapabilities = goat.table(
+  "workspace_capabilities",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    source: text("source").$type<GoatManagedCapabilitySource>().notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedByWorkosId: text("updated_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.source] }),
+    sourceCheck: check(
+      "goat_workspace_capabilities_source_check",
+      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead')`,
+    ),
+  }),
+);
+
 // Billing v4: this row is the wallet's Stripe home (customer id + auto-refill
 // state). plan/seat/subscription columns are orphaned v3 leftovers — no code
 // writes them anymore; a cleanup migration drops them once prod confirms zero
@@ -739,7 +785,7 @@ export const goatCreditLedger = goat.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'stripe_topup', 'chat_model_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'stripe_topup', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );
@@ -2700,6 +2746,110 @@ export const goatChatSessions = goat.table(
   }),
 );
 
+// Durable paid-capability lifecycle. Inputs and provider output intentionally
+// stay out of this table: the exact input is bound by input_hash and the
+// safety-bounded provider result lives only in the requesting chat trace.
+export const goatCapabilityRuns = goat.table(
+  "capability_runs",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "restrict" }),
+    toolCallId: text("tool_call_id"),
+    source: text("source").$type<GoatManagedCapabilitySource>().notNull(),
+    action: text("action").notNull(),
+    inputHash: text("input_hash").notNull(),
+    provider: text("provider").notNull(),
+    endpoint: text("endpoint").notNull(),
+    status: text("status").$type<GoatCapabilityRunStatus>().notNull(),
+    quoteProviderCostUsdMicros: bigint("quote_provider_cost_usd_micros", {
+      mode: "number",
+    }).notNull(),
+    quotePlatformFeeUsdMicros: bigint("quote_platform_fee_usd_micros", {
+      mode: "number",
+    }).notNull(),
+    quoteTotalCostUsdMicros: bigint("quote_total_cost_usd_micros", {
+      mode: "number",
+    }).notNull(),
+    monidRunId: text("monid_run_id"),
+    providerHttpStatus: integer("provider_http_status"),
+    resultCount: integer("result_count"),
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", { mode: "number" }),
+    platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" }),
+    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" }),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    approvalExpiresAt: timestamp("approval_expires_at", { withTimezone: true }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    monidRunIdx: uniqueIndex("goat_capability_runs_monid_run_idx")
+      .on(table.monidRunId)
+      .where(sql`${table.monidRunId} IS NOT NULL`),
+    workspaceCreatedIdx: index("goat_capability_runs_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    reconciliationIdx: index("goat_capability_runs_reconciliation_idx")
+      .on(table.updatedAt, table.id)
+      .where(
+        sql`${table.status} IN ('executing', 'running', 'stopping') AND ${table.settledAt} IS NULL`,
+      ),
+    approvalIdx: index("goat_capability_runs_approval_idx").on(
+      table.userWorkosId,
+      table.chatSessionId,
+      table.status,
+      table.approvalExpiresAt,
+    ),
+    sourceCheck: check(
+      "goat_capability_runs_source_check",
+      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead')`,
+    ),
+    providerCheck: check(
+      "goat_capability_runs_provider_check",
+      sql`${table.provider} IN ('tikhub', 'apify', 'pdl')`,
+    ),
+    inputHashCheck: check(
+      "goat_capability_runs_input_hash_check",
+      sql`${table.inputHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    moneyCheck: check(
+      "goat_capability_runs_money_check",
+      sql`${table.quoteProviderCostUsdMicros} >= 0
+        AND ${table.quotePlatformFeeUsdMicros} >= 0
+        AND ${table.quoteTotalCostUsdMicros} >= 0
+        AND ${table.quoteTotalCostUsdMicros} = ${table.quoteProviderCostUsdMicros} + ${table.quotePlatformFeeUsdMicros}
+        AND (${table.providerCostUsdMicros} IS NULL OR ${table.providerCostUsdMicros} >= 0)
+        AND (${table.platformFeeUsdMicros} IS NULL OR ${table.platformFeeUsdMicros} >= 0)
+        AND (${table.totalCostUsdMicros} IS NULL OR ${table.totalCostUsdMicros} >= 0)
+        AND (
+          (${table.providerCostUsdMicros} IS NULL AND ${table.platformFeeUsdMicros} IS NULL AND ${table.totalCostUsdMicros} IS NULL)
+          OR (
+            ${table.providerCostUsdMicros} IS NOT NULL
+            AND ${table.platformFeeUsdMicros} IS NOT NULL
+            AND ${table.totalCostUsdMicros} = ${table.providerCostUsdMicros} + ${table.platformFeeUsdMicros}
+          )
+        )
+        AND (${table.resultCount} IS NULL OR ${table.resultCount} >= 0)`,
+    ),
+    statusCheck: check(
+      "goat_capability_runs_status_check",
+      sql`${table.status} IN ('awaiting_approval', 'approved', 'canceled', 'expired', 'executing', 'running', 'stopping', 'succeeded', 'failed', 'stopped', 'timed_out')`,
+    ),
+  }),
+);
+
 export const goatChatMessages = goat.table(
   "chat_messages",
   {
@@ -3268,6 +3418,8 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   taskToolUsage: many(goatTaskToolUsage),
   taskSandboxUsage: many(goatTaskSandboxUsage),
   chatSessions: many(goatChatSessions),
+  capabilityRuns: many(goatCapabilityRuns),
+  capabilityOverrides: many(goatWorkspaceCapabilities),
   localBridges: many(goatLocalBridges),
   localCodexSessions: many(goatLocalCodexSessions),
   localCodexTurns: many(goatLocalCodexTurns),
@@ -3287,6 +3439,8 @@ export const goatWorkspacesRelations = relations(goatWorkspaces, ({ one, many })
     references: [goatUsers.workosUserId],
   }),
   members: many(goatWorkspaceMembers),
+  capabilities: many(goatWorkspaceCapabilities),
+  capabilityRuns: many(goatCapabilityRuns),
   billing: one(goatWorkspaceBilling),
   ingestionReservations: many(goatWorkspaceIngestionReservations),
   brains: many(goatBrains),
@@ -3309,6 +3463,20 @@ export const goatWorkspaceMembersRelations = relations(goatWorkspaceMembers, ({ 
     references: [goatUsers.workosUserId],
   }),
 }));
+
+export const goatWorkspaceCapabilitiesRelations = relations(
+  goatWorkspaceCapabilities,
+  ({ one }) => ({
+    workspace: one(goatWorkspaces, {
+      fields: [goatWorkspaceCapabilities.workspaceId],
+      references: [goatWorkspaces.id],
+    }),
+    updatedBy: one(goatUsers, {
+      fields: [goatWorkspaceCapabilities.updatedByWorkosId],
+      references: [goatUsers.workosUserId],
+    }),
+  }),
+);
 
 export const goatBrainsRelations = relations(goatBrains, ({ one, many }) => ({
   workspace: one(goatWorkspaces, {
@@ -3805,6 +3973,22 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
   skills: many(goatChatSessionSkills),
   brainToolRuns: many(goatBrainToolRuns),
   localCodexSessions: many(goatLocalCodexSessions),
+  capabilityRuns: many(goatCapabilityRuns),
+}));
+
+export const goatCapabilityRunsRelations = relations(goatCapabilityRuns, ({ one }) => ({
+  workspace: one(goatWorkspaces, {
+    fields: [goatCapabilityRuns.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
+  user: one(goatUsers, {
+    fields: [goatCapabilityRuns.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  chatSession: one(goatChatSessions, {
+    fields: [goatCapabilityRuns.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
 }));
 
 export const goatChatMessagesRelations = relations(goatChatMessages, ({ one, many }) => ({
@@ -3844,6 +4028,7 @@ export type GoatUser = typeof goatUsers.$inferSelect;
 export type GoatWorkspace = typeof goatWorkspaces.$inferSelect;
 export type GoatOnboarding = typeof goatOnboarding.$inferSelect;
 export type GoatWorkspaceMember = typeof goatWorkspaceMembers.$inferSelect;
+export type GoatWorkspaceCapability = typeof goatWorkspaceCapabilities.$inferSelect;
 export type GoatWorkspaceBilling = typeof goatWorkspaceBilling.$inferSelect;
 export type GoatWorkspaceIngestionReservation =
   typeof goatWorkspaceIngestionReservations.$inferSelect;
@@ -3880,5 +4065,6 @@ export type GoatTaskModelUsage = typeof goatTaskModelUsage.$inferSelect;
 export type GoatTaskToolUsage = typeof goatTaskToolUsage.$inferSelect;
 export type GoatTaskSandboxUsage = typeof goatTaskSandboxUsage.$inferSelect;
 export type GoatChatSession = typeof goatChatSessions.$inferSelect;
+export type GoatCapabilityRun = typeof goatCapabilityRuns.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
 export type GoatChatSessionSkill = typeof goatChatSessionSkills.$inferSelect;

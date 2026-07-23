@@ -27,6 +27,20 @@ export default async function WorkspaceBillingSettingsPage({
       data={{
         creditBalanceUsdMicros: overview.creditBalanceUsdMicros,
         spendThisMonthUsdMicros: credit.spendThisMonthUsdMicros,
+        spendThisMonthByCategory: credit.spendThisMonthByCategory,
+        recentActivity: credit.recentEntries.map((entry) => ({
+          id: entry.id,
+          source: entry.source,
+          amountUsdMicros: entry.amountUsdMicros,
+          providerCostUsdMicros: entry.providerCostUsdMicros,
+          platformFeeUsdMicros: entry.platformFeeUsdMicros,
+          capabilityAction:
+            typeof entry.metadata.capabilityAction === "string"
+              ? entry.metadata.capabilityAction
+              : null,
+          isAutoRefill: entry.metadata.kind === "auto_refill",
+          createdAt: entry.createdAt.toISOString(),
+        })),
         lowBalanceWarnUsdMicros: GOAT_LOW_BALANCE_WARN_USD_MICROS,
         topUpAmountsCents: [...GOAT_TOP_UP_AMOUNTS_USD_CENTS],
         defaultTopUpCents: GOAT_DEFAULT_TOP_UP_USD_CENTS,

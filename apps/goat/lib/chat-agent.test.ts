@@ -138,7 +138,7 @@ describe("runOpenCompanyChatAgent", () => {
   it("configures catalog action repair for headless chat generation", async () => {
     const actions: ActionDispatcher = {
       catalog: {
-        providers: [
+        sources: [
           {
             id: "linear",
             label: "Linear workspace",
@@ -148,7 +148,7 @@ describe("runOpenCompanyChatAgent", () => {
         actions: [
           {
             id: "linear.get_project",
-            provider: "linear",
+            source: "linear",
             description: "Fetch one Linear project.",
             params: { type: "object", properties: {} },
             permissionMode: "on" as const,
@@ -787,7 +787,7 @@ describe("runOpenCompanyChatAgent", () => {
 
 describe("list_actions and use_action tools", () => {
   const catalog: GoatChatActionCatalog = {
-    providers: [
+    sources: [
       {
         id: "slack",
         label: 'Slack workspace "Acme"',
@@ -802,14 +802,14 @@ describe("list_actions and use_action tools", () => {
     actions: [
       {
         id: "slack.fetch_history",
-        provider: "slack",
+        source: "slack",
         description: "Fetch recent messages from one Slack conversation.",
         params: { type: "object", properties: { channel: { type: "string" } } },
         permissionMode: "on" as const,
       },
       {
         id: "linear.list_issues",
-        provider: "linear",
+        source: "linear",
         description: "List Linear issues.",
         params: { type: "object", properties: {} },
         permissionMode: "on" as const,
@@ -833,19 +833,19 @@ describe("list_actions and use_action tools", () => {
     const emptyContext = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
-      actions: { catalog: { providers: [], actions: [] }, execute: vi.fn() },
+      actions: { catalog: { sources: [], actions: [] }, execute: vi.fn() },
     });
     expect(emptyContext.tools[LIST_ACTIONS_TOOL_NAME]).toBeUndefined();
     expect(emptyContext.tools[USE_ACTION_TOOL_NAME]).toBeUndefined();
   });
 
-  it("builds integration and action enums and lists only the selected integration", async () => {
+  it("builds source and action enums and lists only the selected source", async () => {
     const context = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
       actions: { catalog, execute: vi.fn() },
     });
-    expect(extractListActionsIntegrationEnum(context.tools)).toEqual(["slack", "linear"]);
+    expect(extractListActionsSourceEnum(context.tools)).toEqual(["slack", "linear"]);
     expect(extractUseActionEnum(context.tools)).toEqual([
       "slack.fetch_history",
       "linear.list_issues",
@@ -853,32 +853,78 @@ describe("list_actions and use_action tools", () => {
     expect(extractUseActionDescription(context.tools)).toContain(
       `Limited to ${MAX_ACTION_CALLS_PER_TURN} calls per chat turn`,
     );
+    expect(extractUseActionDescription(context.tools)).toContain(
+      "only after list_actions succeeded",
+    );
     expect(MAX_ACTION_CALLS_PER_TURN).toBe(16);
-    const listed = await executeListActionsTool(context.tools, { integration: "slack" });
+    const listed = await executeListActionsTool(context.tools, { source: "slack" });
     expect(listed).toEqual({
       ok: true,
-      integration: catalog.providers[0],
+      source: catalog.sources[0],
       actions: [catalog.actions[0]],
     });
 
-    const listedLinear = await executeListActionsTool(context.tools, { integration: "linear" });
+    const listedLinear = await executeListActionsTool(context.tools, { source: "linear" });
     expect(listedLinear).toEqual({
       ok: true,
-      integration: catalog.providers[1],
+      source: catalog.sources[1],
       actions: [catalog.actions[1]],
     });
 
     const unknown = await executeListActionsTool(context.tools, {
-      integration: "mail",
+      source: "mail",
     } as unknown as ListActionsToolInput);
     expect(unknown).toEqual({
       ok: false,
       error: {
-        code: "unknown_integration",
-        message: 'Unknown integration "mail". Use an exact id from <integrations>.',
-        availableIntegrations: ["slack", "linear"],
+        code: "unknown_source",
+        message: 'Unknown source "mail". Use an exact id from <action_sources>.',
+        availableSources: ["slack", "linear"],
       },
     });
+  });
+
+  it("requires list_actions separately for each source before dispatch", async () => {
+    const execute = vi.fn(async ({ action }: { action: string }) => okResult(action));
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      actions: { catalog, execute },
+    });
+
+    const beforeDiscovery = await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C123" },
+    });
+    expect(beforeDiscovery).toEqual({
+      ok: false,
+      action: "slack.fetch_history",
+      error: {
+        code: "invalid_params",
+        source: "slack",
+        message:
+          'Call list_actions with source "slack" in this chat turn before using "slack.fetch_history".',
+      },
+    });
+    expect(execute).not.toHaveBeenCalled();
+
+    await executeListActionsTool(context.tools, { source: "slack" });
+    expect(
+      await executeUseActionTool(context.tools, {
+        action: "slack.fetch_history",
+        params: { channel: "C123" },
+      }),
+    ).toMatchObject({ ok: true });
+
+    const otherSource = await executeUseActionTool(context.tools, {
+      action: "linear.list_issues",
+      params: {},
+    });
+    expect(otherSource).toMatchObject({
+      ok: false,
+      error: { code: "invalid_params", source: "linear" },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("dispatches valid calls and steers invalid or over-budget ones", async () => {
@@ -889,6 +935,7 @@ describe("list_actions and use_action tools", () => {
       actions: { catalog, execute },
     });
 
+    await executeListActionsTool(context.tools, { source: "slack" });
     const valid = await executeUseActionTool(context.tools, {
       action: "slack.fetch_history",
       params: { channel: "C123" },
@@ -913,6 +960,7 @@ describe("list_actions and use_action tools", () => {
     expect(execute).toHaveBeenCalledTimes(1);
 
     // Missing params coerces to an empty object rather than failing.
+    await executeListActionsTool(context.tools, { source: "linear" });
     await executeUseActionTool(context.tools, { action: "linear.list_issues" });
     expect(execute).toHaveBeenLastCalledWith(
       expect.objectContaining({ action: "linear.list_issues", params: {} }),
@@ -940,14 +988,14 @@ describe("list_actions and use_action tools", () => {
         ...catalog.actions,
         {
           id: "linear.get_project",
-          provider: "linear",
+          source: "linear",
           description: "Fetch one Linear project.",
           params: { type: "object", properties: {} },
           permissionMode: "on",
         },
         {
           id: "linear.create_issue",
-          provider: "linear",
+          source: "linear",
           description: "Create a Linear issue.",
           params: { type: "object", properties: {} },
           permissionMode: "ask",
@@ -1185,17 +1233,15 @@ function extractUseActionDescription(tools: unknown) {
   return (tools as Tools)[USE_ACTION_TOOL_NAME]?.description ?? "";
 }
 
-function extractListActionsIntegrationEnum(tools: unknown) {
-  type IntegrationSchema = { properties?: { integration?: { enum?: string[] } } };
+function extractListActionsSourceEnum(tools: unknown) {
+  type SourceSchema = { properties?: { source?: { enum?: string[] } } };
   type Tools = Record<
     typeof LIST_ACTIONS_TOOL_NAME,
-    { inputSchema?: IntegrationSchema & { jsonSchema?: IntegrationSchema } }
+    { inputSchema?: SourceSchema & { jsonSchema?: SourceSchema } }
   >;
   const inputSchema = (tools as Tools)[LIST_ACTIONS_TOOL_NAME]?.inputSchema;
   return (
-    inputSchema?.properties?.integration?.enum ??
-    inputSchema?.jsonSchema?.properties?.integration?.enum ??
-    []
+    inputSchema?.properties?.source?.enum ?? inputSchema?.jsonSchema?.properties?.source?.enum ?? []
   );
 }
 

@@ -31,7 +31,7 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     expect(createOpenCompanyChatSystemPrompt({ currentDate, connectedIntegrations: [] })).toBe(
       base,
     );
-    expect(base).not.toContain("<integrations>");
+    expect(base).not.toContain("<action_sources>");
     expect(base).not.toContain("<brain_fill>");
     expect(base).not.toContain("list_actions");
     expect(base).not.toContain("use_action");
@@ -41,25 +41,28 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     const prompt = createOpenCompanyChatSystemPrompt({
       connectedIntegrations: CONNECTED_INTEGRATIONS,
     });
-    expect(prompt).toContain("<integrations>");
+    expect(prompt).toContain("<action_sources>");
     expect(prompt).toContain(
-      '- slack — Slack workspace "Acme": Read conversations, messages, threads, and workspace members.',
+      '- slack [connected integration] — Slack workspace "Acme": Read conversations, messages, threads, and workspace members.',
     );
     expect(prompt).toContain(
-      "- gmail — Gmail (louis@example.com): Search and read messages and threads.",
+      "- gmail [connected integration] — Gmail (louis@example.com): Search and read messages and threads.",
     );
     expect(prompt).toContain(
-      "- google_calendar — Google Calendar (louis@example.com): List calendar events in a bounded time window.",
+      "- google_calendar [connected integration] — Google Calendar (louis@example.com): List calendar events in a bounded time window.",
     );
-    expect(prompt).toContain("Connected integrations usable in chat");
-    expect(prompt).toContain("Call list_actions with the exact integration id");
-    expect(prompt).toContain("call list_actions with the relevant integration id");
-    expect(prompt).toContain("Use a write action only when the user explicitly asked");
+    expect(prompt).toContain("Action sources usable in chat");
+    expect(prompt).toContain("Call list_actions with the exact source id");
+    expect(prompt).toContain("call list_actions with the relevant source id");
+    expect(prompt).toContain("Managed capabilities are read-only");
+    expect(prompt).toContain("cannot post, edit, create, delete");
+    expect(prompt).toContain("write action only when the user explicitly asked");
     expect(prompt).toContain("Never claim a write happened unless the action returned ok=true");
     expect(prompt).toContain("Choose the lightest path");
     expect(prompt).toContain("start a task for deep, multi-step, or cross-source work");
     expect(prompt).toContain("one quick bounded lookup");
-    expect(prompt).toContain("If a use_action result has ok=false");
+    expect(prompt).toContain("If use_action returns invalid_params");
+    expect(prompt).toContain("make at most one corrected call");
     expect(prompt).toContain("<brain_fill>");
     expect(prompt).toContain("Survey breadth before depth");
     expect(prompt).toContain("exception to normal task routing");
@@ -67,7 +70,10 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     expect(prompt).toContain("sourceRef plus integrationId");
     expect(prompt).toContain("summarize what you saved");
     // The block stays small: one routing line per integration, not an action index.
-    const block = prompt.slice(prompt.indexOf("<integrations>"), prompt.indexOf("</integrations>"));
+    const block = prompt.slice(
+      prompt.indexOf("<action_sources>"),
+      prompt.indexOf("</action_sources>"),
+    );
     expect(block.length).toBeLessThan(800);
   });
 
@@ -77,7 +83,7 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
       brainCaptureEnabled: false,
     });
 
-    expect(prompt).toContain("<integrations>");
+    expect(prompt).toContain("<action_sources>");
     expect(prompt).not.toContain("<brain_fill>");
   });
 

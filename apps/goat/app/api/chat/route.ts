@@ -29,7 +29,7 @@ import {
 import { after } from "next/server";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import { executeGoatAction } from "@/lib/actions/execute";
-import type { GoatResolvedActionCatalog } from "@/lib/actions/types";
+import type { GoatCapabilityTurnState, GoatResolvedActionCatalog } from "@/lib/actions/types";
 import { currentGoatUser } from "@/lib/auth";
 import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
@@ -82,6 +82,7 @@ import {
   type GoatChatUiMessage,
   replaceGoatChatUiMessageText,
   textFromGoatChatUiMessage,
+  USE_ACTION_TOOL_NAME,
   type UseActionToolOutput,
   type WebFetchToolInput,
   type WebFetchToolOutput,
@@ -115,6 +116,13 @@ type ChatRequestBody = {
   model?: unknown;
   message?: unknown;
   mentions?: unknown;
+  capabilityApproval?: unknown;
+};
+
+type CapabilityApprovalContinuation = {
+  runId: string;
+  action: string;
+  params: Record<string, unknown>;
 };
 
 export async function POST(request: Request): Promise<Response> {
@@ -123,6 +131,10 @@ export async function POST(request: Request): Promise<Response> {
 
   const body = await readJsonBody(request);
   if (!body.ok) return new Response(body.error, { status: 400 });
+  const capabilityApproval = parseCapabilityApprovalContinuation(body.value.capabilityApproval);
+  if (body.value.capabilityApproval !== undefined && !capabilityApproval) {
+    return new Response("Invalid paid capability continuation.", { status: 400 });
+  }
 
   // Two request shapes share this route: a user message starting a normal
   // turn, and the client's re-send of the latest assistant message carrying
@@ -461,6 +473,10 @@ export async function POST(request: Request): Promise<Response> {
   const resumeEnabled = isGoatChatResumeEnabled();
   const stopController = new AbortController();
   const generationSignal = resumeEnabled ? stopController.signal : request.signal;
+  const capabilityTurnState: GoatCapabilityTurnState = {
+    quotedTotalUsdMicros: 0,
+    asyncRunStarted: false,
+  };
   let stopWatcherCleanup: (() => void) | null = null;
   let activeStreamId: string | null = null;
   const releaseStreamCoordination = () => {
@@ -597,15 +613,25 @@ export async function POST(request: Request): Promise<Response> {
       ? {
           actions: {
             catalog: {
-              providers: actionCatalog.providers,
+              sources: actionCatalog.providers.map((source) => ({
+                ...source,
+                kind: source.kind ?? "integration",
+              })),
               actions: actionCatalog.actions.map((action) => ({
                 id: action.id,
-                provider: action.provider,
+                source: action.provider,
                 description: action.description,
                 params: action.params,
                 permissionMode: action.permissionMode,
               })),
             },
+            ...(capabilityApproval
+              ? {
+                  prelistedSourceIds: actionCatalog.actions
+                    .filter((action) => action.id === capabilityApproval.action)
+                    .map((action) => action.provider),
+                }
+              : {}),
             execute: (call) =>
               executeChatActionCall({
                 catalog: actionCatalog,
@@ -615,7 +641,13 @@ export async function POST(request: Request): Promise<Response> {
                 currentDate,
                 userTimezone: context.user.timezone?.trim() || "UTC",
                 userWorkosId: context.user.workosUserId,
+                workspaceId: context.workspace.id,
                 chatSessionId: turn.session.id,
+                toolCallId: call.toolCallId,
+                capabilityTurnState,
+                ...(capabilityApproval
+                  ? { capabilityApprovalRunId: capabilityApproval.runId }
+                  : {}),
                 attributes: {
                   ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
                   "goat.chat_session_id": turn.session.id,
@@ -825,7 +857,15 @@ export async function POST(request: Request): Promise<Response> {
       scheduleToolsEnabled: taskToolsEnabled,
       recurringSchedules,
       ...(actionCatalog.providers.length > 0
-        ? { connectedIntegrations: actionCatalog.providers }
+        ? {
+            actionSources: actionCatalog.providers.map((source) => ({
+              ...source,
+              kind: source.kind ?? "integration",
+            })),
+            connectedIntegrations: actionCatalog.providers.filter(
+              (source) => source.kind !== "managed",
+            ),
+          }
         : {}),
     }),
     messages: await convertToModelMessages(
@@ -854,6 +894,20 @@ export async function POST(request: Request): Promise<Response> {
     experimental_transform: smoothStream(),
     abortSignal: generationSignal,
     tools: toolContext.tools,
+    ...(capabilityApproval
+      ? {
+          prepareStep: ({ stepNumber }: { stepNumber: number }) =>
+            stepNumber === 0
+              ? {
+                  activeTools: [USE_ACTION_TOOL_NAME],
+                  toolChoice: {
+                    type: "tool" as const,
+                    toolName: USE_ACTION_TOOL_NAME,
+                  },
+                }
+              : {},
+        }
+      : {}),
     ...(toolContext.repairToolCall
       ? { experimental_repairToolCall: toolContext.repairToolCall }
       : {}),
@@ -1151,7 +1205,11 @@ async function executeChatActionCall(input: {
   currentDate: Date;
   userTimezone: string;
   userWorkosId: string;
+  workspaceId: string;
   chatSessionId: string;
+  toolCallId: string;
+  capabilityApprovalRunId?: string;
+  capabilityTurnState: GoatCapabilityTurnState;
   attributes: Record<string, string | number | boolean | null | undefined>;
   chatSpan: ReturnType<typeof startGoatSpan>;
 }): Promise<UseActionToolOutput> {
@@ -1176,6 +1234,13 @@ async function executeChatActionCall(input: {
       actionId: input.action,
       params: input.params,
       userWorkosId: input.userWorkosId,
+      workspaceId: input.workspaceId,
+      chatSessionId: input.chatSessionId,
+      toolCallId: input.toolCallId,
+      ...(input.capabilityApprovalRunId
+        ? { capabilityApprovalRunId: input.capabilityApprovalRunId }
+        : {}),
+      capabilityTurnState: input.capabilityTurnState,
       signal: input.signal,
       currentDate: input.currentDate,
       userTimezone: input.userTimezone,
@@ -1355,6 +1420,26 @@ async function readJsonBody(
   } catch {
     return { ok: false, error: "Invalid chat request." };
   }
+}
+
+function parseCapabilityApprovalContinuation(
+  value: unknown,
+): CapabilityApprovalContinuation | null {
+  if (!isRecord(value)) return null;
+  const runId = normalizedOptionalString(value.runId);
+  const action = normalizedOptionalString(value.action);
+  if (
+    !runId ||
+    runId.length > 160 ||
+    !/^gcr_[a-f0-9]+$/.test(runId) ||
+    !action ||
+    action.length > 160 ||
+    !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(action) ||
+    !isRecord(value.params)
+  ) {
+    return null;
+  }
+  return { runId, action, params: value.params };
 }
 
 function parseUserMessage(value: unknown): GoatChatUiMessage | null {

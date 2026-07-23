@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/agent-runtime";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
   type GoatChatUiMessage,
@@ -13,6 +13,10 @@ import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";
 
 const emptyTaskLookup: ChatTaskLookup = new Map();
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("MessageBubble assistant errors", () => {
   it("renders the turn error even when the assistant produced no parts", () => {
@@ -213,6 +217,77 @@ describe("MessageBubble assistant errors", () => {
     expect(within(toolCall).getByText(/"team": "Goat"/)).toBeInTheDocument();
     expect(within(toolCall).getByText(/"issues": \[\]/)).toBeInTheDocument();
     expect(screen.getByText("No open issues for the Goat team.")).toBeInTheDocument();
+  });
+
+  it("renders and resolves a one-time paid capability approval card", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              runId: "gcr_abc",
+              status: "awaiting_approval",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    const onCapabilityApproval = vi.fn(async () => "approved");
+    const message: GoatChatUiMessage = {
+      id: "assistant_approval",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_action_approval",
+          state: "output-available",
+          input: {
+            action: "lead.enrich_person",
+            params: { email: "ada@example.com" },
+          },
+          output: {
+            ok: false,
+            action: "lead.enrich_person",
+            error: {
+              code: "approval_required",
+              source: "lead",
+              message: "Approve this paid capability once to continue.",
+              approval: {
+                runId: "gcr_abc",
+                source: "lead",
+                action: "lead.enrich_person",
+                maxCostUsdMicros: 360_000,
+                expiresAt: "2026-07-23T10:15:00.000Z",
+                status: "awaiting_approval",
+              },
+            },
+          },
+        },
+      ],
+    };
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onCapabilityApproval={onCapabilityApproval}
+      />,
+    );
+
+    expect(screen.getByText("Approve paid capability?")).toBeVisible();
+    expect(screen.getByText(/Maximum charge \$0\.36/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Approve once" }));
+    await waitFor(() =>
+      expect(onCapabilityApproval).toHaveBeenCalledWith({
+        decision: "approve",
+        runId: "gcr_abc",
+        action: "lead.enrich_person",
+        params: { email: "ada@example.com" },
+      }),
+    );
+    expect(await screen.findByRole("button", { name: "Continue approved action" })).toBeVisible();
   });
 
   it("renders historical use_capability parts through the generic tool row without crashing", () => {

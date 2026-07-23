@@ -10,9 +10,10 @@ import type {
 } from "@opencompany/db/goat-schema";
 import type { UIMessage } from "ai";
 import type {
+  GoatActionApprovalView,
   GoatActionErrorCode,
-  GoatActionProviderDescriptor,
-  GoatActionProviderId,
+  GoatActionSourceDescriptor,
+  GoatActionSourceId,
 } from "@/lib/actions/types";
 import { finiteDurationMs } from "@/lib/chat-timing";
 import type { GoatCodexComposerSettingsView } from "@/lib/codex-chat-settings";
@@ -307,10 +308,10 @@ export type WebSearchToolOutput =
     };
 
 export type GoatChatActionCatalog = {
-  providers: GoatActionProviderDescriptor[];
+  sources: GoatActionSourceDescriptor[];
   actions: {
     id: string;
-    provider: GoatActionProviderId;
+    source: GoatActionSourceId;
     description: string;
     params: unknown;
     // "ask" actions pause on a tool-approval request the user answers in chat;
@@ -320,21 +321,21 @@ export type GoatChatActionCatalog = {
 };
 
 export type ListActionsToolInput = {
-  integration: GoatActionProviderId;
+  source: GoatActionSourceId;
 };
 
 export type ListActionsToolOutput =
   | {
       ok: true;
-      integration: GoatActionProviderDescriptor;
+      source: GoatActionSourceDescriptor;
       actions: GoatChatActionCatalog["actions"];
     }
   | {
       ok: false;
       error: {
-        code: "unknown_integration";
+        code: "unknown_source";
         message: string;
-        availableIntegrations: GoatActionProviderId[];
+        availableSources: GoatActionSourceId[];
       };
     };
 
@@ -348,7 +349,12 @@ export type UseActionToolOutput =
   | {
       ok: false;
       action: string;
-      error: { code: GoatActionErrorCode; provider?: GoatActionProviderId; message: string };
+      error: {
+        code: GoatActionErrorCode;
+        source?: GoatActionSourceId;
+        message: string;
+        approval?: GoatActionApprovalView;
+      };
     };
 
 export type GoatChatTools = {

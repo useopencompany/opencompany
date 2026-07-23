@@ -82,7 +82,7 @@ describe("executeGoatAction", () => {
       action: "slack.fetch_history",
       error: {
         code: "auth_expired",
-        provider: "slack",
+        source: "slack",
         message: "Reconnect Slack in Settings.",
       },
     });
@@ -143,6 +143,29 @@ describe("clampActionResult", () => {
     };
     expect(clamped.truncated).toBe(true);
     expect(clamped.note).toContain("narrow the request");
-    expect(clamped.resultPreview.length).toBe(MAX_ACTION_RESULT_CHARS);
+    expect(clamped.resultPreview.length).toBeGreaterThan(0);
+    expect(JSON.stringify(clamped).length).toBeLessThanOrEqual(MAX_ACTION_RESULT_CHARS);
+  });
+
+  it("preserves managed capability activity metadata when truncating its payload", () => {
+    const clamped = clampActionResult({
+      untrustedProviderData: true,
+      securityNotice: "External data",
+      source: "x",
+      action: "x.search_posts",
+      resultCount: 20,
+      canonicalLinks: ["https://x.com/openai/status/123456789"],
+      cost: { state: "settled", totalUsdMicros: 1_800 },
+      payload: { items: [{ text: "x".repeat(MAX_ACTION_RESULT_CHARS + 100) }] },
+    }) as Record<string, unknown>;
+    expect(clamped).toMatchObject({
+      untrustedProviderData: true,
+      source: "x",
+      action: "x.search_posts",
+      resultCount: 20,
+      cost: { state: "settled", totalUsdMicros: 1_800 },
+      payload: { truncated: true },
+    });
+    expect(JSON.stringify(clamped).length).toBeLessThanOrEqual(MAX_ACTION_RESULT_CHARS);
   });
 });

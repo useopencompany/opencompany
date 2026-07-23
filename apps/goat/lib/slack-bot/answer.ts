@@ -568,9 +568,15 @@ async function resolveSlackActionDispatcher(input: {
       workspaceId: input.workspaceId,
     });
     // Slack has no tool-approval continuation UI. Keep actions the member has
-    // explicitly enabled, and omit "ask" actions instead of letting the model
-    // produce an approval request that cannot be answered.
-    const actions = resolved.actions.filter((action) => action.permissionMode === "on");
+    // explicitly enabled, and omit both "ask" actions and paid managed
+    // capabilities, which require a persisted chat session for execution and
+    // may return a confirmation card Slack cannot answer.
+    const slackSourceIds = new Set(
+      resolved.providers.filter((source) => source.kind !== "managed").map((source) => source.id),
+    );
+    const actions = resolved.actions.filter(
+      (action) => action.permissionMode === "on" && slackSourceIds.has(action.provider),
+    );
     const providerIds = new Set(actions.map((action) => action.provider));
     catalog = {
       providers: resolved.providers.filter((provider) => providerIds.has(provider.id)),
@@ -588,10 +594,10 @@ async function resolveSlackActionDispatcher(input: {
     catalog,
     dispatcher: {
       catalog: {
-        providers: catalog.providers,
+        sources: catalog.providers,
         actions: catalog.actions.map((action) => ({
           id: action.id,
-          provider: action.provider,
+          source: action.provider,
           description: action.description,
           params: action.params,
           permissionMode: action.permissionMode,

@@ -67,6 +67,23 @@ describe("goat credits", () => {
     expect(db.execute).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts idempotent paid-capability debits", async () => {
+    const db = fakeDb([{ ledgerId: 9, balanceUsdMicros: "4640000" }]);
+    await expect(
+      recordGoatCreditDebit({
+        workspaceId: "goat_ws_1",
+        userWorkosId: "user_1",
+        source: "capability_usage",
+        idempotencyKey: "capability:monid_run_1",
+        providerCostUsdMicros: 300_000,
+        platformFeeUsdMicros: 60_000,
+        totalCostUsdMicros: 360_000,
+        costBasis: { kind: "paid_capability" },
+        db,
+      }),
+    ).resolves.toEqual({ ok: true, ledgerId: 9, balanceUsdMicros: 4_640_000 });
+  });
+
   it("returns the ledger id and new balance for an applied debit", async () => {
     const db = fakeDb([{ ledgerId: 7, balanceUsdMicros: "4890000" }]);
     const result = await recordGoatCreditDebit({
@@ -188,6 +205,27 @@ describe("goat credits", () => {
         spendUsdMicros: 124_000,
         providerCostUsdMicros: 100_000,
         platformFeeUsdMicros: 24_000,
+      },
+    ]);
+  });
+
+  it("keeps paid capability spend in its own usage category", async () => {
+    const db = fakeDb([
+      {
+        day: "2026-07-23",
+        category: "capabilities",
+        spendUsdMicros: "360000",
+        providerCostUsdMicros: "300000",
+        platformFeeUsdMicros: "60000",
+      },
+    ]);
+    await expect(loadGoatSpendBreakdown("goat_ws_1", { db })).resolves.toEqual([
+      {
+        day: "2026-07-23",
+        category: "capabilities",
+        spendUsdMicros: 360_000,
+        providerCostUsdMicros: 300_000,
+        platformFeeUsdMicros: 60_000,
       },
     ]);
   });

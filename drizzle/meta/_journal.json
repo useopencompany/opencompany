@@ -1058,6 +1058,13 @@
       "when": 1784793600000,
       "tag": "0150_goat_github_pr_buffer",
       "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1784793601000,
+      "tag": "0151_goat_managed_capabilities",
+      "breakpoints": true
     }
   ]
 }

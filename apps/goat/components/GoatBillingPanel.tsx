@@ -13,6 +13,21 @@ import {
 export type GoatBillingPanelData = {
   creditBalanceUsdMicros: number;
   spendThisMonthUsdMicros: number;
+  spendThisMonthByCategory: {
+    chat: number;
+    ingestion: number;
+    capabilities: number;
+  };
+  recentActivity: Array<{
+    id: number;
+    source: string;
+    amountUsdMicros: number;
+    providerCostUsdMicros: number;
+    platformFeeUsdMicros: number;
+    capabilityAction: string | null;
+    isAutoRefill: boolean;
+    createdAt: string;
+  }>;
   lowBalanceWarnUsdMicros: number;
   topUpAmountsCents: number[];
   defaultTopUpCents: number;
@@ -108,8 +123,8 @@ export function GoatBillingPanel({
       {lowBalance ? (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
           {data.creditBalanceUsdMicros <= 0
-            ? "Your workspace is out of credits. Chat and ingestion are paused until you top up."
-            : "Your balance is running low. Top up to keep chat and ingestion running."}
+            ? "Your workspace is out of credits. Chat, ingestion, and paid capabilities are paused until you top up."
+            : "Your balance is running low. Top up to keep chat, ingestion, and paid capabilities running."}
         </div>
       ) : null}
 
@@ -186,6 +201,26 @@ export function GoatBillingPanel({
         </p>
       </section>
 
+      <section className="flex flex-col gap-3">
+        <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          This month
+        </h2>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {[
+            ["Chat", data.spendThisMonthByCategory.chat],
+            ["Brain ingestion", data.spendThisMonthByCategory.ingestion],
+            ["Paid capabilities", data.spendThisMonthByCategory.capabilities],
+          ].map(([label, amount]) => (
+            <div key={String(label)} className="rounded-lg border border-border px-3 py-2.5">
+              <div className="text-[11px] text-ink-subtle">{label}</div>
+              <div className="mt-0.5 text-[15px] font-semibold text-ink">
+                {formatUsdMicros(Number(amount))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface-muted/40 p-4">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -248,9 +283,57 @@ export function GoatBillingPanel({
             Brain ingestion: model cost + {data.platformFeePercent}% platform fee, plus{" "}
             {formatUsd(data.ingestFeeUsdCentsPer50)} per 50 ingested items.
           </li>
+          <li>
+            Paid capabilities: underlying provider cost + {data.platformFeePercent}% platform fee.
+            Higher-cost actions ask for one-time approval before running.
+          </li>
           <li>Brain retrieval and browsing are free.</li>
         </ul>
       </section>
+
+      {data.recentActivity.length > 0 ? (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+            Recent activity
+          </h2>
+          <div className="overflow-hidden rounded-lg border border-border">
+            {data.recentActivity.map((entry, index) => (
+              <div
+                key={entry.id}
+                className={`flex items-center justify-between gap-4 px-3 py-2.5 ${
+                  index > 0 ? "border-t border-border" : ""
+                }`}
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-[12.5px] font-medium text-ink">
+                    {billingActivityLabel(entry.source, entry.capabilityAction, entry.isAutoRefill)}
+                  </div>
+                  <div className="text-[11px] text-ink-subtle">
+                    {new Intl.DateTimeFormat(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    }).format(new Date(entry.createdAt))}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-[12.5px] font-medium text-ink">
+                    {entry.amountUsdMicros < 0 ? "-" : "+"}
+                    {formatUsdMicros(Math.abs(entry.amountUsdMicros))}
+                  </div>
+                  {entry.amountUsdMicros < 0 ? (
+                    <div className="text-[10.5px] text-ink-subtle">
+                      {formatUsdMicros(entry.providerCostUsdMicros)} cost +{" "}
+                      {formatUsdMicros(entry.platformFeeUsdMicros)} fee
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {data.isAdmin && data.hasStripeCustomer ? (
         <button
@@ -278,10 +361,36 @@ function formatUsd(cents: number) {
 }
 
 function formatUsdMicros(usdMicros: number) {
+  const dollars = usdMicros / 1_000_000;
+  const fractionDigits = Math.abs(dollars) > 0 && Math.abs(dollars) < 0.1 ? 4 : 2;
   return new Intl.NumberFormat(undefined, {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(usdMicros / 1_000_000);
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(dollars);
+}
+
+function billingActivityLabel(
+  source: string,
+  capabilityAction: string | null,
+  isAutoRefill: boolean,
+) {
+  if (source === "chat_model_usage") return "Chat";
+  if (
+    source === "ingest_model_usage" ||
+    source === "ingest_fee" ||
+    source === "frontier_ingest" ||
+    source === "ingest_overage"
+  ) {
+    return "Brain ingestion";
+  }
+  if (source === "capability_usage") {
+    return capabilityAction ? `Paid capability · ${capabilityAction}` : "Paid capability";
+  }
+  if (source === "stripe_topup") {
+    return isAutoRefill ? "Auto-refill" : "Credit top-up";
+  }
+  if (source === "starter_grant") return "Starter credits";
+  return "Workspace credits";
 }

@@ -6,7 +6,12 @@ import { type ChatTaskLookup, getOrderedAssistantItems } from "./assistant-items
 import { ReasoningItem } from "./ReasoningItem";
 import { TaskCard } from "./TaskCard";
 import { TurnDuration } from "./ThinkingIndicator";
-import { type ActionApprovalRequest, type CodexToolAction, ToolCallItem } from "./ToolCallItem";
+import {
+  type ActionApprovalRequest,
+  type CapabilityApprovalAction,
+  type CodexToolAction,
+  ToolCallItem,
+} from "./ToolCallItem";
 import { UserMessageBubble } from "./UserMessageBubble";
 
 export function MessageBubble({
@@ -15,6 +20,7 @@ export function MessageBubble({
   stopped = false,
   durationMs,
   onCodexAction,
+  onCapabilityApproval,
   allowCodexPlanActions = false,
   onActionApproval,
   allowActionApproval = false,
@@ -24,6 +30,7 @@ export function MessageBubble({
   stopped?: boolean;
   durationMs?: number | null | undefined;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
+  onCapabilityApproval?: ((action: CapabilityApprovalAction) => Promise<string>) | undefined;
   allowCodexPlanActions?: boolean;
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
   allowActionApproval?: boolean;
@@ -38,6 +45,7 @@ export function MessageBubble({
       stopped={stopped}
       durationMs={durationMs}
       onCodexAction={onCodexAction}
+      onCapabilityApproval={onCapabilityApproval}
       allowCodexPlanActions={allowCodexPlanActions}
       onActionApproval={onActionApproval}
       allowActionApproval={allowActionApproval}
@@ -51,6 +59,7 @@ function AssistantTurn({
   stopped,
   durationMs,
   onCodexAction,
+  onCapabilityApproval,
   allowCodexPlanActions,
   onActionApproval,
   allowActionApproval,
@@ -60,6 +69,7 @@ function AssistantTurn({
   stopped: boolean;
   durationMs?: number | null | undefined;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
+  onCapabilityApproval?: ((action: CapabilityApprovalAction) => Promise<string>) | undefined;
   allowCodexPlanActions: boolean;
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
   allowActionApproval: boolean;
@@ -94,6 +104,7 @@ function AssistantTurn({
             key={item.key}
             tool={item.tool}
             onCodexAction={onCodexAction}
+            onCapabilityApproval={onCapabilityApproval}
             allowCodexPlanActions={allowCodexPlanActions}
             onActionApproval={onActionApproval}
             allowActionApproval={allowActionApproval}

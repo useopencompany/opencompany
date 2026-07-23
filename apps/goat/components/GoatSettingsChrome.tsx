@@ -9,6 +9,7 @@ import {
   MessageSquare,
   PanelLeft,
   PlugZap,
+  SearchCheck,
   SlidersHorizontal,
   UserRound,
   Users,
@@ -66,6 +67,12 @@ const NAV_GROUPS: SettingsNavGroup[] = [
   {
     label: "Workspace",
     items: [
+      {
+        href: "/settings/workspace/capabilities",
+        icon: SearchCheck,
+        label: "Capabilities",
+        isActive: (pathname) => pathname === "/settings/workspace/capabilities",
+      },
       {
         href: "/settings/workspace/usage",
         icon: CircleDollarSign,
