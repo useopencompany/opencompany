@@ -667,16 +667,12 @@ export async function runClaimedGoatBrainIngestJob(input: {
   const runSpan = startGoatSpan(GOAT_SPANS.brainIngestRun, baseAttributes);
   // Product-analytics counterpart to the observability span: one event per ingestion agent
   // run. No-ops unless STATSIG_SERVER_SECRET_KEY is present in the runner env.
-  await captureStatsigServerEvent(
-    "brain_ingestion_run",
-    input.job.workspaceId ?? input.job.userWorkosId,
-    {
-      source: input.job.sourceProvider,
-      run_id: input.job.id,
-      ...(input.job.workspaceId ? { workspace_id: input.job.workspaceId } : {}),
-      ...(input.job.brainRef ? { brain_id: input.job.brainRef } : {}),
-    },
-  );
+  await captureStatsigServerEvent("brain_ingestion_run", input.job.userWorkosId, {
+    source: input.job.sourceProvider,
+    run_id: input.job.id,
+    ...(input.job.workspaceId ? { workspace_id: input.job.workspaceId } : {}),
+    ...(input.job.brainRef ? { brain_id: input.job.brainRef } : {}),
+  });
   let leaseActive = true;
   let telemetryFinished = false;
   const runAbort = new AbortController();
