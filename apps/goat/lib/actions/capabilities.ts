@@ -47,8 +47,8 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
     },
     {
       id: "write",
-      label: "Create issues",
-      description: "Create new issues in your Linear workspace.",
+      label: "Manage issues",
+      description: "Create and update issues, and add comments in your Linear workspace.",
       defaultMode: "ask",
     },
   ],
