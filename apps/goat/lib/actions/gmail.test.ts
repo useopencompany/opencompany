@@ -231,7 +231,7 @@ describe("gmail.search_messages", () => {
       action: "gmail.search_messages",
       error: {
         code: "provider_error",
-        provider: "gmail",
+        source: "gmail",
         message:
           "Google API request failed with 400: Invalid id value (invalid, INVALID_ARGUMENT).",
       },

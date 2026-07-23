@@ -146,6 +146,13 @@ Set the Goat project envs in Infisical `prod` + `/goat` and sync that path into 
 Production environment. Create a separate Goat WorkOS Application in the same WorkOS environment as
 the core app, then register the Goat redirect URI on that Application:
 
+Managed social and lead capabilities additionally require `MONID_API_KEY` in that same `/goat`
+path. `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes those managed sources from new chats
+without disabling connected-integration actions.
+`GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS=x.search_posts,linkedin.list_comments` can isolate
+specific reviewed endpoints. Keep the hourly `/api/billing/reconcile` cron
+enabled even during a kill-switch incident so already-started runs and their final costs settle.
+
 ```text
 https://<goat-domain>/auth/callback
 ```

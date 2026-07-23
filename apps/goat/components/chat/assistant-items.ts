@@ -155,8 +155,14 @@ export function toolCallViewFromPart(
   // part state: completed-with-ok=false renders as failed.
   const failedAction =
     name === USE_ACTION_TOOL_NAME && state === "output-available" && isUseActionToolOutput(output)
-      ? output.ok === false
+      ? output.ok === false && output.error.code !== "approval_required"
       : false;
+  const awaitingCapabilityApproval =
+    name === USE_ACTION_TOOL_NAME &&
+    state === "output-available" &&
+    isUseActionToolOutput(output) &&
+    output.ok === false &&
+    output.error.code === "approval_required";
   // Codex item parts (file changes, MCP tools, web searches) carry their outcome in
   // output.status rather than the part state.
   const codexItemOutcome =
@@ -167,11 +173,13 @@ export function toolCallViewFromPart(
     ? "failed"
     : failedAction
       ? "failed"
-      : codexItemOutcome === "failed"
-        ? "failed"
-        : codexItemOutcome === "interrupted"
-          ? "stopped"
-          : toolStatusFromState(state, stopped);
+      : awaitingCapabilityApproval
+        ? "waiting"
+        : codexItemOutcome === "failed"
+          ? "failed"
+          : codexItemOutcome === "interrupted"
+            ? "stopped"
+            : toolStatusFromState(state, stopped);
   const codexPromptOutcome =
     (name === CODEX_QUESTION_TOOL_NAME || name === CODEX_APPROVAL_TOOL_NAME) &&
     state === "output-available" &&
@@ -191,7 +199,9 @@ export function toolCallViewFromPart(
             ? codexPromptOutcome === "canceled"
               ? "Canceled"
               : "Unanswered"
-            : toolStatusText(status, state),
+            : awaitingCapabilityApproval
+              ? "Approval needed"
+              : toolStatusText(status, state),
     detail: toolDetail(name, part, status),
     input: part.input,
     output: part.output,
@@ -314,9 +324,34 @@ function actionToolDetail(part: Record<string, unknown>) {
     if (part.output.ok === false) {
       return truncateToolPreview([action, part.output.error.message].filter(Boolean).join(" - "));
     }
+    if (isRecord(part.output.result) && part.output.result.untrustedProviderData === true) {
+      const resultCount =
+        typeof part.output.result.resultCount === "number"
+          ? `${part.output.result.resultCount} result${
+              part.output.result.resultCount === 1 ? "" : "s"
+            }`
+          : null;
+      const cost = isRecord(part.output.result.cost)
+        ? part.output.result.cost.state === "settling"
+          ? "cost settling"
+          : typeof part.output.result.cost.totalUsdMicros === "number"
+            ? formatActionCost(part.output.result.cost.totalUsdMicros)
+            : null
+        : null;
+      return truncateToolPreview([action, resultCount, cost].filter(Boolean).join(" · "));
+    }
     return truncateToolPreview(action);
   }
   return truncateToolPreview(action) ?? formatToolInput(part.input);
+}
+
+function formatActionCost(usdMicros: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: usdMicros < 100_000 ? 3 : 2,
+    maximumFractionDigits: usdMicros < 100_000 ? 3 : 2,
+  }).format(usdMicros / 1_000_000);
 }
 
 function actionToolLabel(input: unknown) {

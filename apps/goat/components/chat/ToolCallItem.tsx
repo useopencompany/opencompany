@@ -12,7 +12,7 @@ import {
   Square,
   Terminal,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CODEX_COMMAND_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
@@ -22,6 +22,7 @@ import {
   EDIT_TASK_SCHEDULE_TOOL_NAME,
   GOAT_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
+  USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
 import {
   formatDebugValue,
@@ -39,13 +40,22 @@ export type CodexToolAction =
       answers: Record<string, { answers: string[] }>;
     };
 
+export type CapabilityApprovalAction = {
+  decision: "approve" | "cancel";
+  runId: string;
+  action: string;
+  params: Record<string, unknown>;
+};
+
 export function ToolCallItem({
   tool,
   onCodexAction,
+  onCapabilityApproval,
   allowCodexPlanActions = false,
 }: {
   tool: ToolCallView;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
+  onCapabilityApproval?: ((action: CapabilityApprovalAction) => Promise<string>) | undefined;
   allowCodexPlanActions?: boolean;
 }) {
   if (tool.name === GOAT_BRAIN_TOOL_NAME) {
@@ -62,7 +72,186 @@ export function ToolCallItem({
   if (tool.name === CODEX_QUESTION_TOOL_NAME && codexQuestionInput(tool.input)) {
     return <CodexQuestionRow tool={tool} onAction={onCodexAction} />;
   }
+  if (tool.name === USE_ACTION_TOOL_NAME && capabilityApprovalFromTool(tool)) {
+    return <CapabilityApprovalRow tool={tool} onAction={onCapabilityApproval} />;
+  }
   return <ToolCallRow tool={tool} />;
+}
+
+function CapabilityApprovalRow({
+  tool,
+  onAction,
+}: {
+  tool: ToolCallView;
+  onAction?: ((action: CapabilityApprovalAction) => Promise<string>) | undefined;
+}) {
+  const approval = capabilityApprovalFromTool(tool)!;
+  const [status, setStatus] = useState(approval.status);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/capabilities/approvals/${encodeURIComponent(approval.runId)}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const value = (await response.json()) as { status?: unknown };
+        if (typeof value.status === "string") {
+          setStatus((current) =>
+            current === "awaiting_approval" ? (value.status as string) : current,
+          );
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [approval.runId]);
+
+  const run = (decision: "approve" | "cancel") => {
+    if (!onAction || submitting) return;
+    setError(null);
+    setSubmitting(true);
+    void onAction({
+      decision,
+      runId: approval.runId,
+      action: approval.action,
+      params: approval.params,
+    })
+      .then(setStatus)
+      .catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "Could not update this approval.");
+      })
+      .finally(() => setSubmitting(false));
+  };
+
+  const canDecide = status === "awaiting_approval";
+  const canContinue = status === "approved";
+  return (
+    <div
+      data-testid="chat-capability-approval"
+      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <div className="text-[12px] font-semibold text-ink">Approve paid capability?</div>
+      <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+        {capabilitySourceLabel(approval.source)} · {capabilityActionLabel(approval.action)}
+      </p>
+      <p className="mt-1 text-[11px] leading-4 text-ink-subtle">
+        Maximum charge {formatUsdMicros(approval.maxCostUsdMicros)}, including the platform fee. The
+        final charge may be lower.
+      </p>
+      {canDecide ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={!onAction || submitting}
+            onClick={() => run("approve")}
+            className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            {submitting ? "Approving..." : "Approve once"}
+          </button>
+          <button
+            type="button"
+            disabled={!onAction || submitting}
+            onClick={() => run("cancel")}
+            className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : canContinue ? (
+        <button
+          type="button"
+          disabled={!onAction || submitting}
+          onClick={() => run("approve")}
+          className="mt-3 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {submitting ? "Continuing..." : "Continue approved action"}
+        </button>
+      ) : (
+        <p className="mt-2 text-[11px] font-medium text-ink-subtle">
+          {capabilityApprovalStatusLabel(status)}
+        </p>
+      )}
+      {error ? (
+        <p className="mt-2 text-[11px] text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function capabilityApprovalFromTool(tool: ToolCallView) {
+  if (!isRecord(tool.output) || tool.output.ok !== false || !isRecord(tool.output.error)) {
+    return null;
+  }
+  const error = tool.output.error;
+  const approval = isRecord(error.approval) ? error.approval : null;
+  const input = isRecord(tool.input) ? tool.input : null;
+  const params = input && isRecord(input.params) ? input.params : null;
+  if (
+    error.code !== "approval_required" ||
+    !approval ||
+    typeof approval.runId !== "string" ||
+    typeof approval.source !== "string" ||
+    typeof approval.action !== "string" ||
+    typeof approval.maxCostUsdMicros !== "number" ||
+    !params
+  ) {
+    return null;
+  }
+  return {
+    runId: approval.runId,
+    source: approval.source,
+    action: approval.action,
+    maxCostUsdMicros: approval.maxCostUsdMicros,
+    status: typeof approval.status === "string" ? approval.status : "awaiting_approval",
+    params,
+  };
+}
+
+function capabilitySourceLabel(source: string) {
+  const labels: Record<string, string> = {
+    x: "X",
+    linkedin: "LinkedIn",
+    youtube: "YouTube",
+    instagram: "Instagram",
+    tiktok: "TikTok",
+    lead: "Lead enrichment",
+  };
+  return labels[source] ?? source;
+}
+
+function capabilityActionLabel(action: string) {
+  const name = action.split(".").at(-1) ?? action;
+  return name
+    .split("_")
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function capabilityApprovalStatusLabel(status: string) {
+  if (status === "canceled") return "Canceled";
+  if (status === "expired") return "Expired";
+  if (status === "failed") return "Failed";
+  if (status === "stopped") return "Stopped";
+  if (status === "timed_out") return "Timed out";
+  if (status === "succeeded") return "Completed";
+  if (status === "executing" || status === "running" || status === "stopping") {
+    return "Running";
+  }
+  return "Already used";
+}
+
+function formatUsdMicros(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: value < 100_000 ? 3 : 2,
+    maximumFractionDigits: value < 100_000 ? 3 : 2,
+  }).format(value / 1_000_000);
 }
 
 function CodexPlanRow({

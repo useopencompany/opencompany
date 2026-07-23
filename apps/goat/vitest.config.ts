@@ -6,6 +6,10 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: /^server-only$/,
+        replacement: new URL("./test/server-only.ts", import.meta.url).pathname,
+      },
+      {
         find: /^@opencompany\/db\/client$/,
         replacement: new URL("../../packages/db/src/client.ts", import.meta.url).pathname,
       },

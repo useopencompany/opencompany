@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
   resolveGoogleDriveActions: vi.fn(),
   resolveLinearActions: vi.fn(),
   resolveGitHubActions: vi.fn(),
+  listGoatWorkspaceCapabilities: vi.fn(),
+}));
+
+vi.mock("@opencompany/db/goat-capabilities", () => ({
+  listGoatWorkspaceCapabilities: mocks.listGoatWorkspaceCapabilities,
 }));
 
 vi.mock("@/lib/actions/attio", () => ({ resolveAttioActions: mocks.resolveAttioActions }));
@@ -130,5 +135,72 @@ describe("resolveGoatActionCatalog", () => {
       workspaceId: "workspace_1",
     });
     expect(catalog).toEqual({ providers: [], actions: [] });
+  });
+
+  it("adds enabled managed sources to the same compact catalog", async () => {
+    vi.stubEnv("MONID_API_KEY", "monid_test");
+    vi.stubEnv("GOAT_MANAGED_CAPABILITIES_KILL_SWITCH", "");
+    mocks.resolveSlackActions.mockResolvedValue(null);
+    mocks.resolveGmailActions.mockResolvedValue(null);
+    mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
+    mocks.resolveGoogleDriveActions.mockResolvedValue(null);
+    mocks.resolveLinearActions.mockResolvedValue(null);
+    mocks.resolveAttioActions.mockResolvedValue(null);
+    mocks.resolveGitHubActions.mockResolvedValue(null);
+    mocks.listGoatWorkspaceCapabilities.mockResolvedValue([
+      { source: "x", enabled: true },
+      { source: "linkedin", enabled: false },
+      { source: "youtube", enabled: true },
+      { source: "instagram", enabled: true },
+      { source: "tiktok", enabled: true },
+      { source: "lead", enabled: true },
+    ]);
+
+    const catalog = await resolveGoatActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(catalog.providers.map((source) => [source.id, source.kind])).toEqual([
+      ["x", "managed"],
+      ["youtube", "managed"],
+      ["instagram", "managed"],
+      ["tiktok", "managed"],
+      ["lead", "managed"],
+    ]);
+    expect(catalog.actions).not.toContainEqual(expect.objectContaining({ provider: "linkedin" }));
+    expect(catalog.actions.filter((action) => action.provider === "x")).toHaveLength(5);
+    expect(catalog.actions.filter((action) => action.provider === "lead")).toHaveLength(4);
+
+    vi.stubEnv("GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS", "x.search_posts");
+    const endpointDisabledCatalog = await resolveGoatActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(endpointDisabledCatalog.actions.some((action) => action.id === "x.search_posts")).toBe(
+      false,
+    );
+    expect(
+      endpointDisabledCatalog.actions.filter((action) => action.provider === "x"),
+    ).toHaveLength(4);
+    expect(endpointDisabledCatalog.providers.some((source) => source.id === "x")).toBe(true);
+  });
+
+  it("removes managed sources behind the dedicated global kill switch", async () => {
+    vi.stubEnv("MONID_API_KEY", "monid_test");
+    vi.stubEnv("GOAT_MANAGED_CAPABILITIES_KILL_SWITCH", "true");
+    mocks.resolveSlackActions.mockResolvedValue(providerCatalog("slack"));
+    mocks.resolveGmailActions.mockResolvedValue(null);
+    mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
+    mocks.resolveGoogleDriveActions.mockResolvedValue(null);
+    mocks.resolveLinearActions.mockResolvedValue(null);
+    mocks.resolveAttioActions.mockResolvedValue(null);
+    mocks.resolveGitHubActions.mockResolvedValue(null);
+
+    const catalog = await resolveGoatActionCatalog({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+    });
+    expect(catalog.providers.map((source) => source.id)).toEqual(["slack"]);
+    expect(mocks.listGoatWorkspaceCapabilities).not.toHaveBeenCalled();
   });
 });

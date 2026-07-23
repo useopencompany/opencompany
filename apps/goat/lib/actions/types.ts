@@ -1,3 +1,4 @@
+import type { GoatManagedCapabilitySource } from "@opencompany/db/goat-schema";
 import type { JSONSchema7 } from "ai";
 
 export type GoatActionProviderId =
@@ -9,6 +10,8 @@ export type GoatActionProviderId =
   | "attio"
   | "github";
 
+export type GoatActionSourceId = GoatActionProviderId | GoatManagedCapabilitySource;
+
 export type GoatActionErrorCode =
   | "not_connected"
   | "auth_expired"
@@ -16,13 +19,16 @@ export type GoatActionErrorCode =
   | "provider_error"
   | "timeout"
   | "call_budget"
+  | "approval_required"
+  | "insufficient_credits"
+  | "disabled"
   | "internal";
 
 // What discovery (list_actions) exposes for one action. The params schema is
 // documentation for the model; each action's execute is the enforcement.
 export type GoatActionDescriptor = {
   id: string;
-  provider: GoatActionProviderId;
+  provider: GoatActionSourceId;
   description: string;
   params: JSONSchema7;
 };
@@ -33,14 +39,32 @@ export type GoatActionProviderDescriptor = {
   description: string;
 };
 
+export type GoatActionSourceDescriptor = {
+  id: GoatActionSourceId;
+  kind?: "integration" | "managed";
+  label: string;
+  description: string;
+};
+
+export type GoatCapabilityTurnState = {
+  quotedTotalUsdMicros: number;
+  asyncRunStarted: boolean;
+};
+
 export type GoatActionExecuteContext = {
   userWorkosId: string;
+  workspaceId?: string;
+  chatSessionId?: string;
+  toolCallId?: string;
+  capabilityApprovalRunId?: string;
+  capabilityTurnState?: GoatCapabilityTurnState;
   signal: AbortSignal;
   currentDate: Date;
   userTimezone: string;
 };
 
 export type ResolvedGoatAction = GoatActionDescriptor & {
+  timeoutMs?: number;
   execute: (params: Record<string, unknown>, context: GoatActionExecuteContext) => Promise<unknown>;
 };
 
@@ -49,8 +73,19 @@ export type GoatActionProviderCatalog = GoatActionProviderDescriptor & {
 };
 
 export type GoatResolvedActionCatalog = {
-  providers: GoatActionProviderDescriptor[];
+  // Kept as `providers` internally for compatibility with existing integration
+  // resolvers. The chat-facing contract exposes these as sources.
+  providers: GoatActionSourceDescriptor[];
   actions: ResolvedGoatAction[];
+};
+
+export type GoatActionApprovalView = {
+  runId: string;
+  source: GoatManagedCapabilitySource;
+  action: string;
+  maxCostUsdMicros: number;
+  expiresAt: string;
+  status: "awaiting_approval";
 };
 
 // Thrown when a stored connection cannot authenticate; the executor maps it to
@@ -77,6 +112,29 @@ export class GoatActionInvalidParamsError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "GoatActionInvalidParamsError";
+  }
+}
+
+export class GoatActionApprovalRequiredError extends Error {
+  readonly approval: GoatActionApprovalView;
+
+  constructor(approval: GoatActionApprovalView) {
+    super("Approve this paid capability once to continue.");
+    this.name = "GoatActionApprovalRequiredError";
+    this.approval = approval;
+  }
+}
+
+export class GoatActionExecutionError extends Error {
+  readonly code: Extract<
+    GoatActionErrorCode,
+    "provider_error" | "insufficient_credits" | "disabled" | "call_budget" | "timeout"
+  >;
+
+  constructor(code: GoatActionExecutionError["code"], message: string) {
+    super(message);
+    this.name = "GoatActionExecutionError";
+    this.code = code;
   }
 }
 

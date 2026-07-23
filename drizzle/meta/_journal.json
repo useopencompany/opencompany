@@ -1037,6 +1037,13 @@
       "when": 1784652413000,
       "tag": "0147_goat_brain_pointer_hydration",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1784652416000,
+      "tag": "0148_goat_managed_capabilities",
+      "breakpoints": true
     }
   ]
 }

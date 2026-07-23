@@ -45,7 +45,7 @@ import {
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
   GOAT_BRAIN_TOOL_DESCRIPTION,
-  LIST_ACTIONS_INTEGRATION_DESCRIPTION,
+  LIST_ACTIONS_SOURCE_DESCRIPTION,
   LIST_ACTIONS_TOOL_DESCRIPTION,
   SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION,
   SAVE_TO_BRAIN_CONTENT_DESCRIPTION,
@@ -622,7 +622,7 @@ export function createOpenCompanyChatToolContext(input: {
 
   const actions = input.actions;
   if (actions && actions.catalog.actions.length > 0) {
-    const integrationIds = actions.catalog.providers.map((provider) => provider.id);
+    const sourceIds = actions.catalog.sources.map((source) => source.id);
     const actionIds = actions.catalog.actions.map((action) => action.id);
     tools[LIST_ACTIONS_TOOL_NAME] = tool<ListActionsToolInput, ListActionsToolOutput>({
       description: LIST_ACTIONS_TOOL_DESCRIPTION,
@@ -630,35 +630,33 @@ export function createOpenCompanyChatToolContext(input: {
         type: "object",
         additionalProperties: false,
         properties: {
-          integration: {
+          source: {
             type: "string",
-            enum: integrationIds,
-            description: LIST_ACTIONS_INTEGRATION_DESCRIPTION,
+            enum: sourceIds,
+            description: LIST_ACTIONS_SOURCE_DESCRIPTION,
           },
         },
-        required: ["integration"],
+        required: ["source"],
       }),
       execute: async (args) => {
         visibleToolActivity = true;
-        const requestedIntegration =
-          typeof args.integration === "string" ? args.integration.trim().toLowerCase() : "";
-        const integration = actions.catalog.providers.find(
-          (provider) => provider.id === requestedIntegration,
-        );
-        if (!integration) {
+        const requestedSource =
+          typeof args.source === "string" ? args.source.trim().toLowerCase() : "";
+        const source = actions.catalog.sources.find((entry) => entry.id === requestedSource);
+        if (!source) {
           return {
             ok: false,
             error: {
-              code: "unknown_integration",
-              message: `Unknown integration ${JSON.stringify(requestedIntegration)}. Use an exact id from <integrations>.`,
-              availableIntegrations: integrationIds,
+              code: "unknown_source",
+              message: `Unknown source ${JSON.stringify(requestedSource)}. Use an exact id from <action_sources>.`,
+              availableSources: sourceIds,
             },
           };
         }
         return {
           ok: true,
-          integration,
-          actions: actions.catalog.actions.filter((action) => action.provider === integration.id),
+          source,
+          actions: actions.catalog.actions.filter((action) => action.source === source.id),
         };
       },
     });
@@ -692,7 +690,7 @@ export function createOpenCompanyChatToolContext(input: {
             action,
             error: {
               code: "invalid_params",
-              message: `"${action}" is not an available action. Call list_actions with the relevant integration id for the current catalog.`,
+              message: `"${action}" is not an available action. Call list_actions with the relevant source id for the current catalog.`,
             },
           };
         }

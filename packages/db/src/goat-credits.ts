@@ -51,7 +51,10 @@ export type GoatCreditDebitInput = {
   // v4 debit sources only; "frontier_ingest"/"ingest_overage" are legacy
   // read-only history and "ingest_fee" is written by the admission CTE in
   // ./goat-billing, never through this function.
-  source: Extract<GoatCreditLedgerSource, "chat_model_usage" | "ingest_model_usage">;
+  source: Extract<
+    GoatCreditLedgerSource,
+    "chat_model_usage" | "ingest_model_usage" | "capability_usage"
+  >;
   idempotencyKey: string;
   providerCostUsdMicros: number;
   platformFeeUsdMicros: number;
@@ -389,7 +392,7 @@ export async function recordGoatAutoRefillCredit(input: {
   };
 }
 
-export type GoatSpendCategory = "chat" | "ingestion" | "other";
+export type GoatSpendCategory = "chat" | "ingestion" | "capabilities" | "other";
 
 export type GoatSpendBreakdownRow = {
   day: string;
@@ -416,6 +419,7 @@ export async function loadGoatSpendBreakdown(
       CASE
         WHEN source = 'chat_model_usage' THEN 'chat'
         WHEN source IN ('ingest_model_usage', 'ingest_fee', 'frontier_ingest', 'ingest_overage') THEN 'ingestion'
+        WHEN source = 'capability_usage' THEN 'capabilities'
         ELSE 'other'
       END AS "category",
       -SUM(amount_usd_micros) AS "spendUsdMicros",
@@ -447,12 +451,16 @@ export type GoatCreditLedgerEntryView = {
   id: number;
   amountUsdMicros: number;
   source: GoatCreditLedgerSource;
+  providerCostUsdMicros: number;
+  platformFeeUsdMicros: number;
+  metadata: Record<string, unknown>;
   createdAt: Date;
 };
 
 export type GoatCreditOverview = {
   balanceUsdMicros: number;
   spendThisMonthUsdMicros: number;
+  spendThisMonthByCategory: Record<Exclude<GoatSpendCategory, "other">, number>;
   recentEntries: GoatCreditLedgerEntryView[];
 };
 
@@ -475,11 +483,43 @@ export async function loadGoatCreditOverview(
       AND created_at >= ${monthStart.toISOString()}
   `);
   const spendRows = rowsFromExecute<{ spendUsdMicros: number | string }>(spendResult);
+  const categorySpendResult = await db.execute(sql`
+    SELECT
+      CASE
+        WHEN source = 'chat_model_usage' THEN 'chat'
+        WHEN source IN ('ingest_model_usage', 'ingest_fee', 'frontier_ingest', 'ingest_overage') THEN 'ingestion'
+        WHEN source = 'capability_usage' THEN 'capabilities'
+        ELSE 'other'
+      END AS "category",
+      COALESCE(-SUM(amount_usd_micros), 0) AS "spendUsdMicros"
+    FROM goat.credit_ledger
+    WHERE workspace_id = ${workspaceId}
+      AND amount_usd_micros < 0
+      AND created_at >= ${monthStart.toISOString()}
+    GROUP BY 1
+  `);
+  const categorySpendRows = rowsFromExecute<{
+    category: GoatSpendCategory;
+    spendUsdMicros: number | string;
+  }>(categorySpendResult);
+  const spendThisMonthByCategory = {
+    chat: 0,
+    ingestion: 0,
+    capabilities: 0,
+  };
+  for (const row of categorySpendRows) {
+    if (row.category !== "other") {
+      spendThisMonthByCategory[row.category] = Number(row.spendUsdMicros);
+    }
+  }
   const entries = await db
     .select({
       id: goatCreditLedger.id,
       amountUsdMicros: goatCreditLedger.amountUsdMicros,
       source: goatCreditLedger.source,
+      providerCostUsdMicros: goatCreditLedger.providerCostUsdMicros,
+      platformFeeUsdMicros: goatCreditLedger.platformFeeUsdMicros,
+      metadata: goatCreditLedger.metadata,
       createdAt: goatCreditLedger.createdAt,
     })
     .from(goatCreditLedger)
@@ -490,10 +530,17 @@ export async function loadGoatCreditOverview(
   return {
     balanceUsdMicros,
     spendThisMonthUsdMicros: spendRows[0] ? Number(spendRows[0].spendUsdMicros) : 0,
+    spendThisMonthByCategory,
     recentEntries: entries.map((entry: (typeof entries)[number]) => ({
       id: Number(entry.id),
       amountUsdMicros: Number(entry.amountUsdMicros),
       source: entry.source,
+      providerCostUsdMicros: Number(entry.providerCostUsdMicros),
+      platformFeeUsdMicros: Number(entry.platformFeeUsdMicros),
+      metadata:
+        entry.metadata && typeof entry.metadata === "object"
+          ? (entry.metadata as Record<string, unknown>)
+          : {},
       createdAt: entry.createdAt,
     })),
   };

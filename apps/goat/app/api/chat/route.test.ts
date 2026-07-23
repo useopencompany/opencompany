@@ -266,6 +266,99 @@ describe("POST /api/chat", () => {
     );
   });
 
+  it("forces an approved continuation through use_action with its bound run id", async () => {
+    mockAuth();
+    mockCreateTurn();
+    const catalog = {
+      providers: [
+        {
+          id: "x" as const,
+          kind: "managed" as const,
+          label: "X",
+          description: "Search public X data.",
+        },
+      ],
+      actions: [
+        {
+          id: "x.search_posts",
+          provider: "x" as const,
+          description: "Search X posts.",
+          params: { type: "object" as const, properties: {} },
+          execute: vi.fn(),
+        },
+      ],
+    };
+    mockResolveGoatActionCatalog().mockResolvedValue(catalog);
+    mockExecuteGoatAction().mockResolvedValue({
+      ok: true,
+      action: "x.search_posts",
+      result: { untrustedProviderData: true, resultCount: 1 },
+    });
+    let execution: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const settings = options as {
+        system?: string;
+        prepareStep?: (input: { stepNumber: number }) => unknown;
+        tools?: Record<string, { execute?: unknown }>;
+      };
+      expect(settings.system).toContain("<action_sources>");
+      expect(settings.system).not.toContain("<brain_fill>");
+      expect(settings.prepareStep?.({ stepNumber: 0 })).toEqual({
+        activeTools: [USE_ACTION_TOOL_NAME],
+        toolChoice: { type: "tool", toolName: USE_ACTION_TOOL_NAME },
+      });
+      const actionTool = settings.tools?.[USE_ACTION_TOOL_NAME];
+      if (typeof actionTool?.execute !== "function") {
+        throw new Error("use_action was not configured.");
+      }
+      execution = actionTool.execute(
+        { action: "x.search_posts", params: { query: "goat" } },
+        { toolCallId: "approval_call_1", messages: [] },
+      ) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        sessionId: "session_1",
+        model: "openai/gpt-5.5",
+        capabilityApproval: {
+          runId: "gcr_abc123",
+          action: "x.search_posts",
+          params: { query: "goat" },
+        },
+        message: {
+          id: "ui_user_approval",
+          role: "user",
+          parts: [
+            {
+              type: "text",
+              text: 'Continue x.search_posts with {"query":"goat"}',
+            },
+          ],
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+    await execution;
+    expect(executeGoatAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionId: "x.search_posts",
+        params: { query: "goat" },
+        workspaceId: "goat_ws_user_1",
+        chatSessionId: "session_1",
+        toolCallId: "approval_call_1",
+        capabilityApprovalRunId: "gcr_abc123",
+        capabilityTurnState: {
+          quotedTotalUsdMicros: 0,
+          asyncRunStarted: false,
+        },
+      }),
+    );
+  });
+
   it("forwards a valid browser-reserved id to new chat persistence", async () => {
     mockAuth();
     mockCreateTurn();

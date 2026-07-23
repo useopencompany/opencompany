@@ -21,6 +21,7 @@ export type GoatUsageData = {
 const CATEGORY_LABELS: Record<GoatSpendBreakdownRow["category"], string> = {
   chat: "Chat",
   ingestion: "Ingestion",
+  capabilities: "Paid capabilities",
   other: "Other",
 };
 

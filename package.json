@@ -18,6 +18,7 @@
     "dev:web": "turbo dev --ui=tui --filter=@opencompany/web",
     "dev:goat": "node scripts/dev.mjs --app=goat --ui=stream --filter=@opencompany/goat --filter=@opencompany/runner --filter=@opencompany/goat-local-bridge",
     "dev:goat:tui": "node scripts/dev.mjs --app=goat --ui=tui --filter=@opencompany/goat --filter=@opencompany/runner --filter=@opencompany/goat-local-bridge",
+    "goat:capabilities:contract": "bun --cwd apps/goat capabilities:contract",
     "dev:ds": "turbo dev --ui=tui --filter=@opencompany/design-system",
     "dev:marketing": "turbo dev --ui=tui --filter=@opencompany/marketing",
     "dev:runner": "turbo dev --ui=stream --filter=@opencompany/runner",

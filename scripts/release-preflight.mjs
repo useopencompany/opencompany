@@ -54,6 +54,7 @@ const groups = {
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
       "ELECTRIC_URL",
+      "MONID_API_KEY",
     ],
     optional: [
       "RUNNER_INTERNAL_URL",
@@ -77,6 +78,9 @@ const groups = {
       "GOAT_OBSERVABILITY_ENABLED",
       "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
       "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+      "GOAT_CHAT_ACTIONS_KILL_SWITCH",
+      "GOAT_MANAGED_CAPABILITIES_KILL_SWITCH",
+      "GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS",
     ],
   },
   runner: {

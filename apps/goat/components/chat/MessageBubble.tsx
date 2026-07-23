@@ -6,7 +6,7 @@ import { type ChatTaskLookup, getOrderedAssistantItems } from "./assistant-items
 import { ReasoningItem } from "./ReasoningItem";
 import { TaskCard } from "./TaskCard";
 import { TurnDuration } from "./ThinkingIndicator";
-import { type CodexToolAction, ToolCallItem } from "./ToolCallItem";
+import { type CapabilityApprovalAction, type CodexToolAction, ToolCallItem } from "./ToolCallItem";
 import { UserMessageBubble } from "./UserMessageBubble";
 
 export function MessageBubble({
@@ -15,6 +15,7 @@ export function MessageBubble({
   stopped = false,
   durationMs,
   onCodexAction,
+  onCapabilityApproval,
   allowCodexPlanActions = false,
 }: {
   message: GoatChatUiMessage;
@@ -22,6 +23,7 @@ export function MessageBubble({
   stopped?: boolean;
   durationMs?: number | null | undefined;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
+  onCapabilityApproval?: ((action: CapabilityApprovalAction) => Promise<string>) | undefined;
   allowCodexPlanActions?: boolean;
 }) {
   if (message.role === "user") {
@@ -34,6 +36,7 @@ export function MessageBubble({
       stopped={stopped}
       durationMs={durationMs}
       onCodexAction={onCodexAction}
+      onCapabilityApproval={onCapabilityApproval}
       allowCodexPlanActions={allowCodexPlanActions}
     />
   );
@@ -45,6 +48,7 @@ function AssistantTurn({
   stopped,
   durationMs,
   onCodexAction,
+  onCapabilityApproval,
   allowCodexPlanActions,
 }: {
   message: GoatChatUiMessage;
@@ -52,6 +56,7 @@ function AssistantTurn({
   stopped: boolean;
   durationMs?: number | null | undefined;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
+  onCapabilityApproval?: ((action: CapabilityApprovalAction) => Promise<string>) | undefined;
   allowCodexPlanActions: boolean;
 }) {
   const error = message.metadata?.error;
@@ -84,6 +89,7 @@ function AssistantTurn({
             key={item.key}
             tool={item.tool}
             onCodexAction={onCodexAction}
+            onCapabilityApproval={onCapabilityApproval}
             allowCodexPlanActions={allowCodexPlanActions}
           />
         );

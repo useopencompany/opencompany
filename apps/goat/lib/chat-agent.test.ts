@@ -667,7 +667,7 @@ describe("runOpenCompanyChatAgent", () => {
 
 describe("list_actions and use_action tools", () => {
   const catalog: GoatChatActionCatalog = {
-    providers: [
+    sources: [
       {
         id: "slack",
         label: 'Slack workspace "Acme"',
@@ -682,13 +682,13 @@ describe("list_actions and use_action tools", () => {
     actions: [
       {
         id: "slack.fetch_history",
-        provider: "slack",
+        source: "slack",
         description: "Fetch recent messages from one Slack conversation.",
         params: { type: "object", properties: { channel: { type: "string" } } },
       },
       {
         id: "linear.list_issues",
-        provider: "linear",
+        source: "linear",
         description: "List Linear issues.",
         params: { type: "object", properties: {} },
       },
@@ -711,19 +711,19 @@ describe("list_actions and use_action tools", () => {
     const emptyContext = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
-      actions: { catalog: { providers: [], actions: [] }, execute: vi.fn() },
+      actions: { catalog: { sources: [], actions: [] }, execute: vi.fn() },
     });
     expect(emptyContext.tools[LIST_ACTIONS_TOOL_NAME]).toBeUndefined();
     expect(emptyContext.tools[USE_ACTION_TOOL_NAME]).toBeUndefined();
   });
 
-  it("builds integration and action enums and lists only the selected integration", async () => {
+  it("builds source and action enums and lists only the selected source", async () => {
     const context = createOpenCompanyChatToolContext({
       model: DEFAULT_GOAT_MODEL,
       runBrainCli: vi.fn(),
       actions: { catalog, execute: vi.fn() },
     });
-    expect(extractListActionsIntegrationEnum(context.tools)).toEqual(["slack", "linear"]);
+    expect(extractListActionsSourceEnum(context.tools)).toEqual(["slack", "linear"]);
     expect(extractUseActionEnum(context.tools)).toEqual([
       "slack.fetch_history",
       "linear.list_issues",
@@ -732,29 +732,29 @@ describe("list_actions and use_action tools", () => {
       `Limited to ${MAX_ACTION_CALLS_PER_TURN} calls per chat turn`,
     );
     expect(MAX_ACTION_CALLS_PER_TURN).toBe(16);
-    const listed = await executeListActionsTool(context.tools, { integration: "slack" });
+    const listed = await executeListActionsTool(context.tools, { source: "slack" });
     expect(listed).toEqual({
       ok: true,
-      integration: catalog.providers[0],
+      source: catalog.sources[0],
       actions: [catalog.actions[0]],
     });
 
-    const listedLinear = await executeListActionsTool(context.tools, { integration: "linear" });
+    const listedLinear = await executeListActionsTool(context.tools, { source: "linear" });
     expect(listedLinear).toEqual({
       ok: true,
-      integration: catalog.providers[1],
+      source: catalog.sources[1],
       actions: [catalog.actions[1]],
     });
 
     const unknown = await executeListActionsTool(context.tools, {
-      integration: "mail",
+      source: "mail",
     } as unknown as ListActionsToolInput);
     expect(unknown).toEqual({
       ok: false,
       error: {
-        code: "unknown_integration",
-        message: 'Unknown integration "mail". Use an exact id from <integrations>.',
-        availableIntegrations: ["slack", "linear"],
+        code: "unknown_source",
+        message: 'Unknown source "mail". Use an exact id from <action_sources>.',
+        availableSources: ["slack", "linear"],
       },
     });
   });
@@ -936,17 +936,15 @@ function extractUseActionDescription(tools: unknown) {
   return (tools as Tools)[USE_ACTION_TOOL_NAME]?.description ?? "";
 }
 
-function extractListActionsIntegrationEnum(tools: unknown) {
-  type IntegrationSchema = { properties?: { integration?: { enum?: string[] } } };
+function extractListActionsSourceEnum(tools: unknown) {
+  type SourceSchema = { properties?: { source?: { enum?: string[] } } };
   type Tools = Record<
     typeof LIST_ACTIONS_TOOL_NAME,
-    { inputSchema?: IntegrationSchema & { jsonSchema?: IntegrationSchema } }
+    { inputSchema?: SourceSchema & { jsonSchema?: SourceSchema } }
   >;
   const inputSchema = (tools as Tools)[LIST_ACTIONS_TOOL_NAME]?.inputSchema;
   return (
-    inputSchema?.properties?.integration?.enum ??
-    inputSchema?.jsonSchema?.properties?.integration?.enum ??
-    []
+    inputSchema?.properties?.source?.enum ?? inputSchema?.jsonSchema?.properties?.source?.enum ?? []
   );
 }
 
