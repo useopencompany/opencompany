@@ -21,6 +21,7 @@ import {
   type StartTaskToolOutput,
   USE_ACTION_TOOL_NAME,
   type UseActionToolOutput,
+  WEB_FETCH_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
 
@@ -161,6 +162,11 @@ export function toolCallViewFromPart(
     name === USE_ACTION_TOOL_NAME && state === "output-available" && isUseActionToolOutput(output)
       ? output.ok === false
       : false;
+  const failedPublicWebTool =
+    (name === WEB_FETCH_TOOL_NAME || name === WEB_SEARCH_TOOL_NAME) &&
+    state === "output-available" &&
+    isRecord(output) &&
+    output.ok === false;
   // Codex item parts (file changes, MCP tools, web searches) carry their outcome in
   // output.status rather than the part state.
   const codexItemOutcome =
@@ -171,11 +177,13 @@ export function toolCallViewFromPart(
     ? "failed"
     : failedAction
       ? "failed"
-      : codexItemOutcome === "failed"
+      : failedPublicWebTool
         ? "failed"
-        : codexItemOutcome === "interrupted"
-          ? "stopped"
-          : toolStatusFromState(state, stopped);
+        : codexItemOutcome === "failed"
+          ? "failed"
+          : codexItemOutcome === "interrupted"
+            ? "stopped"
+            : toolStatusFromState(state, stopped);
   const codexPromptOutcome =
     (name === CODEX_QUESTION_TOOL_NAME || name === CODEX_APPROVAL_TOOL_NAME) &&
     state === "output-available" &&
@@ -261,6 +269,7 @@ export function toolLabel(name: string) {
   if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
   if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
+  if (name === WEB_FETCH_TOOL_NAME) return "Web Fetch";
   if (name === WEB_SEARCH_TOOL_NAME) return "Web Search";
   return name
     .split(/[_-]+/)
@@ -310,6 +319,15 @@ export function toolDetail(
   }
   if (name === USE_ACTION_TOOL_NAME) {
     return actionToolDetail(part);
+  }
+  if (
+    (name === WEB_FETCH_TOOL_NAME || name === WEB_SEARCH_TOOL_NAME) &&
+    part.state === "output-available" &&
+    isRecord(part.output) &&
+    part.output.ok === false &&
+    typeof part.output.error === "string"
+  ) {
+    return truncateToolPreview(part.output.error);
   }
 
   return formatToolInput(part.input);

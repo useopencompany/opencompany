@@ -121,7 +121,7 @@ optionally stops the active stream, and marks the chat session closed through
 5. Persists the user message in `goat.chat_messages`.
 6. Resolves read-only connected-integration actions and creates the chat tool context for
    `goat_brain`, `save_to_brain`, `list_actions`/`use_action`, optional `start_task`, and optional
-   `web_search`.
+   `web_fetch`/`web_search`.
 7. Calls `streamText` through Vercel AI Gateway with the session's model.
 8. Streams the UI message response back to the browser.
 9. Persists the assistant message, debug trace, and optional task link on finish.
@@ -139,7 +139,8 @@ model turn when the task finishes.
 The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, assembled from
 structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
-timezone. `goat_brain` is always available and `web_search` is available when Exa is configured.
+timezone. `goat_brain` is always available. When Exa is configured, `web_fetch` reads one known URL
+through the Contents API while `web_search` discovers current public-web sources through Search.
 Connected integration lookups are dispatched through the read-only `list_actions` and `use_action`
 tools. The route resolves a per-user catalog from currently connected providers, and the model must
 discover a provider's concrete action ids and parameter schemas before executing one. Slack exposes
@@ -653,8 +654,8 @@ Common changes and where they belong:
 - Change when chat starts a task: `createOpenCompanyChatSystemPrompt` in
   `apps/goat/lib/prompts/main-chat.ts` and `createOpenCompanyChatToolContext` in
   `apps/goat/lib/chat-agent.ts`.
-- Change lightweight chat web search: `web_search` in `apps/goat/lib/chat-agent.ts` and the Exa
-  callback in `apps/goat/app/api/chat/route.ts`.
+- Change lightweight chat web access: `web_fetch`/`web_search` in
+  `apps/goat/lib/chat-agent.ts` and their Exa callbacks in `apps/goat/app/api/chat/route.ts`.
 - Change chat streaming behavior: `apps/goat/app/api/chat/route.ts` and
   `apps/goat/components/GoatSurface.tsx`.
 - Change task creation defaults: `createGoatTaskForUser` in `apps/goat/lib/tasks.ts`.

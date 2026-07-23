@@ -83,10 +83,13 @@ import {
   replaceGoatChatUiMessageText,
   textFromGoatChatUiMessage,
   type UseActionToolOutput,
+  type WebFetchToolInput,
+  type WebFetchToolOutput,
   type WebSearchToolInput,
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, validateGoatChatInput } from "@/lib/chat-validation";
+import { executeGoatChatExaFetch } from "@/lib/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
@@ -561,6 +564,19 @@ export async function POST(request: Request): Promise<Response> {
       : {}),
     ...(exaApiKey
       ? {
+          webFetch: (toolInput) =>
+            executeChatWebFetch({
+              toolInput,
+              apiKey: exaApiKey,
+              signal: generationSignal,
+              attributes: {
+                ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
+                "goat.chat_session_id": turn.session.id,
+                "goat.chat_message_id": turn.userMessageId,
+                "goat.model": turn.session.model,
+              },
+              chatSpan,
+            }),
           webSearch: (toolInput) =>
             executeChatWebSearch({
               toolInput,
@@ -796,6 +812,7 @@ export async function POST(request: Request): Promise<Response> {
         lastName: context.user.lastName,
         timezone: context.user.timezone,
       },
+      webFetchEnabled: Boolean(exaApiKey),
       webSearchEnabled: Boolean(exaApiKey),
       activeBrain: context.activeBrain
         ? {
@@ -1030,6 +1047,50 @@ function groupSessionSkillsByActivationMessage(skills: GoatChatSessionSkillSnaps
     grouped.set(skill.activatedMessageId, activated);
   }
   return grouped;
+}
+
+async function executeChatWebFetch(input: {
+  toolInput: WebFetchToolInput;
+  apiKey: string;
+  signal: AbortSignal;
+  attributes: Record<string, string | number | boolean | null | undefined>;
+  chatSpan: ReturnType<typeof startGoatSpan>;
+}): Promise<WebFetchToolOutput> {
+  const baseAttributes = {
+    ...input.attributes,
+    "goat.web_fetch_provider": "exa",
+    "goat.web_fetch_operation": "contents",
+  };
+  try {
+    const output = await executeGoatChatExaFetch(input);
+    const attributes = {
+      ...baseAttributes,
+      "goat.outcome": "success",
+      "goat.web_fetch_cost_usd_micros": output.costUsdMicros ?? 0,
+    };
+    input.chatSpan.setAttributes({
+      "goat.web_fetch_used": true,
+      "goat.web_fetch_cost_usd_micros": output.costUsdMicros ?? 0,
+    });
+    recordGoatCounter(GOAT_METRICS.chatWebFetchesTotal, 1, attributes);
+    if (output.costUsdMicros) {
+      recordGoatCounter(GOAT_METRICS.chatWebFetchCostUsdMicros, output.costUsdMicros, attributes);
+    }
+    return output;
+  } catch (error) {
+    input.chatSpan.setAttributes({
+      "goat.web_fetch_used": true,
+      "goat.web_fetch_failed": true,
+    });
+    recordGoatCounter(GOAT_METRICS.chatWebFetchesTotal, 1, {
+      ...baseAttributes,
+      "goat.outcome": "failure",
+    });
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Web fetch failed.",
+    };
+  }
 }
 
 async function executeChatWebSearch(input: {
