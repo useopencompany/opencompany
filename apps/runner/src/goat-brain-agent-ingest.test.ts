@@ -496,6 +496,16 @@ describe("buildGoatChatCaptureAgentIngestPrompt", () => {
     );
   });
 
+  it("treats successful write receipts as authoritative", () => {
+    expect(GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT).toContain("Write receipts are authoritative");
+    expect(GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT).toContain(
+      "never call get or timeline on a page changed by that write",
+    );
+    expect(GOAT_CHAT_CAPTURE_INGEST_SYSTEM_PROMPT).toContain(
+      "after a failed write, you may read to diagnose",
+    );
+  });
+
   it("carries the draft pointer, source ref, intent, and capture text", () => {
     const item = captureItem();
     const prompt = buildGoatChatCaptureAgentIngestPrompt(item);
@@ -1137,7 +1147,7 @@ describe("runGoatChatCaptureAgentIngest", () => {
             args: ["pricing-teardown-reference", "--type", "concept", "--status", "active"],
             status: "completed",
             mutating: true,
-            stdoutPreview: "ok",
+            stdoutPreview: expect.stringContaining('"outcome":"succeeded"'),
           }),
         ],
       },
@@ -1163,7 +1173,15 @@ describe("runGoatChatCaptureAgentIngest", () => {
     );
     expect(okCli).toHaveBeenCalledWith(
       expect.objectContaining({
-        argv: ["set", "pricing-teardown-reference", "--type", "concept", "--status", "active"],
+        argv: [
+          "set",
+          "pricing-teardown-reference",
+          "--type",
+          "concept",
+          "--status",
+          "active",
+          "--json",
+        ],
         reporting: {
           user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
           tags: expect.arrayContaining([
@@ -1494,9 +1512,114 @@ describe("runGoatChatCaptureAgentIngest", () => {
 
     expect(result).toMatchObject({ toolCalls: 2, mutations: 2 });
     expect(order).toEqual([
-      "move pricing-teardown-reference --folder decisions",
-      "set pricing-teardown-reference --status active",
+      "move pricing-teardown-reference --folder decisions --json",
+      "set pricing-teardown-reference --status active --json",
     ]);
+  });
+
+  it("returns authoritative write receipts and blocks post-write verification reads", async () => {
+    aiMock.generateText.mockImplementationOnce(
+      async (options: { tools: Record<string, CapturedTool> }) => {
+        const [write, verificationRead] = await Promise.all([
+          options.tools.goat_brain?.execute({
+            command: "timeline-add",
+            args: ["pricing", "--body", "Pricing changed."],
+          }),
+          options.tools.goat_brain?.execute({
+            command: "timeline",
+            args: ["pricing"],
+          }),
+        ]);
+        const unrelatedRead = await options.tools.goat_brain?.execute({
+          command: "get",
+          args: ["company"],
+        });
+
+        expect(write).toMatchObject({
+          ok: true,
+          receipt: {
+            outcome: "succeeded",
+            command: "timeline-add",
+            affectedPageIds: ["pricing"],
+            result: {
+              id: "pricing",
+              status: "active",
+              timelineEntryCount: 4,
+              evidenceId: "ev-pricing-change",
+            },
+          },
+        });
+        expect(verificationRead).toMatchObject({
+          ok: false,
+          error: expect.stringContaining(
+            '"pricing" was already changed successfully by timeline-add',
+          ),
+        });
+        expect(unrelatedRead).toMatchObject({ ok: true, stdout: "Company page." });
+
+        return {
+          text: "Updated pricing.",
+          steps: [{}, {}],
+          totalUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        };
+      },
+    );
+    const receiptCli: GoatBrainAgentCliRunner = vi.fn(async (input) => {
+      if (input.argv[0] === "timeline-add") {
+        return {
+          ok: true,
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            id: "pricing",
+            path: "concepts/pricing.md",
+            status: "active",
+            timelineEntryCount: 4,
+            evidenceId: "ev-pricing-change",
+          }),
+          stderr: "",
+        };
+      }
+      return { ok: true, exitCode: 0, stdout: "Company page.", stderr: "" };
+    });
+
+    const result = await runGoatChatCaptureAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: captureItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: receiptCli },
+    );
+
+    expect(receiptCli).toHaveBeenCalledTimes(2);
+    expect(receiptCli).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        argv: ["timeline-add", "pricing", "--body", "Pricing changed.", "--json"],
+      }),
+    );
+    expect(receiptCli).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ argv: ["get", "company"] }),
+    );
+    expect(result).toMatchObject({
+      toolCalls: 3,
+      mutations: 1,
+      trace: {
+        toolCalls: [
+          expect.objectContaining({ command: "timeline-add", status: "completed" }),
+          expect.objectContaining({
+            command: "timeline",
+            status: "blocked",
+            mutating: false,
+            errorPreview: expect.stringContaining("Verification read blocked"),
+          }),
+          expect.objectContaining({ command: "get", status: "completed" }),
+        ],
+      },
+    });
   });
 
   it("bounds trace previews for long args, stdin, output, and final text", async () => {
@@ -1534,7 +1657,8 @@ describe("runGoatChatCaptureAgentIngest", () => {
     expect(resultTrace.finalText).toContain("[truncated]");
     expect(resultTrace.toolCalls[0]?.args[2]).toContain("[truncated]");
     expect(resultTrace.toolCalls[0]?.stdinPreview).toContain("[truncated]");
-    expect(resultTrace.toolCalls[0]?.stdoutPreview).toContain("[truncated]");
+    expect(resultTrace.toolCalls[0]?.stdoutPreview).toContain('"outcome":"succeeded"');
+    expect(resultTrace.toolCalls[0]?.stdoutPreview).not.toContain(longOutput);
     expect(resultTrace.toolCalls[0]?.stderrPreview).toContain("[truncated]");
   });
 
@@ -1834,7 +1958,17 @@ describe("runJamieMeetingAgentIngest", () => {
     expect(okCli).toHaveBeenCalledTimes(2);
     expect(okCli).toHaveBeenCalledWith(
       expect.objectContaining({
-        argv: ["create", "--type", "person", "--id", "ada", "--title", "Ada", "--truth-stdin"],
+        argv: [
+          "create",
+          "--type",
+          "person",
+          "--id",
+          "ada",
+          "--title",
+          "Ada",
+          "--truth-stdin",
+          "--json",
+        ],
         stdin: "Ada leads GTM.",
       }),
     );
