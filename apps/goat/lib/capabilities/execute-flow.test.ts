@@ -365,6 +365,54 @@ describe("executeManagedCapability", () => {
     expect(client.run).toHaveBeenCalledTimes(1);
     expect(client.getRun).toHaveBeenCalledTimes(1);
   });
+
+  it("allows sequential catalog-sync actions when Monid returns async job envelopes", async () => {
+    const sharedContext = context();
+    const firstClient = fakeClient({
+      inspection: inspectPrice(0.0015),
+      run: providerRun({ runId: "monid_run_1", status: "RUNNING", cost: null }),
+      polled: providerRun({
+        runId: "monid_run_1",
+        status: "COMPLETED",
+        cost: { value: 0.0015, currency: "USD" },
+      }),
+    });
+    const secondClient = fakeClient({
+      inspection: inspectPrice(0.0015),
+      run: providerRun({ runId: "monid_run_2", status: "RUNNING", cost: null }),
+      polled: providerRun({
+        runId: "monid_run_2",
+        status: "COMPLETED",
+        cost: { value: 0.0015, currency: "USD" },
+      }),
+    });
+
+    await executeManagedCapability({
+      spec: spec(),
+      params: { query: "first" },
+      context: sharedContext,
+      client: firstClient,
+      pollIntervalMs: 1,
+    });
+    await executeManagedCapability({
+      spec: spec(),
+      params: { query: "second" },
+      context: sharedContext,
+      client: secondClient,
+      pollIntervalMs: 1,
+    });
+
+    expect(firstClient.run).toHaveBeenCalledTimes(1);
+    expect(secondClient.run).toHaveBeenCalledTimes(1);
+    expect(firstClient.getRun).toHaveBeenCalledTimes(1);
+    expect(secondClient.getRun).toHaveBeenCalledTimes(1);
+    expect(firstClient.stopRun).not.toHaveBeenCalled();
+    expect(secondClient.stopRun).not.toHaveBeenCalled();
+    expect(sharedContext.capabilityTurnState).toEqual({
+      quotedTotalUsdMicros: 3_600,
+      asyncRunStarted: false,
+    });
+  });
 });
 
 function context(): GoatActionExecuteContext {
@@ -443,6 +491,7 @@ function fakeClient(input: { inspection: MonidInspection; run: MonidRun; polled?
     inspect: ReturnType<typeof vi.fn>;
     run: ReturnType<typeof vi.fn>;
     getRun: ReturnType<typeof vi.fn>;
+    stopRun: ReturnType<typeof vi.fn>;
   };
 }
 

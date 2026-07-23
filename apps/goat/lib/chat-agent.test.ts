@@ -731,6 +731,9 @@ describe("list_actions and use_action tools", () => {
     expect(extractUseActionDescription(context.tools)).toContain(
       `Limited to ${MAX_ACTION_CALLS_PER_TURN} calls per chat turn`,
     );
+    expect(extractUseActionDescription(context.tools)).toContain(
+      "only after list_actions succeeded",
+    );
     expect(MAX_ACTION_CALLS_PER_TURN).toBe(16);
     const listed = await executeListActionsTool(context.tools, { source: "slack" });
     expect(listed).toEqual({
@@ -759,6 +762,49 @@ describe("list_actions and use_action tools", () => {
     });
   });
 
+  it("requires list_actions separately for each source before dispatch", async () => {
+    const execute = vi.fn(async ({ action }: { action: string }) => okResult(action));
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      actions: { catalog, execute },
+    });
+
+    const beforeDiscovery = await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C123" },
+    });
+    expect(beforeDiscovery).toEqual({
+      ok: false,
+      action: "slack.fetch_history",
+      error: {
+        code: "invalid_params",
+        source: "slack",
+        message:
+          'Call list_actions with source "slack" in this chat turn before using "slack.fetch_history".',
+      },
+    });
+    expect(execute).not.toHaveBeenCalled();
+
+    await executeListActionsTool(context.tools, { source: "slack" });
+    expect(
+      await executeUseActionTool(context.tools, {
+        action: "slack.fetch_history",
+        params: { channel: "C123" },
+      }),
+    ).toMatchObject({ ok: true });
+
+    const otherSource = await executeUseActionTool(context.tools, {
+      action: "linear.list_issues",
+      params: {},
+    });
+    expect(otherSource).toMatchObject({
+      ok: false,
+      error: { code: "invalid_params", source: "linear" },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it("dispatches valid calls and steers invalid or over-budget ones", async () => {
     const execute = vi.fn(async ({ action }: { action: string }) => okResult(action));
     const context = createOpenCompanyChatToolContext({
@@ -767,6 +813,7 @@ describe("list_actions and use_action tools", () => {
       actions: { catalog, execute },
     });
 
+    await executeListActionsTool(context.tools, { source: "slack" });
     const valid = await executeUseActionTool(context.tools, {
       action: "slack.fetch_history",
       params: { channel: "C123" },
@@ -791,6 +838,7 @@ describe("list_actions and use_action tools", () => {
     expect(execute).toHaveBeenCalledTimes(1);
 
     // Missing params coerces to an empty object rather than failing.
+    await executeListActionsTool(context.tools, { source: "linear" });
     await executeUseActionTool(context.tools, { action: "linear.list_issues" });
     expect(execute).toHaveBeenLastCalledWith(
       expect.objectContaining({ action: "linear.list_issues", params: {} }),

@@ -118,6 +118,7 @@ type ActionDispatcher = {
   // become the dispatch enum, so a disconnected provider's actions cannot be
   // invoked by guessing.
   catalog: GoatChatActionCatalog;
+  prelistedSourceIds?: readonly string[];
   execute: (input: {
     action: string;
     params: Record<string, unknown>;
@@ -268,6 +269,7 @@ export function createOpenCompanyChatToolContext(input: {
   let visibleToolActivity = false;
   let webSearchCallCount = 0;
   let actionCallCount = 0;
+  const listedActionSourceIds = new Set(input.actions?.prelistedSourceIds ?? []);
 
   const tools: ToolSet = {
     [GOAT_BRAIN_TOOL_NAME]: tool<GoatBrainToolInput, GoatBrainToolOutput>({
@@ -653,6 +655,7 @@ export function createOpenCompanyChatToolContext(input: {
             },
           };
         }
+        listedActionSourceIds.add(source.id);
         return {
           ok: true,
           source,
@@ -682,15 +685,29 @@ export function createOpenCompanyChatToolContext(input: {
       execute: async (args, executionContext) => {
         visibleToolActivity = true;
         const action = typeof args.action === "string" ? args.action : "";
+        const resolvedAction = actions.catalog.actions.find((entry) => entry.id === action);
         // Models occasionally emit values outside a schema enum; re-validate so
         // an invented id fails as a steering result, not an executor error.
-        if (!actionIds.includes(action)) {
+        if (!resolvedAction) {
           return {
             ok: false,
             action,
             error: {
               code: "invalid_params",
               message: `"${action}" is not an available action. Call list_actions with the relevant source id for the current catalog.`,
+            },
+          };
+        }
+        if (!listedActionSourceIds.has(resolvedAction.source)) {
+          return {
+            ok: false,
+            action,
+            error: {
+              code: "invalid_params",
+              source: resolvedAction.source,
+              message: `Call list_actions with source ${JSON.stringify(
+                resolvedAction.source,
+              )} in this chat turn before using ${JSON.stringify(action)}.`,
             },
           };
         }

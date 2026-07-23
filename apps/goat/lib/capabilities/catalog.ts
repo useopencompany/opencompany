@@ -95,6 +95,30 @@ const PROFILE_LIST_PARAMS = {
   },
   required: ["profile"],
 } as const satisfies JSONSchema7;
+const YOUTUBE_CHANNEL_PARAMS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    profile: {
+      type: "string",
+      minLength: 22,
+      maxLength: 1_000,
+      description:
+        "A YouTube channel id beginning with UC, or a canonical https://www.youtube.com/channel/UC... URL. When chaining from youtube.search_channels, pass payload.channels[].channel_id; handles and /@handle URLs are not accepted.",
+    },
+  },
+  required: ["profile"],
+} as const satisfies JSONSchema7;
+const YOUTUBE_CHANNEL_LIST_PARAMS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    profile: YOUTUBE_CHANNEL_PARAMS.properties.profile,
+    cursor: CURSOR_SCHEMA,
+    limit: LIMIT_SCHEMA,
+  },
+  required: ["profile"],
+} as const satisfies JSONSchema7;
 const URL_PARAMS = {
   type: "object",
   additionalProperties: false,
@@ -370,7 +394,7 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
   ),
   youtubeSearchAction(
     "youtube.search_channels",
-    "Search public YouTube channels.",
+    "Search public YouTube channels. To call a YouTube channel action next, pass the selected payload.channels[].channel_id as its profile parameter.",
     "/api/v1/youtube/web_v2/search_channels",
   ),
   youtubeVideoAction(
@@ -391,19 +415,19 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
   ),
   youtubeChannelAction(
     "youtube.get_channel",
-    "Get one public YouTube channel.",
+    "Get one public YouTube channel from its UC... channel id or canonical /channel/UC... URL.",
     "/api/v1/youtube/web/get_channel_info",
     false,
   ),
   youtubeChannelAction(
     "youtube.list_channel_videos",
-    "List public videos from a YouTube channel.",
+    "List public videos from a YouTube UC... channel id or canonical /channel/UC... URL.",
     "/api/v1/youtube/web_v2/get_channel_videos",
     true,
   ),
   youtubeChannelAction(
     "youtube.list_channel_shorts",
-    "List public Shorts from a YouTube channel.",
+    "List public Shorts from a YouTube UC... channel id or canonical /channel/UC... URL.",
     "/api/v1/youtube/web_v2/get_channel_shorts",
     true,
   ),
@@ -1081,7 +1105,7 @@ function youtubeChannelAction(
     id,
     source: "youtube",
     description,
-    params: list ? PROFILE_LIST_PARAMS : PROFILE_PARAMS,
+    params: list ? YOUTUBE_CHANNEL_LIST_PARAMS : YOUTUBE_CHANNEL_PARAMS,
     provider: TIKHUB,
     endpoint,
     priceType: "PER_CALL",

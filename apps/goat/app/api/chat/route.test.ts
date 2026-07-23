@@ -205,16 +205,25 @@ describe("POST /api/chat", () => {
     });
     let actionOutput: unknown;
     mockStreamText().mockImplementation((options: unknown) => {
-      const actionTool = (options as { tools?: Record<string, { execute?: unknown }> }).tools?.[
-        USE_ACTION_TOOL_NAME
-      ];
-      if (typeof actionTool?.execute !== "function") {
+      const tools = (options as { tools?: Record<string, { execute?: unknown }> }).tools ?? {};
+      const listActionsTool = tools[LIST_ACTIONS_TOOL_NAME];
+      const actionTool = tools[USE_ACTION_TOOL_NAME];
+      const executeListActions = listActionsTool?.execute;
+      const executeAction = actionTool?.execute;
+      if (typeof executeListActions !== "function") {
+        throw new Error("list_actions was not configured.");
+      }
+      if (typeof executeAction !== "function") {
         throw new Error("use_action was not configured.");
       }
-      const execution = actionTool.execute(
-        { action: "slack.fetch_history", params: { channel: "C123" } },
-        { toolCallId: "action_call_1", messages: [] },
-      ) as Promise<unknown>;
+      const execution = Promise.resolve(
+        executeListActions({ source: "slack" }, { toolCallId: "list_action_call_1", messages: [] }),
+      ).then(() =>
+        executeAction(
+          { action: "slack.fetch_history", params: { channel: "C123" } },
+          { toolCallId: "action_call_1", messages: [] },
+        ),
+      );
       return {
         toUIMessageStreamResponse: vi.fn(
           async (responseOptions: {

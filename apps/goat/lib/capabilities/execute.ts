@@ -234,16 +234,9 @@ export async function executeManagedCapability(input: {
       now: now(),
     });
     assertProviderRunMatches(input.spec, currentRun);
-    if (started.async && input.spec.executionMode !== "async") {
-      if (turnState.asyncRunStarted) {
-        await stopRunBestEffort(client, currentRun.runId);
-        throw new GoatActionExecutionError(
-          "call_budget",
-          "The provider unexpectedly made this a second long-running capability.",
-        );
-      }
-      turnState.asyncRunStarted = true;
-    }
+    // Monid can use a 202 job envelope for reviewed, short-lived actions that
+    // are cataloged as synchronous. The reviewed execution mode — not the
+    // transport envelope — owns the per-turn long-running action budget.
     if (!isTerminalMonidRun(currentRun.status)) {
       currentRun = await pollMonidRun({
         client,

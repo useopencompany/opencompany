@@ -514,6 +514,13 @@ export async function POST(request: Request): Promise<Response> {
                 params: action.params,
               })),
             },
+            ...(capabilityApproval
+              ? {
+                  prelistedSourceIds: actionCatalog.actions
+                    .filter((action) => action.id === capabilityApproval.action)
+                    .map((action) => action.provider),
+                }
+              : {}),
             execute: (call) =>
               executeChatActionCall({
                 catalog: actionCatalog,

@@ -58,7 +58,8 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     expect(prompt).toContain("Choose the lightest path");
     expect(prompt).toContain("start a task for deep, multi-step, or cross-source work");
     expect(prompt).toContain("one quick bounded lookup");
-    expect(prompt).toContain("If a use_action result has ok=false");
+    expect(prompt).toContain("If use_action returns invalid_params");
+    expect(prompt).toContain("make at most one corrected call");
     expect(prompt).toContain("<brain_fill>");
     expect(prompt).toContain("Survey breadth before depth");
     expect(prompt).toContain("exception to normal task routing");

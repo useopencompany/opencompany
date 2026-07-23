@@ -137,6 +137,32 @@ describe("managed capability catalog", () => {
       profileScraperMode: "Full + email search ($12 per 1k)",
     });
   });
+
+  it("makes the YouTube channel-search handoff explicit and directly usable", () => {
+    const channelId = `UC${"a".repeat(22)}`;
+    const searchResult = {
+      channels: [{ channel_id: channelId, channel_url: "https://www.youtube.com/@openai" }],
+    };
+    const searchChannels = action("youtube.search_channels");
+    const listChannelVideos = action("youtube.list_channel_videos");
+    const profileSchema = (
+      listChannelVideos.params.properties as Record<string, { description?: string }>
+    ).profile;
+
+    expect(searchChannels.description).toContain("payload.channels[].channel_id");
+    expect(profileSchema?.description).toContain("payload.channels[].channel_id");
+    expect(profileSchema?.description).toContain("handles and /@handle URLs are not accepted");
+    expect(
+      listChannelVideos.mapInput({
+        profile: searchResult.channels[0]!.channel_id,
+        limit: 5,
+      }),
+    ).toMatchObject({
+      providerInput: { channel_id: channelId },
+      resultLimit: 5,
+      canonicalLinks: [`https://www.youtube.com/channel/${channelId}`],
+    });
+  });
 });
 
 function action(id: string) {
