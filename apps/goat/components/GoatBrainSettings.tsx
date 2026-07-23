@@ -307,8 +307,8 @@ function IntelligenceSection({ brainRef }: { brainRef: string }) {
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="text-[13px] font-medium text-ink">Basic intelligence</span>
           <span className="text-[12px] leading-5 text-ink-subtle">
-            Ingestion runs on an open-source model, included in your plan&apos;s monthly allowance
-            at no extra cost.
+            Ingestion runs on Claude Haiku, a fast and cost-efficient model. The model cost of each
+            ingestion is billed to your workspace credits.
           </span>
         </span>
       </label>

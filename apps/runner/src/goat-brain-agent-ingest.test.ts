@@ -1196,7 +1196,7 @@ describe("runGoatChatCaptureAgentIngest", () => {
     );
   });
 
-  it("runs basic-tier brains on the open-source model", async () => {
+  it("runs basic-tier brains on the basic ingest model", async () => {
     workspacesMock.getGoatBrainIntelligence.mockResolvedValue("basic");
     mockAgentRun({
       finalText: "Filed the capture.",
@@ -1219,8 +1219,8 @@ describe("runGoatChatCaptureAgentIngest", () => {
     );
 
     expect(result).toMatchObject({
-      model: "moonshotai/kimi-k2.6",
-      trace: expect.objectContaining({ model: "moonshotai/kimi-k2.6" }),
+      model: "anthropic/claude-haiku-4.5",
+      trace: expect.objectContaining({ model: "anthropic/claude-haiku-4.5" }),
     });
   });
 

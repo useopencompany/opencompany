@@ -33,7 +33,13 @@ export const GOAT_MAX_MEMBERS = 50;
 
 // Ingestion model tiers: both are metered (model cost + fee); "frontier" just
 // runs a more expensive model.
-export const GOAT_BASIC_INGEST_MODEL = "moonshotai/kimi-k2.6";
+//
+// Basic is Haiku 4.5, not an open-source model: kimi-k2.6's per-token discount
+// ($0.95/$4 vs Haiku's $1/$5) was erased by step inflation — in prod it
+// averaged 23 steps/job (32% of jobs hit the 32-step cap) vs 6-8 steps for
+// Anthropic models on the same events, netting ~23c/job vs ~7-12c for Haiku.
+// Evidence: apps/runner/scripts/ingest-model-bench.ts replays.
+export const GOAT_BASIC_INGEST_MODEL = "anthropic/claude-haiku-4.5";
 export const GOAT_FRONTIER_INGEST_MODEL = "anthropic/claude-sonnet-5";
 
 export function goatIngestItemFeeUsdMicros(rawEventCount: number) {
