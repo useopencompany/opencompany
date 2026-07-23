@@ -38,6 +38,34 @@ export function mentionsSlackUser(text: string, userId: string | null): boolean 
   return new RegExp(`<@${escapeRegExp(userId)}(\\|[^>]*)?>`).test(text);
 }
 
+export function collectSlackMentionUserIds(texts: readonly string[]): Set<string> {
+  const userIds = new Set<string>();
+  for (const text of texts) {
+    for (const match of text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]*)?>/gi)) {
+      const userId = match[1];
+      if (userId) userIds.add(userId);
+    }
+  }
+  return userIds;
+}
+
+// LLM output must not be able to ping an invented user, @channel, @here, or a
+// user group. Preserve only user mentions that were already present in the
+// conversation; render every other mention-like token as inert inline code.
+export function sanitizeSlackMentions(text: string, allowedUserIds: ReadonlySet<string>): string {
+  return text
+    .replace(/<@([A-Z0-9]+)(?:\|[^>]*)?>/gi, (token, userId: string) =>
+      allowedUserIds.has(userId) ? token : `\`@${userId}\``,
+    )
+    .replace(
+      /<!(channel|here|everyone|subteam\^[^>|]+)(?:\|[^>]*)?>/gi,
+      (_token, target: string) => {
+        const readable = target.startsWith("subteam^") ? "user-group" : target;
+        return `\`@${readable}\``;
+      },
+    );
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

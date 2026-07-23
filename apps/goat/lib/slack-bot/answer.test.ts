@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 // Import from ./format (not ./answer): the answer module's runtime import
 // chain reaches authkit, which does not resolve under vitest's node runner.
 import {
+  collectSlackMentionUserIds,
   mentionsOtherHuman,
   mentionsSlackUser,
+  sanitizeSlackMentions,
   stripSlackBotMention,
   toSlackMrkdwn,
   truncateForSlack,
@@ -103,5 +105,29 @@ describe("mentionsSlackUser", () => {
   it("does not match other users or missing ids", () => {
     expect(mentionsSlackUser("hey <@UOTHER> hello", "UBOT")).toBe(false);
     expect(mentionsSlackUser("hey <@UBOT> hello", null)).toBe(false);
+  });
+});
+
+describe("sanitizeSlackMentions", () => {
+  it("preserves only user mentions already present in the conversation", () => {
+    const allowed = collectSlackMentionUserIds([
+      "[Jane (<@UASKER>)]: what changed?",
+      "[<@UTEAMMATE>]: I can help",
+    ]);
+    expect(
+      sanitizeSlackMentions(
+        "Thanks <@UASKER>. Ask <@UTEAMMATE>, not <@UINVENTED> or <!channel>.",
+        allowed,
+      ),
+    ).toBe("Thanks <@UASKER>. Ask <@UTEAMMATE>, not `@UINVENTED` or `@channel`.");
+  });
+
+  it("neutralizes here, everyone, and user-group broadcasts without changing links", () => {
+    expect(
+      sanitizeSlackMentions(
+        "See <https://example.com|docs> <!here> <!everyone> <!subteam^S123|ops>",
+        new Set(),
+      ),
+    ).toBe("See <https://example.com|docs> `@here` `@everyone` `@user-group`");
   });
 });

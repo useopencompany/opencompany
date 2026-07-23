@@ -71,13 +71,14 @@ export function createGoatSlackBotStatusReporter(input: {
   // flight or inside the throttle window are dropped (never queued) — the next
   // phase change or the final answer supersedes them anyway.
   let updateInFlight = false;
+  let latestPhaseUpdate: Promise<unknown> = Promise.resolve();
 
   const setPhase = (text: string) => {
     const phaseText = `_${text}_`;
     if (settled || updateInFlight || phaseText === lastText) return;
     if (lastUpdateAt !== null && now() - lastUpdateAt < STATUS_UPDATE_MIN_INTERVAL_MS) return;
     updateInFlight = true;
-    void statusTsPromise
+    latestPhaseUpdate = statusTsPromise
       .then((ts) => {
         if (!ts || settled) return null;
         lastText = phaseText;
@@ -87,10 +88,14 @@ export function createGoatSlackBotStatusReporter(input: {
       .finally(() => {
         updateInFlight = false;
       });
+    void latestPhaseUpdate;
   };
 
   const settle = async (text: string, reaction: "white_check_mark" | "warning") => {
     settled = true;
+    // A phase update may already be in flight. Let it finish before writing the
+    // terminal text so a slow Slack response cannot overwrite the final answer.
+    await latestPhaseUpdate;
     const ts = await statusTsPromise;
     let replyTs = ts;
     if (ts) {

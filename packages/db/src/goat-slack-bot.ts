@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, isNotNull, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   type GoatBrainVisibility,
@@ -260,9 +260,12 @@ export async function recordGoatSlackBotThreadParticipation(
 }
 
 export async function getGoatSlackBotThreadParticipation(
-  input: GoatSlackBotThreadRef,
+  input: GoatSlackBotThreadRef & { now?: Date },
   db: DbLike = getDb(),
 ): Promise<{ integrationId: string } | null> {
+  const cutoff = new Date(
+    (input.now ?? new Date()).getTime() - GOAT_SLACK_BOT_THREAD_PARTICIPATION_TTL_MS,
+  );
   const rows = await db
     .select({ integrationId: goatSlackBotThreadParticipation.integrationId })
     .from(goatSlackBotThreadParticipation)
@@ -271,6 +274,7 @@ export async function getGoatSlackBotThreadParticipation(
         eq(goatSlackBotThreadParticipation.teamId, input.teamId),
         eq(goatSlackBotThreadParticipation.channelId, input.channelId),
         eq(goatSlackBotThreadParticipation.threadTs, input.threadTs),
+        gte(goatSlackBotThreadParticipation.updatedAt, cutoff),
       ),
     )
     .limit(1);

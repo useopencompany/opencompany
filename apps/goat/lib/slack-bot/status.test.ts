@@ -92,6 +92,38 @@ describe("createGoatSlackBotStatusReporter", () => {
     expect(updates[0]?.form?.text).toBe("_Searching the brain…_");
   });
 
+  it("waits for an in-flight phase update before writing the final answer", async () => {
+    let releasePhaseUpdate: (() => void) | undefined;
+    const phaseUpdate = new Promise<void>((resolve) => {
+      releasePhaseUpdate = resolve;
+    });
+    vi.mocked(slackApiRequest).mockImplementation(async (input) => {
+      if (input.method === "chat.update" && input.form?.text === "_Searching the brain…_") {
+        await phaseUpdate;
+      }
+      return { ok: true, ts: "111.222" };
+    });
+
+    const status = createGoatSlackBotStatusReporter({ ...BASE, canReact: false });
+    await flush();
+    status.setPhase("Searching the brain…");
+    await flush();
+
+    const finishPromise = status.finish("final answer");
+    await flush();
+    expect(
+      calls().filter((call) => call.method === "chat.update" && call.form?.text === "final answer"),
+    ).toHaveLength(0);
+
+    releasePhaseUpdate?.();
+    await finishPromise;
+    const updates = calls().filter((call) => call.method === "chat.update");
+    expect(updates.map((call) => call.form?.text)).toEqual([
+      "_Searching the brain…_",
+      "final answer",
+    ]);
+  });
+
   it("skips reactions when the install lacks the scope", async () => {
     const status = createGoatSlackBotStatusReporter({ ...BASE, canReact: false });
     await status.finish("done");

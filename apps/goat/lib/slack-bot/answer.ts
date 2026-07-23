@@ -33,7 +33,9 @@ import { goatSlackBotHasScope } from "@/lib/integrations/slack-bot";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { createGoatSlackSurfacePromptBlock } from "@/lib/prompts/slack-surface";
 import {
+  collectSlackMentionUserIds,
   mentionsSlackUser,
+  sanitizeSlackMentions,
   stripSlackBotMention,
   toSlackMrkdwn,
   truncateForSlack,
@@ -265,8 +267,16 @@ async function answerForIntegration(
       sourceRef: `slack:${input.teamId}:${input.channelId}:${input.messageTs}`,
     });
 
+    const allowedMentionUserIds = collectSlackMentionUserIds([
+      input.text,
+      ...contextMessages.map((message) => message.content),
+    ]);
+    allowedMentionUserIds.add(input.slackUserId);
     const { replyTs } = await status.finish(
-      truncateForSlack(toSlackMrkdwn(answer.content), SLACK_ANSWER_MAX_CHARS),
+      truncateForSlack(
+        sanitizeSlackMentions(toSlackMrkdwn(answer.content), allowedMentionUserIds),
+        SLACK_ANSWER_MAX_CHARS,
+      ),
     );
 
     if (mode !== "dm") {
@@ -286,7 +296,7 @@ async function answerForIntegration(
       userWorkosId: identity.userWorkosId,
       model: DEFAULT_GOAT_MODEL,
       usage: answer.totalUsage,
-      idempotencyKey: `slack_bot:${input.teamId}:${input.channelId}:${input.messageTs}`,
+      idempotencyKey: `slack_bot:${integration.id}:${input.teamId}:${input.channelId}:${input.messageTs}`,
     });
   } catch (error) {
     console.error("[goat-slack-bot] Answer generation or delivery failed", {
@@ -410,14 +420,19 @@ async function runSlackChatAgent(input: {
     : ((await getGoatUserBasics(input.identity.userWorkosId)) ?? undefined);
   const userTimezone = userContext?.timezone || "UTC";
 
-  const actions = await resolveSlackActionDispatcher({
-    userWorkosId: input.identity.userWorkosId,
-    workspaceId: input.integration.workspaceId,
-    status: input.status,
-    signal,
-    currentDate,
-    userTimezone,
-  });
+  // Never expose the installing admin's private integrations to an unmapped
+  // Slack sender using the fallback identity. DMs already require a mapped
+  // member; channel fallbacks remain limited to their explicitly routed brains.
+  const actions = input.identity.member
+    ? await resolveSlackActionDispatcher({
+        userWorkosId: input.identity.userWorkosId,
+        workspaceId: input.integration.workspaceId,
+        status: input.status,
+        signal,
+        currentDate,
+        userTimezone,
+      })
+    : null;
 
   const workspaceName = await getWorkspaceName(input.integration.workspaceId);
 
@@ -540,10 +555,19 @@ async function resolveSlackActionDispatcher(input: {
   if (isGoatChatActionsKilled()) return null;
   let catalog: GoatResolvedActionCatalog;
   try {
-    catalog = await resolveGoatActionCatalog({
+    const resolved = await resolveGoatActionCatalog({
       userWorkosId: input.userWorkosId,
       workspaceId: input.workspaceId,
     });
+    // Slack has no tool-approval continuation UI. Keep actions the member has
+    // explicitly enabled, and omit "ask" actions instead of letting the model
+    // produce an approval request that cannot be answered.
+    const actions = resolved.actions.filter((action) => action.permissionMode === "on");
+    const providerIds = new Set(actions.map((action) => action.provider));
+    catalog = {
+      providers: resolved.providers.filter((provider) => providerIds.has(provider.id)),
+      actions,
+    };
   } catch {
     return null;
   }
@@ -562,6 +586,7 @@ async function resolveSlackActionDispatcher(input: {
           provider: action.provider,
           description: action.description,
           params: action.params,
+          permissionMode: action.permissionMode,
         })),
       },
       execute: async (call: {
