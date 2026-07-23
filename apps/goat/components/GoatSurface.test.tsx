@@ -422,7 +422,46 @@ describe("GoatSurface chat streaming UI", () => {
     );
   });
 
-  it("remembers the last main chat engine when returning Home and remounting", async () => {
+  it("keeps a new session's model fixed when another tab changes the Home preference", async () => {
+    const user = userEvent.setup();
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start with Claude");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const modelPicker = screen.getByRole("button", { name: "Model" });
+    expect(modelPicker).toHaveTextContent("Claude Sonnet 5");
+    expect(modelPicker).toBeDisabled();
+
+    const storageKey = "opencompany-goat-main-chat-selection:user_1";
+    window.localStorage.setItem(storageKey, "moonshotai/kimi-k3");
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: storageKey,
+          newValue: "moonshotai/kimi-k3",
+          storageArea: window.localStorage,
+        }),
+      );
+    });
+
+    expect(modelPicker).toHaveTextContent("Claude Sonnet 5");
+
+    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3"),
+    );
+    expect(screen.getByRole("button", { name: "Model" })).toBeEnabled();
+  });
+
+  it("remembers the last main chat engine across a Home reset and remounting", async () => {
     const user = userEvent.setup();
     const sharedProps = {
       tasks: [],
@@ -430,17 +469,7 @@ describe("GoatSurface chat streaming UI", () => {
       codexConnected: true,
       userWorkosId: "user_1",
     } as const;
-    const { unmount } = render(
-      <GoatSurface
-        {...sharedProps}
-        initialChat={{
-          id: "chat_1",
-          title: "Chat",
-          model: DEFAULT_GOAT_MODEL,
-          messages: [],
-        }}
-      />,
-    );
+    const { unmount } = render(<GoatSurface {...sharedProps} initialChat={null} />);
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));

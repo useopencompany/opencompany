@@ -1,11 +1,14 @@
+import { createHash } from "node:crypto";
 import { captureGoatIngestionQuotaAnalytics } from "@opencompany/analytics/goat";
 import {
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   upsertGoatBrainSourceItemAndEnqueue,
 } from "@opencompany/db/goat-brain-ingest";
 import {
+  type GoatGitHubPullRequestEventInsert,
   goatGitHubEnabledEventTypes,
   goatGitHubSelectedRepoIds,
+  insertGoatGitHubPullRequestEvents,
   listEnabledGoatGitHubBrainSourceRoutes,
   listGoatGitHubIntegrationsForInstallation,
 } from "@opencompany/db/goat-github";
@@ -48,20 +51,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  // After the signature check every path acks with 200 — a non-2xx would only
-  // trigger GitHub redeliveries of payloads we already know how to handle.
+  // Pull-request delivery ids make buffering retries idempotent. Surface
+  // transient failures so GitHub redelivers instead of losing activity.
   try {
     if (eventName === "installation") {
       return NextResponse.json(await handleInstallationEvent(payload));
     }
-    return NextResponse.json(await handleActivityEvent(eventName, payload));
+    const deliveryId =
+      request.headers.get("x-github-delivery")?.trim() ||
+      createHash("sha256").update(rawBody).digest("hex");
+    return NextResponse.json(await handleActivityEvent(eventName, payload, deliveryId));
   } catch (error) {
     console.error("[goat-github] Failed to process GitHub event", {
       eventName,
       action: payload.action,
       error: error instanceof Error ? error.message : String(error),
     });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ error: "Unable to process GitHub event." }, { status: 503 });
   }
 }
 
@@ -94,7 +100,11 @@ async function handleInstallationEvent(payload: Record<string, unknown>) {
   return { ok: true, marked };
 }
 
-async function handleActivityEvent(eventName: string, payload: Record<string, unknown>) {
+async function handleActivityEvent(
+  eventName: string,
+  payload: Record<string, unknown>,
+  deliveryId: string,
+) {
   let item;
   try {
     item = normalizeGitHubActivityWebhook(eventName, payload, {
@@ -134,6 +144,38 @@ async function handleActivityEvent(eventName: string, payload: Record<string, un
     brainRefsByIntegration.set(route.integrationId, refs);
   }
   if (brainRefsByIntegration.size === 0) return { ok: true, dropped: true };
+
+  if (item.content.activity.kind === "pull_request") {
+    const pullRequestNumber = item.content.activity.number;
+    const pullRequestEventType =
+      eventType === "pull_request_opened" ||
+      eventType === "pull_request_merged" ||
+      eventType === "pull_request_commented"
+        ? eventType
+        : null;
+    if (pullRequestNumber === undefined || !pullRequestEventType) {
+      return { ok: true, dropped: true };
+    }
+    const inserts: GoatGitHubPullRequestEventInsert[] = connected.flatMap((integration) => {
+      const brainRefs = brainRefsByIntegration.get(integration.id);
+      if (!brainRefs || brainRefs.length === 0) return [];
+      return [
+        {
+          integrationId: integration.id,
+          userWorkosId: integration.userWorkosId,
+          installationId,
+          repositoryId: repoId,
+          pullRequestNumber,
+          deliveryId,
+          eventType: pullRequestEventType,
+          payload,
+          eventTime: new Date(item.occurredAt),
+        },
+      ];
+    });
+    const buffered = await insertGoatGitHubPullRequestEvents(inserts);
+    return { ok: true, buffered };
+  }
 
   let enqueued = 0;
   for (const integration of connected) {

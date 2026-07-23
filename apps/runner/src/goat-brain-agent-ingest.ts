@@ -73,6 +73,7 @@ import {
   recordGoatBrainIngestBudgetExhausted,
   recordGoatBrainIngestSpend,
 } from "@opencompany/goat-observability";
+import { latitudeTelemetry } from "@opencompany/goat-observability/latitude";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import * as ai from "ai";
@@ -168,6 +169,7 @@ const PROMPT_SLACK_TRANSCRIPT_BYTES = 80_000;
 const PROMPT_SLACK_CONTEXT_BYTES = 40_000;
 const PROMPT_LINEAR_DESCRIPTION_BYTES = 24_000;
 const PROMPT_LINEAR_ACTIVITY_BYTES = 80_000;
+const PROMPT_GITHUB_ACTIVITY_BYTES = 80_000;
 const PROMPT_HUBSPOT_ACTIVITY_BYTES = 60_000;
 const PROMPT_HUBSPOT_PROPERTIES_BYTES = 24_000;
 const PROMPT_ATTIO_ACTIVITY_BYTES = 60_000;
@@ -704,12 +706,67 @@ export function buildLinearIssueAgentIngestPrompt(item: NormalizedLinearIssueSou
 
 export const GITHUB_ACTIVITY_INGEST_SYSTEM_PROMPT = buildGoatBrainIngestSystemPrompt({
   mission:
-    "folds one GitHub activity event — a newly opened pull request, a merged pull request, a newly opened issue, or a new comment on a pull request or issue — into a single brain of Markdown knowledge documents.",
+    "folds one GitHub activity event or one buffered pull-request activity window into a single brain of Markdown knowledge documents.",
   skipRule: `GitHub activity is often routine: dependency bumps, typo fixes, chores, housekeeping issues, and comments that are acknowledgements or status pings ("LGTM", "+1", "done") carry no durable knowledge. If the event is not brain-worthy, make no writes and reply with exactly ${GOAT_BRAIN_AGENT_SKIP_SENTINEL}. Only work that changes a project's state of play belongs in the brain: shipped or in-flight features, meaningful fixes, newly surfaced problems, and decisions recorded in a description or comment.`,
 });
 
 export function buildGitHubActivityAgentIngestPrompt(item: NormalizedGitHubActivitySourceItem) {
   const activity = item.content.activity;
+  if (activity.events && activity.events.length > 0) {
+    const fullActivityText = activity.events
+      .map((event, index) => {
+        const stats = [
+          event.author ? `- Author: ${event.author}` : null,
+          event.mergedBy ? `- Merged by: ${event.mergedBy}` : null,
+          event.baseRef && event.headRef
+            ? `- Branches: ${event.headRef} -> ${event.baseRef}`
+            : null,
+          event.additions !== undefined && event.deletions !== undefined
+            ? `- Size: +${event.additions} / -${event.deletions}${
+                event.changedFiles !== undefined ? ` across ${event.changedFiles} files` : ""
+              }`
+            : null,
+          event.labels?.length ? `- Labels: ${event.labels.join(", ")}` : null,
+        ].filter((line): line is string => line !== null);
+        return [
+          `### ${index + 1}. ${event.state} at ${event.occurredAt}`,
+          `- Source ref: ${event.sourceRef}`,
+          `- URL: ${event.url}`,
+          ...stats,
+          event.truncatedBody ? "- Body was truncated at normalization time." : null,
+          "",
+          event.body.trim() || "(no description or comment body)",
+        ]
+          .filter((line): line is string => line !== null)
+          .join("\n");
+      })
+      .join("\n\n");
+    const activityText = truncateByBytes(fullActivityText, PROMPT_GITHUB_ACTIVITY_BYTES);
+    const truncated =
+      Buffer.byteLength(activityText, "utf8") < Buffer.byteLength(fullActivityText, "utf8");
+    return [
+      `Ingest this batch of GitHub activity on pull request ${activity.repository.fullName}#${activity.number} into the brain. It is one activity window containing everything buffered since the last ingest.`,
+      "",
+      "Required outcome, all scoped to this brain:",
+      "1. Query the brain first for the project, product, or repository this work belongs to, and for the entities the window touches, so you update existing knowledge instead of duplicating it.",
+      "2. Judge the window as a whole: keep only durable changes to a project's state of play — substantial work started or shipped, meaningful fixes, newly surfaced problems, and decisions in discussion. Ignore routine review acknowledgements and status pings.",
+      `3. Fold each durable point into the page where it belongs: rewrite compiled truth when the state of play changes and add dated evidence with the event's listed source ref. The PR-level source ref is ${item.sourceRef}.`,
+      `4. Pointer discipline: this pull request has a canonical live home (${activity.url}). Cite it as a pointer plus a one-line current-state summary — [[source:${item.sourceRef}|${activity.repository.fullName}#${activity.number}]]. Never copy the full description or discussion into a page and never snapshot it into evidence/.`,
+      "5. Create a project/product page only when this work is substantial enough to seed one. Update person or company pages only when the window reveals durable knowledge about them; do not create person pages for authors or reviewers merely participating in the PR.",
+      "",
+      `Source ref: ${item.sourceRef}`,
+      `Window: ${activity.windowStart} to ${activity.windowEnd}`,
+      `Current title: ${activity.title}`,
+      `Current state: ${activity.state}`,
+      `URL: ${activity.url}`,
+      truncated ? "The activity below was truncated to fit the 80 KB prompt limit." : null,
+      "",
+      `## Activity window\n${activityText}`,
+    ]
+      .filter((line): line is string => line !== null)
+      .join("\n");
+  }
+
   const artifact = activity.kind === "pull_request" ? "pull request" : "issue";
   const ref = `${activity.repository.fullName}#${activity.number}`;
   const label =
@@ -2724,6 +2781,13 @@ export async function runIngestAgentLoop(input: {
         },
       ],
       tools: { ...tools, ...enrichmentTools },
+      ...latitudeTelemetry({
+        name: "brain-ingest",
+        feature: "brain-ingest",
+        userId: input.userWorkosId,
+        sessionId: input.ingestJobId,
+        metadata: { model: input.model, brainRef: input.brainRef },
+      }),
       stopWhen: [
         ai.stepCountIs(GOAT_BRAIN_AGENT_INGEST_MAX_STEPS),
         () => budgetExhausted || budgetAccountingError !== null,

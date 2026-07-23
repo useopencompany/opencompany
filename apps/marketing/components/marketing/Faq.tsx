@@ -13,7 +13,7 @@ const FAQS = [
   },
   {
     q: "What does it cost?",
-    a: "Free to start. $15/seat/month for teams, with pooled ingestion.",
+    a: "Free to start with $5 in credits. After that, it's usage-based: model cost plus a 20% platform fee, with an additional $0.20 per 50 items for Brain ingestion. No seats or subscription.",
   },
   {
     q: "Where does my data actually live?",

@@ -15,6 +15,7 @@ import {
   recordGoatModelCost,
   startGoatSpan,
 } from "@opencompany/goat-observability";
+import { flushLatitude, latitudeTelemetry } from "@opencompany/goat-observability/latitude";
 import { createLogger } from "@opencompany/observability";
 import { captureStatsigServerEvent } from "@opencompany/statsig/server";
 import {
@@ -836,7 +837,22 @@ export async function POST(request: Request): Promise<Response> {
     experimental_transform: smoothStream(),
     abortSignal: generationSignal,
     tools: toolContext.tools,
+    ...(toolContext.repairToolCall
+      ? { experimental_repairToolCall: toolContext.repairToolCall }
+      : {}),
     providerOptions: goatGatewayProviderOptions(gatewayAttribution),
+    ...latitudeTelemetry({
+      name: "chat-turn",
+      feature: "chat",
+      userId: context.user.workosUserId,
+      sessionId: turn.session.id,
+      metadata: {
+        model: turn.session.model,
+        workspaceId: context.workspace.id,
+        userMessageId: turn.userMessageId,
+        ...(context.activeBrain ? { brainRef: context.activeBrain.id } : {}),
+      },
+    }),
     async onFinish(event) {
       const finishReason = stringifyFinishReason(event.finishReason);
       await recordChatModelCost({
@@ -877,6 +893,10 @@ export async function POST(request: Request): Promise<Response> {
       void persistFallbackAssistantMessage(event.error, "error");
     },
   });
+
+  // after() runs once the response has finished streaming, when the model
+  // spans have ended; export them to Latitude before the function is frozen.
+  after(() => flushLatitude());
 
   return result.toUIMessageStreamResponse<GoatChatUiMessage>({
     originalMessages: turn.messages,

@@ -1051,6 +1051,13 @@
       "when": 1784652415000,
       "tag": "0149_goat_slack_bot_v2",
       "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1784793600000,
+      "tag": "0150_goat_github_pr_buffer",
+      "breakpoints": true
     }
   ]
 }

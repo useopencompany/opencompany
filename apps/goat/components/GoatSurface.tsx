@@ -313,6 +313,8 @@ export function GoatSurface({
     if (engine === "local_codex") return LOCAL_CODEX_PICKER_VALUE;
     return normalizeGoatModel(initialChat.model);
   });
+  // The remembered selection is a Home default. Opening or reserving a session sets the override
+  // so cross-tab preference updates apply only to the next chat.
   const chatModel = chatModelOverride ?? rememberedChatModel;
   const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
     normalizeCodexChatModelId(initialChat?.model),
@@ -1149,6 +1151,7 @@ export function GoatSurface({
       if (newSessionId && pendingNewSessionIdRef.current !== newSessionId) {
         pendingNewSessionIdRef.current = newSessionId;
         routedChatSessionIdRef.current = newSessionId;
+        setChatModelOverride(chatModel);
         setChatSessionId(newSessionId);
         setPersistedChatSessionId(null);
         window.history.replaceState(null, "", chatHref(newSessionId));
@@ -1235,6 +1238,7 @@ export function GoatSurface({
     if (newSessionId && pendingNewSessionIdRef.current !== newSessionId) {
       pendingNewSessionIdRef.current = newSessionId;
       routedChatSessionIdRef.current = newSessionId;
+      setChatModelOverride(model);
       setChatSessionId(newSessionId);
       setPersistedChatSessionId(null);
       window.history.replaceState(null, "", chatHref(newSessionId));
@@ -2021,7 +2025,7 @@ export function GoatSurface({
                     setCodexGoalTokenBudget("");
                   }
                 }}
-                disabled={isGenerating || Boolean(activeEngineChat)}
+                disabled={isGenerating || Boolean(chatSessionId)}
                 localCodexBetaEnabled={localCodexBetaEnabled}
                 codexConnected={codexConnected}
               />

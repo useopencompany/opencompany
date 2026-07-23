@@ -17,6 +17,7 @@ import {
   goatGatewayProviderOptions,
   recordGoatBrainIngestSpend,
 } from "@opencompany/goat-observability";
+import { latitudeTelemetry } from "@opencompany/goat-observability/latitude";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import * as ai from "ai";
 
@@ -92,6 +93,14 @@ export async function runGoatBrainIngestTriage(
     prompt: input.prompt,
     maxOutputTokens: GOAT_BRAIN_INGEST_TRIAGE_MAX_OUTPUT_TOKENS,
     abortSignal,
+    ...latitudeTelemetry({
+      name: "brain-ingest-triage",
+      feature: "brain-ingest",
+      userId: input.userWorkosId,
+      // Same session as the main ingest agent so both calls group per job.
+      sessionId: input.ingestJobId,
+      metadata: { model: GOAT_BRAIN_INGEST_TRIAGE_MODEL, brainRef: input.brainRef },
+    }),
     providerOptions: goatGatewayProviderOptions(attribution, {
       openai: {
         reasoningEffort: "low",
