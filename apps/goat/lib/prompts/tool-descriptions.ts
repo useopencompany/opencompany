@@ -1,4 +1,5 @@
 import { MAX_ACTION_CALLS_PER_TURN } from "@/lib/actions/limits";
+import { MAX_WEB_SEARCH_CALLS_PER_TURN } from "@/lib/chat-limits";
 
 export const GOAT_BRAIN_TOOL_DESCRIPTION =
   "Read-only access to the user's durable Goat Brain (structured memory stored as Markdown files). Use it to recall and inspect existing knowledge, never to write. Use query for recall/search, list for inventory, get for a known brain id, timeline for a record's history, help for command-specific usage, and doctor for validation. Use query with since windows like 6h, 2d, 1w, or an ISO timestamp to search or browse recent Brain entries; omit text when the user only wants recent entries. Use includeMerged only when inspecting duplicate/merged history and includeArchived only for retired records. To add or edit Brain content — new pages, evidence, corrections, links, or merges — use save_to_brain instead; the background curation agent files it. Do not treat Brain as a chat scratchpad.";
@@ -77,8 +78,7 @@ export const WEB_FETCH_TOOL_DESCRIPTION =
 export const WEB_FETCH_URL_DESCRIPTION =
   "The exact absolute HTTP or HTTPS URL to read. Use the URL the user provided; do not invent or guess a different URL.";
 
-export const WEB_SEARCH_TOOL_DESCRIPTION =
-  "Search the public web once for simple freshness-sensitive questions. Use this for one-shot current facts, recent updates, or latest docs. Do not use it for deep research, monitoring, multi-source reports, connected-account work, or anything that should become a tracked task.";
+export const WEB_SEARCH_TOOL_DESCRIPTION = `Search the public web for simple freshness-sensitive questions. Use up to ${MAX_WEB_SEARCH_CALLS_PER_TURN} focused searches in a chat turn when the answer needs complementary queries or source confirmation. Do not use it for deep research, monitoring, extensive reports, connected-account work, or anything that should become a tracked task.`;
 
 export const WEB_SEARCH_QUERY_DESCRIPTION =
   "A concise public-web search query. Prefer entity names plus the user's requested current fact or update.";

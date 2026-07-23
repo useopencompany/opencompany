@@ -23,6 +23,7 @@ import {
   type GoatBrainMultiBrainTarget,
   normalizeGoatBrainReadToolInput,
 } from "@/lib/brain-surface";
+import { MAX_WEB_SEARCH_CALLS_PER_TURN } from "@/lib/chat-limits";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
@@ -737,11 +738,10 @@ export function createOpenCompanyChatToolContext(input: {
       }),
       execute: async (args) => {
         visibleToolActivity = true;
-        if (webSearchCallCount >= 1) {
+        if (webSearchCallCount >= MAX_WEB_SEARCH_CALLS_PER_TURN) {
           return {
             ok: false,
-            error:
-              "web_search is limited to one search per chat turn. Start a task for deeper research.",
+            error: `web_search is limited to ${MAX_WEB_SEARCH_CALLS_PER_TURN} searches per chat turn. Start a task for deeper research.`,
           };
         }
         webSearchCallCount += 1;

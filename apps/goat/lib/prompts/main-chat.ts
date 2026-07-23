@@ -1,3 +1,5 @@
+import { MAX_WEB_SEARCH_CALLS_PER_TURN } from "@/lib/chat-limits";
+
 function promptBlock(name: string, lines: readonly string[]) {
   return [`<${name}>`, ...lines, `</${name}>`].join("\n");
 }
@@ -53,7 +55,7 @@ const OPENCOMPANY_CHAT_WEB_FETCH_FALLBACK =
   "If web_fetch fails or is unavailable, say that briefly and explain that the page could not be read; do not silently substitute web_search.";
 
 const OPENCOMPANY_CHAT_WEB_SEARCH_BEHAVIOR_LINES = [
-  "Use the web_search tool inside chat for simple one-shot public-web freshness questions, such as latest company updates, current facts, or current docs. After searching, answer directly and include a compact Sources list with markdown links.",
+  `Use the web_search tool inside chat for lightweight public-web freshness questions, such as latest company updates, current facts, or current docs. You may run up to ${MAX_WEB_SEARCH_CALLS_PER_TURN} focused searches when complementary queries or source confirmation will improve the answer. After searching, answer directly and include a compact Sources list with markdown links.`,
   'For web search, a good natural pre-tool sentence is: "I\'ll quickly check the web for the latest sources."',
 ];
 
