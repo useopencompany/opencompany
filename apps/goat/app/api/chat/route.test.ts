@@ -160,9 +160,14 @@ describe("POST /api/chat", () => {
     mockCreateTurn();
     mockResolveGoatActionCatalog().mockResolvedValue(sampleActionCatalog());
     mockStreamText().mockImplementation((options: unknown) => {
-      const tools = (options as { tools?: Record<string, unknown> }).tools ?? {};
+      const streamOptions = options as {
+        tools?: Record<string, unknown>;
+        experimental_repairToolCall?: unknown;
+      };
+      const tools = streamOptions.tools ?? {};
       expect(tools[LIST_ACTIONS_TOOL_NAME]).toBeDefined();
       expect(tools[USE_ACTION_TOOL_NAME]).toBeDefined();
+      expect(streamOptions.experimental_repairToolCall).toBeTypeOf("function");
       return {
         toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
       } as never;

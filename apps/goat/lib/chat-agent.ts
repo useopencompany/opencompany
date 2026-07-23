@@ -11,6 +11,7 @@ import {
   jsonSchema,
   type LanguageModelUsage,
   stepCountIs,
+  type ToolCallRepairFunction,
   type ToolSet,
   tool,
 } from "ai";
@@ -278,6 +279,9 @@ export async function runOpenCompanyChatAgent(input: {
     })),
     stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
     tools: toolContext.tools,
+    ...(toolContext.repairToolCall
+      ? { experimental_repairToolCall: toolContext.repairToolCall }
+      : {}),
     providerOptions: goatGatewayProviderOptions(attribution),
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
   });
@@ -322,6 +326,7 @@ export function createOpenCompanyChatToolContext(input: {
   let visibleToolActivity = false;
   let webSearchCallCount = 0;
   let actionCallCount = 0;
+  let repairToolCall: ToolCallRepairFunction<ToolSet> | undefined;
 
   const multiBrainTargets = input.goatBrainMultiBrain?.targets ?? [];
   const multiBrain = multiBrainTargets.length > 1;
@@ -688,6 +693,24 @@ export function createOpenCompanyChatToolContext(input: {
   if (actions && actions.catalog.actions.length > 0) {
     const integrationIds = actions.catalog.providers.map((provider) => provider.id);
     const actionIds = actions.catalog.actions.map((action) => action.id);
+    const actionIdSet = new Set(actionIds);
+    // Models sometimes emit an action id from discovery (for example
+    // "linear.get_project") as the tool name instead of wrapping it in
+    // use_action. Repair only exact ids from this user's current catalog so
+    // normal validation and write approval still happen inside use_action.
+    repairToolCall = async ({ toolCall }) => {
+      if (!actionIdSet.has(toolCall.toolName)) return null;
+      const params = parseToolCallParams(toolCall.input);
+      if (!params) return null;
+      return {
+        ...toolCall,
+        toolName: USE_ACTION_TOOL_NAME,
+        input: JSON.stringify({
+          action: toolCall.toolName,
+          params,
+        }),
+      };
+    };
     tools[LIST_ACTIONS_TOOL_NAME] = tool<ListActionsToolInput, ListActionsToolOutput>({
       description: LIST_ACTIONS_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<ListActionsToolInput>({
@@ -792,6 +815,7 @@ export function createOpenCompanyChatToolContext(input: {
   return {
     getStartedTask: () => startedTask,
     hasVisibleToolActivity: () => visibleToolActivity,
+    repairToolCall,
     tools,
   };
 }
@@ -841,6 +865,18 @@ function latestUserMessageContent(messages: readonly OpenCompanyChatAgentMessage
     if (trimmed) return trimmed;
   }
   return undefined;
+}
+
+function parseToolCallParams(input: string): Record<string, unknown> | null {
+  if (!input.trim()) return {};
+  try {
+    const parsed = JSON.parse(input);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeStartTaskEngine(value: unknown): GoatHarnessEngine | undefined {
