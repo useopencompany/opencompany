@@ -302,7 +302,8 @@ Examples:
 
 Update frontmatter fields for an existing document. Provide at least one of
 --title, --type, or --status. Promoting a page to --status active requires its
-compiled truth to cite evidence with [[evidence:<evidence-id>]].
+compiled truth to cite provenance with [[evidence:<evidence-id>]] or
+[[source:<provider>:<id>]].
 
 Options:
   --title <title>     New human-readable title.

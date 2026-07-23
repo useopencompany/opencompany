@@ -65,5 +65,6 @@ see `apps/goat/research/goat-brain-v1.md` and issue #597.
 - **Everything is scoped to one `brain_ref`.** No query, job, or tool call joins across brains.
 - **Evidence is immutable and zoned.** Evidence records live under `evidence/`, get `ev-*` ids,
   and pages link to them rather than inlining content.
-- **A page cannot become `active` without citing evidence** — `goat-brain set --status active`
-  requires the compiled truth to contain at least one `[[evidence:...]]` link.
+- **A page cannot become `active` without cited provenance** — `goat-brain set --status active`
+  requires the compiled truth to contain at least one valid `[[evidence:...]]` or
+  `[[source:...]]` link.

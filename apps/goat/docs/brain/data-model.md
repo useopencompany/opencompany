@@ -51,7 +51,7 @@ the closed set above is what validators actually accept.
 | Status | Meaning |
 | --- | --- |
 | `draft` | Captured but not yet curated. Chat captures land in `inbox/` as drafts. |
-| `active` | Curated, trusted knowledge. **Promotion to `active` requires the compiled truth to cite at least one `[[evidence:...]]` link** (enforced by `goat-brain set`). |
+| `active` | Curated, trusted knowledge. **Promotion to `active` requires the compiled truth to cite at least one valid `[[evidence:...]]` or `[[source:...]]` link** (enforced by `goat-brain set`). |
 | `archived` | Kept for history, excluded from default retrieval. |
 | `merged` | Superseded by another document; frontmatter `mergedInto` names the survivor. |
 
