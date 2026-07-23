@@ -112,6 +112,14 @@ describe("Goat MCP tools", () => {
     );
   });
 
+  it("brands MCP tool metadata as OpenCompany", () => {
+    const tools = registerTools();
+
+    expect(getTool(tools, "goat_brain").config.title).toBe("OpenCompany brain (advanced)");
+    expect(getTool(tools, "list_brains").config.description).toContain("every OpenCompany brain");
+    expect(getTool(tools, "save_to_brain").config.title).toBe("Save to OpenCompany brain");
+  });
+
   it("marks every retrieval tool read-only and capture as a non-destructive write", () => {
     const tools = registerTools();
     for (const name of [

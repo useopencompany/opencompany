@@ -1066,7 +1066,7 @@ export function GoatSurface({
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isGenerating || engineSubmitting) return;
+    if (isAgentWorking) return;
     if (chatSendBlocked) {
       toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
@@ -1455,7 +1455,7 @@ export function GoatSurface({
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      formRef.current?.requestSubmit();
+      if (!isAgentWorking) formRef.current?.requestSubmit();
     }
   };
 
@@ -1951,7 +1951,7 @@ export function GoatSurface({
                       event.currentTarget.selectionStart,
                     )
                   }
-                  disabled={isGenerating || localCodexFeatureDisabledForChat}
+                  disabled={localCodexFeatureDisabledForChat}
                   className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
                   style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                   maxLength={10_000}
@@ -1971,6 +1971,7 @@ export function GoatSurface({
                     )) ||
                   composerAttachments.isUploading ||
                   engineSubmitting ||
+                  engineRunning ||
                   localCodexFeatureDisabledForChat ||
                   chatSendBlocked
                 }

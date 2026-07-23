@@ -269,7 +269,7 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
   server.registerTool(
     GOAT_BRAIN_ADVANCED_TOOL_NAME,
     {
-      title: "Goat brain (advanced)",
+      title: "OpenCompany brain (advanced)",
       description: GOAT_BRAIN_ADVANCED_TOOL_DESCRIPTION,
       inputSchema: goatBrainAdvancedInputSchema,
       annotations: READ_TOOL_ANNOTATIONS,
@@ -282,7 +282,7 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
     {
       title: "List brains",
       description:
-        'List every Goat brain you can access, grouped by workspace. Each brain reports whether you can save to it. Use a returned id as the "brain" argument for other tools.',
+        'List every OpenCompany brain you can access, grouped by workspace. Each brain reports whether you can save to it. Use a returned id as the "brain" argument for other tools.',
       inputSchema: {},
       outputSchema: listBrainsOutputSchema,
       annotations: READ_TOOL_ANNOTATIONS,
@@ -316,7 +316,7 @@ export function registerGoatBrainTools(server: McpServer, ctx: GoatMcpToolContex
   server.registerTool(
     SAVE_TO_BRAIN_TOOL_NAME,
     {
-      title: "Save to Goat brain",
+      title: "Save to OpenCompany brain",
       description: SAVE_TO_BRAIN_TOOL_DESCRIPTION,
       inputSchema: saveToBrainInputSchema,
       outputSchema: saveToBrainOutputSchema,

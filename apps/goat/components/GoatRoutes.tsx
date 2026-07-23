@@ -159,7 +159,7 @@ export function GoatMcpSettingsRoute() {
   return (
     <GoatSettingsContent
       title="MCP"
-      description="Connect Claude, ChatGPT, or Cursor to everything you can access in Goat."
+      description="Connect Claude, ChatGPT, or Cursor to everything you can access in OpenCompany."
     >
       <McpSetupGuide
         displayName={displayName}

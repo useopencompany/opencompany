@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatBrainView } from "@/components/GoatBrainView";
-import { GoatBrainRoute, GoatPreferencesSettingsRoute } from "./GoatRoutes";
+import { GoatBrainRoute, GoatMcpSettingsRoute, GoatPreferencesSettingsRoute } from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -22,6 +22,7 @@ const appDataMock = vi.hoisted(() => ({
     workspaceMembers: [],
     featureFlags: { taskSpawning: false, localCodexBridge: false },
     integrations: {},
+    mcpSetup: { preferredClient: null, completedAt: null },
   },
 }));
 
@@ -151,6 +152,17 @@ describe("GoatSettingsRoute", () => {
 
     await user.keyboard("{ArrowLeft}");
     expect(themeMock.setTheme).toHaveBeenLastCalledWith("light");
+  });
+
+  it("brands MCP settings as OpenCompany", () => {
+    const view = render(<GoatMcpSettingsRoute />);
+
+    expect(
+      screen.getByText(
+        "Connect Claude, ChatGPT, or Cursor to everything you can access in OpenCompany.",
+      ),
+    ).toBeInTheDocument();
+    expect(view.container).not.toHaveTextContent("Goat");
   });
 
   it("shows the Local Codex bridge beta switch and persists changes", async () => {
