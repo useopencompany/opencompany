@@ -265,6 +265,12 @@ async function answerForIntegration(
       contextMessages,
       slackUserId: input.slackUserId,
       sourceRef: `slack:${input.teamId}:${input.channelId}:${input.messageTs}`,
+      // Latitude session: a DM conversation is one session; a channel groups
+      // by thread so follow-ups land with the mention that started them.
+      telemetrySessionId:
+        mode === "dm"
+          ? `slack:${input.teamId}:${input.channelId}`
+          : `slack:${input.teamId}:${input.channelId}:${replyThreadTs ?? input.messageTs}`,
     });
 
     const allowedMentionUserIds = collectSlackMentionUserIds([
@@ -400,6 +406,7 @@ async function runSlackChatAgent(input: {
   contextMessages: SlackContextMessage[];
   slackUserId: string;
   sourceRef: string;
+  telemetrySessionId: string;
 }) {
   const gatewayApiKey = requiredGatewayApiKey();
   const signal = AbortSignal.timeout(SLACK_AGENT_TIMEOUT_MS);
@@ -470,6 +477,7 @@ async function runSlackChatAgent(input: {
     ],
     ...(multiBrain ? { goatBrainMultiBrain: { targets: input.brains } } : {}),
     userWorkosId: input.identity.userWorkosId,
+    telemetrySessionId: input.telemetrySessionId,
     brainRef: primaryBrain.brainRef,
     currentDate,
     ...(userContext ? { userContext } : {}),
