@@ -510,6 +510,19 @@ describe("GoatSurface chat streaming UI", () => {
     expect(historyMock.replaceState).toHaveBeenCalledWith(null, "", `/chat/${body.newSessionId}`);
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
+
+    const textarea = await screen.findByPlaceholderText("Reply...");
+    await user.type(textarea, "Follow up after this");
+
+    expect(textarea).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+
+    await user.keyboard("{Enter}");
+
+    expect(textarea).toHaveValue("Follow up after this");
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url === "/api/local-codex/messages"),
+    ).toHaveLength(1);
   });
 
   it("shows the Codex engine only when Codex is connected", async () => {
@@ -2058,13 +2071,21 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
   });
 
-  it("disables input and exposes a stop button while streaming", async () => {
+  it("allows drafting but blocks Enter submission while streaming", async () => {
     const user = userEvent.setup();
     chatMock.status = "streaming";
 
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
-    expect(screen.getByPlaceholderText("Ask Goat anything...")).toBeDisabled();
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    expect(textarea).toBeEnabled();
+
+    await user.type(textarea, "My next message");
+    await user.keyboard("{Enter}");
+
+    expect(textarea).toHaveValue("My next message");
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+
     await user.click(screen.getByRole("button", { name: "Stop response" }));
 
     expect(chatMock.stop).toHaveBeenCalledTimes(1);
