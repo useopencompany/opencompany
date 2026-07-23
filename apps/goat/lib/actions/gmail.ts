@@ -68,6 +68,8 @@ export async function resolveGmailActions(
     {
       id: "gmail.search_messages",
       provider: "gmail",
+      capability: "read",
+      permissionMode: "on",
       description:
         'Search one page of the user\'s Gmail with Gmail search syntax, e.g. "from:jane after:2026/07/01 subject:invoice is:unread". Returns message ids with From/To/Subject/Date and a snippet; use gmail.get_message or gmail.get_thread for full content. Pass nextPageToken as pageToken to continue.',
       params: {
@@ -120,6 +122,8 @@ export async function resolveGmailActions(
     {
       id: "gmail.get_message",
       provider: "gmail",
+      capability: "read",
+      permissionMode: "on",
       description:
         "Fetch one Gmail message by id, including its plain-text body (truncated). Prefer gmail.get_thread when the conversation context matters.",
       params: {
@@ -147,6 +151,8 @@ export async function resolveGmailActions(
     {
       id: "gmail.get_thread",
       provider: "gmail",
+      capability: "read",
+      permissionMode: "on",
       description:
         "Fetch one Gmail thread by id with each message's headers and truncated plain-text body (newest 15 messages).",
       params: {

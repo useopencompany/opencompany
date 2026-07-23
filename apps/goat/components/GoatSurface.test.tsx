@@ -59,6 +59,11 @@ vi.mock("@/lib/chat-actions", () => ({
   closeGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
 }));
 
+// Server action module; importing it for real drags authkit into jsdom.
+vi.mock("@/lib/integration-account-actions", () => ({
+  alwaysAllowGoatChatActionAction: vi.fn(async () => ({ ok: true })),
+}));
+
 vi.mock("@/lib/chat-attachment-upload", () => ({
   uploadGoatChatAttachmentBlob: attachmentUploadMock.upload,
 }));

@@ -2,6 +2,7 @@ import {
   GoatActionAuthError,
   type GoatActionErrorCode,
   GoatActionInvalidParamsError,
+  GoatActionPermissionError,
   type GoatActionProviderId,
   type GoatResolvedActionCatalog,
 } from "@/lib/actions/types";
@@ -58,6 +59,13 @@ export async function executeGoatAction(input: {
         ok: false,
         action: action.id,
         error: { code: error.code, provider: error.provider, message: error.message },
+      };
+    }
+    if (error instanceof GoatActionPermissionError) {
+      return {
+        ok: false,
+        action: action.id,
+        error: { code: "not_permitted", provider: error.provider, message: error.message },
       };
     }
     if (error instanceof GoatActionInvalidParamsError) {

@@ -51,10 +51,11 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     expect(prompt).toContain(
       "- google_calendar — Google Calendar (louis@example.com): List calendar events in a bounded time window.",
     );
-    expect(prompt).toContain("Connected read-only integrations");
+    expect(prompt).toContain("Connected integrations usable in chat");
     expect(prompt).toContain("Call list_actions with the exact integration id");
     expect(prompt).toContain("call list_actions with the relevant integration id");
-    expect(prompt).toContain("you cannot post, edit, create, or delete anything");
+    expect(prompt).toContain("Use a write action only when the user explicitly asked");
+    expect(prompt).toContain("Never claim a write happened unless the action returned ok=true");
     expect(prompt).toContain("Choose the lightest path");
     expect(prompt).toContain("start a task for deep, multi-step, or cross-source work");
     expect(prompt).toContain("one quick bounded lookup");

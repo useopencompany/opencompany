@@ -152,6 +152,8 @@ export type GoatIntegrationAccountView = {
   accountName: string | null;
   connectionLabel: string | null;
   statusReason: string | null;
+  // Sparse per-connection capability overrides; registry defaults fill gaps.
+  capabilityModes: Record<string, unknown>;
 };
 
 export type GoatPersonalAccountProvider =
@@ -199,6 +201,8 @@ type IntegrationStateRow = {
   statusReason?: string | null;
   status_reason?: string | null;
   status: GoatIntegrationStatus;
+  capabilityModes?: Record<string, unknown> | null;
+  capability_modes?: Record<string, unknown> | null;
 };
 
 const JAMIE_API_KEY_EXTERNAL_ID_PREFIX = "jamie_api_key_sha256:";
@@ -302,6 +306,7 @@ function accountViewFromRow(
     accountName: row.accountName ?? row.account_name ?? null,
     connectionLabel: row.connectionLabel ?? row.connection_label ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }
 
