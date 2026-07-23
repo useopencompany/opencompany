@@ -172,4 +172,38 @@ describe("SettingsIntegrationsPanel", () => {
       "true",
     );
   });
+
+  it("shows Attio read and write permission controls on the connected workspace", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_attio",
+        provider: "attio",
+        externalId: "attio_workspace_1",
+        connectionLabel: "Acme CRM",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    const attioCard = screen
+      .getByText("Sync CRM records and notes from Attio.")
+      .closest("div.rounded-2xl");
+    expect(attioCard).not.toBeNull();
+    const readPermission = within(attioCard as HTMLElement).getByRole("group", {
+      name: "Read Attio permission",
+    });
+    const writePermission = within(attioCard as HTMLElement).getByRole("group", {
+      name: "Update Attio permission",
+    });
+    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
 });
