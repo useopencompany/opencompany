@@ -719,6 +719,19 @@ describe("goat-brain cli", () => {
     await expect(
       run(["set", "--root", root, "goat-brain", "--status", "active"]),
     ).resolves.toMatchObject({ exitCode: 0 });
+
+    const health = JSON.parse((await run(["doctor", "--root", root, "--json"])).stdout) as {
+      errors: number;
+      findings: Array<{ message: string }>;
+    };
+    expect(health.errors).toBe(0);
+    expect(health.findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.stringContaining("active compiled truth must cite provenance"),
+        }),
+      ]),
+    );
   });
 
   it("adds and reads sourced timeline entries through gbrain-style commands", async () => {
