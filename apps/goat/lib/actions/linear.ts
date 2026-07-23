@@ -104,6 +104,7 @@ const MAX_LINEAR_SELECTOR_CHARS = 500;
 const MAX_LINEAR_PARENT_ID_CHARS = 100;
 const MAX_LINEAR_LABELS = 25;
 const MAX_LINEAR_LABEL_CHARS = 100;
+const MAX_LINEAR_COMMENT_BODY_CHARS = 25_000;
 
 const LINEAR_CREATE_ISSUE_PARAMS: JSONSchema7 = {
   type: "object",
@@ -167,6 +168,98 @@ const LINEAR_CREATE_ISSUE_PARAMS: JSONSchema7 = {
       minLength: 1,
       maxLength: MAX_LINEAR_PARENT_ID_CHARS,
       description: "Optional parent issue ID or identifier when creating a sub-issue.",
+    },
+  },
+};
+
+const LINEAR_UPDATE_ISSUE_PARAMS: JSONSchema7 = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id"],
+  minProperties: 2,
+  properties: {
+    id: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_SELECTOR_CHARS,
+      description: "Issue ID or identifier such as ENG-123.",
+    },
+    title: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_ISSUE_TITLE_CHARS,
+      description: "Replacement issue title.",
+    },
+    team: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_SELECTOR_CHARS,
+      description: "Team name, key, or ID to move the issue to.",
+    },
+    description: {
+      type: "string",
+      maxLength: MAX_LINEAR_ISSUE_DESCRIPTION_CHARS,
+      description: "Replacement Markdown issue description. Use an empty string to clear it.",
+    },
+    assignee: {
+      type: ["string", "null"],
+      minLength: 1,
+      maxLength: MAX_LINEAR_SELECTOR_CHARS,
+      description: 'Assignee name, email, ID, or "me"; use null to remove the assignee.',
+    },
+    state: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_SELECTOR_CHARS,
+      description:
+        'Workflow state name or ID. To cancel an issue, set its team cancellation state (usually "Canceled").',
+    },
+    project: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_SELECTOR_CHARS,
+      description: "Project name, slug, or ID.",
+    },
+    priority: {
+      type: "integer",
+      enum: [0, 1, 2, 3, 4],
+      description: "Priority: 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low.",
+    },
+    labels: {
+      type: "array",
+      maxItems: MAX_LINEAR_LABELS,
+      items: {
+        type: "string",
+        minLength: 1,
+        maxLength: MAX_LINEAR_LABEL_CHARS,
+      },
+      description: "Replacement label names or IDs. Use an empty array to remove all labels.",
+    },
+    parentId: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_PARENT_ID_CHARS,
+      description: "Parent issue ID or identifier.",
+    },
+  },
+};
+
+const LINEAR_CREATE_COMMENT_PARAMS: JSONSchema7 = {
+  type: "object",
+  additionalProperties: false,
+  required: ["issueId", "body"],
+  properties: {
+    issueId: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_SELECTOR_CHARS,
+      description: "Issue ID or identifier such as ENG-123.",
+    },
+    body: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_LINEAR_COMMENT_BODY_CHARS,
+      description: "Markdown comment body.",
     },
   },
 };
@@ -300,6 +393,24 @@ const LINEAR_ACTION_SPECS: readonly LinearActionSpec[] = [
     params: LINEAR_CREATE_ISSUE_PARAMS,
     normalize: normalizeLinearCreateIssueInput,
   },
+  {
+    id: "linear.update_issue",
+    remoteName: "save_issue",
+    capability: "write",
+    description:
+      'Update an existing Linear issue, including its state, title, description, team, assignee, project, priority, labels, or parent. Use the team cancellation state (usually "Canceled") to cancel an issue. Include only fields the user explicitly asked to change.',
+    params: LINEAR_UPDATE_ISSUE_PARAMS,
+    normalize: normalizeLinearUpdateIssueInput,
+  },
+  {
+    id: "linear.create_comment",
+    remoteName: "save_comment",
+    capability: "write",
+    description:
+      "Add a Markdown comment to an existing Linear issue. Use only when the user explicitly asked to post or leave the comment.",
+    params: LINEAR_CREATE_COMMENT_PARAMS,
+    normalize: normalizeLinearCreateCommentInput,
+  },
 ];
 
 export async function resolveLinearActions(
@@ -342,10 +453,10 @@ export async function resolveLinearActions(
     label: "Linear workspace",
     description:
       readEnabled && writeEnabled
-        ? "Read Linear workspace context and create new issues."
+        ? "Read Linear workspace context, create and update issues, and add comments."
         : readEnabled
           ? "Read issues, comments, projects, teams, members, and workflow statuses."
-          : "Create new issues in Linear.",
+          : "Create and update issues and add comments in Linear.",
     actions,
   };
 }
@@ -398,7 +509,7 @@ async function executeLinearAction(
   if (spec.capability === "write" && connection.integrationId !== expectedIntegrationId) {
     throw new GoatActionPermissionError(
       "linear",
-      "The Linear connection changed before this issue could be created. Retry so Goat can use the current connection and permission.",
+      "The Linear connection changed before this change could be made. Retry so Goat can use the current connection and permission.",
     );
   }
 
@@ -444,13 +555,13 @@ async function assertLinearWriteStillEnabled(userWorkosId: string, expectedInteg
   if (state.integrationId !== expectedIntegrationId) {
     throw new GoatActionPermissionError(
       "linear",
-      "The Linear connection changed before this issue could be created. Retry so Goat can use the current connection and permission.",
+      "The Linear connection changed before this change could be made. Retry so Goat can use the current connection and permission.",
     );
   }
   if (effectiveCapabilityMode("linear", "write", state.capabilityModes) === "off") {
     throw new GoatActionPermissionError(
       "linear",
-      "Creating Linear issues is turned off. It can be changed under Settings → Integrations.",
+      "Writing to Linear is turned off. It can be changed under Settings → Integrations.",
     );
   }
 }
@@ -555,23 +666,68 @@ export function normalizeLinearCreateIssueInput(input: unknown): Record<string, 
     if (value !== undefined) normalized[key] = value;
   }
 
-  if (input.priority !== undefined && input.priority !== null) {
-    if (
-      typeof input.priority !== "number" ||
-      !Number.isInteger(input.priority) ||
-      input.priority < 0 ||
-      input.priority > 4
-    ) {
-      throw new GoatActionInvalidParamsError(
-        '"priority" must be an integer from 0 (none) to 4 (low).',
-      );
-    }
-    normalized.priority = input.priority;
-  }
+  const priority = normalizeLinearPriority(input.priority);
+  if (priority !== undefined) normalized.priority = priority;
 
   const labels = normalizeLinearLabels(input.labels);
   if (labels !== undefined) normalized.labels = labels;
   return normalized;
+}
+
+export function normalizeLinearUpdateIssueInput(input: unknown): Record<string, unknown> {
+  if (!isRecord(input)) {
+    throw new GoatActionInvalidParamsError("Linear issue parameters must be an object.");
+  }
+  assertOnlyKnownParams(input, LINEAR_UPDATE_ISSUE_PARAM_KEYS);
+
+  const normalized: Record<string, unknown> = {
+    id: requiredBoundedString(input, "id", MAX_LINEAR_SELECTOR_CHARS),
+  };
+  for (const [key, maxChars] of [
+    ["title", MAX_LINEAR_ISSUE_TITLE_CHARS],
+    ["team", MAX_LINEAR_SELECTOR_CHARS],
+    ["state", MAX_LINEAR_SELECTOR_CHARS],
+    ["project", MAX_LINEAR_SELECTOR_CHARS],
+    ["parentId", MAX_LINEAR_PARENT_ID_CHARS],
+  ] as const) {
+    const value = optionalBoundedString(input, key, maxChars);
+    if (value !== undefined) normalized[key] = value;
+  }
+
+  if (input.description !== undefined && input.description !== null) {
+    normalized.description = boundedStringAllowingEmpty(
+      input.description,
+      "description",
+      MAX_LINEAR_ISSUE_DESCRIPTION_CHARS,
+    );
+  }
+  if (input.assignee === null) {
+    normalized.assignee = null;
+  } else {
+    const assignee = optionalBoundedString(input, "assignee", MAX_LINEAR_SELECTOR_CHARS);
+    if (assignee !== undefined) normalized.assignee = assignee;
+  }
+
+  const priority = normalizeLinearPriority(input.priority);
+  if (priority !== undefined) normalized.priority = priority;
+  const labels = normalizeLinearLabels(input.labels);
+  if (labels !== undefined) normalized.labels = labels;
+
+  if (Object.keys(normalized).length === 1) {
+    throw new GoatActionInvalidParamsError("Provide at least one issue field to update.");
+  }
+  return normalized;
+}
+
+export function normalizeLinearCreateCommentInput(input: unknown): Record<string, unknown> {
+  if (!isRecord(input)) {
+    throw new GoatActionInvalidParamsError("Linear comment parameters must be an object.");
+  }
+  assertOnlyKnownParams(input, LINEAR_CREATE_COMMENT_PARAM_KEYS);
+  return {
+    issueId: requiredBoundedString(input, "issueId", MAX_LINEAR_SELECTOR_CHARS),
+    body: requiredBoundedString(input, "body", MAX_LINEAR_COMMENT_BODY_CHARS),
+  };
 }
 
 const LINEAR_CREATE_ISSUE_PARAM_KEYS = [
@@ -585,6 +741,21 @@ const LINEAR_CREATE_ISSUE_PARAM_KEYS = [
   "labels",
   "parentId",
 ] as const;
+
+const LINEAR_UPDATE_ISSUE_PARAM_KEYS = [
+  "id",
+  "title",
+  "team",
+  "description",
+  "assignee",
+  "state",
+  "project",
+  "priority",
+  "labels",
+  "parentId",
+] as const;
+
+const LINEAR_CREATE_COMMENT_PARAM_KEYS = ["issueId", "body"] as const;
 
 function assertOnlyKnownParams(params: Record<string, unknown>, allowed: readonly string[]) {
   const allowedSet = new Set(allowed);
@@ -613,6 +784,27 @@ function optionalBoundedString(params: Record<string, unknown>, key: string, max
     throw new GoatActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
   }
   return trimmed;
+}
+
+function boundedStringAllowingEmpty(value: unknown, key: string, maxChars: number) {
+  if (typeof value !== "string") {
+    throw new GoatActionInvalidParamsError(`"${key}" must be a string.`);
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > maxChars) {
+    throw new GoatActionInvalidParamsError(`"${key}" exceeds ${maxChars} characters.`);
+  }
+  return trimmed;
+}
+
+function normalizeLinearPriority(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 4) {
+    throw new GoatActionInvalidParamsError(
+      '"priority" must be an integer from 0 (none) to 4 (low).',
+    );
+  }
+  return value;
 }
 
 function normalizeLinearLabels(value: unknown): string[] | undefined {

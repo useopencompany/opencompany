@@ -16,8 +16,10 @@ vi.mock("@ai-sdk/mcp", () => ({
 }));
 
 import {
+  normalizeLinearCreateCommentInput,
   normalizeLinearCreateIssueInput,
   normalizeLinearListIssuesInput,
+  normalizeLinearUpdateIssueInput,
   resolveLinearActions,
 } from "@/lib/actions/linear";
 import {
@@ -150,6 +152,67 @@ describe("normalizeLinearCreateIssueInput", () => {
   });
 });
 
+describe("normalizeLinearUpdateIssueInput", () => {
+  it("normalizes requested changes, supports cancellation, and preserves explicit clears", () => {
+    expect(
+      normalizeLinearUpdateIssueInput({
+        id: " GOAT-123 ",
+        title: " Ship Linear updates ",
+        description: "  ",
+        assignee: null,
+        state: " Canceled ",
+        priority: 0,
+        labels: [],
+      }),
+    ).toEqual({
+      id: "GOAT-123",
+      title: "Ship Linear updates",
+      description: "",
+      assignee: null,
+      state: "Canceled",
+      priority: 0,
+      labels: [],
+    });
+  });
+
+  it("requires an identifier and at least one known field to update", () => {
+    expect(() => normalizeLinearUpdateIssueInput({ state: "Done" })).toThrow('"id" is required');
+    expect(() => normalizeLinearUpdateIssueInput({ id: "GOAT-123" })).toThrow(
+      "at least one issue field",
+    );
+    expect(() => normalizeLinearUpdateIssueInput({ id: "GOAT-123", delete: true })).toThrow(
+      "Unknown parameter",
+    );
+  });
+});
+
+describe("normalizeLinearCreateCommentInput", () => {
+  it("normalizes the issue identifier and Markdown body", () => {
+    expect(
+      normalizeLinearCreateCommentInput({
+        issueId: " GOAT-123 ",
+        body: "  Shipped in #456.  ",
+      }),
+    ).toEqual({
+      issueId: "GOAT-123",
+      body: "Shipped in #456.",
+    });
+  });
+
+  it("requires both fields and rejects unknown parameters", () => {
+    expect(() => normalizeLinearCreateCommentInput({ issueId: "GOAT-123" })).toThrow(
+      '"body" is required',
+    );
+    expect(() =>
+      normalizeLinearCreateCommentInput({
+        issueId: "GOAT-123",
+        body: "Done",
+        notifyAll: true,
+      }),
+    ).toThrow("Unknown parameter");
+  });
+});
+
 describe("resolveLinearActions", () => {
   it("is absent when Linear is not connected", async () => {
     mocks.getGoatLinearIntegrationState.mockResolvedValueOnce({
@@ -161,7 +224,7 @@ describe("resolveLinearActions", () => {
     expect(await resolveLinearActions("user_1")).toBeNull();
   });
 
-  it("exposes read actions and an ask-before-create action without touching the MCP server", async () => {
+  it("exposes read and ask-before-write actions without touching the MCP server", async () => {
     mocks.createMCPClient.mockClear();
     const catalog = await resolveLinearActions("user_1");
     const ids = catalog?.actions.map((action) => action.id) ?? [];
@@ -169,13 +232,15 @@ describe("resolveLinearActions", () => {
     expect(ids).toContain("linear.get_issue");
     expect(ids).toContain("linear.list_teams");
     expect(ids).toContain("linear.create_issue");
+    expect(ids).toContain("linear.update_issue");
+    expect(ids).toContain("linear.create_comment");
     expect(catalog?.actions.find((action) => action.id === "linear.create_issue")).toMatchObject({
       capability: "write",
       permissionMode: "ask",
       permission: {
         provider: "linear",
         capabilityId: "write",
-        label: "Create issues",
+        label: "Manage issues",
         integrationIds: ["gint_linear_1"],
       },
       params: {
@@ -204,7 +269,11 @@ describe("resolveLinearActions", () => {
       connectedLinearState({ read: "off" }),
     );
     catalog = await resolveLinearActions("user_1");
-    expect(catalog?.actions.map((action) => action.id)).toEqual(["linear.create_issue"]);
+    expect(catalog?.actions.map((action) => action.id)).toEqual([
+      "linear.create_issue",
+      "linear.update_issue",
+      "linear.create_comment",
+    ]);
 
     mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
       connectedLinearState({ read: "off", write: "off" }),
@@ -338,7 +407,78 @@ describe("linear action execution", () => {
     expect(close).toHaveBeenCalled();
   });
 
-  it("blocks a stale write when issue creation was turned off after catalog resolution", async () => {
+  it("updates an issue through save_issue and returns canonical source metadata", async () => {
+    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+      ok: true,
+      integrationId: "gint_linear_1",
+      authProvider: {},
+    });
+    const remoteExecute = vi.fn(async () => ({
+      content: [
+        {
+          type: "text",
+          text: '{"id":"issue_1","identifier":"GOAT-123","state":{"name":"Canceled"}}',
+        },
+      ],
+    }));
+    const { close } = mockClient({ save_issue: { execute: remoteExecute } });
+
+    const catalog = await resolveLinearActions("user_1");
+    const updateIssue = catalog?.actions.find((action) => action.id === "linear.update_issue");
+    const result = await updateIssue?.execute(
+      {
+        id: " GOAT-123 ",
+        state: " Canceled ",
+        description: " No longer planned. ",
+      },
+      CONTEXT,
+    );
+
+    expect(remoteExecute).toHaveBeenCalledWith(
+      {
+        id: "GOAT-123",
+        state: "Canceled",
+        description: "No longer planned.",
+      },
+      expect.anything(),
+    );
+    expect(result).toEqual({
+      id: "issue_1",
+      identifier: "GOAT-123",
+      state: { name: "Canceled" },
+      sourceRef: "linear:issue:GOAT-123",
+      integrationId: "gint_linear_1",
+    });
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("adds a comment through save_comment", async () => {
+    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+      ok: true,
+      integrationId: "gint_linear_1",
+      authProvider: {},
+    });
+    const remoteExecute = vi.fn(async () => ({
+      content: [{ type: "text", text: '{"id":"comment_1","body":"Shipped."}' }],
+    }));
+    const { close } = mockClient({ save_comment: { execute: remoteExecute } });
+
+    const catalog = await resolveLinearActions("user_1");
+    const createComment = catalog?.actions.find((action) => action.id === "linear.create_comment");
+    const result = await createComment?.execute(
+      { issueId: " GOAT-123 ", body: " Shipped. " },
+      CONTEXT,
+    );
+
+    expect(remoteExecute).toHaveBeenCalledWith(
+      { issueId: "GOAT-123", body: "Shipped." },
+      expect.anything(),
+    );
+    expect(result).toEqual({ id: "comment_1", body: "Shipped." });
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("blocks a stale write when Linear writes were turned off after catalog resolution", async () => {
     const catalog = await resolveLinearActions("user_1");
     mocks.getGoatLinearIntegrationState.mockResolvedValueOnce(
       connectedLinearState({ write: "off" }),
