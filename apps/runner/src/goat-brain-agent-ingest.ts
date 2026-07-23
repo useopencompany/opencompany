@@ -170,8 +170,9 @@ const RESULT_SUMMARY_LIMIT = 2_000;
 const INFERRED_NO_MUTATION_SKIP_REASON =
   "No brain-worthy content identified; agent completed without brain mutations.";
 
-// The ingestion agent gets the full working surface of the CLI except the
-// planner (`ingest` runs its own LLM) and destructive curation commands.
+// The ingestion agent gets the scoped working surface of the CLI except the
+// planner (`ingest` runs its own LLM), corpus-wide diagnostics, and destructive
+// curation commands.
 const AGENT_CLI_COMMANDS = [
   "help",
   "list",
@@ -179,7 +180,6 @@ const AGENT_CLI_COMMANDS = [
   "timeline",
   "query",
   "folder",
-  "doctor",
   "create",
   "rewrite",
   "set",
@@ -712,11 +712,11 @@ export function buildGitHubActivityAgentIngestPrompt(item: NormalizedGitHubActiv
     `Ingest this ${label} into the brain.`,
     "",
     "Required outcome, all scoped to this brain:",
-    "1. Query the brain first for the project, product, or repository this work belongs to, and for the entities the event touches, so you update existing knowledge instead of duplicating it.",
+    "1. Query the brain first for the project or repository area this work belongs to (including any named product surface), and for the entities the event touches, so you update existing knowledge instead of duplicating it.",
     `2. Judge brain-worthiness: does this event change what someone should believe about a project's state of play? Routine housekeeping does not. ${activity.state === "commented" ? "A comment records discussion on a tracked item — ingest it only when it carries a durable decision, a new fact, or a change in direction, not routine back-and-forth, acknowledgements, or status pings." : activity.state === "opened" ? "An opened item records work or a problem now in flight — ingest it only when what it starts or surfaces matters at the project level." : "A merged pull request records shipped work — ingest it only when what shipped matters at the project level."}`,
     `3. Fold what it changes into the page where it belongs — usually a project page: rewrite compiled truth when the state of play changes, and record the event as dated evidence with timeline-add --source-ref ${item.sourceRef}.`,
     `4. Pointer discipline: this is a tracked work item with a canonical live home (${activity.url}). Cite it as a pointer plus a one-line current-state summary — [[source:${item.sourceRef}|${activity.repository.fullName}${activity.number !== undefined ? `#${activity.number}` : ""}]]. Never copy the description into a page and never snapshot it into evidence/; the tracker copy goes stale immediately.`,
-    "5. Create a project/product page when the repository area or product surface clearly has none yet and this event is substantial enough to seed one. If a matching custom folder such as product/ exists, use it for product-surface work. Do not fold product implementation details into the top-level company page merely because no page exists yet. Update person or company pages only when the event reveals durable knowledge about them; do not create person pages for people who merely authored or merged the change.",
+    "5. Create a project page with entity type `project` when the repository area or product surface clearly has none yet and this event is substantial enough to seed one. If a matching custom folder such as product/ exists, use it for product-surface work. Do not use `product` as an entity type; it is not valid. Do not fold product implementation details into the top-level company page merely because no page exists yet. Update person or company pages only when the event reveals durable knowledge about them; do not create person pages for people who merely authored or merged the change.",
     "",
     `Source ref: ${item.sourceRef}`,
     `Occurred at: ${item.occurredAt}`,
@@ -1562,7 +1562,7 @@ const GOAT_IMPORT_INGEST_PROFILE: GoatBrainIngestProfile<NormalizedGoatImportSou
             .join("\n")
         : [
             `Finalize the confirmed company bootstrap for ${content.companyName ?? content.companyDomain}.`,
-            "Query the brain first. Merge obvious duplicate drafts, repair missing backlinks, and run brain health checks.",
+            "Query the brain first. Merge obvious duplicate drafts and repair missing backlinks in the pages you inspect.",
             "Do not add new facts, sources, people, or claims. This pass is organization only; child-job outcomes are operational context, not factual evidence.",
             "",
             JSON.stringify(content.childSummary, null, 2),
