@@ -9,6 +9,7 @@ export type GoatBrainClaimProvider =
   | "slack"
   | "gmail"
   | "linear"
+  | "github"
   | "hubspot"
   | "granola"
   | "fathom"
