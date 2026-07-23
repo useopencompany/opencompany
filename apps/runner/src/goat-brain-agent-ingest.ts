@@ -108,9 +108,9 @@ const logger = createLogger({
   runtime: "goat-brain-agent-ingest",
 });
 
-// Model tier per brain: "basic" (open-source, included in the plan) vs
-// "frontier" (cost passed through to workspace credits). Read live at ingest
-// time via goat.brains.intelligence.
+// Model tier per brain: "basic" (fast, cost-efficient) vs "frontier" (highest
+// extraction quality). Both are metered; read live at ingest time via
+// goat.brains.intelligence.
 export const GOAT_BRAIN_AGENT_INGEST_BASIC_MODEL = GOAT_BASIC_INGEST_MODEL;
 export const GOAT_BRAIN_AGENT_INGEST_FRONTIER_MODEL = GOAT_FRONTIER_INGEST_MODEL;
 
@@ -2076,7 +2076,9 @@ export function placeMovingAnthropicCacheBreakpoint(
   });
 }
 
-async function runIngestAgentLoop(input: {
+// Exported for scripts/ingest-model-bench.ts (offline model comparison); the
+// production entry point remains runBrainAgentIngestSession.
+export async function runIngestAgentLoop(input: {
   root: string;
   cliPath: string;
   gatewayApiKey: string;
