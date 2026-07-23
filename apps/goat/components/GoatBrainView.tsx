@@ -59,6 +59,7 @@ import { useRouter } from "next/navigation";
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  type Ref,
   useCallback,
   useEffect,
   useMemo,
@@ -359,6 +360,7 @@ function GoatBrainEditor({
   const [isFolderPending, startFolderTransition] = useTransition();
   const [menuOpen, setMenuOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<BrainContextMenuState | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [fileDialogFolder, setFileDialogFolder] = useState<string | null>(null);
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -499,17 +501,26 @@ function GoatBrainEditor({
     if (!contextMenu) return;
 
     const closeContextMenu = () => setContextMenu(null);
+    // In the App Router, React hydrates `document`, so its delegated event
+    // handlers sit on the same node as this listener. `stopPropagation()` inside
+    // the menu can't stop a sibling listener on the same node, so we must ignore
+    // presses that land inside the menu ourselves — otherwise the menu closes on
+    // pointerdown and a mouse click never reaches the item (keyboard still works).
+    const handlePointerDown = (event: PointerEvent) => {
+      if (contextMenuRef.current?.contains(event.target as Node)) return;
+      closeContextMenu();
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeContextMenu();
     };
 
-    document.addEventListener("pointerdown", closeContextMenu);
+    document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("scroll", closeContextMenu, true);
     window.addEventListener("blur", closeContextMenu);
     window.addEventListener("resize", closeContextMenu);
     return () => {
-      document.removeEventListener("pointerdown", closeContextMenu);
+      document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("scroll", closeContextMenu, true);
       window.removeEventListener("blur", closeContextMenu);
@@ -1313,6 +1324,7 @@ function GoatBrainEditor({
       </div>
       {contextMenu && canEditBrain ? (
         <BrainContextMenu
+          ref={contextMenuRef}
           state={contextMenu}
           creatingSkill={isGoatBrainSkillFolder(contextMenu.fileFolderPath)}
           onCreateFile={() => {
@@ -1358,11 +1370,13 @@ function GoatBrainEditor({
 }
 
 function BrainContextMenu({
+  ref,
   state,
   creatingSkill,
   onCreateFile,
   onCreateFolder,
 }: {
+  ref?: Ref<HTMLDivElement>;
   state: BrainContextMenuState;
   creatingSkill: boolean;
   onCreateFile: () => void;
@@ -1370,12 +1384,12 @@ function BrainContextMenu({
 }) {
   return (
     <div
+      ref={ref}
       role="menu"
       aria-label="Brain file actions"
       className="fixed z-[90] min-w-[180px] overflow-hidden rounded-md border border-border-strong bg-surface-raised py-1 text-[12.5px] text-ink shadow-[0_10px_30px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
       style={{ left: state.x, top: state.y }}
       onContextMenu={(event) => event.preventDefault()}
-      onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
         event.preventDefault();

@@ -5,6 +5,13 @@ import {
   HARD_DEFAULT_GOAT_BRAIN_FOLDERS,
   normalizeGoatBrainFolder,
 } from "@opencompany/goat-brain/schema";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@opencompany/ui/components/dialog";
 import { toast } from "@opencompany/ui/components/sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
 import type { LucideIcon } from "lucide-react";
@@ -39,17 +46,24 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
-import { resolveGoatBrainSourceState, SourceProviderCard } from "@/components/GoatBrainSourceCards";
+import {
+  goatBrainSourceHasScope,
+  resolveGoatBrainSourceState,
+} from "@/components/GoatBrainSourceCards";
 import { ConnectIntegrationModal } from "@/components/onboarding/ConnectIntegrationModal";
+import { OnboardingSourceCard } from "@/components/onboarding/OnboardingSourceCard";
+import { SourceConfigSheet } from "@/components/onboarding/SourceConfigSheet";
 import {
   type GoatBrainSourcesDetails,
   getGoatBrainSourcesAction,
+  setGoatBrainSourceEnabledAction,
 } from "@/lib/brain-source-actions";
 import {
   GOAT_BRAIN_SOURCE_PROVIDERS,
   type GoatBrainSourceProviderDef,
+  goatBrainSourceNeedsConfig,
 } from "@/lib/brain-sources/registry";
 import {
   checkGoatOnboardingCompanyUrlAction,
@@ -107,6 +121,32 @@ const MEMBER_STEPS: StepDef[] = [
 // Nudge toward a strong starting set of connected sources; purely a UI goal,
 // connecting sources no longer changes the ingestion allowance.
 const SOURCE_GOAL = 4;
+
+// A source only counts as "feeding" once it is both enabled and has enough scope
+// selected to actually ingest (see goatBrainSourceHasScope). Everything in
+// onboarding reasons about this — never bare "enabled", which for the
+// scope-required providers can be true while nothing flows.
+function isGoatSourceFeeding(
+  providerId: GoatBrainSourceProviderDef["id"],
+  details: GoatBrainSourcesDetails | null,
+): boolean {
+  const state = resolveGoatBrainSourceState(providerId, details);
+  return state.enabled && goatBrainSourceHasScope(providerId, state.source?.config);
+}
+
+function countGoatSourcesFeeding(details: GoatBrainSourcesDetails | null): number {
+  return GOAT_BRAIN_SOURCE_PROVIDERS.filter((provider) => isGoatSourceFeeding(provider.id, details))
+    .length;
+}
+
+// Sources the user authorized but that aren't feeding the brain yet — the exact
+// "landed with no sources" gap we surface before leaving the step.
+function countGoatSourcesAuthorizedNotFeeding(details: GoatBrainSourcesDetails | null): number {
+  return GOAT_BRAIN_SOURCE_PROVIDERS.filter((provider) => {
+    const state = resolveGoatBrainSourceState(provider.id, details);
+    return state.connected && !isGoatSourceFeeding(provider.id, details);
+  }).length;
+}
 
 // Role presets — the first onboarding step. Picking one seeds the adjustable
 // brain folders with a set that matches how that person actually works (the
@@ -234,6 +274,23 @@ export function OnboardingWizard({
     reachable: boolean;
     error: string | null;
   } | null>(null);
+  // Source details live here (not inside SourcesStep) so the leave-step gate can
+  // read whether anything is actually feeding the brain.
+  const [sourceDetails, setSourceDetails] = useState(initialSourceDetails);
+  const [sourcesGateConfirmed, setSourcesGateConfirmed] = useState(false);
+  const [showSourcesGate, setShowSourcesGate] = useState(false);
+
+  const reloadSourceDetails = useCallback(async () => {
+    if (!brainRef) return null;
+    const next = await getGoatBrainSourcesAction(brainRef);
+    setSourceDetails(next);
+    return next;
+  }, [brainRef]);
+
+  const authorizedNotFeeding = useMemo(
+    () => countGoatSourcesAuthorizedNotFeeding(sourceDetails),
+    [sourceDetails],
+  );
 
   const step = STEPS[stepIndex] ?? STEPS[0]!;
   const isLast = stepIndex === STEPS.length - 1;
@@ -323,7 +380,7 @@ export function OnboardingWizard({
     return true;
   };
 
-  const goNext = () => {
+  const advance = () => {
     startTransition(async () => {
       if (!(await persistCurrentStep())) return;
       if (isLast) {
@@ -337,6 +394,17 @@ export function OnboardingWizard({
       }
       setStepIndex((i) => Math.min(i + 1, STEPS.length - 1));
     });
+  };
+
+  const goNext = () => {
+    // Before leaving the sources step, surface any account the user authorized
+    // but never finished configuring — otherwise they land in a brain with
+    // nothing flowing in. Soft gate: they can still continue anyway.
+    if (step.key === "sources" && !isLast && authorizedNotFeeding > 0 && !sourcesGateConfirmed) {
+      setShowSourcesGate(true);
+      return;
+    }
+    advance();
   };
   const goBack = () => setStepIndex((i) => Math.max(i - 1, 0));
 
@@ -405,7 +473,8 @@ export function OnboardingWizard({
           {step.key === "sources" && (
             <SourcesStep
               brainRef={brainRef}
-              initialDetails={initialSourceDetails}
+              details={sourceDetails}
+              reload={reloadSourceDetails}
               initialConnectionResult={initialConnectionResult}
             />
           )}
@@ -453,12 +522,73 @@ export function OnboardingWizard({
           </div>
         </div>
       </main>
+
+      {showSourcesGate ? (
+        <SourcesGateDialog
+          count={authorizedNotFeeding}
+          onSetUp={() => setShowSourcesGate(false)}
+          onContinueAnyway={() => {
+            setShowSourcesGate(false);
+            setSourcesGateConfirmed(true);
+            advance();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
 function isSkippable(key: StepKey) {
   return key === "sources";
+}
+
+// Soft gate shown when the user tries to leave the sources step with accounts
+// they authorized but never finished configuring. Not a hard block — the point
+// is to make the gap visible and one click away from being fixed.
+function SourcesGateDialog({
+  count,
+  onSetUp,
+  onContinueAnyway,
+}: {
+  count: number;
+  onSetUp: () => void;
+  onContinueAnyway: () => void;
+}) {
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onSetUp();
+      }}
+    >
+      <DialogContent className="max-w-[420px]">
+        <DialogHeader className="text-left">
+          <DialogTitle className="text-[15px]">Finish connecting your sources?</DialogTitle>
+          <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
+            {count === 1
+              ? "1 account is connected but isn't feeding your Brain yet — choose what it should ingest so your Brain starts learning right away."
+              : `${count} accounts are connected but aren't feeding your Brain yet — choose what they should ingest so your Brain starts learning right away.`}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onContinueAnyway}
+            className="rounded-lg px-3 py-2 text-[13px] font-medium text-ink-subtle transition-colors hover:text-ink"
+          >
+            Continue anyway
+          </button>
+          <button
+            type="button"
+            onClick={onSetUp}
+            className="rounded-lg bg-ink px-4 py-2 text-[13px] font-semibold text-canvas transition-opacity hover:opacity-90"
+          >
+            Set them up
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function toastFail(message: string): false {
@@ -1025,18 +1155,22 @@ const POPUP_HEIGHT = 760;
 
 function SourcesStep({
   brainRef,
-  initialDetails,
+  details,
+  reload,
   initialConnectionResult,
 }: {
   brainRef: string | null;
-  initialDetails: GoatBrainSourcesDetails | null;
+  details: GoatBrainSourcesDetails | null;
+  reload: () => Promise<GoatBrainSourcesDetails | null>;
   initialConnectionResult: GoatOnboardingConnectionResult | null;
 }) {
-  const [details, setDetails] = useState(initialDetails);
   const [connectingId, setConnectingId] = useState<string | null>(null);
   // The api_key/webhook providers connect inside a modal rather than navigating
   // out of the wizard.
   const [modalProvider, setModalProvider] = useState<GoatBrainSourceProviderDef | null>(null);
+  // The focused config surface that opens the moment a scope-required source
+  // authorizes, so the user picks what to ingest in one continuous motion.
+  const [configProvider, setConfigProvider] = useState<GoatBrainSourceProviderDef | null>(null);
   // When the OAuth popup is blocked we surface an in-wizard notice with a plain
   // anchor instead of a same-tab redirect that would drop wizard state.
   const [popupBlocked, setPopupBlocked] = useState<{ name: string; href: string } | null>(null);
@@ -1048,21 +1182,52 @@ function SourcesStep({
         )
       : null,
   );
-  const [connectionNotice, setConnectionNotice] = useState<string | null>(() =>
-    initialConnectionResult?.status === "connected"
-      ? "Account authorized. Now choose what should feed this Brain."
-      : null,
-  );
+  const [connectionNotice, setConnectionNotice] = useState<string | null>(null);
   const connectingRef = useRef<string | null>(null);
   const popupRef = useRef<Window | null>(null);
   const popupPollRef = useRef<number | null>(null);
+  const initialConnectionHandledRef = useRef(false);
 
-  const reload = useCallback(async () => {
-    if (!brainRef) return null;
-    const next = await getGoatBrainSourcesAction(brainRef);
-    setDetails(next);
-    return next;
-  }, [brainRef]);
+  // Runs after any connect path finishes. Refreshes state, then either opens the
+  // config surface (scope-required providers can't feed until something is
+  // picked) or turns the source on so it feeds immediately (the meeting-note
+  // providers, which have nothing to scope). This is the fix for landing in a
+  // brain where connected accounts silently ingest nothing.
+  const onSourceConnected = useCallback(
+    async (providerId: string | null) => {
+      const provider = GOAT_BRAIN_SOURCE_PROVIDERS.find((entry) => entry.id === providerId) ?? null;
+      const next = await reload();
+      if (!provider) return;
+      const state = resolveGoatBrainSourceState(provider.id, next);
+      if (!state.connected) {
+        setConnectionNotice(null);
+        setConnectionError(`${provider.name} authorization was not completed.`);
+        return;
+      }
+      setConnectionError(null);
+      if (goatBrainSourceNeedsConfig(provider.id)) {
+        setConnectionNotice(null);
+        setConfigProvider(provider);
+        return;
+      }
+      // Nothing to scope — enable it so meetings/notes flow into this brain now.
+      if (brainRef && state.integrationId && !state.enabled) {
+        const result = await setGoatBrainSourceEnabledAction({
+          brainRef,
+          provider: provider.id,
+          integrationId: state.integrationId,
+          enabled: true,
+        });
+        if (!result.ok) {
+          setConnectionError(result.error);
+          return;
+        }
+        await reload();
+      }
+      setConnectionNotice(`${provider.name} is now feeding your Brain.`);
+    },
+    [brainRef, reload],
+  );
 
   useEffect(() => {
     function handleConnection(message: GoatOnboardingConnectionMessage | undefined) {
@@ -1075,9 +1240,7 @@ function SourcesStep({
       setConnectingId(null);
       setPopupBlocked(null);
       if (message.status === "connected") {
-        setConnectionError(null);
-        setConnectionNotice("Account authorized. Now choose what should feed this Brain.");
-        void reload();
+        void onSourceConnected(message.provider);
       } else {
         setConnectionNotice(null);
         setConnectionError(goatOnboardingConnectionError(message.provider, message.reason));
@@ -1104,7 +1267,7 @@ function SourcesStep({
       window.removeEventListener("message", onMessage);
       window.removeEventListener("storage", onStorage);
     };
-  }, [reload]);
+  }, [onSourceConnected]);
 
   useEffect(
     () => () => {
@@ -1112,6 +1275,19 @@ function SourcesStep({
     },
     [],
   );
+
+  // Full-page OAuth (popup-blocked fallback) returns to /onboarding?setup=connected;
+  // run the same post-connect handling so the config surface opens on arrival.
+  useEffect(() => {
+    if (initialConnectionHandledRef.current) return;
+    initialConnectionHandledRef.current = true;
+    if (initialConnectionResult?.status === "connected" && initialConnectionResult.provider) {
+      // Not a synchronous cascading render: onSourceConnected awaits reload()
+      // before any setState, so this only runs once on the OAuth-return mount.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void onSourceConnected(initialConnectionResult.provider);
+    }
+  }, [initialConnectionResult, onSourceConnected]);
 
   const openConnection = (provider: GoatBrainSourceProviderDef) => {
     setConnectionError(null);
@@ -1154,28 +1330,21 @@ function SourcesStep({
       connectingRef.current = null;
       popupRef.current = null;
       setConnectingId(null);
-      void reload().then((next) => {
-        const connected = resolveGoatBrainSourceState(provider.id, next).connected;
-        if (!connected) {
-          setConnectionError(`${provider.name} authorization was not completed.`);
-        }
-      });
+      void onSourceConnected(provider.id);
     }, 500);
   };
 
-  const count = GOAT_BRAIN_SOURCE_PROVIDERS.filter(
-    (provider) => resolveGoatBrainSourceState(provider.id, details).enabled,
-  ).length;
+  const feedingCount = countGoatSourcesFeeding(details);
   const authorizedCount = GOAT_BRAIN_SOURCE_PROVIDERS.filter(
     (provider) => resolveGoatBrainSourceState(provider.id, details).connected,
   ).length;
-  const pct = Math.min(100, (count / SOURCE_GOAL) * 100);
+  const pct = Math.min(100, (feedingCount / SOURCE_GOAL) * 100);
 
   return (
     <div>
       <StepHeader
         title="Connect your sources"
-        subtitle="Authorize an account, then choose exactly what should flow into this Brain."
+        subtitle="Authorize an account and we'll walk you straight into choosing what it feeds your Brain."
       />
 
       {connectionError ? (
@@ -1205,13 +1374,11 @@ function SourcesStep({
       <div className="mb-5 rounded-lg border border-border bg-surface p-3.5">
         <div className="flex items-center justify-between text-[12.5px]">
           <span className="font-medium text-ink">
-            {count >= SOURCE_GOAL
+            {feedingCount >= SOURCE_GOAL
               ? "Your Brain has a strong starting set of sources."
-              : `Configure ${SOURCE_GOAL - count} more to get the most out of your Brain`}
+              : `Set up ${SOURCE_GOAL - feedingCount} more to get the most out of your Brain`}
           </span>
-          <span className="font-medium text-success">
-            {count} source{count === 1 ? "" : "s"} connected
-          </span>
+          <span className="font-medium text-success">{feedingCount} feeding</span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-subtle">
           <div
@@ -1220,21 +1387,22 @@ function SourcesStep({
           />
         </div>
         <p className="mt-2 text-[11.5px] leading-4 text-ink-subtle">
-          {authorizedCount} authorized · {count} feeding this Brain
+          {authorizedCount} authorized · {feedingCount} feeding your Brain
         </p>
       </div>
 
       <div className="flex flex-col gap-2">
         {GOAT_BRAIN_SOURCE_PROVIDERS.map((provider) => (
-          <SourceProviderCard
+          <OnboardingSourceCard
             key={provider.id}
             brainRef={brainRef ?? ""}
             provider={provider}
             details={details}
+            onConnect={() => openConnection(provider)}
+            onConfigure={() => setConfigProvider(provider)}
             onChanged={async () => {
               await reload();
             }}
-            onConnect={() => openConnection(provider)}
             connectPending={connectingId === provider.id}
             connectDisabled={connectingId !== null}
           />
@@ -1258,10 +1426,24 @@ function SourcesStep({
             void reload();
           }}
           onConnected={() => {
+            const providerId = modalProvider.id;
             setModalProvider(null);
-            setConnectionError(null);
-            setConnectionNotice("Account authorized. Now choose what should feed this Brain.");
+            void onSourceConnected(providerId);
+          }}
+        />
+      ) : null}
+
+      {configProvider && brainRef ? (
+        <SourceConfigSheet
+          brainRef={brainRef}
+          provider={configProvider}
+          details={details}
+          onClose={() => {
+            setConfigProvider(null);
             void reload();
+          }}
+          onChanged={async () => {
+            await reload();
           }}
         />
       ) : null}

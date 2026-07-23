@@ -21,6 +21,7 @@ import {
   type StartTaskToolOutput,
   USE_ACTION_TOOL_NAME,
   type UseActionToolOutput,
+  WEB_FETCH_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
 
@@ -58,6 +59,10 @@ export type ToolCallView = {
   input: unknown;
   output: unknown;
   errorText: string | null;
+  // Raw part state, so approval-aware rows (use_action) can tell a pending
+  // approval request apart from an in-flight call.
+  state: string;
+  approvalId: string | null;
 };
 
 export function getOrderedAssistantItems(
@@ -163,6 +168,11 @@ export function toolCallViewFromPart(
     isUseActionToolOutput(output) &&
     output.ok === false &&
     output.error.code === "approval_required";
+  const failedPublicWebTool =
+    (name === WEB_FETCH_TOOL_NAME || name === WEB_SEARCH_TOOL_NAME) &&
+    state === "output-available" &&
+    isRecord(output) &&
+    output.ok === false;
   // Codex item parts (file changes, MCP tools, web searches) carry their outcome in
   // output.status rather than the part state.
   const codexItemOutcome =
@@ -175,11 +185,13 @@ export function toolCallViewFromPart(
       ? "failed"
       : awaitingCapabilityApproval
         ? "waiting"
-        : codexItemOutcome === "failed"
+        : failedPublicWebTool
           ? "failed"
-          : codexItemOutcome === "interrupted"
-            ? "stopped"
-            : toolStatusFromState(state, stopped);
+          : codexItemOutcome === "failed"
+            ? "failed"
+            : codexItemOutcome === "interrupted"
+              ? "stopped"
+              : toolStatusFromState(state, stopped);
   const codexPromptOutcome =
     (name === CODEX_QUESTION_TOOL_NAME || name === CODEX_APPROVAL_TOOL_NAME) &&
     state === "output-available" &&
@@ -206,6 +218,9 @@ export function toolCallViewFromPart(
     input: part.input,
     output: part.output,
     errorText: typeof part.errorText === "string" ? part.errorText : null,
+    state,
+    approvalId:
+      isRecord(part.approval) && typeof part.approval.id === "string" ? part.approval.id : null,
   };
 }
 
@@ -241,7 +256,7 @@ export function toolStatusFromState(state: string, stopped = false): ToolCallVie
 }
 
 export function toolStatusText(status: ToolCallView["status"], state: string) {
-  if (state === "output-denied") return "Denied";
+  if (state === "output-denied") return "Declined";
   if (state === "approval-requested") return "Waiting";
   if (state === "approval-responded") return "Approved";
   if (status === "completed") return "Done";
@@ -264,6 +279,7 @@ export function toolLabel(name: string) {
   if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
   if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
+  if (name === WEB_FETCH_TOOL_NAME) return "Web Fetch";
   if (name === WEB_SEARCH_TOOL_NAME) return "Web Search";
   return name
     .split(/[_-]+/)
@@ -313,6 +329,15 @@ export function toolDetail(
   }
   if (name === USE_ACTION_TOOL_NAME) {
     return actionToolDetail(part);
+  }
+  if (
+    (name === WEB_FETCH_TOOL_NAME || name === WEB_SEARCH_TOOL_NAME) &&
+    part.state === "output-available" &&
+    isRecord(part.output) &&
+    part.output.ok === false &&
+    typeof part.output.error === "string"
+  ) {
+    return truncateToolPreview(part.output.error);
   }
 
   return formatToolInput(part.input);

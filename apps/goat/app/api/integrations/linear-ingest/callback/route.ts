@@ -1,5 +1,6 @@
 import { connectGoatLinearIngestIntegration } from "@opencompany/db/goat-integrations";
 import { NextResponse } from "next/server";
+import { getGoatAppUrl } from "@/lib/app-url";
 import { currentGoatUser } from "@/lib/auth";
 import {
   appendGoatLinearIngestStatus,
@@ -12,6 +13,7 @@ import {
 export async function GET(request: Request) {
   const current = await currentGoatUser();
   const url = new URL(request.url);
+  const appUrl = getGoatAppUrl();
   const stateValue = url.searchParams.get("state") ?? "";
 
   let state;
@@ -19,33 +21,33 @@ export async function GET(request: Request) {
     state = verifyGoatLinearIngestState(stateValue);
   } catch {
     return NextResponse.redirect(
-      new URL("/settings?integration=linear&setup=error&reason=invalid_state", url),
+      new URL("/settings?integration=linear&setup=error&reason=invalid_state", appUrl),
     );
   }
 
   if (state.userWorkosId !== current.user.workosUserId) {
     return NextResponse.redirect(
-      new URL(appendGoatLinearIngestStatus(state.returnTo, "error", "session_mismatch"), url),
+      new URL(appendGoatLinearIngestStatus(state.returnTo, "error", "session_mismatch"), appUrl),
     );
   }
 
   if (!isGoatLinearIngestConfigured()) {
     return NextResponse.redirect(
-      new URL(appendGoatLinearIngestStatus(state.returnTo, "error", "not_configured"), url),
+      new URL(appendGoatLinearIngestStatus(state.returnTo, "error", "not_configured"), appUrl),
     );
   }
 
   const oauthError = url.searchParams.get("error");
   if (oauthError) {
     return NextResponse.redirect(
-      new URL(appendGoatLinearIngestStatus(state.returnTo, "error", "linear_denied"), url),
+      new URL(appendGoatLinearIngestStatus(state.returnTo, "error", "linear_denied"), appUrl),
     );
   }
 
   const code = url.searchParams.get("code");
   if (!code) {
     return NextResponse.redirect(
-      new URL(appendGoatLinearIngestStatus(state.returnTo, "error", "missing_code"), url),
+      new URL(appendGoatLinearIngestStatus(state.returnTo, "error", "missing_code"), appUrl),
     );
   }
 
@@ -66,11 +68,14 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.redirect(
-      new URL(appendGoatLinearIngestStatus(state.returnTo, "connected"), url),
+      new URL(appendGoatLinearIngestStatus(state.returnTo, "connected"), appUrl),
     );
   } catch {
     return NextResponse.redirect(
-      new URL(appendGoatLinearIngestStatus(state.returnTo, "error", "connection_sync_failed"), url),
+      new URL(
+        appendGoatLinearIngestStatus(state.returnTo, "error", "connection_sync_failed"),
+        appUrl,
+      ),
     );
   }
 }

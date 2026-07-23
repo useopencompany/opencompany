@@ -105,6 +105,8 @@ export async function resolveAttioActions(
     {
       id: "attio.search_records",
       provider: "attio",
+      capability: "read",
+      permissionMode: "on",
       description:
         "Fuzzy-search Attio people, companies, and deals by name, domain, email, phone number, social handle, or deal label. Returns compact matches only; call attio.get_record with the returned object and id for full properties such as company domain or deal stage and value.",
       params: {
@@ -182,6 +184,8 @@ export async function resolveAttioActions(
     {
       id: "attio.get_record",
       provider: "attio",
+      capability: "read",
+      permissionMode: "on",
       description:
         "Get one Attio person, company, or deal by object and record id. Returns a detailed CRM record with a larger property set than attio.search_records.",
       params: {
@@ -245,6 +249,8 @@ export async function resolveAttioActions(
     actions.push({
       id: "attio.query_list",
       provider: "attio",
+      capability: "read",
+      permissionMode: "on",
       description:
         "Read entries from an Attio list, optionally using the saved-view filter from a full Attio collection URL. Returns bounded list values plus hydrated parent CRM records.",
       params: {

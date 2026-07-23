@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, isNotNull, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   type GoatBrainVisibility,
@@ -8,6 +8,7 @@ import {
   goatBrains,
   goatIntegrations,
   goatSlackBotEventClaims,
+  goatSlackBotThreadParticipation,
 } from "./goat-schema";
 import { type GoatSlackBrainSourceConfig, parseGoatSlackBrainSourceConfig } from "./goat-slack";
 
@@ -25,6 +26,9 @@ export type GoatSlackBotIntegrationForTeam = {
   userWorkosId: string;
   workspaceId: string;
   status: GoatIntegrationStatus;
+  // Bot scopes granted at install time; features added after an install (DMs,
+  // reactions, user lookups) check these and degrade until a reconnect.
+  scopes: string[];
 };
 
 export type GoatSlackBotIntegrationForWorkspace = GoatSlackBotIntegrationForTeam & {
@@ -56,6 +60,7 @@ export async function listGoatSlackBotIntegrationsForTeam(
       userWorkosId: goatIntegrations.userWorkosId,
       workspaceId: goatIntegrations.workspaceId,
       status: goatIntegrations.status,
+      scopes: goatIntegrations.scopes,
     })
     .from(goatIntegrations)
     .where(
@@ -78,6 +83,7 @@ export async function getGoatSlackBotIntegrationForWorkspace(
       userWorkosId: goatIntegrations.userWorkosId,
       workspaceId: goatIntegrations.workspaceId,
       status: goatIntegrations.status,
+      scopes: goatIntegrations.scopes,
       externalId: goatIntegrations.externalId,
       connectionLabel: goatIntegrations.connectionLabel,
       statusReason: goatIntegrations.statusReason,
@@ -211,4 +217,78 @@ export async function releaseGoatSlackBotEvent(
         isNull(goatSlackBotEventClaims.completedAt),
       ),
     );
+}
+
+export const GOAT_SLACK_BOT_THREAD_PARTICIPATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+export type GoatSlackBotThreadRef = {
+  teamId: string;
+  channelId: string;
+  threadTs: string;
+};
+
+// Upserted every time the bot posts an answer into a thread; the message-event
+// webhook then treats replies in that thread as follow-ups without a mention.
+export async function recordGoatSlackBotThreadParticipation(
+  input: GoatSlackBotThreadRef & { integrationId: string; botReplyTs: string; now?: Date },
+  db: DbLike = getDb(),
+): Promise<void> {
+  const now = input.now ?? new Date();
+  await db
+    .insert(goatSlackBotThreadParticipation)
+    .values({
+      teamId: input.teamId,
+      channelId: input.channelId,
+      threadTs: input.threadTs,
+      integrationId: input.integrationId,
+      lastBotReplyTs: input.botReplyTs,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        goatSlackBotThreadParticipation.teamId,
+        goatSlackBotThreadParticipation.channelId,
+        goatSlackBotThreadParticipation.threadTs,
+      ],
+      set: {
+        integrationId: input.integrationId,
+        lastBotReplyTs: input.botReplyTs,
+        updatedAt: now,
+      },
+    });
+}
+
+export async function getGoatSlackBotThreadParticipation(
+  input: GoatSlackBotThreadRef & { now?: Date },
+  db: DbLike = getDb(),
+): Promise<{ integrationId: string } | null> {
+  const cutoff = new Date(
+    (input.now ?? new Date()).getTime() - GOAT_SLACK_BOT_THREAD_PARTICIPATION_TTL_MS,
+  );
+  const rows = await db
+    .select({ integrationId: goatSlackBotThreadParticipation.integrationId })
+    .from(goatSlackBotThreadParticipation)
+    .where(
+      and(
+        eq(goatSlackBotThreadParticipation.teamId, input.teamId),
+        eq(goatSlackBotThreadParticipation.channelId, input.channelId),
+        eq(goatSlackBotThreadParticipation.threadTs, input.threadTs),
+        gte(goatSlackBotThreadParticipation.updatedAt, cutoff),
+      ),
+    )
+    .limit(1);
+  return (rows[0] as { integrationId: string } | undefined) ?? null;
+}
+
+// Threads with no bot reply in ~30 days stop qualifying for mention-free
+// follow-ups; a fresh mention re-records them.
+export async function pruneGoatSlackBotThreadParticipation(
+  now: Date = new Date(),
+  db: DbLike = getDb(),
+): Promise<void> {
+  const cutoff = new Date(now.getTime() - GOAT_SLACK_BOT_THREAD_PARTICIPATION_TTL_MS);
+  await db
+    .delete(goatSlackBotThreadParticipation)
+    .where(lt(goatSlackBotThreadParticipation.updatedAt, cutoff));
 }

@@ -17,7 +17,8 @@ import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analyti
 import { getGoatAppUrl } from "@/lib/workos";
 
 export const GOAT_LINEAR_MCP_ENDPOINT_URL = "https://mcp.linear.app/mcp";
-const GOAT_LINEAR_MCP_SCOPE = "read write";
+const GOAT_LINEAR_MCP_SCOPES = ["read", "write"] as const;
+const GOAT_LINEAR_MCP_SCOPE = GOAT_LINEAR_MCP_SCOPES.join(" ");
 const GOAT_LINEAR_PROVIDER = "linear" as const;
 const GOAT_LINEAR_CREDENTIAL_KIND = "oauth_token" as const;
 const LINEAR_EXTERNAL_ID = "linear_mcp";
@@ -27,8 +28,10 @@ export type GoatLinearProviderState = {
   provider: typeof GOAT_LINEAR_PROVIDER;
   connected: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
   accountName: string | null;
   statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
 };
 
 type GoatLinearOAuthPayload = {
@@ -51,9 +54,11 @@ export async function getGoatLinearIntegrationState(
 ): Promise<GoatLinearProviderState> {
   const [row] = await getDb()
     .select({
+      id: goatIntegrations.id,
       status: goatIntegrations.status,
       accountName: goatIntegrations.accountName,
       statusReason: goatIntegrations.statusReason,
+      capabilityModes: goatIntegrations.capabilityModes,
     })
     .from(goatIntegrations)
     .where(
@@ -73,8 +78,10 @@ export async function getGoatLinearIntegrationState(
       provider: GOAT_LINEAR_PROVIDER,
       connected: false,
       status: "not_connected",
+      integrationId: null,
       accountName: null,
       statusReason: null,
+      capabilityModes: {},
     };
   }
 
@@ -82,8 +89,10 @@ export async function getGoatLinearIntegrationState(
     provider: GOAT_LINEAR_PROVIDER,
     connected: row.status === "connected",
     status: row.status,
+    integrationId: row.id,
     accountName: row.accountName,
     statusReason: row.statusReason,
+    capabilityModes: row.capabilityModes,
   };
 }
 
@@ -248,7 +257,7 @@ async function upsertGoatLinearIntegration(input: {
       accountType: "mcp_server",
       status: input.status,
       statusReason: input.statusReason,
-      scopes: [],
+      scopes: [...GOAT_LINEAR_MCP_SCOPES],
       lastSyncedAt: now,
       updatedAt: now,
     })
@@ -266,6 +275,7 @@ async function upsertGoatLinearIntegration(input: {
         accountType: "mcp_server",
         status: input.status,
         statusReason: input.statusReason,
+        scopes: [...GOAT_LINEAR_MCP_SCOPES],
         lastSyncedAt: now,
         updatedAt: now,
       },
@@ -285,6 +295,7 @@ async function markGoatLinearConnected(integrationId: string, userWorkosId: stri
       connectionLabel: "Linear",
       accountName: "Linear",
       accountType: "mcp_server",
+      scopes: [...GOAT_LINEAR_MCP_SCOPES],
       lastSyncedAt: new Date(),
       updatedAt: new Date(),
     })

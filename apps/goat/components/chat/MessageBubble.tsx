@@ -6,7 +6,12 @@ import { type ChatTaskLookup, getOrderedAssistantItems } from "./assistant-items
 import { ReasoningItem } from "./ReasoningItem";
 import { TaskCard } from "./TaskCard";
 import { TurnDuration } from "./ThinkingIndicator";
-import { type CapabilityApprovalAction, type CodexToolAction, ToolCallItem } from "./ToolCallItem";
+import {
+  type ActionApprovalRequest,
+  type CapabilityApprovalAction,
+  type CodexToolAction,
+  ToolCallItem,
+} from "./ToolCallItem";
 import { UserMessageBubble } from "./UserMessageBubble";
 
 export function MessageBubble({
@@ -17,6 +22,8 @@ export function MessageBubble({
   onCodexAction,
   onCapabilityApproval,
   allowCodexPlanActions = false,
+  onActionApproval,
+  allowActionApproval = false,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -25,6 +32,8 @@ export function MessageBubble({
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   onCapabilityApproval?: ((action: CapabilityApprovalAction) => Promise<string>) | undefined;
   allowCodexPlanActions?: boolean;
+  onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
+  allowActionApproval?: boolean;
 }) {
   if (message.role === "user") {
     return <UserMessageBubble message={message} />;
@@ -38,6 +47,8 @@ export function MessageBubble({
       onCodexAction={onCodexAction}
       onCapabilityApproval={onCapabilityApproval}
       allowCodexPlanActions={allowCodexPlanActions}
+      onActionApproval={onActionApproval}
+      allowActionApproval={allowActionApproval}
     />
   );
 }
@@ -50,6 +61,8 @@ function AssistantTurn({
   onCodexAction,
   onCapabilityApproval,
   allowCodexPlanActions,
+  onActionApproval,
+  allowActionApproval,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -58,6 +71,8 @@ function AssistantTurn({
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   onCapabilityApproval?: ((action: CapabilityApprovalAction) => Promise<string>) | undefined;
   allowCodexPlanActions: boolean;
+  onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
+  allowActionApproval: boolean;
 }) {
   const error = message.metadata?.error;
   const items = getOrderedAssistantItems(
@@ -91,6 +106,8 @@ function AssistantTurn({
             onCodexAction={onCodexAction}
             onCapabilityApproval={onCapabilityApproval}
             allowCodexPlanActions={allowCodexPlanActions}
+            onActionApproval={onActionApproval}
+            allowActionApproval={allowActionApproval}
           />
         );
       })}

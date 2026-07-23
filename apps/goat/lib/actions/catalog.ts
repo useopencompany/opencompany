@@ -60,9 +60,11 @@ export async function resolveGoatActionCatalog(input: {
   ).map((spec) => ({
     id: spec.id,
     provider: spec.source,
+    capability: "read" as const,
     description: spec.description,
     params: spec.params,
     timeoutMs: GOAT_CAPABILITY_ACTION_TIMEOUT_MS,
+    permissionMode: "on" as const,
     execute: (params: Record<string, unknown>, context: GoatActionExecuteContext) =>
       executeManagedCapability({ spec, params, context }),
   }));

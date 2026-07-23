@@ -32,6 +32,7 @@ import {
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
 import {
+  armSandboxActiveTimeoutById,
   armSandboxIdleTimeout,
   createOrConnectSandbox,
   type SandboxHandle,
@@ -154,6 +155,11 @@ export async function runGoatCodexChatTurn(input: {
     initialParts,
   });
 
+  const checkExternalAbort = () => {
+    const abort = shouldAbort?.();
+    if (abort) throw abort;
+  };
+
   let recoveryHadPendingInteraction = false;
   if (input.recovery) {
     // A server request belongs to the dead proxy connection and cannot be resumed. Settle it
@@ -162,17 +168,30 @@ export async function runGoatCodexChatTurn(input: {
   }
 
   let outcome: "settled" | "handed_off" = "settled";
+  let leaseLost = false;
+  let executionStage = "load_attachments";
   try {
+    checkExternalAbort();
     const attachments = await loadGoatCodexChatAttachments(turn);
+    checkExternalAbort();
+    executionStage = "prepare_directories";
     await sandbox.commands.run(
       `mkdir -p ${shellQuote(CODEX_CHAT_WORKDIR)} ${shellQuote(CODEX_CHAT_HOME)}`,
       { timeoutMs: 30_000 },
     );
+    checkExternalAbort();
     if (serializedAuthJson) {
+      executionStage = "write_auth";
       await sandbox.files.write(`${CODEX_CHAT_HOME}/auth.json`, serializedAuthJson);
+      checkExternalAbort();
     }
+    executionStage = "ensure_codex";
     await ensureCodexInstalled(sandbox);
+    checkExternalAbort();
+    executionStage = "load_skills";
     const sessionSkills = await loadGoatCodexChatSessionSkills(turn);
+    checkExternalAbort();
+    executionStage = "materialize_skills";
     const codexSkills = await materializeCodexSkillSnapshotsForSession({
       sandbox,
       codexWorkRoot: CODEX_CHAT_WORKDIR,
@@ -191,18 +210,21 @@ export async function runGoatCodexChatTurn(input: {
         ],
       })),
     });
+    checkExternalAbort();
     const invokedSkills = sessionSkills
       .filter((skill) => skill.activatedMessageId === turn.userMessageId)
       .map((skill) => ({
         name: skill.skillId,
         path: `${CODEX_CHAT_WORKDIR}/.agents/skills/${skill.skillId}/SKILL.md`,
       }));
+    executionStage = "materialize_attachments";
     const materializedAttachments = await materializeGoatCodexChatAttachments({
       sandbox,
       turnId: turn.id,
       attachments,
       blobToken: env.blobReadWriteToken,
     });
+    checkExternalAbort();
 
     const checkAbort = createTurnAbortCheck({
       turnId: turn.id,
@@ -210,6 +232,7 @@ export async function runGoatCodexChatTurn(input: {
       leaseOwner,
       ...(shouldAbort ? { shouldAbort } : {}),
     });
+    executionStage = "run_turn";
     const summary = await runCodexAppServerTurn({
       sandbox,
       codexWorkRoot: CODEX_CHAT_WORKDIR,
@@ -281,6 +304,7 @@ export async function runGoatCodexChatTurn(input: {
       onActivity: async () => undefined,
     });
 
+    executionStage = "finalize";
     if (summary.sessionId && summary.sessionId !== session.codexThreadId) {
       await updateCodexChatSessionIfLeaseHeld({
         turn,
@@ -307,7 +331,15 @@ export async function runGoatCodexChatTurn(input: {
     });
     await projector.finalize(summary);
   } catch (error) {
-    if (error instanceof GoatCodexChatHandoffError) {
+    // A setup operation can finish or time out after shutdown requested a handoff. Prefer the
+    // current ownership signal over that stale operation result so the next runner can recover it.
+    const effectiveError =
+      error instanceof GoatCodexChatHandoffError ||
+      error instanceof GoatCodexChatInterruptedError ||
+      error instanceof GoatCodexChatLeaseLostError
+        ? error
+        : (shouldAbort?.() ?? error);
+    if (effectiveError instanceof GoatCodexChatHandoffError) {
       outcome = "handed_off";
       await projector.cancelPendingInteractions();
       await persistRefreshedGoatCodexAuth({
@@ -316,7 +348,7 @@ export async function runGoatCodexChatTurn(input: {
         auth,
         codexHome: CODEX_CHAT_HOME,
       }).catch(() => undefined);
-    } else if (error instanceof GoatCodexChatInterruptedError) {
+    } else if (effectiveError instanceof GoatCodexChatInterruptedError) {
       await persistRefreshedGoatCodexAuth({
         sandbox,
         userWorkosId: turn.userWorkosId,
@@ -324,11 +356,23 @@ export async function runGoatCodexChatTurn(input: {
         codexHome: CODEX_CHAT_HOME,
       }).catch(() => undefined);
       await projector.interrupted();
-    } else if (error instanceof GoatCodexChatLeaseLostError) {
+    } else if (effectiveError instanceof GoatCodexChatLeaseLostError) {
       // Another worker owns the turn now; leave all rows to it.
-      throw error;
+      leaseLost = true;
+      throw effectiveError;
     } else {
-      await projector.fail(redact(errorMessage(error)));
+      const message = redact(errorMessage(effectiveError));
+      logger.warn("Goat Codex chat turn execution failed", {
+        event: "opencompany.goat_codex_chat_turn_execution_failed",
+        turn_id: turn.id,
+        codex_chat_session_id: session.id,
+        attempt: turn.attempts,
+        recovery: Boolean(input.recovery),
+        stage: executionStage,
+        error_name: effectiveError instanceof Error ? effectiveError.name : typeof effectiveError,
+        error: message,
+      });
+      await projector.fail(message);
     }
   } finally {
     // The sandbox outlives the turn: arm the chat idle timeout instead of killing it, so the
@@ -338,13 +382,28 @@ export async function runGoatCodexChatTurn(input: {
         ? Math.max(CODEX_CHAT_HANDOFF_TIMEOUT_MS, env.jobLeaseTtlMs * 2)
         : env.goatCodexChatIdleTimeoutMs;
     try {
-      const armed = await armSandboxIdleTimeout(sandbox, idleTimeoutMs);
-      if (armed && outcome === "settled") {
-        await markCodexChatSandboxTimeoutArmed({
-          sessionId: session.id,
-          userWorkosId: turn.userWorkosId,
-          sandboxId: sandbox.sandboxId,
-        });
+      if (
+        !leaseLost &&
+        (outcome !== "handed_off" ||
+          (await codexChatTurnLeaseIsHeld({ turn, leaseId, leaseOwner })))
+      ) {
+        const armed = await armSandboxIdleTimeout(sandbox, idleTimeoutMs);
+        if (armed && outcome === "settled") {
+          await markCodexChatSandboxTimeoutArmed({
+            sessionId: session.id,
+            userWorkosId: turn.userWorkosId,
+            sandboxId: sandbox.sandboxId,
+          });
+        }
+        if (
+          armed &&
+          outcome === "handed_off" &&
+          !(await codexChatTurnLeaseIsHeld({ turn, leaseId, leaseOwner }))
+        ) {
+          // A forced shutdown handoff won the race while the timeout update was in flight.
+          // Restore the active timeout so the replacement runner is not paused mid-turn.
+          await armSandboxActiveTimeoutById(sandbox.sandboxId);
+        }
       }
     } catch (error) {
       captureException(error, {
@@ -361,6 +420,24 @@ export async function runGoatCodexChatTurn(input: {
     }
   }
   return outcome;
+}
+
+async function codexChatTurnLeaseIsHeld(input: {
+  turn: GoatCodexChatTurn;
+  leaseId: string;
+  leaseOwner: string;
+}) {
+  const result = await getDb().execute(sql`
+    SELECT 1
+    FROM goat.codex_chat_turns
+    WHERE id = ${input.turn.id}
+      AND user_workos_id = ${input.turn.userWorkosId}
+      AND lease_id = ${input.leaseId}
+      AND lease_owner = ${input.leaseOwner}
+      AND status = 'running'
+    LIMIT 1
+  `);
+  return rowsFromExecute(result).length > 0;
 }
 
 async function waitForCodexChatInteraction(input: {

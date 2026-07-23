@@ -1,3 +1,4 @@
+-- Managed public-data capabilities and their paid execution ledger.
 CREATE TABLE "goat"."workspace_capabilities" (
 	"workspace_id" text NOT NULL,
 	"source" text NOT NULL,

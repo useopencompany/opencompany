@@ -57,6 +57,32 @@ export const GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA = {
   required: ["command"],
 };
 
+export type GoatBrainMultiBrainTarget = {
+  brainRef: string;
+  brainName: string;
+};
+
+// Single-brain surfaces use the shared read-tool schema unchanged; when
+// several brains are in scope the model must pick one per call via a required
+// `brain` enum (one tool, not N mangled tool names).
+export function buildGoatBrainMultiBrainToolSchema(brains: readonly GoatBrainMultiBrainTarget[]) {
+  if (brains.length <= 1) return GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA;
+  return {
+    ...GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
+    properties: {
+      ...GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA.properties,
+      brain: {
+        type: "string",
+        enum: brains.map((brain) => brain.brainRef),
+        description: `Which brain to search. ${brains
+          .map((brain) => `${brain.brainName}: ${brain.brainRef}`)
+          .join("; ")}`,
+      },
+    },
+    required: [...GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA.required, "brain"],
+  };
+}
+
 export function normalizeGoatBrainReadToolInput(input: unknown): GoatBrainToolInput {
   if (!input || typeof input !== "object") {
     throw new Error("goat_brain command is required.");

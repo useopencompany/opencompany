@@ -18,6 +18,8 @@ function catalogWith(execute: ResolvedGoatAction["execute"]): GoatResolvedAction
       {
         id: "slack.fetch_history",
         provider: "slack",
+        capability: "read",
+        permissionMode: "on",
         description: "fetch",
         params: { type: "object" },
         execute,

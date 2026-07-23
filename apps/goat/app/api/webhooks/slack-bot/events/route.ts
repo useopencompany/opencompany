@@ -2,13 +2,20 @@ import {
   claimGoatSlackBotEvent,
   completeGoatSlackBotEvent,
   type GoatSlackBotEventClaim,
+  getGoatSlackBotThreadParticipation,
   markGoatSlackBotIntegrationStatusForTeam,
   releaseGoatSlackBotEvent,
 } from "@opencompany/db/goat-slack-bot";
 import { after, NextResponse } from "next/server";
 import { goatSlackBotSigningSecret } from "@/lib/integrations/slack-bot";
 import { verifyGoatSlackEventSignature } from "@/lib/integrations/slack-signature";
-import { processGoatSlackBotMention } from "@/lib/slack-bot/answer";
+import {
+  type GoatSlackBotEventInput,
+  processGoatSlackBotDirectMessage,
+  processGoatSlackBotMention,
+  processGoatSlackBotThreadFollowUp,
+} from "@/lib/slack-bot/answer";
+import { mentionsOtherHuman } from "@/lib/slack-bot/format";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -80,19 +87,44 @@ async function handleEventCallback(
     return { ok: true };
   }
 
-  if (event.type === "app_mention") {
+  if (event.type === "app_mention" || event.type === "message") {
     const channelId = typeof event.channel === "string" ? event.channel : null;
     const messageTs = typeof event.ts === "string" ? event.ts : null;
     const slackUserId = typeof event.user === "string" ? event.user : null;
     const text = typeof event.text === "string" ? event.text : "";
+    const threadTs = typeof event.thread_ts === "string" ? event.thread_ts : null;
     // Loop guard: never answer bots (including ourselves) or system subtypes.
     if (event.bot_id || event.subtype || !slackUserId || !channelId || !messageTs) {
       return { ok: true, dropped: true };
     }
-    if (!eventId) {
-      console.warn("[goat-slack-bot] Dropping mention without Slack event_id", {
+
+    let kind: "mention" | "follow_up" | "dm";
+    if (event.type === "app_mention") {
+      kind = "mention";
+    } else if (event.channel_type === "im" || channelId.startsWith("D")) {
+      kind = "dm";
+    } else {
+      // Channel messages qualify as mention-free follow-ups only inside a
+      // thread the bot participates in. Any @mention disqualifies: a bot
+      // mention arrives separately as app_mention (answering here would
+      // double-post), and a human mention means the reply is addressed at a
+      // person. Both checks run before claiming to keep the claims table lean.
+      if (!threadTs) return { ok: true, ignored: true };
+      if (mentionsOtherHuman(text, null)) return { ok: true, ignored: true };
+      const participation = await getGoatSlackBotThreadParticipation({
         teamId,
         channelId,
+        threadTs,
+      });
+      if (!participation) return { ok: true, ignored: true };
+      kind = "follow_up";
+    }
+
+    if (!eventId) {
+      console.warn("[goat-slack-bot] Dropping Slack event without event_id", {
+        teamId,
+        channelId,
+        kind,
       });
       return { ok: true, dropped: true };
     }
@@ -101,11 +133,11 @@ async function handleEventCallback(
     if (!claim) return { ok: true, skipped: "duplicate" };
 
     after(
-      processClaimedMention(claim, {
+      processClaimedEvent(claim, kind, {
         teamId,
         channelId,
         messageTs,
-        threadTs: typeof event.thread_ts === "string" ? event.thread_ts : null,
+        threadTs,
         text,
         slackUserId,
       }),
@@ -116,12 +148,19 @@ async function handleEventCallback(
   return { ok: true, ignored: true };
 }
 
-async function processClaimedMention(
+async function processClaimedEvent(
   claim: GoatSlackBotEventClaim,
-  input: Parameters<typeof processGoatSlackBotMention>[0],
+  kind: "mention" | "follow_up" | "dm",
+  input: GoatSlackBotEventInput,
 ) {
   try {
-    await processGoatSlackBotMention(input);
+    if (kind === "mention") {
+      await processGoatSlackBotMention(input);
+    } else if (kind === "follow_up") {
+      await processGoatSlackBotThreadFollowUp(input);
+    } else {
+      await processGoatSlackBotDirectMessage(input);
+    }
   } catch (error) {
     await releaseGoatSlackBotEvent(claim).catch((releaseError) => {
       console.error("[goat-slack-bot] Failed to release Slack event claim", {
@@ -129,7 +168,8 @@ async function processClaimedMention(
         error: releaseError instanceof Error ? releaseError.message : String(releaseError),
       });
     });
-    console.error("[goat-slack-bot] Mention processing failed", {
+    console.error("[goat-slack-bot] Event processing failed", {
+      kind,
       teamId: input.teamId,
       channelId: input.channelId,
       error: error instanceof Error ? error.message : String(error),

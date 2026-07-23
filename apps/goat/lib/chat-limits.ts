@@ -1,0 +1,1 @@
+export const MAX_WEB_SEARCH_CALLS_PER_TURN = 4;

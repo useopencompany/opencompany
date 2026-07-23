@@ -45,6 +45,8 @@ export const GOAT_BRAIN_TOOL_NAME = "goat_brain";
 export const GOAT_BRAIN_TOOL_PART_TYPE = `tool-${GOAT_BRAIN_TOOL_NAME}` as const;
 export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
 export const SAVE_TO_BRAIN_TOOL_PART_TYPE = `tool-${SAVE_TO_BRAIN_TOOL_NAME}` as const;
+export const WEB_FETCH_TOOL_NAME = "web_fetch";
+export const WEB_FETCH_TOOL_PART_TYPE = `tool-${WEB_FETCH_TOOL_NAME}` as const;
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
 export const LIST_ACTIONS_TOOL_NAME = "list_actions";
@@ -262,6 +264,27 @@ export type WebSearchToolInput = {
   recencyDays?: 7 | 30 | 90;
 };
 
+export type WebFetchToolInput = {
+  url: string;
+};
+
+export type WebFetchToolOutput =
+  | {
+      ok: true;
+      url: string;
+      title?: string;
+      author?: string;
+      publishedDate?: string;
+      text: string;
+      truncated?: boolean;
+      requestId?: string;
+      costUsdMicros?: number;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 export type WebSearchToolResult = {
   title?: string;
   url?: string;
@@ -286,7 +309,15 @@ export type WebSearchToolOutput =
 
 export type GoatChatActionCatalog = {
   sources: GoatActionSourceDescriptor[];
-  actions: { id: string; source: GoatActionSourceId; description: string; params: unknown }[];
+  actions: {
+    id: string;
+    source: GoatActionSourceId;
+    description: string;
+    params: unknown;
+    // "ask" actions pause on a tool-approval request the user answers in chat;
+    // "off" actions never reach the catalog.
+    permissionMode: "on" | "ask";
+  }[];
 };
 
 export type ListActionsToolInput = {
@@ -350,6 +381,10 @@ export type GoatChatTools = {
   save_to_brain: {
     input: SaveToBrainToolInput;
     output: SaveToBrainToolOutput;
+  };
+  web_fetch: {
+    input: WebFetchToolInput;
+    output: WebFetchToolOutput;
   };
   web_search: {
     input: WebSearchToolInput;
@@ -633,6 +668,115 @@ function isPersistedToolPart(value: Record<string, unknown>) {
     typeof value.type === "string" &&
     (value.type === "dynamic-tool" || value.type.startsWith("tool-"))
   );
+}
+
+// ---------------------------------------------------------------------------
+// Tool-approval part surgery. These operate on the raw persisted uiMessageParts
+// (debug_trace) so both the chat route and the turn store can use them without
+// round-tripping through UIMessage types.
+
+export const GOAT_APPROVAL_DISMISSED_REASON = "The user did not respond to the approval request.";
+
+type RawApprovalPart = Record<string, unknown> & {
+  toolCallId: string;
+  approval: { id: string };
+};
+
+function asPendingApprovalPart(value: unknown): RawApprovalPart | null {
+  if (!isRecord(value) || value.type !== USE_ACTION_TOOL_PART_TYPE) return null;
+  if (value.state !== "approval-requested") return null;
+  if (typeof value.toolCallId !== "string") return null;
+  const approval = value.approval;
+  if (!isRecord(approval) || typeof approval.id !== "string") return null;
+  return value as RawApprovalPart;
+}
+
+export function pendingApprovalIdsFromStoredParts(parts: unknown): string[] {
+  if (!Array.isArray(parts)) return [];
+  return parts.flatMap((part) => {
+    const pending = asPendingApprovalPart(part);
+    return pending ? [pending.approval.id] : [];
+  });
+}
+
+// Merges the user's approval decisions from a client-sent copy of the
+// assistant message into the stored parts. Only the decision itself
+// (approved/reason) is taken from the client — input, output, and everything
+// else stay as recorded, so a tampered client cannot change what was approved.
+// Pending approvals the client did not answer are denied as dismissed, keeping
+// the history convertible for the model.
+export function applyApprovalResponsesToStoredParts(
+  storedParts: unknown,
+  clientParts: unknown,
+): { parts: unknown[]; respondedApprovalIds: string[] } {
+  const parts = Array.isArray(storedParts) ? storedParts : [];
+  const decisions = new Map<string, { approved: boolean; reason?: string }>();
+  if (Array.isArray(clientParts)) {
+    for (const part of clientParts) {
+      if (!isRecord(part) || part.type !== USE_ACTION_TOOL_PART_TYPE) continue;
+      if (part.state !== "approval-responded") continue;
+      const approval = part.approval;
+      if (!isRecord(approval)) continue;
+      if (typeof approval.id !== "string" || typeof approval.approved !== "boolean") continue;
+      decisions.set(approval.id, {
+        approved: approval.approved,
+        ...(typeof approval.reason === "string" && approval.reason
+          ? { reason: approval.reason }
+          : {}),
+      });
+    }
+  }
+
+  const respondedApprovalIds: string[] = [];
+  const merged = parts.map((part) => {
+    const pending = asPendingApprovalPart(part);
+    if (!pending) return part;
+    const decision = decisions.get(pending.approval.id);
+    if (!decision) {
+      return {
+        ...pending,
+        state: "output-denied",
+        approval: {
+          id: pending.approval.id,
+          approved: false,
+          reason: GOAT_APPROVAL_DISMISSED_REASON,
+        },
+      };
+    }
+    respondedApprovalIds.push(pending.approval.id);
+    return {
+      ...pending,
+      state: "approval-responded",
+      approval: { id: pending.approval.id, ...decision },
+    };
+  });
+  return { parts: merged, respondedApprovalIds };
+}
+
+// A user message sent while approvals were still pending dismisses them: the
+// model cannot resume a turn the user talked past, and an unresolved approval
+// request would make the history unconvertible (a tool call with no result).
+export function dismissPendingApprovalsInStoredParts(parts: unknown): {
+  parts: unknown[];
+  changed: boolean;
+} {
+  if (!Array.isArray(parts)) return { parts: [], changed: false };
+  let changed = false;
+  const dismissed = parts.map((part) => {
+    const pending = asPendingApprovalPart(part);
+    if (!pending) return part;
+    changed = true;
+    return {
+      ...pending,
+      state: "output-denied",
+      approval: {
+        id: pending.approval.id,
+        approved: false,
+        reason: GOAT_APPROVAL_DISMISSED_REASON,
+      },
+    };
+  });
+  return { parts: dismissed, changed };
 }
 
 function chatMessageCreatedAtMs(value: Date | string) {

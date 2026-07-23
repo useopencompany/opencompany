@@ -60,6 +60,29 @@ from the model plus those token metrics. The spans nest under the per-turn root 
 tool-result pair on that trace; we no longer open manual `tool.*` spans. Tool failures are still
 reported to Better Stack via `captureException`.
 
+Latitude LLM tracing (goat surfaces) is disabled unless keyed:
+
+```sh
+LATITUDE_API_KEY=...
+LATITUDE_PROJECT_SLUG=goat-prod
+# Optional:
+LATITUDE_SERVICE_NAME=opencompany-goat   # runner deployments set opencompany-runner-goat
+LATITUDE_TELEMETRY_DISABLED=1            # kill switch even when keyed
+```
+
+When enabled, `@opencompany/goat-observability/latitude` sends full-content AI SDK spans
+(prompts, completions, tool calls, token usage) to Latitude for three goat surfaces: main chat
+turns (`chat-turn`, session = chat session id), Slack bot answers (`slack-answer`, session =
+`slack:{team}:{channel}:{thread}`), and brain ingestion runs (`brain-ingest` +
+`brain-ingest-triage`, session = ingest job id). Spans flow through a dedicated tracer provider
+passed to each call via `experimental_telemetry`, so this content never enters the sanitized
+`GOAT_OTEL_*` OTLP pipeline. Each call gets an isolated Latitude capture root so session names and
+active durations come from a root span Latitude actually receives. Vercel AI Gateway spans are
+identified as the `vercel` provider used by Latitude's models.dev catalog, allowing Latitude to
+estimate cost from the AI SDK's model and token attributes. Like Braintrust, keep it disabled in
+environments where full AI content must not leave the platform. Serverless routes flush via
+`after()`; the runner flushes per ingest job and on shutdown.
+
 We lean on the defaults that the AI SDK and Braintrust expose rather than hand-rolled instrumentation.
 The Better Stack timing trace remains a separate concern: `model_stream_total` and
 `model_first_stream_part` are timed via `timeAsync`, and the surrounding non-LLM steps (session/message

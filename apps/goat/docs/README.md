@@ -122,10 +122,14 @@ optionally stops the active stream, and marks the chat session closed through
 6. Resolves read-only connected-integration actions plus the workspace's managed social/lead
    capabilities and creates the chat tool context for
    `goat_brain`, `save_to_brain`, `list_actions`/`use_action`, optional `start_task`, and optional
-   `web_search`.
-7. Calls `streamText` through Vercel AI Gateway with the selected model.
+   `web_fetch`/`web_search`.
+7. Calls `streamText` through Vercel AI Gateway with the session's model.
 8. Streams the UI message response back to the browser.
 9. Persists the assistant message, debug trace, and optional task link on finish.
+
+The first message fixes the model for that chat session. The Home composer remembers the latest
+selection for the next chat, while an active chat keeps its stored model even if that Home preference
+changes in another tab.
 
 When a background task that was started from chat succeeds or fails, the runner appends a synthetic
 assistant message to the originating chat session if that session is still open. The message includes
@@ -136,7 +140,8 @@ model turn when the task finishes.
 The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, assembled from
 structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
-timezone. `goat_brain` is always available and `web_search` is available when Exa is configured.
+timezone. `goat_brain` is always available. When Exa is configured, `web_fetch` reads one known URL
+through the Contents API while `web_search` discovers current public-web sources through Search.
 Connected integration lookups are dispatched through the read-only `list_actions` and `use_action`
 tools. The route resolves one compact source catalog from currently connected providers and the
 workspace's enabled managed capabilities, and the model must discover a source's concrete action ids
@@ -668,8 +673,8 @@ Common changes and where they belong:
 - Change when chat starts a task: `createOpenCompanyChatSystemPrompt` in
   `apps/goat/lib/prompts/main-chat.ts` and `createOpenCompanyChatToolContext` in
   `apps/goat/lib/chat-agent.ts`.
-- Change lightweight chat web search: `web_search` in `apps/goat/lib/chat-agent.ts` and the Exa
-  callback in `apps/goat/app/api/chat/route.ts`.
+- Change lightweight chat web access: `web_fetch`/`web_search` in
+  `apps/goat/lib/chat-agent.ts` and their Exa callbacks in `apps/goat/app/api/chat/route.ts`.
 - Change managed chat capabilities: the endpoint allowlist and validators in
   `apps/goat/lib/capabilities/catalog.ts`, execution policy in
   `apps/goat/lib/capabilities/execute.ts`, and workspace controls in

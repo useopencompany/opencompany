@@ -41,6 +41,8 @@ function providerCatalog(
       {
         id: `${id}.read_something`,
         provider: id,
+        capability: "read",
+        permissionMode: "on",
         description: "read",
         params: { type: "object" },
         execute: vi.fn(),

@@ -139,6 +139,10 @@ export type GoatGmailMessageDirection = "sent" | "received";
 export type GoatSlackChannelType = "channel" | "group" | "im" | "mpim";
 export type GoatLinearEventEntityType = "issue" | "comment";
 export type GoatLinearEventAction = "create" | "update" | "remove";
+export type GoatGitHubPullRequestEventType =
+  | "pull_request_opened"
+  | "pull_request_merged"
+  | "pull_request_commented";
 export type GoatHubspotObjectType = "contact" | "company" | "deal";
 export type GoatHubspotEventAction = "create" | "update";
 export type GoatAttioObjectType = "person" | "company" | "deal";
@@ -1259,6 +1263,13 @@ export const goatIntegrations = goat.table(
     status: text("status").$type<GoatIntegrationStatus>().notNull().default("connected"),
     statusReason: text("status_reason"),
     scopes: jsonb("scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    // Sparse per-connection capability mode overrides (capability id → "on" |
+    // "off" | "ask"). Missing keys fall back to the app-level capability
+    // registry defaults, so defaults can evolve without a backfill.
+    capabilityModes: jsonb("capability_modes")
+      .$type<Partial<Record<string, "on" | "off" | "ask">>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1771,6 +1782,33 @@ export const goatSlackBotEventClaims = goat.table("slack_bot_event_claims", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Threads the answer bot has replied in. Lets the message-event webhook decide
+// with one indexed lookup whether a reply-without-mention should get an answer,
+// instead of calling conversations.replies for every threaded message in every
+// channel the bot is in. Rows are upserted on each bot reply and pruned after
+// ~30 days of thread inactivity.
+export const goatSlackBotThreadParticipation = goat.table(
+  "slack_bot_thread_participation",
+  {
+    teamId: text("team_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    threadTs: text("thread_ts").notNull(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    lastBotReplyTs: text("last_bot_reply_ts").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      name: "slack_bot_thread_participation_pkey",
+      columns: [table.teamId, table.channelId, table.threadTs],
+    }),
+    updatedAtIdx: index("goat_sbtp_updated_at_idx").on(table.updatedAt),
+  }),
+);
+
 // Raw Slack message buffer: the events webhook inserts one row per relevant
 // message; the runner's flush sweeper batches unflushed rows per channel into a
 // conversation-window source item after a quiet period (source_item_id NULL =
@@ -1869,6 +1907,51 @@ export const goatLinearIssueEvents = goat.table(
     actionCheck: check(
       "goat_linear_issue_events_action_check",
       sql`${table.action} IN ('create', 'update', 'remove')`,
+    ),
+  }),
+);
+
+// Raw GitHub pull-request activity buffer: the webhook inserts one row per
+// opened, commented, or merged event; the runner's flush sweeper batches
+// unflushed rows per pull request into one activity-window source item after a
+// quiet period (source_item_id NULL = unflushed). Issue activity remains
+// direct-enqueue because it does not have the open-to-merge lifecycle that
+// causes repeated PR ingestion.
+export const goatGitHubPullRequestEvents = goat.table(
+  "github_pull_request_events",
+  {
+    id: text("id").primaryKey(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    installationId: text("installation_id").notNull(),
+    repositoryId: text("repository_id").notNull(),
+    pullRequestNumber: integer("pull_request_number").notNull(),
+    // GitHub's X-GitHub-Delivery UUID is stable across redelivery attempts.
+    deliveryId: text("delivery_id").notNull(),
+    eventType: text("event_type").$type<GoatGitHubPullRequestEventType>().notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    sourceItemId: text("source_item_id").references(() => goatBrainSourceItems.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    integrationDeliveryIdx: uniqueIndex(
+      "goat_github_pull_request_events_integration_delivery_idx",
+    ).on(table.integrationId, table.deliveryId),
+    pendingIdx: index("goat_github_pull_request_events_pending_idx")
+      .on(table.integrationId, table.repositoryId, table.pullRequestNumber, table.receivedAt)
+      .where(sql`${table.sourceItemId} IS NULL`),
+    sourceItemIdx: index("goat_github_pull_request_events_source_item_idx").on(table.sourceItemId),
+    eventTypeCheck: check(
+      "goat_github_pull_request_events_event_type_check",
+      sql`${table.eventType} IN ('pull_request_opened', 'pull_request_merged', 'pull_request_commented')`,
     ),
   }),
 );

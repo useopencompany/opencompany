@@ -81,6 +81,10 @@ const groups = {
       "GOAT_CHAT_ACTIONS_KILL_SWITCH",
       "GOAT_MANAGED_CAPABILITIES_KILL_SWITCH",
       "GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS",
+      "LATITUDE_API_KEY",
+      "LATITUDE_PROJECT_SLUG",
+      "LATITUDE_SERVICE_NAME",
+      "LATITUDE_TELEMETRY_DISABLED",
     ],
   },
   runner: {
@@ -118,6 +122,10 @@ const groups = {
       "GOAT_OBSERVABILITY_ENABLED",
       "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
       "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+      "LATITUDE_API_KEY",
+      "LATITUDE_PROJECT_SLUG",
+      "LATITUDE_SERVICE_NAME",
+      "LATITUDE_TELEMETRY_DISABLED",
     ],
   },
   release: {
@@ -163,6 +171,17 @@ for (const name of selected) {
 
   if (optionalMissing.length > 0) {
     console.log(`  optional unset: ${optionalMissing.join(", ")}`);
+  }
+}
+
+if (selected.some((name) => name === "goat" || name === "runner")) {
+  const latitudeApiKeySet = !isUnset(process.env.LATITUDE_API_KEY);
+  const latitudeProjectSet = !isUnset(process.env.LATITUDE_PROJECT_SLUG);
+  if (latitudeApiKeySet !== latitudeProjectSet) {
+    failed = true;
+    console.log(
+      "\nLATITUDE_API_KEY and LATITUDE_PROJECT_SLUG must either both be set or both be unset.",
+    );
   }
 }
 

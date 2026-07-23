@@ -5,6 +5,7 @@ import {
   type GoatActionErrorCode,
   GoatActionExecutionError,
   GoatActionInvalidParamsError,
+  GoatActionPermissionError,
   type GoatActionSourceId,
   type GoatCapabilityTurnState,
   type GoatResolvedActionCatalog,
@@ -106,6 +107,13 @@ export async function executeGoatAction(input: {
           source: action.provider,
           message: error.message,
         },
+      };
+    }
+    if (error instanceof GoatActionPermissionError) {
+      return {
+        ok: false,
+        action: action.id,
+        error: { code: "not_permitted", source: error.provider, message: error.message },
       };
     }
     if (error instanceof GoatActionInvalidParamsError) {

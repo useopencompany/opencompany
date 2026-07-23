@@ -241,6 +241,17 @@ export async function releaseGoatCodexChatTurnForHandoff(input: {
   leaseId: string;
   leaseOwner: string;
 }) {
+  const released = await expireGoatCodexChatTurnLeaseForHandoff(input);
+  if (!released) {
+    throw new GoatCodexChatLeaseLostError();
+  }
+}
+
+async function expireGoatCodexChatTurnLeaseForHandoff(input: {
+  turnId: string;
+  leaseId: string;
+  leaseOwner: string;
+}) {
   const now = new Date();
   const result = await getDb().execute(sql`
     UPDATE goat.codex_chat_turns
@@ -254,9 +265,7 @@ export async function releaseGoatCodexChatTurnForHandoff(input: {
       AND status = 'running'
     RETURNING id
   `);
-  if (rowsFromExecute<{ id: string }>(result).length === 0) {
-    throw new GoatCodexChatLeaseLostError();
-  }
+  return rowsFromExecute<{ id: string }>(result).length > 0;
 }
 
 export async function sweepTerminalGoatCodexChatSandboxes(input: {
@@ -334,7 +343,15 @@ export function startGoatCodexChatWorker(
 ) {
   const concurrency = resolveGoatCodexChatWorkerConcurrency(env, options.concurrency);
   const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? 1_000);
-  const active = new Map<Promise<void>, AbortController>();
+  const active = new Map<
+    Promise<void>,
+    {
+      controller: AbortController;
+      turnId: string;
+      leaseId: string | null;
+      leaseOwner: string | null;
+    }
+  >();
   const sandboxSweepIntervalMs = Math.max(
     1_000,
     options.sandboxSweepIntervalMs ?? GOAT_CODEX_CHAT_SANDBOX_SWEEP_INTERVAL_MS,
@@ -409,7 +426,12 @@ export function startGoatCodexChatWorker(
               });
             })
             .finally(() => active.delete(running));
-          active.set(running, handoffController);
+          active.set(running, {
+            controller: handoffController,
+            turnId: turn.id,
+            leaseId: turn.leaseId,
+            leaseOwner: turn.leaseOwner,
+          });
         }
       } catch (error) {
         captureException(error, { event: "opencompany.goat_codex_chat_worker_failed" });
@@ -447,12 +469,45 @@ export function startGoatCodexChatWorker(
       if (drained) return;
 
       await options.onHandoff?.(active.size);
-      for (const controller of active.values()) controller.abort();
+      for (const run of active.values()) run.controller.abort();
       if (options.postHandoffWaitMs !== undefined) {
         await Promise.race([
           Promise.allSettled(Array.from(active.keys())),
           sleep(options.postHandoffWaitMs),
         ]);
+      }
+      // Setup work may be blocked before it reaches the abort check. Fence any such process after
+      // the grace period so another runner can reclaim the durable turn instead of waiting a full
+      // lease TTL. The lease id/owner predicates keep this safe if ownership already changed.
+      const pendingHandoffs = Array.from(active.values());
+      const forcedHandoffs = await Promise.allSettled(
+        pendingHandoffs.map((run) =>
+          run.leaseId && run.leaseOwner
+            ? expireGoatCodexChatTurnLeaseForHandoff({
+                turnId: run.turnId,
+                leaseId: run.leaseId,
+                leaseOwner: run.leaseOwner,
+              })
+            : Promise.resolve(false),
+        ),
+      );
+      forcedHandoffs.forEach((result, index) => {
+        if (result.status !== "rejected") return;
+        captureException(result.reason, {
+          event: "opencompany.goat_codex_chat_shutdown_forced_handoff_failed",
+          turn_id: pendingHandoffs[index]?.turnId,
+        });
+      });
+      const releasedCount = forcedHandoffs.filter(
+        (result) => result.status === "fulfilled" && result.value,
+      ).length;
+      const failedCount = forcedHandoffs.filter((result) => result.status === "rejected").length;
+      if (releasedCount > 0 || failedCount > 0) {
+        logger.warn("Runner shutdown forced Goat Codex chat lease handoff", {
+          event: "opencompany.goat_codex_chat_shutdown_forced_handoff",
+          released_count: releasedCount,
+          failed_count: failedCount,
+        });
       }
     },
   };

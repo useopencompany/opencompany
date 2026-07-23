@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
+// Import from ./format (not ./answer): the answer module's runtime import
+// chain reaches authkit, which does not resolve under vitest's node runner.
 import {
-  formatSlackThreadContext,
-  formatSlackThreadContextPage,
+  collectSlackMentionUserIds,
+  mentionsOtherHuman,
+  mentionsSlackUser,
+  sanitizeSlackMentions,
   stripSlackBotMention,
   toSlackMrkdwn,
   truncateForSlack,
-} from "./answer";
+} from "./format";
 
 describe("stripSlackBotMention", () => {
   it("strips a leading mention of the bot", () => {
@@ -49,8 +53,14 @@ describe("toSlackMrkdwn", () => {
     expect(toSlackMrkdwn("## Summary\ntext\n### Details")).toBe("*Summary*\ntext\n*Details*");
   });
 
+  it("converts markdown links to Slack links", () => {
+    expect(toSlackMrkdwn("see [the docs](https://example.com/a?b=1) here")).toBe(
+      "see <https://example.com/a?b=1|the docs> here",
+    );
+  });
+
   it("leaves slack mrkdwn untouched", () => {
-    const text = "*bold* _italic_ `code`\n• bullet";
+    const text = "*bold* _italic_ `code`\n• bullet\n<https://example.com|docs>";
     expect(toSlackMrkdwn(text)).toBe(text);
   });
 });
@@ -67,44 +77,57 @@ describe("truncateForSlack", () => {
   });
 });
 
-describe("formatSlackThreadContext", () => {
-  it("omits an oldest-first page when Slack reports newer replies", () => {
-    expect(
-      formatSlackThreadContextPage({
-        messages: [{ user: "U1", text: "stale context" }],
-        response_metadata: { next_cursor: "next-page" },
-      }),
-    ).toBeNull();
-    expect(
-      formatSlackThreadContextPage({
-        messages: [{ user: "U1", text: "stale context" }],
-        has_more: true,
-      }),
-    ).toBeNull();
+describe("mentionsOtherHuman", () => {
+  it("is false without any mention", () => {
+    expect(mentionsOtherHuman("just a follow-up question", "UBOT")).toBe(false);
   });
 
-  it("keeps the most recent twenty messages in chronological order", () => {
-    const context = formatSlackThreadContext(
-      Array.from({ length: 25 }, (_, index) => ({ user: `U${index}`, text: `message ${index}` })),
-    );
-
-    expect(context).not.toContain("message 4");
-    expect(context).toContain("U5: message 5");
-    expect(context).toContain("U24: message 24");
-    expect(context?.indexOf("message 5")).toBeLessThan(context?.indexOf("message 24") ?? 0);
+  it("is false when only the bot is mentioned", () => {
+    expect(mentionsOtherHuman("<@UBOT> what about pricing?", "UBOT")).toBe(false);
   });
 
-  it("caps individual messages and the total prompt context", () => {
-    const context = formatSlackThreadContext(
-      Array.from({ length: 20 }, (_, index) => ({
-        user: `U${index}`,
-        text: `${index}:${"x".repeat(5000)}`,
-      })),
-    );
+  it("is true when another user is mentioned", () => {
+    expect(mentionsOtherHuman("<@UHUMAN> can you take this?", "UBOT")).toBe(true);
+    expect(mentionsOtherHuman("<@UHUMAN|jane> thoughts?", "UBOT")).toBe(true);
+  });
 
-    expect(context).not.toBeNull();
-    expect(context?.length).toBeLessThanOrEqual(12_000);
-    expect(context).toContain("U19:");
-    expect(context).not.toContain("U0:");
+  it("treats every mention as other when the bot id is unknown", () => {
+    expect(mentionsOtherHuman("<@UANY> hello", null)).toBe(true);
+  });
+});
+
+describe("mentionsSlackUser", () => {
+  it("matches plain and labeled mentions of the given user", () => {
+    expect(mentionsSlackUser("hey <@UBOT> hello", "UBOT")).toBe(true);
+    expect(mentionsSlackUser("hey <@UBOT|opencompany> hello", "UBOT")).toBe(true);
+  });
+
+  it("does not match other users or missing ids", () => {
+    expect(mentionsSlackUser("hey <@UOTHER> hello", "UBOT")).toBe(false);
+    expect(mentionsSlackUser("hey <@UBOT> hello", null)).toBe(false);
+  });
+});
+
+describe("sanitizeSlackMentions", () => {
+  it("preserves only user mentions already present in the conversation", () => {
+    const allowed = collectSlackMentionUserIds([
+      "[Jane (<@UASKER>)]: what changed?",
+      "[<@UTEAMMATE>]: I can help",
+    ]);
+    expect(
+      sanitizeSlackMentions(
+        "Thanks <@UASKER>. Ask <@UTEAMMATE>, not <@UINVENTED> or <!channel>.",
+        allowed,
+      ),
+    ).toBe("Thanks <@UASKER>. Ask <@UTEAMMATE>, not `@UINVENTED` or `@channel`.");
+  });
+
+  it("neutralizes here, everyone, and user-group broadcasts without changing links", () => {
+    expect(
+      sanitizeSlackMentions(
+        "See <https://example.com|docs> <!here> <!everyone> <!subteam^S123|ops>",
+        new Set(),
+      ),
+    ).toBe("See <https://example.com|docs> `@here` `@everyone` `@user-group`");
   });
 });

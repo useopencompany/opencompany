@@ -1407,6 +1407,24 @@ export const GITHUB_ACTIVITY_EVENT_TYPES = [
 ] as const;
 export type GitHubActivityEventType = (typeof GITHUB_ACTIVITY_EVENT_TYPES)[number];
 
+export type NormalizedGitHubActivityEvent = {
+  state: "opened" | "merged" | "commented";
+  occurredAt: string;
+  sourceRef: string;
+  url: string;
+  body: string;
+  truncatedBody: boolean;
+  author?: string;
+  mergedBy?: string;
+  baseRef?: string;
+  headRef?: string;
+  additions?: number;
+  deletions?: number;
+  changedFiles?: number;
+  commits?: number;
+  labels?: string[];
+};
+
 export type NormalizedGitHubActivityContent = {
   activity: {
     kind: NormalizedGitHubActivityKind;
@@ -1426,6 +1444,11 @@ export type NormalizedGitHubActivityContent = {
     changedFiles?: number;
     commits?: number;
     labels?: string[];
+    // Present for buffered pull-request windows. Older persisted items and
+    // direct-enqueued issue activity remain valid single-event items.
+    windowStart?: string;
+    windowEnd?: string;
+    events?: NormalizedGitHubActivityEvent[];
   };
 };
 
@@ -1524,6 +1547,106 @@ export function normalizeGitHubActivityWebhook(
   });
 }
 
+// Combines normalized webhook events for one pull request into a single source
+// item. Each event remains explicit evidence for the ingest agent, while the
+// PR-level source ref stays stable and one flush produces one billed agent job.
+export function normalizeGitHubPullRequestWindow(input: {
+  windowId: string;
+  events: readonly NormalizedGitHubActivitySourceItem[];
+  flushedAt: string;
+}): NormalizedGitHubActivitySourceItem {
+  const windowId = input.windowId.trim();
+  if (!windowId) throw invalid("GitHub windowId must not be empty", "invalid_activity");
+  const flushedAt = optionalIsoString(input.flushedAt);
+  if (!flushedAt) throw invalid("GitHub flushedAt must be a timestamp", "invalid_activity");
+  if (input.events.length === 0) {
+    throw invalid("GitHub pull request window must not be empty", "invalid_activity");
+  }
+
+  const sorted = input.events
+    .map((item) => {
+      if (!isNormalizedGitHubActivitySourceItem(item)) {
+        throw invalid("GitHub window contains an invalid activity item", "invalid_activity");
+      }
+      const activity = item.content.activity;
+      if (activity.kind !== "pull_request" || activity.number === undefined) {
+        throw invalid("GitHub window contains non-pull-request activity", "invalid_activity");
+      }
+      const occurredAt = optionalIsoString(item.occurredAt);
+      if (!occurredAt) {
+        throw invalid("GitHub activity occurredAt must be a timestamp", "invalid_activity");
+      }
+      return { item, activity, occurredAt };
+    })
+    .sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime());
+
+  const first = sorted[0]!;
+  for (const event of sorted.slice(1)) {
+    if (
+      event.activity.repository.id !== first.activity.repository.id ||
+      event.activity.number !== first.activity.number
+    ) {
+      throw invalid("GitHub window events must belong to one pull request", "invalid_activity");
+    }
+  }
+
+  const latest = sorted.at(-1)!;
+  const events: NormalizedGitHubActivityEvent[] = sorted.map(({ item, activity, occurredAt }) => ({
+    state: activity.state,
+    occurredAt,
+    sourceRef: item.sourceRef,
+    url: activity.url,
+    body: activity.body,
+    truncatedBody: activity.truncatedBody,
+    ...(activity.author ? { author: activity.author } : {}),
+    ...(activity.mergedBy ? { mergedBy: activity.mergedBy } : {}),
+    ...(activity.baseRef ? { baseRef: activity.baseRef } : {}),
+    ...(activity.headRef ? { headRef: activity.headRef } : {}),
+    ...(activity.additions !== undefined ? { additions: activity.additions } : {}),
+    ...(activity.deletions !== undefined ? { deletions: activity.deletions } : {}),
+    ...(activity.changedFiles !== undefined ? { changedFiles: activity.changedFiles } : {}),
+    ...(activity.commits !== undefined ? { commits: activity.commits } : {}),
+    ...(activity.labels ? { labels: activity.labels } : {}),
+  }));
+  const windowStart = events[0]!.occurredAt;
+  const windowEnd = events.at(-1)!.occurredAt;
+  // A comment is activity on the PR, not its lifecycle state. Prefer the
+  // newest opened/merged snapshot for the window-level state and canonical
+  // URL; a comment-only follow-up window falls back to its newest comment.
+  const lifecycleSnapshot =
+    [...sorted].reverse().find((event) => event.activity.state !== "commented") ?? latest;
+  const activity: NormalizedGitHubActivityContent["activity"] = {
+    ...lifecycleSnapshot.activity,
+    repository: latest.activity.repository,
+    title: latest.activity.title,
+    windowStart,
+    windowEnd,
+    events,
+  };
+  const contentHashInput = {
+    sourceProvider: "github",
+    sourceType: "activity",
+    repositoryId: activity.repository.id,
+    pullRequestNumber: activity.number,
+    title: activity.title,
+    events,
+  };
+  const externalId = `${activity.repository.fullName}:pull:${activity.number}`;
+
+  return {
+    sourceProvider: "github",
+    sourceType: "activity",
+    externalId: windowId,
+    sourceRef: `github:${externalId}`,
+    title: `${activity.repository.fullName} #${activity.number} activity: ${activity.title}`,
+    occurredAt: windowStart,
+    capturedAt: flushedAt,
+    contentHash: sha256(stableJson(contentHashInput)),
+    contentHashInput,
+    content: { activity },
+  };
+}
+
 // The `issue_comment` event fires for comments on both issues and pull
 // requests — GitHub models a PR as an issue, so a comment on a PR arrives here
 // with `issue.pull_request` set. We only ingest newly created comments; the
@@ -1580,6 +1703,23 @@ export function isNormalizedGitHubActivitySourceItem(
     return false;
   }
   const activity = (item.content as Partial<NormalizedGitHubActivityContent>).activity;
+  const validEvents =
+    activity?.events === undefined ||
+    (Array.isArray(activity.events) &&
+      activity.events.length > 0 &&
+      activity.events.every(
+        (event) =>
+          !!event &&
+          typeof event === "object" &&
+          (event.state === "opened" || event.state === "merged" || event.state === "commented") &&
+          typeof event.occurredAt === "string" &&
+          typeof event.sourceRef === "string" &&
+          typeof event.url === "string" &&
+          typeof event.body === "string" &&
+          typeof event.truncatedBody === "boolean",
+      ) &&
+      typeof activity.windowStart === "string" &&
+      typeof activity.windowEnd === "string");
   return (
     !!activity &&
     typeof activity === "object" &&
@@ -1593,7 +1733,8 @@ export function isNormalizedGitHubActivitySourceItem(
     (activity.state === "opened" ||
       activity.state === "merged" ||
       activity.state === "commented") &&
-    typeof activity.body === "string"
+    typeof activity.body === "string" &&
+    validEvents
   );
 }
 
