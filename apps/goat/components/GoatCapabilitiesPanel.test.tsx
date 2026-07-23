@@ -23,6 +23,7 @@ const capabilities = [
   { source: "instagram", enabled: true },
   { source: "tiktok", enabled: true },
   { source: "lead", enabled: true },
+  { source: "seo", enabled: true },
 ] as const;
 
 describe("GoatCapabilitiesPanel", () => {
@@ -32,7 +33,7 @@ describe("GoatCapabilitiesPanel", () => {
 
   it("shows all managed sources as enabled to every workspace member", () => {
     render(<GoatCapabilitiesPanel capabilities={[...capabilities]} isAdmin={false} />);
-    expect(screen.getAllByRole("switch")).toHaveLength(6);
+    expect(screen.getAllByRole("switch")).toHaveLength(7);
     for (const toggle of screen.getAllByRole("switch")) {
       expect(toggle).toBeChecked();
       expect(toggle).toHaveAttribute("aria-disabled", "true");

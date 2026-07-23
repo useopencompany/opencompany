@@ -320,6 +320,7 @@ function capabilitySourceLabel(source: string) {
     instagram: "Instagram",
     tiktok: "TikTok",
     lead: "Lead enrichment",
+    seo: "SEO",
   };
   return labels[source] ?? source;
 }

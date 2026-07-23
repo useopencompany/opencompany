@@ -285,7 +285,8 @@ export type GoatManagedCapabilitySource =
   | "youtube"
   | "instagram"
   | "tiktok"
-  | "lead";
+  | "lead"
+  | "seo";
 export type GoatCapabilityRunStatus =
   | "awaiting_approval"
   | "approved"

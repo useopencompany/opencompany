@@ -159,7 +159,7 @@ connected. Disconnected or disabled capabilities are absent from the catalog, gu
 cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
 connected-account work continues through background tasks.
 
-Managed X, LinkedIn, YouTube, Instagram, TikTok, and lead-enrichment actions use a fixed
+Managed X, LinkedIn, YouTube, Instagram, TikTok, lead-enrichment, and Semrush SEO actions use a fixed
 server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Every paid execution
 inspects its live endpoint schema and price before running, checks shared workspace credits, and
 requires a one-time approval above the per-action or per-turn thresholds. Provider data is treated

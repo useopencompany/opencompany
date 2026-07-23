@@ -17,6 +17,7 @@ export const GOAT_MANAGED_CAPABILITY_SOURCES = [
   "instagram",
   "tiktok",
   "lead",
+  "seo",
 ] as const satisfies readonly GoatManagedCapabilitySource[];
 
 export type GoatWorkspaceCapabilityState = {
