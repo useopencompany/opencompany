@@ -122,9 +122,13 @@ optionally stops the active stream, and marks the chat session closed through
 6. Resolves read-only connected-integration actions and creates the chat tool context for
    `goat_brain`, `save_to_brain`, `list_actions`/`use_action`, optional `start_task`, and optional
    `web_search`.
-7. Calls `streamText` through Vercel AI Gateway with the selected model.
+7. Calls `streamText` through Vercel AI Gateway with the session's model.
 8. Streams the UI message response back to the browser.
 9. Persists the assistant message, debug trace, and optional task link on finish.
+
+The first message fixes the model for that chat session. The Home composer remembers the latest
+selection for the next chat, while an active chat keeps its stored model even if that Home preference
+changes in another tab.
 
 When a background task that was started from chat succeeds or fails, the runner appends a synthetic
 assistant message to the originating chat session if that session is still open. The message includes
