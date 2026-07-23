@@ -1,6 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { GoatBrainIngestTrace } from "@opencompany/db/goat-brain-ingest-trace";
+import type {
+  GoatBrainIngestTrace,
+  GoatBrainIngestTriageTrace,
+} from "@opencompany/db/goat-brain-ingest-trace";
 import {
   normalizeAttioObjectWindow,
   normalizeGitHubActivityWebhook,
@@ -15,6 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const aiMock = vi.hoisted(() => ({
   generateText: vi.fn(),
+  generateObject: vi.fn(),
   createGateway: vi.fn(() => (model: string) => ({ model })),
   jsonSchema: vi.fn((schema: unknown) => schema),
   stepCountIs: vi.fn((steps: number) => ({ steps })),
@@ -46,6 +50,7 @@ const goatGmailMock = vi.hoisted(() => ({
 
 vi.mock("ai", () => ({
   generateText: aiMock.generateText,
+  generateObject: aiMock.generateObject,
   createGateway: aiMock.createGateway,
   jsonSchema: aiMock.jsonSchema,
   stepCountIs: aiMock.stepCountIs,
@@ -99,6 +104,8 @@ import {
   GoatBrainIngestBudgetError,
   HUBSPOT_OBJECT_INGEST_SYSTEM_PROMPT,
   placeMovingAnthropicCacheBreakpoint,
+  runAttioObjectAgentIngest,
+  runGitHubActivityAgentIngest,
   runGmailThreadAgentIngest,
   runGoatChatCaptureAgentIngest,
   runJamieMeetingAgentIngest,
@@ -280,6 +287,74 @@ function attioItem() {
   });
 }
 
+function githubCommentItem() {
+  const item = normalizeGitHubActivityWebhook(
+    "issue_comment",
+    {
+      action: "created",
+      repository: { id: 4242, full_name: "acme/api", private: false },
+      issue: {
+        number: 45,
+        title: "Billing webhook drops retries",
+        html_url: "https://github.com/acme/api/issues/45",
+        labels: [{ name: "bug" }],
+      },
+      comment: {
+        id: 987654321,
+        body: "We decided to drop retries older than 24h and alert on the rest.",
+        html_url: "https://github.com/acme/api/issues/45#issuecomment-987654321",
+        user: { login: "grace" },
+        created_at: "2026-07-02T08:15:00Z",
+      },
+      installation: { id: 777 },
+    },
+    { capturedAt: "2026-07-02T08:16:00.000Z" },
+  );
+  if (!item) throw new Error("Expected GitHub comment fixture to normalize.");
+  return item;
+}
+
+function githubOpenedIssueItem() {
+  const item = normalizeGitHubActivityWebhook(
+    "issues",
+    {
+      action: "opened",
+      repository: { id: 4242, full_name: "acme/api", private: false },
+      issue: {
+        number: 45,
+        title: "Billing webhook drops retries",
+        body: "Stripe retries are acknowledged before processing.",
+        html_url: "https://github.com/acme/api/issues/45",
+        user: { login: "ada" },
+        created_at: "2026-07-01T10:00:00Z",
+        labels: [{ name: "bug" }],
+      },
+      installation: { id: 777 },
+    },
+    { capturedAt: "2026-07-01T10:01:00.000Z" },
+  );
+  if (!item) throw new Error("Expected GitHub issue fixture to normalize.");
+  return item;
+}
+
+function triageResult(
+  decision: "skip" | "ingest",
+  overrides: Partial<GoatBrainIngestTriageTrace> = {},
+): GoatBrainIngestTriageTrace {
+  return {
+    model: "openai/gpt-5.4-nano",
+    decision,
+    reason:
+      decision === "skip"
+        ? "Routine acknowledgement with no durable knowledge."
+        : "Contains a durable product decision.",
+    entityHints: decision === "ingest" ? ["Onboarding", "Acme"] : [],
+    usage: { inputTokens: 2_000, outputTokens: 100, totalTokens: 2_100 },
+    modelCostUsdMicros: 525,
+    ...overrides,
+  };
+}
+
 type CapturedTool = {
   execute: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
 };
@@ -368,6 +443,14 @@ beforeEach(() => {
   workspacesMock.getGoatBrainIntelligence.mockResolvedValue("basic");
   workspacesMock.getGoatUserDisplayName.mockResolvedValue(null);
   agentRuntimeMock.executeExaSearchRequest.mockReset();
+  aiMock.generateObject.mockResolvedValue({
+    object: {
+      decision: "ingest",
+      reason: "May contain durable knowledge.",
+      entityHints: [],
+    },
+    usage: { inputTokens: 200, outputTokens: 20, totalTokens: 220 },
+  });
 });
 
 describe("validateGoatBrainAgentInvocation", () => {
@@ -758,6 +841,186 @@ describe("buildGmailThreadEvidenceWrite", () => {
     expect(first.evidenceContent).toContain("Attached is the term sheet we discussed.");
     expect(first.evidenceContent).toContain("gmail:message:msg_1");
     expect(first.truncatedBodies).toBe(false);
+  });
+});
+
+describe("cheap source triage", () => {
+  it("skips obvious Gmail noise before Brain materialization or evidence writes", async () => {
+    goatGmailMock.getGoatGmailBrainSourceInstructions.mockResolvedValueOnce(
+      "Only investor emails.",
+    );
+    const runTriage = vi.fn(async () => triageResult("skip"));
+
+    const result = await runGmailThreadAgentIngest(
+      {
+        jobId: "job_gmail_skip",
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        integrationId: "gint_gmail",
+        item: gmailItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli, runTriage },
+    );
+
+    expect(runTriage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ingestJobId: "job_gmail_skip",
+        brainRef: "gbrain_123",
+        prompt: expect.stringContaining("Only investor emails."),
+      }),
+    );
+    expect(brainFilesMock.materializeGoatBrainFilesToRoot).not.toHaveBeenCalled();
+    expect(localBrainMock.writeLocalBrainFile).not.toHaveBeenCalled();
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).not.toHaveBeenCalled();
+    expect(aiMock.generateText).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      skipped: true,
+      skipMode: "triage",
+      triageSkippedBeforeMaterialization: true,
+      mutations: 0,
+      upserted: 0,
+      budget: {
+        modelCostUsdMicros: 525,
+        totalCostUsdMicros: 525,
+      },
+      trace: {
+        model: "openai/gpt-5.4-nano",
+        triage: {
+          decision: "skip",
+          modelCostUsdMicros: 525,
+        },
+      },
+    });
+  });
+
+  it("passes triage entity hints into the full Slack agent and shares its cost budget", async () => {
+    let seenPrompt = "";
+    aiMock.generateText.mockImplementationOnce(
+      async (options: {
+        tools: Record<string, CapturedTool>;
+        messages: CapturedMessage[];
+        onStepFinish?: (event: { usage: Record<string, unknown> }) => Promise<void> | void;
+      }) => {
+        seenPrompt = userPromptFrom(options);
+        await options.tools.goat_brain?.execute({
+          command: "timeline-add",
+          args: ["onboarding", "--body", "Ship decision."],
+        });
+        const totalUsage = { inputTokens: 100, outputTokens: 50, totalTokens: 150 };
+        await options.onStepFinish?.({ usage: totalUsage });
+        return { text: "Updated onboarding.", steps: [{}, {}], totalUsage };
+      },
+    );
+
+    const result = await runSlackConversationAgentIngest(
+      {
+        jobId: "job_slack_ingest",
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: slackItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      {
+        runCli: okCli,
+        runTriage: vi.fn(async () =>
+          triageResult("ingest", { entityHints: ["Onboarding", "Acme"] }),
+        ),
+      },
+    );
+
+    expect(seenPrompt).toContain("## Cheap triage handoff");
+    expect(seenPrompt).toContain("Query likely matching entities before writing.");
+    expect(seenPrompt).toContain("- Onboarding");
+    expect(seenPrompt).toContain("- Acme");
+    expect(result).toMatchObject({
+      skipped: false,
+      budget: {
+        // $0.000525 triage + $0.000295 Kimi full-agent step.
+        modelCostUsdMicros: 820,
+        totalCostUsdMicros: 820,
+      },
+      trace: {
+        model: "moonshotai/kimi-k2.6",
+        triage: {
+          decision: "ingest",
+          entityHints: ["Onboarding", "Acme"],
+        },
+      },
+    });
+  });
+
+  it("falls back to the full agent when cheap triage fails", async () => {
+    mockAgentRun({ finalText: "SKIP" });
+
+    const result = await runSlackConversationAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: slackItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      {
+        runCli: okCli,
+        runTriage: vi.fn(async () => {
+          throw new Error("triage provider unavailable");
+        }),
+      },
+    );
+
+    expect(brainFilesMock.materializeGoatBrainFilesToRoot).toHaveBeenCalled();
+    expect(brainFilesMock.syncGoatBrainFilesFromRoot).toHaveBeenCalled();
+    expect(result).toMatchObject({ skipped: true, skipMode: "explicit" });
+    expect(result).not.toHaveProperty("triageSkippedBeforeMaterialization");
+  });
+
+  it("triages Attio activity before starting the full agent", async () => {
+    const result = await runAttioObjectAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: attioItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      {
+        runCli: okCli,
+        runTriage: vi.fn(async () => triageResult("skip")),
+      },
+    );
+
+    expect(result).toMatchObject({ skipped: true, skipMode: "triage" });
+    expect(brainFilesMock.materializeGoatBrainFilesToRoot).not.toHaveBeenCalled();
+  });
+
+  it("triages GitHub comments but sends opened issues directly to the full agent", async () => {
+    const runTriage = vi.fn(async () => triageResult("skip"));
+    const commentResult = await runGitHubActivityAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: githubCommentItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli, runTriage },
+    );
+    expect(commentResult).toMatchObject({ skipped: true, skipMode: "triage" });
+
+    mockAgentRun({
+      finalText: "Updated billing project.",
+      toolInvocations: [{ command: "timeline-add", args: ["billing", "--body", "Bug opened."] }],
+    });
+    const openedResult = await runGitHubActivityAgentIngest(
+      {
+        userWorkosId: "user_123",
+        brainRef: "gbrain_123",
+        item: githubOpenedIssueItem(),
+        env: { vercelAiGatewayApiKey: "gw_test" },
+      },
+      { runCli: okCli, runTriage },
+    );
+
+    expect(openedResult).toMatchObject({ skipped: false });
+    expect(runTriage).toHaveBeenCalledTimes(1);
   });
 });
 
