@@ -15,6 +15,7 @@ import {
   isNormalizedUploadAssetSourceItem,
   normalizeAttioObjectWindow,
   normalizeGitHubActivityWebhook,
+  normalizeGitHubPullRequestWindow,
   normalizeGmailThreadWindow,
   normalizeGoatBrainPointerCapture,
   normalizeGoatChatCapture,
@@ -1132,6 +1133,68 @@ describe("GitHub activity normalization", () => {
     expect(item ? githubActivityEventType(item.content.activity) : null).toBe(
       "pull_request_commented",
     );
+  });
+
+  it("combines a pull request lifecycle into one activity window", () => {
+    const opened = normalizeGitHubActivityWebhook(
+      "pull_request",
+      { ...pullRequestPayload({ merged: false, merged_at: null }), action: "opened" },
+      { capturedAt },
+    );
+    const commented = normalizeGitHubActivityWebhook(
+      "issue_comment",
+      issueCommentPayload({
+        pullRequest: true,
+        issue: { number: 123, title: "Add usage-based billing" },
+        comment: { created_at: "2026-07-01T11:00:00Z" },
+      }),
+      { capturedAt: "2026-07-01T11:00:00.000Z" },
+    );
+    const merged = normalizeGitHubActivityWebhook("pull_request", pullRequestPayload(), {
+      capturedAt: "2026-07-01T12:00:00.000Z",
+    });
+    expect(opened).not.toBeNull();
+    expect(commented).not.toBeNull();
+    expect(merged).not.toBeNull();
+
+    const item = normalizeGitHubPullRequestWindow({
+      windowId: "gghprwin_test",
+      events: [merged!, opened!, commented!],
+      flushedAt: "2026-07-01T12:45:00.000Z",
+    });
+
+    expect(item).toMatchObject({
+      sourceProvider: "github",
+      sourceType: "activity",
+      externalId: "gghprwin_test",
+      sourceRef: "github:acme/api:pull:123",
+      occurredAt: "2026-07-01T09:30:00Z",
+      capturedAt: "2026-07-01T12:45:00.000Z",
+    });
+    expect(item.content.activity).toMatchObject({
+      kind: "pull_request",
+      number: 123,
+      state: "merged",
+      windowStart: "2026-07-01T09:30:00Z",
+      windowEnd: "2026-07-01T11:58:00Z",
+    });
+    expect(item.content.activity.events?.map((event) => event.state)).toEqual([
+      "opened",
+      "commented",
+      "merged",
+    ]);
+    expect(item.content.activity.events?.[1]).toMatchObject({
+      author: "grace",
+      body: "We decided to drop retries older than 24h and alert on the rest.",
+    });
+    expect(isNormalizedGitHubActivitySourceItem(item)).toBe(true);
+
+    const replay = normalizeGitHubPullRequestWindow({
+      windowId: "gghprwin_other",
+      events: [opened!, commented!, merged!],
+      flushedAt: "2026-07-02T00:00:00.000Z",
+    });
+    expect(replay.contentHash).toBe(item.contentHash);
   });
 
   it("ignores edited and deleted comments", () => {

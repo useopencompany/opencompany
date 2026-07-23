@@ -27,6 +27,7 @@ import {
   sweepTerminalGoatCodexChatSandboxes,
 } from "./goat-codex-chat-worker";
 import { startGoatFathomPollWorker } from "./goat-fathom-poll-worker";
+import { startGoatGitHubFlushWorker } from "./goat-github-flush-worker";
 import { startGoatGmailFlushWorker } from "./goat-gmail-flush-worker";
 import { startGoatGmailPollWorker } from "./goat-gmail-poll-worker";
 import {
@@ -125,6 +126,7 @@ const goatBrainIngestWorker = env.goatTaskWorkerEnabled ? startGoatBrainIngestWo
 const goatBrainImportWorker = env.goatTaskWorkerEnabled ? startGoatBrainImportWorker(env) : null;
 const goatSlackFlushWorker = env.goatTaskWorkerEnabled ? startGoatSlackFlushWorker() : null;
 const goatLinearFlushWorker = env.goatTaskWorkerEnabled ? startGoatLinearFlushWorker() : null;
+const goatGitHubFlushWorker = env.goatTaskWorkerEnabled ? startGoatGitHubFlushWorker() : null;
 const goatHubspotFlushWorker = env.goatTaskWorkerEnabled ? startGoatHubspotFlushWorker(env) : null;
 const goatAttioFlushWorker = env.goatTaskWorkerEnabled ? startGoatAttioFlushWorker() : null;
 const goatGmailPollWorker = env.goatTaskWorkerEnabled ? startGoatGmailPollWorker(env) : null;
@@ -214,6 +216,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatBrainImportWorker?.stop() ?? Promise.resolve(),
       goatSlackFlushWorker?.stop() ?? Promise.resolve(),
       goatLinearFlushWorker?.stop() ?? Promise.resolve(),
+      goatGitHubFlushWorker?.stop() ?? Promise.resolve(),
       goatHubspotFlushWorker?.stop() ?? Promise.resolve(),
       goatAttioFlushWorker?.stop() ?? Promise.resolve(),
       goatGmailPollWorker?.stop() ?? Promise.resolve(),
