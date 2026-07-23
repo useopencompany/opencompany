@@ -748,9 +748,11 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
               <span className="min-w-0 truncate">{tool.detail}</span>
             </span>
           ) : null}
-          <span className={`${meta.className} shrink-0 text-[10.5px] font-medium`}>
-            {tool.statusText}
-          </span>
+          {tool.statusText !== "Done" ? (
+            <span className={`${meta.className} shrink-0 text-[10.5px] font-medium`}>
+              {tool.statusText}
+            </span>
+          ) : null}
         </button>
       </div>
       {expanded ? (
