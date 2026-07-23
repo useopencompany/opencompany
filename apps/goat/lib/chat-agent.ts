@@ -49,10 +49,14 @@ import {
   USE_ACTION_TOOL_NAME,
   type UseActionToolInput,
   type UseActionToolOutput,
+  WEB_FETCH_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
+  type WebFetchToolInput,
+  type WebFetchToolOutput,
   type WebSearchToolInput,
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
+import { normalizePublicWebUrl } from "@/lib/chat-web-fetch";
 import {
   createOpenCompanyChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
@@ -84,6 +88,8 @@ import {
   USE_ACTION_ACTION_DESCRIPTION,
   USE_ACTION_PARAMS_DESCRIPTION,
   USE_ACTION_TOOL_DESCRIPTION,
+  WEB_FETCH_TOOL_DESCRIPTION,
+  WEB_FETCH_URL_DESCRIPTION,
   WEB_SEARCH_QUERY_DESCRIPTION,
   WEB_SEARCH_RECENCY_DAYS_DESCRIPTION,
   WEB_SEARCH_TOOL_DESCRIPTION,
@@ -118,6 +124,7 @@ type GoatBrainCliRunner = (
   executionContext?: unknown,
 ) => Promise<GoatBrainToolOutput>;
 type SaveToBrainRunner = (input: SaveToBrainToolInput) => Promise<SaveToBrainToolOutput>;
+type WebFetchRunner = (input: WebFetchToolInput) => Promise<WebFetchToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
 type ScheduleTaskRunner = (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
 type EditTaskScheduleRunner = (
@@ -202,6 +209,7 @@ export async function runOpenCompanyChatAgent(input: {
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
+  webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
   actions?: ActionDispatcher;
   goatBrainMultiBrain?: { targets: readonly GoatBrainMultiBrainTarget[] };
@@ -250,12 +258,14 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
+    ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
     ...(input.actions ? { actions: input.actions } : {}),
     ...(input.goatBrainMultiBrain ? { goatBrainMultiBrain: input.goatBrainMultiBrain } : {}),
   });
 
   const systemPromptInput = {
+    webFetchEnabled: Boolean(input.webFetch),
     webSearchEnabled: Boolean(input.webSearch),
     ...(input.currentDate ? { currentDate: input.currentDate } : {}),
     ...(input.userContext ? { userContext: input.userContext } : {}),
@@ -334,6 +344,7 @@ export function createOpenCompanyChatToolContext(input: {
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
+  webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
   actions?: ActionDispatcher;
   // When several brains are in scope (e.g. a Slack channel routed to more than
@@ -346,6 +357,7 @@ export function createOpenCompanyChatToolContext(input: {
   let scheduledTask: ScheduleTaskToolOutput | null = null;
   let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
   let visibleToolActivity = false;
+  let webFetchCallCount = 0;
   let webSearchCallCount = 0;
   let actionCallCount = 0;
   let repairToolCall: ToolCallRepairFunction<ToolSet> | undefined;
@@ -661,6 +673,44 @@ export function createOpenCompanyChatToolContext(input: {
       execute: async (args) => {
         visibleToolActivity = true;
         return input.deleteTaskSchedule!(args);
+      },
+    });
+  }
+
+  const webFetch = input.webFetch;
+  if (webFetch) {
+    tools[WEB_FETCH_TOOL_NAME] = tool<WebFetchToolInput, WebFetchToolOutput>({
+      description: WEB_FETCH_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<WebFetchToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          url: {
+            type: "string",
+            description: WEB_FETCH_URL_DESCRIPTION,
+          },
+        },
+        required: ["url"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        let url: string;
+        try {
+          url = normalizePublicWebUrl(typeof args.url === "string" ? args.url : "");
+        } catch (error) {
+          return {
+            ok: false,
+            error: error instanceof Error ? error.message : "web_fetch URL is invalid.",
+          };
+        }
+        if (webFetchCallCount >= 1) {
+          return {
+            ok: false,
+            error: "web_fetch is limited to one URL per chat turn.",
+          };
+        }
+        webFetchCallCount += 1;
+        return webFetch({ url });
       },
     });
   }

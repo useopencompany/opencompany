@@ -44,6 +44,8 @@ export const GOAT_BRAIN_TOOL_NAME = "goat_brain";
 export const GOAT_BRAIN_TOOL_PART_TYPE = `tool-${GOAT_BRAIN_TOOL_NAME}` as const;
 export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
 export const SAVE_TO_BRAIN_TOOL_PART_TYPE = `tool-${SAVE_TO_BRAIN_TOOL_NAME}` as const;
+export const WEB_FETCH_TOOL_NAME = "web_fetch";
+export const WEB_FETCH_TOOL_PART_TYPE = `tool-${WEB_FETCH_TOOL_NAME}` as const;
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
 export const LIST_ACTIONS_TOOL_NAME = "list_actions";
@@ -261,6 +263,27 @@ export type WebSearchToolInput = {
   recencyDays?: 7 | 30 | 90;
 };
 
+export type WebFetchToolInput = {
+  url: string;
+};
+
+export type WebFetchToolOutput =
+  | {
+      ok: true;
+      url: string;
+      title?: string;
+      author?: string;
+      publishedDate?: string;
+      text: string;
+      truncated?: boolean;
+      requestId?: string;
+      costUsdMicros?: number;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 export type WebSearchToolResult = {
   title?: string;
   url?: string;
@@ -352,6 +375,10 @@ export type GoatChatTools = {
   save_to_brain: {
     input: SaveToBrainToolInput;
     output: SaveToBrainToolOutput;
+  };
+  web_fetch: {
+    input: WebFetchToolInput;
+    output: WebFetchToolOutput;
   };
   web_search: {
     input: WebSearchToolInput;

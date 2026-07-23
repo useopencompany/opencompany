@@ -945,7 +945,95 @@ describe("POST /api/chat", () => {
     }
   });
 
-  it("omits web_search when EXA_API_KEY is absent", async () => {
+  it("wires Exa-backed web_fetch into the model stream when configured", async () => {
+    vi.stubEnv("EXA_API_KEY", "exa_test");
+    mockAuth();
+    mockCreateTurn();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            requestId: "exa_contents_123",
+            costDollars: { total: 0.001 },
+            results: [
+              {
+                title: "Example article",
+                url: "https://example.com/article",
+                author: "Ada Lovelace",
+                publishedDate: "2026-07-03",
+                text: "This is the readable article.",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    let webFetchToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const typedOptions = options as {
+        system?: string;
+        tools?: { web_fetch?: { execute?: unknown } };
+      };
+      expect(typedOptions.system).toContain("Use web_fetch when the user provides a public URL");
+      expect(typedOptions.system).toContain(
+        "use web_search instead only when a page must be discovered",
+      );
+      const tool = typedOptions.tools?.web_fetch;
+      if (typeof tool?.execute !== "function") {
+        throw new Error("web_fetch execute function was not configured.");
+      }
+      webFetchToolPromise = tool.execute({
+        url: "https://example.com/article#intro",
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.5",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "https://example.com/article#intro" }],
+        },
+      }),
+    );
+    const output = await webFetchToolPromise;
+    const [, fetchInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+
+    expect(response.status).toBe(200);
+    expect(output).toEqual({
+      ok: true,
+      url: "https://example.com/article",
+      title: "Example article",
+      author: "Ada Lovelace",
+      publishedDate: "2026-07-03",
+      text: "This is the readable article.",
+      requestId: "exa_contents_123",
+      costUsdMicros: 1000,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.exa.ai/contents",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": "exa_test",
+        },
+      }),
+    );
+    expect(JSON.parse(String(fetchInit.body))).toEqual({
+      urls: ["https://example.com/article"],
+      text: { maxCharacters: 20_000 },
+      maxAgeHours: 24,
+      livecrawlTimeout: 15_000,
+    });
+  });
+
+  it("omits public-web tools when EXA_API_KEY is absent", async () => {
     vi.stubEnv("EXA_API_KEY", "");
     mockAuth();
     mockCreateTurn();
@@ -953,10 +1041,12 @@ describe("POST /api/chat", () => {
       const typedOptions = options as {
         system?: string;
         stopWhen?: unknown;
-        tools?: { web_search?: unknown };
+        tools?: { web_fetch?: unknown; web_search?: unknown };
       };
       expect(typedOptions.stopWhen).toEqual({ count: OPENCOMPANY_CHAT_MAX_STEPS });
+      expect(typedOptions.tools?.web_fetch).toBeUndefined();
       expect(typedOptions.tools?.web_search).toBeUndefined();
+      expect(typedOptions.system).not.toContain("Use web_fetch when the user provides");
       expect(typedOptions.system).not.toContain("Use the web_search tool inside chat");
       return {
         toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),

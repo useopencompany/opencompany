@@ -12,6 +12,7 @@ import {
   type GoatChatUiMessage,
   type GoatCodexRuntimeView,
   START_TASK_TOOL_PART_TYPE,
+  WEB_FETCH_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
@@ -2748,6 +2749,44 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Web Search")).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
     expect(screen.getByText("query: latest Google updates")).toBeInTheDocument();
+  });
+
+  it("renders persisted failed web fetch tool calls with a generic tool row", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [
+                {
+                  type: WEB_FETCH_TOOL_PART_TYPE,
+                  toolCallId: "tool_fetch_1",
+                  state: "output-available",
+                  input: { url: "https://example.com/article" },
+                  output: {
+                    ok: false,
+                    error: "Web fetch returned no readable page content.",
+                  },
+                },
+              ],
+            } as unknown as GoatChatUiMessage,
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("chat-tool-call-web_fetch")).toBeInTheDocument();
+    expect(screen.getByText("Web Fetch")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Web fetch returned no readable page content.")).toBeInTheDocument();
   });
 
   it("labels freshly created result rows as just now", () => {
