@@ -28,14 +28,30 @@ describe("goatOnboardingFoldersForRole", () => {
 });
 
 describe("parseGoatOnboardingProfile", () => {
-  it("normalizes a supported role and company URL", () => {
-    expect(parseGoatOnboardingProfile({ role: "founder", companyUrl: " opencompany.ai " })).toEqual(
-      {
-        ok: true,
+  it.each([
+    [" opencompany.ai ", "https://opencompany.ai/"],
+    ["https:opencompany.ai/about", "https://opencompany.ai/about"],
+    ["http://opencompany.ai", "http://opencompany.ai/"],
+    ["https://opencompany.ai/company#team", "https://opencompany.ai/company"],
+  ])("normalizes a supported role and company URL (%s)", (companyUrl, normalizedCompanyUrl) => {
+    expect(parseGoatOnboardingProfile({ role: "founder", companyUrl })).toEqual({
+      ok: true,
+      role: "founder",
+      companyUrl: normalizedCompanyUrl,
+    });
+  });
+
+  it("accepts a well-formed URL without requiring the website to be reachable", () => {
+    expect(
+      parseGoatOnboardingProfile({
         role: "founder",
-        companyUrl: "https://opencompany.ai/",
-      },
-    );
+        companyUrl: "https://temporarily-unavailable.example",
+      }),
+    ).toEqual({
+      ok: true,
+      role: "founder",
+      companyUrl: "https://temporarily-unavailable.example/",
+    });
   });
 
   it("rejects missing or unsupported roles", () => {

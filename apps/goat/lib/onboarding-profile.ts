@@ -43,7 +43,11 @@ export function normalizeGoatOnboardingCompanyUrl(value: unknown): string | null
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH) return null;
 
-  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const candidate = /^https?:/i.test(trimmed)
+    ? trimmed
+    : /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`;
   try {
     const url = new URL(candidate);
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;

@@ -66,7 +66,6 @@ import {
   goatBrainSourceNeedsConfig,
 } from "@/lib/brain-sources/registry";
 import {
-  checkGoatOnboardingCompanyUrlAction,
   checkGoatWorkspaceSlugAction,
   finishGoatOnboardingAction,
   saveGoatOnboardingBrainFoldersAction,
@@ -219,7 +218,7 @@ function foldersForRole(role: GoatOnboardingRole | null): string[] {
 // ---------------------------------------------------------------------------
 
 type SlugStatus = "idle" | "checking" | "available" | "taken";
-type CompanyUrlStatus = "idle" | "checking" | "verified" | "invalid";
+type CompanyUrlStatus = "idle" | "valid" | "invalid";
 
 export function OnboardingWizard({
   user,
@@ -269,11 +268,6 @@ export function OnboardingWizard({
     slug: string;
     available: boolean;
   } | null>(null);
-  const [companyUrlCheck, setCompanyUrlCheck] = useState<{
-    companyUrl: string;
-    reachable: boolean;
-    error: string | null;
-  } | null>(null);
   // Source details live here (not inside SourcesStep) so the leave-step gate can
   // read whether anything is actually feeding the brain.
   const [sourceDetails, setSourceDetails] = useState(initialSourceDetails);
@@ -296,18 +290,11 @@ export function OnboardingWizard({
   const isLast = stepIndex === STEPS.length - 1;
   const effectiveSlug = slugTouched ? slug : slugify(workspaceName);
   const normalizedCompanyUrl = normalizeGoatOnboardingCompanyUrl(companyUrl);
-  const shouldCheckCompanyUrl = step.key === "profile" && normalizedCompanyUrl !== null;
   const companyUrlStatus: CompanyUrlStatus = !companyUrl.trim()
     ? "idle"
-    : !normalizedCompanyUrl
-      ? "invalid"
-      : companyUrlCheck?.companyUrl === normalizedCompanyUrl
-        ? companyUrlCheck.reachable
-          ? "verified"
-          : "invalid"
-        : "checking";
-  const companyUrlError =
-    companyUrlCheck?.companyUrl === normalizedCompanyUrl ? companyUrlCheck.error : null;
+    : normalizedCompanyUrl
+      ? "valid"
+      : "invalid";
   const shouldCheckSlug = step.key === "workspace" && effectiveSlug.length > 0;
   const slugStatus: SlugStatus = !shouldCheckSlug
     ? "idle"
@@ -333,26 +320,6 @@ export function OnboardingWizard({
     }, 400);
     return () => window.clearTimeout(timer);
   }, [effectiveSlug, shouldCheckSlug]);
-
-  useEffect(() => {
-    if (!shouldCheckCompanyUrl || !normalizedCompanyUrl) return;
-    const timer = window.setTimeout(() => {
-      void checkGoatOnboardingCompanyUrlAction(normalizedCompanyUrl)
-        .then((result) => {
-          const checkedUrl = result.companyUrl;
-          if (!checkedUrl) return;
-          setCompanyUrlCheck({ ...result, companyUrl: checkedUrl });
-        })
-        .catch(() => {
-          setCompanyUrlCheck({
-            companyUrl: normalizedCompanyUrl,
-            reachable: false,
-            error: "We couldn't verify that company URL. Try again.",
-          });
-        });
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [normalizedCompanyUrl, shouldCheckCompanyUrl]);
 
   // Saves the current step server-side; returns false (and toasts) on rejection.
   const persistCurrentStep = async (): Promise<boolean> => {
@@ -419,7 +386,7 @@ export function OnboardingWizard({
 
   const canContinue =
     step.key === "profile"
-      ? role !== null && companyUrlStatus === "verified"
+      ? role !== null && companyUrlStatus === "valid"
       : step.key === "workspace"
         ? workspaceName.trim().length > 0 && effectiveSlug.length > 0 && slugStatus !== "taken"
         : true;
@@ -445,7 +412,6 @@ export function OnboardingWizard({
               companyUrl={companyUrl}
               onCompanyUrl={setCompanyUrl}
               companyUrlStatus={companyUrlStatus}
-              companyUrlError={companyUrlError}
             />
           )}
           {step.key === "workspace" && (
@@ -661,7 +627,6 @@ function ProfileStep({
   companyUrl,
   onCompanyUrl,
   companyUrlStatus,
-  companyUrlError,
 }: {
   user: OnboardingUser;
   role: GoatOnboardingRole | null;
@@ -669,16 +634,13 @@ function ProfileStep({
   companyUrl: string;
   onCompanyUrl: (v: string) => void;
   companyUrlStatus: CompanyUrlStatus;
-  companyUrlError: string | null;
 }) {
   const companyUrlHint =
-    companyUrlStatus === "checking"
-      ? "Checking website…"
-      : companyUrlStatus === "verified"
-        ? "Website verified. We'll use it to start your first Brain research run."
-        : companyUrlStatus === "invalid"
-          ? (companyUrlError ?? "Enter a valid company URL.")
-          : "We'll use this to start your first Brain research run.";
+    companyUrlStatus === "valid"
+      ? "URL looks good. We'll use it to start your first Brain research run."
+      : companyUrlStatus === "invalid"
+        ? "Enter a valid company URL."
+        : "We'll use this to start your first Brain research run.";
 
   return (
     <div>

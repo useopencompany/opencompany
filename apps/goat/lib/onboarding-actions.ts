@@ -14,11 +14,7 @@ import {
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import { createGoatBrainFolderForUser, deleteGoatBrainFolderForUser } from "@/lib/brain";
-import { verifyGoatOnboardingCompanyUrl } from "@/lib/onboarding-company-url.server";
-import {
-  normalizeGoatOnboardingCompanyUrl,
-  parseGoatOnboardingProfile,
-} from "@/lib/onboarding-profile";
+import { parseGoatOnboardingProfile } from "@/lib/onboarding-profile";
 import { getWorkOSClient } from "@/lib/workos-client";
 
 export type GoatOnboardingActionResult = { ok: true } | { ok: false; error: string };
@@ -49,23 +45,6 @@ export async function checkGoatWorkspaceSlugAction(
     excludeWorkspaceId: context.workspace.id,
   });
   return { slug, available };
-}
-
-export async function checkGoatOnboardingCompanyUrlAction(rawUrl: string): Promise<{
-  companyUrl: string | null;
-  reachable: boolean;
-  error: string | null;
-}> {
-  await currentGoatUser();
-  const companyUrl = normalizeGoatOnboardingCompanyUrl(rawUrl);
-  if (!companyUrl) {
-    return { companyUrl: null, reachable: false, error: "Enter a valid company URL." };
-  }
-
-  const verification = await verifyGoatOnboardingCompanyUrl(companyUrl);
-  return verification.ok
-    ? { companyUrl, reachable: true, error: null }
-    : { companyUrl, reachable: false, error: verification.error };
 }
 
 export async function saveGoatOnboardingWorkspaceAction(input: {
@@ -147,8 +126,6 @@ export async function saveGoatOnboardingProfileAction(input: {
   const context = await currentGoatUser();
   const profile = parseGoatOnboardingProfile(input);
   if (!profile.ok) return profile;
-  const verification = await verifyGoatOnboardingCompanyUrl(profile.companyUrl);
-  if (!verification.ok) return verification;
   try {
     await upsertGoatOnboarding({
       userWorkosId: context.user.workosUserId,
