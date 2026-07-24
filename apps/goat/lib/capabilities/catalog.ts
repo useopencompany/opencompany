@@ -31,7 +31,7 @@ export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
   x: {
     label: "X",
     description:
-      "Search public posts and profiles, inspect profiles, and browse follower relationships on X.",
+      "Search public posts and profiles, inspect threads and replies, and browse follower relationships on X.",
   },
   linkedin: {
     label: "LinkedIn",
