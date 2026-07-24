@@ -1042,7 +1042,7 @@ describe("list_actions and use_action tools", () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
-  it("limits parallel provider attempts for one action to the retry budget", async () => {
+  it("queues healthy parallel calls instead of treating in-flight work as failures", async () => {
     let releaseProvider!: () => void;
     const providerGate = new Promise<void>((resolve) => {
       releaseProvider = resolve;
@@ -1061,6 +1061,88 @@ describe("list_actions and use_action tools", () => {
       },
     });
 
+    const attempts = Array.from({ length: 6 }, (_, index) =>
+      executeUseActionTool(context.tools, {
+        action: "slack.fetch_history",
+        params: { channel: `C${index + 1}` },
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(execute).toHaveBeenCalledTimes(2);
+    });
+    releaseProvider();
+    const results = await Promise.all(attempts);
+
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(execute).toHaveBeenCalledTimes(6);
+  });
+
+  it("blocks queued parallel calls after two completed provider failures", async () => {
+    let releaseProvider!: () => void;
+    const providerGate = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    const execute = vi.fn(async ({ action }: { action: string }): Promise<UseActionToolOutput> => {
+      await providerGate;
+      return {
+        ok: false,
+        action,
+        error: {
+          code: "provider_error",
+          source: "slack",
+          message: "Provider failed.",
+        },
+      };
+    });
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      actions: {
+        catalog,
+        prelistedSourceIds: ["slack"],
+        execute,
+      },
+    });
+
+    const attempts = Array.from({ length: 6 }, (_, index) =>
+      executeUseActionTool(context.tools, {
+        action: "slack.fetch_history",
+        params: { channel: `C${index + 1}` },
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(execute).toHaveBeenCalledTimes(2);
+    });
+    releaseProvider();
+    const results = await Promise.all(attempts);
+    const retryLimited = results.filter(
+      (result) => !result.ok && result.error.message.includes("provider retry limit"),
+    );
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(retryLimited).toHaveLength(4);
+  });
+
+  it("does not dispatch queued calls after the chat is aborted", async () => {
+    let releaseProvider!: () => void;
+    const providerGate = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    const execute = vi.fn(async ({ action }: { action: string }) => {
+      await providerGate;
+      return okResult(action);
+    });
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      actions: {
+        catalog,
+        prelistedSourceIds: ["slack"],
+        execute,
+      },
+    });
     const first = executeUseActionTool(context.tools, {
       action: "slack.fetch_history",
       params: { channel: "C1" },
@@ -1069,18 +1151,24 @@ describe("list_actions and use_action tools", () => {
       action: "slack.fetch_history",
       params: { channel: "C2" },
     });
-    const blocked = await executeUseActionTool(context.tools, {
-      action: "slack.fetch_history",
-      params: { channel: "C3" },
-    });
+    const controller = new AbortController();
+    const queued = executeUseActionTool(
+      context.tools,
+      {
+        action: "slack.fetch_history",
+        params: { channel: "C3" },
+      },
+      { abortSignal: controller.signal },
+    );
 
-    expect(blocked).toMatchObject({
-      ok: false,
-      error: { code: "provider_error" },
+    await vi.waitFor(() => {
+      expect(execute).toHaveBeenCalledTimes(2);
     });
-    expect(execute).toHaveBeenCalledTimes(2);
+    controller.abort(new Error("Chat aborted."));
+    await expect(queued).rejects.toThrow("Chat aborted.");
     releaseProvider();
     await Promise.all([first, second]);
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 
   it("dispatches valid calls and steers invalid or over-budget ones", async () => {
@@ -1416,13 +1504,18 @@ async function executeListActionsTool(
 async function executeUseActionTool(
   tools: unknown,
   input: UseActionToolInput,
+  options?: { abortSignal?: AbortSignal },
 ): Promise<UseActionToolOutput> {
   type Tools = Record<typeof USE_ACTION_TOOL_NAME, { execute?: unknown }>;
   const tool = (tools as Tools)[USE_ACTION_TOOL_NAME];
   if (typeof tool?.execute !== "function") {
     throw new Error(`${USE_ACTION_TOOL_NAME} execute function was not configured.`);
   }
-  return tool.execute(input, { toolCallId: "call_1", messages: [] });
+  return tool.execute(input, {
+    toolCallId: "call_1",
+    messages: [],
+    ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+  });
 }
 
 async function needsApprovalForUseAction(tools: unknown, input: UseActionToolInput) {
