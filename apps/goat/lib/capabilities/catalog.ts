@@ -759,7 +759,7 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     id: "lead.search_prospects",
     source: "lead",
     description:
-      "Find targeted professional prospects by current title or seniority, person or company location, company industry, and company employee count. Filters are ANDed across fields and ORed within each list. For titles, include common variants such as CTO and chief technology officer. Company industries use provider taxonomy such as computer software.",
+      "Find targeted professional prospects by current title or seniority, person or company location, company industry, and provider-estimated company employee count. Filters are ANDed across fields and ORed within each list. For titles, include common variants such as CTO and chief technology officer. Company industries use provider taxonomy such as computer software.",
     params: {
       type: "object",
       additionalProperties: false,
@@ -808,14 +808,14 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
           type: "integer",
           minimum: 0,
           maximum: 10_000_000,
-          description: "Inclusive minimum current company employee count.",
+          description: "Inclusive minimum provider-estimated current company employee count.",
         },
         maxCompanyEmployees: {
           type: "integer",
           minimum: 0,
           maximum: 10_000_000,
           description:
-            "Inclusive maximum current company employee count. For fewer than 5 employees, pass 4.",
+            "Inclusive maximum provider-estimated current company employee count. For fewer than 5 employees, pass 4.",
         },
         requireWorkEmail: {
           type: "boolean",
