@@ -30,7 +30,8 @@ export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
 > = {
   x: {
     label: "X",
-    description: "Search public posts, profiles, threads, and replies on X.",
+    description:
+      "Search public posts and profiles, inspect profiles, and browse follower relationships on X.",
   },
   linkedin: {
     label: "LinkedIn",
@@ -244,6 +245,29 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
       };
     },
   },
+  {
+    id: "x.search_profiles",
+    source: "x",
+    description:
+      "Search X's public People results by keyword. Matches are X-ranked and may include names, handles, or profile text.",
+    params: SEARCH_PARAMS,
+    provider: TIKHUB,
+    endpoint: "/api/v1/twitter/web/fetch_search_timeline",
+    priceType: "PER_CALL",
+    executionMode: "sync",
+    mapInput: (raw) => {
+      const params = checkedParams(raw, ["query", "cursor", "limit"]);
+      return {
+        providerInput: compact({
+          keyword: requiredText(params, "query", 300),
+          search_type: "People",
+          cursor: cursorParam(params),
+        }),
+        resultLimit: limitParam(params, 20, 20),
+        canonicalLinks: [],
+      };
+    },
+  },
   profileAction({
     id: "x.get_profile",
     source: "x",
@@ -256,6 +280,14 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     source: "x",
     description: "List recent public posts from an X profile.",
     endpoint: "/api/v1/twitter/web/fetch_user_post_tweet",
+    platform: "x",
+    defaultLimit: 20,
+  }),
+  profileListAction({
+    id: "x.list_followers",
+    source: "x",
+    description: "List public followers of an X profile.",
+    endpoint: "/api/v1/twitter/web/fetch_user_followers",
     platform: "x",
     defaultLimit: 20,
   }),
@@ -966,7 +998,7 @@ export function managedCapabilityContractProbeParams(id: string): Record<string,
     return { url: "https://www.tiktok.com/@openai/video/123456789" };
   }
   if (id.startsWith("x.")) {
-    if (id.includes("profile")) return { profile: "openai" };
+    if (id.includes("profile") || id.includes("followers")) return { profile: "openai" };
     return { url: "https://x.com/openai/status/123456789" };
   }
   throw new Error(`No contract probe is defined for ${id}.`);

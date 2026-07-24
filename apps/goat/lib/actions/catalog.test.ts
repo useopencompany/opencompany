@@ -172,7 +172,7 @@ describe("resolveGoatActionCatalog", () => {
       ["seo", "managed"],
     ]);
     expect(catalog.actions).not.toContainEqual(expect.objectContaining({ provider: "linkedin" }));
-    expect(catalog.actions.filter((action) => action.provider === "x")).toHaveLength(5);
+    expect(catalog.actions.filter((action) => action.provider === "x")).toHaveLength(7);
     expect(catalog.actions.filter((action) => action.provider === "lead")).toHaveLength(4);
     expect(catalog.actions.filter((action) => action.provider === "seo")).toHaveLength(6);
 
@@ -186,7 +186,7 @@ describe("resolveGoatActionCatalog", () => {
     );
     expect(
       endpointDisabledCatalog.actions.filter((action) => action.provider === "x"),
-    ).toHaveLength(4);
+    ).toHaveLength(6);
     expect(endpointDisabledCatalog.providers.some((source) => source.id === "x")).toBe(true);
   });
 

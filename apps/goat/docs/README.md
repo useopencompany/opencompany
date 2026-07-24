@@ -173,6 +173,10 @@ turns. `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action
 isolation. Managed sources never participate in automatic Brain-fill surveying; the user must
 explicitly ask to save their results.
 
+Managed X profile discovery uses X's People-ranked search rather than an exact bio-field predicate.
+It can also page through the public followers of a supplied profile with the provider's opaque
+cursor.
+
 Run `bun run goat:capabilities:contract` with `MONID_API_KEY` to inspect every allowlisted
 endpoint and fail on removal or pricing/input-contract drift, including whether parameters belong
 in the request body, query, or path. The command never calls the paid run API and is intentionally
