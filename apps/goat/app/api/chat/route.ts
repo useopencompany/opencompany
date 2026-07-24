@@ -103,7 +103,7 @@ import {
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
 
-export const maxDuration = 240;
+export const maxDuration = 800;
 export const runtime = "nodejs";
 
 const logger = createLogger({
