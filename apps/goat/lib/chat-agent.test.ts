@@ -3,6 +3,7 @@ import {
   type ActionDispatcher,
   createOpenCompanyChatToolContext,
   MAX_ACTION_CALLS_PER_TURN,
+  OPENCOMPANY_CHAT_MAX_STEPS,
   runOpenCompanyChatAgent,
 } from "@/lib/chat-agent";
 import { MAX_WEB_SEARCH_CALLS_PER_TURN } from "@/lib/chat-limits";
@@ -35,6 +36,31 @@ import {
 } from "@/lib/prompts";
 
 describe("runOpenCompanyChatAgent", () => {
+  it("reserves the final model step for an answer without tools", async () => {
+    await runOpenCompanyChatAgent({
+      messages: [{ role: "user", content: "research this in chat" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      generateTextImpl: (async (options: unknown) => {
+        const prepareStep = (
+          options as {
+            prepareStep?: (input: { stepNumber: number }) => unknown;
+          }
+        ).prepareStep;
+        expect(prepareStep?.({ stepNumber: OPENCOMPANY_CHAT_MAX_STEPS - 2 })).toEqual({});
+        expect(prepareStep?.({ stepNumber: OPENCOMPANY_CHAT_MAX_STEPS - 1 })).toEqual({
+          activeTools: [],
+          toolChoice: "none",
+        });
+        return {
+          text: "Here are the useful findings.",
+          finishReason: "stop",
+          steps: [],
+        };
+      }) as never,
+    });
+  });
+
   it("includes task fallback guidance for connected-account checks", async () => {
     const startTask = vi.fn();
 
@@ -925,6 +951,113 @@ describe("list_actions and use_action tools", () => {
       error: { code: "invalid_params", source: "linear" },
     });
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts discovery carried forward from an earlier turn in the same chat", async () => {
+    const execute = vi.fn(async ({ action }: { action: string }) => okResult(action));
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      actions: {
+        catalog,
+        prelistedSourceIds: ["slack"],
+        execute,
+      },
+    });
+
+    const result = await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C123" },
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a turn-local circuit after two provider failures for one action", async () => {
+    const providerFailure = (action: string): UseActionToolOutput => ({
+      ok: false,
+      action,
+      error: {
+        code: "provider_error",
+        source: "slack",
+        message: "Provider failed.",
+      },
+    });
+    const execute = vi.fn(async ({ action }: { action: string }) => providerFailure(action));
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      actions: {
+        catalog,
+        prelistedSourceIds: ["slack"],
+        execute,
+      },
+    });
+
+    await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C1" },
+    });
+    await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C2" },
+    });
+    const blocked = await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C3" },
+    });
+
+    expect(blocked).toMatchObject({
+      ok: false,
+      error: {
+        code: "provider_error",
+        source: "slack",
+      },
+    });
+    if (!blocked.ok) expect(blocked.error.message).toContain("provider retry limit");
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("limits parallel provider attempts for one action to the retry budget", async () => {
+    let releaseProvider!: () => void;
+    const providerGate = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    const execute = vi.fn(async ({ action }: { action: string }) => {
+      await providerGate;
+      return okResult(action);
+    });
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      actions: {
+        catalog,
+        prelistedSourceIds: ["slack"],
+        execute,
+      },
+    });
+
+    const first = executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C1" },
+    });
+    const second = executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C2" },
+    });
+    const blocked = await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C3" },
+    });
+
+    expect(blocked).toMatchObject({
+      ok: false,
+      error: { code: "provider_error" },
+    });
+    expect(execute).toHaveBeenCalledTimes(2);
+    releaseProvider();
+    await Promise.all([first, second]);
   });
 
   it("dispatches valid calls and steers invalid or over-budget ones", async () => {

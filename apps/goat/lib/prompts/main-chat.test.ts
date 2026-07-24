@@ -59,10 +59,12 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     expect(prompt).toContain("write action only when the user explicitly asked");
     expect(prompt).toContain("Never claim a write happened unless the action returned ok=true");
     expect(prompt).toContain("Choose the lightest path");
-    expect(prompt).toContain("start a task for deep, multi-step, or cross-source work");
+    expect(prompt).toContain("Multi-step and cross-source research may stay in chat");
+    expect(prompt).toContain("summarize before the tool-step limit");
     expect(prompt).toContain("one quick bounded lookup");
     expect(prompt).toContain("If use_action returns invalid_params");
     expect(prompt).toContain("make at most one corrected call");
+    expect(prompt).toContain("make at most one substantially simplified retry");
     expect(prompt).toContain("<brain_fill>");
     expect(prompt).toContain("Survey breadth before depth");
     expect(prompt).toContain("exception to normal task routing");
@@ -87,12 +89,31 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     expect(prompt).not.toContain("<brain_fill>");
   });
 
-  it("drops the start-a-task routing when task tools are disabled", () => {
+  it("keeps multi-step action research in chat when task tools are disabled", () => {
     const prompt = createOpenCompanyChatSystemPrompt({
       connectedIntegrations: CONNECTED_INTEGRATIONS,
       taskToolsEnabled: false,
     });
     expect(prompt).toContain("Choose the lightest path");
-    expect(prompt).not.toContain("start a task for deep, multi-step, or cross-source work");
+    expect(prompt).toContain("Multi-step and cross-source research may stay in chat");
+  });
+
+  it("identifies managed capabilities as metered services rather than connected accounts", () => {
+    const prompt = createOpenCompanyChatSystemPrompt({
+      actionSources: [
+        {
+          id: "linkedin",
+          kind: "managed",
+          label: "LinkedIn",
+          description: "Metered public LinkedIn research.",
+        },
+      ],
+    });
+
+    expect(prompt).toContain(
+      "linkedin [managed capability] — LinkedIn: Metered public LinkedIn research.",
+    );
+    expect(prompt).toContain("metered third-party services, not connected user accounts");
+    expect(prompt).toContain("never describe them as free");
   });
 });

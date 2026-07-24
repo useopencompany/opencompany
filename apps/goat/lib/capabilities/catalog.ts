@@ -32,7 +32,8 @@ export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
   },
   linkedin: {
     label: "LinkedIn",
-    description: "Research public LinkedIn people, companies, posts, and comments.",
+    description:
+      "Metered research of public LinkedIn people, companies, posts, and comments through a managed provider; this does not connect to the user's LinkedIn account.",
   },
   youtube: {
     label: "YouTube",
@@ -48,7 +49,7 @@ export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
   },
   lead: {
     label: "Lead enrichment",
-    description: "Find and enrich professional contact data from reviewed paid sources.",
+    description: "Metered professional contact discovery from reviewed managed providers.",
   },
   seo: {
     label: "SEO",
@@ -280,12 +281,15 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     source: "linkedin",
     description: "Search public LinkedIn posts by keyword.",
     params: {
-      ...SEARCH_PARAMS,
+      type: "object",
+      additionalProperties: false,
       properties: {
-        ...SEARCH_PARAMS.properties,
+        query: SEARCH_PARAMS.properties.query,
+        limit: SEARCH_PARAMS.properties.limit,
         page: { type: "integer", minimum: 1, maximum: 20 },
         sort: { type: "string", enum: ["relevant", "recent"] },
       },
+      required: ["query"],
     },
     provider: TIKHUB,
     endpoint: "/api/v1/linkedin/web/search_posts",
@@ -297,7 +301,10 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
         providerInput: compact({
           keyword: requiredText(params, "query", 300),
           page: integerParam(params, "page", 1, 20, 1),
-          sort_by: enumParam(params, "sort", ["relevant", "recent"], undefined),
+          sort_by: enumParam(params, "sort", ["relevant", "recent"], undefined, {
+            relevant: "relevance",
+            recent: "date_posted",
+          }),
         }),
         resultLimit: limitParam(params, 10, 10),
         canonicalLinks: [],
@@ -907,12 +914,10 @@ export function managedCapabilityContractProbeParams(id: string): Record<string,
   if (id === "lead.search_people_by_name") {
     return { firstName: "Ada", lastName: "Lovelace" };
   }
-  if (
-    id.endsWith(".search") ||
-    id.includes(".search_") ||
-    id === "x.search_posts" ||
-    id === "linkedin.search_posts"
-  ) {
+  if (id === "linkedin.search_posts") {
+    return { query: "openai", sort: "relevant" };
+  }
+  if (id.endsWith(".search") || id.includes(".search_") || id === "x.search_posts") {
     return { query: "openai" };
   }
   if (id === "instagram.list_hashtag_posts") return { query: "#ai" };

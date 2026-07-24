@@ -4,6 +4,8 @@ import {
   CODEX_COMMAND_TOOL_PART_TYPE,
   compareGoatChatMessageOrder,
   type GoatStoredChatMessage,
+  LIST_ACTIONS_TOOL_PART_TYPE,
+  listedActionSourceIdsFromMessages,
   nextGoatChatMessageCreatedAt,
   START_TASK_TOOL_PART_TYPE,
   toGoatChatUiMessage,
@@ -180,6 +182,64 @@ describe("toGoatChatUiMessage", () => {
       updatedAt: "2026-07-04T12:02:33.400Z",
       durationMs: 153_400,
     });
+  });
+});
+
+describe("listedActionSourceIdsFromMessages", () => {
+  it("recovers successful action discovery from earlier persisted turns", () => {
+    const discovered = toGoatChatUiMessage(
+      storedAssistantMessage({
+        debugTrace: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          model: DEFAULT_GOAT_MODEL,
+          uiMessageParts: [
+            {
+              type: LIST_ACTIONS_TOOL_PART_TYPE,
+              toolCallId: "list_linkedin",
+              state: "output-available",
+              input: { source: "linkedin" },
+              output: {
+                ok: true,
+                source: {
+                  id: "linkedin",
+                  kind: "managed",
+                  label: "LinkedIn",
+                  description: "Metered public LinkedIn research.",
+                },
+                actions: [],
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(listedActionSourceIdsFromMessages([discovered])).toEqual(["linkedin"]);
+  });
+
+  it("ignores unsuccessful discovery results", () => {
+    const failed = {
+      id: "assistant_failed",
+      role: "assistant" as const,
+      parts: [
+        {
+          type: LIST_ACTIONS_TOOL_PART_TYPE,
+          toolCallId: "list_unknown",
+          state: "output-available" as const,
+          input: { source: "linkedin" as const },
+          output: {
+            ok: false as const,
+            error: {
+              code: "unknown_source" as const,
+              message: "Unknown source.",
+              availableSources: [],
+            },
+          },
+        },
+      ],
+    };
+
+    expect(listedActionSourceIdsFromMessages([failed])).toEqual([]);
   });
 });
 
