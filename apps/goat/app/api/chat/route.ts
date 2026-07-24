@@ -30,7 +30,6 @@ import { after } from "next/server";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import { executeGoatAction } from "@/lib/actions/execute";
 import type { GoatCapabilityTurnState, GoatResolvedActionCatalog } from "@/lib/actions/types";
-import { currentGoatUser } from "@/lib/auth";
 import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
@@ -67,6 +66,7 @@ import {
   parseGoatChatAttachmentsInput,
 } from "@/lib/chat-attachments";
 import { parseOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
+import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
 import {
   clearActiveGoatChatStream,
   getGoatChatStreamContext,
@@ -96,10 +96,10 @@ import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
   createGoatTaskScheduleForUser,
-  deleteGoatTaskScheduleAction,
+  deleteGoatTaskScheduleForUser,
   type GoatTaskScheduleView,
-  listCurrentUserGoatTaskSchedules,
-  updateGoatTaskScheduleAction,
+  listGoatTaskSchedulesForUser,
+  updateGoatTaskScheduleForUser,
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
 
@@ -127,8 +127,9 @@ type CapabilityApprovalContinuation = {
 };
 
 export async function POST(request: Request): Promise<Response> {
-  const context = await currentGoatUser({ optional: true });
-  if (!context) return new Response("Unauthorized", { status: 401 });
+  const auth = await resolveGoatChatRequestContext(request);
+  if (!auth.ok) return auth.response;
+  const { context } = auth;
 
   const body = await readJsonBody(request);
   if (!body.ok) return new Response(body.error, { status: 400 });
@@ -280,7 +281,9 @@ export async function POST(request: Request): Promise<Response> {
     : emptyCatalog;
 
   const store = createDbGoatChatStore();
-  const recurringSchedules = taskToolsEnabled ? await listCurrentUserGoatTaskSchedules() : [];
+  const recurringSchedules = taskToolsEnabled
+    ? await listGoatTaskSchedulesForUser(context.user.workosUserId)
+    : [];
   const startedAt = performance.now();
   const currentDate = new Date();
   const userIdHash = hashGoatUserId(context.user.workosUserId);
@@ -731,13 +734,17 @@ export async function POST(request: Request): Promise<Response> {
               (!scheduleTimingChanged ? target.schedule.sourceDescription : "") ||
               `${cron} - ${timezone}`;
 
-            const result = await updateGoatTaskScheduleAction(target.schedule.id, {
-              name,
-              sourceDescription,
-              cron,
-              timezone,
-              prompt,
-            });
+            const result = await updateGoatTaskScheduleForUser(
+              context.user.workosUserId,
+              target.schedule.id,
+              {
+                name,
+                sourceDescription,
+                cron,
+                timezone,
+                prompt,
+              },
+            );
             if (!result.ok) {
               return {
                 ok: false,
@@ -760,7 +767,10 @@ export async function POST(request: Request): Promise<Response> {
             const target = resolveChatScheduleTarget(recurringSchedules, input);
             if (!target.ok) return target;
 
-            const result = await deleteGoatTaskScheduleAction(target.schedule.id);
+            const result = await deleteGoatTaskScheduleForUser(
+              context.user.workosUserId,
+              target.schedule.id,
+            );
             if (!result.ok) {
               return {
                 ok: false,

@@ -32,15 +32,18 @@ export type GoatTaskScheduleView = {
 
 export async function listCurrentUserGoatTaskSchedules(): Promise<GoatTaskScheduleView[]> {
   const { user } = await currentGoatUser();
-  if (!user.taskSpawningEnabled) return [];
+  return listGoatTaskSchedulesForUser(user.workosUserId);
+}
+
+export async function listGoatTaskSchedulesForUser(
+  userWorkosId: string,
+): Promise<GoatTaskScheduleView[]> {
+  if (!(await taskSpawningEnabledForUser(userWorkosId))) return [];
   const rows = await getDb()
     .select()
     .from(goatTaskSchedules)
     .where(
-      and(
-        eq(goatTaskSchedules.userWorkosId, user.workosUserId),
-        isNull(goatTaskSchedules.deletedAt),
-      ),
+      and(eq(goatTaskSchedules.userWorkosId, userWorkosId), isNull(goatTaskSchedules.deletedAt)),
     )
     .orderBy(desc(goatTaskSchedules.createdAt))
     .limit(50);
@@ -191,7 +194,21 @@ export async function updateGoatTaskScheduleAction(
   },
 ) {
   const { user } = await currentGoatUser();
-  if (!user.taskSpawningEnabled) {
+  return updateGoatTaskScheduleForUser(user.workosUserId, scheduleId, input);
+}
+
+export async function updateGoatTaskScheduleForUser(
+  userWorkosId: string,
+  scheduleId: string,
+  input: {
+    name: string;
+    sourceDescription?: string;
+    cron: string;
+    timezone?: string | null;
+    prompt: string;
+  },
+) {
+  if (!(await taskSpawningEnabledForUser(userWorkosId))) {
     return { ok: false, error: "Background tasks are disabled." } as const;
   }
   const parsed = parseTaskScheduleInput(input);
@@ -203,7 +220,7 @@ export async function updateGoatTaskScheduleAction(
     .where(
       and(
         eq(goatTaskSchedules.id, scheduleId),
-        eq(goatTaskSchedules.userWorkosId, user.workosUserId),
+        eq(goatTaskSchedules.userWorkosId, userWorkosId),
         isNull(goatTaskSchedules.deletedAt),
       ),
     )
@@ -217,7 +234,7 @@ export async function updateGoatTaskScheduleAction(
   }
 
   const plannedHarnessSpec = await planGoatTaskHarness({
-    userWorkosId: user.workosUserId,
+    userWorkosId,
     prompt: parsed.value.prompt,
   });
 
@@ -236,9 +253,9 @@ export async function updateGoatTaskScheduleAction(
     .where(
       and(
         eq(goatTaskSchedules.id, schedule.id),
-        eq(goatTaskSchedules.userWorkosId, user.workosUserId),
+        eq(goatTaskSchedules.userWorkosId, userWorkosId),
         isNull(goatTaskSchedules.deletedAt),
-        taskSpawningEnabledForUserSql(user.workosUserId),
+        taskSpawningEnabledForUserSql(userWorkosId),
       ),
     )
     .returning({
@@ -255,7 +272,11 @@ export async function updateGoatTaskScheduleAction(
 
 export async function deleteGoatTaskScheduleAction(scheduleId: string) {
   const { user } = await currentGoatUser();
-  if (!user.taskSpawningEnabled) {
+  return deleteGoatTaskScheduleForUser(user.workosUserId, scheduleId);
+}
+
+export async function deleteGoatTaskScheduleForUser(userWorkosId: string, scheduleId: string) {
+  if (!(await taskSpawningEnabledForUser(userWorkosId))) {
     return { ok: false, error: "Background tasks are disabled." } as const;
   }
   const [updated] = await getDb()
@@ -264,9 +285,9 @@ export async function deleteGoatTaskScheduleAction(scheduleId: string) {
     .where(
       and(
         eq(goatTaskSchedules.id, scheduleId),
-        eq(goatTaskSchedules.userWorkosId, user.workosUserId),
+        eq(goatTaskSchedules.userWorkosId, userWorkosId),
         isNull(goatTaskSchedules.deletedAt),
-        taskSpawningEnabledForUserSql(user.workosUserId),
+        taskSpawningEnabledForUserSql(userWorkosId),
       ),
     )
     .returning({ id: goatTaskSchedules.id });

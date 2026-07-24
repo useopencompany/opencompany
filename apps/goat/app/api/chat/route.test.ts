@@ -2,7 +2,6 @@ import { convertToModelMessages, streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import { executeGoatAction } from "@/lib/actions/execute";
-import { currentGoatUser } from "@/lib/auth";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
@@ -12,6 +11,7 @@ import {
 } from "@/lib/brain-skills";
 import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
+import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
@@ -28,12 +28,16 @@ import {
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
-  deleteGoatTaskScheduleAction,
-  listCurrentUserGoatTaskSchedules,
-  updateGoatTaskScheduleAction,
+  deleteGoatTaskScheduleForUser,
+  listGoatTaskSchedulesForUser,
+  updateGoatTaskScheduleForUser,
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
 import { POST } from "./route";
+
+vi.mock("@/lib/chat-request-auth", () => ({
+  resolveGoatChatRequestContext: vi.fn(),
+}));
 
 vi.mock("@/lib/auth", () => ({
   currentGoatUser: vi.fn(),
@@ -83,9 +87,9 @@ vi.mock("@/lib/tasks", () => ({
 
 vi.mock("@/lib/task-schedules", () => ({
   createGoatTaskScheduleForUser: vi.fn(),
-  deleteGoatTaskScheduleAction: vi.fn(),
-  listCurrentUserGoatTaskSchedules: vi.fn(),
-  updateGoatTaskScheduleAction: vi.fn(),
+  deleteGoatTaskScheduleForUser: vi.fn(),
+  listGoatTaskSchedulesForUser: vi.fn(),
+  updateGoatTaskScheduleForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/actions/catalog", () => ({
@@ -113,7 +117,7 @@ describe("POST /api/chat", () => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "test-key");
-    mockListCurrentUserGoatTaskSchedules().mockResolvedValue([]);
+    mockListGoatTaskSchedulesForUser().mockResolvedValue([]);
     mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
     mockIsGoatChatActionsKilled().mockReturnValue(false);
     mockResolveGoatActionCatalog().mockResolvedValue({ providers: [], actions: [] });
@@ -122,7 +126,10 @@ describe("POST /api/chat", () => {
   });
 
   it("rejects unauthenticated requests", async () => {
-    mockCurrentGoatUser().mockResolvedValue(null);
+    mockResolveGoatChatRequestContext().mockResolvedValue({
+      ok: false,
+      response: new Response("Unauthorized", { status: 401 }),
+    });
 
     const response = await POST(jsonRequest({}));
 
@@ -984,7 +991,7 @@ describe("POST /api/chat", () => {
       },
     });
     expect(createGoatTaskForUser).not.toHaveBeenCalled();
-    expect(listCurrentUserGoatTaskSchedules).not.toHaveBeenCalled();
+    expect(listGoatTaskSchedulesForUser).not.toHaveBeenCalled();
   });
 
   it("keeps background task and schedule behavior out of chat when the user has not opted in", async () => {
@@ -1021,7 +1028,7 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(listCurrentUserGoatTaskSchedules).not.toHaveBeenCalled();
+    expect(listGoatTaskSchedulesForUser).not.toHaveBeenCalled();
     expect(createGoatTaskForUser).not.toHaveBeenCalled();
   });
 
@@ -1402,7 +1409,7 @@ describe("POST /api/chat", () => {
   it("wires recurring schedule edits into the model stream", async () => {
     mockAuth();
     mockCreateTurn();
-    mockListCurrentUserGoatTaskSchedules().mockResolvedValue([
+    mockListGoatTaskSchedulesForUser().mockResolvedValue([
       {
         id: "goat_task_schedule_1",
         name: "Daily briefing",
@@ -1417,7 +1424,7 @@ describe("POST /api/chat", () => {
         updatedAt: "2026-07-01T00:00:00.000Z",
       },
     ]);
-    mockUpdateGoatTaskScheduleAction().mockResolvedValue({
+    mockUpdateGoatTaskScheduleForUser().mockResolvedValue({
       ok: true,
       schedule: {
         id: "goat_task_schedule_1",
@@ -1460,7 +1467,7 @@ describe("POST /api/chat", () => {
     const output = await editToolPromise;
 
     expect(response.status).toBe(200);
-    expect(updateGoatTaskScheduleAction).toHaveBeenCalledWith("goat_task_schedule_1", {
+    expect(updateGoatTaskScheduleForUser).toHaveBeenCalledWith("user_1", "goat_task_schedule_1", {
       name: "Daily briefing",
       sourceDescription: "0 10 * * * - UTC",
       cron: "0 10 * * *",
@@ -1481,7 +1488,7 @@ describe("POST /api/chat", () => {
   it("wires recurring schedule deletion into the model stream", async () => {
     mockAuth();
     mockCreateTurn();
-    mockListCurrentUserGoatTaskSchedules().mockResolvedValue([
+    mockListGoatTaskSchedulesForUser().mockResolvedValue([
       {
         id: "goat_task_schedule_1",
         name: "Daily briefing",
@@ -1496,7 +1503,7 @@ describe("POST /api/chat", () => {
         updatedAt: "2026-07-01T00:00:00.000Z",
       },
     ]);
-    mockDeleteGoatTaskScheduleAction().mockResolvedValue({ ok: true });
+    mockDeleteGoatTaskScheduleForUser().mockResolvedValue({ ok: true });
     let deleteToolPromise: Promise<unknown> | null = null;
     mockStreamText().mockImplementation((options: unknown) => {
       const tool = (options as { tools?: { delete_task_schedule?: { execute?: unknown } } }).tools
@@ -1523,7 +1530,7 @@ describe("POST /api/chat", () => {
     const output = await deleteToolPromise;
 
     expect(response.status).toBe(200);
-    expect(deleteGoatTaskScheduleAction).toHaveBeenCalledWith("goat_task_schedule_1");
+    expect(deleteGoatTaskScheduleForUser).toHaveBeenCalledWith("user_1", "goat_task_schedule_1");
     expect(output).toEqual({
       ok: true,
       scheduleId: "goat_task_schedule_1",
@@ -1751,49 +1758,48 @@ function mockAuth(
     timezone: overrides.timezone ?? "UTC",
   };
 
-  mockCurrentGoatUser().mockResolvedValue({
-    authUser: {
-      id: "user_1",
-      email: user.email,
-    } as never,
-    user: {
-      workosUserId: "user_1",
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      avatarUrl: null,
-      timezone: user.timezone,
-      taskSpawningEnabled: overrides.taskSpawningEnabled ?? true,
-      localCodexBetaEnabled: false,
-      chatCapabilitiesBetaEnabled: false,
-      onboardedAt: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-    workspace: {
-      id: "goat_ws_user_1",
-      workosOrganizationId: null,
-      name: "Test Workspace",
-      createdByWorkosId: "user_1",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-    role: overrides.role ?? "admin",
-    workspaces: [
-      {
-        workspace: {
-          id: "goat_ws_user_1",
-          workosOrganizationId: null,
-          name: "Test Workspace",
-          createdByWorkosId: "user_1",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        role: overrides.role ?? "admin",
+  mockResolveGoatChatRequestContext().mockResolvedValue({
+    ok: true,
+    context: {
+      user: {
+        workosUserId: "user_1",
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        avatarUrl: null,
+        timezone: user.timezone,
+        taskSpawningEnabled: overrides.taskSpawningEnabled ?? true,
+        localCodexBetaEnabled: false,
+        chatCapabilitiesBetaEnabled: false,
+        onboardedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
       },
-    ],
-    brains: [ACTIVE_BRAIN],
-    activeBrain: ACTIVE_BRAIN,
+      workspace: {
+        id: "goat_ws_user_1",
+        workosOrganizationId: null,
+        name: "Test Workspace",
+        createdByWorkosId: "user_1",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      role: overrides.role ?? "admin",
+      workspaces: [
+        {
+          workspace: {
+            id: "goat_ws_user_1",
+            workosOrganizationId: null,
+            name: "Test Workspace",
+            createdByWorkosId: "user_1",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+          role: overrides.role ?? "admin",
+        },
+      ],
+      brains: [ACTIVE_BRAIN],
+      activeBrain: ACTIVE_BRAIN,
+    },
   });
 }
 
@@ -1823,8 +1829,8 @@ function mockCreateTurn() {
   });
 }
 
-function mockCurrentGoatUser() {
-  return vi.mocked(currentGoatUser as unknown as () => Promise<unknown>);
+function mockResolveGoatChatRequestContext() {
+  return vi.mocked(resolveGoatChatRequestContext as unknown as () => Promise<unknown>);
 }
 
 function mockCreateGoatChatUserTurn() {
@@ -1855,16 +1861,16 @@ function mockCreateGoatTaskForUser() {
   return vi.mocked(createGoatTaskForUser);
 }
 
-function mockListCurrentUserGoatTaskSchedules() {
-  return vi.mocked(listCurrentUserGoatTaskSchedules);
+function mockListGoatTaskSchedulesForUser() {
+  return vi.mocked(listGoatTaskSchedulesForUser);
 }
 
-function mockUpdateGoatTaskScheduleAction() {
-  return vi.mocked(updateGoatTaskScheduleAction);
+function mockUpdateGoatTaskScheduleForUser() {
+  return vi.mocked(updateGoatTaskScheduleForUser);
 }
 
-function mockDeleteGoatTaskScheduleAction() {
-  return vi.mocked(deleteGoatTaskScheduleAction);
+function mockDeleteGoatTaskScheduleForUser() {
+  return vi.mocked(deleteGoatTaskScheduleForUser);
 }
 
 function mockStreamText() {
