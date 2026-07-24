@@ -81,4 +81,27 @@ describe("sanitizeCapabilityResult", () => {
     });
     expect(result.canonicalLinks).toEqual(["https://x.com/openai/status/123"]);
   });
+
+  it("keeps public SEO result links while rejecting local targets", () => {
+    const result = sanitizeCapabilityResult({
+      source: "seo",
+      action: "seo.list_top_pages",
+      expectedLimit: 3,
+      canonicalLinks: ["https://openai.com/?utm_source=test"],
+      payload: {
+        pages: [
+          { url: "https://openai.com/research/?ref=seo" },
+          { url: "https://competitor.example/guide#results" },
+          { url: "https://127.0.0.1/private" },
+        ],
+      },
+      totalCostUsdMicros: 2_000,
+    });
+    expect(result.resultCount).toBe(3);
+    expect(result.canonicalLinks).toEqual([
+      "https://openai.com/research/",
+      "https://competitor.example/guide",
+      "https://openai.com/",
+    ]);
+  });
 });

@@ -320,6 +320,7 @@ function capabilitySourceLabel(source: string) {
     instagram: "Instagram",
     tiktok: "TikTok",
     lead: "Lead enrichment",
+    seo: "SEO",
   };
   return labels[source] ?? source;
 }
@@ -748,7 +749,7 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
               <span className="min-w-0 truncate">{tool.detail}</span>
             </span>
           ) : null}
-          {tool.statusText !== "Done" ? (
+          {tool.statusText !== "Done" && tool.statusText !== "Failed" ? (
             <span className={`${meta.className} shrink-0 text-[10.5px] font-medium`}>
               {tool.statusText}
             </span>

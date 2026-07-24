@@ -19,6 +19,7 @@ const PLATFORM_HOSTS: Record<GoatManagedCapabilitySource, readonly string[]> = {
   instagram: ["instagram.com"],
   tiktok: ["tiktok.com"],
   lead: ["linkedin.com"],
+  seo: [],
 };
 
 export type SanitizedCapabilityResult = {
@@ -145,9 +146,10 @@ function canonicalPlatformUrl(value: string, source: GoatManagedCapabilitySource
     const url = new URL(value);
     if (url.protocol !== "https:") return null;
     const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
-    const allowed = PLATFORM_HOSTS[source].some(
-      (host) => hostname === host || hostname.endsWith(`.${host}`),
-    );
+    const allowed =
+      source === "seo"
+        ? isPublicWebHostname(hostname)
+        : PLATFORM_HOSTS[source].some((host) => hostname === host || hostname.endsWith(`.${host}`));
     if (!allowed) return null;
     if (hostname === "twitter.com") url.hostname = "x.com";
     url.hash = "";
@@ -181,8 +183,30 @@ function inferResultCount(value: unknown, limit: number) {
     "comments",
     "users",
     "employees",
+    "keywords",
+    "pages",
+    "domains",
+    "rows",
   ]) {
     if (Array.isArray(record[key])) return Math.min(record[key].length, limit);
   }
   return 1;
+}
+
+function isPublicWebHostname(hostname: string) {
+  if (
+    hostname === "localhost" ||
+    hostname.includes(":") ||
+    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)
+  ) {
+    return false;
+  }
+  const labels = hostname.split(".");
+  return (
+    labels.length >= 2 &&
+    labels.every(
+      (label) =>
+        label.length >= 1 && label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
+    )
+  );
 }

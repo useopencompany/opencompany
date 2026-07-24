@@ -7,8 +7,8 @@ import {
 
 describe("managed capability catalog", () => {
   it("contains only the reviewed fixed action and endpoint allowlist", () => {
-    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(42);
-    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(42);
+    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(48);
+    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(48);
     expect(
       Object.fromEntries(
         MANAGED_CAPABILITY_ACTIONS.map((action) => [
@@ -25,6 +25,12 @@ describe("managed capability catalog", () => {
       "lead.enrich_person": "pdl:/v5/person/enrich",
       "lead.search_people_by_name": "apify:/harvestapi/linkedin-profile-search-by-name",
       "lead.list_company_employees": "apify:/harvestapi/linkedin-company-employees",
+      "seo.get_domain_overview": "semrush:/domain_rank",
+      "seo.list_ranking_keywords": "semrush:/domain_organic",
+      "seo.list_top_pages": "semrush:/domain_organic_pages",
+      "seo.list_organic_competitors": "semrush:/domain_organic_organic",
+      "seo.get_keyword_metrics": "semrush:/keyword_metrics",
+      "seo.get_backlink_overview": "semrush:/backlinks_overview",
     });
   });
 
@@ -185,6 +191,58 @@ describe("managed capability catalog", () => {
       resultLimit: 5,
       canonicalLinks: [`https://www.youtube.com/channel/${channelId}`],
     });
+  });
+
+  it("normalizes SEO targets and maps only the bounded Semrush inputs", () => {
+    expect(
+      action("seo.list_ranking_keywords").mapInput({
+        domain: "https://www.OpenAI.com/research/?utm_source=test",
+        country: "UK",
+        limit: 7,
+      }),
+    ).toEqual({
+      providerInput: {
+        domain: "openai.com",
+        database: "uk",
+        display_limit: 7,
+      },
+      resultLimit: 7,
+      canonicalLinks: ["https://openai.com/"],
+    });
+    expect(
+      action("seo.get_keyword_metrics").mapInput({
+        keyword: "AI agents",
+        country: "GB",
+      }).providerInput,
+    ).toEqual({ phrase: "AI agents", database: "uk" });
+    expect(
+      action("seo.get_backlink_overview").mapInput({
+        domain: "openai.com",
+      }).providerInput,
+    ).toEqual({ target: "openai.com", target_type: "root_domain" });
+  });
+
+  it("rejects private, malformed, and oversized SEO requests", () => {
+    expect(() =>
+      action("seo.get_domain_overview").mapInput({ domain: "https://localhost" }),
+    ).toThrow(/public domain/i);
+    expect(() =>
+      action("seo.get_domain_overview").mapInput({
+        domain: "https://127.0.0.1",
+      }),
+    ).toThrow(/public domain/i);
+    expect(() =>
+      action("seo.list_top_pages").mapInput({
+        domain: "openai.com",
+        country: "us",
+      }),
+    ).toThrow(/two-letter uppercase/i);
+    expect(() =>
+      action("seo.list_organic_competitors").mapInput({
+        domain: "openai.com",
+        limit: 11,
+      }),
+    ).toThrow(/1 to 10/i);
   });
 });
 

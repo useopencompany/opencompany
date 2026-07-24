@@ -2785,7 +2785,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(screen.getByTestId("chat-tool-call-web_fetch")).toBeInTheDocument();
     expect(screen.getByText("Web Fetch")).toBeInTheDocument();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
     expect(screen.getByText("Web fetch returned no readable page content.")).toBeInTheDocument();
   });
 

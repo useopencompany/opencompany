@@ -29,6 +29,7 @@ describe("Goat workspace capabilities", () => {
       { source: "instagram", enabled: true },
       { source: "tiktok", enabled: true },
       { source: "lead", enabled: true },
+      { source: "seo", enabled: true },
     ]);
   });
 

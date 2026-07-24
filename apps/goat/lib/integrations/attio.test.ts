@@ -37,6 +37,8 @@ vi.mock("@/lib/app-url", () => ({
 import {
   connectGoatAttioIntegration,
   hasGoatAttioListReadScopes,
+  hasGoatAttioListWriteScopes,
+  hasGoatAttioRecordWriteScopes,
   parseGoatAttioScopes,
   validateGoatAttioApiKey,
 } from "@/lib/integrations/attio";
@@ -73,6 +75,19 @@ describe("Attio API key scope handling", () => {
     expect(
       hasGoatAttioListReadScopes(["list_configuration:read-write", "list_entry:read-write"]),
     ).toBe(true);
+  });
+
+  it("requires explicit record and list-entry write scopes for chat updates", () => {
+    expect(
+      hasGoatAttioRecordWriteScopes(["object_configuration:read", "record_permission:read-write"]),
+    ).toBe(true);
+    expect(
+      hasGoatAttioRecordWriteScopes(["object_configuration:read", "record_permission:read"]),
+    ).toBe(false);
+    expect(hasGoatAttioListWriteScopes(["list_configuration:read", "list_entry:read-write"])).toBe(
+      true,
+    );
+    expect(hasGoatAttioListWriteScopes(["list_configuration:read", "list_entry:read"])).toBe(false);
   });
 
   it("returns Attio scopes with the validated workspace identity", async () => {

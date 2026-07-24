@@ -15,7 +15,7 @@ export type ManagedCapabilityActionSpec = {
   source: GoatManagedCapabilitySource;
   description: string;
   params: JSONSchema7;
-  provider: "tikhub" | "apify" | "pdl";
+  provider: "tikhub" | "apify" | "pdl" | "semrush";
   endpoint: string;
   priceType: "PER_CALL" | "PER_RESULT";
   executionMode: ManagedCapabilityExecutionMode;
@@ -50,6 +50,11 @@ export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
   lead: {
     label: "Lead enrichment",
     description: "Metered professional contact discovery from reviewed managed providers.",
+  },
+  seo: {
+    label: "SEO",
+    description:
+      "Research search visibility, ranking keywords, top pages, competitors, and backlinks with Semrush.",
   },
 };
 
@@ -185,6 +190,24 @@ const CONTENT_LIST_PARAMS = {
 } as const satisfies JSONSchema7;
 
 const TIKHUB = "tikhub" as const;
+const SEMRUSH = "semrush" as const;
+const SEO_DOMAIN_SCHEMA = {
+  type: "string",
+  minLength: 4,
+  maxLength: 1_000,
+  description: "A public website domain or HTTPS URL, such as example.com.",
+} as const;
+const SEO_COUNTRY_SCHEMA = {
+  type: "string",
+  pattern: "^[A-Z]{2}$",
+  description:
+    "Two-letter Semrush regional database code, such as US, UK, CA, DE, or AU. Defaults to US.",
+} as const;
+const SEO_LIMIT_SCHEMA = {
+  ...LIMIT_SCHEMA,
+  maximum: 10,
+  description: "Maximum number of SEO rows returned, from 1 to 10.",
+} as const;
 
 export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] = [
   {
@@ -785,6 +808,91 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
       };
     },
   },
+  seoDomainOverviewAction({
+    id: "seo.get_domain_overview",
+    description:
+      "Get a Semrush SEO baseline for one domain, including organic keywords, estimated organic traffic, and traffic value in one country.",
+    endpoint: "/domain_rank",
+  }),
+  seoDomainListAction({
+    id: "seo.list_ranking_keywords",
+    description:
+      "List a domain's leading Google organic keywords, positions, landing pages, search volumes, and estimated traffic in one country.",
+    endpoint: "/domain_organic",
+    priceType: "PER_RESULT",
+  }),
+  seoDomainListAction({
+    id: "seo.list_top_pages",
+    description:
+      "List a domain's top pages in Google organic search, including ranking-keyword counts and estimated traffic in one country.",
+    endpoint: "/domain_organic_pages",
+    priceType: "PER_RESULT",
+  }),
+  seoDomainListAction({
+    id: "seo.list_organic_competitors",
+    description:
+      "List a domain's closest Google organic-search competitors and their shared-keyword and traffic metrics in one country.",
+    endpoint: "/domain_organic_organic",
+    priceType: "PER_RESULT",
+  }),
+  {
+    id: "seo.get_keyword_metrics",
+    source: "seo",
+    description:
+      "Get Semrush search volume, keyword difficulty, CPC, competition, and result-count metrics for one keyword in one country.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        keyword: { type: "string", minLength: 1, maxLength: 200 },
+        country: SEO_COUNTRY_SCHEMA,
+      },
+      required: ["keyword"],
+    },
+    provider: SEMRUSH,
+    endpoint: "/keyword_metrics",
+    priceType: "PER_CALL",
+    executionMode: "sync",
+    mapInput: (raw) => {
+      const params = checkedParams(raw, ["keyword", "country"]);
+      return {
+        providerInput: {
+          phrase: requiredText(params, "keyword", 200),
+          database: seoDatabase(params),
+        },
+        resultLimit: 1,
+        canonicalLinks: [],
+      };
+    },
+  },
+  {
+    id: "seo.get_backlink_overview",
+    source: "seo",
+    description:
+      "Get a Semrush summary of one domain's backlink profile, including authority, backlink, and referring-domain counts.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      properties: { domain: SEO_DOMAIN_SCHEMA },
+      required: ["domain"],
+    },
+    provider: SEMRUSH,
+    endpoint: "/backlinks_overview",
+    priceType: "PER_CALL",
+    executionMode: "sync",
+    mapInput: (raw) => {
+      const params = checkedParams(raw, ["domain"]);
+      const domain = seoDomain(params);
+      return {
+        providerInput: {
+          target: domain,
+          target_type: "root_domain",
+        },
+        resultLimit: 1,
+        canonicalLinks: [seoHomepage(domain)],
+      };
+    },
+  },
 ];
 
 export function managedCapabilityActionsForSource(source: GoatManagedCapabilitySource) {
@@ -794,6 +902,15 @@ export function managedCapabilityActionsForSource(source: GoatManagedCapabilityS
 // Stable, non-sensitive probes used by the opt-in inspect-only contract check.
 // They exercise every adapter without calling the paid run API.
 export function managedCapabilityContractProbeParams(id: string): Record<string, unknown> {
+  if (id === "seo.get_keyword_metrics") {
+    return { keyword: "artificial intelligence", country: "US" };
+  }
+  if (id === "seo.get_backlink_overview") {
+    return { domain: "openai.com" };
+  }
+  if (id.startsWith("seo.")) {
+    return { domain: "openai.com", country: "US" };
+  }
   if (id === "lead.search_people_by_name") {
     return { firstName: "Ada", lastName: "Lovelace" };
   }
@@ -1311,6 +1428,84 @@ function noInputAction(
   };
 }
 
+function seoDomainOverviewAction(input: {
+  id: string;
+  description: string;
+  endpoint: string;
+}): ManagedCapabilityActionSpec {
+  return {
+    id: input.id,
+    source: "seo",
+    description: input.description,
+    params: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        domain: SEO_DOMAIN_SCHEMA,
+        country: SEO_COUNTRY_SCHEMA,
+      },
+      required: ["domain"],
+    },
+    provider: SEMRUSH,
+    endpoint: input.endpoint,
+    priceType: "PER_CALL",
+    executionMode: "sync",
+    mapInput: (raw) => {
+      const params = checkedParams(raw, ["domain", "country"]);
+      const domain = seoDomain(params);
+      return {
+        providerInput: {
+          domain,
+          database: seoDatabase(params),
+        },
+        resultLimit: 1,
+        canonicalLinks: [seoHomepage(domain)],
+      };
+    },
+  };
+}
+
+function seoDomainListAction(input: {
+  id: string;
+  description: string;
+  endpoint: string;
+  priceType: "PER_RESULT";
+}): ManagedCapabilityActionSpec {
+  return {
+    id: input.id,
+    source: "seo",
+    description: input.description,
+    params: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        domain: SEO_DOMAIN_SCHEMA,
+        country: SEO_COUNTRY_SCHEMA,
+        limit: SEO_LIMIT_SCHEMA,
+      },
+      required: ["domain"],
+    },
+    provider: SEMRUSH,
+    endpoint: input.endpoint,
+    priceType: input.priceType,
+    executionMode: "sync",
+    mapInput: (raw) => {
+      const params = checkedParams(raw, ["domain", "country", "limit"]);
+      const domain = seoDomain(params);
+      const limit = limitParam(params, 10, 10);
+      return {
+        providerInput: {
+          domain,
+          database: seoDatabase(params),
+          display_limit: limit,
+        },
+        resultLimit: limit,
+        canonicalLinks: [seoHomepage(domain)],
+      };
+    },
+  };
+}
+
 function checkedParams(raw: Record<string, unknown>, allowed: readonly string[]) {
   const allowedSet = new Set(allowed);
   const unknown = Object.keys(raw).filter((key) => !allowedSet.has(key));
@@ -1368,6 +1563,51 @@ function integerParam(
     throw new GoatActionInvalidParamsError(`"${key}" must be an integer from ${min} to ${max}.`);
   }
   return value as number;
+}
+
+function seoDatabase(params: Record<string, unknown>) {
+  const country = optionalText(params, "country", 2) ?? "US";
+  if (!/^[A-Z]{2}$/.test(country)) {
+    throw new GoatActionInvalidParamsError('"country" must be a two-letter uppercase code.');
+  }
+  return country === "GB" ? "uk" : country.toLowerCase();
+}
+
+function seoDomain(params: Record<string, unknown>) {
+  const value = requiredText(params, "domain", 1_000);
+  let url: URL;
+  try {
+    url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+  } catch {
+    throw new GoatActionInvalidParamsError('"domain" must be a valid public domain or HTTPS URL.');
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.port ||
+    url.hostname === "localhost"
+  ) {
+    throw new GoatActionInvalidParamsError('"domain" must be a valid public domain or HTTPS URL.');
+  }
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+  const labels = hostname.split(".");
+  if (
+    hostname.length > 253 ||
+    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname) ||
+    labels.length < 2 ||
+    labels.some(
+      (label) =>
+        label.length < 1 || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
+    )
+  ) {
+    throw new GoatActionInvalidParamsError('"domain" must be a valid public domain or HTTPS URL.');
+  }
+  return hostname;
+}
+
+function seoHomepage(domain: string) {
+  return `https://${domain}/`;
 }
 
 function enumParam<T extends string>(
