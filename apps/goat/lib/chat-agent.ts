@@ -365,8 +365,9 @@ export function createOpenCompanyChatToolContext(input: {
   let webSearchCallCount = 0;
   let actionCallCount = 0;
   const listedActionSourceIds = new Set(input.actions?.prelistedSourceIds ?? []);
-  const actionProviderFailureCounts = new Map<string, number>();
-  const actionCallsInFlight = new Map<string, number>();
+  const actionProviderRetryGate = createActionProviderRetryGate(
+    MAX_ACTION_PROVIDER_FAILURES_PER_TURN,
+  );
   let repairToolCall: ToolCallRepairFunction<ToolSet> | undefined;
 
   const multiBrainTargets = input.goatBrainMultiBrain?.targets ?? [];
@@ -890,10 +891,16 @@ export function createOpenCompanyChatToolContext(input: {
             },
           };
         }
-        if (
-          (actionProviderFailureCounts.get(action) ?? 0) + (actionCallsInFlight.get(action) ?? 0) >=
-          MAX_ACTION_PROVIDER_FAILURES_PER_TURN
-        ) {
+        actionCallCount += 1;
+        const actionCallNumber = actionCallCount;
+        const actionAbortSignal =
+          executionContext &&
+          typeof executionContext === "object" &&
+          "abortSignal" in executionContext &&
+          executionContext.abortSignal instanceof AbortSignal
+            ? executionContext.abortSignal
+            : undefined;
+        if (!(await actionProviderRetryGate.acquire(action, actionAbortSignal))) {
           return {
             ok: false,
             action,
@@ -904,30 +911,24 @@ export function createOpenCompanyChatToolContext(input: {
             },
           };
         }
-        actionCallCount += 1;
         const toolCallId =
           executionContext &&
           typeof executionContext === "object" &&
           "toolCallId" in executionContext &&
           typeof executionContext.toolCallId === "string"
             ? executionContext.toolCallId
-            : `action_${actionCallCount}`;
-        actionCallsInFlight.set(action, (actionCallsInFlight.get(action) ?? 0) + 1);
+            : `action_${actionCallNumber}`;
+        let outcome: ActionProviderAttemptOutcome = "neutral";
         try {
           const result = await actions.execute({ action, params, toolCallId });
           if (result.ok) {
-            actionProviderFailureCounts.delete(action);
+            outcome = "success";
           } else if (result.error.code === "provider_error" || result.error.code === "timeout") {
-            actionProviderFailureCounts.set(
-              action,
-              (actionProviderFailureCounts.get(action) ?? 0) + 1,
-            );
+            outcome = "failure";
           }
           return result;
         } finally {
-          const remaining = (actionCallsInFlight.get(action) ?? 1) - 1;
-          if (remaining > 0) actionCallsInFlight.set(action, remaining);
-          else actionCallsInFlight.delete(action);
+          actionProviderRetryGate.complete(action, outcome);
         }
       },
     });
@@ -939,6 +940,79 @@ export function createOpenCompanyChatToolContext(input: {
     repairToolCall,
     tools,
   };
+}
+
+type ActionProviderAttemptOutcome = "success" | "failure" | "neutral";
+
+function createActionProviderRetryGate(maxFailures: number) {
+  const failureCounts = new Map<string, number>();
+  const callsInFlight = new Map<string, number>();
+  const stateSignals = new Map<string, { promise: Promise<void>; resolve: () => void }>();
+
+  function waitForStateChange(action: string, abortSignal?: AbortSignal) {
+    const existing = stateSignals.get(action);
+    let statePromise = existing?.promise;
+    if (!statePromise) {
+      let resolve!: () => void;
+      statePromise = new Promise<void>((release) => {
+        resolve = release;
+      });
+      stateSignals.set(action, { promise: statePromise, resolve });
+    }
+    if (!abortSignal) return statePromise;
+    if (abortSignal.aborted) return Promise.reject(actionAbortReason(abortSignal));
+    return new Promise<void>((resolve, reject) => {
+      const onAbort = () => reject(actionAbortReason(abortSignal));
+      abortSignal.addEventListener("abort", onAbort, { once: true });
+      void statePromise.then(() => {
+        abortSignal.removeEventListener("abort", onAbort);
+        resolve();
+      });
+    });
+  }
+
+  function notifyStateChange(action: string) {
+    const signal = stateSignals.get(action);
+    if (!signal) return;
+    stateSignals.delete(action);
+    signal.resolve();
+  }
+
+  return {
+    async acquire(action: string, abortSignal?: AbortSignal) {
+      while (true) {
+        if (abortSignal?.aborted) throw actionAbortReason(abortSignal);
+        const failures = failureCounts.get(action) ?? 0;
+        if (failures >= maxFailures) return false;
+
+        const inFlight = callsInFlight.get(action) ?? 0;
+        if (failures + inFlight < maxFailures) {
+          callsInFlight.set(action, inFlight + 1);
+          return true;
+        }
+
+        // In-flight work is not a failure. Wait for it to settle, then admit
+        // another call if success reopened the circuit.
+        await waitForStateChange(action, abortSignal);
+      }
+    },
+    complete(action: string, outcome: ActionProviderAttemptOutcome) {
+      if (outcome === "success") {
+        failureCounts.delete(action);
+      } else if (outcome === "failure") {
+        failureCounts.set(action, (failureCounts.get(action) ?? 0) + 1);
+      }
+
+      const remaining = (callsInFlight.get(action) ?? 1) - 1;
+      if (remaining > 0) callsInFlight.set(action, remaining);
+      else callsInFlight.delete(action);
+      notifyStateChange(action);
+    },
+  };
+}
+
+function actionAbortReason(abortSignal: AbortSignal) {
+  return abortSignal.reason ?? new DOMException("Action execution was aborted.", "AbortError");
 }
 
 export function prepareOpenCompanyChatStep(input: {
