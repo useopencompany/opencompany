@@ -6,7 +6,7 @@ import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
 import { currentGoatUser, type GoatAuthContext } from "@/lib/auth";
 import { resolveGoatAuthKitDomain } from "@/lib/mcp-oauth";
 
-export const GOAT_MACOS_OAUTH_CLIENT_ID_ENV = "GOAT_MACOS_OAUTH_CLIENT_ID";
+export const GOAT_MACOS_OAUTH_AUDIENCE_ENV = "GOAT_MACOS_OAUTH_AUDIENCE";
 
 export type GoatChatRequestContext = Pick<
   GoatAuthContext,
@@ -48,13 +48,13 @@ export async function resolveGoatChatRequestContext(request: Request): Promise<C
 export async function verifyGoatMacAccessToken(
   token: string,
   options: {
-    clientId?: string | null;
+    audience?: string | null;
     authKitDomain?: string | null;
     verifyJwt?: typeof jwtVerify;
   } = {},
 ): Promise<TokenVerification> {
-  const clientId = options.clientId ?? process.env[GOAT_MACOS_OAUTH_CLIENT_ID_ENV]?.trim();
-  if (!clientId) {
+  const audience = options.audience ?? process.env[GOAT_MACOS_OAUTH_AUDIENCE_ENV]?.trim();
+  if (!audience) {
     return {
       ok: false,
       response: new Response("Goat Quick authentication is not configured.", { status: 503 }),
@@ -72,7 +72,7 @@ export async function verifyGoatMacAccessToken(
     const verifyJwt = options.verifyJwt ?? jwtVerify;
     const { payload } = await verifyJwt(token, jwksForAuthKitDomain(configuredDomain.domain), {
       issuer: configuredDomain.domain,
-      audience: clientId,
+      audience,
     });
     return { ok: true, payload };
   } catch {

@@ -201,7 +201,8 @@ Set these in the separate Vercel project for Goat:
 | `GOAT_NEXT_PUBLIC_APP_URL` | Yes | Canonical Goat domain origin, for example `https://goat.example.com`. Production URL generation fails closed when this is missing instead of falling back to the legacy web origin. |
 | `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Yes | Goat callback URL, for example `https://goat.example.com/auth/callback`. |
 | `GOAT_AUTHKIT_DOMAIN` | Goat auth | AuthKit issuer origin used to verify Goat MCP connector and Goat Quick bearer tokens, for example `https://example.authkit.app`. MCP setup also requires Client ID Metadata Documents and Dynamic Client Registration in WorkOS. |
-| `GOAT_MACOS_OAUTH_CLIENT_ID` | Goat Quick | Client ID of the first-party public WorkOS OAuth application used by Goat Quick. `/api/chat` requires bearer tokens whose issuer and audience match this application. This value identifies a public client and is not a secret. |
+| `GOAT_MACOS_OAUTH_AUDIENCE` | Goat Quick | Resource audience (`aud`) WorkOS places in access tokens accepted by Goat's `/api/chat`. This is distinct from the OAuth client ID and is not a secret. |
+| `GOAT_MACOS_OAUTH_CLIENT_ID` | Goat Quick | Client ID of the first-party public WorkOS OAuth application used by Goat Quick. This is a public identifier used by the native client and is intentionally distinct from the access token audience. |
 | `GOAT_SLACK_CLIENT_ID` / `GOAT_SLACK_CLIENT_SECRET` | Slack only | Goat Slack ingestion app OAuth credentials (user-token app, `user_scope` only — no bot token). Distinct from `SLACK_MCP_*` and `SLACK_SUPPORT_*`. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack/callback`. |
 | `GOAT_SLACK_SIGNING_SECRET` | Slack only | Slack app signing secret used to verify Events API deliveries at `/api/webhooks/slack/events`. |
 | `GOAT_SLACK_STATE_SECRET` | Slack only | Dedicated secret used to sign Goat Slack OAuth setup state. Generate with `openssl rand -base64 32`. |

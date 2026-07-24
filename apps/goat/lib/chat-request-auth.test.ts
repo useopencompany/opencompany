@@ -52,17 +52,18 @@ describe("resolveGoatChatRequestContext", () => {
 });
 
 describe("verifyGoatMacAccessToken", () => {
-  it("accepts a token issued for the configured Goat Quick client", async () => {
+  it("accepts a token issued for the configured Goat resource", async () => {
     const verifyJwt = vi.fn(async () => ({
       payload: {
         sub: "user_1",
         org_id: "org_1",
+        exp: 2_000_000_000,
       },
       protectedHeader: { alg: "RS256" },
     }));
 
     const result = await verifyGoatMacAccessToken("token", {
-      clientId: "client_goat_quick",
+      audience: "goat_api",
       authKitDomain: "https://example.authkit.app",
       verifyJwt: verifyJwt as unknown as typeof jwtVerify,
     });
@@ -73,14 +74,14 @@ describe("verifyGoatMacAccessToken", () => {
       expect.any(Function),
       expect.objectContaining({
         issuer: "https://example.authkit.app",
-        audience: "client_goat_quick",
+        audience: "goat_api",
       }),
     );
   });
 
   it("rejects an MCP-audience token", async () => {
     const result = await verifyGoatMacAccessToken("token", {
-      clientId: "client_goat_quick",
+      audience: "goat_api",
       authKitDomain: "https://example.authkit.app",
       verifyJwt: vi.fn(async () => {
         throw new Error("unexpected audience");
@@ -97,7 +98,7 @@ describe("verifyGoatMacAccessToken", () => {
     "wrong audience",
   ])("rejects tokens that fail JWT verification: %s", async () => {
     const result = await verifyGoatMacAccessToken("token", {
-      clientId: "client_goat_quick",
+      audience: "goat_api",
       authKitDomain: "https://example.authkit.app",
       verifyJwt: vi.fn(async () => {
         throw new Error("JWT verification failed");
@@ -106,6 +107,17 @@ describe("verifyGoatMacAccessToken", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(401);
+  });
+
+  it("fails closed when the resource audience is missing", async () => {
+    const result = await verifyGoatMacAccessToken("token", {
+      audience: "",
+      authKitDomain: "https://example.authkit.app",
+      verifyJwt: vi.fn() as unknown as typeof jwtVerify,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(503);
   });
 });
 
@@ -180,6 +192,7 @@ function validPayload(): JWTPayload {
   return {
     sub: "user_1",
     org_id: "org_1",
+    exp: 2_000_000_000,
   };
 }
 
