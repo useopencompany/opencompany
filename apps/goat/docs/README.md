@@ -173,8 +173,9 @@ isolation. Managed sources never participate in automatic Brain-fill surveying; 
 explicitly ask to save their results.
 
 Run `bun run goat:capabilities:contract` with `MONID_API_KEY` to inspect every allowlisted
-endpoint and fail on removal or pricing/input-contract drift. The command never calls the paid run
-API and is intentionally opt-in.
+endpoint and fail on removal or pricing/input-contract drift, including whether parameters belong
+in the request body, query, or path. The command never calls the paid run API and is intentionally
+opt-in.
 
 When connected integrations and an active brain are present, a conditional `brain_fill` prompt
 teaches the agent to survey breadth before depth, page promising sources, save focused findings
