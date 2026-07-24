@@ -1164,7 +1164,9 @@ describe("POST /api/chat", () => {
         system?: string;
         tools?: { web_fetch?: { execute?: unknown } };
       };
-      expect(typedOptions.system).toContain("Use web_fetch when the user provides a public URL");
+      expect(typedOptions.system).toContain(
+        "Use web_fetch when the user provides one or more public URLs",
+      );
       expect(typedOptions.system).toContain(
         "use web_search instead only when a page must be discovered",
       );

@@ -1,1 +1,2 @@
+export const MAX_WEB_FETCH_CALLS_PER_TURN = 4;
 export const MAX_WEB_SEARCH_CALLS_PER_TURN = 4;
