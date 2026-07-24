@@ -363,7 +363,7 @@ describe("POST /api/chat", () => {
     expect(executeGoatAction).toHaveBeenCalledTimes(1);
   });
 
-  it("forces an approved continuation through use_action with its bound run id", async () => {
+  it("requires an approved continuation through use_action with its bound run id", async () => {
     mockAuth();
     mockCreateTurn();
     const catalog = {
@@ -404,7 +404,7 @@ describe("POST /api/chat", () => {
       expect(settings.system).not.toContain("<brain_fill>");
       expect(settings.prepareStep?.({ stepNumber: 0 })).toEqual({
         activeTools: [USE_ACTION_TOOL_NAME],
-        toolChoice: { type: "tool", toolName: USE_ACTION_TOOL_NAME },
+        toolChoice: "required",
       });
       expect(settings.prepareStep?.({ stepNumber: OPENCOMPANY_CHAT_MAX_STEPS - 1 })).toEqual({
         activeTools: [],
