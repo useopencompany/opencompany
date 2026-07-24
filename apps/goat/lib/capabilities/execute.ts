@@ -222,7 +222,9 @@ export async function executeManagedCapability(input: {
       {
         provider: input.spec.provider,
         endpoint: input.spec.endpoint,
-        input: mapped.providerInput,
+        input: input.spec.inputLocation
+          ? { [input.spec.inputLocation]: mapped.providerInput }
+          : mapped.providerInput,
       },
       input.context.signal,
     );

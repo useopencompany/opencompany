@@ -954,10 +954,9 @@ export function prepareOpenCompanyChatStep(input: {
   if (input.forceApprovedAction && input.stepNumber === 0) {
     return {
       activeTools: [USE_ACTION_TOOL_NAME],
-      toolChoice: {
-        type: "tool" as const,
-        toolName: USE_ACTION_TOOL_NAME,
-      },
+      // Only use_action is active, so "required" remains deterministic without
+      // the named-tool choice that Kimi K3 rejects while thinking is enabled.
+      toolChoice: "required" as const,
     };
   }
   return {};

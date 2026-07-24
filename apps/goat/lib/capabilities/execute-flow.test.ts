@@ -91,6 +91,61 @@ describe("executeManagedCapability", () => {
     });
   });
 
+  it("sends reviewed query parameters in the Monid input envelope", async () => {
+    const action = {
+      ...spec("seo.get_domain_overview", "seo", "semrush", "/domain_rank"),
+      inputLocation: "queryParams" as const,
+      mapInput: () => ({
+        providerInput: { domain: "opencompany.cloud", database: "us" },
+        resultLimit: 1,
+        canonicalLinks: ["https://opencompany.cloud/"],
+      }),
+    };
+    const client = fakeClient({
+      inspection: {
+        ...inspectPrice(0.002),
+        provider: "semrush",
+        endpoint: "/domain_rank",
+        input: {
+          queryParams: {
+            type: "object",
+            properties: {
+              domain: { type: "string" },
+              database: { type: "string" },
+            },
+            required: ["domain"],
+          },
+        },
+      },
+      run: providerRun({
+        provider: "semrush",
+        endpoint: "/domain_rank",
+        cost: { value: 0.002, currency: "USD" },
+      }),
+    });
+
+    await executeManagedCapability({
+      spec: action,
+      params: { domain: "opencompany.cloud", country: "US" },
+      context: context(),
+      client,
+    });
+
+    expect(client.run).toHaveBeenCalledWith(
+      {
+        provider: "semrush",
+        endpoint: "/domain_rank",
+        input: {
+          queryParams: {
+            domain: "opencompany.cloud",
+            database: "us",
+          },
+        },
+      },
+      expect.any(AbortSignal),
+    );
+  });
+
   it("keeps a completed run unsettled until Monid reports its final cost", async () => {
     const client = fakeClient({
       inspection: inspectPrice(0.0015),

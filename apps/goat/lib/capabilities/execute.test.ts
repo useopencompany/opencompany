@@ -79,6 +79,41 @@ describe("managed capability contract and money helpers", () => {
     ).toThrow(/input contract/i);
   });
 
+  it("validates the reviewed Monid input location without flattening it", () => {
+    const spec = { ...actionSpec(), inputLocation: "queryParams" as const };
+    const mapped = {
+      providerInput: { keyword: "openai" },
+      resultLimit: 20,
+      canonicalLinks: [],
+    };
+    expect(() =>
+      assertInspectionMatches(
+        spec,
+        mapped,
+        inspection(
+          { type: "PER_CALL", amount: 0.0015, currency: "USD" },
+          {
+            queryParams: {
+              type: "object",
+              properties: { keyword: { type: "string" } },
+              required: ["keyword"],
+            },
+          },
+        ),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertInspectionMatches(
+        spec,
+        mapped,
+        inspection(
+          { type: "PER_CALL", amount: 0.0015, currency: "USD" },
+          { keyword: { type: "string" } },
+        ),
+      ),
+    ).toThrow(/input contract/i);
+  });
+
   it("uses settled cost first and Monid's reported micro-dollar cost otherwise", () => {
     expect(
       providerRunCostUsdMicros(
