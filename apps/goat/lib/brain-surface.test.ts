@@ -49,6 +49,20 @@ describe("Goat Brain read surface", () => {
       normalizeGoatBrainReadToolInput({ command: "create", flags: { title: "Acme" } }),
     ).toThrow("goat_brain command is invalid");
   });
+
+  it("advertises page defaults and query continuation flags to models", () => {
+    const flags = GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA.properties.flags;
+    expect(flags.properties.kind).toMatchObject({
+      enum: ["page", "evidence"],
+      description: expect.stringContaining('defaults to "page"'),
+    });
+    expect(flags.properties.offset).toMatchObject({
+      type: "integer",
+      minimum: 0,
+      description: expect.stringContaining("pagination.nextOffset"),
+    });
+    expect(flags.description).toContain("pagination");
+  });
 });
 
 describe("buildGoatBrainMultiBrainToolSchema", () => {
