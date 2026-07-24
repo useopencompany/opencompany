@@ -56,6 +56,7 @@ import {
   createOpenCompanyChatToolContext,
   normalizeAgentText,
   OPENCOMPANY_CHAT_MAX_STEPS,
+  prepareOpenCompanyChatStep,
   type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
@@ -80,9 +81,9 @@ import {
   type EditTaskScheduleToolOutput,
   type GoatChatMessageMetadata,
   type GoatChatUiMessage,
+  listedActionSourceIdsFromMessages,
   replaceGoatChatUiMessageText,
   textFromGoatChatUiMessage,
-  USE_ACTION_TOOL_NAME,
   type UseActionToolOutput,
   type WebFetchToolInput,
   type WebFetchToolOutput,
@@ -479,6 +480,17 @@ export async function POST(request: Request): Promise<Response> {
   };
   let stopWatcherCleanup: (() => void) | null = null;
   let activeStreamId: string | null = null;
+  const currentActionSourceIds = new Set(actionCatalog.providers.map((source) => source.id));
+  const prelistedActionSourceIds = new Set(
+    listedActionSourceIdsFromMessages(turn.messages).filter((sourceId) =>
+      currentActionSourceIds.has(sourceId),
+    ),
+  );
+  if (capabilityApproval) {
+    for (const action of actionCatalog.actions) {
+      if (action.id === capabilityApproval.action) prelistedActionSourceIds.add(action.provider);
+    }
+  }
   const releaseStreamCoordination = () => {
     stopWatcherCleanup?.();
     stopWatcherCleanup = null;
@@ -625,12 +637,8 @@ export async function POST(request: Request): Promise<Response> {
                 permissionMode: action.permissionMode,
               })),
             },
-            ...(capabilityApproval
-              ? {
-                  prelistedSourceIds: actionCatalog.actions
-                    .filter((action) => action.id === capabilityApproval.action)
-                    .map((action) => action.provider),
-                }
+            ...(prelistedActionSourceIds.size > 0
+              ? { prelistedSourceIds: [...prelistedActionSourceIds] }
               : {}),
             execute: (call) =>
               executeChatActionCall({
@@ -894,20 +902,11 @@ export async function POST(request: Request): Promise<Response> {
     experimental_transform: smoothStream(),
     abortSignal: generationSignal,
     tools: toolContext.tools,
-    ...(capabilityApproval
-      ? {
-          prepareStep: ({ stepNumber }: { stepNumber: number }) =>
-            stepNumber === 0
-              ? {
-                  activeTools: [USE_ACTION_TOOL_NAME],
-                  toolChoice: {
-                    type: "tool" as const,
-                    toolName: USE_ACTION_TOOL_NAME,
-                  },
-                }
-              : {},
-        }
-      : {}),
+    prepareStep: ({ stepNumber }: { stepNumber: number }) =>
+      prepareOpenCompanyChatStep({
+        stepNumber,
+        forceApprovedAction: Boolean(capabilityApproval),
+      }),
     ...(toolContext.repairToolCall
       ? { experimental_repairToolCall: toolContext.repairToolCall }
       : {}),

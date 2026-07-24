@@ -19,6 +19,7 @@ import {
   GOAT_BRAIN_TOOL_NAME,
   GOAT_BRAIN_TOOL_PART_TYPE,
   LIST_ACTIONS_TOOL_NAME,
+  LIST_ACTIONS_TOOL_PART_TYPE,
   SAVE_TO_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
   START_TASK_TOOL_NAME,
@@ -282,6 +283,79 @@ describe("POST /api/chat", () => {
     );
   });
 
+  it("reuses successful action discovery from an earlier turn", async () => {
+    mockAuth();
+    mockCreateGoatChatUserTurn().mockResolvedValue({
+      session: {
+        id: "session_1",
+        model: "openai/gpt-5.5",
+      },
+      sessionCreated: false,
+      userMessage: {
+        id: "user_message_2",
+      },
+      storedMessages: [],
+      messages: [
+        {
+          id: "assistant_previous",
+          role: "assistant",
+          parts: [
+            {
+              type: LIST_ACTIONS_TOOL_PART_TYPE,
+              toolCallId: "list_slack_previous",
+              state: "output-available",
+              input: { source: "slack" },
+              output: {
+                ok: true,
+                source: {
+                  id: "slack",
+                  label: "Slack workspace",
+                  description: "Read Slack messages.",
+                },
+                actions: [],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const catalog = sampleActionCatalog();
+    mockResolveGoatActionCatalog().mockResolvedValue(catalog);
+    mockExecuteGoatAction().mockResolvedValue({
+      ok: true,
+      action: "slack.fetch_history",
+      result: { messages: [] },
+    });
+    let execution: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const actionTool = (
+        options as {
+          tools?: Record<string, { execute?: unknown }>;
+        }
+      ).tools?.[USE_ACTION_TOOL_NAME];
+      if (typeof actionTool?.execute !== "function") {
+        throw new Error("use_action was not configured.");
+      }
+      execution = Promise.resolve(
+        actionTool.execute(
+          { action: "slack.fetch_history", params: { channel: "C123" } },
+          { toolCallId: "action_call_2", messages: [] },
+        ),
+      );
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Now read #general."));
+    expect(response.status).toBe(200);
+    await expect(execution).resolves.toMatchObject({
+      ok: true,
+      action: "slack.fetch_history",
+    });
+    expect(executeGoatAction).toHaveBeenCalledTimes(1);
+  });
+
   it("forces an approved continuation through use_action with its bound run id", async () => {
     mockAuth();
     mockCreateTurn();
@@ -324,6 +398,10 @@ describe("POST /api/chat", () => {
       expect(settings.prepareStep?.({ stepNumber: 0 })).toEqual({
         activeTools: [USE_ACTION_TOOL_NAME],
         toolChoice: { type: "tool", toolName: USE_ACTION_TOOL_NAME },
+      });
+      expect(settings.prepareStep?.({ stepNumber: OPENCOMPANY_CHAT_MAX_STEPS - 1 })).toEqual({
+        activeTools: [],
+        toolChoice: "none",
       });
       const actionTool = settings.tools?.[USE_ACTION_TOOL_NAME];
       if (typeof actionTool?.execute !== "function") {
@@ -1145,9 +1223,14 @@ describe("POST /api/chat", () => {
       const typedOptions = options as {
         system?: string;
         stopWhen?: unknown;
+        prepareStep?: (input: { stepNumber: number }) => unknown;
         tools?: { web_fetch?: unknown; web_search?: unknown };
       };
       expect(typedOptions.stopWhen).toEqual({ count: OPENCOMPANY_CHAT_MAX_STEPS });
+      expect(typedOptions.prepareStep?.({ stepNumber: OPENCOMPANY_CHAT_MAX_STEPS - 1 })).toEqual({
+        activeTools: [],
+        toolChoice: "none",
+      });
       expect(typedOptions.tools?.web_fetch).toBeUndefined();
       expect(typedOptions.tools?.web_search).toBeUndefined();
       expect(typedOptions.system).not.toContain("Use web_fetch when the user provides");

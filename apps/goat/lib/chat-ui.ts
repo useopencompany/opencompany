@@ -410,6 +410,24 @@ export type GoatChatUiMessage = UIMessage<
   GoatChatTools
 >;
 
+export function listedActionSourceIdsFromMessages(
+  messages: readonly GoatChatUiMessage[],
+): GoatActionSourceId[] {
+  const sourceIds = new Set<GoatActionSourceId>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (
+        part.type === LIST_ACTIONS_TOOL_PART_TYPE &&
+        part.state === "output-available" &&
+        part.output.ok
+      ) {
+        sourceIds.add(part.output.source.id);
+      }
+    }
+  }
+  return [...sourceIds];
+}
+
 export type GoatChatSessionView = {
   id: string;
   title: string;

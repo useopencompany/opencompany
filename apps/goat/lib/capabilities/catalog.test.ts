@@ -120,6 +120,29 @@ describe("managed capability catalog", () => {
 
   it("maps live provider-specific identifiers and reviewed enum values", () => {
     expect(
+      action("linkedin.search_posts").mapInput({
+        query: "founding CTO",
+        sort: "recent",
+      }).providerInput,
+    ).toEqual({
+      keyword: "founding CTO",
+      page: 1,
+      sort_by: "date_posted",
+    });
+    expect(
+      action("linkedin.search_posts").mapInput({
+        query: "founding CTO",
+        sort: "relevant",
+      }).providerInput,
+    ).toEqual({
+      keyword: "founding CTO",
+      page: 1,
+      sort_by: "relevance",
+    });
+    expect(
+      (action("linkedin.search_posts").params.properties as Record<string, unknown>).cursor,
+    ).toBeUndefined();
+    expect(
       action("linkedin.list_comments").mapInput({
         url: "https://www.linkedin.com/feed/update/urn:li:activity:7244804629786419202",
       }).providerInput,

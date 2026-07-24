@@ -104,6 +104,7 @@ export {
 
 export const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
 export const OPENCOMPANY_CHAT_MAX_STEPS = 8;
+const MAX_ACTION_PROVIDER_FAILURES_PER_TURN = 2;
 const GOAT_BRAIN_READ_TOOL_AI_SCHEMA =
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0];
 
@@ -297,6 +298,7 @@ export async function runOpenCompanyChatAgent(input: {
         content: message.content,
       })),
       stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
+      prepareStep: ({ stepNumber }) => prepareOpenCompanyChatStep({ stepNumber }),
       tools: toolContext.tools,
       ...(toolContext.repairToolCall
         ? { experimental_repairToolCall: toolContext.repairToolCall }
@@ -363,6 +365,8 @@ export function createOpenCompanyChatToolContext(input: {
   let webSearchCallCount = 0;
   let actionCallCount = 0;
   const listedActionSourceIds = new Set(input.actions?.prelistedSourceIds ?? []);
+  const actionProviderFailureCounts = new Map<string, number>();
+  const actionCallsInFlight = new Map<string, number>();
   let repairToolCall: ToolCallRepairFunction<ToolSet> | undefined;
 
   const multiBrainTargets = input.goatBrainMultiBrain?.targets ?? [];
@@ -882,7 +886,21 @@ export function createOpenCompanyChatToolContext(input: {
             action,
             error: {
               code: "call_budget",
-              message: `use_action is limited to ${MAX_ACTION_CALLS_PER_TURN} calls per chat turn. Summarize what you already have, or start a task for deeper work.`,
+              message: `use_action is limited to ${MAX_ACTION_CALLS_PER_TURN} calls per chat turn. Summarize what you already have and continue in a later chat turn if needed.`,
+            },
+          };
+        }
+        if (
+          (actionProviderFailureCounts.get(action) ?? 0) + (actionCallsInFlight.get(action) ?? 0) >=
+          MAX_ACTION_PROVIDER_FAILURES_PER_TURN
+        ) {
+          return {
+            ok: false,
+            action,
+            error: {
+              code: "provider_error",
+              source: resolvedAction.source,
+              message: `${JSON.stringify(action)} reached its provider retry limit in this chat turn. Do not call it again now; summarize any results already available and explain what remains unverified.`,
             },
           };
         }
@@ -894,7 +912,23 @@ export function createOpenCompanyChatToolContext(input: {
           typeof executionContext.toolCallId === "string"
             ? executionContext.toolCallId
             : `action_${actionCallCount}`;
-        return actions.execute({ action, params, toolCallId });
+        actionCallsInFlight.set(action, (actionCallsInFlight.get(action) ?? 0) + 1);
+        try {
+          const result = await actions.execute({ action, params, toolCallId });
+          if (result.ok) {
+            actionProviderFailureCounts.delete(action);
+          } else if (result.error.code === "provider_error" || result.error.code === "timeout") {
+            actionProviderFailureCounts.set(
+              action,
+              (actionProviderFailureCounts.get(action) ?? 0) + 1,
+            );
+          }
+          return result;
+        } finally {
+          const remaining = (actionCallsInFlight.get(action) ?? 1) - 1;
+          if (remaining > 0) actionCallsInFlight.set(action, remaining);
+          else actionCallsInFlight.delete(action);
+        }
       },
     });
   }
@@ -905,6 +939,28 @@ export function createOpenCompanyChatToolContext(input: {
     repairToolCall,
     tools,
   };
+}
+
+export function prepareOpenCompanyChatStep(input: {
+  stepNumber: number;
+  forceApprovedAction?: boolean;
+}) {
+  if (input.stepNumber >= OPENCOMPANY_CHAT_MAX_STEPS - 1) {
+    return {
+      activeTools: [],
+      toolChoice: "none" as const,
+    };
+  }
+  if (input.forceApprovedAction && input.stepNumber === 0) {
+    return {
+      activeTools: [USE_ACTION_TOOL_NAME],
+      toolChoice: {
+        type: "tool" as const,
+        toolName: USE_ACTION_TOOL_NAME,
+      },
+    };
+  }
+  return {};
 }
 
 export function createOpenCompanyChatDebugTrace(input: {
