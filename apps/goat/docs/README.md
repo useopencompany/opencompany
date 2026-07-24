@@ -140,8 +140,9 @@ model turn when the task finishes.
 The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, assembled from
 structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
-timezone. `goat_brain` is always available. When Exa is configured, `web_fetch` reads one known URL
-through the Contents API while `web_search` discovers current public-web sources through Search.
+timezone. `goat_brain` is always available. When Exa is configured, `web_fetch` reads up to four
+known URLs per chat turn through the Contents API while `web_search` discovers current public-web
+sources through Search.
 Connected integration and managed capability actions are dispatched through `list_actions` and
 `use_action`. The route resolves one compact source catalog from currently connected providers and
 the workspace's enabled managed capabilities, and the model must discover a source's concrete action
