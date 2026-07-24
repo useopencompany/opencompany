@@ -3,6 +3,7 @@ import type { JSONSchema7 } from "ai";
 import { GoatActionInvalidParamsError } from "@/lib/actions/types";
 
 export type ManagedCapabilityExecutionMode = "sync" | "async";
+export type ManagedCapabilityInputLocation = "body" | "queryParams" | "pathParams";
 
 export type ManagedCapabilityMappedInput = {
   providerInput: Record<string, unknown>;
@@ -19,6 +20,7 @@ export type ManagedCapabilityActionSpec = {
   endpoint: string;
   priceType: "PER_CALL" | "PER_RESULT";
   executionMode: ManagedCapabilityExecutionMode;
+  inputLocation?: ManagedCapabilityInputLocation;
   mapInput: (params: Record<string, unknown>) => ManagedCapabilityMappedInput;
 };
 
@@ -853,12 +855,13 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     endpoint: "/keyword_metrics",
     priceType: "PER_CALL",
     executionMode: "sync",
+    inputLocation: "queryParams",
     mapInput: (raw) => {
       const params = checkedParams(raw, ["keyword", "country"]);
       return {
         providerInput: {
-          phrase: requiredText(params, "keyword", 200),
-          database: seoDatabase(params),
+          keyword: requiredText(params, "keyword", 200),
+          country: seoCountry(params),
         },
         resultLimit: 1,
         canonicalLinks: [],
@@ -880,13 +883,14 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     endpoint: "/backlinks_overview",
     priceType: "PER_CALL",
     executionMode: "sync",
+    inputLocation: "queryParams",
     mapInput: (raw) => {
       const params = checkedParams(raw, ["domain"]);
       const domain = seoDomain(params);
       return {
         providerInput: {
-          target: domain,
-          target_type: "root_domain",
+          url: domain,
+          scope: "ROOT_DOMAIN",
         },
         resultLimit: 1,
         canonicalLinks: [seoHomepage(domain)],
@@ -1450,6 +1454,7 @@ function seoDomainOverviewAction(input: {
     endpoint: input.endpoint,
     priceType: "PER_CALL",
     executionMode: "sync",
+    inputLocation: "queryParams",
     mapInput: (raw) => {
       const params = checkedParams(raw, ["domain", "country"]);
       const domain = seoDomain(params);
@@ -1489,6 +1494,7 @@ function seoDomainListAction(input: {
     endpoint: input.endpoint,
     priceType: input.priceType,
     executionMode: "sync",
+    inputLocation: "queryParams",
     mapInput: (raw) => {
       const params = checkedParams(raw, ["domain", "country", "limit"]);
       const domain = seoDomain(params);
@@ -1571,6 +1577,14 @@ function seoDatabase(params: Record<string, unknown>) {
     throw new GoatActionInvalidParamsError('"country" must be a two-letter uppercase code.');
   }
   return country === "GB" ? "uk" : country.toLowerCase();
+}
+
+function seoCountry(params: Record<string, unknown>) {
+  const country = optionalText(params, "country", 2) ?? "US";
+  if (!/^[A-Z]{2}$/.test(country)) {
+    throw new GoatActionInvalidParamsError('"country" must be a two-letter uppercase code.');
+  }
+  return country === "GB" ? "UK" : country;
 }
 
 function seoDomain(params: Record<string, unknown>) {

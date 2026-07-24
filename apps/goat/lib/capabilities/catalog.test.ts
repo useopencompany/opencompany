@@ -195,6 +195,11 @@ describe("managed capability catalog", () => {
 
   it("normalizes SEO targets and maps only the bounded Semrush inputs", () => {
     expect(
+      MANAGED_CAPABILITY_ACTIONS.filter((entry) => entry.source === "seo").map(
+        (entry) => entry.inputLocation,
+      ),
+    ).toEqual(Array(6).fill("queryParams"));
+    expect(
       action("seo.list_ranking_keywords").mapInput({
         domain: "https://www.OpenAI.com/research/?utm_source=test",
         country: "UK",
@@ -214,12 +219,17 @@ describe("managed capability catalog", () => {
         keyword: "AI agents",
         country: "GB",
       }).providerInput,
-    ).toEqual({ phrase: "AI agents", database: "uk" });
+    ).toEqual({ keyword: "AI agents", country: "UK" });
+    expect(
+      action("seo.get_keyword_metrics").mapInput({
+        keyword: "AI agents",
+      }).providerInput,
+    ).toEqual({ keyword: "AI agents", country: "US" });
     expect(
       action("seo.get_backlink_overview").mapInput({
         domain: "openai.com",
       }).providerInput,
-    ).toEqual({ target: "openai.com", target_type: "root_domain" });
+    ).toEqual({ url: "openai.com", scope: "ROOT_DOMAIN" });
   });
 
   it("rejects private, malformed, and oversized SEO requests", () => {

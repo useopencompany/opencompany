@@ -28,7 +28,8 @@ export function assertManagedCapabilityInspection(
       "The capability currency contract changed and requires review.",
     );
   }
-  const inputContract = collectInspectionInputContract(inspection.input);
+  const inspectionInput = inspectedProviderInput(spec, inspection.input);
+  const inputContract = collectInspectionInputContract(inspectionInput);
   const schemaKeys = new Set(inputContract.fields.keys());
   const mappedKeys = Object.keys(mapped.providerInput);
   if (
@@ -45,6 +46,17 @@ export function assertManagedCapabilityInspection(
       "The capability input contract changed and requires review.",
     );
   }
+}
+
+function inspectedProviderInput(spec: ManagedCapabilityActionSpec, input: unknown) {
+  if (!spec.inputLocation) return input;
+  if (!isPlainRecord(input) || !isPlainRecord(input[spec.inputLocation])) {
+    throw new GoatActionExecutionError(
+      "provider_error",
+      "The capability input contract changed and requires review.",
+    );
+  }
+  return input[spec.inputLocation];
 }
 
 function collectInspectionInputContract(value: unknown) {
