@@ -34,6 +34,11 @@ const CAPABILITY_COPY: Record<GoatManagedCapabilitySource, { label: string; desc
       label: "Lead enrichment",
       description: "Find and enrich professional profiles and contact details.",
     },
+    seo: {
+      label: "SEO",
+      description:
+        "Research search visibility, ranking keywords, top pages, competitors, and backlinks with Semrush.",
+    },
   };
 
 export function GoatCapabilitiesPanel({

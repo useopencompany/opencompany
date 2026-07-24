@@ -156,6 +156,7 @@ describe("resolveGoatActionCatalog", () => {
       { source: "instagram", enabled: true },
       { source: "tiktok", enabled: true },
       { source: "lead", enabled: true },
+      { source: "seo", enabled: true },
     ]);
 
     const catalog = await resolveGoatActionCatalog({
@@ -168,10 +169,12 @@ describe("resolveGoatActionCatalog", () => {
       ["instagram", "managed"],
       ["tiktok", "managed"],
       ["lead", "managed"],
+      ["seo", "managed"],
     ]);
     expect(catalog.actions).not.toContainEqual(expect.objectContaining({ provider: "linkedin" }));
     expect(catalog.actions.filter((action) => action.provider === "x")).toHaveLength(5);
     expect(catalog.actions.filter((action) => action.provider === "lead")).toHaveLength(4);
+    expect(catalog.actions.filter((action) => action.provider === "seo")).toHaveLength(6);
 
     vi.stubEnv("GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS", "x.search_posts");
     const endpointDisabledCatalog = await resolveGoatActionCatalog({
