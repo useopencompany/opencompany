@@ -31,8 +31,8 @@ const CAPABILITY_COPY: Record<GoatManagedCapabilitySource, { label: string; desc
       description: "Search public creators, videos, comments, hashtags, and trends.",
     },
     lead: {
-      label: "Lead enrichment",
-      description: "Find and enrich professional profiles and contact details.",
+      label: "Prospecting",
+      description: "Find targeted professional prospects and enrich their contact details.",
     },
     seo: {
       label: "SEO",

@@ -7,8 +7,8 @@ import {
 
 describe("managed capability catalog", () => {
   it("contains only the reviewed fixed action and endpoint allowlist", () => {
-    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(48);
-    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(48);
+    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(49);
+    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(49);
     expect(
       Object.fromEntries(
         MANAGED_CAPABILITY_ACTIONS.map((action) => [
@@ -23,6 +23,7 @@ describe("managed capability catalog", () => {
       "instagram.search_reels": "tikhub:/api/v1/instagram/v2/search_reels",
       "tiktok.get_search_trends": "tikhub:/api/v1/tiktok/web/fetch_trending_searchwords",
       "lead.enrich_person": "pdl:/v5/person/enrich",
+      "lead.search_prospects": "pdl:/v5/person/search",
       "lead.search_people_by_name": "apify:/harvestapi/linkedin-profile-search-by-name",
       "lead.list_company_employees": "apify:/harvestapi/linkedin-company-employees",
       "seo.get_domain_overview": "semrush:/domain_rank",
@@ -167,6 +168,92 @@ describe("managed capability catalog", () => {
     });
   });
 
+  it("maps structured prospect filters to a bounded PDL person search", () => {
+    expect(
+      action("lead.search_prospects").mapInput({
+        jobTitles: ["CTO", "Chief Technology Officer", "CTO"],
+        jobLevels: ["cxo"],
+        companyLocations: ["Berlin"],
+        companyIndustries: ["Computer Software"],
+        maxCompanyEmployees: 4,
+        requireWorkEmail: true,
+        cursor: "104$14.278746",
+        limit: 7,
+      }),
+    ).toEqual({
+      providerInput: {
+        query: {
+          bool: {
+            must: [
+              {
+                bool: {
+                  should: [
+                    { match_phrase: { "job_title.text": "cto" } },
+                    { match_phrase: { "job_title.text": "chief technology officer" } },
+                  ],
+                  minimum_should_match: 1,
+                },
+              },
+              { terms: { job_title_levels: ["cxo"] } },
+              {
+                bool: {
+                  should: [
+                    { term: { job_company_location_locality: "berlin" } },
+                    { term: { job_company_location_region: "berlin" } },
+                    { term: { job_company_location_country: "berlin" } },
+                  ],
+                  minimum_should_match: 1,
+                },
+              },
+              {
+                bool: {
+                  should: [
+                    { term: { job_company_industry: "computer software" } },
+                    { term: { job_company_industry_v2: "computer software" } },
+                  ],
+                  minimum_should_match: 1,
+                },
+              },
+              { range: { job_company_employee_count: { lte: 4 } } },
+              { exists: { field: "work_email" } },
+            ],
+          },
+        },
+        size: 7,
+        scroll_token: "104$14.278746",
+        titlecase: true,
+        data_include: expect.stringContaining("work_email"),
+      },
+      resultLimit: 7,
+      canonicalLinks: [],
+    });
+  });
+
+  it("rejects unbounded or contradictory prospect searches", () => {
+    const searchProspects = action("lead.search_prospects");
+    expect(() => searchProspects.mapInput({ requireWorkEmail: true })).toThrow(
+      /at least one title, seniority, location, industry, or employee-count filter/i,
+    );
+    expect(() =>
+      searchProspects.mapInput({
+        companyLocations: ["Berlin"],
+        minCompanyEmployees: 10,
+        maxCompanyEmployees: 4,
+      }),
+    ).toThrow(/cannot exceed/i);
+    expect(() =>
+      searchProspects.mapInput({
+        jobLevels: ["executive"],
+      }),
+    ).toThrow(/jobLevels.*one of/i);
+    expect(() =>
+      searchProspects.mapInput({
+        jobTitles: ["CTO"],
+        limit: 11,
+      }),
+    ).toThrow(/1 to 10/i);
+  });
+
   it("makes the YouTube channel-search handoff explicit and directly usable", () => {
     const channelId = `UC${"a".repeat(22)}`;
     const searchResult = {
@@ -264,6 +351,7 @@ function action(id: string) {
 
 function maxResultLimit(id: string) {
   if (id === "lead.search_people_by_name") return 5;
+  if (id === "lead.search_prospects") return 10;
   if (id === "lead.list_company_employees") return 10;
   if (id.endsWith("comments") || id.endsWith("replies")) return 20;
   if (id.startsWith("x.")) return 20;
