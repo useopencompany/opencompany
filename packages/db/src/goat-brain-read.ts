@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, like, ne, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, like, ne, or, type SQL, sql } from "drizzle-orm";
 import {
   createGateway,
   GOAT_BRAIN_WEIGHT_FRESHNESS,
@@ -31,7 +31,9 @@ import {
 // ingestion agent's per-job sandbox (which needs read-your-writes against uncommitted files).
 
 const DEFAULT_SEARCH_LIMIT = 10;
-const MAX_SEARCH_LIMIT = 50;
+// The public tool caps pages at 50 and requests one extra hit to determine whether a continuation
+// exists, so the read plane deliberately permits a 51-row internal window.
+const MAX_SEARCH_LIMIT = 51;
 const FTS_CANDIDATE_LIMIT = 50;
 const NAME_CANDIDATE_LIMIT = 20;
 const VECTOR_CANDIDATE_LIMIT = 50;
@@ -110,6 +112,7 @@ export type GoatBrainSearchOptions = {
   kind?: GoatBrainKind;
   since?: string;
   limit?: number;
+  offset?: number;
   hops?: number;
   includeMerged?: boolean;
   includeArchived?: boolean;
@@ -209,15 +212,23 @@ export async function searchGoatBrain(
   const db = ctx.db ?? getDb();
   const text = options.text?.trim() ?? "";
   const limit = clamp(options.limit ?? DEFAULT_SEARCH_LIMIT, 1, MAX_SEARCH_LIMIT);
+  const offset = Math.max(0, Math.trunc(options.offset ?? 0));
   const snippetChars = clamp(options.snippetChars ?? SNIPPET_MAX_CHARS, 0, SNIPPET_MAX_CHARS);
   const includeNeighbors = options.includeNeighbors ?? true;
   const hops = Math.max(0, options.hops ?? 0);
-  const conditions = documentFilters(ctx.brainRef, options, hops, now);
+  // Curated pages are the default retrieval surface. Evidence remains available through an
+  // explicit kind=evidence search or from a page's links/timeline via get/timeline.
+  const conditions = documentFilters(
+    ctx.brainRef,
+    { ...options, kind: options.kind ?? "page" },
+    hops,
+    now,
+  );
 
   // No query text → freshness-ordered browse over the filtered set (CLI parity: every candidate
   // gets relevance 1 and the recency blend decides).
   if (!text) {
-    const rows = await fetchDocumentMetaWhere(db, and(...conditions), limit);
+    const rows = await fetchDocumentMetaWhere(db, and(...conditions), limit, offset);
     const neighborsById = includeNeighbors
       ? await fetchNeighbors(
           db,
@@ -272,8 +283,8 @@ export async function searchGoatBrain(
       if (!record) return [];
       return [{ record, score: blendScore(rel, maxRelevance, record.updatedAt, now) }];
     })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    .sort((a, b) => b.score - a.score || a.record.brainId.localeCompare(b.record.brainId))
+    .slice(offset, offset + limit);
 
   const neighborsById = includeNeighbors
     ? await fetchNeighbors(
@@ -1000,12 +1011,14 @@ async function fetchDocumentMetaWhere(
   db: DbClient,
   where: SQL | undefined,
   limit: number,
+  offset: number = 0,
 ): Promise<DocumentMetaRow[]> {
   return db
     .select(documentMetaSelection)
     .from(goatBrainDocuments)
     .where(where)
-    .orderBy(desc(goatBrainDocuments.updatedAt))
+    .orderBy(desc(goatBrainDocuments.updatedAt), asc(goatBrainDocuments.brainId))
+    .offset(offset)
     .limit(limit);
 }
 

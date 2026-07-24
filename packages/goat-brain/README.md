@@ -6,6 +6,10 @@ Brain-owned skills are Markdown pages under `skills/`. `src/skills.ts` validates
 materializes them as standard single-file `SKILL.md` content. Default list/query retrieval excludes
 that zone unless the caller explicitly selects `skills` or one of its descendants.
 
+Query retrieval returns curated `kind: page` documents by default. Raw `kind: evidence` records are
+an explicit opt-in for source-level investigation; normal recall should query pages, read the
+relevant page, and follow its timeline or evidence links only when needed.
+
 ## Inline Links
 
 Inline links are parsed and formatted by `src/inline-links.ts`. Keep new link syntax, validation,

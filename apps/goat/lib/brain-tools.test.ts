@@ -23,14 +23,20 @@ describe("searchBrainToToolInput", () => {
   it("maps a query into the query command with json output, default limit, and no neighbors", () => {
     expect(searchBrainToToolInput({ query: "workos sponsorship" })).toEqual({
       command: "query",
-      flags: { text: "workos sponsorship", limit: 10, includeNeighbors: false, json: true },
+      flags: {
+        text: "workos sponsorship",
+        kind: "page",
+        limit: 10,
+        includeNeighbors: false,
+        json: true,
+      },
     });
   });
 
   it("omits text for a recency-only browse and passes since", () => {
     expect(searchBrainToToolInput({ since: "7d" })).toEqual({
       command: "query",
-      flags: { since: "7d", limit: 10, includeNeighbors: false, json: true },
+      flags: { kind: "page", since: "7d", limit: 10, includeNeighbors: false, json: true },
     });
   });
 
@@ -41,6 +47,7 @@ describe("searchBrainToToolInput", () => {
       command: "query",
       flags: {
         text: "pricing",
+        kind: "page",
         limit: 10,
         includeNeighbors: true,
         snippetChars: 150,
@@ -80,6 +87,26 @@ describe("searchBrainToToolInput", () => {
         includeNeighbors: false,
         lexicalOnly: true,
         includeMerged: true,
+        json: true,
+      },
+    });
+  });
+
+  it("passes evidence opt-in and continuation offsets explicitly", () => {
+    expect(
+      searchBrainToToolInput({
+        query: "raw pricing email",
+        kind: "evidence",
+        offset: 10,
+      }),
+    ).toEqual({
+      command: "query",
+      flags: {
+        text: "raw pricing email",
+        kind: "evidence",
+        limit: 10,
+        offset: 10,
+        includeNeighbors: false,
         json: true,
       },
     });

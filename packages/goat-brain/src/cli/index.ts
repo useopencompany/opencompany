@@ -58,6 +58,9 @@ import { type CommandContext, type CommandResult, fail, notFound, ok, render } f
 
 type Handler = (ctx: CommandContext) => Promise<CommandResult>;
 
+const DEFAULT_QUERY_LIMIT = 10;
+const MAX_QUERY_LIMIT = 50;
+
 const COMMANDS: Record<string, Handler> = {
   help: helpCommand,
   create,
@@ -151,8 +154,10 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   query: [
     "text",
     "folder",
+    "kind",
     "since",
     "limit",
+    "offset",
     "hops",
     "graph-direction",
     "lexical-only",
@@ -256,12 +261,15 @@ Examples:
        goat-brain query --text <text> [options]
 
 Search and retrieve relevant brain docs. Use list for inventory/enumeration instead of wildcard queries.
+Curated pages are searched by default; use --kind evidence for an explicit raw-source lookup.
 Merged, archived, and conflict-copy docs are excluded unless explicitly included.
 
 Options:
   --folder <path>
+  --kind page|evidence
   --since <duration-or-iso>
-  --limit <n>
+  --limit <n>            Results per page (default 10, max 50)
+  --offset <n>           Zero-based continuation offset
   --hops <n>
   --graph-direction out|in|both
   --lexical-only
@@ -273,6 +281,8 @@ Options:
 
 Examples:
   goat-brain query "hiring plan" --limit 5
+  goat-brain query "hiring plan" --offset 10
+  goat-brain query "pricing source" --kind evidence
   goat-brain query --text "Ada launch sequencing" --hops 2 --graph-direction both --json`,
   ingest: `Usage: goat-brain ingest (--text <text> | --text-stdin) --source-ref <ref> [options]
 
@@ -687,19 +697,36 @@ async function query(ctx: CommandContext): Promise<CommandResult> {
   if (graphDirectionInput && !graphDirection) {
     return fail('Invalid --graph-direction value. Use "out", "in", or "both".');
   }
-  const hits = await queryGoatBrain(
+  const kindInput = ctx.args.get("kind");
+  if (kindInput && !isValidGoatBrainKind(kindInput)) {
+    return fail('Invalid --kind value. Use "page" or "evidence".');
+  }
+  const kind: GoatBrainKind = kindInput && isValidGoatBrainKind(kindInput) ? kindInput : "page";
+  const limitInput = ctx.args.get("limit");
+  const limit = limitInput === undefined ? DEFAULT_QUERY_LIMIT : Number(limitInput);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_QUERY_LIMIT) {
+    return fail(`Invalid --limit value. Use an integer from 1 to ${MAX_QUERY_LIMIT}.`);
+  }
+  const offsetInput = ctx.args.get("offset");
+  const offset = offsetInput === undefined ? 0 : Number(offsetInput);
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    return fail("Invalid --offset value. Use a non-negative integer.");
+  }
+  const candidates = await queryGoatBrain(
     ctx.root,
     {
       text,
       ...(ctx.args.get("folder")
         ? { folder: normalizeGoatBrainFolderForV1(ctx.args.get("folder") ?? "") }
         : {}),
+      kind,
       ...(since ? { since } : {}),
       ...(ctx.args.number("hops") !== undefined
         ? { hops: Math.max(0, ctx.args.number("hops") ?? 0) }
         : {}),
       ...(graphDirection ? { graphDirection } : {}),
-      limit: ctx.args.number("limit") ?? 10,
+      limit: limit + 1,
+      offset,
       lexicalOnly: ctx.args.has("lexical-only"),
       ...(ctx.args.has("include-invalid") ? { includeInvalid: true } : {}),
       ...(ctx.args.has("include-merged") ? { includeMerged: true } : {}),
@@ -708,15 +735,36 @@ async function query(ctx: CommandContext): Promise<CommandResult> {
     },
     providers,
   );
+  const hasMore = candidates.length > limit;
+  const hits = candidates.slice(0, limit);
+  const nextOffset = hasMore ? offset + hits.length : undefined;
+  const instruction =
+    nextOffset !== undefined
+      ? `More matches are available. Repeat the same query with all filters unchanged and --offset ${nextOffset}.`
+      : undefined;
   const rendered = hits.length
     ? hits
         .map(
           (hit, index) =>
-            `${index + 1}. [${hit.folder}] ${hit.title} (${hit.id}, score ${hit.score}, updated ${hit.updatedAt})\n${hit.snippet}\nNext: goat-brain get ${hit.id}`,
+            `${offset + index + 1}. [${hit.folder}] ${hit.title} (${hit.id}, score ${hit.score}, updated ${hit.updatedAt})\n${hit.snippet}\nNext: goat-brain get ${hit.id}`,
         )
         .join("\n\n")
     : "No matching brain docs found.";
-  return { ...ok(rendered, { count: hits.length, hits }), usage };
+  return {
+    ...ok([rendered, instruction].filter(Boolean).join("\n\n"), {
+      count: hits.length,
+      hits,
+      scope: { kind },
+      pagination: {
+        limit,
+        offset,
+        returned: hits.length,
+        hasMore,
+        ...(nextOffset !== undefined ? { nextOffset, instruction } : {}),
+      },
+    }),
+    usage,
+  };
 }
 
 async function ingest(ctx: CommandContext): Promise<CommandResult> {

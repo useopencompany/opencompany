@@ -63,6 +63,7 @@ function searchGoatBrain(ctx, opts: {
   kind?: "page" | "evidence";
   since?: string;
   limit?: number;           // default 10
+  offset?: number;          // zero-based continuation offset
   hops?: number;            // default 0; explicit graph expansion
   includeMerged?: boolean;
   includeArchived?: boolean;
@@ -76,6 +77,12 @@ function getGoatBrainTimeline(ctx, id: string, opts?: { since?: string; limit?: 
 function listGoatBrainDocuments(ctx, opts?: { folder?: string; type?: string; limit?: number }):
   Promise<GoatBrainDocumentSummary[]>;
 ```
+
+Search defaults to `kind: "page"`. Evidence records are retrieved only with an explicit
+`kind: "evidence"` query or by following a page through `get`/`timeline`. Tool responses request
+one extra hit and expose `pagination.hasMore` plus `pagination.nextOffset`, so chat and MCP agents
+can continue the same ranked query without increasing a single response beyond its requested
+limit.
 
 ### Hit shape (built for the agent's next move)
 

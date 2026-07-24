@@ -66,7 +66,7 @@ describe("goat brain retrieval", () => {
     );
   });
 
-  it("does not return evidence records from hop-based retrieval", async () => {
+  it("returns curated pages by default and evidence only when explicitly requested", async () => {
     await writeDoc("companies/acme.md", {
       id: "acme",
       folder: "companies",
@@ -94,13 +94,48 @@ describe("goat brain retrieval", () => {
 
     await expect(
       queryGoatBrain(root, { text: "enterprise search", lexicalOnly: true }),
-    ).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: "ev-acme-email" })]));
-
-    await expect(
-      queryGoatBrain(root, { text: "enterprise search", hops: 1, lexicalOnly: true }),
     ).resolves.not.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: "ev-acme-email" })]),
     );
+
+    await expect(
+      queryGoatBrain(root, {
+        text: "enterprise search",
+        kind: "evidence",
+        lexicalOnly: true,
+      }),
+    ).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: "ev-acme-email" })]));
+  });
+
+  it("supports stable offset pagination across equally ranked pages", async () => {
+    for (let index = 1; index <= 12; index++) {
+      const suffix = String(index).padStart(2, "0");
+      await writeDoc(`projects/pagination-${suffix}.md`, {
+        id: `pagination-${suffix}`,
+        folder: "projects",
+        type: "project",
+        title: `Pagination ${suffix}`,
+        truth: "Shared pagination target.",
+        relations: [],
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+    }
+
+    const first = await queryGoatBrain(root, {
+      text: "shared pagination target",
+      limit: 10,
+      lexicalOnly: true,
+    });
+    const second = await queryGoatBrain(root, {
+      text: "shared pagination target",
+      limit: 10,
+      offset: 10,
+      lexicalOnly: true,
+    });
+
+    expect(first).toHaveLength(10);
+    expect(second).toHaveLength(2);
+    expect(new Set([...first, ...second].map((hit) => hit.id)).size).toBe(12);
   });
 
   it("hides conflict copies from query results unless explicitly included", async () => {

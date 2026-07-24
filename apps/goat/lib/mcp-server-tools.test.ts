@@ -157,11 +157,70 @@ describe("Goat MCP tools", () => {
         sourceRef: `mcp:${general.brain.id}`,
         toolInput: {
           command: "query",
-          flags: { text: "workos sponsorship", limit: 10, includeNeighbors: false, json: true },
+          flags: {
+            text: "workos sponsorship",
+            kind: "page",
+            limit: 10,
+            includeNeighbors: false,
+            json: true,
+          },
         },
       }),
     );
     expect(result.isError).toBe(false);
+  });
+
+  it("search_brain forwards the continuation offset", async () => {
+    const tools = registerTools();
+    await getTool(tools, "search_brain").callback({
+      query: "workos sponsorship",
+      offset: 10,
+    });
+
+    expect(lastToolInput()).toEqual({
+      command: "query",
+      flags: {
+        text: "workos sponsorship",
+        kind: "page",
+        limit: 10,
+        offset: 10,
+        includeNeighbors: false,
+        json: true,
+      },
+    });
+  });
+
+  it("search_brain exposes continuation metadata in MCP output", async () => {
+    brainCliMock.runGoatBrainToolForUser.mockResolvedValue({
+      ok: true,
+      brainRef: general.brain.id,
+      exitCode: 0,
+      stdout: "More matches are available.",
+      stderr: "",
+      parsed: {
+        hits: Array.from({ length: 10 }, (_, index) => ({ id: `page-${index + 1}` })),
+        pagination: {
+          limit: 10,
+          offset: 0,
+          returned: 10,
+          hasMore: true,
+          nextOffset: 10,
+          instruction:
+            "More matches are available. Repeat the same query with all filters unchanged and offset set to 10.",
+        },
+      },
+    });
+    const tools = registerTools();
+
+    const result = await getTool(tools, "search_brain").callback({ query: "roadmap" });
+    const payload = JSON.parse(result.content[0]?.text ?? "{}");
+
+    expect(payload.pagination).toMatchObject({
+      hasMore: true,
+      nextOffset: 10,
+    });
+    expect(payload.pagination.instruction).toContain("offset set to 10");
+    expect(result.structuredContent).toEqual(payload);
   });
 
   it("get_document accepts a single scalar id (the shape agents reach for first)", async () => {

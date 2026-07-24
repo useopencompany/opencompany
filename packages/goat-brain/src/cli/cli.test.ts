@@ -598,6 +598,74 @@ describe("goat-brain cli", () => {
     });
   });
 
+  it("returns explicit query continuation metadata", async () => {
+    await expect(
+      run(["query", "--root", root, "pagination", "--offset", "later"]),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("Invalid --offset value"),
+    });
+
+    for (let index = 1; index <= 11; index++) {
+      const suffix = String(index).padStart(2, "0");
+      await expect(
+        run([
+          "create",
+          "--root",
+          root,
+          "--folder",
+          "projects",
+          "--type",
+          "project",
+          "--id",
+          `pagination-${suffix}`,
+          "--title",
+          `Pagination ${suffix}`,
+          "--truth",
+          "Shared pagination target.",
+        ]),
+      ).resolves.toMatchObject({ exitCode: 0 });
+    }
+
+    const firstPage = JSON.parse(
+      (await run(["query", "--root", root, "shared pagination target", "--lexical-only", "--json"]))
+        .stdout,
+    ) as {
+      hits: Array<{ id: string }>;
+      pagination: {
+        hasMore: boolean;
+        nextOffset?: number;
+        instruction?: string;
+      };
+    };
+    const secondPage = JSON.parse(
+      (
+        await run([
+          "query",
+          "--root",
+          root,
+          "shared pagination target",
+          "--lexical-only",
+          "--offset",
+          String(firstPage.pagination.nextOffset),
+          "--json",
+        ])
+      ).stdout,
+    ) as {
+      hits: Array<{ id: string }>;
+      pagination: { hasMore: boolean };
+    };
+
+    expect(firstPage.hits).toHaveLength(10);
+    expect(firstPage.pagination).toMatchObject({
+      hasMore: true,
+      nextOffset: 10,
+      instruction: expect.stringContaining("--offset 10"),
+    });
+    expect(secondPage.hits).toHaveLength(1);
+    expect(secondPage.pagination.hasMore).toBe(false);
+  });
+
   it("updates title, type, and status through set", async () => {
     await expect(
       run([

@@ -58,6 +58,7 @@ export const searchBrainInputSchema = {
   kind: z.optional(z.enum(["page", "evidence"])),
   since: z.optional(nonEmptyString),
   limit: z.optional(z.number().check(z.int(), z.minimum(1), z.maximum(50))),
+  offset: z.optional(z.number().check(z.int(), z.minimum(0), z.maximum(Number.MAX_SAFE_INTEGER))),
   hops: z.optional(z.number().check(z.int(), z.minimum(0), z.maximum(3))),
   includeNeighbors: z.optional(z.boolean()),
   snippetChars: z.optional(z.number().check(z.int(), z.minimum(0), z.maximum(1200))),
@@ -74,6 +75,7 @@ export type SearchBrainArgs = BrainSelectorArgs & {
   kind?: "page" | "evidence" | undefined;
   since?: string | undefined;
   limit?: number | undefined;
+  offset?: number | undefined;
   hops?: number | undefined;
   includeNeighbors?: boolean | undefined;
   snippetChars?: number | undefined;
@@ -83,7 +85,7 @@ export type SearchBrainArgs = BrainSelectorArgs & {
 };
 
 export const SEARCH_BRAIN_TOOL_DESCRIPTION =
-  'Search a knowledge brain for pages and evidence by meaning and keyword. This is the primary recall tool. Pass "query" with the topic to find (e.g. { "query": "WorkOS sponsorship deal terms" }). Omit "query" and pass "since" (a relative window like 6h, 2d, 1w or an ISO-8601 timestamp) to browse recent entries. Each hit returns an id — follow the important ones with get_document. "score" is a relative rank within this response, not absolute confidence — do not threshold on it. Trust hits whose "signals" include both "lexical" and "vector"; vector-only hits may be semantic noise, and "vectorSimilarity" (when present) is the absolute confidence. When browsing with "since" (no query), score reflects recency only. Set includeNeighbors: true to get linked pages per hit (get_document always returns full links). Set snippetChars (e.g. 150) to trim each snippet; snippetChars: 150 with the default no-neighbors gives concise output. Read-only.';
+  'Search a knowledge brain by meaning and keyword. Curated pages are returned by default; set kind: "evidence" only when raw source material is explicitly needed. Pass "query" with the topic to find (e.g. { "query": "WorkOS sponsorship deal terms" }). Omit "query" and pass "since" (a relative window like 6h, 2d, 1w or an ISO-8601 timestamp) to browse recent pages. Each hit returns an id — follow the important ones with get_document, which exposes the page timeline and linked evidence. Results include pagination. When pagination.hasMore is true, call search_brain again with the same arguments and offset: pagination.nextOffset. "score" is a relative rank within this response, not absolute confidence — do not threshold on it. Trust hits whose "signals" include both "lexical" and "vector"; vector-only hits may be semantic noise, and "vectorSimilarity" (when present) is the absolute confidence. When browsing with "since" (no query), score reflects recency only. Set includeNeighbors: true to get linked pages per hit (get_document always returns full links). Set snippetChars (e.g. 150) to trim each snippet; snippetChars: 150 with the default no-neighbors gives concise output. Read-only.';
 
 export function searchBrainToToolInput(args: SearchBrainArgs): GoatBrainToolInput {
   const query = args.query?.trim();
@@ -93,10 +95,11 @@ export function searchBrainToToolInput(args: SearchBrainArgs): GoatBrainToolInpu
       ...(query ? { text: query } : {}),
       ...(args.folder?.trim() ? { folder: args.folder.trim() } : {}),
       ...(args.type?.trim() ? { type: args.type.trim() } : {}),
-      ...(args.kind ? { kind: args.kind } : {}),
+      kind: args.kind ?? "page",
       ...(args.since?.trim() ? { since: args.since.trim() } : {}),
       ...(args.hops !== undefined ? { hops: args.hops } : {}),
       limit: args.limit ?? 10,
+      ...(args.offset !== undefined ? { offset: args.offset } : {}),
       // MCP defaults to no neighbors — the biggest payload lever. Chat/CLI keep them (absent flag
       // → true downstream). Normalizes to the `include-neighbors` engine flag.
       includeNeighbors: args.includeNeighbors ?? false,

@@ -1,4 +1,4 @@
-import type { GoatBrainGraphDirection, GoatBrainRelation } from "../schema";
+import type { GoatBrainGraphDirection, GoatBrainKind, GoatBrainRelation } from "../schema";
 import { isGoatBrainSkillFolder } from "../skills";
 import { blend } from "./blend";
 import { createLexicalIndex, lexicalSearch, titleTagMatch } from "./bm25";
@@ -17,8 +17,10 @@ export { createGateway, type FetchLike, type Gateway, type GatewayConfig } from 
 export type GoatBrainQueryOptions = {
   text: string;
   folder?: string;
+  kind?: GoatBrainKind;
   since?: string;
   limit?: number;
+  offset?: number;
   lexicalOnly?: boolean;
   hops?: number;
   graphDirection?: GoatBrainGraphDirection;
@@ -65,9 +67,7 @@ export async function queryGoatBrain(
   now: number = Date.now(),
 ): Promise<GoatBrainQueryHit[]> {
   const all = await buildCorpus(root);
-  const candidates = applyFilters(all, options).filter(
-    (record) => (options.hops ?? 0) <= 0 || record.kind !== "evidence",
-  );
+  const candidates = applyFilters(all, options);
   if (candidates.length === 0) return [];
   const byId = new Map(candidates.map((record) => [record.id, record]));
   const useModel = !options.lexicalOnly;
@@ -124,7 +124,10 @@ export async function queryGoatBrain(
     .filter((item): item is { record: IndexRecord; relevance: number } => item !== null);
 
   return blend(scored, now)
-    .slice(0, options.limit ?? 10)
+    .slice(
+      Math.max(0, Math.trunc(options.offset ?? 0)),
+      Math.max(0, Math.trunc(options.offset ?? 0)) + (options.limit ?? 10),
+    )
     .map(({ record, score }) => {
       const via = graphPaths.get(record.id);
       return {
@@ -152,10 +155,12 @@ export async function queryGoatBrain(
 
 function applyFilters(records: IndexRecord[], options: GoatBrainQueryOptions): IndexRecord[] {
   const sinceMs = options.since ? Date.parse(options.since) : Number.NaN;
+  const kind = options.kind ?? "page";
   if (options.since && Number.isNaN(sinceMs)) {
     throw new Error(`Invalid "since" value: ${options.since}`);
   }
   return records.filter((record) => {
+    if (record.kind !== kind) return false;
     if (!options.includeInvalid && !record.valid) return false;
     if (!options.includeMerged && record.status === "merged") return false;
     if (!options.includeArchived && record.status === "archived") return false;

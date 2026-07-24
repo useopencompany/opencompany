@@ -45,9 +45,40 @@ export const GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA = {
     },
     flags: {
       type: "object",
+      properties: {
+        text: {
+          type: "string",
+          description:
+            "Query text for semantic and keyword search. Omit only for a recency-ordered browse.",
+        },
+        kind: {
+          type: "string",
+          enum: ["page", "evidence"],
+          description:
+            'Query/list document kind. Query defaults to "page"; use "evidence" only for an explicit raw-source lookup.',
+        },
+        since: {
+          type: "string",
+          description:
+            "Lower updated-at bound for query/timeline, such as 6h, 2d, 1w, or an ISO timestamp.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 50,
+          description: "Maximum query hits to return in this page. Defaults to 10.",
+        },
+        offset: {
+          type: "integer",
+          minimum: 0,
+          maximum: Number.MAX_SAFE_INTEGER,
+          description:
+            "Zero-based query result offset. When pagination.hasMore is true, repeat the same query with pagination.nextOffset.",
+        },
+      },
       additionalProperties: GOAT_BRAIN_TOOL_FLAG_VALUE_JSON_SCHEMA,
       description:
-        "CLI flags for the command, without leading dashes. Query/timeline since accepts relative windows like 6h, 2d, 1w or an ISO-8601 timestamp.",
+        'CLI flags for the command, without leading dashes. Query defaults to kind "page". Query output includes pagination; when hasMore is true, repeat the same query with offset set to nextOffset.',
     },
     stdin: {
       type: "string",
