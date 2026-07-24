@@ -71,6 +71,35 @@ export type CodexAppServerSkill = {
   path: string;
 };
 
+export type CodexAppServerDynamicToolSpec = {
+  type: "function";
+  name: string;
+  description: string;
+  inputSchema: unknown;
+  deferLoading?: boolean;
+};
+
+export type CodexAppServerDynamicToolResponse = {
+  success: boolean;
+  contentItems: Array<
+    { type: "inputText"; text: string } | { type: "inputImage"; imageUrl: string }
+  >;
+};
+
+export type CodexAppServerDynamicToolCall = {
+  threadId: string;
+  turnId: string;
+  callId: string;
+  namespace: string | null;
+  tool: string;
+  arguments: unknown;
+};
+
+export type CodexAppServerDynamicTool = {
+  spec: CodexAppServerDynamicToolSpec;
+  execute: (call: CodexAppServerDynamicToolCall) => Promise<CodexAppServerDynamicToolResponse>;
+};
+
 type AppServerState = {
   pid: number;
   socketPath: string;
@@ -157,6 +186,7 @@ export async function runCodexAppServerTurn(input: {
   task: string;
   skills?: CodexAppServerSkill[];
   localImages?: CodexAppServerLocalImage[];
+  dynamicTools?: CodexAppServerDynamicTool[];
   model: string;
   reasoningEffort: CodexReasoningEffort;
   planModeReasoningEffort: CodexReasoningEffort | null;
@@ -285,6 +315,7 @@ async function runTurnThroughProxy(input: {
   task: string;
   skills?: CodexAppServerSkill[];
   localImages?: CodexAppServerLocalImage[];
+  dynamicTools?: CodexAppServerDynamicTool[];
   model: string;
   reasoningEffort: CodexReasoningEffort;
   planModeReasoningEffort: CodexReasoningEffort | null;
@@ -311,7 +342,26 @@ async function runTurnThroughProxy(input: {
       if (activity) await input.onActivity(activity);
     },
   });
-  const onServerRequest = input.onServerRequest;
+  let threadId: string | null = null;
+  let turnId: string | null = null;
+  const dynamicTools = validateDynamicTools(input.dynamicTools ?? []);
+  const onServerRequest =
+    dynamicTools.length > 0 || input.onServerRequest
+      ? async (request: CodexAppServerRequest) => {
+          if (request.method === "item/tool/call") {
+            return executeDynamicToolRequest({
+              request,
+              tools: dynamicTools,
+              expectedThreadId: threadId,
+              expectedTurnId: turnId,
+            });
+          }
+          if (!input.onServerRequest) {
+            throw new Error(`Unsupported Codex app-server request: ${request.method}`);
+          }
+          return input.onServerRequest(request);
+        }
+      : undefined;
   const client = new AppServerProxyClient({
     sandbox: input.sandbox,
     command: input.plan.proxyCommand,
@@ -335,7 +385,6 @@ async function runTurnThroughProxy(input: {
     },
   });
 
-  let turnId: string | null = null;
   try {
     await client.start();
     await client.request("initialize", {
@@ -348,8 +397,11 @@ async function runTurnThroughProxy(input: {
     });
     await client.notify("initialized", {});
 
-    const thread = await startOrResumeThread({ client, input });
-    const threadId = thread.id;
+    const thread = await startOrResumeThread({
+      client,
+      input: { ...input, dynamicTools },
+    });
+    threadId = thread.id;
     if (threadId !== input.existingEngineSessionId) {
       await input.onEngineSessionId?.(threadId);
     }
@@ -477,6 +529,7 @@ async function startOrResumeThread(input: {
     model: string;
     reasoningEffort: CodexReasoningEffort;
     planModeReasoningEffort: CodexReasoningEffort | null;
+    dynamicTools: CodexAppServerDynamicTool[];
     plan: ReturnType<typeof buildCodexAppServerCommandPlan>;
   };
 }) {
@@ -501,6 +554,9 @@ async function startOrResumeThread(input: {
     sandbox: "workspace-write",
     approvalPolicy: "never",
     config: reasoningConfig(input.input.reasoningEffort, input.input.planModeReasoningEffort),
+    ...(input.input.dynamicTools.length > 0
+      ? { dynamicTools: input.input.dynamicTools.map((tool) => tool.spec) }
+      : {}),
   });
   const threadId = stringFromPath(started, ["thread", "id"]);
   if (!threadId) throw new Error("Codex app-server did not return a thread id.");
@@ -508,6 +564,72 @@ async function startOrResumeThread(input: {
     id: threadId,
     value: isRecord(started) && isRecord(started.thread) ? started.thread : {},
   };
+}
+
+function validateDynamicTools(
+  tools: readonly CodexAppServerDynamicTool[],
+): CodexAppServerDynamicTool[] {
+  const names = new Set<string>();
+  for (const tool of tools) {
+    const name = tool.spec.name.trim();
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(name)) {
+      throw new Error(`Invalid Codex dynamic tool name: ${JSON.stringify(tool.spec.name)}.`);
+    }
+    if (names.has(name)) throw new Error(`Duplicate Codex dynamic tool: ${name}.`);
+    names.add(name);
+  }
+  return [...tools];
+}
+
+async function executeDynamicToolRequest(input: {
+  request: CodexAppServerRequest;
+  tools: readonly CodexAppServerDynamicTool[];
+  expectedThreadId: string | null;
+  expectedTurnId: string | null;
+}): Promise<Record<string, unknown>> {
+  const threadId = firstString(input.request.params.threadId);
+  const turnId = firstString(input.request.params.turnId);
+  const callId = firstString(input.request.params.callId);
+  const toolName = firstString(input.request.params.tool);
+  const hasNamespace =
+    input.request.params.namespace !== null && input.request.params.namespace !== undefined;
+  if (!threadId || !turnId || !callId || !toolName || hasNamespace) {
+    throw new Error("Codex sent an invalid dynamic tool request.");
+  }
+  if (input.expectedThreadId && threadId !== input.expectedThreadId) {
+    throw new Error("Codex dynamic tool request did not match the active thread.");
+  }
+  if (input.expectedTurnId && turnId !== input.expectedTurnId) {
+    throw new Error("Codex dynamic tool request did not match the active turn.");
+  }
+
+  const tool = input.tools.find((candidate) => candidate.spec.name === toolName);
+  if (!tool) throw new Error(`Unsupported Codex dynamic tool: ${toolName}.`);
+
+  try {
+    const response = await tool.execute({
+      threadId,
+      turnId,
+      callId,
+      namespace: null,
+      tool: toolName,
+      arguments: input.request.params.arguments,
+    });
+    return {
+      success: response.success,
+      contentItems: response.contentItems,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      contentItems: [
+        {
+          type: "inputText",
+          text: error instanceof Error ? error.message : "The host tool failed.",
+        },
+      ],
+    };
+  }
 }
 
 function findThreadTurn(thread: Record<string, unknown>, turnId: string | null) {

@@ -86,6 +86,7 @@ describe("POST /api/codex-chat/messages", () => {
     expect(response.status).toBe(202);
     expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith({
       userWorkosId: "user_1",
+      brainRef: "goat_brain_1",
       sessionId: "goat_chat_1",
       prompt: "hello",
       skills: [],
