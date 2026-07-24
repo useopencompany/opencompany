@@ -23,7 +23,7 @@ import {
   type GoatBrainMultiBrainTarget,
   normalizeGoatBrainReadToolInput,
 } from "@/lib/brain-surface";
-import { MAX_WEB_SEARCH_CALLS_PER_TURN } from "@/lib/chat-limits";
+import { MAX_WEB_FETCH_CALLS_PER_TURN, MAX_WEB_SEARCH_CALLS_PER_TURN } from "@/lib/chat-limits";
 import {
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
@@ -710,10 +710,10 @@ export function createOpenCompanyChatToolContext(input: {
             error: error instanceof Error ? error.message : "web_fetch URL is invalid.",
           };
         }
-        if (webFetchCallCount >= 1) {
+        if (webFetchCallCount >= MAX_WEB_FETCH_CALLS_PER_TURN) {
           return {
             ok: false,
-            error: "web_fetch is limited to one URL per chat turn.",
+            error: `web_fetch is limited to ${MAX_WEB_FETCH_CALLS_PER_TURN} URLs per chat turn. Start a task for deeper research.`,
           };
         }
         webFetchCallCount += 1;

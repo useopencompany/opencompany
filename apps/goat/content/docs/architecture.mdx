@@ -32,7 +32,7 @@ The chat entry point is `apps/goat/app/api/chat/route.ts`. It authenticates the 
 The chat agent can answer directly or use the tools assembled in `apps/goat/lib/chat-agent.ts`:
 
 - `goat_brain` for durable personal context.
-- `web_fetch` for reading one known public URL when Exa is configured.
+- `web_fetch` for reading up to four known public URLs per chat turn when Exa is configured.
 - `web_search` when Exa is configured.
 - `start_task` for work that belongs in Results.
 
