@@ -183,6 +183,22 @@ describe("toGoatChatUiMessage", () => {
       durationMs: 153_400,
     });
   });
+
+  it("exposes persisted context usage in message metadata", () => {
+    const message = storedAssistantMessage({
+      debugTrace: {
+        schemaVersion: "opencompany.chat.debug.v1",
+        model: DEFAULT_GOAT_MODEL,
+        usage: {
+          inputTokens: 14_000,
+          outputTokens: 200,
+          totalTokens: 14_200,
+        },
+      },
+    });
+
+    expect(toGoatChatUiMessage(message).metadata?.contextTokens).toBe(14_200);
+  });
 });
 
 describe("listedActionSourceIdsFromMessages", () => {

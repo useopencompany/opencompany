@@ -562,7 +562,7 @@ export function toGoatChatMessageMetadata(
   const aborted = message.debugTrace?.aborted === true;
   const timing = toGoatChatMessageTiming(message);
   const attachments = toGoatChatUiAttachments(message.attachments);
-  const contextTokens = contextTokensFromUsage(message.debugTrace?.usage);
+  const contextTokens = goatChatContextTokensFromUsage(message.debugTrace?.usage);
 
   if (
     !message.sessionId &&
@@ -603,8 +603,15 @@ function toGoatChatUiAttachments(
   }));
 }
 
-function contextTokensFromUsage(
-  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null | undefined,
+export function goatChatContextTokensFromUsage(
+  usage:
+    | {
+        inputTokens?: number | undefined;
+        outputTokens?: number | undefined;
+        totalTokens?: number | undefined;
+      }
+    | null
+    | undefined,
 ): number | undefined {
   if (!usage) return undefined;
   if (typeof usage.totalTokens === "number" && usage.totalTokens > 0) return usage.totalTokens;
