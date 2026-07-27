@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-27
+
+### Added
+- Share any Goat chat as a live, read-only link, then stop sharing whenever you want; sharing it again creates a fresh URL so old viewers stay locked out (#892, #896) — @opencompany-bot.
+- Goat Quick brings chat to the macOS menu bar with an Option-Command-Space shortcut (#876, #877) — @louis.
+- Goat can browse full websites in a persistent sandbox and read up to four specific URLs per turn alongside multi-search web research (#866, #868, #881, #906) — @louis and @opencompany-bot.
+- Connected tools can now take guarded actions from chat with per-connection On, Ask, and Off controls: create Calendar events; create, update, and comment on Linear issues; send Gmail; read and edit Google Docs; read Slack; and read, update, or configure Attio lists (#842, #843, #851, #859, #870, #873, #891, #894, #895, #897, #905) — @louis and @opencompany-bot.
+- New managed research capabilities cover X, LinkedIn, YouTube, Instagram, TikTok, Semrush SEO, and structured prospect search, with a price quote and approval before paid calls (#869, #874, #887, #888) — @louis and @opencompany-bot.
+- Connect a workspace Stripe account to ask read-only questions about payments, balances, subscriptions and estimated MRR, or open invoices (#890) — @opencompany-bot.
+- Cloud Codex tasks can query their active Brain, with access checked again on every call (#884) — @opencompany-bot.
+- Ask main chat to survey Slack, Gmail, and Linear and save focused findings to the Brain with their original source attached (#838) — @louis.
+- Attach `.srt` subtitle files in chat, save them to the Brain, or pass the originals into Cloud Codex (#907) — @opencompany-bot.
+- New workspace owners now receive a short founder onboarding email series with one-click unsubscribe (#900) — @louis.
+- A new shareable [use-cases page](https://www.opencompany.cloud/use-cases) shows what OpenCompany can do (#885) — @louis.
+
+### Changed
+- The Slack answer bot now runs through the full Goat agent, understands follow-up threads, can work across multiple Brains, and shows live status while it works (#854) — @louis.
+- You can keep drafting your next message while Goat responds, tool rows are less cluttered, and the context-window meter updates throughout multi-step turns (#857, #871, #872, #904) — @opencompany-bot.
+- Onboarding now guides connected sources all the way to actively feeding the Brain, and valid company URLs are no longer blocked by temporary reachability checks (#852, #883) — @louis and @opencompany-bot.
+- Brain queries now default to curated pages, paginate consistently across chat, MCP, and the CLI, and keep raw evidence available when you explicitly need it (#880) — @louis.
+- Basic Brain ingestion is more efficient, groups each GitHub pull request lifecycle into one filing pass, and preserves valid source citations (#846, #847, #848, #849, #850, #853) — @louis and @opencompany-bot.
+
+### Fixed
+- Accepted workspace invitations now appear after sign-in even when you already belong to another workspace (#889) — @opencompany-bot.
+- Brain sidebar context-menu actions work with the mouse again, and each chat keeps its original model instead of inheriting a choice from another tab (#864, #865) — @louis and @opencompany-bot.
+- Cloud Codex handoffs and long, parallel, or paid chat actions recover more reliably instead of timing out or rejecting valid tool calls (#858, #862, #875, #878, #879, #882, #886) — @louis.
+- Brain tool results no longer appear twice in the model's chat context (#903) — @louis.
+
 ## [1.1.0] - 2026-07-22
 
 ### Added
