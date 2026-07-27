@@ -1079,6 +1079,13 @@
       "when": 1785141000000,
       "tag": "0153_goat_stripe_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1785155888264,
+      "tag": "0154_goat_stripe_oauth",
+      "breakpoints": true
     }
   ]
 }

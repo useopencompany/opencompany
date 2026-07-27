@@ -264,6 +264,9 @@ The Inngest values in `.env.example` are for background jobs. Local `bun run dev
   AuthKit env vars into Infisical `dev` + `/web`.
 - **Initial Stripe CLI bootstrap only:** run `stripe login` once. For shared development env vars,
   prefer storing a restricted test key as `STRIPE_SECRET_KEY` in Infisical `dev` + `/web`.
+- **Initial Goat Stripe App bootstrap only:** create and publish the public OAuth Stripe App,
+  register its connected-account lifecycle webhook, and store its client id, matching app-developer
+  key, state secret, and webhook secret. See [stripe-oauth-app.md](./stripe-oauth-app.md).
 - **Initial GitHub integration bootstrap only:** create a dedicated development GitHub App and a
   stable ngrok domain when testing the user-facing GitHub work integration locally. ngrok is required
   for the smoothest developer experience on callback/webhook integrations. See
