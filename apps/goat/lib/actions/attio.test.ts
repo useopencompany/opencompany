@@ -146,7 +146,7 @@ describe("resolveAttioActions", () => {
     expect(mocks.loadCredential).not.toHaveBeenCalled();
   });
 
-  it("puts record and list-entry updates behind the Attio write capability", async () => {
+  it("puts record, list-membership, and list-entry updates behind the Attio write capability", async () => {
     mocks.dbRows = [
       connectedRow({
         scopes: [...RECORD_WRITE_SCOPES, ...LIST_WRITE_SCOPES],
@@ -156,9 +156,10 @@ describe("resolveAttioActions", () => {
 
     const catalog = await resolveAttioActions("user_1");
     const updateRecord = catalog?.actions.find((entry) => entry.id === "attio.update_record");
+    const addToList = catalog?.actions.find((entry) => entry.id === "attio.add_record_to_list");
     const updateEntry = catalog?.actions.find((entry) => entry.id === "attio.update_list_entry");
 
-    for (const action of [updateRecord, updateEntry]) {
+    for (const action of [updateRecord, addToList, updateEntry]) {
       expect(action).toMatchObject({
         capability: "write",
         permissionMode: "ask",
@@ -171,8 +172,9 @@ describe("resolveAttioActions", () => {
       });
     }
     expect(updateRecord?.params.required).toEqual(["object", "record_id", "values"]);
+    expect(addToList?.params.required).toEqual(["list", "object", "record_id"]);
     expect(updateEntry?.params.required).toEqual(["list", "entry_id", "values"]);
-    expect(catalog?.description).toContain("update records or pipeline entries");
+    expect(catalog?.description).toContain("add records to lists");
   });
 
   it("fails closed for writes when a legacy connection has no tracked scopes", async () => {
@@ -205,6 +207,7 @@ describe("resolveAttioActions", () => {
     expect(writeOnly?.actions.some((entry) => entry.capability === "read")).toBe(false);
     expect(writeOnly?.actions.map((entry) => entry.id)).toEqual([
       "attio.update_record",
+      "attio.add_record_to_list",
       "attio.update_list_entry",
     ]);
   });
@@ -1018,6 +1021,97 @@ describe("Attio updates", () => {
         values: { stage: "Proposal" },
       },
     });
+  });
+
+  it("adds an existing record to a list with idempotent upsert semantics", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          id: { entry_id: "entry_1" },
+          parent_record_id: "person_1",
+          parent_object: "people",
+          entry_values: {
+            stage: [{ attribute_type: "status", status: { title: "Invited" } }],
+          },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await findAction("attio.add_record_to_list").then((action) =>
+      action.execute(
+        {
+          list: LIST_URL,
+          object: "people",
+          record_id: "person_1",
+          values: { stage: "Invited" },
+        },
+        CONTEXT,
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.attio.com/v2/lists/${LIST_ID}/entries`,
+      expect.objectContaining({
+        method: "PUT",
+        signal: CONTEXT.signal,
+        body: JSON.stringify({
+          data: {
+            parent_record_id: "person_1",
+            parent_object: "people",
+            entry_values: { stage: "Invited" },
+          },
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      workspace: "Acme",
+      list: LIST_ID,
+      entry: {
+        id: "entry_1",
+        parent: { object: "people", id: "person_1" },
+        values: { stage: "Invited" },
+      },
+    });
+  });
+
+  it("can add an existing record to a list without initial list fields", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          id: { entry_id: "entry_1" },
+          parent_record_id: "person_1",
+          parent_object: "people",
+          entry_values: {},
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await findAction("attio.add_record_to_list").then((action) =>
+      action.execute(
+        {
+          list: LIST_ID,
+          object: "people",
+          record_id: "person_1",
+        },
+        CONTEXT,
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.attio.com/v2/lists/${LIST_ID}/entries`,
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          data: {
+            parent_record_id: "person_1",
+            parent_object: "people",
+            entry_values: {},
+          },
+        }),
+      }),
+    );
   });
 
   it("rechecks write permission immediately before mutation", async () => {

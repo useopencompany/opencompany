@@ -48,11 +48,9 @@ export type GoatAttioWorkspaceIdentity = {
 };
 
 export function parseGoatAttioScopes(value: unknown): string[] {
-  const values = Array.isArray(value)
-    ? value.filter((entry): entry is string => typeof entry === "string")
-    : typeof value === "string"
-      ? value.split(/\s+/)
-      : [];
+  const values = (Array.isArray(value) ? value : [value]).flatMap((entry) =>
+    typeof entry === "string" ? entry.split(/\s+/) : [],
+  );
   return [...new Set(values.map((scope) => scope.trim()).filter(Boolean))].sort();
 }
 
