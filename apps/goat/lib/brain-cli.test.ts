@@ -379,10 +379,7 @@ describe("read plane commands", () => {
       },
     );
     expect(output.ok).toBe(true);
-    expect(output.stdout).toContain("1. [team/gtm] Ada (ada, person, score 0.91");
-    expect(output.stdout).toContain("Linked: → works_at acme (Acme, page/company)");
-    expect(output.stdout).toContain("→ cites ev-acme-email (Acme email, evidence/source)");
-    expect(output.stdout).toContain("Next: get ada");
+    expect(output.stdout).toBeUndefined();
     expect(output.parsed).toEqual({
       hits: [HIT],
       mode: "search",
@@ -484,10 +481,11 @@ describe("read plane commands", () => {
       "ghost",
     ]);
     expect(output.ok).toBe(true);
-    expect(output.stdout).toContain('# Ada (ada) (resolved from "ada lovelace" via alias)');
-    expect(output.stdout).toContain("## Compiled truth");
-    expect(output.stdout).toContain("→ works_at acme (Acme, page/company)");
-    expect(output.stdout).toContain("Not found: ghost");
+    expect(output.stdout).toBeUndefined();
+    expect(output.parsed).toMatchObject({
+      documents: [expect.objectContaining({ id: "ada" })],
+      missing: ["ghost"],
+    });
   });
 
   it("fails get with a surface-neutral message and no write-command manual", async () => {
@@ -580,8 +578,7 @@ describe("read plane commands", () => {
       },
     });
     expect((output.parsed as { hits: unknown[] }).hits).toHaveLength(10);
-    expect(output.stdout).toContain("21. [team/gtm] Person 1");
-    expect(output.stdout).toContain("offset set to 30");
+    expect(output.stdout).toBeUndefined();
   });
 
   it("serves timeline and list from the read module", async () => {
@@ -616,7 +613,11 @@ describe("read plane commands", () => {
     });
     expect(getGoatBrainTimeline).toHaveBeenCalledWith(expect.anything(), "ada", { limit: 10 });
     expect(timeline.ok).toBe(true);
-    expect(timeline.stdout).toContain("Source: Kickoff (jamie:meeting:1)");
+    expect(timeline.stdout).toBeUndefined();
+    expect(timeline.parsed).toMatchObject({
+      id: "ada",
+      entries: [expect.objectContaining({ sourceRef: "jamie:meeting:1" })],
+    });
 
     const list = await runGoatBrainToolForUser({
       ...BASE_INPUT,
@@ -627,7 +628,15 @@ describe("read plane commands", () => {
       limit: 20,
     });
     expect(list.ok).toBe(true);
-    expect(list.stdout).toContain("[team/gtm] Ada (ada, person, active");
+    expect(list.stdout).toBeUndefined();
+    expect(list.parsed).toEqual({
+      documents: [
+        expect.objectContaining({
+          id: "ada",
+          type: "person",
+        }),
+      ],
+    });
   });
 
   it("rejects invalid read flags before touching the module", async () => {

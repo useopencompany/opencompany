@@ -270,8 +270,9 @@ async function runResolvedGoatBrainCliForUser(
 
 // --- read plane -------------------------------------------------------------------------------
 // query/get/timeline/list are served in-process by @opencompany/db/goat-brain-read instead of
-// materializing the brain and spawning the CLI. Output keeps the GoatBrainToolOutput contract
-// (human-readable stdout + machine-readable `parsed`) and every run is still traced.
+// materializing the brain and spawning the CLI. Read results expose the machine-readable `parsed`
+// payload only; returning the equivalent human rendering as `stdout` would duplicate every result
+// in the model context. Every run is still traced.
 
 async function runGoatBrainReadCommandForUser(
   input: {
@@ -301,7 +302,6 @@ async function runGoatBrainReadCommandForUser(
     }),
   };
   const flags = normalizeCliToolFlags(input.toolInput.flags ?? {});
-  const wantsJson = flagBoolean(flags.json) === true;
 
   let output: GoatBrainToolOutput;
   try {
@@ -309,7 +309,6 @@ async function runGoatBrainReadCommandForUser(
     output = {
       ok: true,
       exitCode: 0,
-      stdout: wantsJson ? JSON.stringify(result.parsed, null, 2) : result.stdout,
       stderr: "",
       command: resolved.display,
       argv: resolved.argv,
@@ -1145,11 +1144,10 @@ function publicGoatBrainCliOutput(
   return {
     ok: result.ok,
     exitCode: result.exitCode,
-    stdout,
     stderr,
     command: resolved.display,
     argv: resolved.argv,
-    ...(parsed !== null ? { parsed } : {}),
+    ...(parsed !== null ? { parsed } : { stdout }),
     ...(error ? { error } : {}),
   };
 }

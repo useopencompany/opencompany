@@ -219,7 +219,7 @@ export type GoatBrainToolOutput = {
   ok: boolean;
   brainRef?: string;
   exitCode: number | null;
-  stdout: string;
+  stdout?: string;
   stderr: string;
   command?: string;
   argv?: string[];
