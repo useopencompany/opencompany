@@ -90,9 +90,10 @@ describe("Goat chat sharing", () => {
   });
 
   it("loads a share through a session-owner join", async () => {
-    const query = vi.fn(async (...[_statement]: [string, unknown[], object]) => ({
-      rows: [[SHARE_ID, "chat_1", "2026-07-27T10:00:00.000Z"]],
-    }));
+    const query = vi.fn(async (...args: [string, unknown[], object]) => {
+      void args;
+      return { rows: [[SHARE_ID, "chat_1", "2026-07-27T10:00:00.000Z"]] };
+    });
     const client = Object.assign(query, {
       transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
     });

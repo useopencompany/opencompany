@@ -97,6 +97,25 @@ describe("ChatShareButton", () => {
     });
   });
 
+  it("keeps a failed revocation open so the owner can retry", async () => {
+    vi.mocked(getGoatChatShareAction).mockResolvedValue({ ok: true, shareId: SHARE_ID });
+    vi.mocked(revokeGoatChatShareAction).mockResolvedValue({
+      ok: false,
+      error: "Could not stop sharing that chat.",
+    });
+    render(<ChatShareButton chatSessionId="chat_1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Share chat" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stop sharing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop sharing" }));
+
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith("Could not stop sharing that chat."),
+    );
+    expect(screen.getByRole("heading", { name: "Stop sharing this chat?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop sharing" })).toBeEnabled();
+  });
+
   it("keeps the unshared state and surfaces a share failure", async () => {
     vi.mocked(createGoatChatShareAction).mockResolvedValue({
       ok: false,

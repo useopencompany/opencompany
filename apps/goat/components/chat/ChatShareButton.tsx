@@ -84,6 +84,7 @@ export function ChatShareButton({
   }
 
   function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen && operation) return;
     setOpen(nextOpen);
     if (!nextOpen) {
       setConfirmingRevoke(false);
@@ -163,7 +164,7 @@ export function ChatShareButton({
       </Tooltip>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="max-w-[420px] gap-5">
+        <DialogContent className="max-w-[420px] gap-5" showCloseButton={operation === null}>
           {confirmingRevoke ? (
             <>
               <DialogHeader className="text-left">
@@ -268,7 +269,12 @@ export function ChatShareButton({
                 </div>
               ) : (
                 <div className="flex items-center justify-end gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => handleOpenChange(false)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={operation === "copying"}
+                    onClick={() => handleOpenChange(false)}
+                  >
                     Cancel
                   </Button>
                   <Button size="sm" disabled={operation === "copying"} onClick={copyShareLink}>
