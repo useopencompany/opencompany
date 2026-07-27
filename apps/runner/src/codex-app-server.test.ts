@@ -450,6 +450,17 @@ describe("runCodexAppServerTurn", () => {
       reasoningEffort: "medium",
       planModeReasoningEffort: null,
       existingEngineSessionId: "thread_existing",
+      dynamicTools: [
+        {
+          spec: {
+            type: "function",
+            name: "goat_brain",
+            description: "Read the Brain.",
+            inputSchema: { type: "object" },
+          },
+          execute: vi.fn(),
+        },
+      ],
       auth: apiAuth,
       githubAuth: { githubToken: null, githubAuthHeader: null },
       timeoutMs: 60_000,
@@ -478,6 +489,7 @@ describe("runCodexAppServerTurn", () => {
       .sentMessages()
       .find((message) => message.method === "thread/resume");
     expect(JSON.stringify(resumeMessage?.params)).not.toContain("plan_mode_reasoning_effort");
+    expect(JSON.stringify(resumeMessage?.params)).not.toContain("dynamicTools");
     expect(sandbox.sentMessages().find((message) => message.method === "turn/start")).toMatchObject(
       {
         params: {
@@ -712,6 +724,100 @@ describe("runCodexAppServerTurn", () => {
     expect(summary).toMatchObject({ status: "success", result: "Codex completed." });
   });
 
+  it("registers dynamic tools on new threads and handles host tool calls", async () => {
+    const sandbox = fakeSandbox({ requestDynamicTool: true });
+    const runtimeEvents: Record<string, unknown>[] = [];
+    const execute = vi.fn(async () => ({
+      success: true,
+      contentItems: [{ type: "inputText" as const, text: '{"hits":[]}' }],
+    }));
+
+    const summary = await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "search the Brain",
+      dynamicTools: [
+        {
+          spec: {
+            type: "function",
+            name: "goat_brain",
+            description: "Read the Brain.",
+            inputSchema: {
+              type: "object",
+              properties: { command: { type: "string" } },
+              required: ["command"],
+            },
+          },
+          execute,
+        },
+      ],
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: null,
+      existingEngineSessionId: null,
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async (events) => {
+        runtimeEvents.push(...events);
+      },
+      onActivity: async () => undefined,
+    });
+
+    expect(
+      sandbox.sentMessages().find((message) => message.method === "thread/start"),
+    ).toMatchObject({
+      params: {
+        dynamicTools: [
+          {
+            type: "function",
+            name: "goat_brain",
+            description: "Read the Brain.",
+          },
+        ],
+      },
+    });
+    expect(execute).toHaveBeenCalledWith({
+      threadId: "thread_started",
+      turnId: "turn_1",
+      callId: "call_brain_1",
+      namespace: null,
+      tool: "goat_brain",
+      arguments: { command: "query", flags: { text: "pricing" } },
+    });
+    expect(sandbox.sentMessages()).toContainEqual({
+      id: "server_dynamic_1",
+      result: {
+        success: true,
+        contentItems: [{ type: "inputText", text: '{"hits":[]}' }],
+      },
+    });
+    expect(runtimeEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          method: "item/started",
+          params: expect.objectContaining({
+            item: expect.objectContaining({ type: "dynamicToolCall", tool: "goat_brain" }),
+          }),
+        }),
+        expect.objectContaining({
+          method: "item/completed",
+          params: expect.objectContaining({
+            item: expect.objectContaining({
+              type: "dynamicToolCall",
+              tool: "goat_brain",
+              success: true,
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(summary).toMatchObject({ status: "success", result: "Codex completed." });
+  });
+
   it("sets a Codex goal after materializing the thread and before starting the turn", async () => {
     const sandbox = fakeSandbox({ completeGoalDelayMs: 5 });
     const activities: string[] = [];
@@ -810,6 +916,7 @@ type FakeProxyMessage = {
 type FakeSandboxOptions = {
   completeTurn?: boolean;
   completeGoalDelayMs?: number;
+  requestDynamicTool?: boolean;
   requestUserInput?: boolean;
   resumedTurn?: "active" | "completed";
 };
@@ -876,6 +983,28 @@ async function respondToProxyMessage(
 ) {
   if (!onStdout || message.id == null) return;
   if (message.id === "server_question_1" && options.requestUserInput) {
+    await completeFakeTurn(onStdout, "thread_started");
+    return;
+  }
+  if (message.id === "server_dynamic_1" && options.requestDynamicTool) {
+    await onStdout(
+      `${JSON.stringify({
+        method: "item/completed",
+        params: {
+          threadId: "thread_started",
+          turnId: "turn_1",
+          item: {
+            id: "dynamic_1",
+            type: "dynamicToolCall",
+            tool: "goat_brain",
+            arguments: { command: "query", flags: { text: "pricing" } },
+            status: "completed",
+            success: true,
+            contentItems: [{ type: "inputText", text: '{"hits":[]}' }],
+          },
+        },
+      })}\n`,
+    );
     await completeFakeTurn(onStdout, "thread_started");
     return;
   }
@@ -981,6 +1110,39 @@ async function respondToProxyMessage(
                 options: [{ label: "Foundational", description: "Harden the full path." }],
               },
             ],
+          },
+        })}\n`,
+      );
+      return;
+    }
+    if (options.requestDynamicTool) {
+      await onStdout(
+        `${JSON.stringify({
+          method: "item/started",
+          params: {
+            threadId,
+            turnId: "turn_1",
+            item: {
+              id: "dynamic_1",
+              type: "dynamicToolCall",
+              tool: "goat_brain",
+              arguments: { command: "query", flags: { text: "pricing" } },
+              status: "inProgress",
+            },
+          },
+        })}\n`,
+      );
+      await onStdout(
+        `${JSON.stringify({
+          id: "server_dynamic_1",
+          method: "item/tool/call",
+          params: {
+            threadId,
+            turnId: "turn_1",
+            callId: "call_brain_1",
+            namespace: null,
+            tool: "goat_brain",
+            arguments: { command: "query", flags: { text: "pricing" } },
           },
         })}\n`,
       );

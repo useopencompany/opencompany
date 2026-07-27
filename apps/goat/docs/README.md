@@ -20,7 +20,8 @@ Goat has four LLM paths:
    `codex app-server`, and posts normalized Codex events back into the Goat chat.
 4. **Cloud Codex chat:** a Goat chat engine mode backed by a persistent E2B sandbox and Codex
    app-server thread. Uploaded images, PDFs, Word files, and Excel files are materialized into that
-   sandbox; images are also sent to Codex as native local-image inputs.
+   sandbox; images are also sent to Codex as native local-image inputs. New chats pin the active
+   Brain and expose its read plane through a runner-hosted Codex dynamic tool.
 
 The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
@@ -313,6 +314,17 @@ the app-server daemon when the installed set changes, while the persistent Codex
 Only skills whose first activation belongs to the current turn are included as native `skill`
 inputs; previously activated skills remain installed and in thread history.
 
+New Cloud Codex chats pin the user's active Brain on `goat.codex_chat_sessions` together with the
+host-tool contract version used to start the Codex thread. On `thread/start`, the runner registers
+the read-only `goat_brain` function through app-server's experimental `dynamicTools` API. When
+Codex sends `item/tool/call`, the runner rechecks the user's Brain access, calls the database-backed
+Brain read plane, audits the attempt in `goat.brain_tool_runs`, and sends the result back over the
+runner-side proxy. Brain credentials and database access never enter E2B. Because app-server stores
+dynamic tool definitions on the thread, resumed turns provide the matching runner callback without
+trying to redefine the tool. Existing sessions without a pinned Brain and matching contract remain
+unchanged. The first contract intentionally supports only `query`, `list`, `get`, and `timeline`;
+it cannot write to the Brain.
+
 The Cloud Codex Plan control starts the turn with app-server's experimental
 `collaborationMode.mode = "plan"`; `plan_mode_reasoning_effort` configures the mode's reasoning
 effort but does not activate Plan mode by itself. A successful Plan turn that produced a proposed
@@ -332,6 +344,8 @@ interactions so stale cards cannot answer dead proxy connections. Cloud executio
 `approvalPolicy: "never"` inside the isolated workspace-write sandbox; unexpected command or file
 approval requests are declined rather than surfaced as misleading UI. Terminal and recovered turns
 clear stored answer bodies after settling the UI, including answers to questions marked secret.
+Pending dynamic host-tool calls also force a guarded recovery, since their result belongs to the
+runner proxy connection that received the original request.
 
 On the Goat home, open Cloud Codex sessions are projected into the unified Tasks section alongside
 background `goat.tasks`. This is a live UI projection of the chat-backed session and its
@@ -578,7 +592,8 @@ Important tables:
 - `goat.local_codex_turns`: local Codex user and assistant message linkage plus Codex turn status.
 - `goat.local_codex_commands`: queued bridge commands for start, steer, interrupt, and close.
 - `goat.local_codex_events`: raw app-server notifications plus normalized event type and payload.
-- `goat.codex_chat_sessions`: persistent cloud sandbox, app-server thread, active turn, and status.
+- `goat.codex_chat_sessions`: persistent cloud sandbox, app-server thread, active turn, status,
+  pinned Brain, and host-tool contract version.
 - `goat.codex_chat_turns`: leased Cloud Codex turn queue and message linkage.
 - `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
 - `goat.codex_chat_events`: normalized Cloud Codex event audit rows.

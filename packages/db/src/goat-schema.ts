@@ -428,6 +428,8 @@ export const GOAT_LOCAL_CODEX_EVENT_TYPES = [
   "file_change.completed",
   "mcp_tool.started",
   "mcp_tool.completed",
+  "dynamic_tool.started",
+  "dynamic_tool.completed",
   "web_search.started",
   "web_search.completed",
   "plan.updated",
@@ -3151,6 +3153,10 @@ export const goatCodexChatSessions = goat.table(
       .notNull()
       .references(() => goatChatSessions.id, { onDelete: "cascade" }),
     model: text("model").notNull().default("gpt-5.5"),
+    brainRef: text("brain_ref").references(() => goatBrains.id, {
+      onDelete: "set null",
+    }),
+    hostToolContractVersion: text("host_tool_contract_version"),
     sandboxId: text("sandbox_id"),
     codexThreadId: text("codex_thread_id"),
     activeTurnId: text("active_turn_id"),
