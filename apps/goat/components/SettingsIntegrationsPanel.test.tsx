@@ -288,6 +288,40 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
+  it("shows one broad Slack read permission for each connected workspace", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_slack",
+        provider: "slack",
+        externalId: "T123",
+        connectionLabel: "Acme",
+        accountName: "Louis",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    const slackCard = screen
+      .getByText("Let Goat search and read your Slack conversations.")
+      .closest("div.rounded-2xl");
+    expect(slackCard).not.toBeNull();
+    const readPermission = within(slackCard as HTMLElement).getByRole("group", {
+      name: "Read Slack permission",
+    });
+    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      within(slackCard as HTMLElement).queryByRole("group", {
+        name: /write|send/i,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a workspace-owned Stripe connection and test-mode label", () => {
     const integrations = goatIntegrationStateFromRows([
       {

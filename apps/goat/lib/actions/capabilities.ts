@@ -80,6 +80,14 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  slack: [
+    {
+      id: "read",
+      label: "Read Slack",
+      description: "Search and read conversations, messages, threads, and people in Slack.",
+      defaultMode: "on",
+    },
+  ],
   attio: [
     {
       id: "read",
