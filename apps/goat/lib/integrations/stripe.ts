@@ -22,6 +22,8 @@ const STRIPE_API_TIMEOUT_MS = 15_000;
 const STRIPE_OAUTH_STATE_TTL_MS = 10 * 60 * 1_000;
 const STRIPE_ACCESS_TOKEN_LIFETIME_SECONDS = 60 * 60;
 const STRIPE_ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
+const STRIPE_REFRESH_RECOVERY_ATTEMPTS = 5;
+const STRIPE_REFRESH_RECOVERY_DELAY_MS = 100;
 const MAX_STRIPE_ERROR_DETAIL_CHARS = 200;
 const stripeTokenRefreshes = new Map<string, Promise<string>>();
 
@@ -638,7 +640,12 @@ async function refreshGoatStripeCredential(
     kind: GOAT_STRIPE_CREDENTIAL_KIND,
   });
   const payload = parseGoatStripeCredential(current?.payload);
-  if (!current || !payload) {
+  if (
+    !current ||
+    !payload ||
+    payload.accountId !== connection.accountId ||
+    payload.livemode !== connection.livemode
+  ) {
     await markStripeNeedsReauth(connection, "Stored Stripe OAuth credentials are not usable.");
     throw new GoatStripeOAuthAuthError("Stored Stripe OAuth credentials are not usable.");
   }
@@ -659,23 +666,30 @@ async function refreshGoatStripeCredential(
   } catch (error) {
     if (error instanceof GoatStripeOAuthError && error.code === "invalid_grant") {
       // Stripe rotates refresh tokens. Another server instance can win the
-      // exchange; recover its freshly persisted token instead of forcing a
-      // needless reconnect.
-      const recovered = await loadGoatIntegrationCredential({
-        userWorkosId: connection.userWorkosId,
-        integrationId: connection.integrationId,
-        provider: GOAT_STRIPE_PROVIDER,
-        kind: GOAT_STRIPE_CREDENTIAL_KIND,
-      });
-      const recoveredPayload = parseGoatStripeCredential(recovered?.payload);
-      if (
-        recovered &&
-        recoveredPayload &&
-        recovered.updatedAt.getTime() > current.updatedAt.getTime() &&
-        recovered.expiresAt &&
-        recovered.expiresAt.getTime() - STRIPE_ACCESS_TOKEN_REFRESH_SKEW_MS > Date.now()
-      ) {
-        return recoveredPayload.accessToken;
+      // exchange. Give that instance a bounded window to persist its result
+      // before forcing a reconnect.
+      for (let attempt = 0; attempt < STRIPE_REFRESH_RECOVERY_ATTEMPTS; attempt += 1) {
+        const recovered = await loadGoatIntegrationCredential({
+          userWorkosId: connection.userWorkosId,
+          integrationId: connection.integrationId,
+          provider: GOAT_STRIPE_PROVIDER,
+          kind: GOAT_STRIPE_CREDENTIAL_KIND,
+        });
+        const recoveredPayload = parseGoatStripeCredential(recovered?.payload);
+        if (
+          recovered &&
+          recoveredPayload &&
+          recoveredPayload.accountId === connection.accountId &&
+          recoveredPayload.livemode === connection.livemode &&
+          recovered.updatedAt.getTime() > current.updatedAt.getTime() &&
+          recovered.expiresAt &&
+          recovered.expiresAt.getTime() - STRIPE_ACCESS_TOKEN_REFRESH_SKEW_MS > Date.now()
+        ) {
+          return recoveredPayload.accessToken;
+        }
+        if (attempt + 1 < STRIPE_REFRESH_RECOVERY_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, STRIPE_REFRESH_RECOVERY_DELAY_MS));
+        }
       }
       await markStripeNeedsReauth(connection, "Stripe rejected the OAuth refresh token.");
       throw new GoatStripeOAuthAuthError("Stripe rejected the OAuth refresh token.");

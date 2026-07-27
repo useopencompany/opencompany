@@ -314,6 +314,55 @@ describe("Stripe Apps OAuth", () => {
     );
   });
 
+  it("waits for another server instance to persist a rotated Stripe token", async () => {
+    const expiredCredential = {
+      payload: {
+        accessToken: "oauth_access_token_old",
+        refreshToken: "oauth_refresh_token_old",
+        accountId: "acct_123",
+        livemode: false,
+        connectedAt: "2026-07-01T00:00:00.000Z",
+      },
+      expiresAt: new Date("2026-07-27T11:00:00Z"),
+      lastRotatedAt: null,
+      updatedAt: new Date("2026-07-27T11:00:00Z"),
+      encryptionKeyVersion: 1,
+    };
+    const recoveredCredential = {
+      ...expiredCredential,
+      payload: {
+        ...expiredCredential.payload,
+        accessToken: "oauth_access_token_recovered",
+        refreshToken: "oauth_refresh_token_recovered",
+      },
+      expiresAt: new Date("2026-07-27T13:00:00Z"),
+      updatedAt: new Date("2026-07-27T12:00:01Z"),
+    };
+    persistenceMocks.loadCredential
+      .mockResolvedValueOnce(expiredCredential)
+      .mockResolvedValueOnce(expiredCredential)
+      .mockResolvedValueOnce(expiredCredential)
+      .mockResolvedValueOnce(recoveredCredential);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ error: "invalid_grant" }, 400)),
+    );
+
+    const refresh = refreshGoatStripeConnectionAccessToken({
+      integrationId: "gint_stripe",
+      userWorkosId: "user_original",
+      accountId: "acct_123",
+      accountName: "Acme Inc",
+      livemode: false,
+      accessToken: "oauth_access_token_old",
+    });
+    await vi.runAllTimersAsync();
+
+    await expect(refresh).resolves.toBe("oauth_access_token_recovered");
+    expect(persistenceMocks.markStatus).not.toHaveBeenCalled();
+    expect(persistenceMocks.refreshCredential).not.toHaveBeenCalled();
+  });
+
   it("validates the OAuth account and every read endpoint before connecting", async () => {
     const fetchMock = vi
       .fn()
