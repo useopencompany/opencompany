@@ -156,7 +156,10 @@ companies, and deals; list, field, and membership discovery; and bounded list re
 filters, explicit filters, sorting, and pagination. Explicitly requested Attio record and list-entry
 updates, Linear writes, and Google Calendar event creation require confirmation by default and can
 be configured under Integrations. An explicit account or workspace is required when several are
-connected. Disconnected or disabled capabilities are absent from the catalog, guessed action ids
+connected. Stripe exposes read-only workspace metrics for balance activity by period, current
+balances, subscription health with estimated MRR, and open receivables. Stripe uses an encrypted
+restricted API key and is excluded from automatic Brain-fill surveying because those financial
+metrics are live operational state. Disconnected or disabled capabilities are absent from the catalog, guessed action ids
 cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
 connected-account work continues through background tasks.
 

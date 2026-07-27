@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { syncGoatUser } from "@/lib/auth";
+import { adoptWorkOSOrganizationMemberships, syncGoatUser } from "@/lib/auth";
 import { GET } from "./route";
 
 vi.mock("@workos-inc/authkit-nextjs", () => ({
@@ -7,6 +7,7 @@ vi.mock("@workos-inc/authkit-nextjs", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
+  adoptWorkOSOrganizationMemberships: vi.fn(),
   syncGoatUser: vi.fn(),
 }));
 
@@ -15,6 +16,7 @@ vi.mock("@/lib/workos", () => ({
 }));
 
 const syncGoatUserMock = vi.mocked(syncGoatUser);
+const adoptWorkOSOrganizationMembershipsMock = vi.mocked(adoptWorkOSOrganizationMemberships);
 
 function authConfig() {
   const config = GET as unknown as {
@@ -32,7 +34,7 @@ describe("Goat auth callback", () => {
     expect(authConfig().returnPathname).toBe("/");
   });
 
-  it("syncs the Goat user on successful authentication", async () => {
+  it("syncs the user and accepted workspace memberships on every authentication", async () => {
     const user = {
       id: "user_123",
       email: "ada@example.com",
@@ -43,5 +45,10 @@ describe("Goat auth callback", () => {
     await authConfig().onSuccess?.({ user: user as never });
 
     expect(syncGoatUserMock).toHaveBeenCalledWith(user);
+    expect(adoptWorkOSOrganizationMembershipsMock).toHaveBeenCalledWith(user);
+    expect(syncGoatUserMock.mock.invocationCallOrder[0]).toBeLessThan(
+      adoptWorkOSOrganizationMembershipsMock.mock.invocationCallOrder[0] ??
+        Number.POSITIVE_INFINITY,
+    );
   });
 });
