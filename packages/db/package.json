@@ -104,6 +104,10 @@
       "types": "./src/goat-workspaces.ts",
       "default": "./src/goat-workspaces.ts"
     },
+    "./goat-onboarding-emails": {
+      "types": "./src/goat-onboarding-emails.ts",
+      "default": "./src/goat-onboarding-emails.ts"
+    },
     "./goat-billing": {
       "types": "./src/goat-billing.ts",
       "default": "./src/goat-billing.ts"
