@@ -51,8 +51,9 @@ export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
     description: "Search public TikTok creators, videos, comments, hashtags, and trends.",
   },
   lead: {
-    label: "Lead enrichment",
-    description: "Metered professional contact discovery from reviewed managed providers.",
+    label: "Prospecting",
+    description:
+      "Find targeted professional prospects and enrich contact details through reviewed managed providers.",
   },
   seo: {
     label: "SEO",
@@ -194,6 +195,35 @@ const CONTENT_LIST_PARAMS = {
 
 const TIKHUB = "tikhub" as const;
 const SEMRUSH = "semrush" as const;
+const PDL_PROSPECT_JOB_LEVELS = [
+  "cxo",
+  "owner",
+  "vp",
+  "director",
+  "partner",
+  "senior",
+  "manager",
+  "entry",
+  "training",
+  "unpaid",
+] as const;
+const PDL_PROSPECT_DATA_INCLUDE = [
+  "id",
+  "full_name",
+  "job_title",
+  "job_title_levels",
+  "job_company_name",
+  "job_company_website",
+  "job_company_size",
+  "job_company_employee_count",
+  "job_company_industry",
+  "job_company_industry_v2",
+  "job_company_linkedin_url",
+  "job_company_location_name",
+  "location_name",
+  "linkedin_url",
+  "work_email",
+].join(",");
 const SEO_DOMAIN_SCHEMA = {
   type: "string",
   minLength: 4,
@@ -758,6 +788,217 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     },
   },
   {
+    id: "lead.search_prospects",
+    source: "lead",
+    description:
+      "Find targeted professional prospects by current title or seniority, person or company location, company industry, and provider-estimated company employee count. Filters are ANDed across fields and ORed within each list. For titles, include common variants such as CTO and chief technology officer. Company industries use provider taxonomy such as computer software.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        jobTitles: {
+          type: "array",
+          minItems: 1,
+          maxItems: 10,
+          items: { type: "string", minLength: 1, maxLength: 100 },
+          description:
+            "Current job-title phrases. Include common variants, for example CTO and chief technology officer.",
+        },
+        jobLevels: {
+          type: "array",
+          minItems: 1,
+          maxItems: PDL_PROSPECT_JOB_LEVELS.length,
+          uniqueItems: true,
+          items: { type: "string", enum: [...PDL_PROSPECT_JOB_LEVELS] },
+          description:
+            "Normalized current seniority levels. CTO, CEO, CIO, and other chief officers are cxo.",
+        },
+        personLocations: {
+          type: "array",
+          minItems: 1,
+          maxItems: 10,
+          items: { type: "string", minLength: 1, maxLength: 100 },
+          description:
+            "Where the people are located, as cities, regions, or countries. Use companyLocations for company headquarters.",
+        },
+        companyLocations: {
+          type: "array",
+          minItems: 1,
+          maxItems: 10,
+          items: { type: "string", minLength: 1, maxLength: 100 },
+          description: "Current company headquarters cities, regions, or countries.",
+        },
+        companyIndustries: {
+          type: "array",
+          minItems: 1,
+          maxItems: 10,
+          items: { type: "string", minLength: 1, maxLength: 100 },
+          description:
+            "Provider-canonical current company industries, such as computer software, information technology and services, or internet.",
+        },
+        minCompanyEmployees: {
+          type: "integer",
+          minimum: 0,
+          maximum: 10_000_000,
+          description: "Inclusive minimum provider-estimated current company employee count.",
+        },
+        maxCompanyEmployees: {
+          type: "integer",
+          minimum: 0,
+          maximum: 10_000_000,
+          description:
+            "Inclusive maximum provider-estimated current company employee count. For fewer than 5 employees, pass 4.",
+        },
+        requireWorkEmail: {
+          type: "boolean",
+          description: "Return only prospects with a provider-available work email.",
+        },
+        cursor: {
+          ...CURSOR_SCHEMA,
+          description:
+            "Exact scroll_token from the previous result. Repeat the same filters when paginating.",
+        },
+        limit: {
+          ...LIMIT_SCHEMA,
+          maximum: 10,
+          description:
+            "Maximum prospects returned and billed for this call, from 1 to 10. Defaults to 5.",
+        },
+      },
+      anyOf: [
+        { required: ["jobTitles"] },
+        { required: ["jobLevels"] },
+        { required: ["personLocations"] },
+        { required: ["companyLocations"] },
+        { required: ["companyIndustries"] },
+        { required: ["minCompanyEmployees"] },
+        { required: ["maxCompanyEmployees"] },
+      ],
+    },
+    provider: "pdl",
+    endpoint: "/v5/person/search",
+    priceType: "PER_RESULT",
+    executionMode: "sync",
+    mapInput: (raw) => {
+      const params = checkedParams(raw, [
+        "jobTitles",
+        "jobLevels",
+        "personLocations",
+        "companyLocations",
+        "companyIndustries",
+        "minCompanyEmployees",
+        "maxCompanyEmployees",
+        "requireWorkEmail",
+        "cursor",
+        "limit",
+      ]);
+      const jobTitles = lowercaseTextListParam(params, "jobTitles", 10, 100);
+      const jobLevels = enumListParam(
+        params,
+        "jobLevels",
+        PDL_PROSPECT_JOB_LEVELS,
+        PDL_PROSPECT_JOB_LEVELS.length,
+      );
+      const personLocations = lowercaseTextListParam(params, "personLocations", 10, 100);
+      const companyLocations = lowercaseTextListParam(params, "companyLocations", 10, 100);
+      const companyIndustries = lowercaseTextListParam(params, "companyIndustries", 10, 100);
+      const minCompanyEmployees = optionalIntegerParam(
+        params,
+        "minCompanyEmployees",
+        0,
+        10_000_000,
+      );
+      const maxCompanyEmployees = optionalIntegerParam(
+        params,
+        "maxCompanyEmployees",
+        0,
+        10_000_000,
+      );
+      if (
+        minCompanyEmployees !== undefined &&
+        maxCompanyEmployees !== undefined &&
+        minCompanyEmployees > maxCompanyEmployees
+      ) {
+        throw new GoatActionInvalidParamsError(
+          '"minCompanyEmployees" cannot exceed "maxCompanyEmployees".',
+        );
+      }
+
+      const must: Record<string, unknown>[] = [];
+      if (jobTitles.length > 0) {
+        must.push(
+          pdlAnyOf(
+            jobTitles.map((title) => ({
+              match_phrase: { "job_title.text": title },
+            })),
+          ),
+        );
+      }
+      if (jobLevels.length > 0) {
+        must.push({ terms: { job_title_levels: jobLevels } });
+      }
+      if (personLocations.length > 0) {
+        must.push(
+          pdlLocationFilter(personLocations, [
+            "location_locality",
+            "location_region",
+            "location_country",
+          ]),
+        );
+      }
+      if (companyLocations.length > 0) {
+        must.push(
+          pdlLocationFilter(companyLocations, [
+            "job_company_location_locality",
+            "job_company_location_region",
+            "job_company_location_country",
+          ]),
+        );
+      }
+      if (companyIndustries.length > 0) {
+        must.push(
+          pdlAnyOf(
+            companyIndustries.flatMap((industry) => [
+              { term: { job_company_industry: industry } },
+              { term: { job_company_industry_v2: industry } },
+            ]),
+          ),
+        );
+      }
+      if (minCompanyEmployees !== undefined || maxCompanyEmployees !== undefined) {
+        must.push({
+          range: {
+            job_company_employee_count: compact({
+              gte: minCompanyEmployees,
+              lte: maxCompanyEmployees,
+            }),
+          },
+        });
+      }
+      if (must.length === 0) {
+        throw new GoatActionInvalidParamsError(
+          "Provide at least one title, seniority, location, industry, or employee-count filter.",
+        );
+      }
+      if (optionalBooleanParam(params, "requireWorkEmail") === true) {
+        must.push({ exists: { field: "work_email" } });
+      }
+
+      const limit = limitParam(params, 5, 10);
+      return {
+        providerInput: compact({
+          query: { bool: { must } },
+          size: limit,
+          scroll_token: cursorParam(params),
+          titlecase: true,
+          data_include: PDL_PROSPECT_DATA_INCLUDE,
+        }),
+        resultLimit: limit,
+        canonicalLinks: [],
+      };
+    },
+  },
+  {
     id: "lead.search_people_by_name",
     source: "lead",
     description:
@@ -949,6 +1190,14 @@ export function managedCapabilityContractProbeParams(id: string): Record<string,
   }
   if (id === "lead.search_people_by_name") {
     return { firstName: "Ada", lastName: "Lovelace" };
+  }
+  if (id === "lead.search_prospects") {
+    return {
+      jobTitles: ["chief technology officer"],
+      companyLocations: ["berlin"],
+      companyIndustries: ["computer software"],
+      maxCompanyEmployees: 4,
+    };
   }
   if (id === "linkedin.search_posts") {
     return { query: "openai", sort: "relevant" };
@@ -1601,6 +1850,78 @@ function integerParam(
     throw new GoatActionInvalidParamsError(`"${key}" must be an integer from ${min} to ${max}.`);
   }
   return value as number;
+}
+
+function optionalIntegerParam(
+  params: Record<string, unknown>,
+  key: string,
+  min: number,
+  max: number,
+) {
+  const value = params[key];
+  if (value === undefined || value === null) return undefined;
+  if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) {
+    throw new GoatActionInvalidParamsError(`"${key}" must be an integer from ${min} to ${max}.`);
+  }
+  return value as number;
+}
+
+function optionalBooleanParam(params: Record<string, unknown>, key: string) {
+  const value = params[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "boolean") {
+    throw new GoatActionInvalidParamsError(`"${key}" must be a boolean.`);
+  }
+  return value;
+}
+
+function lowercaseTextListParam(
+  params: Record<string, unknown>,
+  key: string,
+  maxItems: number,
+  maxItemLength: number,
+) {
+  const value = params[key];
+  if (value === undefined || value === null) return [] as string[];
+  if (!Array.isArray(value) || value.length < 1 || value.length > maxItems) {
+    throw new GoatActionInvalidParamsError(`"${key}" must contain from 1 to ${maxItems} strings.`);
+  }
+  const normalized = value.map((entry) => {
+    if (typeof entry !== "string") {
+      throw new GoatActionInvalidParamsError(`"${key}" must contain only strings.`);
+    }
+    const text = entry.trim().toLowerCase();
+    if (!text || text.length > maxItemLength) {
+      throw new GoatActionInvalidParamsError(
+        `Each "${key}" value must be from 1 to ${maxItemLength} characters.`,
+      );
+    }
+    return text;
+  });
+  return [...new Set(normalized)];
+}
+
+function enumListParam<T extends string>(
+  params: Record<string, unknown>,
+  key: string,
+  values: readonly T[],
+  maxItems: number,
+) {
+  const entries = lowercaseTextListParam(params, key, maxItems, 100);
+  if (entries.some((entry) => !values.includes(entry as T))) {
+    throw new GoatActionInvalidParamsError(`"${key}" values must be one of: ${values.join(", ")}.`);
+  }
+  return entries as T[];
+}
+
+function pdlAnyOf(queries: Record<string, unknown>[]) {
+  return { bool: { should: queries, minimum_should_match: 1 } };
+}
+
+function pdlLocationFilter(locations: string[], fields: string[]) {
+  return pdlAnyOf(
+    locations.flatMap((location) => fields.map((field) => ({ term: { [field]: location } }))),
+  );
 }
 
 function seoDatabase(params: Record<string, unknown>) {

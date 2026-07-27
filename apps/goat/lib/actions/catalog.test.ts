@@ -191,7 +191,7 @@ describe("resolveGoatActionCatalog", () => {
     ]);
     expect(catalog.actions).not.toContainEqual(expect.objectContaining({ provider: "linkedin" }));
     expect(catalog.actions.filter((action) => action.provider === "x")).toHaveLength(7);
-    expect(catalog.actions.filter((action) => action.provider === "lead")).toHaveLength(4);
+    expect(catalog.actions.filter((action) => action.provider === "lead")).toHaveLength(5);
     expect(catalog.actions.filter((action) => action.provider === "seo")).toHaveLength(6);
 
     vi.stubEnv("GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS", "x.search_posts");

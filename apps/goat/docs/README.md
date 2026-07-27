@@ -175,16 +175,19 @@ metrics are live operational state. Disconnected or disabled capabilities are ab
 cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
 connected-account work continues through background tasks.
 
-Managed X, LinkedIn, YouTube, Instagram, TikTok, lead-enrichment, and Semrush SEO actions use a fixed
-server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Every paid execution
-inspects its live endpoint schema and price before running, checks shared workspace credits, and
-requires a one-time approval above the per-action or per-turn thresholds. Provider data is treated
-as hostile input, redacted and bounded before it enters the chat trace, and billed once from the
-settled provider cost plus the platform fee. The durable `goat.capability_runs` row stores only the
-parameter hash and lifecycle/cost metadata; raw results stay in the requesting chat. The hourly
-billing reconciler settles interrupted or delayed runs. `MONID_API_KEY` belongs in Infisical
-`prod` + `/goat`, and `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new
-turns. `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint
+Managed X, LinkedIn, YouTube, Instagram, TikTok, prospecting, and Semrush SEO actions use a fixed
+server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Prospecting includes
+bounded PDL person search across current title and seniority, person or company location, company
+industry, provider-estimated company employee count, and work-email availability, plus focused
+enrichment actions. Every paid execution inspects its live endpoint schema and price before running,
+checks shared workspace credits, and requires a one-time approval above the per-action or per-turn
+thresholds. Provider data is treated as hostile input, redacted and bounded before it enters the chat
+trace, and billed once from the settled provider cost plus the platform fee. The durable
+`goat.capability_runs` row stores only the parameter hash and lifecycle/cost metadata; raw results
+stay in the requesting chat. The hourly billing reconciler settles interrupted or delayed runs.
+`MONID_API_KEY` belongs in Infisical `prod` + `/goat`, and
+`GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new turns.
+`GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint
 isolation. Managed sources never participate in automatic Brain-fill surveying; the user must
 explicitly ask to save their results.
 
