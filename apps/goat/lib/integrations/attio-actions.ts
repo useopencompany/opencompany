@@ -14,6 +14,7 @@ import {
   connectGoatAttioIntegration,
   deleteGoatAttioWebhook,
   getGoatAttioIntegrationState,
+  hasGoatAttioListConfigurationWriteScope,
   hasGoatAttioListReadScopes,
   hasGoatAttioListWriteScopes,
   hasGoatAttioRecordWriteScopes,
@@ -39,13 +40,14 @@ export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnec
     if (!validation.ok) return { ok: false, error: validation.error };
     if (
       !hasGoatAttioListReadScopes(validation.identity.scopes) ||
+      !hasGoatAttioListConfigurationWriteScope(validation.identity.scopes) ||
       !hasGoatAttioRecordWriteScopes(validation.identity.scopes) ||
       !hasGoatAttioListWriteScopes(validation.identity.scopes)
     ) {
       return {
         ok: false,
         error:
-          "This Attio API key needs object_configuration:read, record_permission:read-write, list_configuration:read, and list_entry:read-write so Chat can read and update CRM records and lists.",
+          "This Attio API key needs object_configuration:read, record_permission:read-write, list_configuration:read-write, and list_entry:read-write so Chat can read and operate CRM records, lists, and pipeline fields.",
       };
     }
     await connectGoatAttioIntegration({
@@ -60,7 +62,7 @@ export async function saveAttioApiKeyAction(apiKey: string): Promise<AttioConnec
     return {
       ok: false,
       error:
-        "Could not connect Attio. Make sure the key has object_configuration:read, record_permission:read-write, list_configuration:read, list_entry:read-write, note:read-write, and webhook:read-write, then try again.",
+        "Could not connect Attio. Make sure the key has object_configuration:read, record_permission:read-write, list_configuration:read-write, list_entry:read-write, note:read-write, and webhook:read-write, then try again.",
     };
   }
 }

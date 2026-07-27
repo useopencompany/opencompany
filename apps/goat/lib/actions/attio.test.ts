@@ -41,6 +41,7 @@ const READ_SCOPES = ["object_configuration:read", "record_permission:read"];
 const LIST_READ_SCOPES = ["list_configuration:read", "list_entry:read"];
 const RECORD_WRITE_SCOPES = ["object_configuration:read", "record_permission:read-write"];
 const LIST_WRITE_SCOPES = ["list_configuration:read", "list_entry:read-write"];
+const LIST_CONFIGURATION_WRITE_SCOPES = ["list_configuration:read-write", "list_entry:read-write"];
 const LIST_ID = "33ebdbe9-e529-47c9-b894-0ba25e9c15c0";
 const VIEW_ID = "cf7aaeb5-7507-4a84-9c26-9d36e34d7b70";
 const LIST_URL = `https://app.attio.com/acme/collection/${LIST_ID}/view/${VIEW_ID}`;
@@ -149,7 +150,7 @@ describe("resolveAttioActions", () => {
   it("puts record, list-membership, and list-entry updates behind the Attio write capability", async () => {
     mocks.dbRows = [
       connectedRow({
-        scopes: [...RECORD_WRITE_SCOPES, ...LIST_WRITE_SCOPES],
+        scopes: [...RECORD_WRITE_SCOPES, ...LIST_CONFIGURATION_WRITE_SCOPES],
         capabilityModes: { write: "ask" },
       }),
     ];
@@ -158,8 +159,20 @@ describe("resolveAttioActions", () => {
     const updateRecord = catalog?.actions.find((entry) => entry.id === "attio.update_record");
     const addToList = catalog?.actions.find((entry) => entry.id === "attio.add_record_to_list");
     const updateEntry = catalog?.actions.find((entry) => entry.id === "attio.update_list_entry");
+    const createAttribute = catalog?.actions.find((entry) => entry.id === "attio.create_attribute");
+    const createStatus = catalog?.actions.find((entry) => entry.id === "attio.create_status");
+    const createSelectOption = catalog?.actions.find(
+      (entry) => entry.id === "attio.create_select_option",
+    );
 
-    for (const action of [updateRecord, addToList, updateEntry]) {
+    for (const action of [
+      updateRecord,
+      createAttribute,
+      createStatus,
+      createSelectOption,
+      addToList,
+      updateEntry,
+    ]) {
       expect(action).toMatchObject({
         capability: "write",
         permissionMode: "ask",
@@ -172,9 +185,52 @@ describe("resolveAttioActions", () => {
       });
     }
     expect(updateRecord?.params.required).toEqual(["object", "record_id", "values"]);
+    expect(createAttribute?.params).toMatchObject({
+      required: ["list", "title", "api_slug", "type"],
+      properties: {
+        type: { enum: ["status", "select", "text"] },
+        is_multiselect: { type: "boolean" },
+      },
+    });
+    expect(createStatus?.params).toMatchObject({
+      required: ["list", "attribute", "title"],
+      properties: {
+        target_time_in_status: { type: "string", maxLength: 100 },
+      },
+    });
+    expect(createSelectOption?.params.required).toEqual(["list", "attribute", "title"]);
     expect(addToList?.params.required).toEqual(["list", "object", "record_id"]);
     expect(updateEntry?.params.required).toEqual(["list", "entry_id", "values"]);
-    expect(catalog?.description).toContain("add records to lists");
+    expect(catalog?.description).toContain("configure pipeline fields");
+  });
+
+  it("requires the exact list configuration read-write scope for schema actions", async () => {
+    mocks.dbRows = [
+      connectedRow({
+        scopes: [...RECORD_WRITE_SCOPES, ...LIST_WRITE_SCOPES],
+        capabilityModes: { write: "on" },
+      }),
+    ];
+    const entryWritesOnly = await resolveAttioActions("user_1");
+    expect(entryWritesOnly?.actions.map((entry) => entry.id)).not.toContain(
+      "attio.create_attribute",
+    );
+    expect(entryWritesOnly?.actions.map((entry) => entry.id)).toContain("attio.update_list_entry");
+
+    mocks.dbRows = [
+      connectedRow({
+        scopes: [...RECORD_WRITE_SCOPES, ...LIST_CONFIGURATION_WRITE_SCOPES],
+        capabilityModes: { write: "on" },
+      }),
+    ];
+    const schemaWrites = await resolveAttioActions("user_1");
+    expect(schemaWrites?.actions.map((entry) => entry.id)).toEqual(
+      expect.arrayContaining([
+        "attio.create_attribute",
+        "attio.create_status",
+        "attio.create_select_option",
+      ]),
+    );
   });
 
   it("fails closed for writes when a legacy connection has no tracked scopes", async () => {
@@ -199,7 +255,7 @@ describe("resolveAttioActions", () => {
 
     mocks.dbRows = [
       connectedRow({
-        scopes: [...RECORD_WRITE_SCOPES, ...LIST_WRITE_SCOPES],
+        scopes: [...RECORD_WRITE_SCOPES, ...LIST_CONFIGURATION_WRITE_SCOPES],
         capabilityModes: { read: "off", write: "on" },
       }),
     ];
@@ -207,6 +263,9 @@ describe("resolveAttioActions", () => {
     expect(writeOnly?.actions.some((entry) => entry.capability === "read")).toBe(false);
     expect(writeOnly?.actions.map((entry) => entry.id)).toEqual([
       "attio.update_record",
+      "attio.create_attribute",
+      "attio.create_status",
+      "attio.create_select_option",
       "attio.add_record_to_list",
       "attio.update_list_entry",
     ]);
@@ -922,7 +981,7 @@ describe("Attio updates", () => {
   beforeEach(() => {
     mocks.dbRows = [
       connectedRow({
-        scopes: [...RECORD_WRITE_SCOPES, ...LIST_WRITE_SCOPES],
+        scopes: [...RECORD_WRITE_SCOPES, ...LIST_CONFIGURATION_WRITE_SCOPES],
         capabilityModes: { write: "ask" },
       }),
     ];
@@ -1114,13 +1173,257 @@ describe("Attio updates", () => {
     );
   });
 
+  it("provisions a full status pipeline and then writes an entry value by title", async () => {
+    const fetchMock = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(request);
+      const body = JSON.parse(String(init?.body)) as {
+        data?: {
+          title?: string;
+          entry_values?: Record<string, unknown>;
+        };
+      };
+      if (url.endsWith("/attributes")) {
+        return jsonResponse({
+          data: {
+            id: { attribute_id: "attribute_stage" },
+            title: "Stage",
+            description: "Dream-user pipeline stage",
+            api_slug: "stage",
+            type: "status",
+            is_writable: true,
+            is_multiselect: false,
+          },
+        });
+      }
+      if (url.endsWith("/statuses")) {
+        return jsonResponse({
+          data: {
+            id: { status_id: `status_${body.data?.title?.toLowerCase().replaceAll(" ", "_")}` },
+            title: body.data?.title,
+            is_archived: false,
+            celebration_enabled: false,
+            target_time_in_status: body.data?.title === "Contacted" ? "P7D" : null,
+          },
+        });
+      }
+      return jsonResponse({
+        data: {
+          id: { entry_id: "entry_1" },
+          parent_record_id: "person_1",
+          parent_object: "people",
+          entry_values: {
+            stage: [
+              {
+                attribute_type: "status",
+                status: { title: body.data?.entry_values?.stage },
+              },
+            ],
+          },
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const catalog = await resolveAttioActions("user_1");
+    const action = (id: string) => {
+      const resolved = catalog?.actions.find((entry) => entry.id === id);
+      if (!resolved) throw new Error(`missing ${id}`);
+      return resolved;
+    };
+
+    const attributeResult = await action("attio.create_attribute").execute(
+      {
+        list: LIST_URL,
+        title: "Stage",
+        api_slug: "stage",
+        type: "status",
+        description: "Dream-user pipeline stage",
+      },
+      CONTEXT,
+    );
+    const stages = ["Identified", "Contacted", "Onboarding call", "Testing", "Active", "Churned"];
+    for (const title of stages) {
+      await action("attio.create_status").execute(
+        {
+          list: LIST_URL,
+          attribute: "stage",
+          title,
+          ...(title === "Contacted" ? { target_time_in_status: "P7D" } : {}),
+        },
+        CONTEXT,
+      );
+    }
+    const entryResult = await action("attio.update_list_entry").execute(
+      {
+        list: LIST_URL,
+        entry_id: "entry_1",
+        values: { stage: "Active" },
+      },
+      CONTEXT,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(fetchMock.mock.calls[0]).toEqual([
+      `https://api.attio.com/v2/lists/${LIST_ID}/attributes`,
+      expect.objectContaining({
+        method: "POST",
+        signal: CONTEXT.signal,
+        body: JSON.stringify({
+          data: {
+            title: "Stage",
+            description: "Dream-user pipeline stage",
+            api_slug: "stage",
+            type: "status",
+            is_required: false,
+            is_unique: false,
+            is_multiselect: false,
+            config: {},
+          },
+        }),
+      }),
+    ]);
+    expect(fetchMock.mock.calls[2]).toEqual([
+      `https://api.attio.com/v2/lists/${LIST_ID}/attributes/stage/statuses`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          data: {
+            title: "Contacted",
+            celebration_enabled: false,
+            target_time_in_status: "P7D",
+          },
+        }),
+      }),
+    ]);
+    expect(fetchMock.mock.calls[7]).toEqual([
+      `https://api.attio.com/v2/lists/${LIST_ID}/entries/entry_1`,
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ data: { entry_values: { stage: "Active" } } }),
+      }),
+    ]);
+    expect(attributeResult).toMatchObject({
+      workspace: "Acme",
+      list: LIST_ID,
+      attribute: { id: "attribute_stage", apiSlug: "stage", title: "Stage", type: "status" },
+    });
+    expect(entryResult).toMatchObject({
+      entry: { id: "entry_1", values: { stage: "Active" } },
+    });
+  });
+
+  it("creates a select option on a list attribute", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          id: { option_id: "option_enterprise" },
+          title: "Enterprise",
+          is_archived: false,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await findAction("attio.create_select_option").then((action) =>
+      action.execute(
+        {
+          list: LIST_URL,
+          attribute: "segment",
+          title: "Enterprise",
+        },
+        CONTEXT,
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.attio.com/v2/lists/${LIST_ID}/attributes/segment/options`,
+      expect.objectContaining({
+        method: "POST",
+        signal: CONTEXT.signal,
+        body: JSON.stringify({ data: { title: "Enterprise" } }),
+      }),
+    );
+    expect(result).toEqual({
+      workspace: "Acme",
+      list: LIST_ID,
+      attribute: "segment",
+      option: {
+        id: "option_enterprise",
+        title: "Enterprise",
+        isArchived: false,
+      },
+    });
+  });
+
+  it("rejects invalid list schema input before mutation", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const createAttribute = await findAction("attio.create_attribute");
+    const createStatus = await findAction("attio.create_status");
+
+    await expect(
+      createAttribute.execute(
+        { list: LIST_ID, title: "Stage", api_slug: "Stage", type: "status" },
+        CONTEXT,
+      ),
+    ).rejects.toThrow('"api_slug" must be a lowercase Attio API slug');
+    await expect(
+      createAttribute.execute(
+        { list: LIST_ID, title: "Stage", api_slug: "stage", type: "number" },
+        CONTEXT,
+      ),
+    ).rejects.toThrow('"type" must be one of status, select, or text');
+    await expect(
+      createAttribute.execute(
+        {
+          list: LIST_ID,
+          title: "Stage",
+          api_slug: "stage",
+          type: "status",
+          is_multiselect: true,
+        },
+        CONTEXT,
+      ),
+    ).rejects.toThrow('"is_multiselect" cannot be true for a status attribute');
+    await expect(
+      createStatus.execute(
+        {
+          list: LIST_ID,
+          attribute: "stage",
+          title: "Contacted",
+          target_time_in_status: "seven days",
+        },
+        CONTEXT,
+      ),
+    ).rejects.toThrow('"target_time_in_status" must be a valid ISO-8601 duration');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the list configuration scope immediately before schema mutation", async () => {
+    const catalog = await resolveAttioActions("user_1");
+    const action = catalog?.actions.find((entry) => entry.id === "attio.create_attribute");
+    if (!action) throw new Error("missing attio.create_attribute");
+    mocks.dbRows = [
+      connectedRow({
+        scopes: [...RECORD_WRITE_SCOPES, ...LIST_WRITE_SCOPES],
+        capabilityModes: { write: "on" },
+      }),
+    ];
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      action.execute({ list: LIST_ID, title: "Stage", api_slug: "stage", type: "status" }, CONTEXT),
+    ).rejects.toMatchObject({ name: "GoatActionPermissionError", provider: "attio" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rechecks write permission immediately before mutation", async () => {
     const catalog = await resolveAttioActions("user_1");
     const action = catalog?.actions.find((entry) => entry.id === "attio.update_record");
     if (!action) throw new Error("missing attio.update_record");
     mocks.dbRows = [
       connectedRow({
-        scopes: [...RECORD_WRITE_SCOPES, ...LIST_WRITE_SCOPES],
+        scopes: [...RECORD_WRITE_SCOPES, ...LIST_CONFIGURATION_WRITE_SCOPES],
         capabilityModes: { write: "off" },
       }),
     ];
