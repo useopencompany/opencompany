@@ -7,12 +7,33 @@ import {
   reopenGoatChatSessionForUser,
   setGoatChatSessionPinnedForUser,
 } from "@/lib/chat";
+import { ensureGoatChatShareForUser } from "@/lib/chat-sharing";
 import { closeGoatCodexChatSessionForChat } from "@/lib/codex-chat";
 
 export type CloseGoatChatResult = {
   ok: boolean;
   error: string | null;
 };
+
+export type CreateGoatChatShareResult =
+  | { ok: true; shareId: string }
+  | { ok: false; error: string };
+
+export async function createGoatChatShareAction(
+  sessionId: string | null,
+): Promise<CreateGoatChatShareResult> {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return { ok: false, error: "Could not share that chat." };
+
+  const { user } = await currentGoatUser();
+  const share = await ensureGoatChatShareForUser({
+    userWorkosId: user.workosUserId,
+    chatSessionId: trimmed,
+  });
+  if (!share) return { ok: false, error: "Could not share that chat." };
+
+  return { ok: true, shareId: share.id };
+}
 
 export async function closeGoatChatSessionAction(
   sessionId: string | null,

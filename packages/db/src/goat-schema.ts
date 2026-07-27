@@ -2756,6 +2756,25 @@ export const goatChatSessions = goat.table(
   }),
 );
 
+// An explicit, unguessable public read boundary for a chat session. Shares are
+// separate from sessions so future access controls (revocation, expiry, password
+// hashes, or snapshot boundaries) can evolve without widening the core chat row.
+export const goatChatShares = goat.table(
+  "chat_session_shares",
+  {
+    id: text("id").primaryKey(),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    chatSessionIdx: uniqueIndex("goat_chat_session_shares_chat_session_idx").on(
+      table.chatSessionId,
+    ),
+  }),
+);
+
 // Durable paid-capability lifecycle. Inputs and provider output intentionally
 // stay out of this table: the exact input is bound by input_hash and the
 // safety-bounded provider result lives only in the requesting chat trace.
@@ -3986,6 +4005,13 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
   capabilityRuns: many(goatCapabilityRuns),
 }));
 
+export const goatChatSharesRelations = relations(goatChatShares, ({ one }) => ({
+  chatSession: one(goatChatSessions, {
+    fields: [goatChatShares.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+}));
+
 export const goatCapabilityRunsRelations = relations(goatCapabilityRuns, ({ one }) => ({
   workspace: one(goatWorkspaces, {
     fields: [goatCapabilityRuns.workspaceId],
@@ -4075,6 +4101,7 @@ export type GoatTaskModelUsage = typeof goatTaskModelUsage.$inferSelect;
 export type GoatTaskToolUsage = typeof goatTaskToolUsage.$inferSelect;
 export type GoatTaskSandboxUsage = typeof goatTaskSandboxUsage.$inferSelect;
 export type GoatChatSession = typeof goatChatSessions.$inferSelect;
+export type GoatChatShare = typeof goatChatShares.$inferSelect;
 export type GoatCapabilityRun = typeof goatCapabilityRuns.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
 export type GoatChatSessionSkill = typeof goatChatSessionSkills.$inferSelect;

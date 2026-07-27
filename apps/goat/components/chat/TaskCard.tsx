@@ -6,17 +6,20 @@ import Link from "next/link";
 import { GOAT_STATUS_COPY } from "@/lib/task-display";
 import type { ChatTaskCardView } from "./assistant-items";
 
-export function TaskCard({ task }: { task: ChatTaskCardView }) {
+export function TaskCard({
+  task,
+  readOnly = false,
+}: {
+  task: ChatTaskCardView;
+  readOnly?: boolean;
+}) {
   const meta = getChatTaskCardMeta(task.status);
   const Icon = meta.icon;
   const linkId = task.displayId ?? task.id;
   const displayLabel = task.displayId ?? "Task";
   const title = task.title ?? "Task";
-  return (
-    <Link
-      href={`/tasks/${encodeURIComponent(linkId)}`}
-      className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.03)] transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-    >
+  const content = (
+    <>
       <Icon
         size={16}
         strokeWidth={2}
@@ -31,6 +34,19 @@ export function TaskCard({ task }: { task: ChatTaskCardView }) {
       <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.04em] text-ink-muted">
         {displayLabel}
       </span>
+    </>
+  );
+  const className =
+    "flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.03)]";
+
+  if (readOnly) return <div className={className}>{content}</div>;
+
+  return (
+    <Link
+      href={`/tasks/${encodeURIComponent(linkId)}`}
+      className={`${className} transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20`}
+    >
+      {content}
     </Link>
   );
 }
