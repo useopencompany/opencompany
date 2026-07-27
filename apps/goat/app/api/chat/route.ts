@@ -81,6 +81,7 @@ import {
   type EditTaskScheduleToolOutput,
   type GoatChatMessageMetadata,
   type GoatChatUiMessage,
+  goatChatContextTokensFromUsage,
   listedActionSourceIdsFromMessages,
   replaceGoatChatUiMessageText,
   textFromGoatChatUiMessage,
@@ -983,7 +984,12 @@ export async function POST(request: Request): Promise<Response> {
   return result.toUIMessageStreamResponse<GoatChatUiMessage>({
     originalMessages: turn.messages,
     generateMessageId: newGoatChatMessageId,
-    messageMetadata: () => toStreamMessageMetadata(turn.session.id, toolContext.getStartedTask()),
+    messageMetadata: ({ part }) =>
+      toStreamMessageMetadata(
+        turn.session.id,
+        toolContext.getStartedTask(),
+        part.type === "finish-step" ? goatChatContextTokensFromUsage(part.usage) : undefined,
+      ),
     consumeSseStream({ stream }) {
       // This copy of the SSE stream keeps the turn alive independently of the
       // client connection: it drives generation and the onFinish persistence
@@ -1405,9 +1411,11 @@ function normalizeScheduleLookupText(value: string) {
 function toStreamMessageMetadata(
   sessionId: string,
   task: StartedTask | null,
+  contextTokens?: number,
 ): GoatChatMessageMetadata {
   return {
     sessionId,
+    ...(contextTokens !== undefined ? { contextTokens } : {}),
     ...(task
       ? {
           taskId: task.id,
