@@ -24,6 +24,20 @@ export const GOAT_CAPABILITY_MODES: readonly GoatCapabilityMode[] = ["on", "ask"
 export const GOAT_PROVIDER_CAPABILITIES: Partial<
   Record<GoatActionProviderId, readonly GoatProviderCapability[]>
 > = {
+  gmail: [
+    {
+      id: "read",
+      label: "Read emails",
+      description: "Search and read messages and threads in your Gmail account.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Send emails",
+      description: "Send new emails from your Gmail account.",
+      defaultMode: "ask",
+    },
+  ],
   google_drive: [
     {
       id: "read",
