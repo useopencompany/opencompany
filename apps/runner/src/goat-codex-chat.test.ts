@@ -269,6 +269,36 @@ describe("runGoatCodexChatTurn", () => {
     expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
   });
 
+  it("registers the Brain host tool only for a session pinned to its contract", async () => {
+    dbMocks.selectRows.push([]);
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: {
+        ...codexSession(),
+        brainRef: "brain_1",
+        hostToolContractVersion: "goat-codex-brain.v1",
+      },
+      env: env(),
+    });
+
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.stringContaining(
+          "A read-only goat_brain tool is available for the Brain pinned to this chat.",
+        ),
+        dynamicTools: [
+          expect.objectContaining({
+            spec: expect.objectContaining({
+              type: "function",
+              name: "goat_brain",
+            }),
+          }),
+        ],
+      }),
+    );
+  });
+
   it("detaches without settling the turn and keeps the sandbox alive for handoff", async () => {
     dbMocks.selectRows.push([]);
     const sandbox = fakeSandbox("sbx_existing");
@@ -410,6 +440,38 @@ describe("runGoatCodexChatTurn", () => {
       }),
     );
   });
+
+  it("restarts the daemon before recovering a pending host tool call", async () => {
+    dbMocks.selectRows.push([]);
+    eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValueOnce([
+      {
+        type: "dynamic-tool",
+        toolName: "codex_dynamic_tool",
+        toolCallId: "dynamic_1",
+        state: "input-available",
+        input: { label: "Brain", tool: "goat_brain" },
+      },
+    ]);
+
+    await runGoatCodexChatTurn({
+      turn: { ...codexTurn(), attempts: 2, codexTurnId: "turn_existing" },
+      session: {
+        ...codexSession(),
+        brainRef: "brain_1",
+        hostToolContractVersion: "goat-codex-brain.v1",
+      },
+      env: env(),
+      recovery: { reason: "lease_reclaimed" },
+    });
+
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingEngineTurnId: "turn_existing",
+        reattachExistingTurn: true,
+        forceRestartForRecovery: true,
+      }),
+    );
+  });
 });
 
 describe("summarizeCodexChatRecoveryProgress", () => {
@@ -502,6 +564,8 @@ function codexSession() {
     userWorkosId: "user_1",
     chatSessionId: "goat_chat_1",
     model: "gpt-5.5",
+    brainRef: null,
+    hostToolContractVersion: null,
     sandboxId: "sbx_existing",
     codexThreadId: "thread_existing",
     activeTurnId: "goat_codex_turn_1",

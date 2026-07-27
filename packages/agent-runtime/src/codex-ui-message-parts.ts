@@ -15,6 +15,7 @@ export const CODEX_QUESTION_TOOL_NAME = "codex_question";
 export const CODEX_APPROVAL_TOOL_NAME = "codex_approval";
 export const CODEX_FILE_CHANGE_TOOL_NAME = "codex_file_change";
 export const CODEX_MCP_TOOL_NAME = "codex_mcp_tool";
+export const CODEX_DYNAMIC_TOOL_NAME = "codex_dynamic_tool";
 export const CODEX_WEB_SEARCH_TOOL_NAME = "codex_web_search";
 
 export type CodexCommandToolInput = { command: string };
@@ -44,6 +45,7 @@ export type CodexUiStatusPart = {
     | typeof CODEX_APPROVAL_TOOL_NAME
     | typeof CODEX_FILE_CHANGE_TOOL_NAME
     | typeof CODEX_MCP_TOOL_NAME
+    | typeof CODEX_DYNAMIC_TOOL_NAME
     | typeof CODEX_WEB_SEARCH_TOOL_NAME;
   toolCallId: string;
   input: Record<string, unknown>;
@@ -150,6 +152,12 @@ export function applyCodexEventToUiMessageParts(
     case "mcp_tool.started":
     case "mcp_tool.completed": {
       return changed(upsertStatusPart(parts, event, CODEX_MCP_TOOL_NAME, mcpToolStatusPart(event)));
+    }
+    case "dynamic_tool.started":
+    case "dynamic_tool.completed": {
+      return changed(
+        upsertStatusPart(parts, event, CODEX_DYNAMIC_TOOL_NAME, dynamicToolStatusPart(event)),
+      );
     }
     case "web_search.started":
     case "web_search.completed": {
@@ -543,6 +551,29 @@ function mcpToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusP
   };
 }
 
+function dynamicToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
+  const tool = readString(event.payload.tool);
+  const namespace = readString(event.payload.namespace);
+  const label = tool === "goat_brain" ? "Brain" : "OpenCompany tool";
+  const input = {
+    label,
+    ...(namespace ? { namespace } : {}),
+    ...(tool ? { tool } : {}),
+    ...(isRecord(event.payload.arguments) ? { arguments: event.payload.arguments } : {}),
+  };
+  if (event.type === "dynamic_tool.started") return { state: "input-available", input };
+  const error = readString(event.payload.error);
+  return {
+    state: "output-available",
+    input,
+    output: {
+      status: readString(event.payload.status) ?? "completed",
+      ...(typeof event.payload.success === "boolean" ? { success: event.payload.success } : {}),
+      ...(error ? { error } : {}),
+    },
+  };
+}
+
 function webSearchStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
   const input = {
     label: "Web search",
@@ -637,6 +668,7 @@ function isCodexStatusToolName(value: string): value is CodexUiStatusPart["toolN
     value === CODEX_APPROVAL_TOOL_NAME ||
     value === CODEX_FILE_CHANGE_TOOL_NAME ||
     value === CODEX_MCP_TOOL_NAME ||
+    value === CODEX_DYNAMIC_TOOL_NAME ||
     value === CODEX_WEB_SEARCH_TOOL_NAME
   );
 }

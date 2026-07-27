@@ -7,8 +7,8 @@ import {
 
 describe("managed capability catalog", () => {
   it("contains only the reviewed fixed action and endpoint allowlist", () => {
-    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(48);
-    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(48);
+    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(51);
+    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(51);
     expect(
       Object.fromEntries(
         MANAGED_CAPABILITY_ACTIONS.map((action) => [
@@ -18,11 +18,14 @@ describe("managed capability catalog", () => {
       ),
     ).toMatchObject({
       "x.search_posts": "tikhub:/api/v1/twitter/web/fetch_search_timeline",
+      "x.search_profiles": "tikhub:/api/v1/twitter/web/fetch_search_timeline",
+      "x.list_followers": "tikhub:/api/v1/twitter/web/fetch_user_followers",
       "linkedin.get_person_profile": "tikhub:/api/v1/linkedin/web_v2/get_user_profile",
       "youtube.get_transcript": "tikhub:/api/v1/youtube/web_v2/get_video_captions",
       "instagram.search_reels": "tikhub:/api/v1/instagram/v2/search_reels",
       "tiktok.get_search_trends": "tikhub:/api/v1/tiktok/web/fetch_trending_searchwords",
       "lead.enrich_person": "pdl:/v5/person/enrich",
+      "lead.search_prospects": "pdl:/v5/person/search",
       "lead.search_people_by_name": "apify:/harvestapi/linkedin-profile-search-by-name",
       "lead.list_company_employees": "apify:/harvestapi/linkedin-company-employees",
       "seo.get_domain_overview": "semrush:/domain_rank",
@@ -75,14 +78,14 @@ describe("managed capability catalog", () => {
     ).toThrow(/content URL or identifier/i);
   });
 
-  it("normalizes canonical public links and never accepts follower exports", () => {
+  it("normalizes canonical public links and excludes private or mutating actions", () => {
     expect(
       action("x.get_post").mapInput({
         url: "https://twitter.com/openai/status/123456789?utm_source=test",
       }).canonicalLinks,
     ).toEqual(["https://x.com/openai/status/123456789"]);
     expect(MANAGED_CAPABILITY_ACTIONS.map((entry) => entry.id).join(" ")).not.toMatch(
-      /followers|following|post_|message|engage/i,
+      /following|post_|message|engage/i,
     );
   });
 
@@ -90,6 +93,35 @@ describe("managed capability catalog", () => {
     expect(
       action("x.search_posts").mapInput({ query: "openai", cursor: "next-x" }).providerInput,
     ).toMatchObject({ cursor: "next-x" });
+    expect(
+      action("x.search_profiles").mapInput({
+        query: "AI founder",
+        cursor: "next-people",
+        limit: 10,
+      }),
+    ).toEqual({
+      providerInput: {
+        keyword: "AI founder",
+        search_type: "People",
+        cursor: "next-people",
+      },
+      resultLimit: 10,
+      canonicalLinks: [],
+    });
+    expect(
+      action("x.list_followers").mapInput({
+        profile: "https://twitter.com/openai",
+        cursor: "next-followers",
+        limit: 10,
+      }),
+    ).toEqual({
+      providerInput: {
+        screen_name: "openai",
+        cursor: "next-followers",
+      },
+      resultLimit: 10,
+      canonicalLinks: ["https://x.com/openai"],
+    });
     expect(
       action("youtube.search").mapInput({
         query: "openai",
@@ -165,6 +197,92 @@ describe("managed capability catalog", () => {
     ).toMatchObject({
       profileScraperMode: "Full + email search ($12 per 1k)",
     });
+  });
+
+  it("maps structured prospect filters to a bounded PDL person search", () => {
+    expect(
+      action("lead.search_prospects").mapInput({
+        jobTitles: ["CTO", "Chief Technology Officer", "CTO"],
+        jobLevels: ["cxo"],
+        companyLocations: ["Berlin"],
+        companyIndustries: ["Computer Software"],
+        maxCompanyEmployees: 4,
+        requireWorkEmail: true,
+        cursor: "104$14.278746",
+        limit: 7,
+      }),
+    ).toEqual({
+      providerInput: {
+        query: {
+          bool: {
+            must: [
+              {
+                bool: {
+                  should: [
+                    { match_phrase: { "job_title.text": "cto" } },
+                    { match_phrase: { "job_title.text": "chief technology officer" } },
+                  ],
+                  minimum_should_match: 1,
+                },
+              },
+              { terms: { job_title_levels: ["cxo"] } },
+              {
+                bool: {
+                  should: [
+                    { term: { job_company_location_locality: "berlin" } },
+                    { term: { job_company_location_region: "berlin" } },
+                    { term: { job_company_location_country: "berlin" } },
+                  ],
+                  minimum_should_match: 1,
+                },
+              },
+              {
+                bool: {
+                  should: [
+                    { term: { job_company_industry: "computer software" } },
+                    { term: { job_company_industry_v2: "computer software" } },
+                  ],
+                  minimum_should_match: 1,
+                },
+              },
+              { range: { job_company_employee_count: { lte: 4 } } },
+              { exists: { field: "work_email" } },
+            ],
+          },
+        },
+        size: 7,
+        scroll_token: "104$14.278746",
+        titlecase: true,
+        data_include: expect.stringContaining("work_email"),
+      },
+      resultLimit: 7,
+      canonicalLinks: [],
+    });
+  });
+
+  it("rejects unbounded or contradictory prospect searches", () => {
+    const searchProspects = action("lead.search_prospects");
+    expect(() => searchProspects.mapInput({ requireWorkEmail: true })).toThrow(
+      /at least one title, seniority, location, industry, or employee-count filter/i,
+    );
+    expect(() =>
+      searchProspects.mapInput({
+        companyLocations: ["Berlin"],
+        minCompanyEmployees: 10,
+        maxCompanyEmployees: 4,
+      }),
+    ).toThrow(/cannot exceed/i);
+    expect(() =>
+      searchProspects.mapInput({
+        jobLevels: ["executive"],
+      }),
+    ).toThrow(/jobLevels.*one of/i);
+    expect(() =>
+      searchProspects.mapInput({
+        jobTitles: ["CTO"],
+        limit: 11,
+      }),
+    ).toThrow(/1 to 10/i);
   });
 
   it("makes the YouTube channel-search handoff explicit and directly usable", () => {
@@ -264,6 +382,7 @@ function action(id: string) {
 
 function maxResultLimit(id: string) {
   if (id === "lead.search_people_by_name") return 5;
+  if (id === "lead.search_prospects") return 10;
   if (id === "lead.list_company_employees") return 10;
   if (id.endsWith("comments") || id.endsWith("replies")) return 20;
   if (id.startsWith("x.")) return 20;

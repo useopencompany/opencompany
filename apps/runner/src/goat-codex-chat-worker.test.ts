@@ -357,6 +357,8 @@ function session(overrides: Partial<GoatCodexChatSession> = {}): GoatCodexChatSe
     userWorkosId: "user_1",
     chatSessionId: "goat_chat_1",
     model: "gpt-5.5",
+    brainRef: null,
+    hostToolContractVersion: null,
     sandboxId: "sbx_1",
     codexThreadId: "thread_1",
     activeTurnId: "goat_codex_chat_turn_1",

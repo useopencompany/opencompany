@@ -4,6 +4,7 @@ import {
   applyCodexEventToUiMessageParts,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_PART_TYPE,
+  CODEX_DYNAMIC_TOOL_NAME,
   CODEX_FILE_CHANGE_TOOL_NAME,
   CODEX_GOAL_TOOL_NAME,
   CODEX_MCP_TOOL_NAME,
@@ -406,6 +407,54 @@ describe("applyCodexEventToUiMessageParts", () => {
     ]);
   });
 
+  it("projects a Brain host tool call as a durable generic tool part", () => {
+    const parts = reduce(
+      [],
+      [
+        {
+          method: "item/started",
+          params: {
+            item: {
+              id: "dynamic_1",
+              type: "dynamicToolCall",
+              tool: "goat_brain",
+              arguments: { command: "query", flags: { text: "pricing" } },
+            },
+          },
+        },
+        {
+          method: "item/completed",
+          params: {
+            item: {
+              id: "dynamic_1",
+              type: "dynamicToolCall",
+              tool: "goat_brain",
+              arguments: { command: "query", flags: { text: "pricing" } },
+              status: "completed",
+              success: true,
+              contentItems: [{ type: "inputText", text: '{"hits":[]}' }],
+            },
+          },
+        },
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_DYNAMIC_TOOL_NAME,
+        toolCallId: "dynamic_1",
+        state: "output-available",
+        input: {
+          label: "Brain",
+          tool: "goat_brain",
+          arguments: { command: "query", flags: { text: "pricing" } },
+        },
+        output: { status: "completed", success: true },
+      },
+    ]);
+  });
+
   it("projects goal, question, and approval request states", () => {
     const parts = reduce(
       [],
@@ -582,6 +631,14 @@ describe("parseCodexUiMessageParts", () => {
         state: "output-available",
         input: { label: "File change", changes: [{ path: "src/a.ts" }] },
         output: { status: "completed", changes: [{ path: "src/a.ts" }] },
+      },
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_DYNAMIC_TOOL_NAME,
+        toolCallId: "dynamic_1",
+        state: "output-available",
+        input: { label: "Brain", tool: "goat_brain" },
+        output: { status: "completed", success: true },
       },
       { type: "text", text: "hello" },
     ];

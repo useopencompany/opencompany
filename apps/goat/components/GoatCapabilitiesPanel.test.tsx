@@ -40,6 +40,8 @@ describe("GoatCapabilitiesPanel", () => {
     }
     expect(screen.getByText(/Only workspace admins can change/i)).toBeVisible();
     expect(screen.getByText(/provider cost plus a 20% platform fee/i)).toBeVisible();
+    expect(screen.getByText("Prospecting")).toBeVisible();
+    expect(screen.getByText(/Find targeted professional prospects/i)).toBeVisible();
   });
 
   it("lets an admin disable one source without changing the others", async () => {

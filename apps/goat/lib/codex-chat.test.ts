@@ -130,6 +130,7 @@ describe("createGoatCodexChatMessage", () => {
   it("creates a new session atomically and wakes the runner", async () => {
     const result = await createGoatCodexChatMessage({
       userWorkosId: "user_1",
+      brainRef: "brain_1",
       prompt: "clone my repo",
       clientMessageId: "client_msg_1",
     });
@@ -141,7 +142,11 @@ describe("createGoatCodexChatMessage", () => {
     });
     // The whole send (session + both messages + codex session + turn) is one statement.
     expect(mocks.execute).toHaveBeenCalledTimes(1);
-    expect(sqlText(mocks.execute.mock.calls[0]?.[0])).toContain("'queued'");
+    const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
+    expect(sqlText(statement)).toContain("'queued'");
+    expect(sqlText(statement)).toContain("brain_ref, host_tool_contract_version");
+    expect(statement.queryChunks).toContain("brain_1");
+    expect(statement.queryChunks).toContain("goat-codex-brain.v1");
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
 

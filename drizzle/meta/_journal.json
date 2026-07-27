@@ -1083,8 +1083,22 @@
     {
       "idx": 154,
       "version": "7",
+      "when": 1785141001000,
+      "tag": "0154_goat_chat_shares",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1785141002000,
+      "tag": "0155_goat_codex_brain_tools",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
       "when": 1785155888264,
-      "tag": "0154_goat_stripe_oauth",
+      "tag": "0156_goat_stripe_oauth",
       "breakpoints": true
     }
   ]

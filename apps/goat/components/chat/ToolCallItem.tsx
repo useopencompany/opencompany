@@ -62,6 +62,7 @@ export function ToolCallItem({
   allowCodexPlanActions = false,
   onActionApproval,
   allowActionApproval = false,
+  readOnly = false,
 }: {
   tool: ToolCallView;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
@@ -69,7 +70,10 @@ export function ToolCallItem({
   allowCodexPlanActions?: boolean;
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
   allowActionApproval?: boolean;
+  readOnly?: boolean;
 }) {
+  if (readOnly) return <ToolCallRow tool={tool} />;
+
   if (tool.name === GOAT_BRAIN_TOOL_NAME) {
     return <BrainToolCallRow tool={tool} />;
   }
@@ -319,7 +323,7 @@ function capabilitySourceLabel(source: string) {
     youtube: "YouTube",
     instagram: "Instagram",
     tiktok: "TikTok",
-    lead: "Lead enrichment",
+    lead: "Prospecting",
     seo: "SEO",
   };
   return labels[source] ?? source;

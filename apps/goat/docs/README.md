@@ -20,7 +20,8 @@ Goat has four LLM paths:
    `codex app-server`, and posts normalized Codex events back into the Goat chat.
 4. **Cloud Codex chat:** a Goat chat engine mode backed by a persistent E2B sandbox and Codex
    app-server thread. Uploaded images, PDFs, Word files, and Excel files are materialized into that
-   sandbox; images are also sent to Codex as native local-image inputs.
+   sandbox; images are also sent to Codex as native local-image inputs. New chats pin the active
+   Brain and expose its read plane through a runner-hosted Codex dynamic tool.
 
 The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
@@ -110,6 +111,17 @@ Stopping generation calls `stop()`, which aborts the HTTP request. Closing chat 
 optionally stops the active stream, and marks the chat session closed through
 `closeGoatChatSessionAction`.
 
+### Public read-only chat links
+
+The link button in a persisted chat header creates or reuses one opaque
+`goat.chat_session_shares` token for the current user's session and copies `/share/<token>`.
+Shared routes sit outside the authenticated Goat app shell, render the existing transcript UI
+without a composer or mutation controls, and can serve that session's attachments through a
+token-scoped byte route. The link reads the current session on each request, so later messages are
+included; the copy confirmation says this explicitly. Normal `/chat/<id>` routes remain
+authenticated. Share pages are excluded from search indexing, and the token never grants access to
+any other session data.
+
 ## `/api/chat`
 
 `POST /api/chat` does the foreground work:
@@ -163,18 +175,25 @@ metrics are live operational state. Disconnected or disabled capabilities are ab
 cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
 connected-account work continues through background tasks.
 
-Managed X, LinkedIn, YouTube, Instagram, TikTok, lead-enrichment, and Semrush SEO actions use a fixed
-server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Every paid execution
-inspects its live endpoint schema and price before running, checks shared workspace credits, and
-requires a one-time approval above the per-action or per-turn thresholds. Provider data is treated
-as hostile input, redacted and bounded before it enters the chat trace, and billed once from the
-settled provider cost plus the platform fee. The durable `goat.capability_runs` row stores only the
-parameter hash and lifecycle/cost metadata; raw results stay in the requesting chat. The hourly
-billing reconciler settles interrupted or delayed runs. `MONID_API_KEY` belongs in Infisical
-`prod` + `/goat`, and `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new
-turns. `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint
+Managed X, LinkedIn, YouTube, Instagram, TikTok, prospecting, and Semrush SEO actions use a fixed
+server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Prospecting includes
+bounded PDL person search across current title and seniority, person or company location, company
+industry, provider-estimated company employee count, and work-email availability, plus focused
+enrichment actions. Every paid execution inspects its live endpoint schema and price before running,
+checks shared workspace credits, and requires a one-time approval above the per-action or per-turn
+thresholds. Provider data is treated as hostile input, redacted and bounded before it enters the chat
+trace, and billed once from the settled provider cost plus the platform fee. The durable
+`goat.capability_runs` row stores only the parameter hash and lifecycle/cost metadata; raw results
+stay in the requesting chat. The hourly billing reconciler settles interrupted or delayed runs.
+`MONID_API_KEY` belongs in Infisical `prod` + `/goat`, and
+`GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new turns.
+`GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint
 isolation. Managed sources never participate in automatic Brain-fill surveying; the user must
 explicitly ask to save their results.
+
+Managed X profile discovery uses X's People-ranked search rather than an exact bio-field predicate.
+It can also page through the public followers of a supplied profile with the provider's opaque
+cursor.
 
 Run `bun run goat:capabilities:contract` with `MONID_API_KEY` to inspect every allowlisted
 endpoint and fail on removal or pricing/input-contract drift, including whether parameters belong
@@ -302,6 +321,17 @@ the app-server daemon when the installed set changes, while the persistent Codex
 Only skills whose first activation belongs to the current turn are included as native `skill`
 inputs; previously activated skills remain installed and in thread history.
 
+New Cloud Codex chats pin the user's active Brain on `goat.codex_chat_sessions` together with the
+host-tool contract version used to start the Codex thread. On `thread/start`, the runner registers
+the read-only `goat_brain` function through app-server's experimental `dynamicTools` API. When
+Codex sends `item/tool/call`, the runner rechecks the user's Brain access, calls the database-backed
+Brain read plane, audits the attempt in `goat.brain_tool_runs`, and sends the result back over the
+runner-side proxy. Brain credentials and database access never enter E2B. Because app-server stores
+dynamic tool definitions on the thread, resumed turns provide the matching runner callback without
+trying to redefine the tool. Existing sessions without a pinned Brain and matching contract remain
+unchanged. The first contract intentionally supports only `query`, `list`, `get`, and `timeline`;
+it cannot write to the Brain.
+
 The Cloud Codex Plan control starts the turn with app-server's experimental
 `collaborationMode.mode = "plan"`; `plan_mode_reasoning_effort` configures the mode's reasoning
 effort but does not activate Plan mode by itself. A successful Plan turn that produced a proposed
@@ -321,6 +351,8 @@ interactions so stale cards cannot answer dead proxy connections. Cloud executio
 `approvalPolicy: "never"` inside the isolated workspace-write sandbox; unexpected command or file
 approval requests are declined rather than surfaced as misleading UI. Terminal and recovered turns
 clear stored answer bodies after settling the UI, including answers to questions marked secret.
+Pending dynamic host-tool calls also force a guarded recovery, since their result belongs to the
+runner proxy connection that received the original request.
 
 On the Goat home, open Cloud Codex sessions are projected into the unified Tasks section alongside
 background `goat.tasks`. This is a live UI projection of the chat-backed session and its
@@ -567,7 +599,8 @@ Important tables:
 - `goat.local_codex_turns`: local Codex user and assistant message linkage plus Codex turn status.
 - `goat.local_codex_commands`: queued bridge commands for start, steer, interrupt, and close.
 - `goat.local_codex_events`: raw app-server notifications plus normalized event type and payload.
-- `goat.codex_chat_sessions`: persistent cloud sandbox, app-server thread, active turn, and status.
+- `goat.codex_chat_sessions`: persistent cloud sandbox, app-server thread, active turn, status,
+  pinned Brain, and host-tool contract version.
 - `goat.codex_chat_turns`: leased Cloud Codex turn queue and message linkage.
 - `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
 - `goat.codex_chat_events`: normalized Cloud Codex event audit rows.

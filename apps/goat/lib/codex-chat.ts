@@ -7,7 +7,10 @@ import {
   goatChatSessions,
   goatCodexChatSessions,
 } from "@opencompany/db/goat-schema";
-import type { GoatBrainSkill } from "@opencompany/goat-brain";
+import {
+  GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION,
+  type GoatBrainSkill,
+} from "@opencompany/goat-brain";
 import { and, eq, isNull, notInArray, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
@@ -51,6 +54,7 @@ export type GoatCodexChatSkillSnapshot = GoatBrainSkill & { brainRef: string };
 
 export async function createGoatCodexChatMessage(input: {
   userWorkosId: string;
+  brainRef?: string | null;
   sessionId?: string | null;
   newSessionId?: string | null;
   prompt: string;
@@ -102,6 +106,7 @@ export async function createGoatCodexChatMessage(input: {
     result = await createFirstCodexChatTurn({
       chatSessionId: input.newSessionId ?? null,
       userWorkosId: input.userWorkosId,
+      brainRef: input.brainRef ?? null,
       prompt,
       skills,
       clientMessageId: input.clientMessageId ?? null,
@@ -263,6 +268,7 @@ async function loadCodexChatSessionForChat(input: { userWorkosId: string; chatSe
 async function createFirstCodexChatTurn(input: {
   chatSessionId: string | null;
   userWorkosId: string;
+  brainRef: string | null;
   prompt: string;
   skills: GoatCodexChatSkillSnapshot[];
   clientMessageId: string | null;
@@ -343,13 +349,16 @@ async function createFirstCodexChatTurn(input: {
     ),
     inserted_codex_session AS (
       INSERT INTO goat.codex_chat_sessions (
-        id, user_workos_id, chat_session_id, model, active_turn_id, status, created_at, updated_at
+        id, user_workos_id, chat_session_id, model, brain_ref, host_tool_contract_version,
+        active_turn_id, status, created_at, updated_at
       )
       VALUES (
         ${codexChatSessionId},
         ${input.userWorkosId},
         ${chatSessionId},
         ${codexModel},
+        ${input.brainRef},
+        ${input.brainRef ? GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION : null},
         ${turnId},
         'queued',
         ${now},
