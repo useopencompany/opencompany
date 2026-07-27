@@ -13,6 +13,8 @@ vi.mock("@opencompany/db/client", () => ({
       from: () => ({
         where: () => ({
           orderBy: async () => mocks.dbRows,
+          // The execute-time send permission re-check reads one integration row.
+          limit: async () => mocks.dbRows,
         }),
       }),
     }),
@@ -26,7 +28,14 @@ vi.mock("@opencompany/db/goat-integrations", () => ({
 
 import { executeGoatAction } from "@/lib/actions/execute";
 import { resolveGmailActions } from "@/lib/actions/gmail";
-import { GoatActionAuthError, type GoatActionExecuteContext } from "@/lib/actions/types";
+import {
+  GoatActionAuthError,
+  type GoatActionExecuteContext,
+  GoatActionPermissionError,
+} from "@/lib/actions/types";
+
+const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 
 const CONTEXT: GoatActionExecuteContext = {
   userWorkosId: "user_1",
@@ -35,12 +44,14 @@ const CONTEXT: GoatActionExecuteContext = {
   userTimezone: "UTC",
 };
 
-function connectedRow(email = "louis@example.com") {
+function connectedRow(email = "louis@example.com", integrationId = "gint_gmail_1") {
   return {
-    integrationId: "gint_gmail_1",
+    integrationId,
     accountEmail: email,
     accountName: "Louis",
     status: "connected",
+    scopes: [GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE],
+    capabilityModes: {},
   };
 }
 
@@ -75,15 +86,53 @@ describe("resolveGmailActions", () => {
     expect(await resolveGmailActions("user_1")).toBeNull();
   });
 
-  it("exposes the three read actions for a connected account", async () => {
+  it("exposes reads and an ask-before-send action for a connected account", async () => {
     mocks.dbRows = [connectedRow()];
     const catalog = await resolveGmailActions("user_1");
     expect(catalog?.actions.map((action) => action.id)).toEqual([
       "gmail.search_messages",
       "gmail.get_message",
       "gmail.get_thread",
+      "gmail.send_email",
     ]);
     expect(catalog?.label).toContain("louis@example.com");
+    expect(findAction(catalog, "gmail.send_email")).toMatchObject({
+      capability: "write",
+      permissionMode: "ask",
+      permission: {
+        provider: "gmail",
+        capabilityId: "write",
+        label: "Send emails",
+        integrationIds: ["gint_gmail_1"],
+      },
+      params: {
+        required: ["to", "subject", "body"],
+      },
+    });
+  });
+
+  it("honors per-account read and send modes", async () => {
+    mocks.dbRows = [{ ...connectedRow(), capabilityModes: { write: "off" } }];
+    let catalog = await resolveGmailActions("user_1");
+    expect(catalog?.actions.map((action) => action.id)).toEqual([
+      "gmail.search_messages",
+      "gmail.get_message",
+      "gmail.get_thread",
+    ]);
+
+    mocks.dbRows = [{ ...connectedRow(), capabilityModes: { read: "off", write: "on" } }];
+    catalog = await resolveGmailActions("user_1");
+    expect(catalog?.actions.map((action) => action.id)).toEqual(["gmail.send_email"]);
+    expect(findAction(catalog, "gmail.send_email").permissionMode).toBe("on");
+
+    mocks.dbRows = [{ ...connectedRow(), capabilityModes: { read: "off", write: "off" } }];
+    expect(await resolveGmailActions("user_1")).toBeNull();
+  });
+
+  it("requires a refreshed OAuth grant before advertising sends", async () => {
+    mocks.dbRows = [{ ...connectedRow(), scopes: [GMAIL_READ_SCOPE] }];
+    const catalog = await resolveGmailActions("user_1");
+    expect(catalog?.actions.some((action) => action.id === "gmail.send_email")).toBe(false);
   });
 });
 
@@ -274,6 +323,133 @@ describe("gmail.search_messages", () => {
     expect(mocks.markStatus).toHaveBeenCalledWith(
       expect.objectContaining({ status: "needs_reauth" }),
     );
+  });
+});
+
+describe("gmail.send_email", () => {
+  const EMAIL = {
+    to: ["maya@example.com"],
+    cc: ["finance@example.com"],
+    bcc: ["archive@example.com"],
+    subject: "Résumé follow-up",
+    body: "Hi Maya,\n\nHere is the follow-up.\n",
+  };
+
+  it("sends a bounded plain-text MIME message and returns canonical thread metadata", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.loadCredential.mockResolvedValue(freshCredential());
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      void args;
+      return jsonResponse({ id: "msg_sent_1", threadId: "thread_sent_1", labelIds: ["SENT"] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const send = findAction(await resolveGmailActions("user_1"), "gmail.send_email");
+    const result = (await send.execute(EMAIL, CONTEXT)) as {
+      integrationId: string;
+      message: Record<string, unknown>;
+    };
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+    );
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(request.method).toBe("POST");
+    expect(request.headers).toEqual(
+      expect.objectContaining({
+        Authorization: "Bearer ya29.fresh",
+        "Content-Type": "application/json",
+      }),
+    );
+    const payload = JSON.parse(String(request.body)) as { raw: string };
+    const mime = Buffer.from(payload.raw, "base64url").toString("utf8");
+    expect(mime).toContain("From: louis@example.com\r\n");
+    expect(mime).toContain("To: maya@example.com\r\n");
+    expect(mime).toContain("Cc: finance@example.com\r\n");
+    expect(mime).toContain("Bcc: archive@example.com\r\n");
+    expect(mime).toContain("Subject: =?UTF-8?B?");
+    expect(mime).toContain('Content-Type: text/plain; charset="UTF-8"');
+    const encodedBody = mime.split("\r\n\r\n")[1]?.replace(/\r\n/g, "") ?? "";
+    expect(Buffer.from(encodedBody, "base64").toString("utf8")).toBe(
+      "Hi Maya,\r\n\r\nHere is the follow-up.\r\n",
+    );
+    expect(result).toEqual({
+      account: "louis@example.com",
+      integrationId: "gint_gmail_1",
+      message: {
+        id: "msg_sent_1",
+        threadId: "thread_sent_1",
+        sourceRef: "gmail:thread:thread_sent_1",
+        url: "https://mail.google.com/mail/u/louis%40example.com/#all/thread_sent_1",
+        labelIds: ["SENT"],
+      },
+    });
+  });
+
+  it("validates recipients, subject, body, and unknown parameters before sending", async () => {
+    mocks.dbRows = [connectedRow()];
+    const send = findAction(await resolveGmailActions("user_1"), "gmail.send_email");
+
+    await expect(send.execute({ ...EMAIL, to: [] }, CONTEXT)).rejects.toThrow(
+      '"to" must be a non-empty array',
+    );
+    await expect(send.execute({ ...EMAIL, to: ["not-an-email"] }, CONTEXT)).rejects.toThrow(
+      "not a valid email address",
+    );
+    await expect(
+      send.execute({ ...EMAIL, subject: "Hello\r\nBcc: bad@example.com" }, CONTEXT),
+    ).rejects.toThrow('"subject" cannot contain line breaks');
+    await expect(send.execute({ ...EMAIL, body: " " }, CONTEXT)).rejects.toThrow(
+      '"body" is required',
+    );
+    await expect(send.execute({ ...EMAIL, attachments: [] }, CONTEXT)).rejects.toThrow(
+      "Unknown parameter",
+    );
+    expect(mocks.loadCredential).not.toHaveBeenCalled();
+  });
+
+  it("refuses to send when the permission is turned off after catalog resolution", async () => {
+    mocks.dbRows = [connectedRow()];
+    const send = findAction(await resolveGmailActions("user_1"), "gmail.send_email");
+
+    mocks.dbRows = [{ ...connectedRow(), capabilityModes: { write: "off" } }];
+    const execution = send.execute(EMAIL, CONTEXT);
+    await expect(execution).rejects.toBeInstanceOf(GoatActionPermissionError);
+    await expect(execution).rejects.toMatchObject({
+      message: expect.stringContaining("turned off"),
+    });
+    expect(mocks.loadCredential).not.toHaveBeenCalled();
+  });
+
+  it("requires reconnecting when send scope is removed after catalog resolution", async () => {
+    mocks.dbRows = [connectedRow()];
+    const send = findAction(await resolveGmailActions("user_1"), "gmail.send_email");
+
+    mocks.dbRows = [{ ...connectedRow(), scopes: [GMAIL_READ_SCOPE] }];
+    const execution = send.execute(EMAIL, CONTEXT);
+    await expect(execution).rejects.toBeInstanceOf(GoatActionAuthError);
+    await expect(execution).rejects.toMatchObject({
+      message: expect.stringContaining("enable sending"),
+    });
+    expect(mocks.loadCredential).not.toHaveBeenCalled();
+  });
+
+  it("pins sending to accounts with send scope and permission", async () => {
+    mocks.dbRows = [
+      {
+        ...connectedRow("readonly@example.com", "gint_readonly"),
+        scopes: [GMAIL_READ_SCOPE],
+      },
+      {
+        ...connectedRow("sender@example.com", "gint_sender"),
+        capabilityModes: { write: "ask" },
+      },
+    ];
+    const send = findAction(await resolveGmailActions("user_1"), "gmail.send_email");
+
+    expect(send.params.required).toEqual(["to", "subject", "body"]);
+    expect(send.permission?.integrationIds).toEqual(["gint_sender"]);
   });
 });
 

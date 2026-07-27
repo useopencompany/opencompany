@@ -23,6 +23,8 @@ export async function getGoatPersonalAccounts(
       connectionLabel: goatIntegrations.connectionLabel,
       statusReason: goatIntegrations.statusReason,
       status: goatIntegrations.status,
+      scopes: goatIntegrations.scopes,
+      capabilityModes: goatIntegrations.capabilityModes,
     })
     .from(goatIntegrations)
     .where(

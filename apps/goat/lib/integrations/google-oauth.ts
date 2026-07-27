@@ -1,5 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { GoatIntegrationProvider } from "@opencompany/db/goat-schema";
+import { GOAT_GMAIL_READ_SCOPE, GOAT_GMAIL_SEND_SCOPE } from "@/lib/integrations/gmail-scopes";
+import {
+  GOAT_GOOGLE_DOCS_WRITE_SCOPE,
+  GOAT_GOOGLE_DRIVE_READ_SCOPE,
+} from "@/lib/integrations/google-drive-scopes";
 import { getGoatAppUrl } from "@/lib/workos";
 
 export type GoatGoogleIntegrationProvider = Extract<
@@ -24,7 +29,7 @@ export const GOAT_GOOGLE_PROVIDER_CONFIG: Record<
     provider: "gmail",
     routeSegment: "gmail",
     displayName: "Gmail",
-    scopes: ["https://www.googleapis.com/auth/gmail.readonly", ...OPENID_SCOPES],
+    scopes: [GOAT_GMAIL_READ_SCOPE, GOAT_GMAIL_SEND_SCOPE, ...OPENID_SCOPES],
   },
   google_calendar: {
     provider: "google_calendar",
@@ -41,7 +46,7 @@ export const GOAT_GOOGLE_PROVIDER_CONFIG: Record<
     provider: "google_drive",
     routeSegment: "google-drive",
     displayName: "Google Drive",
-    scopes: ["https://www.googleapis.com/auth/drive.readonly", ...OPENID_SCOPES],
+    scopes: [GOAT_GOOGLE_DRIVE_READ_SCOPE, GOAT_GOOGLE_DOCS_WRITE_SCOPE, ...OPENID_SCOPES],
   },
 };
 
