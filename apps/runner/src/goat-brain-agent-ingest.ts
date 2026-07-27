@@ -2253,6 +2253,10 @@ async function extractAssetText(format: string, bytes: Buffer): Promise<string> 
         const { extractXlsxText } = await import("@opencompany/file-extract");
         return await extractXlsxText(bytes);
       }
+      case "srt": {
+        const { extractUtf8Text } = await import("@opencompany/file-extract");
+        return extractUtf8Text(bytes);
+      }
       default:
         // Images (and any future format without a text plane) extract nothing.
         return "";

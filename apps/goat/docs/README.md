@@ -19,9 +19,9 @@ Goat has four LLM paths:
    The bridge creates a clean session folder under `~/.opencompany/goat/sessions`, runs
    `codex app-server`, and posts normalized Codex events back into the Goat chat.
 4. **Cloud Codex chat:** a Goat chat engine mode backed by a persistent E2B sandbox and Codex
-   app-server thread. Uploaded images, PDFs, Word files, and Excel files are materialized into that
-   sandbox; images are also sent to Codex as native local-image inputs. New chats pin the active
-   Brain and expose its read plane through a runner-hosted Codex dynamic tool.
+   app-server thread. Uploaded images, PDFs, Word files, Excel files, and SRT subtitles are
+   materialized into that sandbox; images are also sent to Codex as native local-image inputs. New
+   chats pin the active Brain and expose its read plane through a runner-hosted Codex dynamic tool.
 
 The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
@@ -98,6 +98,10 @@ while manually typed lookalikes stay plain text. The server resolves that metada
 current user's active-Brain access, rejects stale or cross-Brain references, and caps a turn at 16
 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable snapshot
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
+
+The composer also accepts PDF, DOCX, XLSX, SRT, PNG, JPEG, and WebP files. SRT MIME values are
+normalized because browsers report them inconsistently. Foreground chat stores bounded extracted
+SRT text for the initial and follow-up turns; Cloud Codex receives the original file in its sandbox.
 
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
 matching `/chat/<id>` URL immediately with the native History API, without starting a server

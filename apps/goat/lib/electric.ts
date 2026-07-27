@@ -75,7 +75,7 @@ const BRAIN_DOCUMENT_COLUMNS = [
   "updated_at",
 ] as const;
 
-// Chat messages sync everything except attachment_texts: docx/xlsx extracted
+// Chat messages sync everything except attachment_texts: docx/xlsx/srt extracted
 // text (up to 64KB per attachment) only the chat model needs, never the UI.
 const CHAT_MESSAGE_COLUMNS = [
   "id",

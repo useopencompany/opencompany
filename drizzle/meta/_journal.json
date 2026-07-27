@@ -1107,6 +1107,13 @@
       "when": 1785141004000,
       "tag": "0157_goat_chat_sandbox_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "7",
+      "when": 1785174319867,
+      "tag": "0158_goat_brain_srt_assets",
+      "breakpoints": true
     }
   ]
 }

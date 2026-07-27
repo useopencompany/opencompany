@@ -874,7 +874,7 @@ function GoatBrainEditor({
         folderPath: activeFolder,
         blobUrl: uploaded.blobUrl,
         originalFileName: file.name,
-        mimeType: file.type,
+        mimeType: uploaded.mediaType,
         sizeBytes: file.size,
         contentSha256: uploaded.contentSha256,
       });
@@ -916,7 +916,7 @@ function GoatBrainEditor({
         folderPath: selectedDocument.folderPath,
         blobUrl: uploaded.blobUrl,
         originalFileName: file.name,
-        mimeType: file.type,
+        mimeType: uploaded.mediaType,
         sizeBytes: file.size,
         contentSha256: uploaded.contentSha256,
       });
@@ -2929,7 +2929,15 @@ function normalizeTimeline(
 }
 
 function normalizeFormat(value: string): GoatBrainDocumentView["format"] {
-  if (value === "pdf" || value === "docx" || value === "xlsx" || value === "image") return value;
+  if (
+    value === "pdf" ||
+    value === "docx" ||
+    value === "xlsx" ||
+    value === "srt" ||
+    value === "image"
+  ) {
+    return value;
+  }
   return "markdown";
 }
 

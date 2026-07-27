@@ -154,11 +154,11 @@ Codex installs it under `.agents/skills/<id>/SKILL.md` for native discovery and 
 `brain_ref` is provenance rather than a foreign key, so deleting the source Brain cannot invalidate
 an existing conversation.
 
-## Binary assets (PDF)
+## Binary assets
 
-`format` on the document row is `markdown` (default), `pdf`, or `docx`
-(`GoatBrainDocumentFormat`). A binary-backed document is **one row, one folder entry, one
-artifact** — there is no sibling "stub page":
+`format` on the document row is `markdown` (default), `pdf`, `docx`, `xlsx`, `srt`, or `image`
+(`GoatBrainDocumentFormat`). A file-backed document is **one row, one folder entry, one artifact**
+— there is no sibling "stub page":
 
 - The bytes live in the private Vercel Blob store behind `asset_storage_key`;
   `original_file_name`, `mime_type`, `asset_size_bytes`, and `asset_content_hash` (sha256 of the

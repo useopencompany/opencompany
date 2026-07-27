@@ -1,4 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import {
+  createGoatBrainAssetDocument,
+  goatBrainFilePathFor,
+} from "@opencompany/db/goat-brain-files";
+import { upsertGoatBrainSourceItemAndEnqueue } from "@opencompany/db/goat-brain-ingest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { documentViewFromFileRow, nextAvailableGoatBrainId } from "@/lib/brain";
 import { createGoatBrainAssetForUser } from "./brain-assets";
 
 vi.mock("@opencompany/analytics/goat", () => ({
@@ -19,6 +25,63 @@ vi.mock("@/lib/brain", () => ({
 }));
 
 describe("Goat Brain asset uploads", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("stores an SRT asset with a canonical MIME type when the browser reports plain text", async () => {
+    vi.mocked(nextAvailableGoatBrainId).mockResolvedValue("captions");
+    vi.mocked(createGoatBrainAssetDocument).mockResolvedValue({
+      id: "document_1",
+      brainId: "captions",
+      folderPath: "inbox",
+    } as never);
+    vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
+      paused: false,
+      quotaUpdates: [],
+    } as never);
+    vi.mocked(documentViewFromFileRow).mockReturnValue({ id: "document_1" } as never);
+    vi.mocked(goatBrainFilePathFor).mockReturnValue("inbox/captions.md");
+
+    const result = await createGoatBrainAssetForUser({
+      brainRef: "goat_brain_1",
+      userWorkosId: "user_1",
+      folderPath: "inbox",
+      blobUrl: "https://blob.test/goat-brain/goat_brain_1/assets/captions.srt",
+      originalFileName: "captions.srt",
+      mimeType: "text/plain",
+      sizeBytes: 128,
+      contentSha256: "a".repeat(64),
+    });
+
+    expect(result).toMatchObject({ ok: true, path: "inbox/captions.md" });
+    expect(createGoatBrainAssetDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        format: "srt",
+        mimeType: "application/x-subrip",
+        originalFileName: "captions.srt",
+      }),
+    );
+  });
+
+  it("requires the SRT extension for subtitle MIME types", async () => {
+    await expect(
+      createGoatBrainAssetForUser({
+        brainRef: "goat_brain_1",
+        userWorkosId: "user_1",
+        folderPath: "inbox",
+        blobUrl: "https://blob.test/goat-brain/goat_brain_1/assets/captions.txt",
+        originalFileName: "captions.txt",
+        mimeType: "application/x-subrip",
+        sizeBytes: 128,
+        contentSha256: "a".repeat(64),
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      message: "Subtitle files must use the .srt extension.",
+    });
+  });
+
   it("rejects uploads inside the skills zone", async () => {
     await expect(
       createGoatBrainAssetForUser({
