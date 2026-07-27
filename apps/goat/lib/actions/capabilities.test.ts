@@ -35,6 +35,12 @@ describe("GOAT_PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
+  it("registers Slack as one broad read permission", () => {
+    expect(GOAT_PROVIDER_CAPABILITIES.slack).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+    ]);
+  });
+
   it("registers Attio reads on by default and updates behind ask", () => {
     expect(GOAT_PROVIDER_CAPABILITIES.attio).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
@@ -68,9 +74,9 @@ describe("effectiveCapabilityMode", () => {
   });
 
   it("treats unregistered providers as read on", () => {
-    expect(effectiveCapabilityMode("slack", "read", {})).toBe("on");
-    expect(effectiveCapabilityMode("slack", "write", {})).toBe("on");
-    expect(effectiveCapabilityMode("slack", "read", { read: "off" })).toBe("off");
+    expect(effectiveCapabilityMode("github", "read", {})).toBe("on");
+    expect(effectiveCapabilityMode("github", "write", {})).toBe("on");
+    expect(effectiveCapabilityMode("github", "read", { read: "off" })).toBe("off");
   });
 });
 
@@ -89,6 +95,7 @@ describe("mode helpers", () => {
     expect(providerCapability("google_drive", "write")?.label).toBe("Edit Google Docs");
     expect(providerCapability("google_calendar", "write")?.label).toBe("Add events");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
+    expect(providerCapability("slack", "read")?.label).toBe("Read Slack");
     expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
     expect(providerCapability("slack", "write")).toBeUndefined();
   });

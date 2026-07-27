@@ -114,7 +114,7 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   },
   slack: {
     label: "Slack",
-    description: "Let Goat read channels and act as you in Slack.",
+    description: "Let Goat search and read your Slack conversations.",
     Icon: SlackIcon,
     tileClass: "bg-[#4A154B] text-white",
   },
