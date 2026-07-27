@@ -110,6 +110,17 @@ Stopping generation calls `stop()`, which aborts the HTTP request. Closing chat 
 optionally stops the active stream, and marks the chat session closed through
 `closeGoatChatSessionAction`.
 
+### Public read-only chat links
+
+The link button in a persisted chat header creates or reuses one opaque
+`goat.chat_session_shares` token for the current user's session and copies `/share/<token>`.
+Shared routes sit outside the authenticated Goat app shell, render the existing transcript UI
+without a composer or mutation controls, and can serve that session's attachments through a
+token-scoped byte route. The link reads the current session on each request, so later messages are
+included; the copy confirmation says this explicitly. Normal `/chat/<id>` routes remain
+authenticated. Share pages are excluded from search indexing, and the token never grants access to
+any other session data.
+
 ## `/api/chat`
 
 `POST /api/chat` does the foreground work:
