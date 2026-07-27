@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   resolveGoogleDriveActions: vi.fn(),
   resolveLinearActions: vi.fn(),
   resolveGitHubActions: vi.fn(),
+  resolveStripeActions: vi.fn(),
   listGoatWorkspaceCapabilities: vi.fn(),
 }));
 
@@ -26,12 +27,21 @@ vi.mock("@/lib/actions/google-drive", () => ({
 }));
 vi.mock("@/lib/actions/linear", () => ({ resolveLinearActions: mocks.resolveLinearActions }));
 vi.mock("@/lib/actions/github", () => ({ resolveGitHubActions: mocks.resolveGitHubActions }));
+vi.mock("@/lib/actions/stripe", () => ({ resolveStripeActions: mocks.resolveStripeActions }));
 
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import type { GoatActionProviderCatalog } from "@/lib/actions/types";
 
 function providerCatalog(
-  id: "slack" | "gmail" | "google_calendar" | "google_drive" | "linear" | "attio" | "github",
+  id:
+    | "slack"
+    | "gmail"
+    | "google_calendar"
+    | "google_drive"
+    | "linear"
+    | "attio"
+    | "github"
+    | "stripe",
 ): GoatActionProviderCatalog {
   return {
     id,
@@ -75,6 +85,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveLinearActions.mockResolvedValue(providerCatalog("linear"));
     mocks.resolveAttioActions.mockResolvedValue(providerCatalog("attio"));
     mocks.resolveGitHubActions.mockResolvedValue(providerCatalog("github"));
+    mocks.resolveStripeActions.mockResolvedValue(providerCatalog("stripe"));
 
     const catalog = await resolveGoatActionCatalog({
       userWorkosId: "user_1",
@@ -87,6 +98,7 @@ describe("resolveGoatActionCatalog", () => {
       "linear",
       "attio",
       "github",
+      "stripe",
     ]);
     expect(catalog.providers.map((provider) => provider.description)).toEqual([
       "slack description",
@@ -95,6 +107,7 @@ describe("resolveGoatActionCatalog", () => {
       "linear description",
       "attio description",
       "github description",
+      "stripe description",
     ]);
     expect(catalog.actions.map((action) => action.id)).toEqual([
       "slack.read_something",
@@ -103,8 +116,10 @@ describe("resolveGoatActionCatalog", () => {
       "linear.read_something",
       "attio.read_something",
       "github.read_something",
+      "stripe.read_something",
     ]);
     expect(mocks.resolveGitHubActions).toHaveBeenCalledWith("workspace_1");
+    expect(mocks.resolveStripeActions).toHaveBeenCalledWith("workspace_1");
   });
 
   it("keeps other providers when one resolver throws", async () => {
@@ -115,6 +130,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
+    mocks.resolveStripeActions.mockResolvedValue(null);
 
     const catalog = await resolveGoatActionCatalog({
       userWorkosId: "user_1",
@@ -131,6 +147,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
+    mocks.resolveStripeActions.mockResolvedValue(null);
 
     const catalog = await resolveGoatActionCatalog({
       userWorkosId: "user_1",
@@ -149,6 +166,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
+    mocks.resolveStripeActions.mockResolvedValue(null);
     mocks.listGoatWorkspaceCapabilities.mockResolvedValue([
       { source: "x", enabled: true },
       { source: "linkedin", enabled: false },
@@ -200,6 +218,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
+    mocks.resolveStripeActions.mockResolvedValue(null);
 
     const catalog = await resolveGoatActionCatalog({
       userWorkosId: "user_1",

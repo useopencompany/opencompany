@@ -6,6 +6,7 @@ import { resolveGoogleCalendarActions } from "@/lib/actions/google-calendar";
 import { resolveGoogleDriveActions } from "@/lib/actions/google-drive";
 import { resolveLinearActions } from "@/lib/actions/linear";
 import { resolveSlackActions } from "@/lib/actions/slack";
+import { resolveStripeActions } from "@/lib/actions/stripe";
 import type {
   GoatActionExecuteContext,
   GoatActionProviderCatalog,
@@ -43,6 +44,7 @@ export async function resolveGoatActionCatalog(input: {
     resolveLinearActions(input.userWorkosId).catch(() => null),
     resolveAttioActions(input.userWorkosId).catch(() => null),
     resolveGitHubActions(input.workspaceId).catch(() => null),
+    resolveStripeActions(input.workspaceId).catch(() => null),
   ]);
   const providers = resolved.filter(
     (entry): entry is GoatActionProviderCatalog => entry !== null && entry.actions.length > 0,

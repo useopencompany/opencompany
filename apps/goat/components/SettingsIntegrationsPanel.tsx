@@ -14,6 +14,7 @@ import {
   LinearIcon,
   OpenAIIcon,
   SlackIcon,
+  StripeIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
@@ -47,6 +48,7 @@ import {
   type GoatLinearProviderState,
   type GoatPersonalAccountProvider,
   type GoatSlackProviderState,
+  type GoatStripeProviderState,
   goatIntegrationStateFromRows,
 } from "@/lib/integration-state";
 import {
@@ -59,7 +61,7 @@ import { createGoatCollections, type GoatIntegrationRow } from "@/lib/task-colle
 // monogram fallback where no square vector mark exists), the colored logo tile,
 // and a short connection-focused description. Keyed by provider so the card
 // components derive everything from the provider string.
-type IntegrationMetaKey = GoatPersonalAccountProvider | "github" | "jamie" | "codex";
+type IntegrationMetaKey = GoatPersonalAccountProvider | "github" | "jamie" | "stripe" | "codex";
 
 type IntegrationMeta = {
   label: string;
@@ -125,6 +127,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Sync CRM records and notes from Attio.",
     Icon: AttioIcon,
     tileClass: "bg-[#111111] text-white",
+  },
+  stripe: {
+    label: "Stripe",
+    description: "Give Goat read-only access to payment activity, subscriptions, and receivables.",
+    Icon: StripeIcon,
+    tileClass: "bg-[#635BFF] text-white",
   },
   granola: {
     label: "Granola",
@@ -265,6 +273,7 @@ function countWorkspaceConnected(integrations: GoatIntegrationState) {
     (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.linear) === "Connected" ? 1 : 0) +
+    (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
     countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
   );
 }
@@ -296,7 +305,7 @@ function IntegrationCards({
       {scope === "workspace" ? (
         <section className="flex flex-col gap-3">
           <p className="text-[12px] leading-5 text-ink-subtle">
-            {`Shared connections that feed the brains in this workspace.${
+            {`Shared connections available across this workspace.${
               isWorkspaceAdmin ? "" : " Managed by workspace admins."
             }`}
           </p>
@@ -304,6 +313,7 @@ function IntegrationCards({
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.linear} />
+            <IntegrationCardRow integration={integrations.stripe} canConnect={isWorkspaceAdmin} />
             <IntegrationProviderGroupCard
               provider="hubspot"
               accounts={integrations.personalAccounts.hubspot}
@@ -483,7 +493,8 @@ function IntegrationCardRow({
     | GoatLinearProviderState
     | GoatGitHubProviderState
     | GoatJamieProviderState
-    | GoatSlackProviderState;
+    | GoatSlackProviderState
+    | GoatStripeProviderState;
   canConnect?: boolean;
 }) {
   const meta = INTEGRATION_META[integration.provider];
@@ -497,9 +508,13 @@ function IntegrationCardRow({
         ? integration.accountName
         : integration.provider === "jamie"
           ? integration.accountName
-          : integration.provider === "slack"
-            ? [integration.teamName, integration.accountName].filter(Boolean).join(" · ") || null
-            : (integration.accountEmail ?? integration.accountName);
+          : integration.provider === "stripe"
+            ? [integration.accountName, integration.livemode === false ? "Test mode" : null]
+                .filter(Boolean)
+                .join(" · ") || null
+            : integration.provider === "slack"
+              ? [integration.teamName, integration.accountName].filter(Boolean).join(" · ") || null
+              : (integration.accountEmail ?? integration.accountName);
   const capabilityBody =
     connected && integration.provider === "linear" && integration.integrationId ? (
       <CapabilityModeRows
@@ -515,12 +530,17 @@ function IntegrationCardRow({
       body={capabilityBody}
       footer={
         connected ? (
-          <div className="flex min-w-0 items-center gap-1.5">
-            <ConnectedStatus />
-            {accountLabel ? (
-              <span className="truncate text-[12px] leading-4 text-ink-subtle">
-                · {accountLabel}
-              </span>
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <ConnectedStatus />
+              {accountLabel ? (
+                <span className="truncate text-[12px] leading-4 text-ink-subtle">
+                  · {accountLabel}
+                </span>
+              ) : null}
+            </div>
+            {integration.provider === "stripe" && canConnect ? (
+              <ConnectLink href={connectHref} label="Manage" />
             ) : null}
           </div>
         ) : canConnect ? (
@@ -942,7 +962,8 @@ function integrationStatus(
     | GoatLinearProviderState
     | GoatGitHubProviderState
     | GoatJamieProviderState
-    | GoatSlackProviderState,
+    | GoatSlackProviderState
+    | GoatStripeProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
   if (integration.provider === "jamie" && integration.apiKeyConfigured) return "Connected";
@@ -964,7 +985,8 @@ function integrationConnectHref(
     | "hubspot"
     | "granola"
     | "fathom"
-    | "attio",
+    | "attio"
+    | "stripe",
 ) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
@@ -979,6 +1001,7 @@ function integrationConnectHref(
   if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
   if (provider === "attio") return "/settings/attio";
+  if (provider === "stripe") return "/settings/stripe";
   if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";

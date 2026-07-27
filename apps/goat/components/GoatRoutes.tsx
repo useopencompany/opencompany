@@ -29,6 +29,7 @@ import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
+import { StripeIntegrationSetup } from "@/components/StripeIntegrationSetup";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { TaskRunPanel } from "@/components/TaskRunPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
@@ -353,6 +354,23 @@ export function GoatAttioSettingsRoute() {
       <AttioIntegrationSetup
         initialState={integrations.attio}
         brainSourcesHref={brainSourcesHref}
+      />
+    </GoatSettingsContent>
+  );
+}
+
+export function GoatStripeSettingsRoute() {
+  const { integrations, workspace } = useGoatAppData();
+
+  return (
+    <GoatSettingsContent
+      title="Stripe"
+      description="Read-only founder metrics from your Stripe account"
+      backLink={{ href: "/settings/integrations", label: "Integrations" }}
+    >
+      <StripeIntegrationSetup
+        initialState={integrations.stripe}
+        canManage={workspace.role === "admin"}
       />
     </GoatSettingsContent>
   );

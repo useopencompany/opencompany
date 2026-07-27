@@ -90,9 +90,12 @@ function defaultWorkspaceName(user: typeof goatUsers.$inferSelect) {
   return `${base}'s Workspace`;
 }
 
-// Adopts memberships for WorkOS organizations the user accepted an invitation
-// to. Failures are swallowed: sign-in must not depend on WorkOS API health.
-async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
+// Reconciles memberships for WorkOS organizations the user accepted an
+// invitation to. Authentication calls this even when the user already has a
+// personal workspace; otherwise that existing membership hides newly accepted
+// workspace invitations. Failures are swallowed: sign-in must not depend on
+// WorkOS API health.
+export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
   try {
     const memberships = await getWorkOSClient().userManagement.listOrganizationMemberships({
       userId: authUser.id,
