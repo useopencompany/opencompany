@@ -31,9 +31,10 @@ const nextConfig = {
   },
   // The Statsig server SDK is a native NAPI addon; keep it external so Next never
   // tries to bundle the .node binary into the server output.
-  serverExternalPackages: ["@statsig/statsig-node-core"],
+  serverExternalPackages: ["@statsig/statsig-node-core", "@vercel/sandbox"],
   transpilePackages: [
     "@opencompany/agent-runtime",
+    "@opencompany/browser-tools",
     "@opencompany/db",
     "@opencompany/goat-brain",
     "@opencompany/statsig",

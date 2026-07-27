@@ -198,6 +198,7 @@ Set these in the separate Vercel project for Goat:
 | `GOOGLE_OAUTH_CALLBACK_URL` | Google only | Optional stable Google callback broker URL for hosted previews. Leave unset for direct Goat-domain callbacks. |
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Google only | Dedicated secret used to sign Goat Google OAuth setup state. |
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls for the default Goat chat agent. Same key the runner uses for Goat tasks. |
+| `BLOB_READ_WRITE_TOKEN` | Yes | Private chat attachments and authenticated browser screenshots. Use the Goat project's Blob store token. |
 | `GOAT_NEXT_PUBLIC_APP_URL` | Yes | Canonical Goat domain origin, for example `https://goat.example.com`. Production URL generation fails closed when this is missing instead of falling back to the legacy web origin. |
 | `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Yes | Goat callback URL, for example `https://goat.example.com/auth/callback`. |
 | `GOAT_AUTHKIT_DOMAIN` | Goat auth | AuthKit issuer origin used to verify Goat MCP connector and Goat Quick bearer tokens, for example `https://example.authkit.app`. MCP setup also requires Client ID Metadata Documents and Dynamic Client Registration in WorkOS. |
@@ -216,6 +217,7 @@ Set these in the separate Vercel project for Goat:
 | `ELECTRIC_SECRET` / `ELECTRIC_TOKEN` | Self-hosted Electric only | Optional self-hosted Electric auth. |
 | `REDIS_URL` (or `KV_URL`) | No | Enables resumable Goat chat streams (`resumable-stream`): refreshes reattach to in-flight turns, disconnects no longer cancel generation, and the stop button cancels via `/api/chat/[sessionId]/stop`. Without it, chat still works; a mid-stream disconnect persists the partial response instead. |
 | `GOAT_CHAT_ACTIONS_KILL_SWITCH` | No | Set to `true` to globally disable Goat chat actions (the `list_actions`/`use_action` tools over Attio, Slack, Gmail, Google Calendar, Google Drive, and Linear) for everyone, without a deploy rollback. Chat actions are otherwise on by default for connected integrations. |
+| `GOAT_CHAT_SANDBOX_IMAGE` | Recommended with browser sandbox | Complete Vercel Container Registry image reference built from `apps/goat/sandbox-image`. Without it, the first browser use provisions `agent-browser` and Chromium in a stock Node 24 sandbox. See `docs/goat-chat-sandbox.md`. |
 | `MONID_API_KEY` | Yes | Server-only API key for Goat’s curated managed social and lead capabilities. Store it in Infisical `prod` + `/goat`; it must never reach the browser or runner. |
 | `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH` | No | Set to `true` to remove all managed social and lead capabilities from new chat turns without disabling connected-integration actions. Already-started runs continue through billing reconciliation. |
 | `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` | No | Comma-separated exact managed action ids (for example `x.search_posts,linkedin.list_comments`) to remove individual reviewed endpoints from new chat turns. Execution also fails closed if a stale catalog attempts a disabled action. |

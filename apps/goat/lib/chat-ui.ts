@@ -1,5 +1,6 @@
 import type { CodexCommandToolInput, CodexCommandToolOutput } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { BrowserToolName } from "@opencompany/browser-tools";
 import type {
   GoatChatAttachmentKind,
   GoatChatEngine,
@@ -53,6 +54,31 @@ export const LIST_ACTIONS_TOOL_NAME = "list_actions";
 export const LIST_ACTIONS_TOOL_PART_TYPE = `tool-${LIST_ACTIONS_TOOL_NAME}` as const;
 export const USE_ACTION_TOOL_NAME = "use_action";
 export const USE_ACTION_TOOL_PART_TYPE = `tool-${USE_ACTION_TOOL_NAME}` as const;
+export const BROWSER_OPEN_TOOL_PART_TYPE = "tool-browser_open";
+export const BROWSER_SNAPSHOT_TOOL_PART_TYPE = "tool-browser_snapshot";
+export const BROWSER_CLICK_TOOL_PART_TYPE = "tool-browser_click";
+export const BROWSER_FILL_TOOL_PART_TYPE = "tool-browser_fill";
+export const BROWSER_WAIT_TOOL_PART_TYPE = "tool-browser_wait";
+export const BROWSER_READ_TOOL_PART_TYPE = "tool-browser_read";
+export const BROWSER_GET_TOOL_PART_TYPE = "tool-browser_get";
+export const BROWSER_FIND_TOOL_PART_TYPE = "tool-browser_find";
+export const BROWSER_SCROLL_TOOL_PART_TYPE = "tool-browser_scroll";
+export const BROWSER_SCREENSHOT_TOOL_PART_TYPE = "tool-browser_screenshot";
+export const BROWSER_CLOSE_TOOL_PART_TYPE = "tool-browser_close";
+export type BrowserToolPartType = `tool-${BrowserToolName}`;
+export type BrowserToolInput = Record<string, unknown>;
+export type BrowserToolOutput = {
+  ok: boolean;
+  command: BrowserToolName;
+  output?: string;
+  stderr?: string;
+  snapshot?: unknown;
+  screenshotUrl?: string;
+  compacted?: boolean;
+  originalOutputChars?: number;
+  browserObservationBudget?: Record<string, number>;
+  error?: string;
+};
 
 export type GoatTaskCardMetadata = {
   id: string;
@@ -357,6 +383,13 @@ export type UseActionToolOutput =
       };
     };
 
+type GoatBrowserChatTools = {
+  [Name in BrowserToolName]: {
+    input: BrowserToolInput;
+    output: BrowserToolOutput;
+  };
+};
+
 export type GoatChatTools = {
   start_task: {
     input: StartTaskToolInput;
@@ -402,7 +435,7 @@ export type GoatChatTools = {
     input: CodexCommandToolInput;
     output: CodexCommandToolOutput;
   };
-};
+} & GoatBrowserChatTools;
 
 export type GoatChatUiMessage = UIMessage<
   GoatChatMessageMetadata,

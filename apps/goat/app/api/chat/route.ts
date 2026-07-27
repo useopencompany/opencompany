@@ -1,8 +1,9 @@
 import { modelSupportsAttachments } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
+import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
 import { hasPositiveGoatCreditBalance, recordGoatCreditDebit } from "@opencompany/db/goat-credits";
-import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
+import { type GoatChatMessageDebugTrace, goatChatSandboxUsage } from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
   GOAT_METRICS,
@@ -55,6 +56,7 @@ import {
   createOpenCompanyChatToolContext,
   normalizeAgentText,
   OPENCOMPANY_CHAT_MAX_STEPS,
+  OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
   prepareOpenCompanyChatStep,
   type StartedTask,
   stringifyFinishReason,
@@ -95,6 +97,7 @@ import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, validateGoatChatInput } from "@/lib/c
 import { executeGoatChatExaFetch } from "@/lib/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
+import type { ChatBrowserToolSession } from "@/lib/sandbox/browser-tools";
 import {
   createGoatTaskScheduleForUser,
   deleteGoatTaskScheduleForUser,
@@ -350,6 +353,7 @@ export async function POST(request: Request): Promise<Response> {
     session: Awaited<ReturnType<typeof createGoatChatUserTurn>>["session"];
     sessionCreated: boolean;
     userMessageId: string;
+    usageUserMessageId: string | null;
     userMessageContent: string;
     storedMessages: Awaited<ReturnType<typeof createGoatChatUserTurn>>["storedMessages"];
     messages: GoatChatUiMessage[];
@@ -383,6 +387,7 @@ export async function POST(request: Request): Promise<Response> {
         session: userTurn.session,
         sessionCreated: userTurn.sessionCreated,
         userMessageId: userTurn.userMessage.id,
+        usageUserMessageId: userTurn.userMessage.id,
         userMessageContent: userInput.prompt,
         storedMessages: userTurn.storedMessages,
         messages: dismissed.changed ? dismissed.messages : userTurn.messages,
@@ -408,6 +413,7 @@ export async function POST(request: Request): Promise<Response> {
         session: continuation.session,
         sessionCreated: false,
         userMessageId: continuation.lastUserMessage?.id ?? continuation.session.id,
+        usageUserMessageId: continuation.lastUserMessage?.id ?? null,
         userMessageContent: continuation.lastUserMessage?.content ?? "",
         storedMessages: continuation.storedMessages,
         messages: continuation.messages,
@@ -504,10 +510,57 @@ export async function POST(request: Request): Promise<Response> {
     }
   };
 
+  let browserToolSession: ChatBrowserToolSession | null = null;
+  if (turn.session.engine === "opencompany" && !requestedEngine) {
+    const { createChatBrowserToolSession } = await import("@/lib/sandbox/browser-tools");
+    browserToolSession = createChatBrowserToolSession({
+      chatSessionId: turn.session.id,
+      userWorkosId: context.user.workosUserId,
+      signal: generationSignal,
+    });
+  }
+  const maxChatSteps = browserToolSession
+    ? OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX
+    : OPENCOMPANY_CHAT_MAX_STEPS;
+  let browserUsagePromise: Promise<void> | null = null;
+  const recordBrowserSandboxUsage = () => {
+    browserUsagePromise ??= (async () => {
+      const usage = browserToolSession?.getUsage();
+      if (!usage) return;
+      await getDb()
+        .insert(goatChatSandboxUsage)
+        .values({
+          chatSessionId: turn.session.id,
+          userWorkosId: context.user.workosUserId,
+          userMessageId: turn.usageUserMessageId,
+          sandboxId: usage.sandboxId,
+          startedAt: usage.startedAt,
+          endedAt: usage.endedAt,
+          activeMs: usage.activeMs,
+          rawMetrics: {
+            ...usage.rawMetrics,
+            sandboxName: usage.sandboxName,
+          },
+          costBasis: {
+            provider: "vercel-sandbox",
+            status: "unpriced",
+          },
+        });
+    })().catch((error) => {
+      logger.warn("Goat chat sandbox usage recording failed", {
+        event: "goat.chat_sandbox_usage_recording_failed",
+        chat_session_id: turn.session.id,
+        error,
+      });
+    });
+    return browserUsagePromise;
+  };
+
   const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
     latestUserMessage: turn.userMessageContent,
     ...(requestedEngine ? { requestedEngine } : {}),
+    ...(browserToolSession ? { browserTools: browserToolSession.execute } : {}),
     // goat_brain is read-only for everyone (recall/inspect). The only write path
     // in chat is save_to_brain, which is available to every workspace member
     // with an active brain and enqueues the durable ingestion agent.
@@ -872,6 +925,7 @@ export async function POST(request: Request): Promise<Response> {
           }
         : null,
       brainCaptureEnabled,
+      browserToolsEnabled: Boolean(browserToolSession),
       taskToolsEnabled,
       scheduleToolsEnabled: taskToolsEnabled,
       recurringSchedules,
@@ -909,7 +963,7 @@ export async function POST(request: Request): Promise<Response> {
         modelId: turn.session.model,
       }),
     ),
-    stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
+    stopWhen: stepCountIs(maxChatSteps),
     // Providers deliver tokens in bursts; re-chunk to word-level with a small
     // delay so streamed text reads as a steady flow instead of jumps.
     experimental_transform: smoothStream(),
@@ -918,6 +972,7 @@ export async function POST(request: Request): Promise<Response> {
     prepareStep: ({ stepNumber }: { stepNumber: number }) =>
       prepareOpenCompanyChatStep({
         stepNumber,
+        maxSteps: maxChatSteps,
         forceApprovedAction: Boolean(capabilityApproval),
       }),
     ...(toolContext.repairToolCall
@@ -956,6 +1011,7 @@ export async function POST(request: Request): Promise<Response> {
         steps: event.steps,
         ...(finishReason ? { finishReason } : {}),
       });
+      await recordBrowserSandboxUsage();
     },
     onError(event) {
       finishChatTelemetry(
@@ -973,6 +1029,7 @@ export async function POST(request: Request): Promise<Response> {
         model: turn.session.model,
         error: event.error instanceof Error ? event.error.message : "Goat chat failed.",
       });
+      after(recordBrowserSandboxUsage());
       void persistFallbackAssistantMessage(event.error, "error");
     },
   });
@@ -1026,11 +1083,13 @@ export async function POST(request: Request): Promise<Response> {
         session_id: turn.session.id,
         error,
       });
+      after(recordBrowserSandboxUsage());
       void persistFallbackAssistantMessage(error, "error");
       return "Goat could not answer that right now.";
     },
     onFinish: async ({ responseMessage, finishReason, isAborted }) => {
       releaseStreamCoordination();
+      await recordBrowserSandboxUsage();
       if (assistantPersistPromise) await assistantPersistPromise;
       if (assistantPersisted) return;
 

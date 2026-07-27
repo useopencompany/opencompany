@@ -2957,6 +2957,57 @@ export const goatChatMessages = goat.table(
   }),
 );
 
+export const goatChatSandboxUsage = goat.table(
+  "chat_sandbox_usage",
+  {
+    id: serial("id").primaryKey(),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    userMessageId: text("user_message_id").references(() => goatChatMessages.id, {
+      onDelete: "set null",
+    }),
+    sandboxId: text("sandbox_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    activeMs: integer("active_ms").notNull().default(0),
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", {
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" }).notNull().default(0),
+    rawMetrics: jsonb("raw_metrics")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    costBasis: jsonb("cost_basis")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userSessionCreatedAtIdx: index("goat_chat_sandbox_usage_user_session_created_at_idx").on(
+      table.userWorkosId,
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    sessionCreatedAtIdx: index("goat_chat_sandbox_usage_session_created_at_idx").on(
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    userMessageIdx: index("goat_chat_sandbox_usage_user_message_idx").on(table.userMessageId),
+    sandboxIdx: index("goat_chat_sandbox_usage_sandbox_idx").on(table.sandboxId),
+  }),
+);
+
 // Immutable skill snapshots activated by an explicit @skill mention in a chat. Keeping the
 // activation message lets non-Codex chat replay the skill as part of conversation history, while
 // Codex can materialize every active snapshot and invoke only the skills selected on the turn.
@@ -3499,6 +3550,7 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   taskToolUsage: many(goatTaskToolUsage),
   taskSandboxUsage: many(goatTaskSandboxUsage),
   chatSessions: many(goatChatSessions),
+  chatSandboxUsage: many(goatChatSandboxUsage),
   capabilityRuns: many(goatCapabilityRuns),
   capabilityOverrides: many(goatWorkspaceCapabilities),
   localBridges: many(goatLocalBridges),
@@ -4051,6 +4103,7 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
     references: [goatUsers.workosUserId],
   }),
   messages: many(goatChatMessages),
+  sandboxUsage: many(goatChatSandboxUsage),
   skills: many(goatChatSessionSkills),
   brainToolRuns: many(goatBrainToolRuns),
   localCodexSessions: many(goatLocalCodexSessions),
@@ -4094,6 +4147,22 @@ export const goatChatMessagesRelations = relations(goatChatMessages, ({ one, man
   }),
   localCodexAssistantTurns: many(goatLocalCodexTurns, {
     relationName: "goat_local_codex_turns_assistant_message",
+  }),
+  sandboxUsage: many(goatChatSandboxUsage),
+}));
+
+export const goatChatSandboxUsageRelations = relations(goatChatSandboxUsage, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatChatSandboxUsage.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  session: one(goatChatSessions, {
+    fields: [goatChatSandboxUsage.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+  userMessage: one(goatChatMessages, {
+    fields: [goatChatSandboxUsage.userMessageId],
+    references: [goatChatMessages.id],
   }),
 }));
 
@@ -4157,4 +4226,5 @@ export type GoatChatSession = typeof goatChatSessions.$inferSelect;
 export type GoatChatShare = typeof goatChatShares.$inferSelect;
 export type GoatCapabilityRun = typeof goatCapabilityRuns.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
+export type GoatChatSandboxUsage = typeof goatChatSandboxUsage.$inferSelect;
 export type GoatChatSessionSkill = typeof goatChatSessionSkills.$inferSelect;
