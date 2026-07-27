@@ -33,7 +33,7 @@ describe("Goat Google OAuth", () => {
     });
   });
 
-  it("requests independent readable and send-capable Gmail, writable Calendar, and read-only Drive scopes", () => {
+  it("requests send-capable Gmail, writable Calendar, and read-plus-edit Drive scopes", () => {
     const gmailUrl = new URL(
       buildGoatGoogleAuthorizationUrl(GOAT_GOOGLE_PROVIDER_CONFIG.gmail, "state"),
     );
@@ -59,6 +59,9 @@ describe("Goat Google OAuth", () => {
     expect(calendarUrl.searchParams.get("scope")).not.toContain("calendar.events.readonly");
     expect(driveUrl.searchParams.get("scope")).toContain(
       "https://www.googleapis.com/auth/drive.readonly",
+    );
+    expect(driveUrl.searchParams.get("scope")).toContain(
+      "https://www.googleapis.com/auth/documents",
     );
     expect(driveUrl.searchParams.get("scope")).not.toContain("gmail.readonly");
     expect(driveUrl.searchParams.get("scope")).not.toContain("calendar.readonly");

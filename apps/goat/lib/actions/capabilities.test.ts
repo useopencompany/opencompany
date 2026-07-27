@@ -14,6 +14,13 @@ describe("GOAT_PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
+  it("registers Drive reads on by default and document edits behind ask", () => {
+    expect(GOAT_PROVIDER_CAPABILITIES.google_drive).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
   it("registers Google Calendar with read on by default and write behind ask", () => {
     expect(GOAT_PROVIDER_CAPABILITIES.google_calendar).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
@@ -78,6 +85,8 @@ describe("mode helpers", () => {
 
   it("looks up registered capabilities", () => {
     expect(providerCapability("gmail", "write")?.label).toBe("Send emails");
+    expect(providerCapability("google_drive", "read")?.label).toBe("Find & read files");
+    expect(providerCapability("google_drive", "write")?.label).toBe("Edit Google Docs");
     expect(providerCapability("google_calendar", "write")?.label).toBe("Add events");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
     expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
