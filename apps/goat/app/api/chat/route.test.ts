@@ -1,3 +1,4 @@
+import { BROWSER_TOOL_NAMES } from "@opencompany/browser-tools";
 import { convertToModelMessages, streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
@@ -10,7 +11,7 @@ import {
   resolveGoatBrainSkillMentions,
 } from "@/lib/brain-skills";
 import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
-import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
+import { OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX } from "@/lib/chat-agent";
 import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import {
@@ -34,6 +35,20 @@ import {
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
 import { POST } from "./route";
+
+const browserMocks = vi.hoisted(() => ({
+  createSession: vi.fn(),
+  dbInsert: vi.fn(),
+  dbValues: vi.fn(),
+  execute: vi.fn(),
+  getUsage: vi.fn(),
+}));
+
+vi.mock("@opencompany/db/client", () => ({
+  getDb: vi.fn(() => ({
+    insert: browserMocks.dbInsert,
+  })),
+}));
 
 vi.mock("@/lib/chat-request-auth", () => ({
   resolveGoatChatRequestContext: vi.fn(),
@@ -101,6 +116,10 @@ vi.mock("@/lib/actions/execute", () => ({
   executeGoatAction: vi.fn(),
 }));
 
+vi.mock("@/lib/sandbox/browser-tools", () => ({
+  createChatBrowserToolSession: browserMocks.createSession,
+}));
+
 vi.mock("ai", () => ({
   convertToModelMessages: vi.fn(async () => []),
   createGateway: vi.fn(() => (model: string) => ({ model })),
@@ -117,6 +136,13 @@ describe("POST /api/chat", () => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "test-key");
+    browserMocks.createSession.mockReturnValue({
+      execute: browserMocks.execute,
+      getUsage: browserMocks.getUsage,
+    });
+    browserMocks.dbInsert.mockReturnValue({ values: browserMocks.dbValues });
+    browserMocks.dbValues.mockResolvedValue(undefined);
+    browserMocks.getUsage.mockReturnValue(null);
     mockListGoatTaskSchedulesForUser().mockResolvedValue([]);
     mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
     mockIsGoatChatActionsKilled().mockReturnValue(false);
@@ -492,7 +518,11 @@ describe("POST /api/chat", () => {
         activeTools: [USE_ACTION_TOOL_NAME],
         toolChoice: "required",
       });
-      expect(settings.prepareStep?.({ stepNumber: OPENCOMPANY_CHAT_MAX_STEPS - 1 })).toEqual({
+      expect(
+        settings.prepareStep?.({
+          stepNumber: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX - 1,
+        }),
+      ).toEqual({
         activeTools: [],
         toolChoice: "none",
       });
@@ -1310,7 +1340,7 @@ describe("POST /api/chat", () => {
     });
   });
 
-  it("omits public-web tools when EXA_API_KEY is absent", async () => {
+  it("omits Exa tools while retaining browser tools when EXA_API_KEY is absent", async () => {
     vi.stubEnv("EXA_API_KEY", "");
     mockAuth();
     mockCreateTurn();
@@ -1319,17 +1349,27 @@ describe("POST /api/chat", () => {
         system?: string;
         stopWhen?: unknown;
         prepareStep?: (input: { stepNumber: number }) => unknown;
-        tools?: { web_fetch?: unknown; web_search?: unknown };
+        tools?: Record<string, unknown>;
       };
-      expect(typedOptions.stopWhen).toEqual({ count: OPENCOMPANY_CHAT_MAX_STEPS });
-      expect(typedOptions.prepareStep?.({ stepNumber: OPENCOMPANY_CHAT_MAX_STEPS - 1 })).toEqual({
+      expect(typedOptions.stopWhen).toEqual({
+        count: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
+      });
+      expect(
+        typedOptions.prepareStep?.({
+          stepNumber: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX - 1,
+        }),
+      ).toEqual({
         activeTools: [],
         toolChoice: "none",
       });
       expect(typedOptions.tools?.web_fetch).toBeUndefined();
       expect(typedOptions.tools?.web_search).toBeUndefined();
+      for (const name of BROWSER_TOOL_NAMES) {
+        expect(typedOptions.tools?.[name]).toBeDefined();
+      }
       expect(typedOptions.system).not.toContain("Use web_fetch when the user provides");
       expect(typedOptions.system).not.toContain("Use the web_search tool inside chat");
+      expect(typedOptions.system).toContain("Use browser tools for rendered public pages");
       return {
         toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
       } as never;
@@ -1347,6 +1387,116 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(browserMocks.createSession).toHaveBeenCalledOnce();
+  });
+
+  it("adds sandbox browser tools and the larger step budget by default", async () => {
+    vi.stubEnv("EXA_API_KEY", "");
+    mockAuth();
+    mockCreateTurn();
+    mockStreamText().mockImplementation((options: unknown) => {
+      const typedOptions = options as {
+        system?: string;
+        stopWhen?: unknown;
+        prepareStep?: (input: { stepNumber: number }) => unknown;
+        tools?: Record<string, unknown>;
+      };
+      expect(typedOptions.stopWhen).toEqual({
+        count: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
+      });
+      expect(
+        typedOptions.prepareStep?.({
+          stepNumber: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX - 1,
+        }),
+      ).toEqual({
+        activeTools: [],
+        toolChoice: "none",
+      });
+      expect(Object.keys(typedOptions.tools ?? {})).toEqual(
+        expect.arrayContaining([...BROWSER_TOOL_NAMES]),
+      );
+      expect(typedOptions.system).toContain("Use browser tools for rendered public pages");
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Open example.com in the browser."));
+
+    expect(response.status).toBe(200);
+    expect(browserMocks.createSession).toHaveBeenCalledWith({
+      chatSessionId: "session_1",
+      userWorkosId: "user_1",
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it("records one metering row after a browser sandbox is touched", async () => {
+    vi.stubEnv("EXA_API_KEY", "");
+    mockAuth();
+    mockCreateTurn();
+    const startedAt = new Date("2026-07-27T10:00:00.000Z");
+    const endedAt = new Date("2026-07-27T10:00:02.500Z");
+    browserMocks.getUsage.mockReturnValue({
+      sandboxId: "sbx_session_1",
+      sandboxName: "goat-chat-session_1",
+      startedAt,
+      endedAt,
+      activeMs: 2500,
+      rawMetrics: { commandCount: 2 },
+    });
+    mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
+    mockStreamText().mockImplementation(
+      () =>
+        ({
+          toUIMessageStreamResponse: vi.fn(
+            async (options: {
+              onFinish: (event: {
+                responseMessage: {
+                  id: string;
+                  role: "assistant";
+                  parts: Array<{ type: "text"; text: string }>;
+                };
+                finishReason: string;
+                isAborted: boolean;
+              }) => Promise<void>;
+            }) => {
+              await options.onFinish({
+                responseMessage: {
+                  id: "assistant_1",
+                  role: "assistant",
+                  parts: [{ type: "text", text: "Example Domain." }],
+                },
+                finishReason: "stop",
+                isAborted: false,
+              });
+              return new Response(null, { status: 200 });
+            },
+          ),
+        }) as never,
+    );
+
+    const response = await POST(validChatRequest("Open example.com."));
+
+    expect(response.status).toBe(200);
+    expect(browserMocks.dbInsert).toHaveBeenCalledOnce();
+    expect(browserMocks.dbValues).toHaveBeenCalledWith({
+      chatSessionId: "session_1",
+      userWorkosId: "user_1",
+      userMessageId: "user_message_1",
+      sandboxId: "sbx_session_1",
+      startedAt,
+      endedAt,
+      activeMs: 2500,
+      rawMetrics: {
+        commandCount: 2,
+        sandboxName: "goat-chat-session_1",
+      },
+      costBasis: {
+        provider: "vercel-sandbox",
+        status: "unpriced",
+      },
+    });
   });
 
   it("uses structured Codex mention metadata when starting a task", async () => {
@@ -1908,6 +2058,7 @@ function mockCreateTurn() {
     session: {
       id: "session_1",
       model: "openai/gpt-5.5",
+      engine: "opencompany",
     },
     userMessage: {
       id: "user_message_1",

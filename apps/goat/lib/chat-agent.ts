@@ -1,4 +1,9 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import {
+  BROWSER_TOOL_INPUT_SCHEMAS,
+  BROWSER_TOOL_NAMES,
+  type BrowserToolName,
+} from "@opencompany/browser-tools";
 import type { GoatHarnessEngine } from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
@@ -23,8 +28,14 @@ import {
   type GoatBrainMultiBrainTarget,
   normalizeGoatBrainReadToolInput,
 } from "@/lib/brain-surface";
-import { MAX_WEB_FETCH_CALLS_PER_TURN, MAX_WEB_SEARCH_CALLS_PER_TURN } from "@/lib/chat-limits";
 import {
+  MAX_BROWSER_CALLS_PER_TURN,
+  MAX_WEB_FETCH_CALLS_PER_TURN,
+  MAX_WEB_SEARCH_CALLS_PER_TURN,
+} from "@/lib/chat-limits";
+import {
+  type BrowserToolInput,
+  type BrowserToolOutput,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
@@ -59,6 +70,8 @@ import {
 } from "@/lib/chat-ui";
 import { normalizePublicWebUrl } from "@/lib/chat-web-fetch";
 import {
+  BROWSER_CHAT_CALL_LIMIT_DESCRIPTION,
+  BROWSER_CHAT_TOOL_DESCRIPTIONS,
   createOpenCompanyChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
@@ -104,6 +117,7 @@ export {
 
 export const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
 export const OPENCOMPANY_CHAT_MAX_STEPS = 8;
+export const OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX = 16;
 const MAX_ACTION_PROVIDER_FAILURES_PER_TURN = 2;
 const GOAT_BRAIN_READ_TOOL_AI_SCHEMA =
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0];
@@ -128,6 +142,10 @@ type GoatBrainCliRunner = (
 type SaveToBrainRunner = (input: SaveToBrainToolInput) => Promise<SaveToBrainToolOutput>;
 type WebFetchRunner = (input: WebFetchToolInput) => Promise<WebFetchToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
+export type BrowserToolRunner = (input: {
+  name: BrowserToolName;
+  args: unknown;
+}) => Promise<BrowserToolOutput>;
 type ScheduleTaskRunner = (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
 type EditTaskScheduleRunner = (
   input: EditTaskScheduleToolInput,
@@ -214,6 +232,7 @@ export async function runOpenCompanyChatAgent(input: {
   saveToBrain?: SaveToBrainRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
+  browserTools?: BrowserToolRunner;
   actions?: ActionDispatcher;
   goatBrainMultiBrain?: { targets: readonly GoatBrainMultiBrainTarget[] };
   currentDate?: Date | string;
@@ -236,6 +255,7 @@ export async function runOpenCompanyChatAgent(input: {
   brainRef?: string | null;
   abortSignal?: AbortSignal;
   generateTextImpl?: GenerateTextLike;
+  maxSteps?: number;
 }): Promise<OpenCompanyChatAgentResult> {
   const gatewayApiKey = input.gatewayApiKey.trim();
   if (!gatewayApiKey) {
@@ -263,6 +283,7 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
+    ...(input.browserTools ? { browserTools: input.browserTools } : {}),
     ...(input.actions ? { actions: input.actions } : {}),
     ...(input.goatBrainMultiBrain ? { goatBrainMultiBrain: input.goatBrainMultiBrain } : {}),
   });
@@ -270,6 +291,7 @@ export async function runOpenCompanyChatAgent(input: {
   const systemPromptInput = {
     webFetchEnabled: Boolean(input.webFetch),
     webSearchEnabled: Boolean(input.webSearch),
+    browserToolsEnabled: Boolean(input.browserTools),
     ...(input.currentDate ? { currentDate: input.currentDate } : {}),
     ...(input.userContext ? { userContext: input.userContext } : {}),
     ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
@@ -288,6 +310,7 @@ export async function runOpenCompanyChatAgent(input: {
   ].join("\n\n");
 
   const feature = input.feature ?? "chat";
+  const maxSteps = input.maxSteps ?? OPENCOMPANY_CHAT_MAX_STEPS;
   let result: Awaited<ReturnType<GenerateTextLike>>;
   try {
     result = await generate({
@@ -297,8 +320,8 @@ export async function runOpenCompanyChatAgent(input: {
         role: message.role,
         content: message.content,
       })),
-      stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
-      prepareStep: ({ stepNumber }) => prepareOpenCompanyChatStep({ stepNumber }),
+      stopWhen: stepCountIs(maxSteps),
+      prepareStep: ({ stepNumber }) => prepareOpenCompanyChatStep({ stepNumber, maxSteps }),
       tools: toolContext.tools,
       ...(toolContext.repairToolCall
         ? { experimental_repairToolCall: toolContext.repairToolCall }
@@ -350,6 +373,7 @@ export function createOpenCompanyChatToolContext(input: {
   saveToBrain?: SaveToBrainRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
+  browserTools?: BrowserToolRunner;
   actions?: ActionDispatcher;
   // When several brains are in scope (e.g. a Slack channel routed to more than
   // one brain), the goat_brain schema grows a required `brain` enum and raw
@@ -363,6 +387,7 @@ export function createOpenCompanyChatToolContext(input: {
   let visibleToolActivity = false;
   let webFetchCallCount = 0;
   let webSearchCallCount = 0;
+  let browserCallCount = 0;
   let actionCallCount = 0;
   const listedActionSourceIds = new Set(input.actions?.prelistedSourceIds ?? []);
   const actionProviderRetryGate = createActionProviderRetryGate(
@@ -768,6 +793,30 @@ export function createOpenCompanyChatToolContext(input: {
     });
   }
 
+  const browserTools = input.browserTools;
+  if (browserTools) {
+    for (const name of BROWSER_TOOL_NAMES) {
+      tools[name] = tool<BrowserToolInput, BrowserToolOutput>({
+        description: `${BROWSER_CHAT_TOOL_DESCRIPTIONS[name]} ${BROWSER_CHAT_CALL_LIMIT_DESCRIPTION}`,
+        inputSchema: jsonSchema<BrowserToolInput>(
+          BROWSER_TOOL_INPUT_SCHEMAS[name] as Parameters<typeof jsonSchema>[0],
+        ),
+        execute: async (args) => {
+          visibleToolActivity = true;
+          if (browserCallCount >= MAX_BROWSER_CALLS_PER_TURN) {
+            return {
+              ok: false,
+              command: name,
+              error: `Browser tools are limited to ${MAX_BROWSER_CALLS_PER_TURN} calls per chat turn. Answer from the evidence already gathered or continue in a later turn.`,
+            };
+          }
+          browserCallCount += 1;
+          return browserTools({ name, args });
+        },
+      });
+    }
+  }
+
   const actions = input.actions;
   if (actions && actions.catalog.actions.length > 0) {
     const sourceIds = actions.catalog.sources.map((source) => source.id);
@@ -1018,8 +1067,10 @@ function actionAbortReason(abortSignal: AbortSignal) {
 export function prepareOpenCompanyChatStep(input: {
   stepNumber: number;
   forceApprovedAction?: boolean;
+  maxSteps?: number;
 }) {
-  if (input.stepNumber >= OPENCOMPANY_CHAT_MAX_STEPS - 1) {
+  const maxSteps = input.maxSteps ?? OPENCOMPANY_CHAT_MAX_STEPS;
+  if (input.stepNumber >= maxSteps - 1) {
     return {
       activeTools: [],
       toolChoice: "none" as const,

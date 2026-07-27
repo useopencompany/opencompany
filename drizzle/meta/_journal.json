@@ -1100,6 +1100,13 @@
       "when": 1785141003000,
       "tag": "0156_goat_onboarding_emails",
       "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1785141004000,
+      "tag": "0157_goat_chat_sandbox_usage",
+      "breakpoints": true
     }
   ]
 }

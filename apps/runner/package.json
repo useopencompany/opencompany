@@ -15,6 +15,7 @@
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",
+    "@opencompany/browser-tools": "workspace:*",
     "@opencompany/crypto": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/file-extract": "workspace:*",
