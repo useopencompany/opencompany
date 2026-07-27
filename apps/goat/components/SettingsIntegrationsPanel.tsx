@@ -51,6 +51,8 @@ import {
   type GoatStripeProviderState,
   goatIntegrationStateFromRows,
 } from "@/lib/integration-state";
+import { hasGoatGmailSendScope } from "@/lib/integrations/gmail-scopes";
+import { hasGoatGoogleDriveWriteScope } from "@/lib/integrations/google-drive-scopes";
 import {
   goatIntegrationConnectionError,
   goatIntegrationConnectionSuccess,
@@ -609,6 +611,12 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
           account.accountEmail ||
           account.integrationId
         : account.accountEmail || account.accountName || account.integrationId;
+  const needsGoogleDriveWriteScope =
+    account.provider === "google_drive" &&
+    account.connected &&
+    !hasGoatGoogleDriveWriteScope(account.scopes);
+  const needsGmailSendScope =
+    account.provider === "gmail" && account.connected && !hasGoatGmailSendScope(account.scopes);
 
   const beginDisconnect = () => {
     setError(null);
@@ -659,6 +667,22 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
               Reconnect
             </a>
           )}
+          {needsGoogleDriveWriteScope ? (
+            <a
+              href={integrationConnectHref("google_drive")}
+              className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
+            >
+              Enable editing
+            </a>
+          ) : null}
+          {needsGmailSendScope ? (
+            <a
+              href={integrationConnectHref("gmail")}
+              className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
+            >
+              Enable sending
+            </a>
+          ) : null}
           <button
             type="button"
             onClick={beginDisconnect}

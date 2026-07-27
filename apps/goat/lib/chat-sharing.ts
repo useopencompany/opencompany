@@ -25,6 +25,11 @@ export type GoatChatShareStore = {
     userWorkosId: string;
     chatSessionId: string;
   }): Promise<GoatChatShare | null>;
+  findShareForUser(input: {
+    userWorkosId: string;
+    chatSessionId: string;
+  }): Promise<GoatChatShare | null>;
+  revokeShare(input: { userWorkosId: string; chatSessionId: string }): Promise<boolean>;
   findShare(
     shareId: string,
   ): Promise<{ share: GoatChatShare; chatSession: PublicGoatChatSessionRecord } | null>;
@@ -48,6 +53,32 @@ export async function ensureGoatChatShareForUser(
 
   return store.ensureShare({
     id: newGoatChatShareId(),
+    userWorkosId: input.userWorkosId,
+    chatSessionId,
+  });
+}
+
+export async function findGoatChatShareForUser(
+  input: { userWorkosId: string; chatSessionId: string },
+  store: GoatChatShareStore = createDbGoatChatShareStore(),
+): Promise<GoatChatShare | null> {
+  const chatSessionId = input.chatSessionId.trim();
+  if (!chatSessionId) return null;
+
+  return store.findShareForUser({
+    userWorkosId: input.userWorkosId,
+    chatSessionId,
+  });
+}
+
+export async function revokeGoatChatShareForUser(
+  input: { userWorkosId: string; chatSessionId: string },
+  store: GoatChatShareStore = createDbGoatChatShareStore(),
+): Promise<boolean> {
+  const chatSessionId = input.chatSessionId.trim();
+  if (!chatSessionId) return false;
+
+  return store.revokeShare({
     userWorkosId: input.userWorkosId,
     chatSessionId,
   });
@@ -102,6 +133,38 @@ export function createDbGoatChatShareStore(
         .where(eq(goatChatShares.chatSessionId, ownedSession.id))
         .limit(1);
       return share ?? null;
+    },
+
+    async findShareForUser(input) {
+      const [share] = await db
+        .select({ share: goatChatShares })
+        .from(goatChatShares)
+        .innerJoin(goatChatSessions, eq(goatChatShares.chatSessionId, goatChatSessions.id))
+        .where(
+          and(
+            eq(goatChatShares.chatSessionId, input.chatSessionId),
+            eq(goatChatSessions.userWorkosId, input.userWorkosId),
+          ),
+        )
+        .limit(1);
+      return share?.share ?? null;
+    },
+
+    async revokeShare(input) {
+      const [ownedSession] = await db
+        .select({ id: goatChatSessions.id })
+        .from(goatChatSessions)
+        .where(
+          and(
+            eq(goatChatSessions.id, input.chatSessionId),
+            eq(goatChatSessions.userWorkosId, input.userWorkosId),
+          ),
+        )
+        .limit(1);
+      if (!ownedSession) return false;
+
+      await db.delete(goatChatShares).where(eq(goatChatShares.chatSessionId, ownedSession.id));
+      return true;
     },
 
     async findShare(shareId) {

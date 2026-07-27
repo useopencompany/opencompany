@@ -113,8 +113,10 @@ optionally stops the active stream, and marks the chat session closed through
 
 ### Public read-only chat links
 
-The link button in a persisted chat header creates or reuses one opaque
-`goat.chat_session_shares` token for the current user's session and copies `/share/<token>`.
+The link button in a persisted chat header opens sharing controls. The owner can create or reuse
+one opaque `goat.chat_session_shares` token for their session, copy `/share/<token>`, or stop
+sharing. Stopping sharing deletes the token so the public transcript and its attachment routes stop
+resolving immediately. Sharing again creates a new token; a revoked URL never becomes valid again.
 Shared routes sit outside the authenticated Goat app shell, render the existing transcript UI
 without a composer or mutation controls, and can serve that session's attachments through a
 token-scoped byte route. The link reads the current session on each request, so later messages are
@@ -160,20 +162,21 @@ Connected integration and managed capability actions are dispatched through `lis
 the workspace's enabled managed capabilities, and the model must discover a source's concrete action
 ids and parameter schemas before executing one. Slack exposes
 conversation, message, thread, member, and scope-dependent search reads. Gmail exposes message
-search plus message and thread retrieval, with an explicit account required when several are
-connected. Google Calendar exposes a bounded event-list read, while Google Drive exposes file
-search. Linear exposes a curated catalog for reading issues and workspace context, creating and
+search, message and thread retrieval, and explicitly requested plain-text email sends, with an
+explicit account required when several are connected. Google Calendar exposes a bounded event-list
+read, while Google Drive exposes file search, live Google Doc reads, and exact text replacement in
+Google Docs. Linear exposes a curated catalog for reading issues and workspace context, creating and
 updating issues, and adding comments. Attio exposes bounded fuzzy search across standard people,
 companies, and deals; list, field, and membership discovery; and bounded list reads with saved-view
-filters, explicit filters, sorting, and pagination. Explicitly requested Attio record and list-entry
-updates, Linear writes, and Google Calendar event creation require confirmation by default and can
-be configured under Integrations. An explicit account or workspace is required when several are
-connected. Stripe exposes read-only workspace metrics for balance activity by period, current
-balances, subscription health with estimated MRR, and open receivables. Stripe uses an encrypted
-restricted API key and is excluded from automatic Brain-fill surveying because those financial
-metrics are live operational state. Disconnected or disabled capabilities are absent from the catalog, guessed action ids
-cannot bypass it, and all provider credentials remain server-side. Deeper or multi-source
-connected-account work continues through background tasks.
+filters, explicit filters, sorting, and pagination. Explicitly requested Gmail sends, Google Doc
+edits, Attio record and list-entry updates, Linear writes, and Google Calendar event creation require
+confirmation by default and can be configured under Integrations. An explicit account or workspace
+is required when several are connected. Stripe exposes read-only workspace metrics for balance
+activity by period, current balances, subscription health with estimated MRR, and open receivables.
+Stripe uses an encrypted restricted API key and is excluded from automatic Brain-fill surveying
+because those financial metrics are live operational state. Disconnected or disabled capabilities
+are absent from the catalog, guessed action ids cannot bypass it, and all provider credentials remain
+server-side. Deeper or multi-source connected-account work continues through background tasks.
 
 Managed X, LinkedIn, YouTube, Instagram, TikTok, prospecting, and Semrush SEO actions use a fixed
 server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Prospecting includes
