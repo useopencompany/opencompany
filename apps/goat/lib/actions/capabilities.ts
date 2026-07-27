@@ -24,6 +24,20 @@ export const GOAT_CAPABILITY_MODES: readonly GoatCapabilityMode[] = ["on", "ask"
 export const GOAT_PROVIDER_CAPABILITIES: Partial<
   Record<GoatActionProviderId, readonly GoatProviderCapability[]>
 > = {
+  google_drive: [
+    {
+      id: "read",
+      label: "Find & read files",
+      description: "Search Google Drive and read the contents of Google Docs.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Edit Google Docs",
+      description: "Replace text in Google Docs you can edit.",
+      defaultMode: "ask",
+    },
+  ],
   google_calendar: [
     {
       id: "read",

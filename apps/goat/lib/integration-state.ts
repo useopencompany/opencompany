@@ -164,6 +164,7 @@ export type GoatIntegrationAccountView = {
   accountName: string | null;
   connectionLabel: string | null;
   statusReason: string | null;
+  scopes: string[];
   // Sparse per-connection capability overrides; registry defaults fill gaps.
   capabilityModes: Record<string, unknown>;
 };
@@ -216,6 +217,7 @@ type IntegrationStateRow = {
   statusReason?: string | null;
   status_reason?: string | null;
   status: GoatIntegrationStatus;
+  scopes?: string[] | null;
   capabilityModes?: Record<string, unknown> | null;
   capability_modes?: Record<string, unknown> | null;
 };
@@ -323,6 +325,9 @@ function accountViewFromRow(
     accountName: row.accountName ?? row.account_name ?? null,
     connectionLabel: row.connectionLabel ?? row.connection_label ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
+    scopes: Array.isArray(row.scopes)
+      ? row.scopes.filter((scope): scope is string => typeof scope === "string")
+      : [],
     capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
   };
 }
