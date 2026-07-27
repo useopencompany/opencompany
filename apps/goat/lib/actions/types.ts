@@ -9,7 +9,8 @@ export type GoatActionProviderId =
   | "google_drive"
   | "linear"
   | "attio"
-  | "github";
+  | "github"
+  | "stripe";
 
 export type GoatActionSourceId = GoatActionProviderId | GoatManagedCapabilitySource;
 

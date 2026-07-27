@@ -62,7 +62,8 @@ export type GoatIntegrationProvider =
   | "hubspot"
   | "granola"
   | "fathom"
-  | "attio";
+  | "attio"
+  | "stripe";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear) are always personal. Installation-bound
@@ -74,6 +75,7 @@ export const WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS = [
   "github",
   "jamie",
   "slack_bot",
+  "stripe",
 ] as const satisfies readonly GoatIntegrationProvider[];
 export function isWorkspaceOwnedGoatIntegrationProvider(provider: GoatIntegrationProvider) {
   return (
@@ -1248,7 +1250,8 @@ export const goatIntegrations = goat.table(
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     // Set for workspace-owned integrations (installation-bound providers:
-    // github, jamie). NULL = personal integration owned by user_workos_id.
+    // GitHub, Jamie, Slack bot, Stripe). NULL = personal integration owned by
+    // user_workos_id.
     workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
       onDelete: "cascade",
     }),
@@ -1306,13 +1309,19 @@ export const goatIntegrations = goat.table(
     slackBotWorkspaceIdx: uniqueIndex("goat_integrations_slack_bot_workspace_idx")
       .on(table.workspaceId, table.provider)
       .where(sql`${table.workspaceId} IS NOT NULL AND ${table.provider} = 'slack_bot'`),
+    // Stripe credentials represent the workspace's single reporting account.
+    // Rotating a key or switching accounts updates that row instead of leaving
+    // another financial connection silently active.
+    stripeWorkspaceIdx: uniqueIndex("goat_integrations_stripe_workspace_idx")
+      .on(table.workspaceId, table.provider)
+      .where(sql`${table.workspaceId} IS NOT NULL AND ${table.provider} = 'stripe'`),
     workspaceProviderIdx: index("goat_integrations_workspace_provider_idx").on(
       table.workspaceId,
       table.provider,
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1361,7 +1370,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1415,7 +1424,7 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",

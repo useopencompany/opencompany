@@ -189,6 +189,43 @@ describe("POST /api/chat", () => {
     });
   });
 
+  it("exposes Stripe actions without automatically surveying live finance data for Brain fill", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockResolveGoatActionCatalog().mockResolvedValue({
+      providers: [
+        {
+          id: "stripe",
+          label: "Stripe (Acme, live mode)",
+          description: "Read live Stripe payment activity.",
+        },
+      ],
+      actions: [
+        {
+          id: "stripe.get_revenue_summary",
+          provider: "stripe",
+          capability: "read",
+          permissionMode: "on",
+          description: "Summarize operational payment activity.",
+          params: { type: "object", properties: {} },
+          execute: vi.fn(),
+        },
+      ],
+    });
+    mockStreamText().mockImplementation((options: unknown) => {
+      const system = (options as { system?: string }).system ?? "";
+      expect(system).toContain("<action_sources>");
+      expect(system).toContain("stripe [connected integration]");
+      expect(system).not.toContain("<brain_fill>");
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("What did we process last week?"));
+    expect(response.status).toBe(200);
+  });
+
   it("honors the actions kill switch", async () => {
     mockAuth();
     mockIsGoatChatActionsKilled().mockReturnValue(true);

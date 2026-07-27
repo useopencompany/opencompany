@@ -206,4 +206,32 @@ describe("SettingsIntegrationsPanel", () => {
       "true",
     );
   });
+
+  it("shows a workspace-owned Stripe connection and test-mode label", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_stripe",
+        workspaceId: "workspace_1",
+        provider: "stripe",
+        externalId: "acct_123",
+        connectionLabel: "Acme Payments",
+        accountType: "stripe_test_restricted_key",
+        status: "connected",
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    const stripeCard = screen
+      .getByText("Give Goat read-only access to payment activity, subscriptions, and receivables.")
+      .closest("div.rounded-2xl");
+    expect(stripeCard).not.toBeNull();
+    expect(within(stripeCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    expect(within(stripeCard as HTMLElement).getByText(/Acme Payments · Test mode/)).toBeVisible();
+    expect(within(stripeCard as HTMLElement).queryByRole("link", { name: "Connect" })).toBeNull();
+    expect(within(stripeCard as HTMLElement).getByRole("link", { name: "Manage" })).toHaveAttribute(
+      "href",
+      "/settings/stripe",
+    );
+  });
 });

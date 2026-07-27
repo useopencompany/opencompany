@@ -881,7 +881,9 @@ export async function POST(request: Request): Promise<Response> {
               kind: source.kind ?? "integration",
             })),
             connectedIntegrations: actionCatalog.providers.filter(
-              (source) => source.kind !== "managed",
+              // Stripe is live operational finance data, not durable company
+              // knowledge to survey or capture during automatic Brain fill.
+              (source) => source.kind !== "managed" && source.id !== "stripe",
             ),
           }
         : {}),

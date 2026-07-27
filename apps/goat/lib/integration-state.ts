@@ -123,6 +123,16 @@ export type GoatAttioProviderState = {
   statusReason: string | null;
 };
 
+export type GoatStripeProviderState = {
+  provider: "stripe";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  livemode: boolean | null;
+  statusReason: string | null;
+};
+
 export type GoatSlackProviderState = {
   provider: "slack";
   connected: boolean;
@@ -180,6 +190,7 @@ export type GoatIntegrationState = {
   granola: GoatGranolaProviderState;
   fathom: GoatFathomProviderState;
   attio: GoatAttioProviderState;
+  stripe: GoatStripeProviderState;
   codex: GoatCodexProviderState;
   // All of the user's connected accounts per personal provider. The
   // single-account states above remain the "primary connection" view used by
@@ -198,6 +209,8 @@ type IntegrationStateRow = {
   account_email?: string | null;
   accountName?: string | null;
   account_name?: string | null;
+  accountType?: string | null;
+  account_type?: string | null;
   connectionLabel?: string | null;
   connection_label?: string | null;
   statusReason?: string | null;
@@ -261,10 +274,11 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     if (row.provider === "linear" && (row.externalId ?? row.external_id) !== "linear_mcp") {
       continue;
     }
-    // GitHub and Jamie are workspace-owned; personal rows for those providers
-    // are pre-ownership leftovers and must not shadow the workspace connection.
+    // GitHub, Jamie, and Stripe are workspace-owned; personal rows for those
+    // providers are pre-ownership leftovers and must not shadow the workspace
+    // connection.
     if (
-      (row.provider === "github" || row.provider === "jamie") &&
+      (row.provider === "github" || row.provider === "jamie" || row.provider === "stripe") &&
       !(row.workspaceId ?? row.workspace_id)
     ) {
       continue;
@@ -284,6 +298,7 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     granola: granolaProviderState(byProvider.get("granola")),
     fathom: fathomProviderState(byProvider.get("fathom")),
     attio: attioProviderState(byProvider.get("attio")),
+    stripe: stripeProviderState(byProvider.get("stripe")),
     codex: {
       provider: "codex",
       connected: false,
@@ -471,6 +486,36 @@ function attioProviderState(row: IntegrationStateRow | undefined): GoatAttioProv
     status: row.status,
     integrationId: row.id ?? null,
     workspaceName: row.connectionLabel ?? row.connection_label ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+  };
+}
+
+function stripeProviderState(row: IntegrationStateRow | undefined): GoatStripeProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "stripe",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      livemode: null,
+      statusReason: null,
+    };
+  }
+
+  return {
+    provider: "stripe",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    accountName:
+      row.connectionLabel ?? row.connection_label ?? row.accountName ?? row.account_name ?? null,
+    livemode:
+      (row.accountType ?? row.account_type) === "stripe_live_restricted_key"
+        ? true
+        : (row.accountType ?? row.account_type) === "stripe_test_restricted_key"
+          ? false
+          : null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
   };
 }
