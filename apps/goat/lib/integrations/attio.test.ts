@@ -65,6 +65,16 @@ describe("Attio API key scope handling", () => {
         " note:read-write  object_configuration:read note:read-write record_permission:read-write ",
       ),
     ).toEqual(["note:read-write", "object_configuration:read", "record_permission:read-write"]);
+    expect(
+      parseGoatAttioScopes([
+        " list_configuration:read-write list_entry:read-write ",
+        "object_configuration:read-write",
+      ]),
+    ).toEqual([
+      "list_configuration:read-write",
+      "list_entry:read-write",
+      "object_configuration:read-write",
+    ]);
     expect(parseGoatAttioScopes(undefined)).toEqual([]);
   });
 
@@ -99,8 +109,9 @@ describe("Attio API key scope handling", () => {
           workspace_id: "workspace_1",
           workspace_name: "Acme",
           workspace_slug: "acme",
-          scope:
+          scope: [
             "object_configuration:read record_permission:read-write note:read-write webhook:read-write",
+          ],
         }),
       ),
     );
