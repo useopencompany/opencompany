@@ -18,6 +18,7 @@ import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 import { getGoatPersonalAccounts } from "@/lib/integrations/personal-accounts";
 import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
+import { getGoatStripeIntegrationState } from "@/lib/integrations/stripe";
 import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
 import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
@@ -37,6 +38,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     granola,
     fathom,
     attio,
+    stripe,
     codex,
     workspaceMembers,
     personalAccounts,
@@ -52,6 +54,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatGranolaIntegrationState(user.workosUserId),
     getGoatFathomIntegrationState(user.workosUserId),
     getGoatAttioIntegrationState(user.workosUserId),
+    getGoatStripeIntegrationState(workspace.id),
     loadCurrentGoatCodexAuthSettings(),
     listGoatWorkspaceMembers(workspace.id),
     getGoatPersonalAccounts(user.workosUserId),
@@ -111,6 +114,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       granola,
       fathom,
       attio,
+      stripe,
       personalAccounts,
       codex: {
         provider: "codex",
@@ -169,6 +173,7 @@ function buildIntegrationState(input: {
   granola: GoatIntegrationState["granola"];
   fathom: GoatIntegrationState["fathom"];
   attio: GoatIntegrationState["attio"];
+  stripe: GoatIntegrationState["stripe"];
   personalAccounts: GoatIntegrationState["personalAccounts"];
   codex: GoatCodexProviderState;
 }): GoatIntegrationState {
@@ -183,6 +188,7 @@ function buildIntegrationState(input: {
     granola: input.granola,
     fathom: input.fathom,
     attio: input.attio,
+    stripe: input.stripe,
     codex: input.codex,
     personalAccounts: input.personalAccounts,
   };

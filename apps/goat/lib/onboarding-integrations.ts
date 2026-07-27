@@ -72,6 +72,8 @@ function providerName(provider: string | null) {
       return "Fathom";
     case "attio":
       return "Attio";
+    case "stripe":
+      return "Stripe";
     default:
       return "This source";
   }

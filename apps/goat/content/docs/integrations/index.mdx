@@ -9,7 +9,7 @@ Integrations connect external systems to Goat so chat, tasks, and Brain ingestio
 
 ## Current categories
 
-- **Tool connectors** let Goat call a provider API on the user's behalf. Gmail, Google Calendar, Google Drive, GitHub, Linear MCP, and Slack use OAuth; Attio uses a workspace API key. Main chat exposes curated actions across these connections. Linear can create or update issues and add comments, Calendar can create events, and Attio can update records or existing list entries. These writes require confirmation by default.
+- **Tool connectors** let Goat call a provider API on the user's behalf. Gmail, Google Calendar, Google Drive, GitHub, Linear MCP, and Slack use OAuth; Attio uses a workspace API key; Stripe uses a restricted, read-only workspace key. Main chat exposes curated actions across these connections. Linear can create or update issues and add comments, Calendar can create events, and Attio can update records or existing list entries. These writes require confirmation by default. Stripe actions are read-only.
 - **Brain source connectors** turn external activity into `goat.brain_source_items` and enqueue durable Brain ingestion. Jamie meeting notes, Granola meeting notes, Slack conversations, Linear issue activity, and chat captures use this shape.
 - **Webhook connectors** receive provider deliveries at Goat API routes. Incoming payloads must authenticate at the route boundary before they can enqueue work.
 - **API-key poll connectors** store a provider API key and let Goat poll for new activity when the provider offers no webhooks. Granola uses this shape.
@@ -18,7 +18,8 @@ Integrations connect external systems to Goat so chat, tasks, and Brain ingestio
 
 - [Jamie](/docs/integrations/jamie) covers the completed-meeting webhook that feeds Goat Brain ingestion.
 - [Granola](/docs/integrations/granola) covers the personal API key connection Goat polls for finished meeting notes.
+- [Stripe](/docs/integrations/stripe) covers the read-only founder metrics available in main chat.
 
 ## Where to configure
 
-Personal OAuth integrations live in `/settings`. Brain source routing lives on each brain's settings page under Sources. Jamie setup starts in `/settings/jamie` and Granola setup starts in `/settings/granola`; each source can then be enabled or disabled per brain once the connection exists.
+Personal OAuth integrations and workspace connections live under **Settings → Integrations**. Brain source routing lives on each brain's settings page under Sources. Stripe is workspace-owned and can only be connected or rotated by a workspace admin.

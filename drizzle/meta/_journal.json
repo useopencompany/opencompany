@@ -1072,6 +1072,13 @@
       "when": 1784793602000,
       "tag": "0152_goat_seo_capability",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1785141000000,
+      "tag": "0153_goat_stripe_integration",
+      "breakpoints": true
     }
   ]
 }
