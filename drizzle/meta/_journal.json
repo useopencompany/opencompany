@@ -1093,6 +1093,13 @@
       "when": 1785141002000,
       "tag": "0155_goat_codex_brain_tools",
       "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1785141003000,
+      "tag": "0156_goat_onboarding_emails",
+      "breakpoints": true
     }
   ]
 }

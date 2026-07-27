@@ -103,7 +103,7 @@ Set these in Vercel Production.
 | `GOAT_STRIPE_API_KEY` | Goat only | Dedicated restricted Stripe key for Goat customers, credit top-up Checkout, off-session auto-refill charges, and portal sessions. Store the live value in Infisical `prod` + `/goat`; use the corresponding development source for test mode. |
 | `GOAT_STRIPE_CHECKOUT_ENABLED` | Goat hosted only | Production live-payment gate for credit top-up Checkout and auto-refill charges. Keep false until the business has configured its actual Stripe Tax registrations, then set true in Infisical `prod` + `/goat` and sync it to Goat Vercel. Test/local Checkout is not gated. The Goat Stripe account's webhook endpoint (the shared web `/api/stripe/webhook` route) must be subscribed to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `payment_intent.succeeded`, and `payment_intent.payment_failed`; its signing secret must match `STRIPE_WEBHOOK_SECRET` before enabling top-ups. |
 | `GOAT_CREDITS_ENFORCEMENT_ENABLED` | Goat only | Set `true` to enforce usage credits: chat turns hard-stop with 402 on an empty balance and new ingestion pauses until the balance is positive. Usage debits and the ledger record regardless of this flag. Keep false in prod until `GOAT_STRIPE_CHECKOUT_ENABLED` is true and the starter-grant backfill (`scripts/goat-backfill-starter-credits.mjs`) has run — enforcement without purchasable top-ups locks users out. Needed by the Goat web app and the runner. |
-| `CRON_SECRET` | Goat hosted only | Bearer secret protecting the hourly Goat billing reconciliation route (charges due auto-refills, then releases paused ingestion backlogs). Store it in Infisical `prod` + `/goat`; sync it to the Goat Vercel project, which sends it as the cron Authorization bearer token. |
+| `CRON_SECRET` | Goat hosted only | Bearer secret protecting the hourly Goat cron routes: billing reconciliation (`/api/billing/reconcile`, charges due auto-refills then releases paused ingestion backlogs) and the onboarding email sweep (`/api/cron/onboarding-emails`). Store it in Infisical `prod` + `/goat`; sync it to the Goat Vercel project, which sends it as the cron Authorization bearer token. |
 | `GOAT_PORT` | Local Goat only | Internal Next.js port for `bun run dev:goat`; defaults to `3002`. |
 | `GOAT_HTTPS_PORT` | Local Goat only | Browser-facing Caddy HTTPS port for `bun run dev:goat`; defaults to `3443`. |
 | `OPENCOMPANY_GITHUB_ORG` | Yes | GitHub org where workspace repos are created. |
@@ -149,9 +149,9 @@ Set these in Vercel Production.
 | `GOAT_FEEDBACK_LINEAR_TEAM_ID` | Goat only | Target Goat Linear team UUID for the sidebar feedback widget. Reuses the shared `LINEAR_API_KEY`; only the team differs. Enable Triage on this team so reports land in the Triage inbox. |
 | `GOAT_FEEDBACK_LINEAR_PROJECT_ID` | No | Optional project routing for Goat feedback. |
 | `GOAT_FEEDBACK_LINEAR_LABELS` | No | Optional comma-separated labels added to Goat feedback issues. |
-| `RESEND_API_KEY` | No | Enables transactional email through Resend. Missing values disable email sends. |
-| `RESEND_WELCOME_FROM` | No | Sender identity for the signup welcome email. Defaults to `Louis from opencompany <louis@updates.opencompany.cloud>`. |
-| `RESEND_REPLY_TO` | No | Reply-to address for transactional emails. Defaults to `louis@opencompany.cloud`. |
+| `RESEND_API_KEY` | No | Enables transactional/lifecycle email through Resend. Missing values disable email sends. Used by the web signup welcome email and the Goat founder onboarding drip — for Goat, store it in Infisical `prod` + `/goat` (the `/web` copy does not reach Goat). |
+| `RESEND_WELCOME_FROM` | No | Sender identity for the signup welcome email and the Goat onboarding drip. Defaults to `Louis from opencompany <louis@updates.opencompany.cloud>`. |
+| `RESEND_REPLY_TO` | No | Reply-to address for transactional/lifecycle emails. Defaults to `louis@opencompany.cloud`. |
 | `RESEND_REGISTERED_USERS_SEGMENT_ID` | Required with `RESEND_API_KEY` | Resend Segment ID for the `Registered Users` Segment. Create the Segment in Resend and store its ID in Infisical/Vercel before enabling Resend. |
 | `NEXT_PUBLIC_POSTHOG_TOKEN` | No | Enables PostHog client/server analytics. |
 | `NEXT_PUBLIC_POSTHOG_HOST` | No | PostHog host. |
