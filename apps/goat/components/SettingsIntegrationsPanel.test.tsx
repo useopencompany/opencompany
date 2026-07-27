@@ -173,6 +173,45 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
+  it("shows Gmail read and send controls and prompts older connections to grant send access", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_gmail",
+        provider: "gmail",
+        externalId: "google_account_1",
+        accountEmail: "louis@example.com",
+        status: "connected",
+        scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    const gmailCard = screen
+      .getByText("Let Goat read and act on your email.")
+      .closest("div.rounded-2xl");
+    expect(gmailCard).not.toBeNull();
+    const readPermission = within(gmailCard as HTMLElement).getByRole("group", {
+      name: "Read emails permission",
+    });
+    const sendPermission = within(gmailCard as HTMLElement).getByRole("group", {
+      name: "Send emails permission",
+    });
+    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(sendPermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      within(gmailCard as HTMLElement).getByRole("link", { name: "Enable sending" }),
+    ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
+  });
+
   it("shows Attio read and write permission controls on the connected workspace", () => {
     const integrations = goatIntegrationStateFromRows([
       {
