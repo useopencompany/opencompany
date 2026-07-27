@@ -244,6 +244,55 @@ describe("POST /api/chat", () => {
     expect(resolveGoatActionCatalog).not.toHaveBeenCalled();
   });
 
+  it("streams context usage metadata as each model step finishes", async () => {
+    mockAuth();
+    mockCreateTurn();
+    const metadataUpdates: unknown[] = [];
+    mockStreamText().mockImplementation(
+      () =>
+        ({
+          toUIMessageStreamResponse: vi.fn(
+            (options: { messageMetadata: (event: { part: unknown }) => unknown }) => {
+              metadataUpdates.push(options.messageMetadata({ part: { type: "start" } }));
+              metadataUpdates.push(
+                options.messageMetadata({
+                  part: {
+                    type: "finish-step",
+                    usage: {
+                      inputTokens: 12_000,
+                      outputTokens: 800,
+                      totalTokens: 12_800,
+                    },
+                  },
+                }),
+              );
+              metadataUpdates.push(
+                options.messageMetadata({
+                  part: {
+                    type: "finish-step",
+                    usage: {
+                      inputTokens: 18_000,
+                      outputTokens: 1_200,
+                    },
+                  },
+                }),
+              );
+              return new Response(null, { status: 200 });
+            },
+          ),
+        }) as never,
+    );
+
+    const response = await POST(validChatRequest("Use the tools and summarize the result."));
+
+    expect(response.status).toBe(200);
+    expect(metadataUpdates).toEqual([
+      { sessionId: "session_1" },
+      { sessionId: "session_1", contextTokens: 12_800 },
+      { sessionId: "session_1", contextTokens: 19_200 },
+    ]);
+  });
+
   it("forwards use_action calls to the executor and returns its result", async () => {
     mockAuth({ timezone: "" });
     mockCreateTurn();

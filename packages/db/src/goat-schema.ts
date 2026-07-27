@@ -17,6 +17,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 // Postgres full-text search vector, written only by the database (a STORED generated column over
@@ -570,6 +571,51 @@ export const goatOnboarding = goat.table("onboarding", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export type GoatOnboardingEmailStep = "welcome" | "checkin" | "feedback_call";
+export type GoatOnboardingEmailStatus = "pending" | "sending" | "sent" | "failed" | "skipped";
+
+// One row per (owner, step) of the founder onboarding drip. Enrollment inserts
+// three rows at first-workspace creation; a cron sweep claims due `pending` rows
+// (status flips to `sending` under a soft lease), sends via Resend, then marks
+// `sent`. The unique (user, step) index makes enrollment idempotent and gives
+// each send a stable Resend idempotency key. Only owners are enrolled — invited
+// members never reach the create-workspace branch that triggers it.
+export const goatOnboardingEmails = goat.table(
+  "onboarding_emails",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workosUserId: text("workos_user_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    step: text("step").$type<GoatOnboardingEmailStep>().notNull(),
+    status: text("status").$type<GoatOnboardingEmailStatus>().notNull().default("pending"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userStepIdx: uniqueIndex("goat_onboarding_emails_user_step_idx").on(
+      table.workosUserId,
+      table.step,
+    ),
+    statusScheduledIdx: index("goat_onboarding_emails_status_scheduled_idx").on(
+      table.status,
+      table.scheduledAt,
+    ),
+    stepCheck: check(
+      "goat_onboarding_emails_step_check",
+      sql`${table.step} IN ('welcome', 'checkin', 'feedback_call')`,
+    ),
+    statusCheck: check(
+      "goat_onboarding_emails_status_check",
+      sql`${table.status} IN ('pending', 'sending', 'sent', 'failed', 'skipped')`,
+    ),
+  }),
+);
 
 export const goatWorkspaceMembers = goat.table(
   "workspace_members",
@@ -4069,6 +4115,7 @@ export const goatChatSessionSkillsRelations = relations(goatChatSessionSkills, (
 export type GoatUser = typeof goatUsers.$inferSelect;
 export type GoatWorkspace = typeof goatWorkspaces.$inferSelect;
 export type GoatOnboarding = typeof goatOnboarding.$inferSelect;
+export type GoatOnboardingEmail = typeof goatOnboardingEmails.$inferSelect;
 export type GoatWorkspaceMember = typeof goatWorkspaceMembers.$inferSelect;
 export type GoatWorkspaceCapability = typeof goatWorkspaceCapabilities.$inferSelect;
 export type GoatWorkspaceBilling = typeof goatWorkspaceBilling.$inferSelect;
