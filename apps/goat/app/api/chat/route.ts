@@ -363,7 +363,7 @@ export async function POST(request: Request): Promise<Response> {
   let turn: ChatTurnState;
   try {
     if (message && userInput) {
-      // Extract docx/xlsx text once at submit time; every later turn reads the
+      // Extract docx/xlsx/srt text once at submit time; every later turn reads the
       // stored text instead of re-downloading the blob.
       const attachmentTexts =
         attachments.length > 0 ? await extractGoatChatAttachmentTexts(attachments) : null;

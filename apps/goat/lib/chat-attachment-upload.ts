@@ -8,11 +8,12 @@ import { upload } from "@vercel/blob/client";
 export async function uploadGoatChatAttachmentBlob(
   userWorkosId: string,
   file: File,
+  mediaType: string,
 ): Promise<{ blobUrl: string; blobPathname: string }> {
   const blob = await upload(`goat-chat/${userWorkosId}/${file.name}`, file, {
     access: "private",
     handleUploadUrl: "/api/chat-attachments/upload",
-    contentType: file.type,
+    contentType: mediaType,
   });
   return { blobUrl: blob.url, blobPathname: blob.pathname };
 }
