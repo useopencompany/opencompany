@@ -1,9 +1,20 @@
 import { getDb } from "@opencompany/db/client";
 import { goatUsers } from "@opencompany/db/goat-schema";
-import { adoptGoatWorkspaceMembershipsFromOrgs } from "@opencompany/db/goat-workspaces";
+import {
+  adoptGoatWorkspaceMembershipsFromOrgs,
+  listAccessibleGoatBrains,
+  listGoatWorkspacesForUser,
+} from "@opencompany/db/goat-workspaces";
 import { recordGoatSignup } from "@opencompany/goat-observability";
+import { cookies } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { adoptWorkOSOrganizationMemberships, syncGoatUser } from "@/lib/auth";
+import {
+  activateGoatWorkspaceForOrganization,
+  adoptWorkOSOrganizationMemberships,
+  GOAT_ACTIVE_BRAIN_COOKIE,
+  GOAT_ACTIVE_WORKSPACE_COOKIE,
+  syncGoatUser,
+} from "@/lib/auth";
 import { getWorkOSClient } from "@/lib/workos-client";
 
 vi.mock("@opencompany/db/client", () => ({
@@ -49,8 +60,11 @@ vi.mock("@/lib/workos-organizations", () => ({
 
 const getDbMock = vi.mocked(getDb);
 const adoptGoatWorkspaceMembershipsFromOrgsMock = vi.mocked(adoptGoatWorkspaceMembershipsFromOrgs);
+const listAccessibleGoatBrainsMock = vi.mocked(listAccessibleGoatBrains);
+const listGoatWorkspacesForUserMock = vi.mocked(listGoatWorkspacesForUser);
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
 const recordGoatSignupMock = vi.mocked(recordGoatSignup);
+const cookiesMock = vi.mocked(cookies);
 
 const now = new Date("2026-01-01T00:00:00.000Z");
 const authUser = {
@@ -212,5 +226,119 @@ describe("adoptWorkOSOrganizationMemberships", () => {
       "[goat] Failed to adopt WorkOS organization memberships",
       error,
     );
+  });
+});
+
+describe("activateGoatWorkspaceForOrganization", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("activates the Goat workspace and default brain mapped to the authenticated organization", async () => {
+    listGoatWorkspacesForUserMock.mockResolvedValue([
+      {
+        workspace: {
+          id: "goat_ws_personal",
+          workosOrganizationId: "org_personal",
+        },
+        role: "admin",
+      },
+      {
+        workspace: {
+          id: "goat_ws_invited",
+          workosOrganizationId: "org_invited",
+        },
+        role: "member",
+      },
+    ] as never);
+    listAccessibleGoatBrainsMock.mockResolvedValue([
+      { id: "brain_other", slug: "other" },
+      { id: "brain_default", slug: "default" },
+    ] as never);
+    const cookieStore = {
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+    cookiesMock.mockResolvedValue(cookieStore as never);
+
+    await expect(
+      activateGoatWorkspaceForOrganization({
+        userWorkosId: authUser.id,
+        organizationId: "org_invited",
+      }),
+    ).resolves.toBe(true);
+
+    expect(listAccessibleGoatBrainsMock).toHaveBeenCalledWith({
+      userWorkosId: authUser.id,
+      workspaceId: "goat_ws_invited",
+    });
+    expect(cookieStore.set).toHaveBeenNthCalledWith(
+      1,
+      GOAT_ACTIVE_WORKSPACE_COOKIE,
+      "goat_ws_invited",
+      {
+        path: "/",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 365,
+      },
+    );
+    expect(cookieStore.set).toHaveBeenNthCalledWith(2, GOAT_ACTIVE_BRAIN_COOKIE, "brain_default", {
+      path: "/",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+    expect(cookieStore.delete).not.toHaveBeenCalled();
+  });
+
+  it("does not change cookies when the organization has no accessible Goat workspace", async () => {
+    listGoatWorkspacesForUserMock.mockResolvedValue([
+      {
+        workspace: {
+          id: "goat_ws_personal",
+          workosOrganizationId: "org_personal",
+        },
+        role: "admin",
+      },
+    ] as never);
+
+    await expect(
+      activateGoatWorkspaceForOrganization({
+        userWorkosId: authUser.id,
+        organizationId: "org_legacy_web",
+      }),
+    ).resolves.toBe(false);
+
+    expect(listAccessibleGoatBrainsMock).not.toHaveBeenCalled();
+    expect(cookiesMock).not.toHaveBeenCalled();
+  });
+
+  it("clears a stale active brain when the invited workspace has no accessible brain", async () => {
+    listGoatWorkspacesForUserMock.mockResolvedValue([
+      {
+        workspace: {
+          id: "goat_ws_invited",
+          workosOrganizationId: "org_invited",
+        },
+        role: "member",
+      },
+    ] as never);
+    listAccessibleGoatBrainsMock.mockResolvedValue([]);
+    const cookieStore = {
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+    cookiesMock.mockResolvedValue(cookieStore as never);
+
+    await activateGoatWorkspaceForOrganization({
+      userWorkosId: authUser.id,
+      organizationId: "org_invited",
+    });
+
+    expect(cookieStore.set).toHaveBeenCalledWith(
+      GOAT_ACTIVE_WORKSPACE_COOKIE,
+      "goat_ws_invited",
+      expect.any(Object),
+    );
+    expect(cookieStore.delete).toHaveBeenCalledWith(GOAT_ACTIVE_BRAIN_COOKIE);
   });
 });
