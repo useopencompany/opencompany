@@ -1,6 +1,6 @@
 "use client";
 
-import type { GoatChatUiMessage } from "@/lib/chat-ui";
+import type { GoatChatUiAttachment, GoatChatUiMessage } from "@/lib/chat-ui";
 import { AssistantTextBubble } from "./AssistantTextBubble";
 import { type ChatTaskLookup, getOrderedAssistantItems } from "./assistant-items";
 import { ReasoningItem } from "./ReasoningItem";
@@ -24,6 +24,8 @@ export function MessageBubble({
   allowCodexPlanActions = false,
   onActionApproval,
   allowActionApproval = false,
+  readOnly = false,
+  attachmentSrc,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -34,9 +36,11 @@ export function MessageBubble({
   allowCodexPlanActions?: boolean;
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
   allowActionApproval?: boolean;
+  readOnly?: boolean;
+  attachmentSrc?: (messageId: string, attachment: GoatChatUiAttachment) => string | undefined;
 }) {
   if (message.role === "user") {
-    return <UserMessageBubble message={message} />;
+    return <UserMessageBubble message={message} {...(attachmentSrc ? { attachmentSrc } : {})} />;
   }
   return (
     <AssistantTurn
@@ -49,6 +53,7 @@ export function MessageBubble({
       allowCodexPlanActions={allowCodexPlanActions}
       onActionApproval={onActionApproval}
       allowActionApproval={allowActionApproval}
+      readOnly={readOnly}
     />
   );
 }
@@ -63,6 +68,7 @@ function AssistantTurn({
   allowCodexPlanActions,
   onActionApproval,
   allowActionApproval,
+  readOnly,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -73,6 +79,7 @@ function AssistantTurn({
   allowCodexPlanActions: boolean;
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
   allowActionApproval: boolean;
+  readOnly: boolean;
 }) {
   const error = message.metadata?.error;
   const items = getOrderedAssistantItems(
@@ -98,7 +105,9 @@ function AssistantTurn({
           );
         }
         if (item.type === "reasoning") return <ReasoningItem key={item.key} text={item.text} />;
-        if (item.type === "task") return <TaskCard key={item.key} task={item.task} />;
+        if (item.type === "task") {
+          return <TaskCard key={item.key} task={item.task} readOnly={readOnly} />;
+        }
         return (
           <ToolCallItem
             key={item.key}
@@ -108,6 +117,7 @@ function AssistantTurn({
             allowCodexPlanActions={allowCodexPlanActions}
             onActionApproval={onActionApproval}
             allowActionApproval={allowActionApproval}
+            readOnly={readOnly}
           />
         );
       })}

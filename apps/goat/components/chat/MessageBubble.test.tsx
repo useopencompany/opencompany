@@ -220,6 +220,60 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.getByText("No open issues for the Goat team.")).toBeInTheDocument();
   });
 
+  it("renders shared transcripts without approval requests or task navigation", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const message: GoatChatUiMessage = {
+      id: "assistant_shared",
+      role: "assistant",
+      metadata: {
+        taskId: "task_1",
+        task: {
+          id: "task_1",
+          displayId: "TASK-1",
+          title: "Private follow-up",
+          status: "queued",
+        },
+      },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_action_approval",
+          state: "output-available",
+          input: {
+            action: "lead.enrich_person",
+            params: { email: "ada@example.com" },
+          },
+          output: {
+            ok: false,
+            action: "lead.enrich_person",
+            error: {
+              code: "approval_required",
+              source: "lead",
+              message: "Approve this paid capability once to continue.",
+              approval: {
+                runId: "gcr_abc",
+                source: "lead",
+                action: "lead.enrich_person",
+                maxCostUsdMicros: 360_000,
+                expiresAt: "2026-07-23T10:15:00.000Z",
+                status: "awaiting_approval",
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} readOnly />);
+
+    expect(screen.queryByText("Approve paid capability?")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve once" })).not.toBeInTheDocument();
+    expect(screen.getByText("Private follow-up")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Private follow-up/ })).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("renders and resolves a one-time paid capability approval card", async () => {
     const user = userEvent.setup();
     vi.stubGlobal(

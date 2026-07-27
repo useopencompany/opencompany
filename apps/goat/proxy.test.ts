@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localGoatHttpsRedirectUrl } from "@/lib/local-https-redirect";
+import { isUnauthenticatedPath } from "./proxy";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -74,6 +75,22 @@ describe("localGoatHttpsRedirectUrl", () => {
     );
 
     expect(redirect).toBeNull();
+  });
+});
+
+describe("Goat public routes", () => {
+  it("allows shared chats and their attachment routes without authentication", () => {
+    expect(isUnauthenticatedPath("/share/goat_chat_share_123")).toBe(true);
+    expect(
+      isUnauthenticatedPath(
+        "/share/goat_chat_share_123/attachments/goat_chat_msg_1/goat_chat_att_1",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps normal chats behind authentication", () => {
+    expect(isUnauthenticatedPath("/chat/goat_chat_123")).toBe(false);
+    expect(isUnauthenticatedPath("/share")).toBe(false);
   });
 });
 

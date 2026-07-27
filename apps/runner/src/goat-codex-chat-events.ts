@@ -568,6 +568,8 @@ const ITEM_LIFECYCLE_EVENT_TYPES = new Set<CodexAppServerNormalizedEvent["type"]
   "file_change.completed",
   "mcp_tool.started",
   "mcp_tool.completed",
+  "dynamic_tool.started",
+  "dynamic_tool.completed",
   "web_search.started",
   "web_search.completed",
 ]);

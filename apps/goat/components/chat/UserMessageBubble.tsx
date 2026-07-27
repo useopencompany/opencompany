@@ -7,7 +7,13 @@ import {
   textFromGoatChatUiMessage,
 } from "@/lib/chat-ui";
 
-export function UserMessageBubble({ message }: { message: GoatChatUiMessage }) {
+export function UserMessageBubble({
+  message,
+  attachmentSrc,
+}: {
+  message: GoatChatUiMessage;
+  attachmentSrc?: (messageId: string, attachment: GoatChatUiAttachment) => string | undefined;
+}) {
   const text = textFromGoatChatUiMessage(message);
   const attachments = message.metadata?.attachments ?? [];
 
@@ -20,7 +26,11 @@ export function UserMessageBubble({ message }: { message: GoatChatUiMessage }) {
               key={attachment.id}
               kind={attachment.kind}
               filename={attachment.filename}
-              src={attachmentThumbnailSrc(message.id, attachment)}
+              src={
+                attachmentSrc
+                  ? attachmentSrc(message.id, attachment)
+                  : attachmentThumbnailSrc(message.id, attachment)
+              }
             />
           ))}
         </div>

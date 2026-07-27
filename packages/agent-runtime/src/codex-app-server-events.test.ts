@@ -233,6 +233,86 @@ describe("normalizeCodexAppServerEvent", () => {
     });
   });
 
+  it("maps dynamic host tool calls without exposing successful result content", () => {
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "item/started",
+        params: {
+          threadId: "thread_1",
+          turnId: "turn_1",
+          item: {
+            id: "dynamic_1",
+            type: "dynamicToolCall",
+            tool: "goat_brain",
+            arguments: { command: "query", flags: { text: "pricing" } },
+          },
+        },
+      })[0],
+    ).toMatchObject({
+      type: "dynamic_tool.started",
+      payload: {
+        threadId: "thread_1",
+        turnId: "turn_1",
+        itemId: "dynamic_1",
+        tool: "goat_brain",
+        arguments: { command: "query", flags: { text: "pricing" } },
+      },
+    });
+
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "item/completed",
+        params: {
+          item: {
+            id: "dynamic_1",
+            type: "dynamicToolCall",
+            tool: "goat_brain",
+            status: "completed",
+            success: true,
+            contentItems: [{ type: "inputText", text: '{"private":"brain result"}' }],
+          },
+        },
+      })[0],
+    ).toMatchObject({
+      type: "dynamic_tool.completed",
+      payload: {
+        itemId: "dynamic_1",
+        tool: "goat_brain",
+        status: "completed",
+        success: true,
+      },
+    });
+    expect(
+      normalizeCodexAppServerEvent({
+        method: "item/completed",
+        params: {
+          item: {
+            id: "dynamic_2",
+            type: "dynamicToolCall",
+            tool: "goat_brain",
+            status: "failed",
+            success: false,
+            contentItems: [
+              {
+                type: "inputText",
+                text: '{"ok":false,"error":"Brain access expired.","traceId":"private"}',
+              },
+            ],
+          },
+        },
+      })[0],
+    ).toMatchObject({
+      type: "dynamic_tool.completed",
+      payload: {
+        itemId: "dynamic_2",
+        tool: "goat_brain",
+        status: "failed",
+        success: false,
+        error: "Brain access expired.",
+      },
+    });
+  });
+
   it("maps user questions and approval requests", () => {
     expect(
       normalizeCodexAppServerEvent({

@@ -74,6 +74,7 @@ export async function POST(request: Request) {
 
   const result = await createGoatCodexChatMessage({
     userWorkosId: context.user.workosUserId,
+    brainRef: context.activeBrain?.id ?? null,
     ...(sessionId ? { sessionId } : {}),
     ...(parsedNewSessionId.sessionId ? { newSessionId: parsedNewSessionId.sessionId } : {}),
     prompt,

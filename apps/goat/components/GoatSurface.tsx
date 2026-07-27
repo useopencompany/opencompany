@@ -67,6 +67,7 @@ import {
   GoatComposerAttachments,
   GoatComposerDropOverlay,
 } from "@/components/chat/ChatComposerAttachments";
+import { ChatShareButton } from "@/components/chat/ChatShareButton";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type {
@@ -1782,6 +1783,9 @@ export function GoatSurface({
                 engine={activeChatEngine}
               />
               <div className="flex shrink-0 items-center gap-2">
+                {chatSessionId && persistedChatSessionId === chatSessionId && hasMessages ? (
+                  <ChatShareButton chatSessionId={chatSessionId} disabled={isAgentWorking} />
+                ) : null}
                 {activeEngineChat?.engine === "codex" ? (
                   <CodexSessionStatusIndicator
                     runtime={codexRuntime}

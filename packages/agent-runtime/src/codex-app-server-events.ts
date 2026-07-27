@@ -10,6 +10,8 @@ export type CodexAppServerEventType =
   | "file_change.completed"
   | "mcp_tool.started"
   | "mcp_tool.completed"
+  | "dynamic_tool.started"
+  | "dynamic_tool.completed"
   | "web_search.started"
   | "web_search.completed"
   | "plan.updated"
@@ -105,6 +107,14 @@ export function normalizeCodexAppServerEvent(
     if (item && isMcpToolCallItem(item)) {
       return [normalized("mcp_tool.started", event, { ...base, ...mcpToolCallPayload(item) })];
     }
+    if (item && isDynamicToolCallItem(item)) {
+      return [
+        normalized("dynamic_tool.started", event, {
+          ...base,
+          ...dynamicToolCallPayload(item),
+        }),
+      ];
+    }
     if (item && isWebSearchItem(item)) {
       return [normalized("web_search.started", event, { ...base, ...webSearchPayload(item) })];
     }
@@ -181,6 +191,16 @@ export function normalizeCodexAppServerEvent(
         normalized("mcp_tool.completed", event, {
           ...base,
           ...mcpToolCallPayload(item),
+          status: firstString(item.status) ?? "completed",
+        }),
+      ];
+    }
+
+    if (isDynamicToolCallItem(item)) {
+      return [
+        normalized("dynamic_tool.completed", event, {
+          ...base,
+          ...dynamicToolCallPayload(item),
           status: firstString(item.status) ?? "completed",
         }),
       ];
@@ -342,6 +362,10 @@ function isMcpToolCallItem(item: Record<string, unknown>) {
   return compactItemType(item).includes("mcptool");
 }
 
+function isDynamicToolCallItem(item: Record<string, unknown>) {
+  return compactItemType(item).includes("dynamictool");
+}
+
 function isWebSearchItem(item: Record<string, unknown>) {
   return compactItemType(item).includes("websearch");
 }
@@ -366,6 +390,35 @@ function mcpToolCallPayload(item: Record<string, unknown>) {
     tool: firstString(item.tool),
     error: firstString(stringFromPath(item, ["error", "message"]), item.error),
   };
+}
+
+function dynamicToolCallPayload(item: Record<string, unknown>) {
+  const success = typeof item.success === "boolean" ? item.success : undefined;
+  return {
+    namespace: firstString(item.namespace),
+    tool: firstString(item.tool),
+    arguments: readRecord(item.arguments) ?? item.arguments,
+    success,
+    error: success === false ? dynamicToolError(item.contentItems) : undefined,
+  };
+}
+
+function dynamicToolError(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  for (const item of value) {
+    const record = readRecord(item);
+    const text = record?.type === "inputText" ? firstString(record.text) : null;
+    if (!text) continue;
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      const error = firstString(readRecord(parsed)?.error);
+      if (error) return error;
+    } catch {
+      // Dynamic tools may return plain text errors.
+    }
+    return text;
+  }
+  return undefined;
 }
 
 function webSearchPayload(item: Record<string, unknown>) {
