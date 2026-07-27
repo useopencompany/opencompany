@@ -1,5 +1,6 @@
 import {
   CODEX_COMMAND_TOOL_PART_TYPE,
+  CODEX_DYNAMIC_TOOL_NAME,
   type CodexUiMessagePart,
   isCodexReasoningEffort,
   shellQuote,
@@ -15,7 +16,10 @@ import {
   goatCodexChatTurns,
   goatIntegrations,
 } from "@opencompany/db/goat-schema";
-import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
+import {
+  GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION,
+  serializeGoatBrainSkillMarkdown,
+} from "@opencompany/goat-brain";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, desc, eq, lt, lte, or, type SQL, sql } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
@@ -26,6 +30,7 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { getGitHubWorkInstallationToken } from "./github";
 import { loadGoatCodexCliAuth, persistRefreshedGoatCodexAuth } from "./goat-codex";
+import { createGoatCodexBrainDynamicTool } from "./goat-codex-brain-tool";
 import { GoatCodexChatHandoffError, GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
 import {
   createGoatCodexChatProjector,
@@ -161,6 +166,15 @@ export async function runGoatCodexChatTurn(input: {
   };
 
   let recoveryHadPendingInteraction = false;
+  const recoveryHadPendingDynamicTool = Boolean(
+    input.recovery &&
+      initialParts.some(
+        (part) =>
+          part.type === "dynamic-tool" &&
+          part.toolName === CODEX_DYNAMIC_TOOL_NAME &&
+          part.state === "input-available",
+      ),
+  );
   if (input.recovery) {
     // A server request belongs to the dead proxy connection and cannot be resumed. Settle it
     // before starting the recovery turn so a stale card cannot accept an unusable answer.
@@ -232,6 +246,23 @@ export async function runGoatCodexChatTurn(input: {
       leaseOwner,
       ...(shouldAbort ? { shouldAbort } : {}),
     });
+    const brainToolEnabled =
+      Boolean(session.brainRef) &&
+      session.hostToolContractVersion === GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION;
+    const dynamicTools =
+      brainToolEnabled && session.brainRef
+        ? [
+            createGoatCodexBrainDynamicTool({
+              brainRef: session.brainRef,
+              userWorkosId: turn.userWorkosId,
+              chatSessionId: session.chatSessionId,
+              userMessageId: turn.userMessageId,
+              assistantMessageId: turn.assistantMessageId,
+              env,
+              checkAbort,
+            }),
+          ]
+        : [];
     executionStage = "run_turn";
     const summary = await runCodexAppServerTurn({
       sandbox,
@@ -243,15 +274,18 @@ export async function runGoatCodexChatTurn(input: {
         ? buildCodexChatRecoveryTask({
             prompt: turn.prompt,
             githubAvailable: Boolean(github),
+            brainAvailable: brainToolEnabled,
             previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
             attachmentPaths: materializedAttachments.paths,
           })
         : buildCodexChatTask({
             prompt: turn.prompt,
             githubAvailable: Boolean(github),
+            brainAvailable: brainToolEnabled,
             attachmentPaths: materializedAttachments.paths,
           }),
       localImages: materializedAttachments.localImages,
+      dynamicTools,
       model: session.model || env.codexModel,
       reasoningEffort: settings.reasoningEffort,
       planModeReasoningEffort: settings.planModeReasoningEffort,
@@ -259,7 +293,7 @@ export async function runGoatCodexChatTurn(input: {
       existingEngineSessionId: session.codexThreadId,
       existingEngineTurnId: input.recovery ? turn.codexTurnId : null,
       reattachExistingTurn: Boolean(input.recovery),
-      forceRestartForRecovery: recoveryHadPendingInteraction,
+      forceRestartForRecovery: recoveryHadPendingInteraction || recoveryHadPendingDynamicTool,
       auth,
       githubAuth: {
         githubToken: github?.githubToken ?? null,
@@ -749,6 +783,7 @@ function createTurnAbortCheck(input: {
 function buildCodexChatTask(input: {
   prompt: string;
   githubAvailable: boolean;
+  brainAvailable: boolean;
   attachmentPaths: string[];
 }) {
   return [
@@ -756,6 +791,9 @@ function buildCodexChatTask(input: {
     "The sandbox and its files persist across messages in this chat session, so you can build on earlier work.",
     input.githubAvailable
       ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Clone repositories into the working directory only when the user asks you to work on one."
+      : null,
+    input.brainAvailable
+      ? "A read-only goat_brain tool is available for the Brain pinned to this chat. Use it when durable company or user context would help; it cannot modify the Brain."
       : null,
     "Answer conversationally. Run commands or edit files only when the message calls for it, and keep replies concise unless the user asks for detail.",
     "",
@@ -771,6 +809,7 @@ function buildCodexChatTask(input: {
 function buildCodexChatRecoveryTask(input: {
   prompt: string;
   githubAvailable: boolean;
+  brainAvailable: boolean;
   previousProgress: string;
   attachmentPaths: string[];
 }) {
@@ -780,6 +819,9 @@ function buildCodexChatRecoveryTask(input: {
     "First inspect the current filesystem, git state, and any relevant external state. Do not repeat completed work or rerun side-effecting commands until inspection proves that it is necessary.",
     input.githubAvailable
       ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Before pushing, opening a PR, or mutating GitHub, inspect the current remote/PR state so recovery is idempotent."
+      : null,
+    input.brainAvailable
+      ? "A read-only goat_brain tool is available for the Brain pinned to this chat. Use it when durable company or user context would help; it cannot modify the Brain."
       : null,
     "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",
     "",

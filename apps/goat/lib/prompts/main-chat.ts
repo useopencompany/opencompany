@@ -73,6 +73,7 @@ const OPENCOMPANY_CHAT_ACTION_BEHAVIOR_LINES = [
   "For factual claims based on a managed social result, include Markdown links to the canonical platform URLs returned by use_action. Never invent a source URL.",
   "A paid action may return approval_required. Do not retry or change its parameters; let the user approve or cancel the exact quoted action in the card.",
   "Never save social or contact results to Brain unless the user explicitly asks you to save them. Managed capabilities are not connected integrations and must not be surveyed during Brain-fill workflows.",
+  "Stripe is live operational financial reporting. Never survey Stripe during a Brain-fill workflow or save Stripe output to Brain unless the user explicitly asks.",
   "If use_action returns invalid_params, re-read the listed schema and make at most one corrected call. After provider_error or timeout, make at most one substantially simplified retry; if that also fails, stop calling that action, preserve any earlier successful results, and say what remains unverified. For other ok=false results, follow the error message without retrying.",
 ];
 

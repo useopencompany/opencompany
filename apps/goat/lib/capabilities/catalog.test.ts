@@ -7,8 +7,8 @@ import {
 
 describe("managed capability catalog", () => {
   it("contains only the reviewed fixed action and endpoint allowlist", () => {
-    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(49);
-    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(49);
+    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(51);
+    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(51);
     expect(
       Object.fromEntries(
         MANAGED_CAPABILITY_ACTIONS.map((action) => [
@@ -18,6 +18,8 @@ describe("managed capability catalog", () => {
       ),
     ).toMatchObject({
       "x.search_posts": "tikhub:/api/v1/twitter/web/fetch_search_timeline",
+      "x.search_profiles": "tikhub:/api/v1/twitter/web/fetch_search_timeline",
+      "x.list_followers": "tikhub:/api/v1/twitter/web/fetch_user_followers",
       "linkedin.get_person_profile": "tikhub:/api/v1/linkedin/web_v2/get_user_profile",
       "youtube.get_transcript": "tikhub:/api/v1/youtube/web_v2/get_video_captions",
       "instagram.search_reels": "tikhub:/api/v1/instagram/v2/search_reels",
@@ -76,14 +78,14 @@ describe("managed capability catalog", () => {
     ).toThrow(/content URL or identifier/i);
   });
 
-  it("normalizes canonical public links and never accepts follower exports", () => {
+  it("normalizes canonical public links and excludes private or mutating actions", () => {
     expect(
       action("x.get_post").mapInput({
         url: "https://twitter.com/openai/status/123456789?utm_source=test",
       }).canonicalLinks,
     ).toEqual(["https://x.com/openai/status/123456789"]);
     expect(MANAGED_CAPABILITY_ACTIONS.map((entry) => entry.id).join(" ")).not.toMatch(
-      /followers|following|post_|message|engage/i,
+      /following|post_|message|engage/i,
     );
   });
 
@@ -91,6 +93,35 @@ describe("managed capability catalog", () => {
     expect(
       action("x.search_posts").mapInput({ query: "openai", cursor: "next-x" }).providerInput,
     ).toMatchObject({ cursor: "next-x" });
+    expect(
+      action("x.search_profiles").mapInput({
+        query: "AI founder",
+        cursor: "next-people",
+        limit: 10,
+      }),
+    ).toEqual({
+      providerInput: {
+        keyword: "AI founder",
+        search_type: "People",
+        cursor: "next-people",
+      },
+      resultLimit: 10,
+      canonicalLinks: [],
+    });
+    expect(
+      action("x.list_followers").mapInput({
+        profile: "https://twitter.com/openai",
+        cursor: "next-followers",
+        limit: 10,
+      }),
+    ).toEqual({
+      providerInput: {
+        screen_name: "openai",
+        cursor: "next-followers",
+      },
+      resultLimit: 10,
+      canonicalLinks: ["https://x.com/openai"],
+    });
     expect(
       action("youtube.search").mapInput({
         query: "openai",

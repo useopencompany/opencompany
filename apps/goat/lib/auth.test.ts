@@ -1,8 +1,10 @@
 import { getDb } from "@opencompany/db/client";
 import { goatUsers } from "@opencompany/db/goat-schema";
+import { adoptGoatWorkspaceMembershipsFromOrgs } from "@opencompany/db/goat-workspaces";
 import { recordGoatSignup } from "@opencompany/goat-observability";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { syncGoatUser } from "@/lib/auth";
+import { adoptWorkOSOrganizationMemberships, syncGoatUser } from "@/lib/auth";
+import { getWorkOSClient } from "@/lib/workos-client";
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(),
@@ -46,6 +48,8 @@ vi.mock("@/lib/workos-organizations", () => ({
 }));
 
 const getDbMock = vi.mocked(getDb);
+const adoptGoatWorkspaceMembershipsFromOrgsMock = vi.mocked(adoptGoatWorkspaceMembershipsFromOrgs);
+const getWorkOSClientMock = vi.mocked(getWorkOSClient);
 const recordGoatSignupMock = vi.mocked(recordGoatSignup);
 
 const now = new Date("2026-01-01T00:00:00.000Z");
@@ -152,5 +156,61 @@ describe("syncGoatUser", () => {
 
     await expect(syncGoatUser(authUser as never)).rejects.toThrow("Unable to sync the Goat user.");
     expect(recordGoatSignupMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("adoptWorkOSOrganizationMemberships", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("imports all active workspace memberships returned by WorkOS", async () => {
+    const listOrganizationMemberships = vi.fn(async () => ({
+      data: [
+        { organizationId: "org_personal", role: { slug: "admin" } },
+        { organizationId: "org_invited", role: { slug: "member" } },
+      ],
+    }));
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: { listOrganizationMemberships },
+    } as never);
+
+    await adoptWorkOSOrganizationMemberships(authUser as never);
+
+    expect(listOrganizationMemberships).toHaveBeenCalledWith({
+      userId: authUser.id,
+      statuses: ["active"],
+    });
+    expect(adoptGoatWorkspaceMembershipsFromOrgsMock).toHaveBeenCalledWith({
+      userWorkosId: authUser.id,
+      memberships: [
+        { organizationId: "org_personal", role: "admin" },
+        { organizationId: "org_invited", role: "member" },
+      ],
+    });
+  });
+
+  it("does not block authentication when WorkOS membership lookup fails", async () => {
+    const error = new Error("WorkOS unavailable");
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: {
+        listOrganizationMemberships: vi.fn(async () => {
+          throw error;
+        }),
+      },
+    } as never);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(adoptWorkOSOrganizationMemberships(authUser as never)).resolves.toBeUndefined();
+
+    expect(adoptGoatWorkspaceMembershipsFromOrgsMock).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      "[goat] Failed to adopt WorkOS organization memberships",
+      error,
+    );
   });
 });

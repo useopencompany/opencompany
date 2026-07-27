@@ -748,6 +748,97 @@ export async function resolveAttioActions(
     const multipleWriteAccounts = listWriteConnections.length > 1;
     const writeAccountParam = attioAccountParam(listWriteConnections, "update");
     actions.push({
+      id: "attio.add_record_to_list",
+      provider: "attio",
+      capability: "write",
+      ...permissionAnnotation("write", listWriteConnections),
+      description:
+        "Add an existing Attio person, company, or deal to a list/collection. This is idempotent when the record has at most one existing entry in the list. Optional values set list fields such as stage, status, or owner. Use only when the user explicitly asked to add the record.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleWriteAccounts
+          ? ["list", "object", "record_id", "account"]
+          : ["list", "object", "record_id"],
+        properties: {
+          list: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_LIST_REFERENCE_CHARS,
+            description: "An Attio list UUID, API slug, or full collection/view URL.",
+          },
+          object: {
+            type: "string",
+            enum: [...STANDARD_OBJECTS],
+            description: "The record type returned by attio.search_records.",
+          },
+          record_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_RECORD_ID_CHARS,
+            description: "The record id returned by attio.search_records.",
+          },
+          values: {
+            type: "object",
+            minProperties: 1,
+            maxProperties: MAX_WRITE_PROPERTIES,
+            description:
+              "Optional initial list fields, keyed by attribute API slug or UUID. Values follow Attio's write format; status/select values may use their title strings.",
+          },
+          ...writeAccountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(
+          params,
+          multipleWriteAccounts
+            ? ["list", "object", "record_id", "values", "account"]
+            : ["list", "object", "record_id", "values"],
+        );
+        const connection = resolveConnection(
+          listWriteConnections,
+          multipleWriteAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const reference = parseAttioListReference(requiredStringParam(params, "list"));
+        const credential = await getCredential(context, connection);
+        const object = parseObject(
+          requiredStringParam(params, "object"),
+          credential.availableObjects,
+        );
+        const recordId = parseBoundedId(params, "record_id", MAX_RECORD_ID_CHARS);
+        const values =
+          params.values === undefined || params.values === null
+            ? {}
+            : parseAttioWriteValues(params.values);
+        await assertAttioWriteStillEnabled(context, connection, "list_entry");
+        const response = await callAttioApi({
+          context,
+          connection,
+          credential,
+          path: `/lists/${encodeURIComponent(reference.list)}/entries`,
+          method: "PUT",
+          body: {
+            data: {
+              parent_record_id: recordId,
+              parent_object: object,
+              entry_values: values,
+            },
+          },
+        });
+        const entry = asRecord(asRecord(response)?.data) as AttioListEntryInput | null;
+        const compact = entry ? compactAttioListEntry(entry, new Map()) : null;
+        if (!compact) {
+          throw new Error("Attio returned an invalid list membership response.");
+        }
+        return {
+          workspace: connection.selector,
+          list: reference.list,
+          entry: compact,
+        };
+      },
+    });
+
+    actions.push({
       id: "attio.update_list_entry",
       provider: "attio",
       capability: "write",
@@ -837,7 +928,7 @@ export async function resolveAttioActions(
         : `Attio (${labelConnections.length} workspaces)`,
     description: hasWrites
       ? hasLists
-        ? "Search and inspect CRM records and lists, and update records or pipeline entries in Attio."
+        ? "Search and inspect CRM records and lists, add records to lists, and update records or pipeline entries in Attio."
         : "Search, inspect, and update people, companies, and deals in Attio."
       : hasLists
         ? "Search and inspect CRM records and lists in Attio."

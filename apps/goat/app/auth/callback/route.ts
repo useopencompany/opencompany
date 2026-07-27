@@ -1,5 +1,5 @@
 import { handleAuth } from "@workos-inc/authkit-nextjs";
-import { syncGoatUser } from "@/lib/auth";
+import { adoptWorkOSOrganizationMemberships, syncGoatUser } from "@/lib/auth";
 import { getGoatAppUrl } from "@/lib/workos";
 
 export const GET = handleAuth({
@@ -7,5 +7,6 @@ export const GET = handleAuth({
   returnPathname: "/",
   onSuccess: async ({ user }) => {
     await syncGoatUser(user);
+    await adoptWorkOSOrganizationMemberships(user);
   },
 });
