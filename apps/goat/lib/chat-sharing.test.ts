@@ -8,10 +8,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createDbGoatChatShareStore,
   ensureGoatChatShareForUser,
+  findGoatChatShareForUser,
   type GoatChatShareStore,
   isGoatChatShareId,
   loadPublicGoatChat,
   newGoatChatShareId,
+  revokeGoatChatShareForUser,
 } from "@/lib/chat-sharing";
 import type { GoatStoredChatMessage } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
@@ -65,6 +67,69 @@ describe("Goat chat sharing", () => {
       chatSessionId: "chat_1",
     });
     expect(isGoatChatShareId(vi.mocked(store.ensureShare).mock.calls[0]![0].id)).toBe(true);
+  });
+
+  it("finds and revokes a share through owner-scoped storage", async () => {
+    const store = createStore();
+
+    await expect(
+      findGoatChatShareForUser({ userWorkosId: "user_1", chatSessionId: "  chat_1  " }, store),
+    ).resolves.toMatchObject({ id: SHARE_ID });
+    await expect(
+      revokeGoatChatShareForUser({ userWorkosId: "user_1", chatSessionId: "  chat_1  " }, store),
+    ).resolves.toBe(true);
+
+    expect(store.findShareForUser).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      chatSessionId: "chat_1",
+    });
+    expect(store.revokeShare).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      chatSessionId: "chat_1",
+    });
+  });
+
+  it("loads a share through a session-owner join", async () => {
+    const query = vi.fn(async (...args: [string, unknown[], object]) => {
+      void args;
+      return { rows: [[SHARE_ID, "chat_1", "2026-07-27T10:00:00.000Z"]] };
+    });
+    const client = Object.assign(query, {
+      transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
+    });
+    const store = createDbGoatChatShareStore(drizzle(client as never) as never);
+
+    await expect(
+      store.findShareForUser({ userWorkosId: "user_1", chatSessionId: "chat_1" }),
+    ).resolves.toMatchObject({ id: SHARE_ID, chatSessionId: "chat_1" });
+
+    const [statement, params] = query.mock.calls[0]!;
+    expect(statement).toContain(
+      'inner join "goat"."chat_sessions" on "goat"."chat_session_shares"."chat_session_id"',
+    );
+    expect(params).toEqual(expect.arrayContaining(["chat_1", "user_1"]));
+  });
+
+  it("deletes a share only after confirming chat ownership", async () => {
+    const query = vi.fn(async (...[statement]: [string, unknown[], object]) => {
+      if (statement.startsWith("delete")) return { rows: [] };
+      return { rows: [["chat_1"]] };
+    });
+    const client = Object.assign(query, {
+      transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
+    });
+    const store = createDbGoatChatShareStore(drizzle(client as never) as never);
+
+    await expect(
+      store.revokeShare({ userWorkosId: "user_1", chatSessionId: "chat_1" }),
+    ).resolves.toBe(true);
+
+    const [ownerStatement, ownerParams] = query.mock.calls[0]!;
+    expect(ownerStatement).toContain('from "goat"."chat_sessions"');
+    expect(ownerParams).toEqual(expect.arrayContaining(["chat_1", "user_1"]));
+    const [deleteStatement, deleteParams] = query.mock.calls[1]!;
+    expect(deleteStatement).toContain('delete from "goat"."chat_session_shares"');
+    expect(deleteParams).toEqual(expect.arrayContaining(["chat_1"]));
   });
 
   it("rejects malformed public ids before querying storage", async () => {
@@ -152,6 +217,16 @@ function createStore({ messages = [] }: { messages?: GoatStoredChatMessage[] } =
   };
   return {
     ensureShare: vi.fn(async (input) => ({ ...share, id: input.id })),
+    findShareForUser: vi.fn(async (input) =>
+      input.chatSessionId === chatSession.id && input.userWorkosId === chatSession.userWorkosId
+        ? share
+        : null,
+    ),
+    revokeShare: vi.fn(async (input) =>
+      Boolean(
+        input.chatSessionId === chatSession.id && input.userWorkosId === chatSession.userWorkosId,
+      ),
+    ),
     findShare: vi.fn(async (shareId) => (shareId === SHARE_ID ? { share, chatSession } : null)),
     listMessages: vi.fn(async () => messages),
   } satisfies GoatChatShareStore;

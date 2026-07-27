@@ -7,7 +7,11 @@ import {
   reopenGoatChatSessionForUser,
   setGoatChatSessionPinnedForUser,
 } from "@/lib/chat";
-import { ensureGoatChatShareForUser } from "@/lib/chat-sharing";
+import {
+  ensureGoatChatShareForUser,
+  findGoatChatShareForUser,
+  revokeGoatChatShareForUser,
+} from "@/lib/chat-sharing";
 import { closeGoatCodexChatSessionForChat } from "@/lib/codex-chat";
 
 export type CloseGoatChatResult = {
@@ -18,6 +22,26 @@ export type CloseGoatChatResult = {
 export type CreateGoatChatShareResult =
   | { ok: true; shareId: string }
   | { ok: false; error: string };
+
+export type GetGoatChatShareResult =
+  | { ok: true; shareId: string | null }
+  | { ok: false; error: string };
+
+export type RevokeGoatChatShareResult = { ok: true } | { ok: false; error: string };
+
+export async function getGoatChatShareAction(
+  sessionId: string | null,
+): Promise<GetGoatChatShareResult> {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return { ok: false, error: "Could not load sharing settings." };
+
+  const { user } = await currentGoatUser();
+  const share = await findGoatChatShareForUser({
+    userWorkosId: user.workosUserId,
+    chatSessionId: trimmed,
+  });
+  return { ok: true, shareId: share?.id ?? null };
+}
 
 export async function createGoatChatShareAction(
   sessionId: string | null,
@@ -33,6 +57,22 @@ export async function createGoatChatShareAction(
   if (!share) return { ok: false, error: "Could not share that chat." };
 
   return { ok: true, shareId: share.id };
+}
+
+export async function revokeGoatChatShareAction(
+  sessionId: string | null,
+): Promise<RevokeGoatChatShareResult> {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return { ok: false, error: "Could not stop sharing that chat." };
+
+  const { user } = await currentGoatUser();
+  const revoked = await revokeGoatChatShareForUser({
+    userWorkosId: user.workosUserId,
+    chatSessionId: trimmed,
+  });
+  if (!revoked) return { ok: false, error: "Could not stop sharing that chat." };
+
+  return { ok: true };
 }
 
 export async function closeGoatChatSessionAction(

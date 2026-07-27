@@ -113,8 +113,10 @@ optionally stops the active stream, and marks the chat session closed through
 
 ### Public read-only chat links
 
-The link button in a persisted chat header creates or reuses one opaque
-`goat.chat_session_shares` token for the current user's session and copies `/share/<token>`.
+The link button in a persisted chat header opens sharing controls. The owner can create or reuse
+one opaque `goat.chat_session_shares` token for their session, copy `/share/<token>`, or stop
+sharing. Stopping sharing deletes the token so the public transcript and its attachment routes stop
+resolving immediately. Sharing again creates a new token; a revoked URL never becomes valid again.
 Shared routes sit outside the authenticated Goat app shell, render the existing transcript UI
 without a composer or mutation controls, and can serve that session's attachments through a
 token-scoped byte route. The link reads the current session on each request, so later messages are
