@@ -75,6 +75,10 @@ export function hasGoatAttioListWriteScopes(scopes: readonly string[]) {
   return canReadListConfiguration && scopes.includes("list_entry:read-write");
 }
 
+export function hasGoatAttioListConfigurationWriteScope(scopes: readonly string[]) {
+  return scopes.includes("list_configuration:read-write");
+}
+
 // Attio publishes no key format; only reject strings that are clearly not a
 // pasted key (whitespace, absurd lengths) and let the API call be the judge.
 export function isValidAttioApiKey(apiKey: string) {

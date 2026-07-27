@@ -27,6 +27,7 @@ import {
 } from "@/lib/actions/types";
 import {
   GoatAttioApiRequestError,
+  hasGoatAttioListConfigurationWriteScope,
   hasGoatAttioListReadScopes,
   hasGoatAttioListWriteScopes,
   hasGoatAttioRecordWriteScopes,
@@ -45,6 +46,7 @@ const DEFAULT_RECORD_ENTRIES = 25;
 const MAX_LIST_OFFSET = 10_000;
 const MAX_QUERY_CHARS = 256;
 const MAX_LIST_REFERENCE_CHARS = 2_000;
+const MAX_ATTRIBUTE_REFERENCE_CHARS = 200;
 const MAX_RECORD_ID_CHARS = 200;
 const MAX_ENTRY_ID_CHARS = 200;
 const MAX_ATTRIBUTES = 30;
@@ -63,8 +65,12 @@ const MAX_DETAIL_PROPERTIES = 24;
 const MAX_LIST_PROPERTIES = 12;
 const MAX_PROPERTY_CHARS = 200;
 const MAX_TITLE_CHARS = 200;
+const MAX_TARGET_TIME_IN_STATUS_CHARS = 100;
+
+const LIST_ATTRIBUTE_TYPES = ["status", "select", "text"] as const;
 
 type AttioObjectSlug = (typeof STANDARD_OBJECTS)[number];
+type AttioListAttributeType = (typeof LIST_ATTRIBUTE_TYPES)[number];
 
 type AttioConnection = {
   integrationId: string;
@@ -122,6 +128,20 @@ type AttioAttributeInput = {
   is_archived?: unknown;
 };
 
+type AttioStatusInput = {
+  id?: { status_id?: unknown };
+  title?: unknown;
+  is_archived?: unknown;
+  celebration_enabled?: unknown;
+  target_time_in_status?: unknown;
+};
+
+type AttioSelectOptionInput = {
+  id?: { option_id?: unknown };
+  title?: unknown;
+  is_archived?: unknown;
+};
+
 export async function resolveAttioActions(
   userWorkosId: string,
 ): Promise<GoatActionProviderCatalog | null> {
@@ -142,10 +162,14 @@ export async function resolveAttioActions(
   const listWriteConnections = writeConnections.filter((connection) =>
     hasGoatAttioListWriteScopes(connection.scopes),
   );
+  const listConfigurationWriteConnections = writeConnections.filter((connection) =>
+    hasGoatAttioListConfigurationWriteScope(connection.scopes),
+  );
   if (
     readConnections.length === 0 &&
     recordWriteConnections.length === 0 &&
-    listWriteConnections.length === 0
+    listWriteConnections.length === 0 &&
+    listConfigurationWriteConnections.length === 0
   ) {
     return null;
   }
@@ -744,6 +768,294 @@ export async function resolveAttioActions(
     });
   }
 
+  if (listConfigurationWriteConnections.length > 0) {
+    const multipleWriteAccounts = listConfigurationWriteConnections.length > 1;
+    const writeAccountParam = attioAccountParam(listConfigurationWriteConnections, "configure");
+
+    actions.push({
+      id: "attio.create_attribute",
+      provider: "attio",
+      capability: "write",
+      ...permissionAnnotation("write", listConfigurationWriteConnections),
+      description:
+        "Create a status, select, or text field on an Attio list/collection. Use the returned attribute API slug or id with attio.create_status or attio.create_select_option, then write entry values by option title. Use only when the user explicitly asked to configure the list.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleWriteAccounts
+          ? ["list", "title", "api_slug", "type", "account"]
+          : ["list", "title", "api_slug", "type"],
+        properties: {
+          list: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_LIST_REFERENCE_CHARS,
+            description: "An Attio list UUID, API slug, or full collection/view URL.",
+          },
+          title: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_TITLE_CHARS,
+            description: 'The human-readable field title, for example "Stage".',
+          },
+          api_slug: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_ATTRIBUTE_REFERENCE_CHARS,
+            pattern: "^[a-z0-9_-]+$",
+            description:
+              'A stable lowercase API slug used to write values, for example "stage". Must be unique on the list.',
+          },
+          type: {
+            type: "string",
+            enum: [...LIST_ATTRIBUTE_TYPES],
+            description: "The list field type.",
+          },
+          description: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_PROPERTY_CHARS,
+            description: "Optional explanation of what the field tracks.",
+          },
+          is_multiselect: {
+            type: "boolean",
+            description:
+              "Whether text or select fields accept multiple values (default false). Status fields cannot be multiselect.",
+          },
+          ...writeAccountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(
+          params,
+          multipleWriteAccounts
+            ? ["list", "title", "api_slug", "type", "description", "is_multiselect", "account"]
+            : ["list", "title", "api_slug", "type", "description", "is_multiselect"],
+        );
+        const connection = resolveConnection(
+          listConfigurationWriteConnections,
+          multipleWriteAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const reference = parseAttioListReference(requiredStringParam(params, "list"));
+        const title = parseBoundedId(params, "title", MAX_TITLE_CHARS);
+        const apiSlug = parseAttioApiSlug(params.api_slug);
+        const type = parseAttioListAttributeType(params.type);
+        const description = optionalAttioStringParam(params, "description");
+        if (description && description.length > MAX_PROPERTY_CHARS) {
+          throw new GoatActionInvalidParamsError(
+            `"description" must be at most ${MAX_PROPERTY_CHARS} characters.`,
+          );
+        }
+        const isMultiselect = optionalBooleanParam(params, "is_multiselect") ?? false;
+        if (type === "status" && isMultiselect) {
+          throw new GoatActionInvalidParamsError(
+            '"is_multiselect" cannot be true for a status attribute.',
+          );
+        }
+        const credential = await getCredential(context, connection);
+        await assertAttioWriteStillEnabled(context, connection, "list_configuration");
+        const response = await callAttioApi({
+          context,
+          connection,
+          credential,
+          path: `/lists/${encodeURIComponent(reference.list)}/attributes`,
+          method: "POST",
+          body: {
+            data: {
+              title,
+              description: description ?? "",
+              api_slug: apiSlug,
+              type,
+              is_required: false,
+              is_unique: false,
+              is_multiselect: isMultiselect,
+              config: {},
+            },
+          },
+        });
+        const attribute = compactAttioAttribute(asRecord(response)?.data);
+        if (!attribute) {
+          throw new Error("Attio returned an invalid created attribute response.");
+        }
+        return {
+          workspace: connection.selector,
+          list: reference.list,
+          attribute,
+        };
+      },
+    });
+
+    actions.push({
+      id: "attio.create_status",
+      provider: "attio",
+      capability: "write",
+      ...permissionAnnotation("write", listConfigurationWriteConnections),
+      description:
+        "Add one option to a status field on an Attio list/collection. Call once per stage, in the desired pipeline order. target_time_in_status is an optional ISO-8601 duration. Use only when the user explicitly asked to configure the pipeline.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleWriteAccounts
+          ? ["list", "attribute", "title", "account"]
+          : ["list", "attribute", "title"],
+        properties: {
+          list: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_LIST_REFERENCE_CHARS,
+            description: "An Attio list UUID, API slug, or full collection/view URL.",
+          },
+          attribute: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_ATTRIBUTE_REFERENCE_CHARS,
+            description: "The status attribute API slug or UUID returned by create_attribute.",
+          },
+          title: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_TITLE_CHARS,
+            description: 'The status title, for example "Contacted".',
+          },
+          celebration_enabled: {
+            type: "boolean",
+            description:
+              "Whether entering this status triggers Attio's celebration (default false).",
+          },
+          target_time_in_status: {
+            type: "string",
+            minLength: 2,
+            maxLength: MAX_TARGET_TIME_IN_STATUS_CHARS,
+            description: 'Optional ISO-8601 duration target, for example "P7D" or "PT24H".',
+          },
+          ...writeAccountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(
+          params,
+          multipleWriteAccounts
+            ? [
+                "list",
+                "attribute",
+                "title",
+                "celebration_enabled",
+                "target_time_in_status",
+                "account",
+              ]
+            : ["list", "attribute", "title", "celebration_enabled", "target_time_in_status"],
+        );
+        const connection = resolveConnection(
+          listConfigurationWriteConnections,
+          multipleWriteAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const reference = parseAttioListReference(requiredStringParam(params, "list"));
+        const attribute = parseSafeAttioIdentifier(params.attribute, "attribute");
+        const title = parseBoundedId(params, "title", MAX_TITLE_CHARS);
+        const celebrationEnabled = optionalBooleanParam(params, "celebration_enabled") ?? false;
+        const targetTimeInStatus = parseOptionalAttioDuration(params.target_time_in_status);
+        const credential = await getCredential(context, connection);
+        await assertAttioWriteStillEnabled(context, connection, "list_configuration");
+        const response = await callAttioApi({
+          context,
+          connection,
+          credential,
+          path: `/lists/${encodeURIComponent(reference.list)}/attributes/${encodeURIComponent(attribute)}/statuses`,
+          method: "POST",
+          body: {
+            data: {
+              title,
+              celebration_enabled: celebrationEnabled,
+              ...(targetTimeInStatus ? { target_time_in_status: targetTimeInStatus } : {}),
+            },
+          },
+        });
+        const status = compactAttioStatus(asRecord(response)?.data);
+        if (!status) {
+          throw new Error("Attio returned an invalid created status response.");
+        }
+        return {
+          workspace: connection.selector,
+          list: reference.list,
+          attribute,
+          status,
+        };
+      },
+    });
+
+    actions.push({
+      id: "attio.create_select_option",
+      provider: "attio",
+      capability: "write",
+      ...permissionAnnotation("write", listConfigurationWriteConnections),
+      description:
+        "Add one option to a select field on an Attio list/collection. Call once per option, in the desired display order. Entry values can then be written by title. Use only when the user explicitly asked to configure the list.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleWriteAccounts
+          ? ["list", "attribute", "title", "account"]
+          : ["list", "attribute", "title"],
+        properties: {
+          list: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_LIST_REFERENCE_CHARS,
+            description: "An Attio list UUID, API slug, or full collection/view URL.",
+          },
+          attribute: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_ATTRIBUTE_REFERENCE_CHARS,
+            description: "The select attribute API slug or UUID returned by create_attribute.",
+          },
+          title: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_TITLE_CHARS,
+            description: "The select option title.",
+          },
+          ...writeAccountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(
+          params,
+          multipleWriteAccounts
+            ? ["list", "attribute", "title", "account"]
+            : ["list", "attribute", "title"],
+        );
+        const connection = resolveConnection(
+          listConfigurationWriteConnections,
+          multipleWriteAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const reference = parseAttioListReference(requiredStringParam(params, "list"));
+        const attribute = parseSafeAttioIdentifier(params.attribute, "attribute");
+        const title = parseBoundedId(params, "title", MAX_TITLE_CHARS);
+        const credential = await getCredential(context, connection);
+        await assertAttioWriteStillEnabled(context, connection, "list_configuration");
+        const response = await callAttioApi({
+          context,
+          connection,
+          credential,
+          path: `/lists/${encodeURIComponent(reference.list)}/attributes/${encodeURIComponent(attribute)}/options`,
+          method: "POST",
+          body: { data: { title } },
+        });
+        const option = compactAttioSelectOption(asRecord(response)?.data);
+        if (!option) {
+          throw new Error("Attio returned an invalid created select option response.");
+        }
+        return {
+          workspace: connection.selector,
+          list: reference.list,
+          attribute,
+          option,
+        };
+      },
+    });
+  }
+
   if (listWriteConnections.length > 0) {
     const multipleWriteAccounts = listWriteConnections.length > 1;
     const writeAccountParam = attioAccountParam(listWriteConnections, "update");
@@ -919,6 +1231,7 @@ export async function resolveAttioActions(
     ...readConnections,
     ...recordWriteConnections,
     ...listWriteConnections,
+    ...listConfigurationWriteConnections,
   ]);
   return {
     id: "attio",
@@ -928,7 +1241,7 @@ export async function resolveAttioActions(
         : `Attio (${labelConnections.length} workspaces)`,
     description: hasWrites
       ? hasLists
-        ? "Search and inspect CRM records and lists, add records to lists, and update records or pipeline entries in Attio."
+        ? "Search and inspect CRM records and lists, configure pipeline fields and options, add records to lists, and update records or pipeline entries in Attio."
         : "Search, inspect, and update people, companies, and deals in Attio."
       : hasLists
         ? "Search and inspect CRM records and lists in Attio."
@@ -1223,7 +1536,7 @@ async function hydrateAttioAttributeOptions(
 async function assertAttioWriteStillEnabled(
   context: GoatActionExecuteContext,
   connection: AttioConnection,
-  resource: "record" | "list_entry",
+  resource: "record" | "list_entry" | "list_configuration",
 ) {
   const [row] = await getDb()
     .select({
@@ -1255,7 +1568,9 @@ async function assertAttioWriteStillEnabled(
   const hasWriteScope =
     resource === "record"
       ? hasGoatAttioRecordWriteScopes(row.scopes)
-      : hasGoatAttioListWriteScopes(row.scopes);
+      : resource === "list_entry"
+        ? hasGoatAttioListWriteScopes(row.scopes)
+        : hasGoatAttioListConfigurationWriteScope(row.scopes);
   if (!hasWriteScope) {
     throw new GoatActionPermissionError(
       "attio",
@@ -1400,6 +1715,57 @@ function optionalAttioStringParam(params: Record<string, unknown>, key: string) 
     throw new GoatActionInvalidParamsError(`"${key}" must be a non-empty string.`);
   }
   return value.trim();
+}
+
+function optionalBooleanParam(params: Record<string, unknown>, key: string): boolean | undefined {
+  const value = params[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "boolean") {
+    throw new GoatActionInvalidParamsError(`"${key}" must be a boolean.`);
+  }
+  return value;
+}
+
+function parseAttioApiSlug(value: unknown) {
+  if (
+    typeof value !== "string" ||
+    !/^[a-z0-9_-]{1,200}$/.test(value.trim()) ||
+    ["__proto__", "constructor", "prototype"].includes(value.trim())
+  ) {
+    throw new GoatActionInvalidParamsError(
+      '"api_slug" must be a lowercase Attio API slug containing only letters, numbers, underscores, or hyphens.',
+    );
+  }
+  return value.trim();
+}
+
+function parseAttioListAttributeType(value: unknown): AttioListAttributeType {
+  if (typeof value !== "string" || !(LIST_ATTRIBUTE_TYPES as readonly string[]).includes(value)) {
+    throw new GoatActionInvalidParamsError('"type" must be one of status, select, or text.');
+  }
+  return value as AttioListAttributeType;
+}
+
+function parseOptionalAttioDuration(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") {
+    throw new GoatActionInvalidParamsError(
+      '"target_time_in_status" must be an ISO-8601 duration string.',
+    );
+  }
+  const normalized = value.trim();
+  const isoDuration =
+    /^P(?=\d|T\d)(?:(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?(?:T(?=\d)(?:\d+(?:[.,]\d+)?H)?(?:\d+(?:[.,]\d+)?M)?(?:\d+(?:[.,]\d+)?S)?)?)$/;
+  if (
+    !normalized ||
+    normalized.length > MAX_TARGET_TIME_IN_STATUS_CHARS ||
+    !isoDuration.test(normalized)
+  ) {
+    throw new GoatActionInvalidParamsError(
+      '"target_time_in_status" must be a valid ISO-8601 duration such as "P7D" or "PT24H".',
+    );
+  }
+  return normalized;
 }
 
 function parseAttioFilter(value: unknown): Record<string, unknown> | undefined {
@@ -1761,6 +2127,38 @@ function compactAttioAttributeOptions(response: unknown) {
     return id && title ? [{ id, title }] : [];
   });
   return { values, truncated: data.length > MAX_ATTRIBUTE_OPTIONS };
+}
+
+function compactAttioStatus(value: unknown) {
+  const status = asRecord(value) as AttioStatusInput | null;
+  if (!status) return null;
+  const id = boundedIdentifier(status.id?.status_id, MAX_ATTRIBUTE_REFERENCE_CHARS);
+  const title = boundedString(status.title, MAX_TITLE_CHARS);
+  if (!id || !title) return null;
+  const targetTimeInStatus = boundedString(
+    status.target_time_in_status,
+    MAX_TARGET_TIME_IN_STATUS_CHARS,
+  );
+  return {
+    id,
+    title,
+    isArchived: status.is_archived === true,
+    celebrationEnabled: status.celebration_enabled === true,
+    ...(targetTimeInStatus ? { targetTimeInStatus } : {}),
+  };
+}
+
+function compactAttioSelectOption(value: unknown) {
+  const option = asRecord(value) as AttioSelectOptionInput | null;
+  if (!option) return null;
+  const id = boundedIdentifier(option.id?.option_id, MAX_ATTRIBUTE_REFERENCE_CHARS);
+  const title = boundedString(option.title, MAX_TITLE_CHARS);
+  if (!id || !title) return null;
+  return {
+    id,
+    title,
+    isArchived: option.is_archived === true,
+  };
 }
 
 async function fetchAttioListParentRecords(input: {
