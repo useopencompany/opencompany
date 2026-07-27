@@ -84,7 +84,7 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
     {
       id: "read",
       label: "Read Slack",
-      description: "Search and read conversations, messages, threads, and people in Slack.",
+      description: "Search and read channels, direct messages, threads, and people in Slack.",
       defaultMode: "on",
     },
   ],
