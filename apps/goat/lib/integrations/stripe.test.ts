@@ -88,6 +88,13 @@ describe("Stripe Apps OAuth", () => {
 
     vi.stubEnv("GOAT_STRIPE_OAUTH_STATE_SECRET", "too-short");
     expect(isGoatStripeOAuthConfigured()).toBe(false);
+    expect(() =>
+      createGoatStripeOAuthState({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        returnTo: "/settings/integrations",
+      }),
+    ).toThrow("must be at least 32 characters");
 
     vi.stubEnv("GOAT_STRIPE_OAUTH_STATE_SECRET", "s".repeat(40));
     vi.stubEnv("GOAT_STRIPE_OAUTH_CALLBACK_URL", "https://goat.example.com/wrong-path");

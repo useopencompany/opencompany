@@ -150,8 +150,8 @@ export class GoatStripeOAuthAuthError extends Error {
 
 export function isGoatStripeOAuthConfigured() {
   if (!GOAT_STRIPE_OAUTH_ENVS.every((name) => Boolean(process.env[name]?.trim()))) return false;
-  if (requiredEnv("GOAT_STRIPE_OAUTH_STATE_SECRET").length < 32) return false;
   try {
+    stripeOAuthStateSecret();
     goatStripeOAuthRedirectUri();
     return true;
   } catch {
@@ -889,9 +889,15 @@ function sanitizeGoatStripeOAuthRedirectUri(value: string) {
 }
 
 function signStripeOAuthState(body: string) {
-  return createHmac("sha256", requiredEnv("GOAT_STRIPE_OAUTH_STATE_SECRET"))
-    .update(body)
-    .digest("base64url");
+  return createHmac("sha256", stripeOAuthStateSecret()).update(body).digest("base64url");
+}
+
+function stripeOAuthStateSecret() {
+  const value = requiredEnv("GOAT_STRIPE_OAUTH_STATE_SECRET");
+  if (value.length < 32) {
+    throw new Error("GOAT_STRIPE_OAUTH_STATE_SECRET must be at least 32 characters.");
+  }
+  return value;
 }
 
 function safeEqual(left: string, right: string) {
