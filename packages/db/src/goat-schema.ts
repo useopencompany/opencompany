@@ -17,6 +17,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 // Postgres full-text search vector, written only by the database (a STORED generated column over
@@ -324,7 +325,7 @@ export type GoatBrainSource = {
   title?: string;
   capturedAt?: string;
 };
-export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx" | "xlsx" | "image";
+export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx" | "xlsx" | "srt" | "image";
 export type GoatBrainStatus = "draft" | "active" | "archived" | "merged";
 export type GoatBrainFrontmatterProjection = Record<string, unknown>;
 export type GoatBrainTimelineEntry = {
@@ -390,7 +391,7 @@ export type GoatTaskDebugTrace = {
 export type GoatChatRole = "user" | "assistant";
 export type GoatChatEngine = "opencompany" | "local_codex" | "codex";
 
-export type GoatChatAttachmentKind = "image" | "pdf" | "docx" | "xlsx";
+export type GoatChatAttachmentKind = "image" | "pdf" | "docx" | "xlsx" | "srt";
 export type GoatChatMessageAttachment = {
   id: string;
   kind: GoatChatAttachmentKind;
@@ -570,6 +571,51 @@ export const goatOnboarding = goat.table("onboarding", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export type GoatOnboardingEmailStep = "welcome" | "checkin" | "feedback_call";
+export type GoatOnboardingEmailStatus = "pending" | "sending" | "sent" | "failed" | "skipped";
+
+// One row per (owner, step) of the founder onboarding drip. Enrollment inserts
+// three rows at first-workspace creation; a cron sweep claims due `pending` rows
+// (status flips to `sending` under a soft lease), sends via Resend, then marks
+// `sent`. The unique (user, step) index makes enrollment idempotent and gives
+// each send a stable Resend idempotency key. Only owners are enrolled — invited
+// members never reach the create-workspace branch that triggers it.
+export const goatOnboardingEmails = goat.table(
+  "onboarding_emails",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workosUserId: text("workos_user_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    step: text("step").$type<GoatOnboardingEmailStep>().notNull(),
+    status: text("status").$type<GoatOnboardingEmailStatus>().notNull().default("pending"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userStepIdx: uniqueIndex("goat_onboarding_emails_user_step_idx").on(
+      table.workosUserId,
+      table.step,
+    ),
+    statusScheduledIdx: index("goat_onboarding_emails_status_scheduled_idx").on(
+      table.status,
+      table.scheduledAt,
+    ),
+    stepCheck: check(
+      "goat_onboarding_emails_step_check",
+      sql`${table.step} IN ('welcome', 'checkin', 'feedback_call')`,
+    ),
+    statusCheck: check(
+      "goat_onboarding_emails_status_check",
+      sql`${table.status} IN ('pending', 'sending', 'sent', 'failed', 'skipped')`,
+    ),
+  }),
+);
 
 export const goatWorkspaceMembers = goat.table(
   "workspace_members",
@@ -1054,7 +1100,7 @@ export const goatBrainDocuments = goat.table(
     ),
     formatCheck: check(
       "goat_brain_documents_format_check",
-      sql`${table.format} IN ('markdown', 'pdf', 'docx', 'xlsx', 'image')`,
+      sql`${table.format} IN ('markdown', 'pdf', 'docx', 'xlsx', 'srt', 'image')`,
     ),
     statusCheck: check(
       "goat_brain_documents_status_check",
@@ -2895,7 +2941,7 @@ export const goatChatMessages = goat.table(
     }),
     debugTrace: jsonb("debug_trace").$type<GoatChatMessageDebugTrace | null>(),
     attachments: jsonb("attachments").$type<GoatChatMessageAttachment[] | null>(),
-    // docx/xlsx extracted text keyed by attachment id; server-side model context
+    // docx/xlsx/srt extracted text keyed by attachment id; server-side model context
     // only — excluded from the Electric shape.
     attachmentTexts: jsonb("attachment_texts").$type<Record<string, string> | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2908,6 +2954,57 @@ export const goatChatMessages = goat.table(
     ),
     taskIdx: index("goat_chat_messages_task_idx").on(table.taskId),
     roleCheck: check("goat_chat_messages_role_check", sql`${table.role} IN ('user', 'assistant')`),
+  }),
+);
+
+export const goatChatSandboxUsage = goat.table(
+  "chat_sandbox_usage",
+  {
+    id: serial("id").primaryKey(),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    userMessageId: text("user_message_id").references(() => goatChatMessages.id, {
+      onDelete: "set null",
+    }),
+    sandboxId: text("sandbox_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    activeMs: integer("active_ms").notNull().default(0),
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", {
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" }).notNull().default(0),
+    rawMetrics: jsonb("raw_metrics")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    costBasis: jsonb("cost_basis")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userSessionCreatedAtIdx: index("goat_chat_sandbox_usage_user_session_created_at_idx").on(
+      table.userWorkosId,
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    sessionCreatedAtIdx: index("goat_chat_sandbox_usage_session_created_at_idx").on(
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    userMessageIdx: index("goat_chat_sandbox_usage_user_message_idx").on(table.userMessageId),
+    sandboxIdx: index("goat_chat_sandbox_usage_sandbox_idx").on(table.sandboxId),
   }),
 );
 
@@ -3156,6 +3253,9 @@ export const goatCodexChatSessions = goat.table(
     brainRef: text("brain_ref").references(() => goatBrains.id, {
       onDelete: "set null",
     }),
+    workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
+      onDelete: "set null",
+    }),
     hostToolContractVersion: text("host_tool_contract_version"),
     sandboxId: text("sandbox_id"),
     codexThreadId: text("codex_thread_id"),
@@ -3223,6 +3323,8 @@ export const goatCodexChatTurns = goat.table(
     }),
     attempts: integer("attempts").notNull().default(0),
     recoveryAttempts: integer("recovery_attempts").notNull().default(0),
+    engineRecoveryRequired: boolean("engine_recovery_required").notNull().default(false),
+    engineTurnBaselineIds: jsonb("engine_turn_baseline_ids").$type<string[]>(),
     leaseId: text("lease_id"),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
@@ -3453,6 +3555,7 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   taskToolUsage: many(goatTaskToolUsage),
   taskSandboxUsage: many(goatTaskSandboxUsage),
   chatSessions: many(goatChatSessions),
+  chatSandboxUsage: many(goatChatSandboxUsage),
   capabilityRuns: many(goatCapabilityRuns),
   capabilityOverrides: many(goatWorkspaceCapabilities),
   localBridges: many(goatLocalBridges),
@@ -4005,6 +4108,7 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
     references: [goatUsers.workosUserId],
   }),
   messages: many(goatChatMessages),
+  sandboxUsage: many(goatChatSandboxUsage),
   skills: many(goatChatSessionSkills),
   brainToolRuns: many(goatBrainToolRuns),
   localCodexSessions: many(goatLocalCodexSessions),
@@ -4049,6 +4153,22 @@ export const goatChatMessagesRelations = relations(goatChatMessages, ({ one, man
   localCodexAssistantTurns: many(goatLocalCodexTurns, {
     relationName: "goat_local_codex_turns_assistant_message",
   }),
+  sandboxUsage: many(goatChatSandboxUsage),
+}));
+
+export const goatChatSandboxUsageRelations = relations(goatChatSandboxUsage, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatChatSandboxUsage.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  session: one(goatChatSessions, {
+    fields: [goatChatSandboxUsage.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+  userMessage: one(goatChatMessages, {
+    fields: [goatChatSandboxUsage.userMessageId],
+    references: [goatChatMessages.id],
+  }),
 }));
 
 export const goatChatSessionSkillsRelations = relations(goatChatSessionSkills, ({ one }) => ({
@@ -4069,6 +4189,7 @@ export const goatChatSessionSkillsRelations = relations(goatChatSessionSkills, (
 export type GoatUser = typeof goatUsers.$inferSelect;
 export type GoatWorkspace = typeof goatWorkspaces.$inferSelect;
 export type GoatOnboarding = typeof goatOnboarding.$inferSelect;
+export type GoatOnboardingEmail = typeof goatOnboardingEmails.$inferSelect;
 export type GoatWorkspaceMember = typeof goatWorkspaceMembers.$inferSelect;
 export type GoatWorkspaceCapability = typeof goatWorkspaceCapabilities.$inferSelect;
 export type GoatWorkspaceBilling = typeof goatWorkspaceBilling.$inferSelect;
@@ -4110,4 +4231,5 @@ export type GoatChatSession = typeof goatChatSessions.$inferSelect;
 export type GoatChatShare = typeof goatChatShares.$inferSelect;
 export type GoatCapabilityRun = typeof goatCapabilityRuns.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
+export type GoatChatSandboxUsage = typeof goatChatSandboxUsage.$inferSelect;
 export type GoatChatSessionSkill = typeof goatChatSessionSkills.$inferSelect;

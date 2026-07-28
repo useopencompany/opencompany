@@ -1,4 +1,9 @@
 import type { RuntimeToolName } from "@opencompany/agent-runtime";
+import {
+  BROWSER_TOOL_DESCRIPTIONS,
+  BROWSER_TOOL_INPUT_SCHEMAS,
+  isBrowserToolName,
+} from "@opencompany/browser-tools";
 import type { GoatTaskToolName } from "@opencompany/db/goat-schema";
 import { GOAT_SPANS, recordGoatToolCall, startGoatSpan } from "@opencompany/goat-observability";
 import { jsonSchema, type ToolSet, tool } from "ai";
@@ -539,31 +544,10 @@ function compactSocialItem(value: unknown): unknown {
 }
 
 function goatToolDescription(toolName: GoatTaskToolName) {
+  if (isBrowserToolName(toolName)) return BROWSER_TOOL_DESCRIPTIONS[toolName];
   switch (toolName) {
     case "exa_search":
       return "Search the web with Exa and return concise source results. A run can use at most 32 Exa searches. After 8 successful searches in a reflection window, the next Exa call returns reflectionRequired; emit a quick assistant update before retrying.";
-    case "browser_open":
-      return "Open a rendered browser page at an absolute http(s) URL in the task's isolated browser session. Read/research only: never log in, check out, purchase, mutate accounts, or handle credentials.";
-    case "browser_snapshot":
-      return "Return a compact accessibility snapshot of the active rendered browser page, with element refs like @e1 for later browser_click or browser_fill calls. Use includeUrls=true only when the task needs direct link URLs from a listing page.";
-    case "browser_click":
-      return "Click one element by a browser_snapshot ref like @e1. Use only for read/research navigation, filters, sorting, tabs, consent dismissal, or non-destructive interaction.";
-    case "browser_fill":
-      return "Fill one input by a browser_snapshot ref like @e1. Use for search boxes and read-only filters only; never enter credentials, payment details, or private user data.";
-    case "browser_wait":
-      return "Wait briefly for browser page state: milliseconds, an element ref, text, URL pattern, or load state.";
-    case "browser_read":
-      return "Read text from either the active rendered browser page or an absolute http(s) URL. Optionally filter returned lines by text. Prefer this over snapshots when page text is the main evidence.";
-    case "browser_get":
-      return "Get one targeted value from the active browser page: url, title, text, value, attr, or count. Prefer this over snapshots when you know what to inspect. For direct URLs from link refs, use target attr with attribute href instead of guessing slugs.";
-    case "browser_find":
-      return "Use semantic locators to find or act on one element without taking a broad snapshot. Supports role, text, label, placeholder, alt, title, testid, first, last, and nth.";
-    case "browser_scroll":
-      return "Scroll the active browser viewport up, down, left, or right. Use before a scoped follow-up snapshot or targeted get when content is below the fold.";
-    case "browser_screenshot":
-      return "Capture a screenshot of the active browser page for traceability. The output includes the saved screenshot path from agent-browser.";
-    case "browser_close":
-      return "Close the task's isolated browser session. Usually automatic at cleanup, but call it when browser work is done.";
     case "x_search_posts":
       return "Search public X posts through Apify-backed scraping. Use for current public conversations, hashtags, mentions, and posts from specific users. Public data only; no private, protected, or login-gated access.";
     case "x_get_profile":
@@ -606,6 +590,7 @@ function goatToolDescription(toolName: GoatTaskToolName) {
 }
 
 function goatToolInputSchema(toolName: GoatTaskToolName) {
+  if (isBrowserToolName(toolName)) return BROWSER_TOOL_INPUT_SCHEMAS[toolName];
   switch (toolName) {
     case "exa_search":
       return {
@@ -620,137 +605,6 @@ function goatToolInputSchema(toolName: GoatTaskToolName) {
           },
         },
         required: ["query"],
-      } as const;
-    case "browser_open":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          url: { type: "string" },
-        },
-        required: ["url"],
-      } as const;
-    case "browser_snapshot":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          interactive: { type: "boolean" },
-          includeUrls: { type: "boolean" },
-          compact: { type: "boolean" },
-          depth: { type: "number", minimum: 1, maximum: 10 },
-          selector: { type: "string" },
-        },
-      } as const;
-    case "browser_click":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          ref: { type: "string" },
-        },
-        required: ["ref"],
-      } as const;
-    case "browser_fill":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          ref: { type: "string" },
-          text: { type: "string" },
-        },
-        required: ["ref", "text"],
-      } as const;
-    case "browser_wait":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          milliseconds: { type: "number", minimum: 100, maximum: 30000 },
-          ref: { type: "string" },
-          text: { type: "string" },
-          urlPattern: { type: "string" },
-          loadState: { type: "string", enum: ["load", "domcontentloaded", "networkidle"] },
-        },
-      } as const;
-    case "browser_read":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          url: { type: "string" },
-          filter: { type: "string" },
-          outline: { type: "boolean" },
-        },
-      } as const;
-    case "browser_get":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          target: { type: "string", enum: ["url", "title", "text", "value", "attr", "count"] },
-          ref: { type: "string" },
-          selector: { type: "string" },
-          attribute: { type: "string" },
-        },
-        required: ["target"],
-      } as const;
-    case "browser_find":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          by: {
-            type: "string",
-            enum: [
-              "role",
-              "text",
-              "label",
-              "placeholder",
-              "alt",
-              "title",
-              "testid",
-              "first",
-              "last",
-              "nth",
-            ],
-          },
-          value: { type: "string" },
-          action: {
-            type: "string",
-            enum: ["click", "fill", "type", "hover", "focus", "check", "uncheck"],
-          },
-          text: { type: "string" },
-          name: { type: "string" },
-          exact: { type: "boolean" },
-          index: { type: "number", minimum: 0, maximum: 10000 },
-        },
-        required: ["by", "value", "action"],
-      } as const;
-    case "browser_scroll":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          direction: { type: "string", enum: ["up", "down", "left", "right"] },
-          pixels: { type: "number", minimum: 1, maximum: 5000 },
-        },
-        required: ["direction"],
-      } as const;
-    case "browser_screenshot":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          fullPage: { type: "boolean" },
-          annotate: { type: "boolean" },
-        },
-      } as const;
-    case "browser_close":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {},
       } as const;
     case "x_search_posts":
       return {

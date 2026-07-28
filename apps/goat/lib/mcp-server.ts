@@ -101,7 +101,7 @@ const CAPTURE_TOOL_ANNOTATIONS = {
 
 export function mcpTextToolResult(output: {
   ok: boolean;
-  stdout: string;
+  stdout?: string;
   stderr: string;
   parsed?: unknown;
   error?: string;
@@ -109,7 +109,7 @@ export function mcpTextToolResult(output: {
   const errorText = output.error || output.stderr || output.stdout || "Unknown error.";
   // Compact JSON: this text body mirrors structuredContent (per the MCP spec), so pretty-printing
   // it just doubles the already-duplicated payload with no reader benefit.
-  const body = output.parsed !== undefined ? JSON.stringify(output.parsed) : output.stdout;
+  const body = output.parsed !== undefined ? JSON.stringify(output.parsed) : (output.stdout ?? "");
   const structuredContent =
     output.parsed && typeof output.parsed === "object" && !Array.isArray(output.parsed)
       ? (output.parsed as Record<string, unknown>)

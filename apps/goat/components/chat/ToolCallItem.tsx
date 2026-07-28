@@ -718,6 +718,7 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
   const meta = getToolCallMeta(tool);
   const Icon = meta.icon;
   const hasOutput = tool.output !== undefined;
+  const screenshotUrl = browserScreenshotUrl(tool.output);
   return (
     <div
       data-testid={`chat-tool-call-${tool.name}`}
@@ -774,8 +775,24 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
           ) : null}
         </div>
       ) : null}
+      {screenshotUrl ? (
+        // Browser screenshots are private, same-origin assets; Next's image optimizer cannot
+        // forward the viewer's auth cookie to the protected route.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={screenshotUrl}
+          alt="Screenshot captured by Goat's browser"
+          loading="lazy"
+          className="ml-6 mt-2 max-h-[560px] w-auto max-w-[calc(100%-1.5rem)] rounded-lg border border-border bg-surface object-contain"
+        />
+      ) : null}
     </div>
   );
+}
+
+function browserScreenshotUrl(value: unknown) {
+  if (!isRecord(value) || typeof value.screenshotUrl !== "string") return null;
+  return value.screenshotUrl.startsWith("/api/chat-screenshots/") ? value.screenshotUrl : null;
 }
 
 function BrainToolCallRow({ tool }: { tool: ToolCallView }) {

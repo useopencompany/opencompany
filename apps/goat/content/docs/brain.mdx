@@ -58,7 +58,7 @@ All tables live in the `goat` Postgres schema, defined in `packages/db/src/goat-
 
 - **`brains`** — one row per brain: workspace, name, slug, `visibility` (`workspace` or `restricted`). `brain_members` holds the allow-list for restricted brains.
 - **`brain_folders`** — the folder tree per brain (`system` or `custom` source).
-- **`brain_documents`** — the documents: content, body, timeline JSON, kind, entity type, status, relations, sources, aliases, content hash. Format can be `markdown`, `pdf`, or `docx`.
+- **`brain_documents`** — the documents: content, body, timeline JSON, kind, entity type, status, relations, sources, aliases, content hash. Format can be `markdown`, `pdf`, `docx`, `xlsx`, `srt`, or `image`.
 - **`brain_timeline_entries`** — denormalized per-entry rows for efficient timeline queries.
 - **`brain_edges`** — the derived graph.
 - **`brain_document_versions`** — an audit trail of overwrites and deletes.

@@ -291,6 +291,7 @@ describe("GoatBrainRoute", () => {
   ])("uses Overview for $label", ({ path }) => {
     const overviewStats = {
       windowStartedAt: "2026-07-08T09:00:00.000Z",
+      itemsAddedLast7Days: 5,
       retrievalsLast7Days: 12,
       activeSources: 3,
     };
@@ -299,7 +300,7 @@ describe("GoatBrainRoute", () => {
         path={path}
         routeBrainId="goat_brain_team"
         selectedBrain={teamBrain}
-        initialBrainSnapshot={brainSnapshot}
+        initialBrainSnapshot={null}
         initialOverviewStats={overviewStats}
       />,
     );
@@ -310,6 +311,7 @@ describe("GoatBrainRoute", () => {
         initialFolderPath: null,
         initialBrainId: null,
         overviewStats,
+        initialDataLoaded: false,
       }),
       undefined,
     );

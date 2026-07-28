@@ -30,6 +30,7 @@ import {
   getSandboxLifecycleStatus,
   githubRemoteMatches,
   guardCommandStreamCallbacks,
+  isRetryableSandboxAcquisitionError,
   prepareWorkspace,
   resolveSandboxBrainRelativePath,
   resolveSandboxSkillPath,
@@ -43,6 +44,33 @@ import {
 
 afterEach(() => {
   vi.resetAllMocks();
+});
+
+describe("isRetryableSandboxAcquisitionError", () => {
+  it("retries provider capacity, rate-limit, and transport failures", () => {
+    const capacity = new Error("500: Failed to place sandbox");
+    capacity.name = "SandboxError";
+    const rateLimit = new Error("Rate limit exceeded");
+    rateLimit.name = "RateLimitError";
+    const network = new TypeError("fetch failed");
+
+    expect(isRetryableSandboxAcquisitionError(capacity)).toBe(true);
+    expect(isRetryableSandboxAcquisitionError(rateLimit)).toBe(true);
+    expect(isRetryableSandboxAcquisitionError(network)).toBe(true);
+  });
+
+  it("does not retry authentication, template, or client errors", () => {
+    const authentication = new Error("Unauthorized");
+    authentication.name = "AuthenticationError";
+    const template = new Error("Template is incompatible");
+    template.name = "TemplateError";
+    const invalid = new Error("400: invalid request");
+    invalid.name = "SandboxError";
+
+    expect(isRetryableSandboxAcquisitionError(authentication)).toBe(false);
+    expect(isRetryableSandboxAcquisitionError(template)).toBe(false);
+    expect(isRetryableSandboxAcquisitionError(invalid)).toBe(false);
+  });
 });
 
 describe("connectSandbox", () => {
@@ -64,7 +92,7 @@ describe("connectSandbox", () => {
 
     expect(e2bMocks.connect).toHaveBeenCalledWith("sbx_existing", {
       timeoutMs: 3_600_000,
-      requestTimeoutMs: 30_000,
+      requestTimeoutMs: 120_000,
     });
     expect(observations).toEqual([
       expect.objectContaining({
@@ -160,7 +188,7 @@ describe("createOrConnectSandbox", () => {
     ]);
   });
 
-  it("resumes existing sandboxes with the active runner timeout", async () => {
+  it("allows paused sandboxes longer to resume while restoring the active runner timeout", async () => {
     const sandbox = {
       sandboxId: "sbx_existing",
       setTimeout: vi.fn().mockResolvedValue(undefined),
@@ -180,7 +208,7 @@ describe("createOrConnectSandbox", () => {
     expect(result).toBe(sandbox);
     expect(e2bMocks.connect).toHaveBeenCalledWith("sbx_existing", {
       timeoutMs: 3_600_000,
-      requestTimeoutMs: 30_000,
+      requestTimeoutMs: 120_000,
     });
     expect(observations).toEqual([
       expect.objectContaining({

@@ -22,17 +22,23 @@ import {
   documentViewFromFileRow,
   nextAvailableGoatBrainId,
 } from "@/lib/brain";
+import {
+  GOAT_CHAT_SRT_MIME_TYPE,
+  normalizedGoatChatAttachmentMediaType,
+  validateGoatChatAttachmentCandidate,
+} from "@/lib/chat-attachment-formats";
 
 export const GOAT_BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 // Claude's per-image limit is 5 MB; the ingestion agent sees images natively.
 export const GOAT_BRAIN_ASSET_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 
-export type GoatBrainAssetFormat = "pdf" | "docx" | "xlsx" | "image";
+export type GoatBrainAssetFormat = "pdf" | "docx" | "xlsx" | "srt" | "image";
 
 const CONTENT_TYPE_FORMATS: Record<string, GoatBrainAssetFormat> = {
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  [GOAT_CHAT_SRT_MIME_TYPE]: "srt",
   "image/png": "image",
   "image/jpeg": "image",
   "image/webp": "image",
@@ -86,7 +92,7 @@ export async function createGoatBrainAssetForUser(
     folderPath,
     title,
     format: validated.format,
-    mimeType: input.mimeType,
+    mimeType: validated.mediaType,
     originalFileName: fileName,
     assetStorageKey: input.blobUrl,
     assetSizeBytes: input.sizeBytes,
@@ -100,7 +106,7 @@ export async function createGoatBrainAssetForUser(
     brainId,
     folderPath,
     format: validated.format,
-    mimeType: input.mimeType,
+    mimeType: validated.mediaType,
     originalFileName: fileName,
     sizeBytes: input.sizeBytes,
     contentSha256: input.contentSha256,
@@ -131,7 +137,7 @@ export async function replaceGoatBrainAssetForUser(
       brainRef: input.brainRef,
       userWorkosId: input.userWorkosId,
       fileId: input.documentId,
-      mimeType: input.mimeType,
+      mimeType: validated.mediaType,
       originalFileName: fileName,
       assetStorageKey: input.blobUrl,
       assetSizeBytes: input.sizeBytes,
@@ -147,7 +153,7 @@ export async function replaceGoatBrainAssetForUser(
     brainId: row.brainId,
     folderPath: row.folderPath,
     format: validated.format,
-    mimeType: input.mimeType,
+    mimeType: validated.mediaType,
     originalFileName: fileName,
     sizeBytes: input.sizeBytes,
     contentSha256: input.contentSha256,
@@ -164,12 +170,22 @@ export async function replaceGoatBrainAssetForUser(
 function validateAssetUpload(
   brainRef: string,
   input: GoatBrainAssetUploadInput,
-): { ok: true; format: GoatBrainAssetFormat } | { ok: false; message: string } {
-  const format = CONTENT_TYPE_FORMATS[input.mimeType];
+): { ok: true; format: GoatBrainAssetFormat; mediaType: string } | { ok: false; message: string } {
+  const mediaType = normalizedGoatChatAttachmentMediaType({
+    mediaType: input.mimeType,
+    filename: input.originalFileName,
+  });
+  const candidate = validateGoatChatAttachmentCandidate({
+    mediaType,
+    filename: input.originalFileName,
+    sizeBytes: input.sizeBytes,
+  });
+  if (!candidate.ok) return { ok: false, message: candidate.message };
+  const format = CONTENT_TYPE_FORMATS[mediaType];
   if (!format) {
     return {
       ok: false,
-      message: "Supported uploads: PDF, Word (.docx), Excel (.xlsx), PNG, JPEG, WebP.",
+      message: "Supported uploads: PDF, Word (.docx), Excel (.xlsx), SRT, PNG, JPEG, WebP.",
     };
   }
   if (!Number.isFinite(input.sizeBytes) || input.sizeBytes <= 0) {
@@ -192,7 +208,7 @@ function validateAssetUpload(
   if (!pathname.startsWith(goatBrainAssetUploadPrefix(brainRef))) {
     return { ok: false, message: "Upload does not belong to this brain." };
   }
-  return { ok: true, format };
+  return { ok: true, format, mediaType };
 }
 
 async function enqueueAssetIngest(input: {

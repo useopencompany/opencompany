@@ -1,6 +1,7 @@
 import { upload } from "@vercel/blob/client";
 import {
   GOAT_CHAT_ATTACHMENT_ACCEPT,
+  normalizedGoatChatAttachmentMediaType,
   validateGoatChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
 
@@ -8,7 +9,7 @@ import {
 // the private Blob store (token minted by /api/brain-assets/upload), then the
 // caller registers the document via uploadGoatBrainAssetAction. Limits mirror
 // the server-side checks in lib/brain-assets.ts; the accepted set is the same
-// core set the chat composer takes (pdf/docx/xlsx/images).
+// core set the chat composer takes (pdf/docx/xlsx/srt/images).
 export const BRAIN_ASSET_ACCEPT = GOAT_CHAT_ATTACHMENT_ACCEPT;
 export const BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 
@@ -16,6 +17,7 @@ export function validateBrainAssetFile(file: File): string | null {
   if (file.size === 0) return "That file is empty.";
   const validation = validateGoatChatAttachmentCandidate({
     mediaType: file.type,
+    filename: file.name,
     sizeBytes: file.size,
   });
   return validation.ok ? null : validation.message;
@@ -24,16 +26,20 @@ export function validateBrainAssetFile(file: File): string | null {
 export async function uploadBrainAssetBlob(
   brainRef: string,
   file: File,
-): Promise<{ blobUrl: string; contentSha256: string }> {
+): Promise<{ blobUrl: string; contentSha256: string; mediaType: string }> {
+  const mediaType = normalizedGoatChatAttachmentMediaType({
+    mediaType: file.type,
+    filename: file.name,
+  });
   const [contentSha256, blob] = await Promise.all([
     sha256Hex(file),
     upload(`goat-brain/${brainRef}/assets/${file.name}`, file, {
       access: "private",
       handleUploadUrl: "/api/brain-assets/upload",
-      contentType: file.type,
+      contentType: mediaType,
     }),
   ]);
-  return { blobUrl: blob.url, contentSha256 };
+  return { blobUrl: blob.url, contentSha256, mediaType };
 }
 
 async function sha256Hex(file: File): Promise<string> {

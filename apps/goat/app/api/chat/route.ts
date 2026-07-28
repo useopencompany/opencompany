@@ -3,9 +3,10 @@ import {
   modelSupportsAttachments,
 } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
+import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
 import { hasPositiveGoatCreditBalance, recordGoatCreditDebit } from "@opencompany/db/goat-credits";
-import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
+import { type GoatChatMessageDebugTrace, goatChatSandboxUsage } from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
   GOAT_METRICS,
@@ -41,6 +42,10 @@ import {
   attachGoatBrainSkillsToPrompt,
   GoatBrainSkillMentionError,
   type GoatChatSessionSkillSnapshot,
+  goatBrainSkillsByteLength,
+  listGoatBrainSkillCatalog,
+  MAX_GOAT_CHAT_SKILL_BYTES,
+  MAX_GOAT_CHAT_SKILLS,
   readGoatBrainSkillMentionRefs,
   resolveGoatBrainSkillMentions,
 } from "@/lib/brain-skills";
@@ -58,6 +63,7 @@ import {
   createOpenCompanyChatToolContext,
   normalizeAgentText,
   OPENCOMPANY_CHAT_MAX_STEPS,
+  OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
   prepareOpenCompanyChatStep,
   type StartedTask,
   stringifyFinishReason,
@@ -84,10 +90,13 @@ import {
   type EditTaskScheduleToolOutput,
   type GoatChatMessageMetadata,
   type GoatChatUiMessage,
+  goatChatContextTokensFromUsage,
   listedActionSourceIdsFromMessages,
+  listedSkillIdsFromMessages,
   replaceGoatChatUiMessageText,
   textFromGoatChatUiMessage,
   type UseActionToolOutput,
+  usedSkillIdsFromMessages,
   type WebFetchToolInput,
   type WebFetchToolOutput,
   type WebSearchToolInput,
@@ -97,6 +106,7 @@ import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, validateGoatChatInput } from "@/lib/c
 import { executeGoatChatExaFetch } from "@/lib/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
+import type { ChatBrowserToolSession } from "@/lib/sandbox/browser-tools";
 import {
   createGoatTaskScheduleForUser,
   deleteGoatTaskScheduleForUser,
@@ -265,23 +275,35 @@ export async function POST(request: Request): Promise<Response> {
   const brainCaptureEnabled = Boolean(context.activeBrain);
   const taskToolsEnabled = context.user.taskSpawningEnabled && canManageWorkspaceBrain;
 
-  // Action catalog: resolved per request from real connection state. On by
-  // default for everyone; the env kill switch disables it without a deploy,
-  // and engine chats (Codex) never get chat actions.
+  // Action and skill catalogs are resolved per request from real connection
+  // and active-Brain state. Engine handoffs get neither: their execution
+  // context is assembled separately, and main-chat skills must not leak into
+  // delegated work.
   const actionsEnabled = !requestedEngine && !isGoatChatActionsKilled();
   const emptyCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
-  const actionCatalog = actionsEnabled
-    ? await resolveGoatActionCatalog({
-        userWorkosId: context.user.workosUserId,
-        workspaceId: context.workspace.id,
-      }).catch((error) => {
-        logger.warn("Goat chat action catalog resolution failed", {
-          event: "goat.chat_action_catalog_resolution_failed",
-          error,
-        });
-        return emptyCatalog;
-      })
-    : emptyCatalog;
+  const [actionCatalog, skillCatalog] = await Promise.all([
+    actionsEnabled
+      ? resolveGoatActionCatalog({
+          userWorkosId: context.user.workosUserId,
+          workspaceId: context.workspace.id,
+        }).catch((error) => {
+          logger.warn("Goat chat action catalog resolution failed", {
+            event: "goat.chat_action_catalog_resolution_failed",
+            error,
+          });
+          return emptyCatalog;
+        })
+      : Promise.resolve(emptyCatalog),
+    !requestedEngine && context.activeBrain
+      ? listGoatBrainSkillCatalog(context.activeBrain.id).catch((error) => {
+          logger.warn("Goat chat skill catalog resolution failed", {
+            event: "goat.chat_skill_catalog_resolution_failed",
+            error,
+          });
+          return [];
+        })
+      : Promise.resolve([]),
+  ]);
 
   const store = createDbGoatChatStore();
   const recurringSchedules = taskToolsEnabled
@@ -352,6 +374,7 @@ export async function POST(request: Request): Promise<Response> {
     session: Awaited<ReturnType<typeof createGoatChatUserTurn>>["session"];
     sessionCreated: boolean;
     userMessageId: string;
+    usageUserMessageId: string | null;
     userMessageContent: string;
     storedMessages: Awaited<ReturnType<typeof createGoatChatUserTurn>>["storedMessages"];
     messages: GoatChatUiMessage[];
@@ -361,7 +384,7 @@ export async function POST(request: Request): Promise<Response> {
   let turn: ChatTurnState;
   try {
     if (message && userInput) {
-      // Extract docx/xlsx text once at submit time; every later turn reads the
+      // Extract docx/xlsx/srt text once at submit time; every later turn reads the
       // stored text instead of re-downloading the blob.
       const attachmentTexts =
         attachments.length > 0 ? await extractGoatChatAttachmentTexts(attachments) : null;
@@ -385,6 +408,7 @@ export async function POST(request: Request): Promise<Response> {
         session: userTurn.session,
         sessionCreated: userTurn.sessionCreated,
         userMessageId: userTurn.userMessage.id,
+        usageUserMessageId: userTurn.userMessage.id,
         userMessageContent: userInput.prompt,
         storedMessages: userTurn.storedMessages,
         messages: dismissed.changed ? dismissed.messages : userTurn.messages,
@@ -410,6 +434,7 @@ export async function POST(request: Request): Promise<Response> {
         session: continuation.session,
         sessionCreated: false,
         userMessageId: continuation.lastUserMessage?.id ?? continuation.session.id,
+        usageUserMessageId: continuation.lastUserMessage?.id ?? null,
         userMessageContent: continuation.lastUserMessage?.content ?? "",
         storedMessages: continuation.storedMessages,
         messages: continuation.messages,
@@ -492,6 +517,16 @@ export async function POST(request: Request): Promise<Response> {
       currentActionSourceIds.has(sourceId),
     ),
   );
+  const currentSkillIds = new Set(skillCatalog.map((skill) => skill.id));
+  const prelistedSkillIds = new Set(
+    listedSkillIdsFromMessages(turn.messages).filter((skillId) => currentSkillIds.has(skillId)),
+  );
+  const activeSkillIds = new Set([
+    ...sessionSkills.map((skill) => skill.skillId),
+    ...usedSkillIdsFromMessages(turn.messages),
+  ]);
+  let loadedSkillCount = resolvedSkills.length;
+  let loadedSkillBytes = goatBrainSkillsByteLength(resolvedSkills);
   if (capabilityApproval) {
     for (const action of actionCatalog.actions) {
       if (action.id === capabilityApproval.action) prelistedActionSourceIds.add(action.provider);
@@ -506,10 +541,57 @@ export async function POST(request: Request): Promise<Response> {
     }
   };
 
+  let browserToolSession: ChatBrowserToolSession | null = null;
+  if (turn.session.engine === "opencompany" && !requestedEngine) {
+    const { createChatBrowserToolSession } = await import("@/lib/sandbox/browser-tools");
+    browserToolSession = createChatBrowserToolSession({
+      chatSessionId: turn.session.id,
+      userWorkosId: context.user.workosUserId,
+      signal: generationSignal,
+    });
+  }
+  const maxChatSteps = browserToolSession
+    ? OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX
+    : OPENCOMPANY_CHAT_MAX_STEPS;
+  let browserUsagePromise: Promise<void> | null = null;
+  const recordBrowserSandboxUsage = () => {
+    browserUsagePromise ??= (async () => {
+      const usage = browserToolSession?.getUsage();
+      if (!usage) return;
+      await getDb()
+        .insert(goatChatSandboxUsage)
+        .values({
+          chatSessionId: turn.session.id,
+          userWorkosId: context.user.workosUserId,
+          userMessageId: turn.usageUserMessageId,
+          sandboxId: usage.sandboxId,
+          startedAt: usage.startedAt,
+          endedAt: usage.endedAt,
+          activeMs: usage.activeMs,
+          rawMetrics: {
+            ...usage.rawMetrics,
+            sandboxName: usage.sandboxName,
+          },
+          costBasis: {
+            provider: "vercel-sandbox",
+            status: "unpriced",
+          },
+        });
+    })().catch((error) => {
+      logger.warn("Goat chat sandbox usage recording failed", {
+        event: "goat.chat_sandbox_usage_recording_failed",
+        chat_session_id: turn.session.id,
+        error,
+      });
+    });
+    return browserUsagePromise;
+  };
+
   const toolContext = createOpenCompanyChatToolContext({
     model: turn.session.model,
     latestUserMessage: turn.userMessageContent,
     ...(requestedEngine ? { requestedEngine } : {}),
+    ...(browserToolSession ? { browserTools: browserToolSession.execute } : {}),
     // goat_brain is read-only for everyone (recall/inspect). The only write path
     // in chat is save_to_brain, which is available to every workspace member
     // with an active brain and enqueues the durable ingestion agent.
@@ -625,6 +707,84 @@ export async function POST(request: Request): Promise<Response> {
               },
               chatSpan,
             }),
+        }
+      : {}),
+    ...(skillCatalog.length > 0 && context.activeBrain
+      ? {
+          skills: {
+            catalog: skillCatalog.map((skill) => ({
+              id: skill.id,
+              name: skill.name,
+              description: skill.description,
+            })),
+            ...(prelistedSkillIds.size > 0 ? { prelistedSkillIds: [...prelistedSkillIds] } : {}),
+            execute: async ({ skill }: { skill: string }) => {
+              try {
+                const [resolved] = await resolveGoatBrainSkillMentions({
+                  activeBrainRef: context.activeBrain?.id ?? null,
+                  mentions: [{ brainRef: context.activeBrain?.id ?? "", id: skill }],
+                });
+                if (!resolved) {
+                  return {
+                    ok: false as const,
+                    skill,
+                    error: {
+                      code: "unavailable" as const,
+                      message: `Skill "@skill/${skill}" is unavailable or incomplete.`,
+                    },
+                  };
+                }
+                if (activeSkillIds.has(resolved.id)) {
+                  return {
+                    ok: false as const,
+                    skill,
+                    error: {
+                      code: "already_loaded" as const,
+                      message: `Skill "@skill/${skill}" is already available in this chat. Follow its existing instructions without loading it again.`,
+                    },
+                  };
+                }
+                const skillBytes = goatBrainSkillsByteLength([resolved]);
+                if (
+                  loadedSkillCount >= MAX_GOAT_CHAT_SKILLS ||
+                  loadedSkillBytes + skillBytes > MAX_GOAT_CHAT_SKILL_BYTES
+                ) {
+                  return {
+                    ok: false as const,
+                    skill,
+                    error: {
+                      code: "call_budget" as const,
+                      message: `Skill loading is limited to ${MAX_GOAT_CHAT_SKILLS} skills and ${MAX_GOAT_CHAT_SKILL_BYTES / 1024} KiB of instructions per chat turn. Continue with the skills already loaded.`,
+                    },
+                  };
+                }
+                activeSkillIds.add(resolved.id);
+                loadedSkillCount += 1;
+                loadedSkillBytes += skillBytes;
+                return {
+                  ok: true as const,
+                  skill: {
+                    id: resolved.id,
+                    name: resolved.name,
+                    description: resolved.description,
+                    instructions: resolved.instructions,
+                  },
+                };
+              } catch (error) {
+                if (error instanceof GoatBrainSkillMentionError) {
+                  return {
+                    ok: false as const,
+                    skill,
+                    error: {
+                      code: "unavailable" as const,
+                      message: error.message,
+                    },
+                  };
+                }
+                throw error;
+              }
+            },
+          },
         }
       : {}),
     ...(actionCatalog.actions.length > 0
@@ -874,6 +1034,8 @@ export async function POST(request: Request): Promise<Response> {
           }
         : null,
       brainCaptureEnabled,
+      browserToolsEnabled: Boolean(browserToolSession),
+      skillsAvailable: skillCatalog.length > 0,
       taskToolsEnabled,
       scheduleToolsEnabled: taskToolsEnabled,
       recurringSchedules,
@@ -911,7 +1073,7 @@ export async function POST(request: Request): Promise<Response> {
         modelId: turn.session.model,
       }),
     ),
-    stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
+    stopWhen: stepCountIs(maxChatSteps),
     // Providers deliver tokens in bursts; re-chunk to word-level with a small
     // delay so streamed text reads as a steady flow instead of jumps.
     experimental_transform: smoothStream(),
@@ -920,7 +1082,9 @@ export async function POST(request: Request): Promise<Response> {
     prepareStep: ({ stepNumber }: { stepNumber: number }) =>
       prepareOpenCompanyChatStep({
         stepNumber,
+        maxSteps: maxChatSteps,
         forceApprovedAction: Boolean(capabilityApproval),
+        finalizeAfterApproval: turn.respondedApprovalIds.length > 0,
       }),
     ...(toolContext.repairToolCall
       ? { experimental_repairToolCall: toolContext.repairToolCall }
@@ -961,6 +1125,7 @@ export async function POST(request: Request): Promise<Response> {
         steps: event.steps,
         ...(finishReason ? { finishReason } : {}),
       });
+      await recordBrowserSandboxUsage();
     },
     onError(event) {
       finishChatTelemetry(
@@ -978,6 +1143,7 @@ export async function POST(request: Request): Promise<Response> {
         model: turn.session.model,
         error: event.error instanceof Error ? event.error.message : "Goat chat failed.",
       });
+      after(recordBrowserSandboxUsage());
       void persistFallbackAssistantMessage(event.error, "error");
     },
   });
@@ -989,7 +1155,12 @@ export async function POST(request: Request): Promise<Response> {
   return result.toUIMessageStreamResponse<GoatChatUiMessage>({
     originalMessages: turn.messages,
     generateMessageId: newGoatChatMessageId,
-    messageMetadata: () => toStreamMessageMetadata(turn.session.id, toolContext.getStartedTask()),
+    messageMetadata: ({ part }) =>
+      toStreamMessageMetadata(
+        turn.session.id,
+        toolContext.getStartedTask(),
+        part.type === "finish-step" ? goatChatContextTokensFromUsage(part.usage) : undefined,
+      ),
     consumeSseStream({ stream }) {
       // This copy of the SSE stream keeps the turn alive independently of the
       // client connection: it drives generation and the onFinish persistence
@@ -1026,11 +1197,13 @@ export async function POST(request: Request): Promise<Response> {
         session_id: turn.session.id,
         error,
       });
+      after(recordBrowserSandboxUsage());
       void persistFallbackAssistantMessage(error, "error");
       return "Goat could not answer that right now.";
     },
     onFinish: async ({ responseMessage, finishReason, isAborted }) => {
       releaseStreamCoordination();
+      await recordBrowserSandboxUsage();
       if (assistantPersistPromise) await assistantPersistPromise;
       if (assistantPersisted) return;
 
@@ -1411,9 +1584,11 @@ function normalizeScheduleLookupText(value: string) {
 function toStreamMessageMetadata(
   sessionId: string,
   task: StartedTask | null,
+  contextTokens?: number,
 ): GoatChatMessageMetadata {
   return {
     sessionId,
+    ...(contextTokens !== undefined ? { contextTokens } : {}),
     ...(task
       ? {
           taskId: task.id,

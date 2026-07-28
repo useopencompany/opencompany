@@ -22,6 +22,7 @@ import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
 
@@ -127,6 +128,13 @@ async function ensureGoatWorkspaces(
   await createDefaultGoatWorkspaceForUser({
     userWorkosId: user.workosUserId,
     name: defaultWorkspaceName(user),
+  });
+  // A user only reaches this branch when we create their own workspace (invited
+  // members return above), so this is the "brand-new owner" moment. Enroll them
+  // in the founder onboarding email drip and fire the welcome immediately.
+  // Best-effort: email/DB hiccups must never block sign-in.
+  await enrollOwnerInOnboardingEmails({ workosUserId: user.workosUserId }).catch((error) => {
+    console.error("[goat] Failed to enroll owner in onboarding emails", error);
   });
   workspaces = await listGoatWorkspacesForUser(user.workosUserId);
   return ensureGoatWorkspaceOrganizationsForEntries(workspaces);

@@ -55,6 +55,11 @@ export async function extractXlsxText(
   return sections.join("\n\n").trim();
 }
 
+export function extractUtf8Text(bytes: Buffer, options: ExtractOptions = {}): string {
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes).trim();
+  return capBytes(text, options.maxBytes ?? DEFAULT_MAX_BYTES);
+}
+
 function cellText(value: ExcelJS.CellValue): string {
   if (value === null || value === undefined) return "";
   if (value instanceof Date) return value.toISOString();

@@ -5,6 +5,7 @@ import {
   consumeGoatCapabilityApproval,
   createGoatCapabilityRun,
   isGoatWorkspaceCapabilityEnabled,
+  markGoatCapabilityRunSettlementFailure,
   markGoatCapabilityRunStarted,
   markGoatCapabilityRunStopping,
   settleGoatCapabilityRun,
@@ -264,7 +265,10 @@ export async function executeManagedCapability(input: {
       }).catch(() => undefined);
     }
     if (currentRun && (input.context.signal.aborted || isCapabilityPollTimeout(error))) {
-      await markGoatCapabilityRunStopping({ id: auditRun.id, now: now() }).catch(() => undefined);
+      await markGoatCapabilityRunStopping({
+        id: auditRun.id,
+        now: now(),
+      }).catch(() => undefined);
       await stopRunBestEffort(client, currentRun.runId);
       if (isCapabilityPollTimeout(error)) {
         throw new GoatActionExecutionError(
@@ -297,6 +301,26 @@ export async function executeManagedCapability(input: {
     throw error;
   }
 
+  let payload = currentRun.output;
+  if (input.spec.mapOutput) {
+    try {
+      payload = input.spec.mapOutput(currentRun.output, input.params);
+    } catch (error) {
+      await settleManagedCapabilityRun({
+        auditRun,
+        providerRun: currentRun,
+        forceFailure: {
+          code: "provider_output_invalid",
+          message: "The capability returned data that could not be safely used.",
+        },
+      });
+      if (error instanceof GoatActionExecutionError) throw error;
+      throw new GoatActionExecutionError(
+        "provider_error",
+        "The capability returned data that could not be safely used.",
+      );
+    }
+  }
   const settlement = await settleManagedCapabilityRun({
     auditRun,
     providerRun: currentRun,
@@ -307,8 +331,11 @@ export async function executeManagedCapability(input: {
   return sanitizeCapabilityResult({
     source: input.spec.source,
     action: input.spec.id,
-    payload: currentRun.output,
+    payload,
     expectedLimit: mapped.resultLimit,
+    ...(mapped.payloadArrayLimit === undefined
+      ? {}
+      : { payloadArrayLimit: mapped.payloadArrayLimit }),
     canonicalLinks: mapped.canonicalLinks,
     ...(currentRun.resultCount === undefined ? {} : { resultCount: currentRun.resultCount }),
     totalCostUsdMicros: settlement.totalCostUsdMicros,
@@ -334,6 +361,13 @@ export async function settleManagedCapabilityRun(input: {
   const providerCostUsdMicros = providerRunCostUsdMicros(input.providerRun);
 
   if (providerCostUsdMicros === null) {
+    if (input.forceFailure) {
+      await markGoatCapabilityRunSettlementFailure({
+        id: input.auditRun.id,
+        errorCode: input.forceFailure.code,
+        errorMessage: input.forceFailure.message,
+      });
+    }
     return {
       success,
       totalCostUsdMicros: null,

@@ -220,6 +220,35 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.getByText("No open issues for the Goat team.")).toBeInTheDocument();
   });
 
+  it("renders browser screenshots from the authenticated transcript route", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_browser",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: "tool-browser_screenshot",
+          toolCallId: "tool_browser_1",
+          state: "output-available",
+          input: { fullPage: true },
+          output: {
+            ok: true,
+            command: "browser_screenshot",
+            screenshotUrl: "/api/chat-screenshots/goat_chat_1/1234-aabb.png",
+          },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByText("Screenshot")).toBeInTheDocument();
+    expect(screen.getByText("Full page")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Screenshot captured by Goat's browser" }),
+    ).toHaveAttribute("src", "/api/chat-screenshots/goat_chat_1/1234-aabb.png");
+  });
+
   it("renders shared transcripts without approval requests or task navigation", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
