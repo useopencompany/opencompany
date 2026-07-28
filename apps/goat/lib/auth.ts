@@ -193,7 +193,13 @@ const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> =
 
   const cookieStore = await cookies();
   const requestedWorkspaceId = cookieStore.get(GOAT_ACTIVE_WORKSPACE_COOKIE)?.value;
-  const active = workspaces.find((entry) => entry.workspace.id === requestedWorkspaceId) ?? first;
+  const active =
+    workspaces.find(
+      (entry) =>
+        session.organizationId && entry.workspace.workosOrganizationId === session.organizationId,
+    ) ??
+    workspaces.find((entry) => entry.workspace.id === requestedWorkspaceId) ??
+    first;
 
   const brains = await listAccessibleGoatBrains({
     userWorkosId: user.workosUserId,
