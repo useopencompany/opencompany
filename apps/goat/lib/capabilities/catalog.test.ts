@@ -4,11 +4,12 @@ import {
   MANAGED_CAPABILITY_ACTIONS,
   managedCapabilityContractProbeParams,
 } from "@/lib/capabilities/catalog";
+import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize";
 
 describe("managed capability catalog", () => {
   it("contains only the reviewed fixed action and endpoint allowlist", () => {
-    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(51);
-    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(51);
+    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(52);
+    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(52);
     expect(
       Object.fromEntries(
         MANAGED_CAPABILITY_ACTIONS.map((action) => [
@@ -21,6 +22,7 @@ describe("managed capability catalog", () => {
       "x.search_profiles": "tikhub:/api/v1/twitter/web/fetch_search_timeline",
       "x.list_followers": "tikhub:/api/v1/twitter/web/fetch_user_followers",
       "linkedin.get_person_profile": "tikhub:/api/v1/linkedin/web_v2/get_user_profile",
+      "youtube.get_transcript": "apify:/starvibe/youtube-video-transcript",
       "youtube.find_in_transcript": "apify:/starvibe/youtube-video-transcript",
       "instagram.search_reels": "tikhub:/api/v1/instagram/v2/search_reels",
       "tiktok.get_search_trends": "tikhub:/api/v1/tiktok/web/fetch_trending_searchwords",
@@ -311,8 +313,32 @@ describe("managed capability catalog", () => {
     });
   });
 
-  it("maps transcript searches to one bounded Apify result without sending the query upstream", () => {
+  it("maps full transcripts and transcript searches to the reviewed Apify actor", () => {
+    const fullTranscript = action("youtube.get_transcript");
     const transcriptSearch = action("youtube.find_in_transcript");
+    expect(fullTranscript).toMatchObject({
+      provider: "apify",
+      priceType: "PER_RESULT",
+      executionMode: "async",
+      inputLocation: "body",
+      maxActionResultChars: 256_000,
+    });
+    expect(
+      fullTranscript.mapInput({
+        video: "dQw4w9WgXcQ",
+        language: "en",
+      }),
+    ).toEqual({
+      providerInput: {
+        youtube_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        language: "en",
+      },
+      resultLimit: 1,
+      payloadArrayLimit: 20,
+      payloadStringLimit: MAX_CAPABILITY_PAYLOAD_STRING_CHARS,
+      discoverPayloadLinks: false,
+      canonicalLinks: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+    });
     expect(transcriptSearch).toMatchObject({
       provider: "apify",
       priceType: "PER_RESULT",
@@ -336,9 +362,14 @@ describe("managed capability catalog", () => {
       payloadArrayLimit: 20,
       canonicalLinks: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
     });
-    expect(MANAGED_CAPABILITY_ACTIONS.some((entry) => entry.id === "youtube.get_transcript")).toBe(
-      false,
-    );
+    expect(fullTranscript.description).toContain("complete plain-text transcript");
+    expect(fullTranscript.description).toContain("youtube.find_in_transcript");
+    expect(() =>
+      fullTranscript.mapInput({
+        video: "dQw4w9WgXcQ",
+        language: "EN",
+      }),
+    ).toThrow(/lowercase two-letter/i);
     expect(() =>
       transcriptSearch.mapInput({
         video: "dQw4w9WgXcQ",

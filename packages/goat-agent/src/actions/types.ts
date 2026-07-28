@@ -72,6 +72,9 @@ export type GoatActionExecuteContext = {
 
 export type ResolvedGoatAction = GoatActionDescriptor & {
   timeoutMs?: number;
+  // Internal-only larger result allowance for deliberately bounded actions
+  // such as a validated full transcript. The executor still applies its hard cap.
+  maxResultChars?: number;
   // Computed at resolve time from the connection's stored capability modes.
   // "off" never appears here — off actions are excluded from the catalog
   // entirely, so the model never sees them.

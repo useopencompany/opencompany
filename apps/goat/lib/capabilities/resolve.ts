@@ -41,6 +41,9 @@ export async function resolveGoatManagedCapabilities(
     description: spec.description,
     params: spec.params,
     timeoutMs: GOAT_CAPABILITY_ACTION_TIMEOUT_MS,
+    ...(spec.maxActionResultChars === undefined
+      ? {}
+      : { maxResultChars: spec.maxActionResultChars }),
     permissionMode: "on" as const,
     execute: (params: Record<string, unknown>, context: GoatActionExecuteContext) =>
       executeManagedCapability({ spec, params, context }),

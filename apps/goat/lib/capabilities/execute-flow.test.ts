@@ -98,9 +98,11 @@ describe("executeManagedCapability", () => {
     });
   });
 
-  it("shapes provider output before sanitizing it with a separate payload array limit", async () => {
+  it("shapes provider output before applying separate payload array and string limits", async () => {
+    const transcript = "x".repeat(5_000);
     const mapOutput = vi.fn(() => ({
       matches: [{ text: "first" }, { text: "second" }, { text: "third" }],
+      transcript,
     }));
     const action = {
       ...spec(),
@@ -108,7 +110,9 @@ describe("executeManagedCapability", () => {
         providerInput: { keyword: params.query },
         resultLimit: 1,
         payloadArrayLimit: 3,
-        canonicalLinks: [],
+        payloadStringLimit: transcript.length,
+        discoverPayloadLinks: false,
+        canonicalLinks: ["https://x.com/openai/status/1"],
       }),
       mapOutput,
     };
@@ -133,8 +137,10 @@ describe("executeManagedCapability", () => {
     expect(mapOutput).toHaveBeenCalledWith(providerOutput, { query: "openai" });
     expect(result.payload).toEqual({
       matches: [{ text: "first" }, { text: "second" }, { text: "third" }],
+      transcript,
     });
     expect(result.resultCount).toBe(1);
+    expect(result.canonicalLinks).toEqual(["https://x.com/openai/status/1"]);
   });
 
   it("charges completed provider work but marks unusable mapped output as failed", async () => {
