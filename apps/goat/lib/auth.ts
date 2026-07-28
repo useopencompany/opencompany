@@ -1,3 +1,4 @@
+import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { getDb } from "@opencompany/db/client";
 import {
   type GoatBrain,
@@ -15,7 +16,6 @@ import {
   listGoatWorkspacesForUser,
 } from "@opencompany/db/goat-workspaces";
 import { recordGoatSignup } from "@opencompany/goat-observability";
-import { captureStatsigServerEvent } from "@opencompany/statsig/server";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import type { User as WorkOSUser } from "@workos-inc/node";
 import { eq } from "drizzle-orm";
@@ -59,8 +59,7 @@ export async function syncGoatUser(authUser: WorkOSUser) {
 
   if (insertedUser) {
     recordGoatSignup({ source: "user_sync" });
-    await captureStatsigServerEvent("signup_completed", insertedUser.workosUserId, {
-      user_id: insertedUser.workosUserId,
+    await captureGoatServerEvent("signup_completed", insertedUser.workosUserId, {
       source: "user_sync",
     });
     return insertedUser;
