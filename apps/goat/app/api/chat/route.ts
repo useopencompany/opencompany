@@ -488,13 +488,23 @@ export async function POST(request: Request): Promise<Response> {
     // One event covers both new and continued chats. `is_first_message` keeps the new-chat
     // funnel queryable without double-capturing the first user action.
     after(
-      captureGoatServerEvent("chat_message_sent", context.user.workosUserId, {
-        workspace_id: context.workspace.id,
-        session_id: turn.session.id,
-        is_first_message: turn.sessionCreated,
-        model: turn.session.model,
-        message_length: userInput.prompt.length,
-      }),
+      captureGoatServerEvent(
+        "chat_message_sent",
+        context.user.workosUserId,
+        {
+          workspace_id: context.workspace.id,
+          session_id: turn.session.id,
+          is_first_message: turn.sessionCreated,
+          model: turn.session.model,
+          message_length: userInput.prompt.length,
+        },
+        {
+          workspaceId: context.workspace.id,
+          email: context.user.email,
+          firstName: context.user.firstName,
+          lastName: context.user.lastName,
+        },
+      ),
     );
   }
 

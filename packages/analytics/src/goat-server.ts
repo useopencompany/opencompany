@@ -1,4 +1,5 @@
 import type { GoatAnalyticsEventName, GoatAnalyticsEventProperties } from "./goat-events";
+import { type GoatAnalyticsPerson, goatAnalyticsPersonProperties } from "./goat-person";
 import { capturePostHogServerEvent } from "./server-core";
 
 function getGoatPostHogConfig() {
@@ -13,10 +14,18 @@ export function captureGoatServerEvent<EventName extends GoatAnalyticsEventName>
   event: EventName,
   distinctId: string,
   properties: GoatAnalyticsEventProperties<EventName>,
+  person?: GoatAnalyticsPerson,
 ) {
+  const personProperties = person ? goatAnalyticsPersonProperties(person) : undefined;
+
   return capturePostHogServerEvent(getGoatPostHogConfig(), {
     event,
     distinctId,
-    properties,
+    properties: {
+      ...properties,
+      ...(personProperties && Object.keys(personProperties).length > 0
+        ? { $set: personProperties }
+        : {}),
+    },
   });
 }

@@ -35,8 +35,11 @@ Event payloads should only send coarse product data:
 - selected enum values
 - counts and changed field names
 
-Goat identifies people with the internal WorkOS user ID and workspace ID only. The legacy web
-project also keeps the existing WorkOS name and email person properties for support workflows.
+Goat identifies people with the internal WorkOS user ID. It sets workspace ID, email, first name,
+last name, and display name as person properties so activity remains attributable across browser
+and server-side events. These allowlisted identity fields may be set through the browser
+`identify()` call or PostHog's server-side `$set`; they must not be copied into ordinary event
+properties.
 
 Do not send company URLs, free-text onboarding answers, agent content, editor documents, prompts,
 or other user-authored content. `message_length` is allowed; message content is not.
@@ -73,8 +76,8 @@ PostHog project.
 With Goat PostHog values missing, exercise signup, app load, chat, and integration connection and
 confirm the app has no analytics-related errors.
 
-With debug enabled, confirm analytics logs contain only the properties registered in
-`goat-events.ts`.
+With debug enabled, confirm analytics logs contain only the event properties registered in
+`goat-events.ts`. Person-property updates should log their property names, never their values.
 
 With the real Goat project values, confirm one `app_opened` client event and one
 `chat_message_sent` server event appear in the Goat project, and that neither appears in the legacy
