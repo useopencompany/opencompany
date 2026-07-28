@@ -46,9 +46,13 @@ import {
   type GoatBrainToolInput,
   type GoatBrainToolOutput,
   type GoatChatActionCatalog,
+  type GoatChatSkillCatalogItem,
   LIST_ACTIONS_TOOL_NAME,
+  LIST_SKILLS_TOOL_NAME,
   type ListActionsToolInput,
   type ListActionsToolOutput,
+  type ListSkillsToolInput,
+  type ListSkillsToolOutput,
   SAVE_TO_BRAIN_TOOL_NAME,
   type SaveToBrainToolInput,
   type SaveToBrainToolOutput,
@@ -59,8 +63,11 @@ import {
   type StartTaskToolInput,
   type StartTaskToolOutput,
   USE_ACTION_TOOL_NAME,
+  USE_SKILL_TOOL_NAME,
   type UseActionToolInput,
   type UseActionToolOutput,
+  type UseSkillToolInput,
+  type UseSkillToolOutput,
   WEB_FETCH_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   type WebFetchToolInput,
@@ -78,6 +85,8 @@ import {
   GOAT_BRAIN_TOOL_DESCRIPTION,
   LIST_ACTIONS_SOURCE_DESCRIPTION,
   LIST_ACTIONS_TOOL_DESCRIPTION,
+  LIST_SKILLS_QUERY_DESCRIPTION,
+  LIST_SKILLS_TOOL_DESCRIPTION,
   SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION,
   SAVE_TO_BRAIN_CONTENT_DESCRIPTION,
   SAVE_TO_BRAIN_FALLBACK_CONTENT_DESCRIPTION,
@@ -102,6 +111,8 @@ import {
   USE_ACTION_ACTION_DESCRIPTION,
   USE_ACTION_PARAMS_DESCRIPTION,
   USE_ACTION_TOOL_DESCRIPTION,
+  USE_SKILL_ID_DESCRIPTION,
+  USE_SKILL_TOOL_DESCRIPTION,
   WEB_FETCH_TOOL_DESCRIPTION,
   WEB_FETCH_URL_DESCRIPTION,
   WEB_SEARCH_QUERY_DESCRIPTION,
@@ -118,6 +129,7 @@ export {
 export const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
 export const OPENCOMPANY_CHAT_MAX_STEPS = 8;
 export const OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX = 16;
+export const MAX_LIST_SKILL_RESULTS = 20;
 const MAX_ACTION_PROVIDER_FAILURES_PER_TURN = 2;
 const GOAT_BRAIN_READ_TOOL_AI_SCHEMA =
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0];
@@ -164,6 +176,12 @@ export type ActionDispatcher = {
     params: Record<string, unknown>;
     toolCallId: string;
   }) => Promise<UseActionToolOutput>;
+};
+
+export type SkillDispatcher = {
+  catalog: readonly GoatChatSkillCatalogItem[];
+  prelistedSkillIds?: readonly string[];
+  execute: (input: { skill: string }) => Promise<UseSkillToolOutput>;
 };
 
 // An action in "ask" mode pauses the stream on a tool-approval request the
@@ -234,6 +252,7 @@ export async function runOpenCompanyChatAgent(input: {
   webSearch?: WebSearchRunner;
   browserTools?: BrowserToolRunner;
   actions?: ActionDispatcher;
+  skills?: SkillDispatcher;
   goatBrainMultiBrain?: { targets: readonly GoatBrainMultiBrainTarget[] };
   currentDate?: Date | string;
   userContext?: OpenCompanyChatSystemPromptInput["userContext"];
@@ -285,6 +304,7 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
     ...(input.browserTools ? { browserTools: input.browserTools } : {}),
     ...(input.actions ? { actions: input.actions } : {}),
+    ...(input.skills ? { skills: input.skills } : {}),
     ...(input.goatBrainMultiBrain ? { goatBrainMultiBrain: input.goatBrainMultiBrain } : {}),
   });
 
@@ -303,6 +323,7 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.connectedIntegrations !== undefined
       ? { connectedIntegrations: input.connectedIntegrations }
       : {}),
+    skillsAvailable: Boolean(input.skills?.catalog.length),
   };
   const system = [
     createOpenCompanyChatSystemPrompt(systemPromptInput),
@@ -375,6 +396,7 @@ export function createOpenCompanyChatToolContext(input: {
   webSearch?: WebSearchRunner;
   browserTools?: BrowserToolRunner;
   actions?: ActionDispatcher;
+  skills?: SkillDispatcher;
   // When several brains are in scope (e.g. a Slack channel routed to more than
   // one brain), the goat_brain schema grows a required `brain` enum and raw
   // args flow to runBrainCli so the runner can pick the target and normalize.
@@ -390,6 +412,7 @@ export function createOpenCompanyChatToolContext(input: {
   let browserCallCount = 0;
   let actionCallCount = 0;
   const listedActionSourceIds = new Set(input.actions?.prelistedSourceIds ?? []);
+  const listedSkillIds = new Set(input.skills?.prelistedSkillIds ?? []);
   const actionProviderRetryGate = createActionProviderRetryGate(
     MAX_ACTION_PROVIDER_FAILURES_PER_TURN,
   );
@@ -815,6 +838,84 @@ export function createOpenCompanyChatToolContext(input: {
         },
       });
     }
+  }
+
+  const skills = input.skills;
+  if (skills && skills.catalog.length > 0) {
+    const skillIds = skills.catalog.map((skill) => skill.id);
+    tools[LIST_SKILLS_TOOL_NAME] = tool<ListSkillsToolInput, ListSkillsToolOutput>({
+      description: LIST_SKILLS_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<ListSkillsToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: {
+            type: "string",
+            description: LIST_SKILLS_QUERY_DESCRIPTION,
+          },
+        },
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+        const queryTerms = query.split(/\s+/).filter(Boolean);
+        const matches = skills.catalog.filter((skill) => {
+          if (queryTerms.length === 0) return true;
+          const searchable = `${skill.id} ${skill.name} ${skill.description}`.toLowerCase();
+          return queryTerms.every((term) => searchable.includes(term));
+        });
+        const listed = matches.slice(0, MAX_LIST_SKILL_RESULTS);
+        for (const skill of listed) listedSkillIds.add(skill.id);
+        return {
+          ok: true,
+          skills: listed,
+          total: matches.length,
+          truncated: matches.length > listed.length,
+        };
+      },
+    });
+    tools[USE_SKILL_TOOL_NAME] = tool<UseSkillToolInput, UseSkillToolOutput>({
+      description: USE_SKILL_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<UseSkillToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          skill: {
+            type: "string",
+            enum: skillIds,
+            description: USE_SKILL_ID_DESCRIPTION,
+          },
+        },
+        required: ["skill"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        const skill = typeof args.skill === "string" ? args.skill : "";
+        if (!skills.catalog.some((candidate) => candidate.id === skill)) {
+          return {
+            ok: false,
+            skill,
+            error: {
+              code: "invalid_params",
+              message: `"${skill}" is not an available skill. Call list_skills for the current catalog.`,
+            },
+          };
+        }
+        if (!listedSkillIds.has(skill)) {
+          return {
+            ok: false,
+            skill,
+            error: {
+              code: "invalid_params",
+              message: `Call list_skills and use an exact returned id before loading ${JSON.stringify(
+                skill,
+              )}.`,
+            },
+          };
+        }
+        return skills.execute({ skill });
+      },
+    });
   }
 
   const actions = input.actions;

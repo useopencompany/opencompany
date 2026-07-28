@@ -99,6 +99,13 @@ current user's active-Brain access, rejects stale or cross-Brain references, and
 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable snapshot
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
+Normal main chat can also discover Brain skills progressively. When the catalog is non-empty, the
+system prompt advertises only that a skill source exists; `list_skills` searches safe id, name, and
+description metadata, and `use_skill` loads the full instructions for one exact returned id. The
+successful tool result stays in conversation history, so model-selected skill instructions remain
+available on later turns without being copied into the system prompt or delegated tasks. Explicit
+and model-selected skills share the same per-turn limit of 16 skills / 256 KiB of instructions.
+
 The composer also accepts PDF, DOCX, XLSX, SRT, PNG, JPEG, and WebP files. SRT MIME values are
 normalized because browsers report them inconsistently. Foreground chat stores bounded extracted
 SRT text for the initial and follow-up turns; Cloud Codex receives the original file in its sandbox.
@@ -137,9 +144,9 @@ any other session data.
 3. Requires `VERCEL_AI_GATEWAY_API_KEY`.
 4. Finds or creates an open `goat.chat_sessions` row.
 5. Persists the user message in `goat.chat_messages`.
-6. Resolves connected-integration actions plus the workspace's managed social/lead capabilities and
-   creates the chat tool context for
-   `goat_brain`, `save_to_brain`, `list_actions`/`use_action`, optional `start_task`, and optional
+6. Resolves active-Brain skills, connected-integration actions, and the workspace's managed
+   social/lead capabilities, then creates the chat tool context for `goat_brain`, `save_to_brain`,
+   `list_skills`/`use_skill`, `list_actions`/`use_action`, optional `start_task`, and optional
    `web_fetch`/`web_search`.
 7. Calls `streamText` through Vercel AI Gateway with the session's model.
 8. Streams the UI message response back to the browser.

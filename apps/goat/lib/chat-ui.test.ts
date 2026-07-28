@@ -5,10 +5,14 @@ import {
   compareGoatChatMessageOrder,
   type GoatStoredChatMessage,
   LIST_ACTIONS_TOOL_PART_TYPE,
+  LIST_SKILLS_TOOL_PART_TYPE,
   listedActionSourceIdsFromMessages,
+  listedSkillIdsFromMessages,
   nextGoatChatMessageCreatedAt,
   START_TASK_TOOL_PART_TYPE,
   toGoatChatUiMessage,
+  USE_SKILL_TOOL_PART_TYPE,
+  usedSkillIdsFromMessages,
 } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
@@ -256,6 +260,90 @@ describe("listedActionSourceIdsFromMessages", () => {
     };
 
     expect(listedActionSourceIdsFromMessages([failed])).toEqual([]);
+  });
+});
+
+describe("listedSkillIdsFromMessages", () => {
+  it("recovers the exact skills returned by successful discovery", () => {
+    const discovered = toGoatChatUiMessage(
+      storedAssistantMessage({
+        debugTrace: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          model: DEFAULT_GOAT_MODEL,
+          uiMessageParts: [
+            {
+              type: LIST_SKILLS_TOOL_PART_TYPE,
+              toolCallId: "list_skills_1",
+              state: "output-available",
+              input: { query: "product" },
+              output: {
+                ok: true,
+                skills: [
+                  {
+                    id: "product-feature",
+                    name: "Product feature",
+                    description: "Build and verify product changes.",
+                  },
+                ],
+                total: 1,
+                truncated: false,
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(listedSkillIdsFromMessages([discovered])).toEqual(["product-feature"]);
+  });
+
+  it("ignores skill discovery that did not produce an available output", () => {
+    const running = {
+      id: "assistant_running",
+      role: "assistant" as const,
+      parts: [
+        {
+          type: LIST_SKILLS_TOOL_PART_TYPE,
+          toolCallId: "list_skills_1",
+          state: "input-available" as const,
+          input: { query: "product" },
+        },
+      ],
+    };
+
+    expect(listedSkillIdsFromMessages([running])).toEqual([]);
+  });
+});
+
+describe("usedSkillIdsFromMessages", () => {
+  it("recovers skills whose instructions were loaded successfully", () => {
+    const loaded = toGoatChatUiMessage(
+      storedAssistantMessage({
+        debugTrace: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          model: DEFAULT_GOAT_MODEL,
+          uiMessageParts: [
+            {
+              type: USE_SKILL_TOOL_PART_TYPE,
+              toolCallId: "use_skill_1",
+              state: "output-available",
+              input: { skill: "product-feature" },
+              output: {
+                ok: true,
+                skill: {
+                  id: "product-feature",
+                  name: "Product feature",
+                  description: "Build and verify product changes.",
+                  instructions: "Inspect, implement, and verify.",
+                },
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(usedSkillIdsFromMessages([loaded])).toEqual(["product-feature"]);
   });
 });
 

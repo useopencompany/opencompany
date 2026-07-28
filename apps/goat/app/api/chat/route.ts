@@ -39,6 +39,10 @@ import {
   attachGoatBrainSkillsToPrompt,
   GoatBrainSkillMentionError,
   type GoatChatSessionSkillSnapshot,
+  goatBrainSkillsByteLength,
+  listGoatBrainSkillCatalog,
+  MAX_GOAT_CHAT_SKILL_BYTES,
+  MAX_GOAT_CHAT_SKILLS,
   readGoatBrainSkillMentionRefs,
   resolveGoatBrainSkillMentions,
 } from "@/lib/brain-skills";
@@ -85,9 +89,11 @@ import {
   type GoatChatUiMessage,
   goatChatContextTokensFromUsage,
   listedActionSourceIdsFromMessages,
+  listedSkillIdsFromMessages,
   replaceGoatChatUiMessageText,
   textFromGoatChatUiMessage,
   type UseActionToolOutput,
+  usedSkillIdsFromMessages,
   type WebFetchToolInput,
   type WebFetchToolOutput,
   type WebSearchToolInput,
@@ -266,23 +272,35 @@ export async function POST(request: Request): Promise<Response> {
   const brainCaptureEnabled = Boolean(context.activeBrain);
   const taskToolsEnabled = context.user.taskSpawningEnabled && canManageWorkspaceBrain;
 
-  // Action catalog: resolved per request from real connection state. On by
-  // default for everyone; the env kill switch disables it without a deploy,
-  // and engine chats (Codex) never get chat actions.
+  // Action and skill catalogs are resolved per request from real connection
+  // and active-Brain state. Engine handoffs get neither: their execution
+  // context is assembled separately, and main-chat skills must not leak into
+  // delegated work.
   const actionsEnabled = !requestedEngine && !isGoatChatActionsKilled();
   const emptyCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
-  const actionCatalog = actionsEnabled
-    ? await resolveGoatActionCatalog({
-        userWorkosId: context.user.workosUserId,
-        workspaceId: context.workspace.id,
-      }).catch((error) => {
-        logger.warn("Goat chat action catalog resolution failed", {
-          event: "goat.chat_action_catalog_resolution_failed",
-          error,
-        });
-        return emptyCatalog;
-      })
-    : emptyCatalog;
+  const [actionCatalog, skillCatalog] = await Promise.all([
+    actionsEnabled
+      ? resolveGoatActionCatalog({
+          userWorkosId: context.user.workosUserId,
+          workspaceId: context.workspace.id,
+        }).catch((error) => {
+          logger.warn("Goat chat action catalog resolution failed", {
+            event: "goat.chat_action_catalog_resolution_failed",
+            error,
+          });
+          return emptyCatalog;
+        })
+      : Promise.resolve(emptyCatalog),
+    !requestedEngine && context.activeBrain
+      ? listGoatBrainSkillCatalog(context.activeBrain.id).catch((error) => {
+          logger.warn("Goat chat skill catalog resolution failed", {
+            event: "goat.chat_skill_catalog_resolution_failed",
+            error,
+          });
+          return [];
+        })
+      : Promise.resolve([]),
+  ]);
 
   const store = createDbGoatChatStore();
   const recurringSchedules = taskToolsEnabled
@@ -496,6 +514,16 @@ export async function POST(request: Request): Promise<Response> {
       currentActionSourceIds.has(sourceId),
     ),
   );
+  const currentSkillIds = new Set(skillCatalog.map((skill) => skill.id));
+  const prelistedSkillIds = new Set(
+    listedSkillIdsFromMessages(turn.messages).filter((skillId) => currentSkillIds.has(skillId)),
+  );
+  const activeSkillIds = new Set([
+    ...sessionSkills.map((skill) => skill.skillId),
+    ...usedSkillIdsFromMessages(turn.messages),
+  ]);
+  let loadedSkillCount = resolvedSkills.length;
+  let loadedSkillBytes = goatBrainSkillsByteLength(resolvedSkills);
   if (capabilityApproval) {
     for (const action of actionCatalog.actions) {
       if (action.id === capabilityApproval.action) prelistedActionSourceIds.add(action.provider);
@@ -676,6 +704,84 @@ export async function POST(request: Request): Promise<Response> {
               },
               chatSpan,
             }),
+        }
+      : {}),
+    ...(skillCatalog.length > 0 && context.activeBrain
+      ? {
+          skills: {
+            catalog: skillCatalog.map((skill) => ({
+              id: skill.id,
+              name: skill.name,
+              description: skill.description,
+            })),
+            ...(prelistedSkillIds.size > 0 ? { prelistedSkillIds: [...prelistedSkillIds] } : {}),
+            execute: async ({ skill }: { skill: string }) => {
+              try {
+                const [resolved] = await resolveGoatBrainSkillMentions({
+                  activeBrainRef: context.activeBrain?.id ?? null,
+                  mentions: [{ brainRef: context.activeBrain?.id ?? "", id: skill }],
+                });
+                if (!resolved) {
+                  return {
+                    ok: false as const,
+                    skill,
+                    error: {
+                      code: "unavailable" as const,
+                      message: `Skill "@skill/${skill}" is unavailable or incomplete.`,
+                    },
+                  };
+                }
+                if (activeSkillIds.has(resolved.id)) {
+                  return {
+                    ok: false as const,
+                    skill,
+                    error: {
+                      code: "already_loaded" as const,
+                      message: `Skill "@skill/${skill}" is already available in this chat. Follow its existing instructions without loading it again.`,
+                    },
+                  };
+                }
+                const skillBytes = goatBrainSkillsByteLength([resolved]);
+                if (
+                  loadedSkillCount >= MAX_GOAT_CHAT_SKILLS ||
+                  loadedSkillBytes + skillBytes > MAX_GOAT_CHAT_SKILL_BYTES
+                ) {
+                  return {
+                    ok: false as const,
+                    skill,
+                    error: {
+                      code: "call_budget" as const,
+                      message: `Skill loading is limited to ${MAX_GOAT_CHAT_SKILLS} skills and ${MAX_GOAT_CHAT_SKILL_BYTES / 1024} KiB of instructions per chat turn. Continue with the skills already loaded.`,
+                    },
+                  };
+                }
+                activeSkillIds.add(resolved.id);
+                loadedSkillCount += 1;
+                loadedSkillBytes += skillBytes;
+                return {
+                  ok: true as const,
+                  skill: {
+                    id: resolved.id,
+                    name: resolved.name,
+                    description: resolved.description,
+                    instructions: resolved.instructions,
+                  },
+                };
+              } catch (error) {
+                if (error instanceof GoatBrainSkillMentionError) {
+                  return {
+                    ok: false as const,
+                    skill,
+                    error: {
+                      code: "unavailable" as const,
+                      message: error.message,
+                    },
+                  };
+                }
+                throw error;
+              }
+            },
+          },
         }
       : {}),
     ...(actionCatalog.actions.length > 0
@@ -926,6 +1032,7 @@ export async function POST(request: Request): Promise<Response> {
         : null,
       brainCaptureEnabled,
       browserToolsEnabled: Boolean(browserToolSession),
+      skillsAvailable: skillCatalog.length > 0,
       taskToolsEnabled,
       scheduleToolsEnabled: taskToolsEnabled,
       recurringSchedules,

@@ -54,6 +54,10 @@ export const LIST_ACTIONS_TOOL_NAME = "list_actions";
 export const LIST_ACTIONS_TOOL_PART_TYPE = `tool-${LIST_ACTIONS_TOOL_NAME}` as const;
 export const USE_ACTION_TOOL_NAME = "use_action";
 export const USE_ACTION_TOOL_PART_TYPE = `tool-${USE_ACTION_TOOL_NAME}` as const;
+export const LIST_SKILLS_TOOL_NAME = "list_skills";
+export const LIST_SKILLS_TOOL_PART_TYPE = `tool-${LIST_SKILLS_TOOL_NAME}` as const;
+export const USE_SKILL_TOOL_NAME = "use_skill";
+export const USE_SKILL_TOOL_PART_TYPE = `tool-${USE_SKILL_TOOL_NAME}` as const;
 export const BROWSER_OPEN_TOOL_PART_TYPE = "tool-browser_open";
 export const BROWSER_SNAPSHOT_TOOL_PART_TYPE = "tool-browser_snapshot";
 export const BROWSER_CLICK_TOOL_PART_TYPE = "tool-browser_click";
@@ -383,6 +387,43 @@ export type UseActionToolOutput =
       };
     };
 
+export type GoatChatSkillCatalogItem = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+export type ListSkillsToolInput = {
+  query?: string;
+};
+
+export type ListSkillsToolOutput = {
+  ok: true;
+  skills: GoatChatSkillCatalogItem[];
+  total: number;
+  truncated: boolean;
+};
+
+export type UseSkillToolInput = {
+  skill: string;
+};
+
+export type UseSkillToolOutput =
+  | {
+      ok: true;
+      skill: GoatChatSkillCatalogItem & {
+        instructions: string;
+      };
+    }
+  | {
+      ok: false;
+      skill: string;
+      error: {
+        code: "invalid_params" | "unavailable" | "already_loaded" | "call_budget";
+        message: string;
+      };
+    };
+
 type GoatBrowserChatTools = {
   [Name in BrowserToolName]: {
     input: BrowserToolInput;
@@ -431,6 +472,14 @@ export type GoatChatTools = {
     input: UseActionToolInput;
     output: UseActionToolOutput;
   };
+  list_skills: {
+    input: ListSkillsToolInput;
+    output: ListSkillsToolOutput;
+  };
+  use_skill: {
+    input: UseSkillToolInput;
+    output: UseSkillToolOutput;
+  };
   codex_command: {
     input: CodexCommandToolInput;
     output: CodexCommandToolOutput;
@@ -459,6 +508,38 @@ export function listedActionSourceIdsFromMessages(
     }
   }
   return [...sourceIds];
+}
+
+export function listedSkillIdsFromMessages(messages: readonly GoatChatUiMessage[]): string[] {
+  const skillIds = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (
+        part.type === LIST_SKILLS_TOOL_PART_TYPE &&
+        part.state === "output-available" &&
+        part.output.ok
+      ) {
+        for (const skill of part.output.skills) skillIds.add(skill.id);
+      }
+    }
+  }
+  return [...skillIds];
+}
+
+export function usedSkillIdsFromMessages(messages: readonly GoatChatUiMessage[]): string[] {
+  const skillIds = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (
+        part.type === USE_SKILL_TOOL_PART_TYPE &&
+        part.state === "output-available" &&
+        part.output.ok
+      ) {
+        skillIds.add(part.output.skill.id);
+      }
+    }
+  }
+  return [...skillIds];
 }
 
 export type GoatChatSessionView = {
