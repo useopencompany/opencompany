@@ -59,6 +59,8 @@ const groups = {
       "RUNNER_INTERNAL_TOKEN",
       "ELECTRIC_URL",
       "MONID_API_KEY",
+      "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
+      "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
     ],
     optional: [
       "RUNNER_INTERNAL_URL",

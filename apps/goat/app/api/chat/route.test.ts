@@ -51,6 +51,14 @@ const browserMocks = vi.hoisted(() => ({
   getUsage: vi.fn(),
 }));
 
+const analyticsMocks = vi.hoisted(() => ({
+  captureGoatServerEvent: vi.fn(async () => {}),
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+}));
+
 vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(() => ({
     insert: browserMocks.dbInsert,
@@ -222,6 +230,17 @@ describe("POST /api/chat", () => {
       userWorkosId: "user_1",
       workspaceId: "goat_ws_user_1",
     });
+    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledOnce();
+    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+      "chat_message_sent",
+      "user_1",
+      expect.objectContaining({
+        workspace_id: "goat_ws_user_1",
+        session_id: "session_1",
+        is_first_message: true,
+        model: "openai/gpt-5.5",
+      }),
+    );
   });
 
   it("lets main chat discover and load active Brain skills", async () => {
@@ -1036,6 +1055,7 @@ describe("POST /api/chat", () => {
       expect.objectContaining({
         providerOptions: {
           gateway: {
+            caching: "auto",
             user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
             tags: expect.arrayContaining([
               "app:goat",
@@ -2260,6 +2280,7 @@ function mockCreateTurn() {
       model: "openai/gpt-5.5",
       engine: "opencompany",
     },
+    sessionCreated: true,
     userMessage: {
       id: "user_message_1",
     },

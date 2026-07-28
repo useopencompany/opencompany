@@ -3326,6 +3326,8 @@ export const goatCodexChatTurns = goat.table(
     }),
     attempts: integer("attempts").notNull().default(0),
     recoveryAttempts: integer("recovery_attempts").notNull().default(0),
+    engineRecoveryRequired: boolean("engine_recovery_required").notNull().default(false),
+    engineTurnBaselineIds: jsonb("engine_turn_baseline_ids").$type<string[]>(),
     leaseId: text("lease_id"),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),

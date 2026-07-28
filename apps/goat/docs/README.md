@@ -342,6 +342,14 @@ allowing two continuations for the same missing turn. A dead proxy with a pendin
 request forces that guarded continuation because server-initiated requests cannot move between
 client connections.
 
+Transient E2B capacity, rate-limit, network, and acquisition-timeout failures defer the same durable
+turn with bounded exponential backoff instead of writing a failed assistant message. Authentication,
+template, and other configuration failures remain terminal. A deferred turn stays interruptible and
+keeps later messages behind it in the per-session FIFO. Before the runner can invoke Codex, it
+durably snapshots the engine thread's existing turn ids and marks the turn as requiring recovery.
+This keeps pre-engine infrastructure retries distinct from post-invocation lease recovery, and lets
+a replacement worker identify an unpersisted new engine turn without adopting older active work.
+
 Session skills are reconciled before every Cloud Codex turn under
 `/home/user/opencompany-goat/codex-chat/.agents/skills/`. The managed-skills manifest removes only
 OpenCompany-managed ids and preserves any unrelated native skills. A content fingerprint restarts
