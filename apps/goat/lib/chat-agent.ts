@@ -1,3 +1,4 @@
+import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import {
   BROWSER_TOOL_INPUT_SCHEMAS,
@@ -347,7 +348,7 @@ export async function runOpenCompanyChatAgent(input: {
       ...(toolContext.repairToolCall
         ? { experimental_repairToolCall: toolContext.repairToolCall }
         : {}),
-      providerOptions: goatGatewayProviderOptions(attribution),
+      providerOptions: goatGatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS),
       ...latitudeTelemetry({
         name: feature === "slack-bot" ? "slack-answer" : "chat-agent",
         feature,

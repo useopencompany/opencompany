@@ -50,6 +50,29 @@ import {
 } from "@/lib/prompts";
 
 describe("runOpenCompanyChatAgent", () => {
+  it("enables Gateway prompt caching for headless chat generation", async () => {
+    await runOpenCompanyChatAgent({
+      messages: [{ role: "user", content: "research this in chat" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      generateTextImpl: (async (options: unknown) => {
+        expect(options).toMatchObject({
+          providerOptions: {
+            gateway: {
+              caching: "auto",
+              tags: expect.arrayContaining(["app:goat", "feature:chat"]),
+            },
+          },
+        });
+        return {
+          text: "Here are the useful findings.",
+          finishReason: "stop",
+          steps: [],
+        };
+      }) as never,
+    });
+  });
+
   it("keeps the post-approval model step answer-only", () => {
     expect(
       prepareOpenCompanyChatStep({

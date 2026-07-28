@@ -327,8 +327,9 @@ visible to the model rather than merely path-referenced. Keeping uploads outside
 directory prevents them from appearing in repository changes.
 
 The Codex app-server daemon runs behind its Unix-socket control transport inside E2B and outlives
-the runner-side proxy. A runner shutdown detaches that proxy, releases the delivery lease, and lets
-the next worker `thread/resume` the same stored Codex turn id. The reconnect reconciles completed
+the runner-side proxy. A runner shutdown detaches that proxy, keeps the sandbox on its active
+timeout, releases the delivery lease, and lets the next worker `thread/resume` the same stored Codex
+turn id. The reconnect reconciles completed
 items and a terminal turn that landed while no runner was attached; stable per-item event keys make
 that replay idempotent. Lease claims count infrastructure ownership changes, while
 `recovery_attempts` increments only when the original Codex turn is missing or was interrupted and
@@ -337,6 +338,14 @@ that guard for the new engine turn, so long-running chats can survive repeated d
 allowing two continuations for the same missing turn. A dead proxy with a pending user-input
 request forces that guarded continuation because server-initiated requests cannot move between
 client connections.
+
+Transient E2B capacity, rate-limit, network, and acquisition-timeout failures defer the same durable
+turn with bounded exponential backoff instead of writing a failed assistant message. Authentication,
+template, and other configuration failures remain terminal. A deferred turn stays interruptible and
+keeps later messages behind it in the per-session FIFO. Before the runner can invoke Codex, it
+durably snapshots the engine thread's existing turn ids and marks the turn as requiring recovery.
+This keeps pre-engine infrastructure retries distinct from post-invocation lease recovery, and lets
+a replacement worker identify an unpersisted new engine turn without adopting older active work.
 
 Session skills are reconciled before every Cloud Codex turn under
 `/home/user/opencompany-goat/codex-chat/.agents/skills/`. The managed-skills manifest removes only
