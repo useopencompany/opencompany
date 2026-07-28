@@ -31,6 +31,7 @@ import {
   type GoatWorkflowTaskDisplayStatus,
   goatWorkflowTaskDisplayStatus,
 } from "@/lib/task-display";
+import { archiveGoatTaskAction } from "@/lib/tasks";
 import { createGoatWorkspaceAction, switchGoatWorkspaceAction } from "@/lib/workspace-actions";
 
 function GoatIcon({ className }: { className?: string }) {
@@ -249,6 +250,9 @@ const WORKFLOW_TASK_STATUS_DOT_CLASS: Record<GoatWorkflowTaskDisplayStatus, stri
 function GoatSidebarTasks() {
   const { tasks } = useGoatAppData();
   const pathname = usePathname();
+  const router = useRouter();
+  const [, startTransition] = useTransition();
+  const [archivingId, setArchivingId] = useState<string | null>(null);
   // Only workflow-spawned tasks surface here; ad-hoc start_task runs keep
   // living on Home. `tasks` is user-scoped and Electric-live.
   const workflowTasks = tasks
@@ -257,6 +261,22 @@ function GoatSidebarTasks() {
   if (workflowTasks.length === 0) return null;
 
   const tasksActive = pathname === "/tasks";
+
+  const archiveTask = (taskId: string, taskName: string, href: string) => {
+    setArchivingId(taskId);
+    startTransition(async () => {
+      const result = await archiveGoatTaskAction(taskId);
+      setArchivingId((current) => (current === taskId ? null : current));
+      if (!result.ok) {
+        toast.error(result.error ?? `Could not archive "${taskName}".`);
+        return;
+      }
+      // If we archived the task we're currently viewing, drop back to the list.
+      if (pathname === href) {
+        router.push("/tasks");
+      }
+    });
+  };
 
   return (
     <div className="pt-4">
@@ -275,31 +295,57 @@ function GoatSidebarTasks() {
           const displayStatus = goatWorkflowTaskDisplayStatus(task);
           const href = `/tasks/${encodeURIComponent(task.displayId)}`;
           const active = pathname === href;
+          const archiving = archivingId === task.id;
+          const canArchive = displayStatus !== "running";
           return (
-            <Link
+            <div
               key={task.id}
-              href={href}
-              prefetch
-              aria-current={active ? "page" : undefined}
-              className={`group flex w-full items-start gap-2.5 rounded-md px-2 py-[5px] text-left transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+              className={`group flex items-center rounded-md transition-colors duration-150 ${
                 active
                   ? "bg-surface-active text-ink"
                   : "text-ink/90 hover:bg-surface-hover hover:text-ink"
               }`}
             >
-              <span
-                aria-hidden="true"
-                className={`mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full ${WORKFLOW_TASK_STATUS_DOT_CLASS[displayStatus]}`}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12.5px] leading-tight tracking-[-0.005em]">
-                  {task.name}
+              <Link
+                href={href}
+                prefetch
+                aria-current={active ? "page" : undefined}
+                className="flex min-w-0 flex-1 items-start gap-2.5 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full ${WORKFLOW_TASK_STATUS_DOT_CLASS[displayStatus]}`}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12.5px] leading-tight tracking-[-0.005em]">
+                    {task.name}
+                  </span>
+                  <span className="block truncate text-[11px] leading-tight text-ink-subtle">
+                    {task.outcomeComment?.trim() || GOAT_WORKFLOW_TASK_STATUS_COPY[displayStatus]}
+                  </span>
                 </span>
-                <span className="block truncate text-[11px] leading-tight text-ink-subtle">
-                  {task.outcomeComment?.trim() || GOAT_WORKFLOW_TASK_STATUS_COPY[displayStatus]}
-                </span>
-              </span>
-            </Link>
+              </Link>
+              {canArchive ? (
+                <button
+                  type="button"
+                  title="Archive task"
+                  aria-label={`Archive ${task.name}`}
+                  disabled={archiving}
+                  onClick={() => archiveTask(task.id, task.name, href)}
+                  className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center self-start rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+                    archiving
+                      ? "opacity-100"
+                      : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                  }`}
+                >
+                  {archiving ? (
+                    <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
+                  ) : (
+                    <Archive size={13} strokeWidth={1.75} />
+                  )}
+                </button>
+              ) : null}
+            </div>
           );
         })}
       </nav>
