@@ -1125,8 +1125,22 @@
     {
       "idx": 160,
       "version": "7",
+      "when": 1785239118176,
+      "tag": "0160_goat_codex_engine_recovery_boundary",
+      "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "7",
+      "when": 1785239118177,
+      "tag": "0161_goat_latitude_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 162,
+      "version": "7",
       "when": 1785240000000,
-      "tag": "0160_goat_claude_code_engine",
+      "tag": "0162_goat_claude_code_engine",
       "breakpoints": true
     }
   ]

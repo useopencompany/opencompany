@@ -6,7 +6,7 @@ import {
   loadEncryptionKey,
   UnsupportedKeyVersionError,
 } from "@opencompany/crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type * as goatSchema from "./goat-schema";
 import {
@@ -59,6 +59,7 @@ export async function saveGoatClaudeCodeCredential(input: {
     ENCRYPTION_KEY_VERSION,
   );
   const status = input.status ?? "connected";
+  const lastValidatedAt = input.validatedAt ?? null;
 
   const [credential] = await input.db
     .insert(goatClaudeCodeCredentials)
@@ -68,7 +69,7 @@ export async function saveGoatClaudeCodeCredential(input: {
       encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
       status,
       statusReason: input.statusReason ?? null,
-      lastValidatedAt: input.validatedAt ?? now,
+      lastValidatedAt,
       lastRotatedAt: now,
       updatedAt: now,
     })
@@ -79,7 +80,7 @@ export async function saveGoatClaudeCodeCredential(input: {
         encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
         status,
         statusReason: input.statusReason ?? null,
-        lastValidatedAt: input.validatedAt ?? now,
+        lastValidatedAt,
         lastRotatedAt: now,
         updatedAt: now,
       },
@@ -93,6 +94,31 @@ export async function saveGoatClaudeCodeCredential(input: {
 
   if (!credential) throw new Error("Could not persist Goat Claude Code credential.");
   return credential;
+}
+
+export async function markGoatClaudeCodeCredentialValidated(input: {
+  db: GoatClaudeCodeAuthDb;
+  userWorkosId: string;
+  expectedUpdatedAt: Date;
+  now?: Date;
+}) {
+  const now = input.now ?? new Date();
+  const [credential] = await input.db
+    .update(goatClaudeCodeCredentials)
+    .set({
+      status: "connected",
+      statusReason: null,
+      lastValidatedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(goatClaudeCodeCredentials.userWorkosId, input.userWorkosId),
+        eq(goatClaudeCodeCredentials.updatedAt, input.expectedUpdatedAt),
+      ),
+    )
+    .returning({ userWorkosId: goatClaudeCodeCredentials.userWorkosId });
+  return Boolean(credential);
 }
 
 export async function markGoatClaudeCodeCredentialNeedsReauth(input: {

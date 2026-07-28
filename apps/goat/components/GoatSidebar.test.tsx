@@ -103,7 +103,7 @@ describe("GoatSidebar", () => {
     expect(home).toHaveAttribute("aria-current", "page");
     expect(within(nav).queryByRole("link", { name: "Brain" })).not.toBeInTheDocument();
     expect(screen.getByText("Brains")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "General" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("link", { name: "General" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("button", { name: "New brain" })).toHaveClass("opacity-0");
     expect(screen.queryByText("New brain")).not.toBeInTheDocument();
     expect(
@@ -138,7 +138,7 @@ describe("GoatSidebar", () => {
 
     const nav = screen.getByRole("navigation", { name: "Goat primary" });
     expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
-    expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page");
   });
 
   it("shows MCP setup until the first successful query is verified", () => {
@@ -171,24 +171,14 @@ describe("GoatSidebar", () => {
     expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
   });
 
-  it("opens the active brain route from the brain list", async () => {
-    const user = userEvent.setup();
+  it("exposes the active brain as a prefetchable route", () => {
     pathnameMock.value = "/";
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    await user.click(screen.getByRole("button", { name: "General" }));
-
-    expect(routerMock.push).toHaveBeenCalledWith("/brain/goat_brain_1");
-  });
-
-  it("opens the active brain route from the brain list", async () => {
-    const user = userEvent.setup();
-    pathnameMock.value = "/";
-    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
-
-    await user.click(screen.getByRole("button", { name: "General" }));
-
-    expect(routerMock.push).toHaveBeenCalledWith("/brain/goat_brain_1");
+    expect(screen.getByRole("link", { name: "General" })).toHaveAttribute(
+      "href",
+      "/brain/goat_brain_1",
+    );
   });
 
   it("does not show brain creation to workspace members", () => {
@@ -197,7 +187,7 @@ describe("GoatSidebar", () => {
 
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    expect(screen.getByRole("button", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "General" })).toBeInTheDocument();
     expect(screen.queryByText("member")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "New brain" })).not.toBeInTheDocument();
   });

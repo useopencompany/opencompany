@@ -9,6 +9,7 @@ import { goatClaudeCodeCredentials } from "@opencompany/db/goat-schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
+import { validateGoatClaudeCodeToken } from "@/lib/claude-code-token";
 
 export type GoatClaudeCodeAuthSettings = {
   status: "connected" | "needs_reauth" | null;
@@ -16,10 +17,6 @@ export type GoatClaudeCodeAuthSettings = {
   lastValidatedAt: string | null;
   lastRotatedAt: string | null;
 };
-
-// Long-lived OAuth tokens from `claude setup-token` are prefixed sk-ant-oat.
-const CLAUDE_CODE_TOKEN_PREFIX = "sk-ant-oat";
-const CLAUDE_CODE_TOKEN_MAX_LENGTH = 512;
 
 export async function loadCurrentGoatClaudeCodeAuthSettings(): Promise<GoatClaudeCodeAuthSettings> {
   const { user } = await currentGoatUser();
@@ -54,25 +51,15 @@ export async function isGoatClaudeCodeConnectedForUser(userWorkosId: string) {
 }
 
 export async function saveGoatClaudeCodeToken(token: string) {
-  const trimmed = token.trim();
-  if (!trimmed) {
-    return { ok: false as const, error: "Paste the token printed by `claude setup-token`." };
-  }
-  if (!trimmed.startsWith(CLAUDE_CODE_TOKEN_PREFIX)) {
-    return {
-      ok: false as const,
-      error: "That doesn't look like a Claude Code token (expected it to start with sk-ant-oat).",
-    };
-  }
-  if (trimmed.length > CLAUDE_CODE_TOKEN_MAX_LENGTH || /\s/.test(trimmed)) {
-    return { ok: false as const, error: "That doesn't look like a valid Claude Code token." };
-  }
+  const validated = validateGoatClaudeCodeToken(token);
+  if (!validated.ok) return validated;
 
   const { user } = await currentGoatUser();
   await saveGoatClaudeCodeCredential({
     db: getDb(),
     userWorkosId: user.workosUserId,
-    authJson: { token: trimmed },
+    authJson: { token: validated.token },
+    validatedAt: null,
   });
   revalidatePath("/settings");
   return { ok: true as const };

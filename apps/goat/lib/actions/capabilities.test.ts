@@ -2,14 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   effectiveCapabilityMode,
   GOAT_PROVIDER_CAPABILITIES,
+  isGoatCapabilityId,
   isGoatCapabilityMode,
   providerCapability,
 } from "@/lib/actions/capabilities";
 
 describe("GOAT_PROVIDER_CAPABILITIES", () => {
-  it("registers Gmail reads on by default and sends behind ask", () => {
+  it("registers Gmail reads and drafts on by default and sends behind ask", () => {
     expect(GOAT_PROVIDER_CAPABILITIES.gmail).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "draft", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
     ]);
   });
@@ -89,7 +91,15 @@ describe("mode helpers", () => {
     expect(isGoatCapabilityMode(undefined)).toBe(false);
   });
 
+  it("recognizes provider-specific capability ids", () => {
+    expect(isGoatCapabilityId("read")).toBe(true);
+    expect(isGoatCapabilityId("draft")).toBe(true);
+    expect(isGoatCapabilityId("write")).toBe(true);
+    expect(isGoatCapabilityId("send")).toBe(false);
+  });
+
   it("looks up registered capabilities", () => {
+    expect(providerCapability("gmail", "draft")?.label).toBe("Create drafts");
     expect(providerCapability("gmail", "write")?.label).toBe("Send emails");
     expect(providerCapability("google_drive", "read")?.label).toBe("Find & read files");
     expect(providerCapability("google_drive", "write")?.label).toBe("Edit Google Docs");

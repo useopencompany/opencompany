@@ -11,12 +11,18 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { runGoatClaudeCodeChatTurn } from "./goat-claude-code-chat";
 import { runGoatCodexChatTurn } from "./goat-codex-chat";
-import { GoatCodexChatHandoffError, GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
+import {
+  GoatCodexChatHandoffError,
+  GoatCodexChatLeaseLostError,
+  GoatCodexChatRetryableInfrastructureError,
+} from "./goat-codex-chat-errors";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat-worker" });
 const GOAT_CODEX_CHAT_SANDBOX_SWEEP_INTERVAL_MS = 60_000;
+const GOAT_CODEX_CHAT_RETRY_BASE_DELAY_MS = 5_000;
+const GOAT_CODEX_CHAT_RETRY_MAX_DELAY_MS = 60_000;
 
 let registeredWakeup: (() => void) | null = null;
 
@@ -43,6 +49,8 @@ type ClaimedTurnRow = {
   interrupt_requested_at: Date | string | null;
   attempts: number;
   recovery_attempts: number;
+  engine_recovery_required: boolean;
+  engine_turn_baseline_ids: string[] | null;
   lease_id: string | null;
   lease_owner: string | null;
   lease_expires_at: Date | string | null;
@@ -176,7 +184,9 @@ export async function runClaimedTurn(
     );
   }
 
-  if (turn.attempts > 1) {
+  const recoveryRequired =
+    turn.attempts > 1 && (turn.engineRecoveryRequired || turn.codexTurnId !== null);
+  if (recoveryRequired) {
     logger.info("Reattaching reclaimed Goat Codex chat turn", {
       event: "opencompany.goat_codex_chat_turn_reattach_started",
       turn_id: turn.id,
@@ -219,26 +229,112 @@ export async function runClaimedTurn(
     Math.max(5_000, Math.floor(env.jobLeaseTtlMs / 3)),
   );
   let handedOff = false;
+  let retryableError: GoatCodexChatRetryableInfrastructureError | null = null;
   try {
-    const turnInput = {
-      turn,
-      session,
-      env,
-      ...(turn.attempts > 1 ? { recovery: { reason: "lease_reclaimed" as const } } : {}),
-      shouldAbort: () =>
-        options.handoffSignal?.aborted ? new GoatCodexChatHandoffError() : heartbeatAbort,
-    };
-    const outcome =
-      session.engine === "claude_code"
-        ? await runGoatClaudeCodeChatTurn(turnInput)
-        : await runGoatCodexChatTurn(turnInput);
-    handedOff = outcome === "handed_off";
+    try {
+      const turnInput = {
+        turn,
+        session,
+        env,
+        ...(recoveryRequired ? { recovery: { reason: "lease_reclaimed" as const } } : {}),
+        shouldAbort: () =>
+          options.handoffSignal?.aborted ? new GoatCodexChatHandoffError() : heartbeatAbort,
+      };
+      const outcome =
+        session.engine === "claude_code"
+          ? await runGoatClaudeCodeChatTurn(turnInput)
+          : await runGoatCodexChatTurn(turnInput);
+      handedOff = outcome === "handed_off";
+    } catch (error) {
+      if (error instanceof GoatCodexChatHandoffError) {
+        handedOff = true;
+      } else if (error instanceof GoatCodexChatRetryableInfrastructureError) {
+        retryableError = error;
+      } else {
+        throw error;
+      }
+    }
   } finally {
     clearInterval(heartbeat);
+  }
+  if (retryableError) {
+    const retryAt = goatCodexChatRetryAt(new Date(), turn.attempts);
+    await deferGoatCodexChatTurnForRetry({
+      turnId: turn.id,
+      codexChatSessionId: turn.codexChatSessionId,
+      userWorkosId: turn.userWorkosId,
+      leaseId,
+      leaseOwner,
+      retryAt,
+    });
+    logger.warn("Deferred Goat Codex chat turn after transient infrastructure failure", {
+      event: "opencompany.goat_codex_chat_turn_retry_deferred",
+      turn_id: turn.id,
+      codex_chat_session_id: session.id,
+      attempt: turn.attempts,
+      retry_at: retryAt.toISOString(),
+      error_name:
+        retryableError.cause instanceof Error
+          ? retryableError.cause.name
+          : typeof retryableError.cause,
+      error:
+        retryableError.cause instanceof Error
+          ? retryableError.cause.message
+          : retryableError.message,
+    });
+    return;
   }
   if (handedOff) {
     await releaseGoatCodexChatTurnForHandoff({ turnId: turn.id, leaseId, leaseOwner });
   }
+}
+
+export async function deferGoatCodexChatTurnForRetry(input: {
+  turnId: string;
+  codexChatSessionId: string;
+  userWorkosId: string;
+  leaseId: string;
+  leaseOwner: string;
+  retryAt: Date;
+}) {
+  const now = new Date();
+  const result = await getDb().execute(sql`
+    WITH deferred AS (
+      UPDATE goat.codex_chat_turns AS turn
+      SET lease_id = NULL,
+          lease_owner = NULL,
+          lease_expires_at = ${input.retryAt},
+          error = NULL,
+          updated_at = ${now}
+      WHERE turn.id = ${input.turnId}
+        AND turn.codex_chat_session_id = ${input.codexChatSessionId}
+        AND turn.user_workos_id = ${input.userWorkosId}
+        AND turn.lease_id = ${input.leaseId}
+        AND turn.lease_owner = ${input.leaseOwner}
+        AND turn.status = 'running'
+      RETURNING turn.id
+    )
+    UPDATE goat.codex_chat_sessions AS session
+    SET status = 'queued',
+        active_turn_id = ${input.turnId},
+        error = NULL,
+        updated_at = ${now}
+    WHERE session.id = ${input.codexChatSessionId}
+      AND session.user_workos_id = ${input.userWorkosId}
+      AND EXISTS (SELECT 1 FROM deferred)
+    RETURNING session.id
+  `);
+  if (rowsFromExecute(result).length === 0) {
+    throw new GoatCodexChatLeaseLostError();
+  }
+}
+
+export function goatCodexChatRetryAt(now: Date, attempts: number) {
+  const delayMs = Math.min(
+    GOAT_CODEX_CHAT_RETRY_MAX_DELAY_MS,
+    GOAT_CODEX_CHAT_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attempts - 1),
+  );
+  return new Date(now.getTime() + delayMs);
 }
 
 export async function releaseGoatCodexChatTurnForHandoff(input: {
@@ -541,6 +637,8 @@ function turnFromRow(row: ClaimedTurnRow): GoatCodexChatTurn {
     interruptRequestedAt: dateFromRow(row.interrupt_requested_at),
     attempts: row.attempts,
     recoveryAttempts: row.recovery_attempts,
+    engineRecoveryRequired: row.engine_recovery_required,
+    engineTurnBaselineIds: row.engine_turn_baseline_ids,
     leaseId: row.lease_id,
     leaseOwner: row.lease_owner,
     leaseExpiresAt: dateFromRow(row.lease_expires_at),

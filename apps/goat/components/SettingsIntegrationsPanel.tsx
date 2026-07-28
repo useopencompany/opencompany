@@ -54,7 +54,7 @@ import {
   type GoatStripeProviderState,
   goatIntegrationStateFromRows,
 } from "@/lib/integration-state";
-import { hasGoatGmailSendScope } from "@/lib/integrations/gmail-scopes";
+import { hasGoatGmailDraftScope, hasGoatGmailSendScope } from "@/lib/integrations/gmail-scopes";
 import { hasGoatGoogleDriveWriteScope } from "@/lib/integrations/google-drive-scopes";
 import {
   goatIntegrationConnectionError,
@@ -120,6 +120,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Connect issues, projects, and comments from Linear.",
     Icon: LinearIcon,
     tileClass: "bg-[#5E6AD2] text-white",
+  },
+  latitude: {
+    label: "Latitude",
+    description: "Observe, understand, and improve your AI agents from Goat.",
+    monogram: "L",
+    tileClass: "bg-[#171717] text-white",
   },
   slack: {
     label: "Slack",
@@ -273,6 +279,7 @@ const PERSONAL_ACCOUNT_PROVIDERS = [
   "google_calendar",
   "google_drive",
   "slack",
+  "latitude",
 ] as const satisfies readonly GoatPersonalAccountProvider[];
 
 function countConnectedAccounts(
@@ -372,6 +379,10 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="slack"
               accounts={integrations.personalAccounts.slack}
+            />
+            <IntegrationProviderGroupCard
+              provider="latitude"
+              accounts={integrations.personalAccounts.latitude}
             />
             <CodexIntegrationCard integration={integrations.codex} />
             <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
@@ -633,8 +644,12 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
     account.provider === "google_drive" &&
     account.connected &&
     !hasGoatGoogleDriveWriteScope(account.scopes);
-  const needsGmailSendScope =
-    account.provider === "gmail" && account.connected && !hasGoatGmailSendScope(account.scopes);
+  const gmailScopeUpgradeLabel =
+    account.provider === "gmail" && account.connected && !hasGoatGmailDraftScope(account.scopes)
+      ? hasGoatGmailSendScope(account.scopes)
+        ? "Enable drafts"
+        : "Enable drafts & sending"
+      : null;
 
   const beginDisconnect = () => {
     setError(null);
@@ -693,12 +708,12 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
               Enable editing
             </a>
           ) : null}
-          {needsGmailSendScope ? (
+          {gmailScopeUpgradeLabel ? (
             <a
               href={integrationConnectHref("gmail")}
               className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
             >
-              Enable sending
+              {gmailScopeUpgradeLabel}
             </a>
           ) : null}
           <button
@@ -1032,7 +1047,7 @@ function ClaudeCodeIntegrationCard({ integration }: { integration: GoatClaudeCod
     integration.status === "connected"
       ? integration.lastValidatedAt
         ? `Connected ${formatDateTime(integration.lastValidatedAt)}`
-        : "Subscription connected"
+        : "Token saved; validation pending"
       : integration.statusReason;
 
   return (
@@ -1137,19 +1152,7 @@ function integrationStatus(
   return "Connect";
 }
 
-function integrationConnectHref(
-  provider:
-    | GoatGoogleProviderState["provider"]
-    | "linear"
-    | "github"
-    | "jamie"
-    | "slack"
-    | "hubspot"
-    | "granola"
-    | "fathom"
-    | "attio"
-    | "stripe",
-) {
+function integrationConnectHref(provider: Exclude<IntegrationMetaKey, "codex">) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
     return "/api/integrations/google-calendar/start?returnTo=/settings/integrations";
@@ -1167,6 +1170,8 @@ function integrationConnectHref(
   if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
+  if (provider === "latitude")
+    return "/api/integrations/latitude/start?returnTo=/settings/integrations";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";
 }
 

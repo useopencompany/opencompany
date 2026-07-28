@@ -6,6 +6,7 @@ import {
 import {
   loadGoatClaudeCodeCredential,
   markGoatClaudeCodeCredentialNeedsReauth,
+  markGoatClaudeCodeCredentialValidated,
 } from "@opencompany/db/goat-claude-code-auth";
 import type { GoatCodexChatSession, GoatCodexChatTurn } from "@opencompany/db/goat-schema";
 import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
@@ -64,7 +65,7 @@ const AUTH_FAILURE_PATTERN =
 
 export async function loadGoatClaudeCodeAuth(
   userWorkosId: string,
-): Promise<ClaudeCodeCliAuth | null> {
+): Promise<(ClaudeCodeCliAuth & { credentialUpdatedAt: Date }) | null> {
   let credential: Awaited<ReturnType<typeof loadGoatClaudeCodeCredential>>;
   try {
     credential = await loadGoatClaudeCodeCredential({ db: getDb(), userWorkosId });
@@ -91,6 +92,7 @@ export async function loadGoatClaudeCodeAuth(
       typeof credential.authJson.rateLimitTier === "string"
         ? credential.authJson.rateLimitTier
         : null,
+    credentialUpdatedAt: credential.updatedAt,
   };
 }
 
@@ -357,6 +359,36 @@ export async function runGoatClaudeCodeChatTurn(input: {
         summary = { ...summary, error: GOAT_CLAUDE_CODE_CHAT_REAUTH_MESSAGE };
       }
     }
+    if (summary.status === "success") {
+      executionStage = "validate_credential";
+      try {
+        const validated = await markGoatClaudeCodeCredentialValidated({
+          db: getDb(),
+          userWorkosId: turn.userWorkosId,
+          expectedUpdatedAt: auth.credentialUpdatedAt,
+        });
+        if (!validated) {
+          logger.info("Claude Code credential changed before validation completed", {
+            event: "opencompany.goat_claude_chat_credential_validation_stale",
+            turn_id: turn.id,
+            user_workos_id: turn.userWorkosId,
+          });
+        }
+      } catch (error) {
+        captureException(error, {
+          event: "opencompany.goat_claude_chat_credential_validation_failed",
+          turn_id: turn.id,
+          user_workos_id: turn.userWorkosId,
+        });
+        logger.warn("Failed to record successful Claude Code credential validation", {
+          event: "opencompany.goat_claude_chat_credential_validation_failed",
+          turn_id: turn.id,
+          user_workos_id: turn.userWorkosId,
+          error,
+        });
+      }
+    }
+    executionStage = "finalize";
     await projector.finalize(toCodexAppServerSummary(summary));
   } catch (error) {
     const effectiveError =

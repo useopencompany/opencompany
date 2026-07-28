@@ -1,16 +1,17 @@
 import type { GoatActionProviderId } from "@/lib/actions/types";
 
-// Human-readable permission "capabilities" for chat actions. Deliberately
-// coarse (read/write per provider) so the settings UI stays legible to
-// non-technical users. Providers absent from the registry have no
-// configurable capabilities: their actions behave as read=on, today's
-// behavior, and the settings UI shows nothing for them.
+// Human-readable permission "capabilities" for chat actions. Keep these
+// provider-level groups legible to non-technical users while separating
+// materially different outcomes (for example, saving a Gmail draft versus
+// sending an email). Providers absent from the registry have no configurable
+// capabilities: their actions behave as read=on, today's behavior, and the
+// settings UI shows nothing for them.
 //
 // This module must stay pure and client-safe — it is imported by both the
 // server-side action catalog and the settings panel.
 
 export type GoatCapabilityMode = "on" | "off" | "ask";
-export type GoatCapabilityId = "read" | "write";
+export type GoatCapabilityId = "read" | "draft" | "write";
 
 export type GoatProviderCapability = {
   id: GoatCapabilityId;
@@ -29,6 +30,12 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
       id: "read",
       label: "Read emails",
       description: "Search and read messages and threads in your Gmail account.",
+      defaultMode: "on",
+    },
+    {
+      id: "draft",
+      label: "Create drafts",
+      description: "Save new email drafts in Gmail for you to review and send.",
       defaultMode: "on",
     },
     {
@@ -102,6 +109,20 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  latitude: [
+    {
+      id: "read",
+      label: "Read Latitude",
+      description: "Inspect projects, traces, signals, datasets, evaluations, and workspace data.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Manage Latitude",
+      description: "Create or change resources in your Latitude organization.",
+      defaultMode: "ask",
+    },
+  ],
 };
 
 export function isGoatCapabilityMode(value: unknown): value is GoatCapabilityMode {
@@ -109,7 +130,7 @@ export function isGoatCapabilityMode(value: unknown): value is GoatCapabilityMod
 }
 
 export function isGoatCapabilityId(value: unknown): value is GoatCapabilityId {
-  return value === "read" || value === "write";
+  return value === "read" || value === "draft" || value === "write";
 }
 
 // The lookups accept any provider string (integration rows carry providers

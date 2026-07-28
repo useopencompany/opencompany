@@ -884,6 +884,21 @@ export function isCommandTimeoutError(error: unknown) {
   );
 }
 
+// Sandbox create/connect uses the E2B control plane, which can reject healthy durable sessions
+// during capacity pressure, rate limiting, or a network timeout. Keep this policy scoped to
+// acquisition: the same broad errors during filesystem or command execution can be application
+// failures and must not replay a turn automatically.
+export function isRetryableSandboxAcquisitionError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "TimeoutError" || error.name === "RateLimitError") return true;
+  if (error.name === "AbortError") return true;
+  if (error.name === "TypeError" && /fetch failed|network|socket/i.test(error.message)) return true;
+  if (error.name !== "SandboxError") return false;
+
+  const status = Number.parseInt(error.message.match(/^(\d{3}):/)?.[1] ?? "", 10);
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
 function gitDiffCommand(workRoot: string) {
   return [
     `WORK=${shellQuote(workRoot)}`,

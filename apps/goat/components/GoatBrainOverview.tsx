@@ -13,7 +13,6 @@ import {
   type GoatBrainActivityFilter,
   GoatBrainRecentActivity,
 } from "@/components/GoatBrainActivity";
-import type { GoatBrainDocumentView } from "@/lib/brain";
 import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
 
 const ACTIVITY_FILTER_OPTIONS = [
@@ -33,25 +32,18 @@ const ACTIVITY_FILTER_LABELS: Record<GoatBrainActivityFilter, string> = {
 export function GoatBrainOverview({
   brainName,
   brainRef,
-  documents,
   stats,
 }: {
   brainName: string;
   brainRef: string;
-  documents: GoatBrainDocumentView[];
   stats: GoatBrainOverviewStats;
 }) {
   const [activityFilter, setActivityFilter] = useState<GoatBrainActivityFilter>("filed");
-  const windowStart = new Date(stats.windowStartedAt).getTime();
-  const itemsAdded = documents.reduce((total, document) => {
-    const createdAt = new Date(document.createdAt).getTime();
-    return Number.isFinite(createdAt) && createdAt >= windowStart ? total + 1 : total;
-  }, 0);
 
   const metrics = [
     {
       label: "Items added",
-      value: itemsAdded,
+      value: stats.itemsAddedLast7Days,
       description: "Last 7 days",
       icon: FilePlus2,
     },

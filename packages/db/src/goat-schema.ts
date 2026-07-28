@@ -64,7 +64,8 @@ export type GoatIntegrationProvider =
   | "granola"
   | "fathom"
   | "attio"
-  | "stripe";
+  | "stripe"
+  | "latitude";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear) are always personal. Installation-bound
@@ -227,6 +228,8 @@ export type GoatTaskToolName =
   | "calendar_get_freebusy"
   | "linear_search_tools"
   | "linear_use_tool"
+  | "latitude_search_tools"
+  | "latitude_use_tool"
   | "github_clone_repository"
   | "github_shell"
   | "github_status"
@@ -1371,7 +1374,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1420,7 +1423,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1474,7 +1477,7 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -3330,6 +3333,8 @@ export const goatCodexChatTurns = goat.table(
     }),
     attempts: integer("attempts").notNull().default(0),
     recoveryAttempts: integer("recovery_attempts").notNull().default(0),
+    engineRecoveryRequired: boolean("engine_recovery_required").notNull().default(false),
+    engineTurnBaselineIds: jsonb("engine_turn_baseline_ids").$type<string[]>(),
     leaseId: text("lease_id"),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),

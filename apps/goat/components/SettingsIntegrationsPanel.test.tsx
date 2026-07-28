@@ -108,6 +108,22 @@ describe("SettingsIntegrationsPanel", () => {
     expect(screen.queryByRole("link", { name: "/settings/mcp" })).not.toBeInTheDocument();
   });
 
+  it("shows a saved Claude Code token as pending until a successful turn validates it", () => {
+    const integrations = goatIntegrationStateFromRows([]) as GoatIntegrationState;
+    integrations.claude_code = {
+      provider: "claude_code",
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      lastValidatedAt: null,
+    };
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    expect(screen.getByText("Token saved; validation pending")).toBeInTheDocument();
+  });
+
   it("switches between the workspace and personal scopes", () => {
     render(
       <SettingsIntegrationsPanel
@@ -179,7 +195,7 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
-  it("shows Gmail read and send controls and prompts older connections to grant send access", () => {
+  it("shows separate Gmail read, draft, and send controls with one scope-upgrade prompt", () => {
     const integrations = goatIntegrationStateFromRows([
       {
         id: "gint_gmail",
@@ -205,7 +221,14 @@ describe("SettingsIntegrationsPanel", () => {
     const sendPermission = within(gmailCard as HTMLElement).getByRole("group", {
       name: "Send emails permission",
     });
+    const draftPermission = within(gmailCard as HTMLElement).getByRole("group", {
+      name: "Create drafts permission",
+    });
     expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(draftPermission).getByRole("button", { name: "On" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -214,8 +237,39 @@ describe("SettingsIntegrationsPanel", () => {
       "true",
     );
     expect(
-      within(gmailCard as HTMLElement).getByRole("link", { name: "Enable sending" }),
+      within(gmailCard as HTMLElement).getByRole("link", { name: "Enable drafts & sending" }),
     ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
+  });
+
+  it("prompts send-enabled Gmail accounts only for draft access", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_gmail",
+        provider: "gmail",
+        externalId: "google_account_1",
+        accountEmail: "louis@example.com",
+        status: "connected",
+        scopes: [
+          "https://www.googleapis.com/auth/gmail.readonly",
+          "https://www.googleapis.com/auth/gmail.send",
+        ],
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    const gmailCard = screen
+      .getByText("Let Goat read and act on your email.")
+      .closest("div.rounded-2xl");
+    expect(gmailCard).not.toBeNull();
+    expect(
+      within(gmailCard as HTMLElement).getByRole("link", { name: "Enable drafts" }),
+    ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
+    expect(
+      within(gmailCard as HTMLElement).queryByRole("link", { name: "Enable drafts & sending" }),
+    ).toBeNull();
   });
 
   it("shows Attio read and write permission controls on the connected workspace", () => {
@@ -326,6 +380,41 @@ describe("SettingsIntegrationsPanel", () => {
         name: /write|send/i,
       }),
     ).not.toBeInTheDocument();
+  });
+
+  it("connects Latitude as a personal OAuth integration with guarded writes", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_latitude",
+        provider: "latitude",
+        externalId: "latitude_mcp",
+        connectionLabel: "Latitude",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    const latitudeCard = screen
+      .getByText("Observe, understand, and improve your AI agents from Goat.")
+      .closest("div.rounded-2xl");
+    expect(latitudeCard).not.toBeNull();
+    expect(within(latitudeCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    expect(
+      within(latitudeCard as HTMLElement).getByRole("group", {
+        name: "Read Latitude permission",
+      }),
+    ).toHaveTextContent("On");
+    expect(
+      within(latitudeCard as HTMLElement).getByRole("group", {
+        name: "Manage Latitude permission",
+      }),
+    ).toHaveTextContent("Ask");
+    expect(
+      within(latitudeCard as HTMLElement).getByRole("link", { name: "Add account" }),
+    ).toHaveAttribute("href", "/api/integrations/latitude/start?returnTo=/settings/integrations");
   });
 
   it("shows a workspace-owned Stripe connection and test-mode label", () => {

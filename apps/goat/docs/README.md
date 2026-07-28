@@ -27,7 +27,7 @@ The Goat task path is not currently a full OpenCompany `.agent` session. It reus
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
 does not yet use `agent_sessions`, `.agent` files, Brain mounts, skills, approvals, or
 `delegate_to_agent`. It does expose selected user-scoped MCP integrations through the Goat
-task harness, starting with Linear.
+task harness, including Linear and Latitude.
 
 The wider OpenCompany runner does have a full multi-agent session loop. Goat can either keep its
 lighter task harness and grow it, or move durable Goat work onto that full session substrate.
@@ -60,7 +60,7 @@ Runner
     claim queued task with lease
     plan harness spec with Gateway planner model
     create durable assistant task message
-    streamText with Gateway, Exa, Gmail, Calendar, and Linear MCP tools
+    streamText with Gateway, Exa, Gmail, Calendar, Linear MCP, and Latitude MCP tools
       append durable message and tool events
     use final assistant message as the task result
     mark task succeeded, failed, or canceled
@@ -174,16 +174,21 @@ the workspace's enabled managed capabilities, and the model must discover a sour
 ids and parameter schemas before executing one. Slack exposes
 conversation, message, thread, member, and scope-dependent search reads under one **Read Slack**
 permission, which defaults to **On** and can be changed to **Ask** or **Off** under Integrations.
-Gmail exposes message search, message and thread retrieval, and explicitly requested plain-text email
-sends, with an explicit account required when several are connected. Google Calendar exposes a
-bounded event-list read, while Google Drive exposes file search, live Google Doc reads, and exact
-text replacement in Google Docs. Linear exposes a curated catalog for reading issues and workspace
-context, creating and updating issues, and adding comments. Attio exposes bounded fuzzy search across
-standard people, companies, and deals; list, field, and membership discovery; and bounded list reads
-with saved-view filters, explicit filters, sorting, and pagination. Explicitly requested Gmail sends,
-Google Doc edits, Attio record and list-entry updates, Linear writes, and Google Calendar event
-creation require confirmation by default and can be configured under Integrations. An explicit
-account or workspace is required when several are connected. Stripe exposes read-only workspace
+Gmail exposes message search, message and thread retrieval, explicitly requested plain-text draft
+creation, and explicitly requested sends, with an explicit account required when several are
+connected. Draft creation and sending have separate per-account permissions: creating drafts defaults
+to **On** because it leaves the email for manual review and sending, while sending defaults to
+confirmation-gated **Ask**. Google Calendar exposes a bounded event-list read, while Google Drive
+exposes file search, live Google Doc reads, and exact text replacement in Google Docs. Linear exposes
+a curated catalog for reading issues and workspace context, creating and updating issues, and adding
+comments. Attio exposes bounded fuzzy search across standard people, companies, and deals; list,
+field, and membership discovery; and bounded list reads with saved-view filters, explicit filters,
+sorting, and pagination. Explicitly requested Gmail sends, Google Doc edits, Attio record and
+list-entry updates, Linear writes, and Google Calendar event creation require confirmation by default
+and can be configured under Integrations. Latitude's live MCP catalog is mapped into the same action
+surface: tools annotated read-only default to On, while mutations and tools without that annotation
+default to Ask. An explicit account or workspace is required when several are connected. Stripe
+exposes read-only workspace
 metrics for balance activity by period, current balances, subscription health with estimated MRR,
 and open receivables. Stripe uses an encrypted restricted API key and is excluded from automatic
 Brain-fill surveying because those financial metrics are live operational state. Disconnected or
@@ -199,8 +204,12 @@ enrichment actions. Every paid execution inspects its live endpoint schema and p
 checks shared workspace credits, and requires a one-time approval above the per-action or per-turn
 thresholds. Provider data is treated as hostile input, redacted and bounded before it enters the chat
 trace, and billed once from the settled provider cost plus the platform fee. The durable
-`goat.capability_runs` row stores only the parameter hash and lifecycle/cost metadata; raw results
-stay in the requesting chat. The hourly billing reconciler settles interrupted or delayed runs.
+`goat.capability_runs` row stores only the parameter hash and lifecycle/cost metadata; only the
+safety-bounded action result enters the requesting chat. The hourly billing reconciler settles
+interrupted or delayed runs.
+YouTube transcript search fetches one full timestamped transcript through a reviewed Monid-backed
+Apify actor, searches it server-side for the requested phrase, and returns only bounded timestamped
+context windows to the chat.
 `MONID_API_KEY` belongs in Infisical `prod` + `/goat`, and
 `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new turns.
 `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint
@@ -321,14 +330,25 @@ visible to the model rather than merely path-referenced. Keeping uploads outside
 directory prevents them from appearing in repository changes.
 
 The Codex app-server daemon runs behind its Unix-socket control transport inside E2B and outlives
-the runner-side proxy. A runner shutdown detaches that proxy, releases the delivery lease, and lets
-the next worker `thread/resume` the same stored Codex turn id. The reconnect reconciles completed
+the runner-side proxy. A runner shutdown detaches that proxy, keeps the sandbox on its active
+timeout, releases the delivery lease, and lets the next worker `thread/resume` the same stored Codex
+turn id. The reconnect reconciles completed
 items and a terminal turn that landed while no runner was attached; stable per-item event keys make
 that replay idempotent. Lease claims count infrastructure ownership changes, while
 `recovery_attempts` increments only when the original Codex turn is missing or was interrupted and
-the worker must start one guarded continuation. A dead proxy with a pending user-input request
-forces that guarded continuation because server-initiated requests cannot move between client
-connections.
+the worker must start one guarded continuation. Persisting the replacement Codex turn id rearms
+that guard for the new engine turn, so long-running chats can survive repeated deploys without
+allowing two continuations for the same missing turn. A dead proxy with a pending user-input
+request forces that guarded continuation because server-initiated requests cannot move between
+client connections.
+
+Transient E2B capacity, rate-limit, network, and acquisition-timeout failures defer the same durable
+turn with bounded exponential backoff instead of writing a failed assistant message. Authentication,
+template, and other configuration failures remain terminal. A deferred turn stays interruptible and
+keeps later messages behind it in the per-session FIFO. Before the runner can invoke Codex, it
+durably snapshots the engine thread's existing turn ids and marks the turn as requiring recovery.
+This keeps pre-engine infrastructure retries distinct from post-invocation lease recovery, and lets
+a replacement worker identify an unpersisted new engine turn without adopting older active work.
 
 Session skills are reconciled before every Cloud Codex turn under
 `/home/user/opencompany-goat/codex-chat/.agents/skills/`. The managed-skills manifest removes only
@@ -570,8 +590,13 @@ Available task harness tools:
 - `calendar_get_freebusy`
 - `linear_search_tools`
 - `linear_use_tool`
+- `latitude_search_tools`
+- `latitude_use_tool`
 - The Google tools run server-side in the runner and resolve encrypted OAuth credentials from the
   database.
+- The Linear and Latitude MCP meta-tools discover each server's current tool catalog before
+  executing an exact remote tool name. Latitude task writes are used only for explicit user
+  requests.
 
 E2B remains available elsewhere in the runner as a future tool backend; new Goat task runs do not
 depend on `/tmp/goat-harness.mjs`, `GOAT_OUTPUT_PATH`, progress stdout parsing, or a sandbox bridge.

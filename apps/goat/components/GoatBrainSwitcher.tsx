@@ -2,6 +2,7 @@
 
 import { toast } from "@opencompany/ui/components/sonner";
 import { Brain, Lock, Plus } from "lucide-react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
@@ -23,10 +24,6 @@ export function GoatBrainSwitcher() {
 
   const switchBrain = (brainRef: string) => {
     const href = goatBrainHref(brainRef);
-    if (brainRef === activeBrain?.id) {
-      router.push(href);
-      return;
-    }
     startTransition(async () => {
       const result = await switchGoatBrainAction(brainRef);
       if (!result.ok) {
@@ -58,29 +55,46 @@ export function GoatBrainSwitcher() {
       <div className="flex flex-col gap-px">
         {brains.map((brain) => {
           const active = brainRouteActive && brain.id === highlightedBrainRef;
+          const rowClassName = `flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+            active
+              ? "bg-surface-active text-ink"
+              : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+          }`;
+          const rowContent = (
+            <>
+              <Brain
+                size={14}
+                strokeWidth={1.75}
+                className={`shrink-0 ${active ? "text-ink" : "text-ink/60"}`}
+              />
+              <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{brain.name}</span>
+              {brain.visibility === "restricted" ? (
+                <Lock size={11} strokeWidth={1.75} className="shrink-0 text-ink/40" />
+              ) : null}
+            </>
+          );
           return (
             <div key={brain.id} className="group/brain flex items-center">
-              <button
-                type="button"
-                disabled={isPending}
-                aria-current={active ? "true" : undefined}
-                onClick={() => switchBrain(brain.id)}
-                className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-                  active
-                    ? "bg-surface-active text-ink"
-                    : "text-ink/90 hover:bg-surface-hover hover:text-ink"
-                }`}
-              >
-                <Brain
-                  size={14}
-                  strokeWidth={1.75}
-                  className={`shrink-0 ${active ? "text-ink" : "text-ink/60"}`}
-                />
-                <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{brain.name}</span>
-                {brain.visibility === "restricted" ? (
-                  <Lock size={11} strokeWidth={1.75} className="shrink-0 text-ink/40" />
-                ) : null}
-              </button>
+              {brain.id === activeBrain?.id ? (
+                <Link
+                  href={goatBrainHref(brain.id)}
+                  prefetch
+                  aria-current={active ? "page" : undefined}
+                  className={rowClassName}
+                >
+                  {rowContent}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  disabled={isPending}
+                  aria-current={active ? "true" : undefined}
+                  onClick={() => switchBrain(brain.id)}
+                  className={rowClassName}
+                >
+                  {rowContent}
+                </button>
+              )}
             </div>
           );
         })}

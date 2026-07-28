@@ -2,7 +2,6 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
-import type { GoatBrainDocumentView } from "@/lib/brain";
 import { GoatBrainOverview } from "./GoatBrainOverview";
 
 vi.mock("@/components/GoatBrainActivity", () => ({
@@ -19,12 +18,9 @@ it("shows useful activity by default and lets the user change the activity filte
     <GoatBrainOverview
       brainName="Company brain"
       brainRef="goat_brain_1"
-      documents={[
-        createDocument({ id: "recent", createdAt: "2026-07-14T09:00:00.000Z" }),
-        createDocument({ id: "old", createdAt: "2026-07-01T09:00:00.000Z" }),
-      ]}
       stats={{
         windowStartedAt: "2026-07-08T09:00:00.000Z",
+        itemsAddedLast7Days: 1,
         retrievalsLast7Days: 42,
         activeSources: 3,
       }}
@@ -51,34 +47,3 @@ it("shows useful activity by default and lets the user change the activity filte
   );
   expect(screen.getByTestId("recent-activity")).toHaveTextContent("goat_brain_1:skipped");
 });
-
-function createDocument({
-  id,
-  createdAt,
-}: {
-  id: string;
-  createdAt: string;
-}): GoatBrainDocumentView {
-  return {
-    id,
-    brainId: id,
-    folderPath: "inbox",
-    path: `inbox/${id}.md`,
-    title: id,
-    content: "",
-    body: "",
-    timeline: [],
-    format: "markdown",
-    mimeType: "text/markdown",
-    relations: [],
-    sources: [],
-    kind: "page",
-    type: "note",
-    status: "draft",
-    aliases: [],
-    contentHash: id,
-    sizeBytes: 0,
-    createdAt,
-    updatedAt: createdAt,
-  };
-}
