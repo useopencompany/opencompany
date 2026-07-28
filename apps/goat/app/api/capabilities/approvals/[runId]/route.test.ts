@@ -96,7 +96,7 @@ function approvalRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "gcr_1",
     source: "lead",
-    action: "lead.enrich_person",
+    action: "lead.find_person_email",
     status: "awaiting_approval",
     quoteTotalCostUsdMicros: 360_000,
     approvalExpiresAt: new Date("2026-07-23T10:15:00.000Z"),

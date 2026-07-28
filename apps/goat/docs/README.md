@@ -207,8 +207,11 @@ through background tasks.
 Managed X, LinkedIn, YouTube, Instagram, TikTok, prospecting, and Semrush SEO actions use a fixed
 server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Prospecting includes
 bounded PDL person search across current title and seniority, person or company location, company
-industry, provider-estimated company employee count, and work-email availability, plus focused
-enrichment actions. Every paid execution inspects its live endpoint schema and price before running,
+industry, provider-estimated company employee count, and work-email availability. When the user
+already knows whom they want to contact, the focused PDL person-enrichment action accepts a LinkedIn
+URL or a full name plus company/location, requires a confidence-gated work email, and returns one
+compact contact record without running a broader prospect search. Every paid execution inspects its
+live endpoint schema and price before running,
 checks shared workspace credits, and requires a one-time approval above the per-action or per-turn
 thresholds. Provider data is treated as hostile input, redacted and bounded before it enters the chat
 trace, and billed once from the settled provider cost plus the platform fee. The durable
