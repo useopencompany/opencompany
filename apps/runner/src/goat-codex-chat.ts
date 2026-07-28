@@ -53,7 +53,6 @@ const CODEX_CHAT_WORKDIR = "/home/user/opencompany-goat/codex-chat";
 const CODEX_CHAT_ATTACHMENTS_ROOT = "/home/user/.opencompany-goat/codex-chat-attachments";
 const INTERRUPT_POLL_INTERVAL_MS = 2_000;
 const INTERACTION_POLL_INTERVAL_MS = 500;
-const CODEX_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-codex-chat" });
 
@@ -425,34 +424,23 @@ export async function runGoatCodexChatTurn(input: {
       await projector.fail(message);
     }
   } finally {
-    // The sandbox outlives the turn: arm the chat idle timeout instead of killing it, so the
-    // next message reconnects to warm files and a reusable app-server daemon.
-    const idleTimeoutMs =
-      outcome === "handed_off"
-        ? Math.max(CODEX_CHAT_HANDOFF_TIMEOUT_MS, env.jobLeaseTtlMs * 2)
-        : env.goatCodexChatIdleTimeoutMs;
+    // A handed-off turn is still running inside E2B. Keep its active timeout instead of parking it:
+    // a deployment can take longer than an idle window, and pausing at the reclaim boundary leaves
+    // the replacement worker with a connected handle whose command service is not ready. Settled
+    // turns get the short idle timeout so later messages can still reuse the warm workspace.
     try {
-      if (
-        !leaseLost &&
-        (outcome !== "handed_off" ||
-          (await codexChatTurnLeaseIsHeld({ turn, leaseId, leaseOwner })))
-      ) {
-        const armed = await armSandboxIdleTimeout(sandbox, idleTimeoutMs);
-        if (armed && outcome === "settled") {
+      if (!leaseLost && outcome === "handed_off") {
+        if (await codexChatTurnLeaseIsHeld({ turn, leaseId, leaseOwner })) {
+          await armSandboxActiveTimeoutById(sandbox.sandboxId);
+        }
+      } else if (!leaseLost) {
+        const armed = await armSandboxIdleTimeout(sandbox, env.goatCodexChatIdleTimeoutMs);
+        if (armed) {
           await markCodexChatSandboxTimeoutArmed({
             sessionId: session.id,
             userWorkosId: turn.userWorkosId,
             sandboxId: sandbox.sandboxId,
           });
-        }
-        if (
-          armed &&
-          outcome === "handed_off" &&
-          !(await codexChatTurnLeaseIsHeld({ turn, leaseId, leaseOwner }))
-        ) {
-          // A forced shutdown handoff won the race while the timeout update was in flight.
-          // Restore the active timeout so the replacement runner is not paused mid-turn.
-          await armSandboxActiveTimeoutById(sandbox.sandboxId);
         }
       }
     } catch (error) {

@@ -327,8 +327,9 @@ visible to the model rather than merely path-referenced. Keeping uploads outside
 directory prevents them from appearing in repository changes.
 
 The Codex app-server daemon runs behind its Unix-socket control transport inside E2B and outlives
-the runner-side proxy. A runner shutdown detaches that proxy, releases the delivery lease, and lets
-the next worker `thread/resume` the same stored Codex turn id. The reconnect reconciles completed
+the runner-side proxy. A runner shutdown detaches that proxy, keeps the sandbox on its active
+timeout, releases the delivery lease, and lets the next worker `thread/resume` the same stored Codex
+turn id. The reconnect reconciles completed
 items and a terminal turn that landed while no runner was attached; stable per-item event keys make
 that replay idempotent. Lease claims count infrastructure ownership changes, while
 `recovery_attempts` increments only when the original Codex turn is missing or was interrupted and
