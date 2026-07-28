@@ -337,16 +337,23 @@ the app-server daemon when the installed set changes, while the persistent Codex
 Only skills whose first activation belongs to the current turn are included as native `skill`
 inputs; previously activated skills remain installed and in thread history.
 
-New Cloud Codex chats pin the user's active Brain on `goat.codex_chat_sessions` together with the
-host-tool contract version used to start the Codex thread. On `thread/start`, the runner registers
-the read-only `goat_brain` function through app-server's experimental `dynamicTools` API. When
-Codex sends `item/tool/call`, the runner rechecks the user's Brain access, calls the database-backed
-Brain read plane, audits the attempt in `goat.brain_tool_runs`, and sends the result back over the
-runner-side proxy. Brain credentials and database access never enter E2B. Because app-server stores
-dynamic tool definitions on the thread, resumed turns provide the matching runner callback without
-trying to redefine the tool. Existing sessions without a pinned Brain and matching contract remain
-unchanged. The first contract intentionally supports only `query`, `list`, `get`, and `timeline`;
-it cannot write to the Brain.
+New Cloud Codex chats pin the user's active Brain and workspace on `goat.codex_chat_sessions`
+together with the host-tool contract version used to start the Codex thread. On `thread/start`, the
+runner registers the read-only `goat_brain`, `list_actions`, and `use_action` functions through
+app-server's experimental `dynamicTools` API. When Codex sends `item/tool/call`, the runner handles
+Brain reads directly or calls Goat's private action gateway with `RUNNER_INTERNAL_TOKEN`.
+
+The action gateway derives the user and workspace from the running turn, rechecks current workspace
+membership, resolves current connections and permission settings, and exposes only integration
+actions whose capability is `read` and permission mode is `on`. Writes, confirmation-gated actions,
+and paid managed capabilities are not present in the Cloud Codex catalog. Provider credentials,
+the internal bearer, and database access never enter E2B. A per-turn call budget bounds provider
+reads.
+
+Because app-server stores dynamic tool definitions on the thread, resumed turns provide the
+matching runner callbacks without trying to redefine the tools. Existing Brain-tool v1 sessions
+remain Brain-only. The Brain contract intentionally supports only `query`, `list`, `get`, and
+`timeline`; it cannot write to the Brain.
 
 The Cloud Codex Plan control starts the turn with app-server's experimental
 `collaborationMode.mode = "plan"`; `plan_mode_reasoning_effort` configures the mode's reasoning
