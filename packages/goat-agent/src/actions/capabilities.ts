@@ -123,15 +123,6 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
-  kleinanzeigen: [
-    {
-      id: "write",
-      label: "Publish listings",
-      description:
-        "Create one Kleinanzeigen listing from the exact details and images you approve in Chat. Each Browser Use agent session is capped at $0.75.",
-      defaultMode: "ask",
-    },
-  ],
 };
 
 export function isGoatCapabilityMode(value: unknown): value is GoatCapabilityMode {
