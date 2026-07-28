@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GOAT_STRIPE_API_VERSION,
   isValidGoatStripeRestrictedApiKey,
   validateGoatStripeRestrictedApiKey,
-} from "@/lib/integrations/stripe";
+} from "@opencompany/goat-agent/integrations/stripe";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
   vi.unstubAllGlobals();

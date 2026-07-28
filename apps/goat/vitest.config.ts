@@ -30,6 +30,13 @@ export default defineConfig({
   test: {
     globals: true,
     clearMocks: true,
+    // AuthKit's ESM build imports extensionless Next.js subpaths. Inline it so
+    // Vite resolves those framework entry points instead of native Node.
+    server: {
+      deps: {
+        inline: ["@workos-inc/authkit-nextjs"],
+      },
+    },
     // userEvent-driven component tests can exceed the 5s default under CI load.
     testTimeout: 15000,
     hookTimeout: 15000,

@@ -15,6 +15,7 @@ import {
   Plus,
   ScrollText,
   Settings,
+  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -25,6 +26,11 @@ import { GoatSidebarFeedback } from "@/components/GoatSidebarFeedback";
 import { closeGoatChatSessionAction, setGoatChatPinnedAction } from "@/lib/chat-actions";
 import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
 import type { GoatChatSummaryView } from "@/lib/chat-ui";
+import {
+  GOAT_WORKFLOW_TASK_STATUS_COPY,
+  type GoatWorkflowTaskDisplayStatus,
+  goatWorkflowTaskDisplayStatus,
+} from "@/lib/task-display";
 import { createGoatWorkspaceAction, switchGoatWorkspaceAction } from "@/lib/workspace-actions";
 
 function GoatIcon({ className }: { className?: string }) {
@@ -107,6 +113,7 @@ export function GoatSidebar({
   const settingsActive =
     (pathname === "/settings" || pathname.startsWith("/settings/")) && !mcpSetupActive;
   const homeActive = pathname === "/";
+  const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
 
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
@@ -156,6 +163,12 @@ export function GoatSidebar({
               window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT));
             }}
           />
+          <SidebarNavRow
+            href="/workflows"
+            icon={Workflow}
+            label="Workflows"
+            active={workflowsActive}
+          />
           {!mcpSetup.completedAt ? (
             <SidebarNavRow
               href="/settings/mcp"
@@ -171,6 +184,9 @@ export function GoatSidebar({
         <div className="px-2 pt-4">
           <GoatBrainSwitcher />
         </div>
+
+        {/* Workflow tasks */}
+        <GoatSidebarTasks />
 
         {/* Recent chats */}
         <GoatSidebarRecentChats />
@@ -218,6 +234,76 @@ export function GoatSidebar({
         </div>
       </div>
     </aside>
+  );
+}
+
+const SIDEBAR_TASKS_LIMIT = 15;
+
+const WORKFLOW_TASK_STATUS_DOT_CLASS: Record<GoatWorkflowTaskDisplayStatus, string> = {
+  running: "bg-ink/40 animate-pulse",
+  failed: "bg-danger",
+  done: "bg-success",
+  "needs-attention": "bg-warning",
+};
+
+function GoatSidebarTasks() {
+  const { tasks } = useGoatAppData();
+  const pathname = usePathname();
+  // Only workflow-spawned tasks surface here; ad-hoc start_task runs keep
+  // living on Home. `tasks` is user-scoped and Electric-live.
+  const workflowTasks = tasks
+    .filter((task) => task.workflowId && !task.archivedAt)
+    .slice(0, SIDEBAR_TASKS_LIMIT);
+  if (workflowTasks.length === 0) return null;
+
+  const tasksActive = pathname === "/tasks";
+
+  return (
+    <div className="pt-4">
+      <Link
+        href="/tasks"
+        prefetch
+        aria-current={tasksActive ? "page" : undefined}
+        className={`mx-2 mb-1 flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+          tasksActive ? "text-ink" : "text-ink-subtle hover:text-ink"
+        }`}
+      >
+        Tasks
+      </Link>
+      <nav aria-label="Workflow tasks" className="flex flex-col gap-px px-2">
+        {workflowTasks.map((task) => {
+          const displayStatus = goatWorkflowTaskDisplayStatus(task);
+          const href = `/tasks/${encodeURIComponent(task.displayId)}`;
+          const active = pathname === href;
+          return (
+            <Link
+              key={task.id}
+              href={href}
+              prefetch
+              aria-current={active ? "page" : undefined}
+              className={`group flex w-full items-start gap-2.5 rounded-md px-2 py-[5px] text-left transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                active
+                  ? "bg-surface-active text-ink"
+                  : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full ${WORKFLOW_TASK_STATUS_DOT_CLASS[displayStatus]}`}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[12.5px] leading-tight tracking-[-0.005em]">
+                  {task.name}
+                </span>
+                <span className="block truncate text-[11px] leading-tight text-ink-subtle">
+                  {task.outcomeComment?.trim() || GOAT_WORKFLOW_TASK_STATUS_COPY[displayStatus]}
+                </span>
+              </span>
+            </Link>
+          );
+        })}
+      </nav>
+    </div>
   );
 }
 

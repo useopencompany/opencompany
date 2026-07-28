@@ -47,13 +47,16 @@ Browser
         OR, when Background tasks is enabled in Preferences, call start_task
           insert goat.tasks row
           POST /internal/goat/tasks/:taskId/run
-    OR Local Codex mode
-      POST /api/local-codex/messages
-        enqueue local Codex bridge command
-    OR Cloud Codex mode
-      POST /api/codex-chat/messages
-        persist the message and attachment metadata
-        enqueue a turn for the cloud Codex chat worker
+  GoatSurface #workflow submit
+    POST /api/workflows
+      insert goat.tasks row without creating a chat session or chat messages
+  GoatSurface Local Codex mode
+    POST /api/local-codex/messages
+      enqueue local Codex bridge command
+  GoatSurface Cloud Codex mode
+    POST /api/codex-chat/messages
+      persist the message and attachment metadata
+      enqueue a turn for the cloud Codex chat worker
 
 Runner
   Goat task worker wakes/polls
@@ -91,15 +94,20 @@ recent open chat session. It passes those into `GoatSurface`.
 - `model`: the current chat model.
 - `message`: only the newest UI message.
 
-The composer can attach eligible pages from the active Brain's protected `skills/` folder with
-`@skill/<id>`. The visible token is paired with structured `{ kind: "skill", brainRef, id }`
-metadata. Exact skill tokens pasted into the composer are resolved against the active Brain catalog,
+The composer can attach the workspace's skills (`goat.skills`) with `@skill/<slug>`. The visible
+token is paired with structured `{ kind: "skill", id }` metadata (`id` is the workspace-scoped
+skill slug). Exact skill tokens pasted into the composer are resolved against the workspace catalog,
 while manually typed lookalikes stay plain text. The server resolves that metadata again under the
-current user's active-Brain access, rejects stale or cross-Brain references, and caps a turn at 16
+current user's active workspace, rejects unavailable references, and caps a turn at 16
 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable snapshot
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
-Normal main chat can also discover Brain skills progressively. When the catalog is non-empty, the
+Selecting a workflow with `#<id>` changes the composer action from **Send message** to **Start
+task**. Submission posts directly to `/api/workflows`, starts the durable task in the
+background, and leaves the current Home or chat surface in place. It does not call the foreground
+chat model or persist user/assistant chat messages for the workflow launch.
+
+Normal main chat can also discover workspace skills progressively. When the catalog is non-empty, the
 system prompt advertises only that a skill source exists; `list_skills` searches safe id, name, and
 description metadata, and `use_skill` loads the full instructions for one exact returned id. The
 successful tool result stays in conversation history, so model-selected skill instructions remain
@@ -233,7 +241,8 @@ main chat even though ordinary deeper or multi-source work routes to a backgroun
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The
 database flag defaults off, so the standard Goat experience is chat plus Brain without background
-task spawning. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
+task spawning. Explicitly starting a `#workflow` opts the user into background tasks so its durable
+run can be claimed. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
 
 The default chat model is `anthropic/claude-sonnet-5`. New tasks store the chat-selected model at
 creation time, then the runner planner chooses the task execution model from its allowed model

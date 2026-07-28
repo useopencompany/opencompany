@@ -11,6 +11,7 @@ import type {
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
   GoatTaskModelUsagePhase,
+  GoatTaskReportedOutcome,
   GoatTaskToolName,
 } from "@opencompany/db/goat-schema";
 import { goatTasks } from "@opencompany/db/goat-schema";
@@ -195,6 +196,8 @@ export type GoatTaskStore = {
     result: string;
     harnessSpec: GoatHarnessSpec;
     debugTrace: GoatTaskDebugTrace;
+    reportedOutcome?: GoatTaskReportedOutcome | null;
+    outcomeComment?: string | null;
   }): Promise<boolean>;
   fail(input: {
     id: string;
@@ -647,6 +650,8 @@ export function createDbGoatTaskStore(): GoatTaskStore {
               model = ${input.harnessSpec.model},
               result = ${input.result},
               error = NULL,
+              reported_outcome = ${input.reportedOutcome ?? null},
+              outcome_comment = ${input.outcomeComment ?? null},
               harness_spec = ${JSON.stringify(input.harnessSpec)}::jsonb,
               debug_trace = ${JSON.stringify(input.debugTrace)}::jsonb,
               lease_id = NULL,
@@ -1338,6 +1343,8 @@ export async function runClaimedGoatTask(input: {
             result: result.result,
             harnessSpec: result.harnessSpec,
             debugTrace: mergeGoatTaskDebugTrace(result.debugTrace, latestDebugTrace),
+            reportedOutcome: result.reportedOutcome ?? null,
+            outcomeComment: result.outcomeComment ?? null,
           }),
         ),
       ),
@@ -1576,10 +1583,16 @@ const goatTaskColumnsSql = sql`
   task.user_workos_id AS "userWorkosId",
   task.prompt,
   task.model,
+  task.schedule_id AS "scheduleId",
+  task.scheduled_for AS "scheduledFor",
+  task.workflow_id AS "workflowId",
+  task.workflow_brain_ref AS "workflowBrainRef",
   task.status,
   task.stage,
   task.result,
   task.error,
+  task.reported_outcome AS "reportedOutcome",
+  task.outcome_comment AS "outcomeComment",
   task.harness_spec AS "harnessSpec",
   task.debug_trace AS "debugTrace",
   task.codex_engine_session_id AS "codexEngineSessionId",
@@ -1596,8 +1609,9 @@ const goatTaskColumnsSql = sql`
 
 type GoatTaskRow = Omit<
   GoatTask,
-  "nextRunAt" | "leaseExpiresAt" | "archivedAt" | "createdAt" | "updatedAt"
+  "scheduledFor" | "nextRunAt" | "leaseExpiresAt" | "archivedAt" | "createdAt" | "updatedAt"
 > & {
+  scheduledFor: Date | string | null;
   nextRunAt: Date | string;
   leaseExpiresAt: Date | string | null;
   archivedAt: Date | string | null;
@@ -1608,6 +1622,7 @@ type GoatTaskRow = Omit<
 function goatTaskFromRow(row: GoatTaskRow): GoatTask {
   return {
     ...row,
+    scheduledFor: row.scheduledFor ? toDate(row.scheduledFor) : null,
     nextRunAt: toDate(row.nextRunAt),
     leaseExpiresAt: row.leaseExpiresAt ? toDate(row.leaseExpiresAt) : null,
     archivedAt: row.archivedAt ? toDate(row.archivedAt) : null,

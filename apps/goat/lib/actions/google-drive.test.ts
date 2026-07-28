@@ -17,18 +17,21 @@ vi.mock("@opencompany/db/client", () => ({
     }),
   }),
 }));
-vi.mock("@/lib/integrations/google-access-token", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/integrations/google-access-token")>();
+vi.mock("@opencompany/goat-agent/integrations/google-access-token", async (importOriginal) => {
+  const original =
+    await importOriginal<
+      typeof import("@opencompany/goat-agent/integrations/google-access-token")
+    >();
   return { ...original, googleApiCall: mocks.googleApiCall };
 });
 
+import { GoogleAccessAuthError } from "@opencompany/goat-agent/integrations/google-access-token";
 import { resolveGoogleDriveActions } from "@/lib/actions/google-drive";
 import {
   GoatActionAuthError,
   type GoatActionExecuteContext,
   GoatActionPermissionError,
 } from "@/lib/actions/types";
-import { GoogleAccessAuthError } from "@/lib/integrations/google-access-token";
 
 const DRIVE_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 const DOCS_WRITE_SCOPE = "https://www.googleapis.com/auth/documents";

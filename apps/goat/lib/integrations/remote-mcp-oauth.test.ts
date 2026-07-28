@@ -32,11 +32,11 @@ vi.mock("@opencompany/db/goat-integrations", () => ({
   saveGoatIntegrationCredential: vi.fn(async () => undefined),
 }));
 
-vi.mock("@/lib/integrations/analytics", () => ({
+vi.mock("@opencompany/goat-agent/integrations/analytics", () => ({
   captureGoatIntegrationAddedAnalytics: vi.fn(async () => undefined),
 }));
 
-vi.mock("@/lib/workos", () => ({
+vi.mock("@opencompany/goat-agent/app-url", () => ({
   getGoatAppUrl: () => "https://goat.example",
 }));
 

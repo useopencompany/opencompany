@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/lib/integrations/stripe", () => ({
+vi.mock("@opencompany/goat-agent/integrations/stripe", () => ({
   GoatStripeApiError: mocks.GoatStripeApiError,
   loadGoatStripeConnection: mocks.loadGoatStripeConnection,
   markGoatStripeConnectionNeedsReauth: mocks.markGoatStripeConnectionNeedsReauth,

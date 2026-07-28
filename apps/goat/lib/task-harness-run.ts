@@ -8,6 +8,7 @@ import type {
   GoatTaskMessageStatus,
   GoatTaskModelUsage,
   GoatTaskModelUsagePhase,
+  GoatTaskReportedOutcome,
   GoatTaskSandboxUsage,
   GoatTaskStage,
   GoatTaskStatus,
@@ -27,6 +28,9 @@ export type GoatTaskRunTaskInput =
       result: string | null;
       error: string | null;
       harnessSpec?: unknown;
+      workflowId?: string | null;
+      reportedOutcome?: GoatTaskReportedOutcome | null;
+      outcomeComment?: string | null;
       createdAt: Date | string;
       updatedAt: Date | string;
     }
@@ -41,6 +45,9 @@ export type GoatTaskRunTaskInput =
       result: string | null;
       error: string | null;
       harness_spec?: unknown;
+      workflow_id?: string | null;
+      reported_outcome?: GoatTaskReportedOutcome | null;
+      outcome_comment?: string | null;
       created_at: string;
       updated_at: string;
     };
@@ -166,6 +173,9 @@ export type GoatHarnessRunViewModel = {
     stage: GoatTaskStage;
     result: string;
     error: string;
+    workflowId: string | null;
+    reportedOutcome: GoatTaskReportedOutcome | null;
+    outcomeComment: string | null;
     createdAt: string;
     updatedAt: string;
   };
@@ -725,6 +735,9 @@ function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["tas
       stage: task.stage,
       result: task.result ?? "",
       error: task.error ?? "",
+      workflowId: task.workflowId ?? null,
+      reportedOutcome: task.reportedOutcome ?? null,
+      outcomeComment: task.outcomeComment ?? null,
       createdAt: serializeDate(task.createdAt),
       updatedAt: serializeDate(task.updatedAt),
     };
@@ -740,6 +753,9 @@ function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["tas
     stage: task.stage,
     result: task.result ?? "",
     error: task.error ?? "",
+    workflowId: task.workflow_id ?? null,
+    reportedOutcome: task.reported_outcome ?? null,
+    outcomeComment: task.outcome_comment ?? null,
     createdAt: task.created_at,
     updatedAt: task.updated_at,
   };
