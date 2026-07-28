@@ -6,7 +6,7 @@ import { planReleaseSurfaces } from "./release-scope.mjs";
 test("maps Turbo affected packages to production surfaces", () => {
   assert.deepEqual(
     planReleaseSurfaces({
-      affectedPackages: ["@opencompany/goat", "@opencompany/runner", "@opencompany/statsig"],
+      affectedPackages: ["@opencompany/analytics", "@opencompany/goat", "@opencompany/runner"],
     }),
     { web: false, goat: true, marketing: false, runner: true },
   );

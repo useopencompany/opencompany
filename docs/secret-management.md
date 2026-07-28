@@ -126,6 +126,8 @@ For Infisical `dev`, `/web` should include:
   credential encryption key)
 - runner connection vars
 - optional Linear, analytics, and observability vars
+- the dedicated Goat project's `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` and
+  `NEXT_PUBLIC_GOAT_POSTHOG_HOST` when testing Goat analytics locally
 
 For Infisical `dev`, `/runner` should include:
 

@@ -1,3 +1,4 @@
+import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { getDb } from "@opencompany/db/client";
 import {
   type GoatBrain,
@@ -15,7 +16,6 @@ import {
   listGoatWorkspacesForUser,
 } from "@opencompany/db/goat-workspaces";
 import { recordGoatSignup } from "@opencompany/goat-observability";
-import { captureStatsigServerEvent } from "@opencompany/statsig/server";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import type { User as WorkOSUser } from "@workos-inc/node";
 import { eq } from "drizzle-orm";
@@ -59,8 +59,7 @@ export async function syncGoatUser(authUser: WorkOSUser) {
 
   if (insertedUser) {
     recordGoatSignup({ source: "user_sync" });
-    await captureStatsigServerEvent("signup_completed", insertedUser.workosUserId, {
-      user_id: insertedUser.workosUserId,
+    await captureGoatServerEvent("signup_completed", insertedUser.workosUserId, {
       source: "user_sync",
     });
     return insertedUser;
@@ -112,6 +111,42 @@ export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
   } catch (error) {
     console.error("[goat] Failed to adopt WorkOS organization memberships", error);
   }
+}
+
+export async function activateGoatWorkspaceForOrganization(input: {
+  userWorkosId: string;
+  organizationId: string;
+}): Promise<boolean> {
+  const workspaces = await listGoatWorkspacesForUser(input.userWorkosId);
+  const target = workspaces.find(
+    (entry) => entry.workspace.workosOrganizationId === input.organizationId,
+  );
+  if (!target) return false;
+
+  const brains = await listAccessibleGoatBrains({
+    userWorkosId: input.userWorkosId,
+    workspaceId: target.workspace.id,
+  });
+  const activeBrain =
+    brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
+
+  const cookieStore = await cookies();
+  cookieStore.set(GOAT_ACTIVE_WORKSPACE_COOKIE, target.workspace.id, {
+    path: "/",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+  if (activeBrain) {
+    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, activeBrain.id, {
+      path: "/",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+  } else {
+    cookieStore.delete(GOAT_ACTIVE_BRAIN_COOKIE);
+  }
+
+  return true;
 }
 
 async function ensureGoatWorkspaces(

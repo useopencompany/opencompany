@@ -41,8 +41,7 @@ const MEMBER_ROLE = "member";
 const ADMIN_ROLE = "admin";
 const WORKSPACE_NAME_MAX_LENGTH = 80;
 const CREATE_WORKSPACE_ERROR_MESSAGE = "Could not create the organization. Please try again.";
-const ACTIVATE_WORKSPACE_ERROR_MESSAGE =
-  "Could not switch organizations. Please try again.";
+const ACTIVATE_WORKSPACE_ERROR_MESSAGE = "Could not switch organizations. Please try again.";
 const ACTIVATE_CREATED_WORKSPACE_ERROR_MESSAGE =
   "The organization was created, but could not be activated. Please try switching to it.";
 

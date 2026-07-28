@@ -32,6 +32,10 @@ In the WorkOS dashboard:
   context of the API key that created them.
 - **Legacy web redirects** must include `http://localhost:3000/auth/callback` for local dev and its production callback URL.
 - **Goat redirects** must include its local callback and the production `.chat` callback URL.
+- Set the Goat Application's **User invitation URL** to
+  `https://<goat-domain>/auth/invite`. WorkOS appends the opaque
+  `invitation_token`; Goat resolves its Organization server-side, starts AuthKit
+  in that Organization, and activates the matching workspace after callback.
 - If local development can run on different ports, add `http://localhost:*/auth/callback` as an allowed redirect URI too. Keep a concrete URI as the default.
 - AuthKit's hosted sign-in screen is enabled by default — no extra config needed.
 
