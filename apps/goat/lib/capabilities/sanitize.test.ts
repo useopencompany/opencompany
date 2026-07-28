@@ -89,17 +89,21 @@ describe("sanitizeCapabilityResult", () => {
 
   it("preserves a validated full transcript under an explicit string limit", () => {
     const transcript = "full transcript ".repeat(2_000);
+    const transcriptWithLink = `${transcript} https://youtube.com/watch?v=other123456`;
     const result = sanitizeCapabilityResult({
       source: "youtube",
       action: "youtube.get_transcript",
       expectedLimit: 1,
-      payloadStringLimit: transcript.length,
-      payload: { transcript },
+      payloadStringLimit: transcriptWithLink.length,
+      discoverPayloadLinks: false,
+      canonicalLinks: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+      payload: { transcript: transcriptWithLink },
       resultCount: 1,
       totalCostUsdMicros: 9_000,
     });
 
-    expect(result.payload).toEqual({ transcript });
+    expect(result.payload).toEqual({ transcript: transcriptWithLink });
+    expect(result.canonicalLinks).toEqual(["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]);
 
     const oversized = sanitizeCapabilityResult({
       source: "youtube",

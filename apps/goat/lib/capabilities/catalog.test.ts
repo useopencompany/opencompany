@@ -336,6 +336,7 @@ describe("managed capability catalog", () => {
       resultLimit: 1,
       payloadArrayLimit: 20,
       payloadStringLimit: MAX_CAPABILITY_PAYLOAD_STRING_CHARS,
+      discoverPayloadLinks: false,
       canonicalLinks: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
     });
     expect(transcriptSearch).toMatchObject({

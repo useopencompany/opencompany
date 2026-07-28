@@ -111,7 +111,8 @@ describe("executeManagedCapability", () => {
         resultLimit: 1,
         payloadArrayLimit: 3,
         payloadStringLimit: transcript.length,
-        canonicalLinks: [],
+        discoverPayloadLinks: false,
+        canonicalLinks: ["https://x.com/openai/status/1"],
       }),
       mapOutput,
     };
@@ -139,6 +140,7 @@ describe("executeManagedCapability", () => {
       transcript,
     });
     expect(result.resultCount).toBe(1);
+    expect(result.canonicalLinks).toEqual(["https://x.com/openai/status/1"]);
   });
 
   it("charges completed provider work but marks unusable mapped output as failed", async () => {

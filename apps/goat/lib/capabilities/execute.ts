@@ -339,6 +339,9 @@ export async function executeManagedCapability(input: {
     ...(mapped.payloadStringLimit === undefined
       ? {}
       : { payloadStringLimit: mapped.payloadStringLimit }),
+    ...(mapped.discoverPayloadLinks === undefined
+      ? {}
+      : { discoverPayloadLinks: mapped.discoverPayloadLinks }),
     canonicalLinks: mapped.canonicalLinks,
     ...(currentRun.resultCount === undefined ? {} : { resultCount: currentRun.resultCount }),
     totalCostUsdMicros: settlement.totalCostUsdMicros,

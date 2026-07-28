@@ -16,6 +16,7 @@ export type ManagedCapabilityMappedInput = {
   resultLimit: number;
   payloadArrayLimit?: number;
   payloadStringLimit?: number;
+  discoverPayloadLinks?: boolean;
   canonicalLinks: string[];
 };
 
@@ -1558,6 +1559,7 @@ function youtubeTranscriptAction(): ManagedCapabilityActionSpec {
         resultLimit: 1,
         payloadArrayLimit: YOUTUBE_TRANSCRIPT_PAYLOAD_ARRAY_LIMIT,
         payloadStringLimit: MAX_CAPABILITY_PAYLOAD_STRING_CHARS,
+        discoverPayloadLinks: false,
         canonicalLinks: [input.video.url],
       };
     },

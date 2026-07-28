@@ -44,6 +44,7 @@ export function sanitizeCapabilityResult(input: {
   expectedLimit: number;
   payloadArrayLimit?: number;
   payloadStringLimit?: number;
+  discoverPayloadLinks?: boolean;
   canonicalLinks?: string[];
   resultCount?: number | null;
   totalCostUsdMicros?: number | null;
@@ -67,6 +68,7 @@ export function sanitizeCapabilityResult(input: {
     depth: 0,
     arrayLimit: Math.max(1, Math.min(requestedArrayLimit, MAX_ARRAY_ITEMS)),
     stringLimit: Math.min(requestedStringLimit, MAX_CAPABILITY_PAYLOAD_STRING_CHARS),
+    discoverLinks: input.discoverPayloadLinks !== false,
     discoveredLinks,
     source: input.source,
   });
@@ -102,6 +104,7 @@ function sanitizeValue(
     depth: number;
     arrayLimit: number;
     stringLimit: number;
+    discoverLinks: boolean;
     discoveredLinks: Set<string>;
     source: GoatManagedCapabilitySource;
   },
@@ -110,7 +113,9 @@ function sanitizeValue(
     return value;
   }
   if (typeof value === "string") {
-    collectPlatformLinks(value, context.source, context.discoveredLinks);
+    if (context.discoverLinks) {
+      collectPlatformLinks(value, context.source, context.discoveredLinks);
+    }
     return value.length > context.stringLimit ? `${value.slice(0, context.stringLimit)}…` : value;
   }
   if (typeof value === "bigint") return value.toString();
