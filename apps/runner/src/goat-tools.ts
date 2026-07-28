@@ -25,6 +25,11 @@ import {
   isGoatGoogleToolName,
 } from "./goat-google-tools";
 import {
+  executeGoatLatitudeMcpTool,
+  type GoatLatitudeMcpToolName,
+  isGoatLatitudeMcpToolName,
+} from "./goat-latitude-mcp-tools";
+import {
   executeGoatLinearMcpTool,
   type GoatLinearMcpToolName,
   isGoatLinearMcpToolName,
@@ -59,6 +64,8 @@ export const GOAT_TASK_TOOL_NAMES = [
   "calendar_get_freebusy",
   "linear_search_tools",
   "linear_use_tool",
+  "latitude_search_tools",
+  "latitude_use_tool",
   "github_clone_repository",
   "github_shell",
   "github_status",
@@ -381,6 +388,18 @@ async function executeGoatTaskTool(input: {
       usage: zeroCostToolUsage(input.toolName, linearOperation(input.toolName, input.toolInput)),
     };
   }
+  if (isGoatLatitudeMcpToolName(input.toolName)) {
+    const output = await executeGoatLatitudeMcpTool({
+      name: input.toolName as GoatLatitudeMcpToolName,
+      args: input.toolInput,
+      userWorkosId: input.userWorkosId,
+      signal: input.signal,
+    });
+    return {
+      output,
+      usage: zeroCostToolUsage(input.toolName, remoteMcpOperation(input.toolName, input.toolInput)),
+    };
+  }
   if (isGoatGitHubToolName(input.toolName)) {
     const output = await input.githubSession.execute({
       name: input.toolName as GoatGitHubToolName,
@@ -578,6 +597,10 @@ function goatToolDescription(toolName: GoatTaskToolName) {
       return "List available Linear MCP tools, including names, descriptions, and input schemas. Call this before linear_use_tool.";
     case "linear_use_tool":
       return "Run one Linear MCP tool by exact name from linear_search_tools. Only create or update Linear records when the user explicitly asked for that action.";
+    case "latitude_search_tools":
+      return "List available Latitude MCP tools, including names, descriptions, annotations, and input schemas. Call this before latitude_use_tool.";
+    case "latitude_use_tool":
+      return "Run one Latitude MCP tool by exact name from latitude_search_tools. Only create or change Latitude resources when the user explicitly asked for that action.";
     case "github_clone_repository":
       return "Clone one connected GitHub repository into an ephemeral task sandbox. Call this before github_shell, github_status, or github_open_pull_request.";
     case "github_shell":
@@ -752,6 +775,7 @@ function goatToolInputSchema(toolName: GoatTaskToolName) {
         },
       } as const;
     case "linear_use_tool":
+    case "latitude_use_tool":
       return {
         type: "object",
         additionalProperties: false,
@@ -763,6 +787,14 @@ function goatToolInputSchema(toolName: GoatTaskToolName) {
           },
         },
         required: ["tool"],
+      } as const;
+    case "latitude_search_tools":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: { type: "string" },
+        },
       } as const;
     case "github_clone_repository":
       return {
@@ -824,6 +856,7 @@ function goatToolProvider(toolName: GoatTaskToolName) {
   if (toolName.startsWith("gmail_")) return "gmail";
   if (toolName.startsWith("calendar_")) return "google_calendar";
   if (toolName.startsWith("linear_")) return "linear";
+  if (toolName.startsWith("latitude_")) return "latitude";
   if (toolName.startsWith("github_")) return "github";
   if (toolName.startsWith("browser_")) return "browser";
   if (toolName.startsWith("x_") || toolName === "social_get_job") return "x";
@@ -833,6 +866,11 @@ function goatToolProvider(toolName: GoatTaskToolName) {
 
 function linearOperation(toolName: GoatTaskToolName, toolInput: unknown) {
   if (toolName !== "linear_use_tool") return toolName;
+  return remoteMcpOperation(toolName, toolInput);
+}
+
+function remoteMcpOperation(toolName: GoatTaskToolName, toolInput: unknown) {
+  if (!toolName.endsWith("_use_tool")) return toolName;
   return readString(asRecord(toolInput), "tool") || toolName;
 }
 

@@ -31,6 +31,7 @@ export function goatIntegrationConnectionError(provider: string | null, reason: 
     case "slack_denied":
     case "linear_denied":
     case "hubspot_denied":
+    case "latitude_denied":
       return `${name} authorization was cancelled.`;
     case "missing_code":
     case "missing_installation_id":
@@ -74,6 +75,8 @@ function providerName(provider: string | null) {
       return "Attio";
     case "stripe":
       return "Stripe";
+    case "latitude":
+      return "Latitude";
     default:
       return "This source";
   }
