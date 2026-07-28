@@ -3,6 +3,7 @@
 import {
   AlertCircle,
   BookOpen,
+  Bot,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
@@ -12,6 +13,7 @@ import {
   Square,
   Terminal,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
   CODEX_COMMAND_TOOL_NAME,
@@ -785,6 +787,95 @@ function ToolCallRow({ tool }: { tool: ToolCallView }) {
           loading="lazy"
           className="ml-6 mt-2 max-h-[560px] w-auto max-w-[calc(100%-1.5rem)] rounded-lg border border-border bg-surface object-contain"
         />
+      ) : null}
+    </div>
+  );
+}
+
+export function SubagentRow({
+  tool,
+  childCount,
+  children,
+}: {
+  tool: ToolCallView;
+  childCount: number;
+  children: ReactNode;
+}) {
+  // Expanded while the subagent is still working so its live trace is visible; collapsed once it
+  // finishes to keep the transcript tidy (the user can re-open it).
+  const [expanded, setExpanded] = useState(tool.status === "running" || tool.status === "waiting");
+  const meta = getToolCallMeta(tool);
+  const result =
+    isRecord(tool.output) && typeof tool.output.result === "string"
+      ? tool.output.result.trim()
+      : "";
+  const stepLabel = childCount === 1 ? "1 step" : `${childCount} steps`;
+  return (
+    <div
+      data-testid={`chat-tool-call-${tool.name}`}
+      className="-ml-1 max-w-[92%] text-[11.5px] leading-5 text-ink-muted"
+    >
+      <div className="flex min-w-0 max-w-full items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <ChevronRight
+            size={11}
+            strokeWidth={1.9}
+            className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+            <Bot
+              size={11}
+              strokeWidth={1.75}
+              className={`${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
+            />
+          </span>
+          <span title={tool.label} className="min-w-0 truncate font-medium text-ink/65">
+            {tool.label}
+          </span>
+          {tool.detail ? (
+            <span
+              title={tool.detail}
+              className="inline-flex min-w-0 max-w-[min(440px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
+            >
+              <span className="min-w-0 truncate">{tool.detail}</span>
+            </span>
+          ) : null}
+          {childCount > 0 ? (
+            <span className="shrink-0 text-[10.5px] text-ink-subtle">{stepLabel}</span>
+          ) : null}
+          {tool.statusText !== "Done" && tool.statusText !== "Failed" ? (
+            <span className={`${meta.className} shrink-0 text-[10.5px] font-medium`}>
+              {tool.statusText}
+            </span>
+          ) : null}
+        </button>
+      </div>
+      {expanded ? (
+        <div className="ml-[13px] mt-1 flex flex-col gap-2 border-l border-border pl-3">
+          {childCount > 0 ? (
+            children
+          ) : (
+            <div className="py-1 text-[11px] text-ink-subtle">
+              {tool.status === "running" ? "Subagent working..." : "No steps recorded"}
+            </div>
+          )}
+          {result ? (
+            <div className="border-t border-border/60 pt-1.5">
+              <div className="mb-0.5 text-[10px] font-medium uppercase text-ink-subtle">Result</div>
+              <div className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-[11.5px] leading-5 text-ink/70">
+                {result}
+              </div>
+            </div>
+          ) : null}
+          {tool.errorText?.trim() ? (
+            <ToolPreviewBlock label="Error" value={tool.errorText} />
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

@@ -190,20 +190,62 @@ describe("createClaudeCodeEventNormalizer", () => {
     expect(events[0]?.payload).toMatchObject({ delta: "/repo" });
   });
 
-  it("skips subagent traffic carrying parent_tool_use_id", () => {
+  it("maps the Task tool to subagent lifecycle events", () => {
     const normalizer = createClaudeCodeEventNormalizer();
-    expect(
-      normalizer.normalize(
-        assistantEvent([{ type: "text", text: "nested" }], { parent_tool_use_id: "tool_9" }),
+    const started = normalizer.normalize(
+      assistantEvent([
+        {
+          type: "tool_use",
+          id: "task_1",
+          name: "Task",
+          input: { description: "Find bugs", subagent_type: "Explore", prompt: "Look for bugs" },
+        },
+      ]),
+    );
+    expect(started).toHaveLength(1);
+    expect(started[0]?.type).toBe("subagent.started");
+    expect(started[0]?.payload).toMatchObject({
+      itemId: "task_1",
+      description: "Find bugs",
+      subagentType: "Explore",
+      prompt: "Look for bugs",
+    });
+
+    const completed = normalizer.normalize(
+      toolResultEvent([{ type: "tool_result", tool_use_id: "task_1", content: "Found 2 bugs" }]),
+    );
+    expect(completed[0]?.type).toBe("subagent.completed");
+    expect(completed[0]?.payload).toMatchObject({
+      itemId: "task_1",
+      status: "completed",
+      result: "Found 2 bugs",
+    });
+  });
+
+  it("stamps subagent traffic (parent_tool_use_id) with the parent tool call id", () => {
+    const normalizer = createClaudeCodeEventNormalizer();
+    const text = normalizer.normalize(
+      assistantEvent([{ type: "text", text: "nested" }], { parent_tool_use_id: "task_1" }),
+    );
+    expect(text).toHaveLength(1);
+    expect(text[0]?.type).toBe("assistant.completed");
+    expect(text[0]?.payload).toMatchObject({ content: "nested", parentToolCallId: "task_1" });
+
+    const nestedTool = normalizer.normalize(
+      assistantEvent(
+        [{ type: "tool_use", id: "nested_1", name: "Bash", input: { command: "ls" } }],
+        { parent_tool_use_id: "task_1" },
       ),
-    ).toEqual([]);
-    expect(
-      normalizer.normalize(
-        toolResultEvent([{ type: "tool_result", tool_use_id: "tool_9", content: "x" }], {
-          parent_tool_use_id: "tool_9",
-        }),
-      ),
-    ).toEqual([]);
+    );
+    expect(nestedTool[0]?.type).toBe("command.started");
+    expect(nestedTool[0]?.payload).toMatchObject({ command: "ls", parentToolCallId: "task_1" });
+
+    const nestedResult = normalizer.normalize(
+      toolResultEvent([{ type: "tool_result", tool_use_id: "nested_1", content: "file.txt" }], {
+        parent_tool_use_id: "task_1",
+      }),
+    );
+    expect(nestedResult.every((event) => event.payload.parentToolCallId === "task_1")).toBe(true);
   });
 
   it("maps a success result to turn.completed + usage.updated and records the summary", () => {

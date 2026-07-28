@@ -1156,6 +1156,13 @@
       "when": 1785240000002,
       "tag": "0164_goat_workflows_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 165,
+      "version": "7",
+      "when": 1785240000003,
+      "tag": "0165_goat_subagent_event_types",
+      "breakpoints": true
     }
   ]
 }

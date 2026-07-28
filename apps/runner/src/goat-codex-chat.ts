@@ -1,6 +1,7 @@
 import {
   CODEX_COMMAND_TOOL_PART_TYPE,
   CODEX_DYNAMIC_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_PART_TYPE,
   type CodexUiMessagePart,
   GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
   isCodexReasoningEffort,
@@ -1018,6 +1019,12 @@ export function summarizeCodexChatRecoveryProgress(parts: readonly CodexUiMessag
     }
     if (part.type === "dynamic-tool") {
       pushSummaryLine(lines, summarizeCodexStatusPart(part));
+      continue;
+    }
+    if (part.type === CODEX_SUBAGENT_TOOL_PART_TYPE) {
+      const label = readString(part.input.subagentType) ?? readString(part.input.description);
+      const status = part.state === "output-available" ? part.output.status : "active";
+      pushSummaryLine(lines, `Subagent ${status}: ${oneLine(label ?? "no detail", 260)}`);
     }
   }
   return lines.slice(-18).join("\n");
