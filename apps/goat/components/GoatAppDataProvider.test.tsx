@@ -80,6 +80,7 @@ function initialData(): GoatAppInitialData {
     integrations: {} as GoatAppInitialData["integrations"],
     featureFlags: { taskSpawning: false, localCodexBridge: false },
     codexConnected: false,
+    claudeCodeConnected: false,
     chatResumeEnabled: false,
     mcpSetup: { preferredClient: null, completedAt: null },
   };

@@ -94,7 +94,7 @@ export type GoatTaskCardMetadata = {
 export type GoatChatMention =
   | {
       kind: "engine";
-      id: "codex";
+      id: "codex" | "claude";
     }
   | {
       kind: "skill";

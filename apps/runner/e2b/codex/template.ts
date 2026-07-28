@@ -1,6 +1,11 @@
 import { Template } from "e2b";
+import { CLAUDE_CODE_CLI_PACKAGE, CLAUDE_CODE_CLI_VERSION } from "../../src/claude-code-version";
 import { CODEX_CLI_PACKAGE, CODEX_CLI_VERSION } from "../../src/codex-version";
 
+export {
+  CLAUDE_CODE_CLI_PACKAGE,
+  CLAUDE_CODE_CLI_VERSION,
+} from "../../src/claude-code-version";
 export { CODEX_CLI_PACKAGE, CODEX_CLI_VERSION } from "../../src/codex-version";
 
 export const CODEX_TOOLBOX_TEMPLATE_ALIAS = "opencompany-codex-toolbox";
@@ -55,13 +60,17 @@ export const template = Template()
   )
   .runCmd(
     [
-      "if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then",
-      "  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -;",
+      "if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(\".\")[0]) >= 22 ? 0 : 1)'; then",
+      "  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -;",
       "  export DEBIAN_FRONTEND=noninteractive;",
       "  apt-get update;",
       "  apt-get install -y --no-install-recommends nodejs;",
+      "  ln -sf /usr/bin/node /usr/local/bin/node;",
+      "  ln -sf /usr/bin/npm /usr/local/bin/npm;",
+      "  ln -sf /usr/bin/npx /usr/local/bin/npx;",
       "  rm -rf /var/lib/apt/lists/*;",
       "fi",
+      "node -e 'process.exit(Number(process.versions.node.split(\".\")[0]) >= 22 ? 0 : 1)'",
     ].join("\n"),
     root,
   )
@@ -69,7 +78,7 @@ export const template = Template()
     [
       `curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}"`,
       `test "$(bun --version)" = "${BUN_VERSION}"`,
-      `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g ${CODEX_CLI_PACKAGE} ${PLAYWRIGHT_PACKAGE}`,
+      `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g --prefix /usr/local ${CODEX_CLI_PACKAGE} ${CLAUDE_CODE_CLI_PACKAGE} ${PLAYWRIGHT_PACKAGE}`,
       "command -v rg",
       "command -v fd",
       "command -v jq",
@@ -81,6 +90,8 @@ export const template = Template()
       "command -v bun",
       "command -v codex",
       `test "$(codex --version)" = "codex-cli ${CODEX_CLI_VERSION}"`,
+      "command -v claude",
+      `claude --version | grep -F "${CLAUDE_CODE_CLI_VERSION}"`,
       "command -v playwright",
       "playwright --version",
     ].join(" && "),

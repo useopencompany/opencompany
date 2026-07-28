@@ -9,6 +9,7 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
+import { runGoatClaudeCodeChatTurn } from "./goat-claude-code-chat";
 import { runGoatCodexChatTurn } from "./goat-codex-chat";
 import {
   GoatCodexChatHandoffError,
@@ -175,7 +176,7 @@ export async function runClaimedTurn(
       GOAT_METRICS.codexChatQueueWaitMs,
       Math.max(0, Date.now() - turn.createdAt.getTime()),
       {
-        "goat.engine": "codex",
+        "goat.engine": session.engine,
         "goat.model": session.model,
         "goat.status": turn.status,
         "goat.attempt": turn.attempts,
@@ -231,14 +232,18 @@ export async function runClaimedTurn(
   let retryableError: GoatCodexChatRetryableInfrastructureError | null = null;
   try {
     try {
-      const outcome = await runGoatCodexChatTurn({
+      const turnInput = {
         turn,
         session,
         env,
         ...(recoveryRequired ? { recovery: { reason: "lease_reclaimed" as const } } : {}),
         shouldAbort: () =>
           options.handoffSignal?.aborted ? new GoatCodexChatHandoffError() : heartbeatAbort,
-      });
+      };
+      const outcome =
+        session.engine === "claude_code"
+          ? await runGoatClaudeCodeChatTurn(turnInput)
+          : await runGoatCodexChatTurn(turnInput);
       handedOff = outcome === "handed_off";
     } catch (error) {
       if (error instanceof GoatCodexChatHandoffError) {
