@@ -193,6 +193,7 @@ export async function runCodexAppServerTurn(input: {
   goalMode?: CodexGoalModeInput | null;
   existingEngineSessionId: string | null;
   existingEngineTurnId?: string | null;
+  existingEngineTurnBaselineIds?: string[] | null;
   reattachExistingTurn?: boolean;
   forceRestartForRecovery?: boolean;
   auth: CodexCliAuth;
@@ -202,6 +203,7 @@ export async function runCodexAppServerTurn(input: {
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
   onEngineSessionId?: (threadId: string) => Promise<void>;
   onEngineTurnId?: (turnId: string) => Promise<void>;
+  onBeforeEngineTurnStart?: (baselineTurnIds: string[]) => Promise<void>;
   onRecoveryStart?: () => Promise<void>;
   onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
   onActivity: (activity: string) => Promise<void>;
@@ -322,6 +324,7 @@ async function runTurnThroughProxy(input: {
   goalMode?: CodexGoalModeInput | null;
   existingEngineSessionId: string | null;
   existingEngineTurnId?: string | null;
+  existingEngineTurnBaselineIds?: string[] | null;
   reattachExistingTurn?: boolean;
   forceRestartForRecovery?: boolean;
   timeoutMs: number;
@@ -329,6 +332,7 @@ async function runTurnThroughProxy(input: {
   onRuntimeEvents: (events: Record<string, unknown>[]) => Promise<void>;
   onEngineSessionId?: (threadId: string) => Promise<void>;
   onEngineTurnId?: (turnId: string) => Promise<void>;
+  onBeforeEngineTurnStart?: (baselineTurnIds: string[]) => Promise<void>;
   onRecoveryStart?: () => Promise<void>;
   onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
   onActivity: (activity: string) => Promise<void>;
@@ -412,7 +416,11 @@ async function runTurnThroughProxy(input: {
       accumulator.setGoal(goal);
     }
     const existingTurn = input.reattachExistingTurn
-      ? findThreadTurn(thread.value, input.existingEngineTurnId ?? null)
+      ? findThreadTurn({
+          thread: thread.value,
+          turnId: input.existingEngineTurnId ?? null,
+          baselineTurnIds: input.existingEngineTurnBaselineIds ?? null,
+        })
       : null;
     if (existingTurn && !isInterruptedTurn(existingTurn)) {
       turnId = firstString(existingTurn.id);
@@ -433,7 +441,11 @@ async function runTurnThroughProxy(input: {
         turn_status: firstString(existingTurn.status),
       });
     } else {
-      if (input.reattachExistingTurn) await input.onRecoveryStart?.();
+      if (input.reattachExistingTurn) {
+        await input.onRecoveryStart?.();
+      } else {
+        await input.onBeforeEngineTurnStart?.(threadTurnIds(thread.value));
+      }
       const turn = await client.request("turn/start", {
         threadId,
         input: [
@@ -632,15 +644,36 @@ async function executeDynamicToolRequest(input: {
   }
 }
 
-function findThreadTurn(thread: Record<string, unknown>, turnId: string | null) {
-  const turns = Array.isArray(thread.turns) ? thread.turns : [];
-  let activeTurn: Record<string, unknown> | null = null;
-  for (const value of turns) {
-    if (!isRecord(value)) continue;
-    if (turnId && firstString(value.id) === turnId) return value;
-    if (!isTerminalTurn(value)) activeTurn = value;
+function findThreadTurn(input: {
+  thread: Record<string, unknown>;
+  turnId: string | null;
+  baselineTurnIds: string[] | null;
+}) {
+  const turns = Array.isArray(input.thread.turns) ? input.thread.turns : [];
+  if (input.turnId) {
+    const exactTurn = turns.find(
+      (value) => isRecord(value) && firstString(value.id) === input.turnId,
+    );
+    if (exactTurn) return exactTurn;
   }
-  return activeTurn;
+  if (!input.baselineTurnIds) return null;
+
+  const baselineTurnIds = new Set(input.baselineTurnIds);
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const value = turns[index];
+    if (!isRecord(value)) continue;
+    const candidateId = firstString(value.id);
+    if (candidateId && !baselineTurnIds.has(candidateId)) return value;
+  }
+  return null;
+}
+
+function threadTurnIds(thread: Record<string, unknown>) {
+  const turns = Array.isArray(thread.turns) ? thread.turns : [];
+  return turns.flatMap((value) => {
+    const turnId = isRecord(value) ? firstString(value.id) : null;
+    return turnId ? [turnId] : [];
+  });
 }
 
 function isInterruptedTurn(turn: Record<string, unknown>) {

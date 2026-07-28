@@ -33,7 +33,11 @@ import { getGitHubWorkInstallationToken } from "./github";
 import { loadGoatCodexCliAuth, persistRefreshedGoatCodexAuth } from "./goat-codex";
 import { createGoatCodexActionDynamicTools } from "./goat-codex-action-tools";
 import { createGoatCodexBrainDynamicTool } from "./goat-codex-brain-tool";
-import { GoatCodexChatHandoffError, GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
+import {
+  GoatCodexChatHandoffError,
+  GoatCodexChatLeaseLostError,
+  GoatCodexChatRetryableInfrastructureError,
+} from "./goat-codex-chat-errors";
 import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
@@ -42,6 +46,7 @@ import {
   armSandboxActiveTimeoutById,
   armSandboxIdleTimeout,
   createOrConnectSandbox,
+  isRetryableSandboxAcquisitionError,
   type SandboxHandle,
   writeSandboxTextFiles,
 } from "./sandbox";
@@ -101,6 +106,11 @@ export async function runGoatCodexChatTurn(input: {
       initialParts,
     });
 
+  if (turn.interruptRequestedAt) {
+    await (await bareProjector()).interrupted();
+    return "settled";
+  }
+
   const auth = await loadGoatCodexCliAuth(turn.userWorkosId);
   if (!auth) {
     await (await bareProjector()).fail(GOAT_CODEX_CHAT_REAUTH_MESSAGE, { sessionStatus: "failed" });
@@ -119,6 +129,14 @@ export async function runGoatCodexChatTurn(input: {
       idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
     });
   } catch (error) {
+    const abort = shouldAbort?.();
+    if (abort) throw abort;
+    if (isRetryableSandboxAcquisitionError(error)) {
+      throw new GoatCodexChatRetryableInfrastructureError(
+        "Codex sandbox capacity is temporarily unavailable.",
+        error,
+      );
+    }
     await (await bareProjector()).fail(
       `Codex sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`,
     );
@@ -307,6 +325,7 @@ export async function runGoatCodexChatTurn(input: {
       goalMode: settings.goalMode,
       existingEngineSessionId: session.codexThreadId,
       existingEngineTurnId: input.recovery ? turn.codexTurnId : null,
+      existingEngineTurnBaselineIds: input.recovery ? turn.engineTurnBaselineIds : null,
       reattachExistingTurn: Boolean(input.recovery),
       forceRestartForRecovery: recoveryHadPendingInteraction || recoveryHadPendingDynamicTool,
       auth,
@@ -327,6 +346,13 @@ export async function runGoatCodexChatTurn(input: {
         }),
       onEngineTurnId: (codexTurnId) =>
         persistCodexChatEngineTurnId({ turn, leaseId, leaseOwner, codexTurnId }),
+      onBeforeEngineTurnStart: (baselineTurnIds) =>
+        persistCodexChatEngineTurnBaseline({
+          turn,
+          leaseId,
+          leaseOwner,
+          baselineTurnIds,
+        }),
       onRecoveryStart: () => claimCodexChatRecovery({ turn, leaseId, leaseOwner }),
       onServerRequest: async (request) => {
         if (request.method === "item/commandExecution/requestApproval") {
@@ -728,6 +754,33 @@ async function persistCodexChatEngineTurnId(input: {
           WHEN turn.codex_turn_id IS DISTINCT FROM ${input.codexTurnId} THEN 0
           ELSE turn.recovery_attempts
         END,
+        updated_at = ${new Date()}
+    WHERE turn.id = ${input.turn.id}
+      AND turn.user_workos_id = ${input.turn.userWorkosId}
+      AND turn.lease_id = ${input.leaseId}
+      AND turn.lease_owner = ${input.leaseOwner}
+      AND turn.status = 'running'
+    RETURNING turn.id
+  `);
+  if (rowsFromExecute(result).length === 0) throw new GoatCodexChatLeaseLostError();
+}
+
+async function persistCodexChatEngineTurnBaseline(input: {
+  turn: GoatCodexChatTurn;
+  leaseId: string;
+  leaseOwner: string;
+  baselineTurnIds: string[];
+}) {
+  // Snapshot the thread immediately before turn/start. If this worker disappears after the write,
+  // the next owner can identify the newly-created turn as the id absent from this baseline instead
+  // of adopting unrelated active work. Setup and sandbox-acquisition retries never reach here.
+  const result = await getDb().execute(sql`
+    UPDATE goat.codex_chat_turns AS turn
+    SET engine_recovery_required = true,
+        engine_turn_baseline_ids = COALESCE(
+          turn.engine_turn_baseline_ids,
+          ${JSON.stringify(input.baselineTurnIds)}::jsonb
+        ),
         updated_at = ${new Date()}
     WHERE turn.id = ${input.turn.id}
       AND turn.user_workos_id = ${input.turn.userWorkosId}

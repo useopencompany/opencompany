@@ -2,7 +2,10 @@ import { CODEX_COMMAND_TOOL_PART_TYPE, type CodexUiMessagePart } from "@opencomp
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import { runGoatCodexChatTurn, summarizeCodexChatRecoveryProgress } from "./goat-codex-chat";
-import { GoatCodexChatHandoffError } from "./goat-codex-chat-errors";
+import {
+  GoatCodexChatHandoffError,
+  GoatCodexChatRetryableInfrastructureError,
+} from "./goat-codex-chat-errors";
 
 const appServerMocks = vi.hoisted(() => ({
   runCodexAppServerTurn: vi.fn(),
@@ -35,6 +38,7 @@ const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
+  isRetryableSandboxAcquisitionError: vi.fn(),
 }));
 
 vi.mock("./codex-app-server", () => ({
@@ -76,6 +80,7 @@ vi.mock("./sandbox", () => ({
   armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
+  isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
   writeSandboxTextFiles: vi.fn(
     async (input: {
       sandbox: { files: { write: (files: unknown) => Promise<void> } };
@@ -91,7 +96,7 @@ describe("runGoatCodexChatTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbMocks.selectRows.length = 0;
-    dbMocks.execute.mockResolvedValue({ rows: [{ id: "updated" }] });
+    dbMocks.execute.mockReset().mockResolvedValue({ rows: [{ id: "updated" }] });
     codexAuthMocks.loadGoatCodexCliAuth.mockResolvedValue({
       kind: "api",
       baseUrl: "https://api.openai.test/v1",
@@ -112,14 +117,20 @@ describe("runGoatCodexChatTurn", () => {
     sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
-    appServerMocks.runCodexAppServerTurn.mockResolvedValue({
-      sessionId: "thread_existing",
-      status: "success",
-      result: "Done.",
-      error: null,
-      usage: null,
-      goal: null,
-    });
+    sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
+    appServerMocks.runCodexAppServerTurn.mockImplementation(
+      async (input: { onBeforeEngineTurnStart?: (turnIds: string[]) => Promise<void> }) => {
+        await input.onBeforeEngineTurnStart?.(["turn_before"]);
+        return {
+          sessionId: "thread_existing",
+          status: "success",
+          result: "Done.",
+          error: null,
+          usage: null,
+          goal: null,
+        };
+      },
+    );
     attachmentMocks.downloadBlobBytes.mockResolvedValue(Buffer.from("image bytes"));
   });
 
@@ -264,9 +275,87 @@ describe("runGoatCodexChatTurn", () => {
         reasoningEffort: "xhigh",
       }),
     );
-    expect(dbMocks.execute).toHaveBeenCalledOnce();
-    expect(sqlText(dbMocks.execute.mock.calls[0]?.[0])).toContain("SET sandbox_timeout_armed_at");
+    const statements = dbMocks.execute.mock.calls.map(([query]) => sqlText(query));
+    expect(statements).toContainEqual(
+      expect.stringContaining("SET engine_recovery_required = true"),
+    );
+    expect(statements).toContainEqual(expect.stringContaining("SET sandbox_timeout_armed_at"));
     expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
+  });
+
+  it("preserves the turn when sandbox acquisition fails transiently", async () => {
+    dbMocks.selectRows.push([]);
+    const capacity = new Error("500: Failed to place sandbox");
+    capacity.name = "SandboxError";
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(capacity);
+    sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValueOnce(true);
+
+    await expect(
+      runGoatCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        env: env(),
+      }),
+    ).rejects.toBeInstanceOf(GoatCodexChatRetryableInfrastructureError);
+
+    expect(eventMocks.createGoatCodexChatProjector).not.toHaveBeenCalled();
+    expect(appServerMocks.runCodexAppServerTurn).not.toHaveBeenCalled();
+  });
+
+  it("keeps permanent sandbox acquisition failures terminal", async () => {
+    dbMocks.selectRows.push([]);
+    const authentication = new Error("Unauthorized");
+    authentication.name = "AuthenticationError";
+    sandboxMocks.createOrConnectSandbox.mockRejectedValueOnce(authentication);
+
+    await expect(
+      runGoatCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createGoatCodexChatProjector.mock.results[0]?.value;
+    expect(projector.fail).toHaveBeenCalledWith(
+      "Codex sandbox could not be started: Unauthorized. Send your message again to retry.",
+    );
+  });
+
+  it("persists the engine turn baseline at the start boundary", async () => {
+    dbMocks.selectRows.push([]);
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      env: env(),
+    });
+
+    const recoveryBoundaryIndex = dbMocks.execute.mock.calls.findIndex(([query]) =>
+      sqlText(query).includes("engine_recovery_required = true"),
+    );
+    expect(recoveryBoundaryIndex).toBeGreaterThanOrEqual(0);
+    expect(sqlText(dbMocks.execute.mock.calls[recoveryBoundaryIndex]?.[0])).toContain(
+      "engine_turn_baseline_ids",
+    );
+  });
+
+  it("settles a deferred turn interrupted before sandbox acquisition", async () => {
+    dbMocks.selectRows.push([]);
+
+    await expect(
+      runGoatCodexChatTurn({
+        turn: { ...codexTurn(), interruptRequestedAt: new Date("2026-07-10T09:01:00.000Z") },
+        session: codexSession(),
+        env: env(),
+        recovery: { reason: "lease_reclaimed" },
+      }),
+    ).resolves.toBe("settled");
+
+    const projector = eventMocks.createGoatCodexChatProjector.mock.results[0]?.value;
+    expect(projector.interrupted).toHaveBeenCalledOnce();
+    expect(codexAuthMocks.loadGoatCodexCliAuth).not.toHaveBeenCalled();
+    expect(sandboxMocks.createOrConnectSandbox).not.toHaveBeenCalled();
   });
 
   it("registers the Brain host tool only for a session pinned to its contract", async () => {
@@ -353,7 +442,9 @@ describe("runGoatCodexChatTurn", () => {
 
   it("does not park a sandbox after shutdown already released the lease", async () => {
     dbMocks.selectRows.push([]);
-    dbMocks.execute.mockResolvedValueOnce({ rows: [] });
+    dbMocks.execute.mockImplementation(async (query) => ({
+      rows: sqlText(query).includes("SELECT 1") ? [] : [{ id: "updated" }],
+    }));
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
     appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new GoatCodexChatHandoffError());
@@ -372,7 +463,7 @@ describe("runGoatCodexChatTurn", () => {
 
   it("does not shorten the active timeout while a handed-off turn still owns its lease", async () => {
     dbMocks.selectRows.push([]);
-    dbMocks.execute.mockResolvedValueOnce({ rows: [{ id: "owned" }] });
+    dbMocks.execute.mockImplementation(async () => ({ rows: [{ id: "owned" }] }));
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
     appServerMocks.runCodexAppServerTurn.mockRejectedValueOnce(new GoatCodexChatHandoffError());
@@ -701,6 +792,8 @@ function codexTurn() {
     interruptRequestedAt: null,
     attempts: 1,
     recoveryAttempts: 0,
+    engineRecoveryRequired: false,
+    engineTurnBaselineIds: null,
     leaseId: "lease_1",
     leaseOwner: "runner_1",
     leaseExpiresAt: new Date("2026-07-10T12:05:00Z"),
