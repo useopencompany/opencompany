@@ -82,7 +82,7 @@ export type GoatChatSessionRow = {
   user_workos_id: string;
   title: string;
   model: string;
-  engine: "opencompany" | "local_codex" | "codex";
+  engine: "opencompany" | "local_codex" | "codex" | "claude_code";
   closed_at: string | null;
   pinned_at: string | null;
   created_at: string;
