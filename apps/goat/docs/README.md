@@ -199,8 +199,12 @@ enrichment actions. Every paid execution inspects its live endpoint schema and p
 checks shared workspace credits, and requires a one-time approval above the per-action or per-turn
 thresholds. Provider data is treated as hostile input, redacted and bounded before it enters the chat
 trace, and billed once from the settled provider cost plus the platform fee. The durable
-`goat.capability_runs` row stores only the parameter hash and lifecycle/cost metadata; raw results
-stay in the requesting chat. The hourly billing reconciler settles interrupted or delayed runs.
+`goat.capability_runs` row stores only the parameter hash and lifecycle/cost metadata; only the
+safety-bounded action result enters the requesting chat. The hourly billing reconciler settles
+interrupted or delayed runs.
+YouTube transcript search fetches one full timestamped transcript through a reviewed Monid-backed
+Apify actor, searches it server-side for the requested phrase, and returns only bounded timestamped
+context windows to the chat.
 `MONID_API_KEY` belongs in Infisical `prod` + `/goat`, and
 `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new turns.
 `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint

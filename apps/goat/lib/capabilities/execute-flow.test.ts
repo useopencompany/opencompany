@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   createRun: vi.fn(),
   isWorkspaceCapabilityEnabled: vi.fn(),
   markStarted: vi.fn(),
+  markSettlementFailure: vi.fn(),
   markStopping: vi.fn(),
   settleRun: vi.fn(),
   getBalance: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock("@opencompany/db/goat-capabilities", () => ({
   createGoatCapabilityRun: mocks.createRun,
   isGoatWorkspaceCapabilityEnabled: mocks.isWorkspaceCapabilityEnabled,
   markGoatCapabilityRunStarted: mocks.markStarted,
+  markGoatCapabilityRunSettlementFailure: mocks.markSettlementFailure,
   markGoatCapabilityRunStopping: mocks.markStopping,
   settleGoatCapabilityRun: mocks.settleRun,
 }));
@@ -50,9 +52,14 @@ describe("executeManagedCapability", () => {
     mocks.createRun.mockImplementation(async (input) => auditRow(input));
     mocks.consumeApproval.mockResolvedValue(null);
     mocks.markStarted.mockResolvedValue({});
+    mocks.markSettlementFailure.mockResolvedValue(undefined);
     mocks.markStopping.mockResolvedValue(undefined);
     mocks.settleRun.mockResolvedValue({});
-    mocks.recordDebit.mockResolvedValue({ ok: true, ledgerId: 1, balanceUsdMicros: 9_998_200 });
+    mocks.recordDebit.mockResolvedValue({
+      ok: true,
+      ledgerId: 1,
+      balanceUsdMicros: 9_998_200,
+    });
   });
 
   it("automatically runs a cheap action and settles provider cost plus 20%", async () => {
@@ -89,6 +96,111 @@ describe("executeManagedCapability", () => {
       resultCount: 1,
       cost: { totalUsdMicros: 1_800, state: "settled" },
     });
+  });
+
+  it("shapes provider output before sanitizing it with a separate payload array limit", async () => {
+    const mapOutput = vi.fn(() => ({
+      matches: [{ text: "first" }, { text: "second" }, { text: "third" }],
+    }));
+    const action = {
+      ...spec(),
+      mapInput: (params: Record<string, unknown>) => ({
+        providerInput: { keyword: params.query },
+        resultLimit: 1,
+        payloadArrayLimit: 3,
+        canonicalLinks: [],
+      }),
+      mapOutput,
+    };
+    const providerOutput = {
+      transcript: [{ text: "unbounded provider data" }],
+    };
+    const client = fakeClient({
+      inspection: inspectPrice(0.0015),
+      run: providerRun({
+        output: providerOutput,
+        cost: { value: 0.0015, currency: "USD" },
+      }),
+    });
+
+    const result = await executeManagedCapability({
+      spec: action,
+      params: { query: "openai" },
+      context: context(),
+      client,
+    });
+
+    expect(mapOutput).toHaveBeenCalledWith(providerOutput, { query: "openai" });
+    expect(result.payload).toEqual({
+      matches: [{ text: "first" }, { text: "second" }, { text: "third" }],
+    });
+    expect(result.resultCount).toBe(1);
+  });
+
+  it("charges completed provider work but marks unusable mapped output as failed", async () => {
+    const action = {
+      ...spec(),
+      mapOutput: () => {
+        throw new Error("untrusted parser detail");
+      },
+    };
+    const client = fakeClient({
+      inspection: inspectPrice(0.0015),
+      run: providerRun({ cost: { value: 0.0015, currency: "USD" } }),
+    });
+
+    await expect(
+      executeManagedCapability({
+        spec: action,
+        params: { query: "openai" },
+        context: context(),
+        client,
+      }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+
+    expect(mocks.recordDebit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerCostUsdMicros: 1_500,
+        platformFeeUsdMicros: 300,
+        totalCostUsdMicros: 1_800,
+      }),
+    );
+    expect(mocks.settleRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "failed",
+        errorCode: "provider_output_invalid",
+        errorMessage: "The capability returned data that could not be safely used.",
+      }),
+    );
+  });
+
+  it("keeps an unusable mapped output failed while its provider cost is still settling", async () => {
+    const action = {
+      ...spec(),
+      mapOutput: () => {
+        throw new Error("untrusted parser detail");
+      },
+    };
+    const client = fakeClient({
+      inspection: inspectPrice(0.0015),
+      run: providerRun({ cost: null }),
+    });
+
+    await expect(
+      executeManagedCapability({
+        spec: action,
+        params: { query: "openai" },
+        context: context(),
+        client,
+      }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+
+    expect(mocks.markSettlementFailure).toHaveBeenCalledWith({
+      id: "gcr_1",
+      errorCode: "provider_output_invalid",
+      errorMessage: "The capability returned data that could not be safely used.",
+    });
+    expect(mocks.settleRun).not.toHaveBeenCalled();
   });
 
   it("sends reviewed query parameters in the Monid input envelope", async () => {
@@ -408,7 +520,10 @@ describe("executeManagedCapability", () => {
     const client = fakeClient({
       inspection: inspectPrice(0.01),
       run: providerRun({ status: "RUNNING", cost: null }),
-      polled: providerRun({ status: "COMPLETED", cost: { value: 0.01, currency: "USD" } }),
+      polled: providerRun({
+        status: "COMPLETED",
+        cost: { value: 0.01, currency: "USD" },
+      }),
     });
     await executeManagedCapability({
       spec: { ...spec(), executionMode: "async" },

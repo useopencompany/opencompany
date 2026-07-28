@@ -1,6 +1,7 @@
 import type { GoatManagedCapabilitySource } from "@opencompany/db/goat-schema";
 import type { JSONSchema7 } from "ai";
 import { GoatActionInvalidParamsError } from "@/lib/actions/types";
+import { shapeYoutubeTranscriptSearchOutput } from "@/lib/capabilities/youtube-transcript-search";
 
 export type ManagedCapabilityExecutionMode = "sync" | "async";
 export type ManagedCapabilityInputLocation = "body" | "queryParams" | "pathParams";
@@ -8,6 +9,7 @@ export type ManagedCapabilityInputLocation = "body" | "queryParams" | "pathParam
 export type ManagedCapabilityMappedInput = {
   providerInput: Record<string, unknown>;
   resultLimit: number;
+  payloadArrayLimit?: number;
   canonicalLinks: string[];
 };
 
@@ -22,6 +24,7 @@ export type ManagedCapabilityActionSpec = {
   executionMode: ManagedCapabilityExecutionMode;
   inputLocation?: ManagedCapabilityInputLocation;
   mapInput: (params: Record<string, unknown>) => ManagedCapabilityMappedInput;
+  mapOutput?: (output: unknown, params: Record<string, unknown>) => unknown;
 };
 
 export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
@@ -159,6 +162,41 @@ const VIDEO_PARAMS = {
   },
   required: ["video"],
 } as const satisfies JSONSchema7;
+const YOUTUBE_TRANSCRIPT_SEARCH_PARAMS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    video: VIDEO_PARAMS.properties.video,
+    query: {
+      type: "string",
+      minLength: 1,
+      maxLength: 200,
+      description:
+        "Case-insensitive phrase to find in the transcript, such as a sponsor, brand, person, or topic name. Retry with a spelling variant only when the first search has no matches.",
+    },
+    language: {
+      type: "string",
+      pattern: "^[a-z]{2}$",
+      description:
+        "Preferred transcript language as a lowercase ISO 639-1 code, such as en or de. The provider falls back when that caption language is unavailable.",
+    },
+    contextSeconds: {
+      type: "integer",
+      minimum: 15,
+      maximum: 120,
+      default: 60,
+      description: "Seconds of transcript context to return before and after each match.",
+    },
+    maxMatches: {
+      type: "integer",
+      minimum: 1,
+      maximum: 3,
+      default: 3,
+      description: "Maximum non-overlapping timestamped excerpts to return.",
+    },
+  },
+  required: ["video", "query"],
+} as const satisfies JSONSchema7;
 const VIDEO_LIST_PARAMS = {
   type: "object",
   additionalProperties: false,
@@ -195,6 +233,7 @@ const CONTENT_LIST_PARAMS = {
 
 const TIKHUB = "tikhub" as const;
 const SEMRUSH = "semrush" as const;
+const YOUTUBE_TRANSCRIPT_PAYLOAD_ARRAY_LIMIT = 20;
 const PDL_PROSPECT_JOB_LEVELS = [
   "cxo",
   "owner",
@@ -496,11 +535,7 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     "Get details for one public YouTube video.",
     "/api/v1/youtube/web_v2/get_video_info_v2",
   ),
-  youtubeVideoAction(
-    "youtube.get_transcript",
-    "Get available captions or transcript for one public YouTube video.",
-    "/api/v1/youtube/web_v2/get_video_captions",
-  ),
+  youtubeTranscriptSearchAction(),
   youtubeVideoListAction(
     "youtube.list_comments",
     "List public comments on a YouTube video.",
@@ -1215,6 +1250,12 @@ export function managedCapabilityContractProbeParams(id: string): Record<string,
   if (id === "lead.list_company_employees") {
     return { companyUrl: "https://www.linkedin.com/company/openai" };
   }
+  if (id === "youtube.find_in_transcript") {
+    return {
+      video: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      query: "never gonna give you up",
+    };
+  }
   if (id.startsWith("linkedin.")) {
     if (id.includes("company")) {
       return { url: "https://www.linkedin.com/company/openai" };
@@ -1469,6 +1510,63 @@ function youtubeVideoAction(
         canonicalLinks: [video.url],
       };
     },
+  };
+}
+
+function youtubeTranscriptSearchAction(): ManagedCapabilityActionSpec {
+  return {
+    id: "youtube.find_in_transcript",
+    source: "youtube",
+    description:
+      "Find a phrase anywhere in a public YouTube video's full transcript and return bounded timestamped excerpts around each match. Use this for sponsor reads, quotes, named topics, or other specific moments instead of downloading an unbounded transcript.",
+    params: YOUTUBE_TRANSCRIPT_SEARCH_PARAMS,
+    provider: "apify",
+    endpoint: "/starvibe/youtube-video-transcript",
+    priceType: "PER_RESULT",
+    executionMode: "async",
+    inputLocation: "body",
+    mapInput: (raw) => {
+      const input = youtubeTranscriptSearchInput(raw);
+      return {
+        providerInput: compact({
+          youtube_url: input.video.url,
+          language: input.language,
+        }),
+        resultLimit: 1,
+        payloadArrayLimit: YOUTUBE_TRANSCRIPT_PAYLOAD_ARRAY_LIMIT,
+        canonicalLinks: [input.video.url],
+      };
+    },
+    mapOutput: (output, raw) => {
+      const input = youtubeTranscriptSearchInput(raw);
+      return shapeYoutubeTranscriptSearchOutput(output, {
+        videoUrl: input.video.url,
+        query: input.query,
+        contextSeconds: input.contextSeconds,
+        maxMatches: input.maxMatches,
+      });
+    },
+  };
+}
+
+function youtubeTranscriptSearchInput(raw: Record<string, unknown>) {
+  const params = checkedParams(raw, ["video", "query", "language", "contextSeconds", "maxMatches"]);
+  const language = optionalText(params, "language", 2);
+  if (language && !/^[a-z]{2}$/.test(language)) {
+    throw new GoatActionInvalidParamsError(
+      '"language" must be a lowercase two-letter ISO 639-1 code.',
+    );
+  }
+  const query = requiredText(params, "query", 200);
+  if (!/[\p{L}\p{N}]/u.test(query)) {
+    throw new GoatActionInvalidParamsError('"query" must contain at least one letter or number.');
+  }
+  return {
+    video: parseContentIdentity(requiredText(params, "video", 1_000), "youtube_video"),
+    query,
+    language,
+    contextSeconds: integerParam(params, "contextSeconds", 15, 120, 60),
+    maxMatches: integerParam(params, "maxMatches", 1, 3, 3),
   };
 }
 
