@@ -10,6 +10,8 @@ export type CodexAppServerEventType =
   | "file_change.completed"
   | "mcp_tool.started"
   | "mcp_tool.completed"
+  | "subagent.started"
+  | "subagent.completed"
   | "dynamic_tool.started"
   | "dynamic_tool.completed"
   | "web_search.started"

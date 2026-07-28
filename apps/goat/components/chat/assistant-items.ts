@@ -9,6 +9,7 @@ import {
   CODEX_MCP_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_NAME,
   CODEX_WEB_SEARCH_TOOL_NAME,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
@@ -32,7 +33,17 @@ export type AssistantRenderItem =
   | { type: "text"; key: string; text: string; citations: BrainCitation[] }
   | { type: "reasoning"; key: string; text: string }
   | { type: "task"; key: string; task: ChatTaskCardView }
-  | { type: "tool"; key: string; tool: ToolCallView };
+  | { type: "tool"; key: string; tool: ToolCallView }
+  | { type: "subagent"; key: string; subagent: SubagentRenderView };
+
+// A Claude Code Task call: the tool header plus the subagent's own nested trace, already
+// resolved into render items so the UI can render them under an expandable subagent row.
+export type SubagentRenderView = {
+  tool: ToolCallView;
+  children: AssistantRenderItem[];
+};
+
+type RenderablePart = Record<string, unknown> & { type: string };
 
 export type BrainCitation = {
   key: string;
@@ -73,6 +84,33 @@ export function getOrderedAssistantItems(
   taskLookup: ChatTaskLookup,
   stopped = false,
 ) {
+  const items = collectRenderItems(
+    message.parts as readonly RenderablePart[],
+    taskLookup,
+    stopped,
+    "",
+  );
+
+  const metadataTask = metadataTaskCard(message.metadata);
+  if (!items.some((item) => item.type === "task") && metadataTask) {
+    items.push({
+      type: "task",
+      key: "task-metadata",
+      task: resolveChatTaskCard(metadataTask, taskLookup),
+    });
+  }
+
+  return items;
+}
+
+// Shared by the top-level turn and each subagent's nested trace: folds a parts array into ordered
+// render items. keyPrefix keeps React keys unique across nesting levels.
+function collectRenderItems(
+  parts: readonly RenderablePart[],
+  taskLookup: ChatTaskLookup,
+  stopped: boolean,
+  keyPrefix: string,
+): AssistantRenderItem[] {
   const items: AssistantRenderItem[] = [];
   let textBuffer = "";
   let pendingCitations: BrainCitation[] = [];
@@ -85,26 +123,39 @@ export function getOrderedAssistantItems(
     pendingCitations = [];
   };
 
-  for (const [index, part] of message.parts.entries()) {
+  for (const [index, part] of parts.entries()) {
     if (part.type === "text") {
-      textBuffer += part.text;
+      textBuffer += typeof part.text === "string" ? part.text : "";
       continue;
     }
     if (part.type === "reasoning") {
-      if (!part.text.trim()) continue;
-      flushText(`text-${index}`);
-      items.push({ type: "reasoning", key: `reasoning-${index}`, text: part.text });
+      const text = typeof part.text === "string" ? part.text : "";
+      if (!text.trim()) continue;
+      flushText(`${keyPrefix}text-${index}`);
+      items.push({ type: "reasoning", key: `${keyPrefix}reasoning-${index}`, text });
       continue;
     }
     if (!isToolPartRecord(part)) continue;
     const tool = toolCallViewFromPart(part, stopped);
     if (!tool) continue;
-    flushText(`text-${index}`);
+    flushText(`${keyPrefix}text-${index}`);
     if (tool.name === GOAT_BRAIN_TOOL_NAME && tool.status === "completed") {
       pendingCitations = mergeBrainCitations(
         pendingCitations,
         brainCitationsFromToolOutput(tool.output),
       );
+    }
+    if (tool.name === CODEX_SUBAGENT_TOOL_NAME) {
+      const childParts = Array.isArray(part.children) ? (part.children as RenderablePart[]) : [];
+      items.push({
+        type: "subagent",
+        key: `${keyPrefix}subagent-${index}`,
+        subagent: {
+          tool,
+          children: collectRenderItems(childParts, taskLookup, stopped, `${keyPrefix}sa${index}-`),
+        },
+      });
+      continue;
     }
     if (
       part.type === START_TASK_TOOL_PART_TYPE &&
@@ -113,28 +164,19 @@ export function getOrderedAssistantItems(
     ) {
       items.push({
         type: "task",
-        key: `task-${index}`,
+        key: `${keyPrefix}task-${index}`,
         task: resolveChatTaskCard(taskFromOutput(part.output), taskLookup),
       });
       continue;
     }
     items.push({
       type: "tool",
-      key: `tool-${index}`,
+      key: `${keyPrefix}tool-${index}`,
       tool,
     });
   }
 
-  flushText("text-end");
-
-  const metadataTask = metadataTaskCard(message.metadata);
-  if (!items.some((item) => item.type === "task") && metadataTask) {
-    items.push({
-      type: "task",
-      key: "task-metadata",
-      task: resolveChatTaskCard(metadataTask, taskLookup),
-    });
-  }
+  flushText(`${keyPrefix}text-end`);
 
   return items;
 }
@@ -244,7 +286,8 @@ function isCodexItemToolName(name: string) {
   return (
     name === CODEX_FILE_CHANGE_TOOL_NAME ||
     name === CODEX_MCP_TOOL_NAME ||
-    name === CODEX_WEB_SEARCH_TOOL_NAME
+    name === CODEX_WEB_SEARCH_TOOL_NAME ||
+    name === CODEX_SUBAGENT_TOOL_NAME
   );
 }
 
@@ -291,6 +334,7 @@ export function toolLabel(name: string) {
   if (name === CODEX_FILE_CHANGE_TOOL_NAME) return "File change";
   if (name === CODEX_MCP_TOOL_NAME) return "MCP tool";
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) return "Web search";
+  if (name === CODEX_SUBAGENT_TOOL_NAME) return "Subagent";
   if (name === START_TASK_TOOL_NAME) return "Task";
   if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
@@ -631,6 +675,13 @@ function codexStateToolDetail(name: string, part: Record<string, unknown>) {
   }
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) {
     return truncateToolPreview(readString(input.query) ?? "Web search");
+  }
+  if (name === CODEX_SUBAGENT_TOOL_NAME) {
+    const subagentType = readString(input.subagentType);
+    const description = readString(input.description) ?? readString(input.prompt);
+    return truncateToolPreview(
+      [subagentType, description].filter(Boolean).join(" · ") || "Subagent",
+    );
   }
   return null;
 }
