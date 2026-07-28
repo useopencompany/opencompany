@@ -730,9 +730,16 @@ async function persistCodexChatEngineTurnId(input: {
   leaseOwner: string;
   codexTurnId: string;
 }) {
+  // Recovery is guarded per persisted engine turn. Only durably adopting a replacement turn
+  // rearms the guard; if the runner dies before this write, another worker cannot start a
+  // duplicate continuation for the same missing engine turn.
   const result = await getDb().execute(sql`
     UPDATE goat.codex_chat_turns AS turn
     SET codex_turn_id = ${input.codexTurnId},
+        recovery_attempts = CASE
+          WHEN turn.codex_turn_id IS DISTINCT FROM ${input.codexTurnId} THEN 0
+          ELSE turn.recovery_attempts
+        END,
         updated_at = ${new Date()}
     WHERE turn.id = ${input.turn.id}
       AND turn.user_workos_id = ${input.turn.userWorkosId}
@@ -763,7 +770,7 @@ async function claimCodexChatRecovery(input: {
   `);
   if (rowsFromExecute(result).length > 0) return;
   throw new Error(
-    "Codex could not resume the original turn after another runner restart. Send your message again to continue.",
+    "Codex could not safely resume this turn because the previous recovery did not persist a resumable engine turn. Send your message again to continue.",
   );
 }
 
