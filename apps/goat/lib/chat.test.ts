@@ -751,6 +751,41 @@ describe("Goat chat history helpers", () => {
       vi.useRealTimers();
     }
   });
+
+  it("includes latest Claude effort on loaded chats", async () => {
+    const { store, sessions } = createInMemoryChatStore({
+      codexSettingsBySessionId: {
+        goat_chat_claude_1: {
+          reasoningEffort: "xhigh",
+        },
+      },
+    });
+    const now = new Date("2026-07-04T12:00:00.000Z");
+    sessions.push({
+      id: "goat_chat_claude_1",
+      userWorkosId: "user_1",
+      title: "Claude chat",
+      model: "anthropic/claude-opus-4.8",
+      engine: "claude_code",
+      closedAt: null,
+      pinnedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await expect(
+      loadGoatChatSessionByIdForUser(
+        { userWorkosId: "user_1", sessionId: "goat_chat_claude_1" },
+        store,
+      ),
+    ).resolves.toMatchObject({
+      codexComposerSettings: {
+        reasoningEffort: "xhigh",
+        planModeEnabled: false,
+        goalMode: null,
+      },
+    });
+  });
 });
 
 function createInMemoryChatStore(

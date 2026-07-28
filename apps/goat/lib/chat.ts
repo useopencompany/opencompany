@@ -29,6 +29,7 @@ import {
   type GoatStoredChatMessage,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
+import { DEFAULT_CLAUDE_CHAT_REASONING_EFFORT } from "@/lib/claude-chat-settings";
 import { codexComposerSettingsFromTurnSettings } from "@/lib/codex-chat-settings";
 import { goatHomeActivityCutoff } from "@/lib/home-activity";
 import { toGoatTaskTitle } from "@/lib/task-display";
@@ -739,12 +740,17 @@ async function loadCodexComposerSettingsForChatSession(input: {
   userWorkosId: string;
   session: GoatChatSession;
 }) {
-  if (input.session.engine !== "codex") return null;
+  if (input.session.engine !== "codex" && input.session.engine !== "claude_code") return null;
   const settings = await input.store.loadLatestCodexTurnSettings?.({
     userWorkosId: input.userWorkosId,
     sessionId: input.session.id,
   });
-  return settings ? codexComposerSettingsFromTurnSettings(settings) : null;
+  return settings
+    ? codexComposerSettingsFromTurnSettings(
+        settings,
+        input.session.engine === "claude_code" ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT : undefined,
+      )
+    : null;
 }
 
 async function loadCodexRuntimeForChatSession(input: {

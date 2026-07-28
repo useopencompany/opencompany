@@ -29,11 +29,27 @@ function debugLog(project: PostHogServerConfig["project"], message: string, payl
   });
 }
 
+function sanitizedDebugEvent(event: PostHogServerEvent) {
+  return {
+    ...event,
+    properties: Object.fromEntries(
+      Object.entries(event.properties).map(([key, value]) => [
+        key,
+        key === "$set" || key === "$set_once" ? personPropertyKeys(value) : value,
+      ]),
+    ),
+  };
+}
+
+function personPropertyKeys(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value) : [];
+}
+
 export async function capturePostHogServerEvent(
   config: PostHogServerConfig,
   event: PostHogServerEvent,
 ) {
-  debugLog(config.project, "server capture", event);
+  debugLog(config.project, "server capture", sanitizedDebugEvent(event));
 
   if (!config.token || !config.host) {
     debugLog(config.project, "server disabled: missing PostHog token or host");

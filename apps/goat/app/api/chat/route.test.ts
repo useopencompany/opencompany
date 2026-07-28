@@ -271,6 +271,12 @@ describe("POST /api/chat", () => {
         is_first_message: true,
         model: "openai/gpt-5.5",
       }),
+      {
+        workspaceId: "goat_ws_user_1",
+        email: "user@example.com",
+        firstName: null,
+        lastName: null,
+      },
     );
   });
 

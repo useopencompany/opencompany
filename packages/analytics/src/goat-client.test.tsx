@@ -24,7 +24,15 @@ describe("GoatAnalyticsProvider", () => {
     vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
 
     const { rerender } = render(
-      <GoatAnalyticsProvider identity={{ userId: "user_123", workspaceId: "workspace_123" }}>
+      <GoatAnalyticsProvider
+        identity={{
+          userId: "user_123",
+          workspaceId: "workspace_123",
+          email: " ada@example.com ",
+          firstName: " Ada ",
+          lastName: " Lovelace ",
+        }}
+      >
         <div>Goat</div>
       </GoatAnalyticsProvider>,
     );
@@ -71,6 +79,10 @@ describe("GoatAnalyticsProvider", () => {
     );
     expect(posthog.identify).toHaveBeenCalledWith("user_123", {
       workspace_id: "workspace_123",
+      email: "ada@example.com",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      name: "Ada Lovelace",
     });
     expect(posthog.reset).not.toHaveBeenCalled();
     expect(posthog.capture).toHaveBeenCalledWith("app_opened", {

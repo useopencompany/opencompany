@@ -1,4 +1,5 @@
 import { shellQuote } from "@opencompany/agent-runtime";
+import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { CLAUDE_CODE_CLI_PACKAGE, CLAUDE_CODE_CLI_VERSION } from "./claude-code-version";
 import {
   commandExitResult,
@@ -63,6 +64,7 @@ export function buildClaudeTurnCommand(input: {
   workdir: string;
   promptPath: string;
   model: string | null;
+  reasoningEffort: CodexReasoningEffort | null;
   resumeSessionId: string | null;
 }) {
   const args = [
@@ -74,6 +76,7 @@ export function buildClaudeTurnCommand(input: {
     "--permission-mode bypassPermissions",
     `--max-turns ${CLAUDE_MAX_TURNS}`,
     ...(input.model ? [`--model ${shellQuote(input.model)}`] : []),
+    ...(input.reasoningEffort ? [`--effort ${shellQuote(input.reasoningEffort)}`] : []),
     ...(input.resumeSessionId ? [`--resume ${shellQuote(input.resumeSessionId)}`] : []),
   ];
   return [

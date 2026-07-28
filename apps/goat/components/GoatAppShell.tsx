@@ -156,6 +156,9 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       identity={{
         userId: user.workosUserId,
         workspaceId: workspace.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
       }}
     >
       <GoatAppDataProvider initialData={initialData}>{children}</GoatAppDataProvider>

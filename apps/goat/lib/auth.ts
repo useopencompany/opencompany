@@ -59,9 +59,18 @@ export async function syncGoatUser(authUser: WorkOSUser) {
 
   if (insertedUser) {
     recordGoatSignup({ source: "user_sync" });
-    await captureGoatServerEvent("signup_completed", insertedUser.workosUserId, {
-      source: "user_sync",
-    });
+    await captureGoatServerEvent(
+      "signup_completed",
+      insertedUser.workosUserId,
+      {
+        source: "user_sync",
+      },
+      {
+        email: insertedUser.email,
+        firstName: insertedUser.firstName,
+        lastName: insertedUser.lastName,
+      },
+    );
     return insertedUser;
   }
 

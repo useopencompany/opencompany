@@ -1,7 +1,10 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { CODEX_REASONING_EFFORTS } from "@opencompany/agent-runtime";
+import {
+  CODEX_REASONING_EFFORTS,
+  claudeCodeModelSupportsReasoningEffort,
+} from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type {
   GoatChatEngine,
@@ -107,7 +110,13 @@ import {
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
-import { CLAUDE_PICKER_VALUE } from "@/lib/claude-chat-constants";
+import {
+  CLAUDE_CHAT_DEFAULT_MODEL_ID,
+  CLAUDE_PICKER_VALUE,
+  type ClaudeChatModelId,
+  normalizeClaudeChatModelId,
+} from "@/lib/claude-chat-constants";
+import { DEFAULT_CLAUDE_CHAT_REASONING_EFFORT } from "@/lib/claude-chat-settings";
 import {
   CODEX_CHAT_DEFAULT_MODEL_ID,
   CODEX_PICKER_VALUE,
@@ -124,6 +133,7 @@ import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { alwaysAllowGoatChatActionAction } from "@/lib/integration-account-actions";
 import { LOCAL_CODEX_PICKER_VALUE } from "@/lib/local-codex-constants";
 import {
+  CLAUDE_CODE_MODELS,
   CODEX_MODELS,
   DEFAULT_GOAT_MODEL,
   GOAT_MODELS,
@@ -190,6 +200,11 @@ type MentionOption =
 // engine endpoint, streaming arrives as Electric row updates, and stop is an interrupt call.
 type GoatEngineChatKind = "local_codex" | "codex" | "claude_code";
 type CodexComposerSettings = GoatCodexComposerSettingsView;
+type EngineComposerSettings = {
+  reasoningEffort: CodexReasoningEffort;
+  planModeEnabled?: boolean;
+  goalMode?: CodexComposerSettings["goalMode"];
+};
 type CodexComposerUiState = {
   reasoningEffort: CodexReasoningEffort;
   planModeEnabled: boolean;
@@ -317,7 +332,6 @@ export function GoatSurface({
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const onboardingKickoffReadRef = useRef(false);
-  const initialCodexComposerUiState = codexComposerUiStateForChat(initialChat);
   const activeTurnStartedAtRef = useRef<number | null>(null);
   const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
   const wasAgentWorkingRef = useRef(false);
@@ -364,8 +378,20 @@ export function GoatSurface({
   // The remembered selection is a Home default. Opening or reserving a session sets the override
   // so cross-tab preference updates apply only to the next chat.
   const chatModel = chatModelOverride ?? rememberedChatModel;
+  const initialCodexComposerUiState = initialChat
+    ? codexComposerUiStateForChat(initialChat)
+    : defaultCodexComposerUiState(
+        chatModel === CLAUDE_PICKER_VALUE
+          ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT
+          : chatModel === LOCAL_CODEX_PICKER_VALUE
+            ? DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT
+            : DEFAULT_CODEX_CHAT_REASONING_EFFORT,
+      );
   const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
     normalizeCodexChatModelId(initialChat?.model),
+  );
+  const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
+    normalizeClaudeChatModelId(initialChat?.model),
   );
   const [engineChatSession, setEngineChatSession] = useState<{
     engine: GoatEngineChatKind;
@@ -768,9 +794,7 @@ export function GoatSurface({
     [optimisticallyArchivedChatIds, recentChats],
   );
   const trimmedNewChatPrompt = newChatPrompt.trim();
-  // Reasoning-effort / plan-mode / goal-mode are codex concepts; the Claude engine has none.
-  const showCodexComposerControls =
-    isEngineChat && activeEngine !== "claude_code" && !localCodexFeatureDisabledForChat;
+  const showEngineComposerControls = isEngineChat && !localCodexFeatureDisabledForChat;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -894,6 +918,7 @@ export function GoatSurface({
                 : null,
       );
       setCodexModel(normalizeCodexChatModelId(chat?.model));
+      setClaudeModel(normalizeClaudeChatModelId(chat?.model));
       setEngineChatSession(
         chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
       );
@@ -1248,14 +1273,20 @@ export function GoatSurface({
     setMentionToken(null);
     setSelectedMentions([]);
     if (activeEngine) {
-      const settings = buildCodexComposerSettings({
-        prompt,
-        reasoningEffort: codexReasoningEffort,
-        planModeEnabled: codexPlanModeEnabled,
-        goalModeEnabled: codexGoalModeEnabled,
-        goalObjective: codexGoalObjective,
-        goalTokenBudget: codexGoalTokenBudget,
-      });
+      const settings =
+        activeEngine === "claude_code"
+          ? ({
+              ok: true,
+              settings: { reasoningEffort: codexReasoningEffort },
+            } as const)
+          : buildCodexComposerSettings({
+              prompt,
+              reasoningEffort: codexReasoningEffort,
+              planModeEnabled: codexPlanModeEnabled,
+              goalModeEnabled: codexGoalModeEnabled,
+              goalObjective: codexGoalObjective,
+              goalTokenBudget: codexGoalTokenBudget,
+            });
       if (!settings.ok) {
         setInput(prompt);
         setSelectedMentions(mentions);
@@ -1291,7 +1322,11 @@ export function GoatSurface({
         userMessageId,
         attachments: attachmentsMetadata,
         mentions: engine === "local_codex" ? [] : mentions.filter(isSkillMention),
-        ...(engine === "codex" && !existingEngineSessionId ? { model: codexModel } : {}),
+        ...(!existingEngineSessionId && engine === "codex"
+          ? { model: codexModel }
+          : !existingEngineSessionId && engine === "claude_code"
+            ? { model: claudeModel }
+            : {}),
       })
         .then((result) => {
           const pendingNewSessionId = pendingNewSessionIdRef.current;
@@ -2264,7 +2299,17 @@ export function GoatSurface({
                     setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
                   } else if (model === LOCAL_CODEX_PICKER_VALUE && model !== chatModel) {
                     setCodexReasoningEffort(DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT);
-                  } else if (model !== CODEX_PICKER_VALUE && model !== LOCAL_CODEX_PICKER_VALUE) {
+                  } else if (model === CLAUDE_PICKER_VALUE && model !== chatModel) {
+                    setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+                    setCodexPlanModeEnabled(false);
+                    setCodexGoalModeEnabled(false);
+                    setCodexGoalObjective("");
+                    setCodexGoalTokenBudget("");
+                  } else if (
+                    model !== CODEX_PICKER_VALUE &&
+                    model !== LOCAL_CODEX_PICKER_VALUE &&
+                    model !== CLAUDE_PICKER_VALUE
+                  ) {
                     setCodexPlanModeEnabled(false);
                     setCodexGoalModeEnabled(false);
                     setCodexGoalObjective("");
@@ -2276,18 +2321,33 @@ export function GoatSurface({
                 codexConnected={codexConnected}
                 claudeCodeConnected={claudeCodeConnected}
               />
-              {showCodexComposerControls ? (
-                <CodexComposerControls
-                  model={activeEngine === "codex" ? codexModel : null}
+              {showEngineComposerControls ? (
+                <EngineComposerControls
+                  model={
+                    activeEngine === "codex"
+                      ? { engine: "codex", value: codexModel, onChange: setCodexModel }
+                      : activeEngine === "claude_code"
+                        ? {
+                            engine: "claude_code",
+                            value: claudeModel,
+                            onChange: setClaudeModel,
+                          }
+                        : null
+                  }
+                  engineLabel={activeEngine === "claude_code" ? "Claude" : "Codex"}
+                  reasoningEffortAvailable={
+                    activeEngine !== "claude_code" ||
+                    claudeCodeModelSupportsReasoningEffort(claudeModel)
+                  }
                   reasoningEffort={codexReasoningEffort}
                   planModeEnabled={codexPlanModeEnabled}
                   planModeAvailable={activeEngine === "codex"}
+                  goalModeAvailable={activeEngine !== "claude_code"}
                   goalModeEnabled={codexGoalModeEnabled}
                   goalObjective={codexGoalObjective}
                   goalTokenBudget={codexGoalTokenBudget}
                   disabled={engineSubmitting}
                   modelDisabled={engineSubmitting || Boolean(activeEngineChat)}
-                  onModelChange={setCodexModel}
                   onReasoningEffortChange={setCodexReasoningEffort}
                   onPlanModeEnabledChange={setCodexPlanModeEnabled}
                   onGoalModeEnabledChange={setCodexGoalModeEnabled}
@@ -2442,11 +2502,11 @@ async function sendEngineChatMessage(input: {
   prompt: string;
   sessionId: string | null;
   newSessionId: string | null;
-  settings: CodexComposerSettings;
+  settings: EngineComposerSettings;
   userMessageId: string;
   attachments: GoatChatUiAttachment[];
   mentions: GoatChatMention[];
-  model?: CodexChatModelId;
+  model?: CodexChatModelId | ClaudeChatModelId;
 }): Promise<EngineChatMessageResponse> {
   const response = await fetch(input.endpoint, {
     method: "POST",
@@ -2541,12 +2601,16 @@ function codexComposerUiStateForChat(
   }
   return codexComposerUiStateFromSettings(
     chat?.codexComposerSettings ?? null,
-    chat?.engine === "local_codex" ? DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT : undefined,
+    chat?.engine === "local_codex"
+      ? DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT
+      : chat?.engine === "claude_code"
+        ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT
+        : undefined,
   );
 }
 
 function codexComposerUiStateFromSettings(
-  settings: CodexComposerSettings | null | undefined,
+  settings: EngineComposerSettings | null | undefined,
   defaultReasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 ): CodexComposerUiState {
   if (!settings) {
@@ -2555,7 +2619,7 @@ function codexComposerUiStateFromSettings(
   const goalMode = settings.goalMode ?? null;
   return {
     reasoningEffort: settings.reasoningEffort,
-    planModeEnabled: settings.planModeEnabled,
+    planModeEnabled: settings.planModeEnabled ?? false,
     goalModeEnabled: goalMode !== null,
     goalObjective: goalMode?.objective ?? "",
     goalTokenBudget: goalMode?.tokenBudget == null ? "" : String(goalMode.tokenBudget),
@@ -2917,22 +2981,74 @@ function CodexModelPicker({
   disabled: boolean;
   onChange: (model: CodexChatModelId) => void;
 }) {
+  return (
+    <CodingEngineModelPicker
+      engineLabel="Codex"
+      provider="openai"
+      value={value}
+      defaultValue={CODEX_CHAT_DEFAULT_MODEL_ID}
+      models={CODEX_MODELS}
+      disabled={disabled}
+      onChange={(model) => onChange(normalizeCodexChatModelId(model))}
+    />
+  );
+}
+
+function ClaudeModelPicker({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: ClaudeChatModelId;
+  disabled: boolean;
+  onChange: (model: ClaudeChatModelId) => void;
+}) {
+  return (
+    <CodingEngineModelPicker
+      engineLabel="Claude"
+      provider="anthropic"
+      value={value}
+      defaultValue={CLAUDE_CHAT_DEFAULT_MODEL_ID}
+      models={CLAUDE_CODE_MODELS}
+      disabled={disabled}
+      onChange={(model) => onChange(normalizeClaudeChatModelId(model))}
+    />
+  );
+}
+
+function CodingEngineModelPicker({
+  engineLabel,
+  provider,
+  value,
+  defaultValue,
+  models,
+  disabled,
+  onChange,
+}: {
+  engineLabel: "Claude" | "Codex";
+  provider: "anthropic" | "openai";
+  value: string;
+  defaultValue: string;
+  models: readonly { id: string; label: string; description: string }[];
+  disabled: boolean;
+  onChange: (model: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const selectedModel =
-    CODEX_MODELS.find((model) => model.id === value) ??
-    CODEX_MODELS.find((model) => model.id === CODEX_CHAT_DEFAULT_MODEL_ID);
-  const selectedLabel = selectedModel?.label ?? "Codex model";
+    models.find((model) => model.id === value) ?? models.find((model) => model.id === defaultValue);
+  const selectedLabel = selectedModel?.label ?? `${engineLabel} model`;
+  const ModelIcon = provider === "anthropic" ? AnthropicIcon : OpenAIIcon;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         type="button"
-        aria-label={`Codex model: ${selectedLabel}`}
-        title="Codex model"
+        aria-label={`${engineLabel} model: ${selectedLabel}`}
+        title={`${engineLabel} model`}
         disabled={disabled}
         className="flex h-7 max-w-[138px] items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
       >
-        <OpenAIIcon size={12} strokeWidth={1.9} className="shrink-0" />
+        <ModelIcon size={12} strokeWidth={1.9} className="shrink-0" />
         <span className="truncate">{selectedLabel}</span>
         <ChevronDown size={11} strokeWidth={2} className="shrink-0" />
       </PopoverTrigger>
@@ -2943,14 +3059,14 @@ function CodexModelPicker({
       >
         <Command className="bg-surface text-ink">
           <CommandList>
-            <CommandGroup heading="Codex models">
-              {CODEX_MODELS.map((model) => (
+            <CommandGroup heading={`${engineLabel} models`}>
+              {models.map((model) => (
                 <CommandItem
                   key={model.id}
                   value={model.id}
-                  keywords={[model.label, "Codex", "OpenAI"]}
+                  keywords={[model.label, engineLabel, provider]}
                   onSelect={() => {
-                    onChange(normalizeCodexChatModelId(model.id));
+                    onChange(model.id);
                     setOpen(false);
                   }}
                   title={model.description}
@@ -2964,7 +3080,7 @@ function CodexModelPicker({
                       model.id === value ? "opacity-100" : "opacity-0",
                     )}
                   />
-                  <OpenAIIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+                  <ModelIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium leading-4">{model.label}</div>
                     <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
@@ -2981,33 +3097,44 @@ function CodexModelPicker({
   );
 }
 
-function CodexComposerControls({
+function EngineComposerControls({
   model,
+  engineLabel,
+  reasoningEffortAvailable,
   reasoningEffort,
   planModeEnabled,
   planModeAvailable,
+  goalModeAvailable,
   goalModeEnabled,
   goalObjective,
   goalTokenBudget,
   disabled,
   modelDisabled,
-  onModelChange,
   onReasoningEffortChange,
   onPlanModeEnabledChange,
   onGoalModeEnabledChange,
   onGoalObjectiveChange,
   onGoalTokenBudgetChange,
 }: {
-  model: CodexChatModelId | null;
+  model:
+    | { engine: "codex"; value: CodexChatModelId; onChange: (model: CodexChatModelId) => void }
+    | {
+        engine: "claude_code";
+        value: ClaudeChatModelId;
+        onChange: (model: ClaudeChatModelId) => void;
+      }
+    | null;
+  engineLabel: "Claude" | "Codex";
+  reasoningEffortAvailable: boolean;
   reasoningEffort: CodexReasoningEffort;
   planModeEnabled: boolean;
   planModeAvailable: boolean;
+  goalModeAvailable: boolean;
   goalModeEnabled: boolean;
   goalObjective: string;
   goalTokenBudget: string;
   disabled: boolean;
   modelDisabled: boolean;
-  onModelChange: (model: CodexChatModelId) => void;
   onReasoningEffortChange: (reasoningEffort: CodexReasoningEffort) => void;
   onPlanModeEnabledChange: (enabled: boolean) => void;
   onGoalModeEnabledChange: (enabled: boolean) => void;
@@ -3017,20 +3144,24 @@ function CodexComposerControls({
   const reasoningLabel = codexReasoningLabel(reasoningEffort);
   return (
     <div className="mb-px flex shrink-0 items-center gap-1 border-l border-border pl-2">
-      {model ? (
-        <CodexModelPicker value={model} disabled={modelDisabled} onChange={onModelChange} />
+      {model?.engine === "codex" ? (
+        <CodexModelPicker value={model.value} disabled={modelDisabled} onChange={model.onChange} />
+      ) : model?.engine === "claude_code" ? (
+        <ClaudeModelPicker value={model.value} disabled={modelDisabled} onChange={model.onChange} />
       ) : null}
-      <button
-        type="button"
-        aria-label={`Codex reasoning effort: ${reasoningLabel} (click to cycle)`}
-        title="Reasoning effort"
-        disabled={disabled}
-        onClick={() => onReasoningEffortChange(nextCodexReasoningEffort(reasoningEffort))}
-        className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        <ReasoningBars effort={reasoningEffort} size={12} />
-        <span className="hidden sm:inline">{reasoningLabel}</span>
-      </button>
+      {reasoningEffortAvailable ? (
+        <button
+          type="button"
+          aria-label={`${engineLabel} reasoning effort: ${reasoningLabel} (click to cycle)`}
+          title="Reasoning effort"
+          disabled={disabled}
+          onClick={() => onReasoningEffortChange(nextCodexReasoningEffort(reasoningEffort))}
+          className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <ReasoningBars effort={reasoningEffort} size={12} />
+          <span className="hidden sm:inline">{reasoningLabel}</span>
+        </button>
+      ) : null}
       {planModeAvailable ? (
         <button
           type="button"
@@ -3049,58 +3180,60 @@ function CodexComposerControls({
           Plan
         </button>
       ) : null}
-      <Popover>
-        <PopoverTrigger
-          type="button"
-          aria-label="Goal mode"
-          aria-pressed={goalModeEnabled}
-          title="Goal mode for the next message"
-          disabled={disabled}
-          className={cn(
-            "flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink",
-            goalModeEnabled
-              ? "bg-ink text-canvas hover:bg-ink/90 data-[popup-open]:bg-ink data-[popup-open]:text-canvas"
-              : "text-ink-muted hover:bg-surface-hover hover:text-ink",
-          )}
-        >
-          <Target size={13} strokeWidth={2} className="shrink-0" />
-          <span className="hidden sm:inline">Goal</span>
-        </PopoverTrigger>
-        <PopoverContent
-          align="end"
-          sideOffset={10}
-          className="w-[320px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-3 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
-        >
-          <div className="flex flex-col gap-3">
-            <label className="flex items-center justify-between gap-3">
-              <span className="text-[13px] font-medium leading-4 text-ink">Goal mode</span>
-              <input
-                type="checkbox"
-                checked={goalModeEnabled}
-                onChange={(event) => onGoalModeEnabledChange(event.target.checked)}
-                className="h-4 w-4 accent-ink"
+      {goalModeAvailable ? (
+        <Popover>
+          <PopoverTrigger
+            type="button"
+            aria-label="Goal mode"
+            aria-pressed={goalModeEnabled}
+            title="Goal mode for the next message"
+            disabled={disabled}
+            className={cn(
+              "flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink",
+              goalModeEnabled
+                ? "bg-ink text-canvas hover:bg-ink/90 data-[popup-open]:bg-ink data-[popup-open]:text-canvas"
+                : "text-ink-muted hover:bg-surface-hover hover:text-ink",
+            )}
+          >
+            <Target size={13} strokeWidth={2} className="shrink-0" />
+            <span className="hidden sm:inline">Goal</span>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            sideOffset={10}
+            className="w-[320px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-3 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+          >
+            <div className="flex flex-col gap-3">
+              <label className="flex items-center justify-between gap-3">
+                <span className="text-[13px] font-medium leading-4 text-ink">Goal mode</span>
+                <input
+                  type="checkbox"
+                  checked={goalModeEnabled}
+                  onChange={(event) => onGoalModeEnabledChange(event.target.checked)}
+                  className="h-4 w-4 accent-ink"
+                />
+              </label>
+              <textarea
+                value={goalObjective}
+                onChange={(event) => onGoalObjectiveChange(event.target.value)}
+                placeholder="Objective"
+                maxLength={CODEX_GOAL_OBJECTIVE_MAX_LENGTH}
+                disabled={!goalModeEnabled}
+                className="min-h-24 resize-y rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong disabled:bg-surface-subtle disabled:text-ink-subtle"
               />
-            </label>
-            <textarea
-              value={goalObjective}
-              onChange={(event) => onGoalObjectiveChange(event.target.value)}
-              placeholder="Objective"
-              maxLength={CODEX_GOAL_OBJECTIVE_MAX_LENGTH}
-              disabled={!goalModeEnabled}
-              className="min-h-24 resize-y rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong disabled:bg-surface-subtle disabled:text-ink-subtle"
-            />
-            <input
-              value={goalTokenBudget}
-              onChange={(event) => onGoalTokenBudgetChange(event.target.value)}
-              inputMode="numeric"
-              pattern="[0-9]*"
-              placeholder="Token budget"
-              disabled={!goalModeEnabled}
-              className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong disabled:bg-surface-subtle disabled:text-ink-subtle"
-            />
-          </div>
-        </PopoverContent>
-      </Popover>
+              <input
+                value={goalTokenBudget}
+                onChange={(event) => onGoalTokenBudgetChange(event.target.value)}
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="Token budget"
+                disabled={!goalModeEnabled}
+                className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong disabled:bg-surface-subtle disabled:text-ink-subtle"
+              />
+            </div>
+          </PopoverContent>
+        </Popover>
+      ) : null}
     </div>
   );
 }
