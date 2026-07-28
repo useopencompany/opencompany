@@ -22,6 +22,8 @@ export function MarkdownGoatBrainEditor({
   brainLinks = EMPTY_BRAIN_LINKS,
   readOnly = false,
   onNavigateInternal,
+  compact = false,
+  placeholder = "Start writing...",
 }: {
   content: string;
   onChange: (content: string) => void;
@@ -30,6 +32,10 @@ export function MarkdownGoatBrainEditor({
   // Handle an internal brain href client-side. Return true if handled; when
   // omitted or it returns false, the link falls back to a full-page navigation.
   onNavigateInternal?: (href: string) => boolean;
+  // Smaller min-height/type scale for embedding in a bordered form field
+  // (e.g. workflow/skill instructions) instead of a full brain document page.
+  compact?: boolean;
+  placeholder?: string;
 }) {
   const [isEmpty, setIsEmpty] = useState(content.trim().length === 0);
   const [, refreshToolbar] = useState(0);
@@ -72,8 +78,9 @@ export function MarkdownGoatBrainEditor({
       editable: !readOnly,
       editorProps: {
         attributes: {
-          class:
-            "tiptap-brain min-h-[560px] w-full pb-20 text-[15px] leading-7 text-ink outline-none",
+          class: compact
+            ? "tiptap-brain tiptap-brain-compact min-h-[220px] w-full text-[13.5px] leading-6 text-ink outline-none"
+            : "tiptap-brain min-h-[560px] w-full pb-20 text-[15px] leading-7 text-ink outline-none",
         },
       },
       onCreate: ({ editor }) => {
@@ -159,8 +166,12 @@ export function MarkdownGoatBrainEditor({
 
       <div className="relative">
         {isEmpty ? (
-          <div className="pointer-events-none absolute left-0 top-0 text-[15px] leading-7 text-ink-subtle/70">
-            {readOnly ? "No content yet." : "Start writing..."}
+          <div
+            className={`pointer-events-none absolute left-0 top-0 text-ink-subtle/70 ${
+              compact ? "text-[13.5px] leading-6" : "text-[15px] leading-7"
+            }`}
+          >
+            {readOnly ? "No content yet." : placeholder}
           </div>
         ) : null}
         <EditorContent editor={editor} />
