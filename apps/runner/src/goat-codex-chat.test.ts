@@ -472,6 +472,28 @@ describe("runGoatCodexChatTurn", () => {
       }),
     );
   });
+
+  it("registers read-only integration tools for v2 workspace-pinned sessions", async () => {
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: {
+        ...codexSession(),
+        workspaceId: "workspace_1",
+        hostToolContractVersion: "goat-codex-host-tools.v2",
+      },
+      env: env({ goatAppUrl: "https://goat.example.com" }),
+    });
+
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dynamicTools: [
+          expect.objectContaining({ spec: expect.objectContaining({ name: "list_actions" }) }),
+          expect.objectContaining({ spec: expect.objectContaining({ name: "use_action" }) }),
+        ],
+        task: expect.stringContaining("Read-only integration actions are available"),
+      }),
+    );
+  });
 });
 
 describe("summarizeCodexChatRecoveryProgress", () => {
@@ -565,6 +587,7 @@ function codexSession() {
     chatSessionId: "goat_chat_1",
     model: "gpt-5.5",
     brainRef: null,
+    workspaceId: null,
     hostToolContractVersion: null,
     sandboxId: "sbx_existing",
     codexThreadId: "thread_existing",

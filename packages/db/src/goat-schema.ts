@@ -3253,6 +3253,9 @@ export const goatCodexChatSessions = goat.table(
     brainRef: text("brain_ref").references(() => goatBrains.id, {
       onDelete: "set null",
     }),
+    workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
+      onDelete: "set null",
+    }),
     hostToolContractVersion: text("host_tool_contract_version"),
     sandboxId: text("sandbox_id"),
     codexThreadId: text("codex_thread_id"),

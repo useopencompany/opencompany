@@ -1114,6 +1114,13 @@
       "when": 1785174319867,
       "tag": "0158_goat_brain_srt_assets",
       "breakpoints": true
+    },
+    {
+      "idx": 159,
+      "version": "7",
+      "when": 1785230000000,
+      "tag": "0159_goat_codex_read_actions",
+      "breakpoints": true
     }
   ]
 }
