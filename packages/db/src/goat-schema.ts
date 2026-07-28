@@ -71,8 +71,7 @@ export type GoatIntegrationProvider =
   | "fathom"
   | "attio"
   | "stripe"
-  | "latitude"
-  | "kleinanzeigen";
+  | "latitude";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear) are always personal. Installation-bound
@@ -94,12 +93,6 @@ export function isWorkspaceOwnedGoatIntegrationProvider(provider: GoatIntegratio
 export type GoatIntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
 export type GoatIntegrationCredentialKind = "oauth_token" | "webhook_secret" | "api_key";
 export type GoatIntegrationCredentialEncryptedPayload = EncryptedPayload;
-export type GoatBrowserActionRunStatus =
-  | "starting"
-  | "running"
-  | "needs_attention"
-  | "succeeded"
-  | "failed";
 export type GoatCodexCredentialStatus = "connected" | "needs_reauth";
 export type GoatCodexDeviceAuthFlowStatus =
   | "pending"
@@ -1413,7 +1406,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'kleinanzeigen')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1462,7 +1455,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'kleinanzeigen')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1516,59 +1509,11 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'kleinanzeigen')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
       sql`${table.status} IN ('available', 'permission_lost', 'archived', 'sync_failed')`,
-    ),
-  }),
-);
-
-// Durable idempotency and ownership boundary for browser actions launched from
-// chat. Provider live URLs remain short-lived and are not persisted; the
-// provider session id is enough to recover status after an approval
-// continuation or request retry.
-export const goatBrowserActionRuns = goat.table(
-  "browser_action_runs",
-  {
-    id: text("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
-    // Kept as an opaque chat id rather than a foreign key because integration
-    // deletion is the lifecycle boundary for these provider runs.
-    chatSessionId: text("chat_session_id"),
-    toolCallId: text("tool_call_id").notNull(),
-    action: text("action").notNull(),
-    inputHash: text("input_hash").notNull(),
-    providerSessionId: text("provider_session_id"),
-    status: text("status").$type<GoatBrowserActionRunStatus>().notNull().default("starting"),
-    result: jsonb("result").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-  },
-  (table) => ({
-    userChatToolIdx: uniqueIndex("goat_browser_action_runs_user_chat_tool_idx").on(
-      table.userWorkosId,
-      table.chatSessionId,
-      table.toolCallId,
-    ),
-    integrationSessionIdx: index("goat_browser_action_runs_integration_session_idx").on(
-      table.integrationId,
-      table.providerSessionId,
-    ),
-    statusUpdatedIdx: index("goat_browser_action_runs_status_updated_idx").on(
-      table.status,
-      table.updatedAt,
-    ),
-    statusCheck: check(
-      "goat_browser_action_runs_status_check",
-      sql`${table.status} IN ('starting', 'running', 'needs_attention', 'succeeded', 'failed')`,
     ),
   }),
 );

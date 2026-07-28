@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   resolveGmailActions: vi.fn(),
   resolveGoogleCalendarActions: vi.fn(),
   resolveGoogleDriveActions: vi.fn(),
-  resolveKleinanzeigenActions: vi.fn(),
   resolveLatitudeActions: vi.fn(),
   resolveLinearActions: vi.fn(),
   resolveGitHubActions: vi.fn(),
@@ -33,9 +32,6 @@ vi.mock("@opencompany/goat-agent/actions/google-calendar", () => ({
 vi.mock("@opencompany/goat-agent/actions/google-drive", () => ({
   resolveGoogleDriveActions: mocks.resolveGoogleDriveActions,
 }));
-vi.mock("@opencompany/goat-agent/actions/kleinanzeigen", () => ({
-  resolveKleinanzeigenActions: mocks.resolveKleinanzeigenActions,
-}));
 vi.mock("@opencompany/goat-agent/actions/latitude", () => ({
   resolveLatitudeActions: mocks.resolveLatitudeActions,
 }));
@@ -58,7 +54,6 @@ function providerCatalog(
     | "gmail"
     | "google_calendar"
     | "google_drive"
-    | "kleinanzeigen"
     | "latitude"
     | "linear"
     | "attio"
@@ -104,7 +99,6 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGmailActions.mockResolvedValue(null);
     mocks.resolveGoogleCalendarActions.mockResolvedValue(providerCatalog("google_calendar"));
     mocks.resolveGoogleDriveActions.mockResolvedValue(providerCatalog("google_drive"));
-    mocks.resolveKleinanzeigenActions.mockResolvedValue(providerCatalog("kleinanzeigen"));
     mocks.resolveLinearActions.mockResolvedValue(providerCatalog("linear"));
     mocks.resolveLatitudeActions.mockResolvedValue(providerCatalog("latitude"));
     mocks.resolveAttioActions.mockResolvedValue(providerCatalog("attio"));
@@ -119,7 +113,6 @@ describe("resolveGoatActionCatalog", () => {
       "slack",
       "google_calendar",
       "google_drive",
-      "kleinanzeigen",
       "linear",
       "latitude",
       "attio",
@@ -130,7 +123,6 @@ describe("resolveGoatActionCatalog", () => {
       "slack description",
       "google_calendar description",
       "google_drive description",
-      "kleinanzeigen description",
       "linear description",
       "latitude description",
       "attio description",
@@ -141,7 +133,6 @@ describe("resolveGoatActionCatalog", () => {
       "slack.read_something",
       "google_calendar.read_something",
       "google_drive.read_something",
-      "kleinanzeigen.read_something",
       "linear.read_something",
       "latitude.read_something",
       "attio.read_something",
@@ -157,7 +148,6 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGmailActions.mockResolvedValue(providerCatalog("gmail"));
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
-    mocks.resolveKleinanzeigenActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
@@ -176,7 +166,6 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGmailActions.mockResolvedValue(null);
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
-    mocks.resolveKleinanzeigenActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
@@ -197,7 +186,6 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGmailActions.mockResolvedValue(null);
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
-    mocks.resolveKleinanzeigenActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
@@ -255,7 +243,6 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGmailActions.mockResolvedValue(null);
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
-    mocks.resolveKleinanzeigenActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);

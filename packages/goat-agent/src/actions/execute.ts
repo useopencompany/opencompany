@@ -2,7 +2,6 @@ import {
   type GoatActionApprovalView,
   GoatActionAuthError,
   type GoatActionErrorCode,
-  type GoatActionExecuteContext,
   GoatActionExecutionError,
   GoatActionInvalidParamsError,
   GoatActionPermissionError,
@@ -40,7 +39,6 @@ export async function executeGoatAction(input: {
   signal: AbortSignal;
   currentDate: Date;
   userTimezone: string;
-  loadAttachments?: GoatActionExecuteContext["loadAttachments"];
 }): Promise<GoatActionResult> {
   const action = input.catalog.actions.find((entry) => entry.id === input.actionId);
   if (!action) {
@@ -73,7 +71,6 @@ export async function executeGoatAction(input: {
       signal,
       currentDate: input.currentDate,
       userTimezone: input.userTimezone,
-      ...(input.loadAttachments ? { loadAttachments: input.loadAttachments } : {}),
     });
     return {
       ok: true,
