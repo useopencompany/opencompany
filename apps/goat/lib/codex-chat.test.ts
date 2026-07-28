@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeGoatCodexChatSessionForChat,
-  createGoatCodexChatMessage,
+  createGoatCodexChatMessage as createGoatCodexChatMessageImpl,
   getGoatCodexChatSandboxStatus,
   interruptGoatCodexChatSession,
 } from "@/lib/codex-chat";
+
+const createGoatCodexChatMessage = (
+  input: Omit<Parameters<typeof createGoatCodexChatMessageImpl>[0], "workspaceId">,
+) => createGoatCodexChatMessageImpl({ ...input, workspaceId: "workspace_1" });
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -144,9 +148,10 @@ describe("createGoatCodexChatMessage", () => {
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
     expect(sqlText(statement)).toContain("'queued'");
-    expect(sqlText(statement)).toContain("brain_ref, host_tool_contract_version");
+    expect(sqlText(statement)).toContain("brain_ref, workspace_id");
     expect(statement.queryChunks).toContain("brain_1");
-    expect(statement.queryChunks).toContain("goat-codex-brain.v1");
+    expect(statement.queryChunks).toContain("workspace_1");
+    expect(statement.queryChunks).toContain("goat-codex-host-tools.v2");
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
 
