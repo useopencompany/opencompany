@@ -5,6 +5,7 @@ import { getGoatWorkOSRedirectUri } from "@/lib/workos";
 
 const UNAUTHENTICATED_PATHS = new Set([
   "/auth/callback",
+  "/auth/invite",
   "/auth/sign-in",
   "/api/healthz",
   "/mcp",

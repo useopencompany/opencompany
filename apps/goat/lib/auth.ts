@@ -113,6 +113,42 @@ export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
   }
 }
 
+export async function activateGoatWorkspaceForOrganization(input: {
+  userWorkosId: string;
+  organizationId: string;
+}): Promise<boolean> {
+  const workspaces = await listGoatWorkspacesForUser(input.userWorkosId);
+  const target = workspaces.find(
+    (entry) => entry.workspace.workosOrganizationId === input.organizationId,
+  );
+  if (!target) return false;
+
+  const brains = await listAccessibleGoatBrains({
+    userWorkosId: input.userWorkosId,
+    workspaceId: target.workspace.id,
+  });
+  const activeBrain =
+    brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
+
+  const cookieStore = await cookies();
+  cookieStore.set(GOAT_ACTIVE_WORKSPACE_COOKIE, target.workspace.id, {
+    path: "/",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+  if (activeBrain) {
+    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, activeBrain.id, {
+      path: "/",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+  } else {
+    cookieStore.delete(GOAT_ACTIVE_BRAIN_COOKIE);
+  }
+
+  return true;
+}
+
 async function ensureGoatWorkspaces(
   authUser: WorkOSUser,
   user: typeof goatUsers.$inferSelect,
