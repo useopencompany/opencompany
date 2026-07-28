@@ -17,6 +17,7 @@ import { and, eq, isNull, notInArray, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
 import { CLAUDE_CHAT_DEFAULT_MODEL_ID, parseClaudeChatModelId } from "@/lib/claude-chat-constants";
+import { parseClaudeChatSettings } from "@/lib/claude-chat-settings";
 import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
@@ -91,13 +92,13 @@ export async function createGoatCodexChatMessage(input: {
     return { ok: false, status: 409, error: CODEX_CHAT_DISCONNECTED_MESSAGE };
   }
 
-  // Reasoning-effort / plan-mode / goal-mode settings are codex-specific.
   let settings: GoatCodexChatTurnSettings = {};
-  if (engine === "codex") {
-    const parsedSettings = parseCodexChatSettings(input.settings);
-    if (!parsedSettings.ok) return { ok: false, status: 400, error: parsedSettings.error };
-    settings = parsedSettings.settings;
-  }
+  const parsedSettings =
+    engine === "claude_code"
+      ? parseClaudeChatSettings(input.settings)
+      : parseCodexChatSettings(input.settings);
+  if (!parsedSettings.ok) return { ok: false, status: 400, error: parsedSettings.error };
+  settings = parsedSettings.settings;
   const requestedModelId =
     engine === "claude_code"
       ? input.model === undefined

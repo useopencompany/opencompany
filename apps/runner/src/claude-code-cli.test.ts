@@ -47,6 +47,7 @@ describe("buildClaudeTurnCommand", () => {
       workdir: "/home/user/opencompany-goat/claude-chat",
       promptPath: "/home/user/.opencompany-goat/claude-chat-prompts/prompt-t1.txt",
       model: "claude-sonnet-5",
+      reasoningEffort: "xhigh",
       resumeSessionId: "sess-1",
     });
     expect(command).toContain("unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN");
@@ -54,6 +55,7 @@ describe("buildClaudeTurnCommand", () => {
     expect(command).toContain("--verbose");
     expect(command).toContain("--permission-mode bypassPermissions");
     expect(command).toContain("--model 'claude-sonnet-5'");
+    expect(command).toContain("--effort 'xhigh'");
     expect(command).toContain("--resume 'sess-1'");
     expect(command).not.toContain("--bare");
   });
@@ -63,9 +65,11 @@ describe("buildClaudeTurnCommand", () => {
       workdir: "/w",
       promptPath: "/p",
       model: null,
+      reasoningEffort: null,
       resumeSessionId: null,
     });
     expect(command).not.toContain("--resume");
     expect(command).not.toContain("--model");
+    expect(command).not.toContain("--effort");
   });
 });

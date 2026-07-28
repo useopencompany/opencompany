@@ -3,6 +3,7 @@ import {
   AGENT_MODEL_CATALOG,
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
+  claudeCodeModelSupportsReasoningEffort,
   codexCliModelNameForModelId,
   isCodexModelId,
 } from "./models";
@@ -25,5 +26,13 @@ describe("Codex model catalog", () => {
   it("has display metadata for every supported Codex model", () => {
     const catalogIds = new Set(AGENT_MODEL_CATALOG.map((model) => model.id));
     expect(CODEX_AGENT_MODEL_IDS.every((modelId) => catalogIds.has(modelId))).toBe(true);
+  });
+});
+
+describe("Claude Code model catalog", () => {
+  it("exposes effort only for adaptive-reasoning models", () => {
+    expect(claudeCodeModelSupportsReasoningEffort("anthropic/claude-sonnet-5")).toBe(true);
+    expect(claudeCodeModelSupportsReasoningEffort("claude-opus-4-8")).toBe(true);
+    expect(claudeCodeModelSupportsReasoningEffort("anthropic/claude-haiku-4.5")).toBe(false);
   });
 });

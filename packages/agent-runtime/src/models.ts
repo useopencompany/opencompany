@@ -98,6 +98,14 @@ export function claudeCodeCliModelNameForModelId(modelId: string): string | null
   return modelId.replace(/^anthropic\//, "").replace(/\./g, "-");
 }
 
+export function claudeCodeModelSupportsReasoningEffort(model: string): boolean {
+  return CLAUDE_CODE_AGENT_MODEL_IDS.some(
+    (modelId) =>
+      !modelId.includes("haiku") &&
+      (model === modelId || model === claudeCodeCliModelNameForModelId(modelId)),
+  );
+}
+
 // Ratings were seeded from public data on 2026-06-03 (Artificial Analysis
 // Intelligence Index, output tokens/sec; OpenRouter / provider output pricing)
 // using these buckets. Keep new models consistent with them:

@@ -14,6 +14,12 @@ export const CLAUDE_CHAT_DEFAULT_MODEL_ID = CLAUDE_CODE_DEFAULT_MODEL_ID as Clau
 export const CLAUDE_CHAT_DEFAULT_MODEL =
   claudeCodeCliModelNameForModelId(CLAUDE_CHAT_DEFAULT_MODEL_ID) ?? "claude-sonnet-5";
 
+export function normalizeClaudeChatModelId(value: unknown): ClaudeChatModelId {
+  return typeof value === "string" && isClaudeCodeModelId(value)
+    ? (value as ClaudeChatModelId)
+    : CLAUDE_CHAT_DEFAULT_MODEL_ID;
+}
+
 export function parseClaudeChatModelId(value: unknown): ClaudeChatModelId | null {
   return typeof value === "string" && isClaudeCodeModelId(value)
     ? (value as ClaudeChatModelId)
