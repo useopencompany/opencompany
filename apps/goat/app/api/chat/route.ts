@@ -518,7 +518,7 @@ export async function POST(request: Request): Promise<Response> {
   const generationSignal = resumeEnabled ? stopController.signal : request.signal;
   const capabilityTurnState: GoatCapabilityTurnState = {
     quotedTotalUsdMicros: 0,
-    asyncRunStarted: false,
+    asyncRunsStarted: 0,
   };
   let stopWatcherCleanup: (() => void) | null = null;
   let activeStreamId: string | null = null;

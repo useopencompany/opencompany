@@ -69,7 +69,7 @@ export async function executeGoatAction(input: {
         : {}),
       capabilityTurnState: input.capabilityTurnState ?? {
         quotedTotalUsdMicros: 0,
-        asyncRunStarted: false,
+        asyncRunsStarted: 0,
       },
       signal,
       currentDate: input.currentDate,

@@ -38,6 +38,7 @@ import { sanitizeCapabilityResult } from "@/lib/capabilities/sanitize";
 export const GOAT_CAPABILITY_APPROVAL_EXPIRES_MS = 15 * 60 * 1_000;
 export const GOAT_CAPABILITY_AUTO_ACTION_MAX_USD_MICROS = 100_000;
 export const GOAT_CAPABILITY_AUTO_TURN_MAX_USD_MICROS = 500_000;
+export const GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN = 6;
 export const GOAT_CAPABILITY_POLL_MAX_MS = 120_000;
 export const GOAT_CAPABILITY_ACTION_TIMEOUT_MS = 125_000;
 export const assertInspectionMatches = assertManagedCapabilityInspection;
@@ -134,23 +135,24 @@ export async function executeManagedCapability(input: {
     );
   }
 
-  turnState.quotedTotalUsdMicros += quoteTotalCostUsdMicros;
+  const nextQuotedTotalUsdMicros = turnState.quotedTotalUsdMicros + quoteTotalCostUsdMicros;
   const requiresApproval =
     quoteTotalCostUsdMicros > GOAT_CAPABILITY_AUTO_ACTION_MAX_USD_MICROS ||
-    turnState.quotedTotalUsdMicros > GOAT_CAPABILITY_AUTO_TURN_MAX_USD_MICROS;
+    nextQuotedTotalUsdMicros > GOAT_CAPABILITY_AUTO_TURN_MAX_USD_MICROS;
 
   const willExecute = Boolean(input.context.capabilityApprovalRunId) || !requiresApproval;
   if (input.spec.executionMode === "async" && willExecute) {
-    if (turnState.asyncRunStarted) {
+    if (turnState.asyncRunsStarted >= GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN) {
       throw new GoatActionExecutionError(
         "call_budget",
-        "Only one long-running paid capability can be started in a turn.",
+        `Only ${GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
       );
     }
     // Claim synchronously before the next await so parallel tool calls cannot
-    // both pass the per-turn long-run gate.
-    turnState.asyncRunStarted = true;
+    // exceed the per-turn long-run gate.
+    turnState.asyncRunsStarted += 1;
   }
+  turnState.quotedTotalUsdMicros = nextQuotedTotalUsdMicros;
 
   let auditRun: GoatCapabilityRun;
   if (input.context.capabilityApprovalRunId) {
