@@ -1,4 +1,7 @@
-import { modelSupportsAttachments } from "@opencompany/agent-runtime";
+import {
+  GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
+  modelSupportsAttachments,
+} from "@opencompany/agent-runtime";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
@@ -1086,7 +1089,10 @@ export async function POST(request: Request): Promise<Response> {
     ...(toolContext.repairToolCall
       ? { experimental_repairToolCall: toolContext.repairToolCall }
       : {}),
-    providerOptions: goatGatewayProviderOptions(gatewayAttribution),
+    providerOptions: goatGatewayProviderOptions(
+      gatewayAttribution,
+      GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
+    ),
     ...latitudeTelemetry({
       name: "chat-turn",
       feature: "chat",

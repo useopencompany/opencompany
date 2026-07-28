@@ -1036,6 +1036,7 @@ describe("POST /api/chat", () => {
       expect.objectContaining({
         providerOptions: {
           gateway: {
+            caching: "auto",
             user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
             tags: expect.arrayContaining([
               "app:goat",
