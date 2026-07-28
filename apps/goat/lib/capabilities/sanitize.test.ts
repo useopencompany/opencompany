@@ -65,6 +65,25 @@ describe("sanitizeCapabilityResult", () => {
     expect(serialized).not.toContain("a".repeat(4_100));
   });
 
+  it("separates billable result limits from nested payload array limits", () => {
+    const result = sanitizeCapabilityResult({
+      source: "youtube",
+      action: "youtube.find_in_transcript",
+      expectedLimit: 1,
+      payloadArrayLimit: 3,
+      payload: {
+        matches: [{ text: "first" }, { text: "second" }, { text: "third" }],
+      },
+      resultCount: 1,
+      totalCostUsdMicros: 9_000,
+    });
+
+    expect(result.resultCount).toBe(1);
+    expect(result.payload).toEqual({
+      matches: [{ text: "first" }, { text: "second" }, { text: "third" }],
+    });
+  });
+
   it("returns only canonical links for the selected platform", () => {
     const result = sanitizeCapabilityResult({
       source: "x",
