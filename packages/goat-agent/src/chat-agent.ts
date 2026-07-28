@@ -1,4 +1,9 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import {
+  BROWSER_TOOL_INPUT_SCHEMAS,
+  BROWSER_TOOL_NAMES,
+  type BrowserToolName,
+} from "@opencompany/browser-tools";
 import type { GoatHarnessEngine } from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
@@ -23,8 +28,14 @@ import {
   type GoatBrainMultiBrainTarget,
   normalizeGoatBrainReadToolInput,
 } from "./brain-surface";
-import { MAX_WEB_FETCH_CALLS_PER_TURN, MAX_WEB_SEARCH_CALLS_PER_TURN } from "./chat-limits";
 import {
+  MAX_BROWSER_CALLS_PER_TURN,
+  MAX_WEB_FETCH_CALLS_PER_TURN,
+  MAX_WEB_SEARCH_CALLS_PER_TURN,
+} from "./chat-limits";
+import {
+  type BrowserToolInput,
+  type BrowserToolOutput,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
@@ -35,9 +46,13 @@ import {
   type GoatBrainToolInput,
   type GoatBrainToolOutput,
   type GoatChatActionCatalog,
+  type GoatChatSkillCatalogItem,
   LIST_ACTIONS_TOOL_NAME,
+  LIST_SKILLS_TOOL_NAME,
   type ListActionsToolInput,
   type ListActionsToolOutput,
+  type ListSkillsToolInput,
+  type ListSkillsToolOutput,
   SAVE_TO_BRAIN_TOOL_NAME,
   type SaveToBrainToolInput,
   type SaveToBrainToolOutput,
@@ -48,8 +63,11 @@ import {
   type StartTaskToolInput,
   type StartTaskToolOutput,
   USE_ACTION_TOOL_NAME,
+  USE_SKILL_TOOL_NAME,
   type UseActionToolInput,
   type UseActionToolOutput,
+  type UseSkillToolInput,
+  type UseSkillToolOutput,
   WEB_FETCH_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   type WebFetchToolInput,
@@ -59,12 +77,16 @@ import {
 } from "./chat-ui";
 import { normalizePublicWebUrl } from "./chat-web-fetch";
 import {
+  BROWSER_CHAT_CALL_LIMIT_DESCRIPTION,
+  BROWSER_CHAT_TOOL_DESCRIPTIONS,
   createOpenCompanyChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
   GOAT_BRAIN_TOOL_DESCRIPTION,
   LIST_ACTIONS_SOURCE_DESCRIPTION,
   LIST_ACTIONS_TOOL_DESCRIPTION,
+  LIST_SKILLS_QUERY_DESCRIPTION,
+  LIST_SKILLS_TOOL_DESCRIPTION,
   SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION,
   SAVE_TO_BRAIN_CONTENT_DESCRIPTION,
   SAVE_TO_BRAIN_FALLBACK_CONTENT_DESCRIPTION,
@@ -89,6 +111,8 @@ import {
   USE_ACTION_ACTION_DESCRIPTION,
   USE_ACTION_PARAMS_DESCRIPTION,
   USE_ACTION_TOOL_DESCRIPTION,
+  USE_SKILL_ID_DESCRIPTION,
+  USE_SKILL_TOOL_DESCRIPTION,
   WEB_FETCH_TOOL_DESCRIPTION,
   WEB_FETCH_URL_DESCRIPTION,
   WEB_SEARCH_QUERY_DESCRIPTION,
@@ -104,6 +128,8 @@ export {
 
 export const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
 export const OPENCOMPANY_CHAT_MAX_STEPS = 8;
+export const OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX = 16;
+export const MAX_LIST_SKILL_RESULTS = 20;
 const MAX_ACTION_PROVIDER_FAILURES_PER_TURN = 2;
 
 // Task-only tool. It exists only when the caller injects an `updateTaskStatus`
@@ -151,6 +177,10 @@ type GoatBrainCliRunner = (
 type SaveToBrainRunner = (input: SaveToBrainToolInput) => Promise<SaveToBrainToolOutput>;
 type WebFetchRunner = (input: WebFetchToolInput) => Promise<WebFetchToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
+export type BrowserToolRunner = (input: {
+  name: BrowserToolName;
+  args: unknown;
+}) => Promise<BrowserToolOutput>;
 type ScheduleTaskRunner = (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
 type EditTaskScheduleRunner = (
   input: EditTaskScheduleToolInput,
@@ -169,6 +199,12 @@ export type ActionDispatcher = {
     params: Record<string, unknown>;
     toolCallId: string;
   }) => Promise<UseActionToolOutput>;
+};
+
+export type SkillDispatcher = {
+  catalog: readonly GoatChatSkillCatalogItem[];
+  prelistedSkillIds?: readonly string[];
+  execute: (input: { skill: string }) => Promise<UseSkillToolOutput>;
 };
 
 // An action in "ask" mode pauses the stream on a tool-approval request the
@@ -237,7 +273,9 @@ export async function runOpenCompanyChatAgent(input: {
   saveToBrain?: SaveToBrainRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
+  browserTools?: BrowserToolRunner;
   actions?: ActionDispatcher;
+  skills?: SkillDispatcher;
   goatBrainMultiBrain?: { targets: readonly GoatBrainMultiBrainTarget[] };
   currentDate?: Date | string;
   userContext?: OpenCompanyChatSystemPromptInput["userContext"];
@@ -259,6 +297,7 @@ export async function runOpenCompanyChatAgent(input: {
   brainRef?: string | null;
   abortSignal?: AbortSignal;
   generateTextImpl?: GenerateTextLike;
+  maxSteps?: number;
 }): Promise<OpenCompanyChatAgentResult> {
   const gatewayApiKey = input.gatewayApiKey.trim();
   if (!gatewayApiKey) {
@@ -286,13 +325,16 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
+    ...(input.browserTools ? { browserTools: input.browserTools } : {}),
     ...(input.actions ? { actions: input.actions } : {}),
+    ...(input.skills ? { skills: input.skills } : {}),
     ...(input.goatBrainMultiBrain ? { goatBrainMultiBrain: input.goatBrainMultiBrain } : {}),
   });
 
   const systemPromptInput = {
     webFetchEnabled: Boolean(input.webFetch),
     webSearchEnabled: Boolean(input.webSearch),
+    browserToolsEnabled: Boolean(input.browserTools),
     ...(input.currentDate ? { currentDate: input.currentDate } : {}),
     ...(input.userContext ? { userContext: input.userContext } : {}),
     ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
@@ -304,6 +346,7 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.connectedIntegrations !== undefined
       ? { connectedIntegrations: input.connectedIntegrations }
       : {}),
+    skillsAvailable: Boolean(input.skills?.catalog.length),
   };
   const system = [
     createOpenCompanyChatSystemPrompt(systemPromptInput),
@@ -311,6 +354,7 @@ export async function runOpenCompanyChatAgent(input: {
   ].join("\n\n");
 
   const feature = input.feature ?? "chat";
+  const maxSteps = input.maxSteps ?? OPENCOMPANY_CHAT_MAX_STEPS;
   let result: Awaited<ReturnType<GenerateTextLike>>;
   try {
     result = await generate({
@@ -320,8 +364,8 @@ export async function runOpenCompanyChatAgent(input: {
         role: message.role,
         content: message.content,
       })),
-      stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
-      prepareStep: ({ stepNumber }) => prepareOpenCompanyChatStep({ stepNumber }),
+      stopWhen: stepCountIs(maxSteps),
+      prepareStep: ({ stepNumber }) => prepareOpenCompanyChatStep({ stepNumber, maxSteps }),
       tools: toolContext.tools,
       ...(toolContext.repairToolCall
         ? { experimental_repairToolCall: toolContext.repairToolCall }
@@ -373,7 +417,9 @@ export function createOpenCompanyChatToolContext(input: {
   saveToBrain?: SaveToBrainRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
+  browserTools?: BrowserToolRunner;
   actions?: ActionDispatcher;
+  skills?: SkillDispatcher;
   // Task-only: injected by the runner's background task executor so the run can
   // report its own outcome. Absent in interactive chat and the Slack bot, so
   // the update_task_status tool never appears there.
@@ -400,8 +446,10 @@ export function createOpenCompanyChatToolContext(input: {
   let visibleToolActivity = false;
   let webFetchCallCount = 0;
   let webSearchCallCount = 0;
+  let browserCallCount = 0;
   let actionCallCount = 0;
   const listedActionSourceIds = new Set(input.actions?.prelistedSourceIds ?? []);
+  const listedSkillIds = new Set(input.skills?.prelistedSkillIds ?? []);
   const actionProviderRetryGate = createActionProviderRetryGate(
     MAX_ACTION_PROVIDER_FAILURES_PER_TURN,
   );
@@ -805,6 +853,108 @@ export function createOpenCompanyChatToolContext(input: {
     });
   }
 
+  const browserTools = input.browserTools;
+  if (browserTools) {
+    for (const name of BROWSER_TOOL_NAMES) {
+      tools[name] = tool<BrowserToolInput, BrowserToolOutput>({
+        description: `${BROWSER_CHAT_TOOL_DESCRIPTIONS[name]} ${BROWSER_CHAT_CALL_LIMIT_DESCRIPTION}`,
+        inputSchema: jsonSchema<BrowserToolInput>(
+          BROWSER_TOOL_INPUT_SCHEMAS[name] as Parameters<typeof jsonSchema>[0],
+        ),
+        execute: async (args) => {
+          visibleToolActivity = true;
+          if (browserCallCount >= MAX_BROWSER_CALLS_PER_TURN) {
+            return {
+              ok: false,
+              command: name,
+              error: `Browser tools are limited to ${MAX_BROWSER_CALLS_PER_TURN} calls per chat turn. Answer from the evidence already gathered or continue in a later turn.`,
+            };
+          }
+          browserCallCount += 1;
+          return browserTools({ name, args });
+        },
+      });
+    }
+  }
+
+  const skills = input.skills;
+  if (skills && skills.catalog.length > 0) {
+    const skillIds = skills.catalog.map((skill) => skill.id);
+    tools[LIST_SKILLS_TOOL_NAME] = tool<ListSkillsToolInput, ListSkillsToolOutput>({
+      description: LIST_SKILLS_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<ListSkillsToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: {
+            type: "string",
+            description: LIST_SKILLS_QUERY_DESCRIPTION,
+          },
+        },
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+        const queryTerms = query.split(/\s+/).filter(Boolean);
+        const matches = skills.catalog.filter((skill) => {
+          if (queryTerms.length === 0) return true;
+          const searchable = `${skill.id} ${skill.name} ${skill.description}`.toLowerCase();
+          return queryTerms.every((term) => searchable.includes(term));
+        });
+        const listed = matches.slice(0, MAX_LIST_SKILL_RESULTS);
+        for (const skill of listed) listedSkillIds.add(skill.id);
+        return {
+          ok: true,
+          skills: listed,
+          total: matches.length,
+          truncated: matches.length > listed.length,
+        };
+      },
+    });
+    tools[USE_SKILL_TOOL_NAME] = tool<UseSkillToolInput, UseSkillToolOutput>({
+      description: USE_SKILL_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<UseSkillToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          skill: {
+            type: "string",
+            enum: skillIds,
+            description: USE_SKILL_ID_DESCRIPTION,
+          },
+        },
+        required: ["skill"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        const skill = typeof args.skill === "string" ? args.skill : "";
+        if (!skills.catalog.some((candidate) => candidate.id === skill)) {
+          return {
+            ok: false,
+            skill,
+            error: {
+              code: "invalid_params",
+              message: `"${skill}" is not an available skill. Call list_skills for the current catalog.`,
+            },
+          };
+        }
+        if (!listedSkillIds.has(skill)) {
+          return {
+            ok: false,
+            skill,
+            error: {
+              code: "invalid_params",
+              message: `Call list_skills and use an exact returned id before loading ${JSON.stringify(
+                skill,
+              )}.`,
+            },
+          };
+        }
+        return skills.execute({ skill });
+      },
+    });
+  }
+
   const actions = input.actions;
   if (actions && actions.catalog.actions.length > 0) {
     const sourceIds = actions.catalog.sources.map((source) => source.id);
@@ -1092,9 +1242,19 @@ export function prepareOpenCompanyChatStep(input: {
   // Background task runs use a larger budget than an interactive chat turn; the
   // final step is always reserved with toolChoice "none" so the model produces
   // a text answer instead of a dangling tool call.
+  finalizeAfterApproval?: boolean;
   maxSteps?: number;
 }) {
   const maxSteps = input.maxSteps ?? OPENCOMPANY_CHAT_MAX_STEPS;
+  // The AI SDK executes approved tool calls before the first continuation
+  // model step. Keep that step answer-only so a completed write cannot spawn
+  // another approval request in the same user turn.
+  if (input.finalizeAfterApproval) {
+    return {
+      activeTools: [],
+      toolChoice: "none" as const,
+    };
+  }
   if (input.stepNumber >= maxSteps - 1) {
     return {
       activeTools: [],

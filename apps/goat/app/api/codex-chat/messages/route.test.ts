@@ -51,7 +51,7 @@ describe("POST /api/codex-chat/messages", () => {
         createdAt: new Date("2026-07-10T00:00:00.000Z"),
         updatedAt: new Date("2026-07-10T00:00:00.000Z"),
       },
-      workspace: { id: "goat_ws_1" },
+      workspace: { id: "workspace_1" },
       activeBrain: { id: "goat_brain_1" },
     } as GoatAuthContext);
     mockCreateGoatCodexChatMessage().mockResolvedValue({
@@ -87,6 +87,7 @@ describe("POST /api/codex-chat/messages", () => {
     expect(response.status).toBe(202);
     expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith({
       userWorkosId: "user_1",
+      workspaceId: "workspace_1",
       brainRef: "goat_brain_1",
       sessionId: "goat_chat_1",
       prompt: "hello",
@@ -229,7 +230,7 @@ describe("POST /api/codex-chat/messages", () => {
         skills: [
           {
             id: "coding-work",
-            brainRef: "goat_ws_1",
+            brainRef: "workspace_1",
             name: "Coding work",
             description: "How coding work should happen.",
             instructions: "Inspect, implement, and verify.",

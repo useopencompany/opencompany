@@ -1,5 +1,6 @@
 import type { CodexCommandToolInput, CodexCommandToolOutput } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { BrowserToolName } from "@opencompany/browser-tools";
 import type {
   GoatChatAttachmentKind,
   GoatChatEngine,
@@ -53,6 +54,35 @@ export const LIST_ACTIONS_TOOL_NAME = "list_actions";
 export const LIST_ACTIONS_TOOL_PART_TYPE = `tool-${LIST_ACTIONS_TOOL_NAME}` as const;
 export const USE_ACTION_TOOL_NAME = "use_action";
 export const USE_ACTION_TOOL_PART_TYPE = `tool-${USE_ACTION_TOOL_NAME}` as const;
+export const LIST_SKILLS_TOOL_NAME = "list_skills";
+export const LIST_SKILLS_TOOL_PART_TYPE = `tool-${LIST_SKILLS_TOOL_NAME}` as const;
+export const USE_SKILL_TOOL_NAME = "use_skill";
+export const USE_SKILL_TOOL_PART_TYPE = `tool-${USE_SKILL_TOOL_NAME}` as const;
+export const BROWSER_OPEN_TOOL_PART_TYPE = "tool-browser_open";
+export const BROWSER_SNAPSHOT_TOOL_PART_TYPE = "tool-browser_snapshot";
+export const BROWSER_CLICK_TOOL_PART_TYPE = "tool-browser_click";
+export const BROWSER_FILL_TOOL_PART_TYPE = "tool-browser_fill";
+export const BROWSER_WAIT_TOOL_PART_TYPE = "tool-browser_wait";
+export const BROWSER_READ_TOOL_PART_TYPE = "tool-browser_read";
+export const BROWSER_GET_TOOL_PART_TYPE = "tool-browser_get";
+export const BROWSER_FIND_TOOL_PART_TYPE = "tool-browser_find";
+export const BROWSER_SCROLL_TOOL_PART_TYPE = "tool-browser_scroll";
+export const BROWSER_SCREENSHOT_TOOL_PART_TYPE = "tool-browser_screenshot";
+export const BROWSER_CLOSE_TOOL_PART_TYPE = "tool-browser_close";
+export type BrowserToolPartType = `tool-${BrowserToolName}`;
+export type BrowserToolInput = Record<string, unknown>;
+export type BrowserToolOutput = {
+  ok: boolean;
+  command: BrowserToolName;
+  output?: string;
+  stderr?: string;
+  snapshot?: unknown;
+  screenshotUrl?: string;
+  compacted?: boolean;
+  originalOutputChars?: number;
+  browserObservationBudget?: Record<string, number>;
+  error?: string;
+};
 
 export type GoatTaskCardMetadata = {
   id: string;
@@ -224,7 +254,7 @@ export type GoatBrainToolOutput = {
   ok: boolean;
   brainRef?: string;
   exitCode: number | null;
-  stdout: string;
+  stdout?: string;
   stderr: string;
   command?: string;
   argv?: string[];
@@ -362,6 +392,50 @@ export type UseActionToolOutput =
       };
     };
 
+export type GoatChatSkillCatalogItem = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+export type ListSkillsToolInput = {
+  query?: string;
+};
+
+export type ListSkillsToolOutput = {
+  ok: true;
+  skills: GoatChatSkillCatalogItem[];
+  total: number;
+  truncated: boolean;
+};
+
+export type UseSkillToolInput = {
+  skill: string;
+};
+
+export type UseSkillToolOutput =
+  | {
+      ok: true;
+      skill: GoatChatSkillCatalogItem & {
+        instructions: string;
+      };
+    }
+  | {
+      ok: false;
+      skill: string;
+      error: {
+        code: "invalid_params" | "unavailable" | "already_loaded" | "call_budget";
+        message: string;
+      };
+    };
+
+type GoatBrowserChatTools = {
+  [Name in BrowserToolName]: {
+    input: BrowserToolInput;
+    output: BrowserToolOutput;
+  };
+};
+
 export type GoatChatTools = {
   start_task: {
     input: StartTaskToolInput;
@@ -403,11 +477,19 @@ export type GoatChatTools = {
     input: UseActionToolInput;
     output: UseActionToolOutput;
   };
+  list_skills: {
+    input: ListSkillsToolInput;
+    output: ListSkillsToolOutput;
+  };
+  use_skill: {
+    input: UseSkillToolInput;
+    output: UseSkillToolOutput;
+  };
   codex_command: {
     input: CodexCommandToolInput;
     output: CodexCommandToolOutput;
   };
-};
+} & GoatBrowserChatTools;
 
 export type GoatChatUiMessage = UIMessage<
   GoatChatMessageMetadata,
@@ -431,6 +513,38 @@ export function listedActionSourceIdsFromMessages(
     }
   }
   return [...sourceIds];
+}
+
+export function listedSkillIdsFromMessages(messages: readonly GoatChatUiMessage[]): string[] {
+  const skillIds = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (
+        part.type === LIST_SKILLS_TOOL_PART_TYPE &&
+        part.state === "output-available" &&
+        part.output.ok
+      ) {
+        for (const skill of part.output.skills) skillIds.add(skill.id);
+      }
+    }
+  }
+  return [...skillIds];
+}
+
+export function usedSkillIdsFromMessages(messages: readonly GoatChatUiMessage[]): string[] {
+  const skillIds = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (
+        part.type === USE_SKILL_TOOL_PART_TYPE &&
+        part.state === "output-available" &&
+        part.output.ok
+      ) {
+        skillIds.add(part.output.skill.id);
+      }
+    }
+  }
+  return [...skillIds];
 }
 
 export type GoatChatSessionView = {
@@ -567,7 +681,7 @@ export function toGoatChatMessageMetadata(
   const aborted = message.debugTrace?.aborted === true;
   const timing = toGoatChatMessageTiming(message);
   const attachments = toGoatChatUiAttachments(message.attachments);
-  const contextTokens = contextTokensFromUsage(message.debugTrace?.usage);
+  const contextTokens = goatChatContextTokensFromUsage(message.debugTrace?.usage);
 
   if (
     !message.sessionId &&
@@ -608,8 +722,15 @@ function toGoatChatUiAttachments(
   }));
 }
 
-function contextTokensFromUsage(
-  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | null | undefined,
+export function goatChatContextTokensFromUsage(
+  usage:
+    | {
+        inputTokens?: number | undefined;
+        outputTokens?: number | undefined;
+        totalTokens?: number | undefined;
+      }
+    | null
+    | undefined,
 ): number | undefined {
   if (!usage) return undefined;
   if (typeof usage.totalTokens === "number" && usage.totalTokens > 0) return usage.totalTokens;

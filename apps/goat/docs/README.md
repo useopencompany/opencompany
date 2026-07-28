@@ -19,9 +19,9 @@ Goat has four LLM paths:
    The bridge creates a clean session folder under `~/.opencompany/goat/sessions`, runs
    `codex app-server`, and posts normalized Codex events back into the Goat chat.
 4. **Cloud Codex chat:** a Goat chat engine mode backed by a persistent E2B sandbox and Codex
-   app-server thread. Uploaded images, PDFs, Word files, and Excel files are materialized into that
-   sandbox; images are also sent to Codex as native local-image inputs. New chats pin the active
-   Brain and expose its read plane through a runner-hosted Codex dynamic tool.
+   app-server thread. Uploaded images, PDFs, Word files, Excel files, and SRT subtitles are
+   materialized into that sandbox; images are also sent to Codex as native local-image inputs. New
+   chats pin the active Brain and expose its read plane through a runner-hosted Codex dynamic tool.
 
 The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
@@ -107,6 +107,17 @@ task**. Submission posts directly to `/api/workflows`, starts the durable task i
 background, and leaves the current Home or chat surface in place. It does not call the foreground
 chat model or persist user/assistant chat messages for the workflow launch.
 
+Normal main chat can also discover workspace skills progressively. When the catalog is non-empty, the
+system prompt advertises only that a skill source exists; `list_skills` searches safe id, name, and
+description metadata, and `use_skill` loads the full instructions for one exact returned id. The
+successful tool result stays in conversation history, so model-selected skill instructions remain
+available on later turns without being copied into the system prompt or delegated tasks. Explicit
+and model-selected skills share the same per-turn limit of 16 skills / 256 KiB of instructions.
+
+The composer also accepts PDF, DOCX, XLSX, SRT, PNG, JPEG, and WebP files. SRT MIME values are
+normalized because browsers report them inconsistently. Foreground chat stores bounded extracted
+SRT text for the initial and follow-up turns; Cloud Codex receives the original file in its sandbox.
+
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
 matching `/chat/<id>` URL immediately with the native History API, without starting a server
 navigation; the server persists that exact id. The stream attaches `sessionId` in message metadata so
@@ -141,9 +152,9 @@ any other session data.
 3. Requires `VERCEL_AI_GATEWAY_API_KEY`.
 4. Finds or creates an open `goat.chat_sessions` row.
 5. Persists the user message in `goat.chat_messages`.
-6. Resolves connected-integration actions plus the workspace's managed social/lead capabilities and
-   creates the chat tool context for
-   `goat_brain`, `save_to_brain`, `list_actions`/`use_action`, optional `start_task`, and optional
+6. Resolves active-Brain skills, connected-integration actions, and the workspace's managed
+   social/lead capabilities, then creates the chat tool context for `goat_brain`, `save_to_brain`,
+   `list_skills`/`use_skill`, `list_actions`/`use_action`, optional `start_task`, and optional
    `web_fetch`/`web_search`.
 7. Calls `streamText` through Vercel AI Gateway with the session's model.
 8. Streams the UI message response back to the browser.
@@ -169,22 +180,26 @@ Connected integration and managed capability actions are dispatched through `lis
 `use_action`. The route resolves one compact source catalog from currently connected providers and
 the workspace's enabled managed capabilities, and the model must discover a source's concrete action
 ids and parameter schemas before executing one. Slack exposes
-conversation, message, thread, member, and scope-dependent search reads. Gmail exposes message
-search, message and thread retrieval, and explicitly requested plain-text email sends, with an
-explicit account required when several are connected. Google Calendar exposes a bounded event-list
-read, while Google Drive exposes file search, live Google Doc reads, and exact text replacement in
-Google Docs. Linear exposes a curated catalog for reading issues and workspace context, creating and
-updating issues, and adding comments. Attio exposes bounded fuzzy search across standard people,
-companies, and deals; list, field, and membership discovery; and bounded list reads with saved-view
-filters, explicit filters, sorting, and pagination. Explicitly requested Gmail sends, Google Doc
-edits, Attio record and list-entry updates, Linear writes, and Google Calendar event creation require
-confirmation by default and can be configured under Integrations. An explicit account or workspace
-is required when several are connected. Stripe exposes read-only workspace metrics for balance
-activity by period, current balances, subscription health with estimated MRR, and open receivables.
-Stripe uses an encrypted restricted API key and is excluded from automatic Brain-fill surveying
-because those financial metrics are live operational state. Disconnected or disabled capabilities
-are absent from the catalog, guessed action ids cannot bypass it, and all provider credentials remain
-server-side. Deeper or multi-source connected-account work continues through background tasks.
+conversation, message, thread, member, and scope-dependent search reads under one **Read Slack**
+permission, which defaults to **On** and can be changed to **Ask** or **Off** under Integrations.
+Gmail exposes message search, message and thread retrieval, explicitly requested plain-text draft
+creation, and explicitly requested sends, with an explicit account required when several are
+connected. Draft creation and sending have separate per-account permissions: creating drafts defaults
+to **On** because it leaves the email for manual review and sending, while sending defaults to
+confirmation-gated **Ask**. Google Calendar exposes a bounded event-list read, while Google Drive
+exposes file search, live Google Doc reads, and exact text replacement in Google Docs. Linear exposes
+a curated catalog for reading issues and workspace context, creating and updating issues, and adding
+comments. Attio exposes bounded fuzzy search across standard people, companies, and deals; list,
+field, and membership discovery; and bounded list reads with saved-view filters, explicit filters,
+sorting, and pagination. Explicitly requested Gmail sends, Google Doc edits, Attio record and
+list-entry updates, Linear writes, and Google Calendar event creation require confirmation by default
+and can be configured under Integrations. An explicit account or workspace is required when several
+are connected. Stripe exposes read-only workspace metrics for balance activity by period, current
+balances, subscription health with estimated MRR, and open receivables. Stripe uses an encrypted
+restricted API key and is excluded from automatic Brain-fill surveying because those financial
+metrics are live operational state. Disconnected or disabled capabilities are absent from the
+catalog, guessed action ids cannot bypass it, and all provider credentials remain server-side.
+Deeper or multi-source connected-account work continues through background tasks.
 
 Managed X, LinkedIn, YouTube, Instagram, TikTok, prospecting, and Semrush SEO actions use a fixed
 server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Prospecting includes
@@ -194,8 +209,12 @@ enrichment actions. Every paid execution inspects its live endpoint schema and p
 checks shared workspace credits, and requires a one-time approval above the per-action or per-turn
 thresholds. Provider data is treated as hostile input, redacted and bounded before it enters the chat
 trace, and billed once from the settled provider cost plus the platform fee. The durable
-`goat.capability_runs` row stores only the parameter hash and lifecycle/cost metadata; raw results
-stay in the requesting chat. The hourly billing reconciler settles interrupted or delayed runs.
+`goat.capability_runs` row stores only the parameter hash and lifecycle/cost metadata; only the
+safety-bounded action result enters the requesting chat. The hourly billing reconciler settles
+interrupted or delayed runs.
+YouTube transcript search fetches one full timestamped transcript through a reviewed Monid-backed
+Apify actor, searches it server-side for the requested phrase, and returns only bounded timestamped
+context windows to the chat.
 `MONID_API_KEY` belongs in Infisical `prod` + `/goat`, and
 `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new turns.
 `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint
@@ -317,14 +336,25 @@ visible to the model rather than merely path-referenced. Keeping uploads outside
 directory prevents them from appearing in repository changes.
 
 The Codex app-server daemon runs behind its Unix-socket control transport inside E2B and outlives
-the runner-side proxy. A runner shutdown detaches that proxy, releases the delivery lease, and lets
-the next worker `thread/resume` the same stored Codex turn id. The reconnect reconciles completed
+the runner-side proxy. A runner shutdown detaches that proxy, keeps the sandbox on its active
+timeout, releases the delivery lease, and lets the next worker `thread/resume` the same stored Codex
+turn id. The reconnect reconciles completed
 items and a terminal turn that landed while no runner was attached; stable per-item event keys make
 that replay idempotent. Lease claims count infrastructure ownership changes, while
 `recovery_attempts` increments only when the original Codex turn is missing or was interrupted and
-the worker must start one guarded continuation. A dead proxy with a pending user-input request
-forces that guarded continuation because server-initiated requests cannot move between client
-connections.
+the worker must start one guarded continuation. Persisting the replacement Codex turn id rearms
+that guard for the new engine turn, so long-running chats can survive repeated deploys without
+allowing two continuations for the same missing turn. A dead proxy with a pending user-input
+request forces that guarded continuation because server-initiated requests cannot move between
+client connections.
+
+Transient E2B capacity, rate-limit, network, and acquisition-timeout failures defer the same durable
+turn with bounded exponential backoff instead of writing a failed assistant message. Authentication,
+template, and other configuration failures remain terminal. A deferred turn stays interruptible and
+keeps later messages behind it in the per-session FIFO. Before the runner can invoke Codex, it
+durably snapshots the engine thread's existing turn ids and marks the turn as requiring recovery.
+This keeps pre-engine infrastructure retries distinct from post-invocation lease recovery, and lets
+a replacement worker identify an unpersisted new engine turn without adopting older active work.
 
 Session skills are reconciled before every Cloud Codex turn under
 `/home/user/opencompany-goat/codex-chat/.agents/skills/`. The managed-skills manifest removes only
@@ -333,16 +363,23 @@ the app-server daemon when the installed set changes, while the persistent Codex
 Only skills whose first activation belongs to the current turn are included as native `skill`
 inputs; previously activated skills remain installed and in thread history.
 
-New Cloud Codex chats pin the user's active Brain on `goat.codex_chat_sessions` together with the
-host-tool contract version used to start the Codex thread. On `thread/start`, the runner registers
-the read-only `goat_brain` function through app-server's experimental `dynamicTools` API. When
-Codex sends `item/tool/call`, the runner rechecks the user's Brain access, calls the database-backed
-Brain read plane, audits the attempt in `goat.brain_tool_runs`, and sends the result back over the
-runner-side proxy. Brain credentials and database access never enter E2B. Because app-server stores
-dynamic tool definitions on the thread, resumed turns provide the matching runner callback without
-trying to redefine the tool. Existing sessions without a pinned Brain and matching contract remain
-unchanged. The first contract intentionally supports only `query`, `list`, `get`, and `timeline`;
-it cannot write to the Brain.
+New Cloud Codex chats pin the user's active Brain and workspace on `goat.codex_chat_sessions`
+together with the host-tool contract version used to start the Codex thread. On `thread/start`, the
+runner registers the read-only `goat_brain`, `list_actions`, and `use_action` functions through
+app-server's experimental `dynamicTools` API. When Codex sends `item/tool/call`, the runner handles
+Brain reads directly or calls Goat's private action gateway with `RUNNER_INTERNAL_TOKEN`.
+
+The action gateway derives the user and workspace from the running turn, rechecks current workspace
+membership, resolves current connections and permission settings, and exposes only integration
+actions whose capability is `read` and permission mode is `on`. Writes, confirmation-gated actions,
+and paid managed capabilities are not present in the Cloud Codex catalog. Provider credentials,
+the internal bearer, and database access never enter E2B. A per-turn call budget bounds provider
+reads.
+
+Because app-server stores dynamic tool definitions on the thread, resumed turns provide the
+matching runner callbacks without trying to redefine the tools. Existing Brain-tool v1 sessions
+remain Brain-only. The Brain contract intentionally supports only `query`, `list`, `get`, and
+`timeline`; it cannot write to the Brain.
 
 The Cloud Codex Plan control starts the turn with app-server's experimental
 `collaborationMode.mode = "plan"`; `plan_mode_reasoning_effort` configures the mode's reasoning

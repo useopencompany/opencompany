@@ -7,6 +7,7 @@ import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { isValidGoatBrainSourceRef } from "@opencompany/goat-brain";
 import { and, desc, eq } from "drizzle-orm";
 import { slackApiRequest } from "../integrations/slack";
+import { effectiveCapabilityMode, providerCapability } from "./capabilities";
 import {
   clampCount,
   GoatActionAuthError,
@@ -35,6 +36,7 @@ type SlackConnection = {
   integrationId: string;
   teamName: string | null;
   hasSearch: boolean;
+  capabilityModes: unknown;
 };
 
 type SlackCredential = {
@@ -66,6 +68,8 @@ export async function resolveSlackActions(
 ): Promise<GoatActionProviderCatalog | null> {
   const connection = await loadSlackConnection(userWorkosId);
   if (!connection) return null;
+  if (effectiveCapabilityMode("slack", "read", connection.capabilityModes) === "off") return null;
+  const readPermission = slackReadPermission(connection);
 
   // The credential is loaded lazily on first execute so catalog resolution
   // never touches secrets; memoized per catalog (one chat request).
@@ -117,7 +121,7 @@ export async function resolveSlackActions(
       id: "slack.list_conversations",
       provider: "slack",
       capability: "read",
-      permissionMode: "on",
+      ...readPermission,
       description:
         "List the user's Slack conversations: channels, private groups, DMs (im), and group DMs (mpim). Channel ids look like C…/G…, DMs like D…. To find a DM with a person, resolve their user id via slack.list_users first, then match the user field on im conversations.",
       params: {
@@ -179,7 +183,7 @@ export async function resolveSlackActions(
       id: "slack.fetch_history",
       provider: "slack",
       capability: "read",
-      permissionMode: "on",
+      ...readPermission,
       description:
         "Fetch one page of recent messages from a Slack conversation (channel, DM, or group DM). A message's id is its ts value in its channel. Pass nextCursor as cursor to continue deeper into history.",
       params: {
@@ -246,7 +250,7 @@ export async function resolveSlackActions(
       id: "slack.fetch_thread",
       provider: "slack",
       capability: "read",
-      permissionMode: "on",
+      ...readPermission,
       description: "Fetch the replies of one Slack thread.",
       params: {
         type: "object",
@@ -291,7 +295,7 @@ export async function resolveSlackActions(
       id: "slack.list_users",
       provider: "slack",
       capability: "read",
-      permissionMode: "on",
+      ...readPermission,
       description: "List members of the Slack workspace to resolve names to user ids (U…).",
       params: {
         type: "object",
@@ -338,7 +342,7 @@ export async function resolveSlackActions(
       id: "slack.search_messages",
       provider: "slack",
       capability: "read",
-      permissionMode: "on",
+      ...readPermission,
       description:
         "Keyword-search messages across the Slack workspace. Supports modifiers like in:#channel, from:@displayname, after:YYYY-MM-DD inside the query.",
       params: {
@@ -414,6 +418,7 @@ async function loadSlackConnection(userWorkosId: string): Promise<SlackConnectio
       status: goatIntegrations.status,
       connectionLabel: goatIntegrations.connectionLabel,
       scopes: goatIntegrations.scopes,
+      capabilityModes: goatIntegrations.capabilityModes,
     })
     .from(goatIntegrations)
     .where(
@@ -427,6 +432,24 @@ async function loadSlackConnection(userWorkosId: string): Promise<SlackConnectio
     integrationId: row.id,
     teamName: row.connectionLabel,
     hasSearch: (row.scopes ?? []).includes("search:read"),
+    capabilityModes: row.capabilityModes,
+  };
+}
+
+function slackReadPermission(
+  connection: SlackConnection,
+): Pick<ResolvedGoatAction, "permissionMode" | "permission"> {
+  if (effectiveCapabilityMode("slack", "read", connection.capabilityModes) !== "ask") {
+    return { permissionMode: "on" };
+  }
+  return {
+    permissionMode: "ask",
+    permission: {
+      provider: "slack",
+      capabilityId: "read",
+      label: providerCapability("slack", "read")?.label ?? "Read Slack",
+      integrationIds: [connection.integrationId],
+    },
   };
 }
 

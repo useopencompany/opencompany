@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { modelSupportsAttachments } from "@opencompany/agent-runtime";
 import type { GoatChatMessageAttachment } from "@opencompany/db/goat-schema";
-import { extractDocxText, extractXlsxText } from "@opencompany/file-extract";
+import { extractDocxText, extractUtf8Text, extractXlsxText } from "@opencompany/file-extract";
 import { get } from "@vercel/blob";
 import {
   GOAT_CHAT_ATTACHMENT_MAX_PER_MESSAGE,
@@ -9,7 +9,7 @@ import {
 } from "@/lib/chat-attachment-formats";
 import type { GoatChatUiMessage, GoatStoredChatMessage } from "@/lib/chat-ui";
 
-// docx/xlsx text shown to the chat model; matches the brain capture cap so a
+// docx/xlsx/srt text shown to the chat model; matches the brain capture cap so a
 // save_to_brain of the same content never silently exceeds it.
 const CHAT_ATTACHMENT_TEXT_MAX_BYTES = 64_000;
 const MAX_FILENAME_LENGTH = 200;
@@ -47,7 +47,7 @@ export function parseGoatChatAttachmentsInput(
     const filenameRaw = typeof record.filename === "string" ? record.filename.trim() : "";
     const filename = (filenameRaw || "upload").slice(0, MAX_FILENAME_LENGTH);
 
-    const validation = validateGoatChatAttachmentCandidate({ mediaType, sizeBytes });
+    const validation = validateGoatChatAttachmentCandidate({ mediaType, filename, sizeBytes });
     if (!validation.ok) return { ok: false, error: validation.message };
 
     let pathname: string;
@@ -65,7 +65,7 @@ export function parseGoatChatAttachmentsInput(
     attachments.push({
       id: `goat_chat_att_${randomUUID()}`,
       kind: validation.kind,
-      mediaType,
+      mediaType: validation.mediaType,
       filename,
       sizeBytes,
       blobPathname: pathname,
@@ -75,7 +75,7 @@ export function parseGoatChatAttachmentsInput(
   return { ok: true, attachments };
 }
 
-// Runs at submit time so docx/xlsx content is visible to the model on this
+// Runs at submit time so docx/xlsx/srt content is visible to the model on this
 // and every later turn without re-extraction. Failures degrade to "no text"
 // (the model still sees the filename) rather than blocking the send.
 export async function extractGoatChatAttachmentTexts(
@@ -83,13 +83,17 @@ export async function extractGoatChatAttachmentTexts(
 ): Promise<Record<string, string> | null> {
   const texts: Record<string, string> = {};
   for (const attachment of attachments) {
-    if (attachment.kind !== "docx" && attachment.kind !== "xlsx") continue;
+    if (attachment.kind !== "docx" && attachment.kind !== "xlsx" && attachment.kind !== "srt") {
+      continue;
+    }
     try {
       const bytes = await downloadGoatChatAttachment(attachment.blobUrl);
       const text =
         attachment.kind === "docx"
           ? await extractDocxText(bytes, { maxBytes: CHAT_ATTACHMENT_TEXT_MAX_BYTES })
-          : await extractXlsxText(bytes, { maxBytes: CHAT_ATTACHMENT_TEXT_MAX_BYTES });
+          : attachment.kind === "xlsx"
+            ? await extractXlsxText(bytes, { maxBytes: CHAT_ATTACHMENT_TEXT_MAX_BYTES })
+            : extractUtf8Text(bytes, { maxBytes: CHAT_ATTACHMENT_TEXT_MAX_BYTES });
       if (text) texts[attachment.id] = text;
     } catch (error) {
       console.warn("Goat chat attachment text extraction failed.", {
@@ -119,7 +123,7 @@ export async function downloadGoatChatAttachment(blobUrl: string): Promise<Buffe
 
 // Appends attachment parts to every user message before convertToModelMessages:
 // pdf/images as data-URL file parts (the blob store is private, so provider-
-// fetchable URLs don't exist), docx/xlsx as extracted-text parts. Replayed on
+// fetchable URLs don't exist), docx/xlsx/srt as extracted-text parts. Replayed on
 // every turn — follow-up questions about a file are the core use case; caps
 // bound the cost. Each part carries the attachment id so the model can pass it
 // to save_to_brain.
@@ -160,7 +164,7 @@ async function attachmentToParts(
 ): Promise<GoatChatUiMessage["parts"]> {
   const label = attachmentLabel(attachment);
 
-  if (attachment.kind === "docx" || attachment.kind === "xlsx") {
+  if (attachment.kind === "docx" || attachment.kind === "xlsx" || attachment.kind === "srt") {
     const text = stored.attachmentTexts?.[attachment.id];
     return [
       {

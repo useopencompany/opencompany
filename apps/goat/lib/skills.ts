@@ -205,14 +205,18 @@ export async function resolveGoatSkillMentions(input: {
     return skill;
   });
 
-  const totalBytes = skills.reduce(
-    (total, skill) => total + Buffer.byteLength(serializeGoatBrainSkillMarkdown(skill), "utf8"),
-    0,
-  );
+  const totalBytes = goatSkillsByteLength(skills);
   if (totalBytes > MAX_GOAT_CHAT_SKILL_BYTES) {
     throw new GoatSkillMentionError("The selected skills are too large to attach together.");
   }
   return skills;
+}
+
+export function goatSkillsByteLength(skills: readonly GoatWorkspaceSkill[]): number {
+  return skills.reduce(
+    (total, skill) => total + Buffer.byteLength(serializeGoatBrainSkillMarkdown(skill), "utf8"),
+    0,
+  );
 }
 
 export async function activateAndListGoatChatSessionSkills(input: {

@@ -30,6 +30,10 @@ services:
         sync: false
       - key: RUNNER_INTERNAL_TOKEN
         sync: false
+      # Canonical Goat origin for private, bearer-protected host calls made on behalf of
+      # Cloud Codex. Credentials and this origin are never injected into E2B.
+      - key: GOAT_NEXT_PUBLIC_APP_URL
+        sync: false
       - key: RUNNER_STREAM_TOKEN_SECRET
         sync: false
       - key: DURABLE_STREAMS_URL

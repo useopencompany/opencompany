@@ -34,8 +34,8 @@ const CONTEXT: GoatActionExecuteContext = {
   userTimezone: "UTC",
 };
 
-function connectedRow(scopes: string[]) {
-  return { id: "gint_1", status: "connected", connectionLabel: "Acme", scopes };
+function connectedRow(scopes: string[], capabilityModes: Record<string, unknown> = {}) {
+  return { id: "gint_1", status: "connected", connectionLabel: "Acme", scopes, capabilityModes };
 }
 
 beforeEach(() => {
@@ -69,6 +69,40 @@ describe("resolveSlackActions", () => {
       "slack.fetch_thread",
       "slack.list_users",
     ]);
+  });
+
+  it("uses one broad Slack read permission for every action", async () => {
+    mocks.dbRows = [connectedRow(["search:read"], { read: "ask" })];
+    const catalog = await resolveSlackActions("user_1");
+
+    expect(catalog?.actions).toHaveLength(5);
+    expect(catalog?.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "slack.fetch_history",
+          capability: "read",
+          permissionMode: "ask",
+          permission: {
+            provider: "slack",
+            capabilityId: "read",
+            label: "Read Slack",
+            integrationIds: ["gint_1"],
+          },
+        }),
+        expect.objectContaining({
+          id: "slack.search_messages",
+          capability: "read",
+          permissionMode: "ask",
+        }),
+      ]),
+    );
+    expect(catalog?.actions.every((action) => action.permissionMode === "ask")).toBe(true);
+  });
+
+  it("removes Slack from the catalog when reading is off", async () => {
+    mocks.dbRows = [connectedRow(["search:read"], { read: "off" })];
+    expect(await resolveSlackActions("user_1")).toBeNull();
+    expect(mocks.loadCredential).not.toHaveBeenCalled();
   });
 
   it("does not touch the credential during resolution", async () => {

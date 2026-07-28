@@ -24,6 +24,7 @@
   "dependencies": {
     "@ai-sdk/mcp": "^1.0.44",
     "@opencompany/agent-runtime": "workspace:*",
+    "@opencompany/browser-tools": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/goat-brain": "workspace:*",
     "@opencompany/goat-observability": "workspace:*",

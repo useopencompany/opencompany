@@ -451,6 +451,7 @@ export function GoatBrainRoute({
       routeBrainId={routeBrainId}
       initialOverview={isOverviewRoute}
       overviewStats={initialOverviewStats ?? null}
+      initialDataLoaded={initialBrainSnapshot !== null || !selectedBrain}
     />
   );
 }
