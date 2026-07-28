@@ -173,7 +173,7 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
-  it("shows Gmail read and send controls and prompts older connections to grant send access", () => {
+  it("shows separate Gmail read, draft, and send controls with one scope-upgrade prompt", () => {
     const integrations = goatIntegrationStateFromRows([
       {
         id: "gint_gmail",
@@ -199,7 +199,14 @@ describe("SettingsIntegrationsPanel", () => {
     const sendPermission = within(gmailCard as HTMLElement).getByRole("group", {
       name: "Send emails permission",
     });
+    const draftPermission = within(gmailCard as HTMLElement).getByRole("group", {
+      name: "Create drafts permission",
+    });
     expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(draftPermission).getByRole("button", { name: "On" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -208,8 +215,39 @@ describe("SettingsIntegrationsPanel", () => {
       "true",
     );
     expect(
-      within(gmailCard as HTMLElement).getByRole("link", { name: "Enable sending" }),
+      within(gmailCard as HTMLElement).getByRole("link", { name: "Enable drafts & sending" }),
     ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
+  });
+
+  it("prompts send-enabled Gmail accounts only for draft access", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_gmail",
+        provider: "gmail",
+        externalId: "google_account_1",
+        accountEmail: "louis@example.com",
+        status: "connected",
+        scopes: [
+          "https://www.googleapis.com/auth/gmail.readonly",
+          "https://www.googleapis.com/auth/gmail.send",
+        ],
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    const gmailCard = screen
+      .getByText("Let Goat read and act on your email.")
+      .closest("div.rounded-2xl");
+    expect(gmailCard).not.toBeNull();
+    expect(
+      within(gmailCard as HTMLElement).getByRole("link", { name: "Enable drafts" }),
+    ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
+    expect(
+      within(gmailCard as HTMLElement).queryByRole("link", { name: "Enable drafts & sending" }),
+    ).toBeNull();
   });
 
   it("shows Attio read and write permission controls on the connected workspace", () => {

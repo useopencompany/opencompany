@@ -20,7 +20,7 @@ import {
   requiredStringParam,
   truncateText,
 } from "@/lib/actions/types";
-import { hasGoatGmailSendScope } from "@/lib/integrations/gmail-scopes";
+import { hasGoatGmailDraftScope, hasGoatGmailSendScope } from "@/lib/integrations/gmail-scopes";
 import { GoogleAccessAuthError, googleApiCall } from "@/lib/integrations/google-access-token";
 
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -66,11 +66,21 @@ export async function resolveGmailActions(
   if (allConnections.length === 0) return null;
 
   const readConnections = eligibleConnections(allConnections, "read");
+  const draftConnections = eligibleConnections(allConnections, "draft").filter(
+    (connection) =>
+      hasGoatGmailDraftScope(connection.scopes) && isValidEmailAddress(connection.accountEmail),
+  );
   const sendConnections = eligibleConnections(allConnections, "write").filter(
     (connection) =>
       hasGoatGmailSendScope(connection.scopes) && isValidEmailAddress(connection.accountEmail),
   );
-  if (readConnections.length === 0 && sendConnections.length === 0) return null;
+  if (
+    readConnections.length === 0 &&
+    draftConnections.length === 0 &&
+    sendConnections.length === 0
+  ) {
+    return null;
+  }
 
   const connections = readConnections;
   const accountParam =
@@ -222,9 +232,20 @@ export async function resolveGmailActions(
   ];
   const actions = [
     ...(readConnections.length > 0 ? readActions : []),
+    ...(draftConnections.length > 0 ? [createDraftAction(draftConnections)] : []),
     ...(sendConnections.length > 0 ? [sendEmailAction(sendConnections)] : []),
   ];
-  const labelConnections = readConnections.length > 0 ? readConnections : sendConnections;
+  const labelConnections =
+    readConnections.length > 0
+      ? readConnections
+      : draftConnections.length > 0
+        ? draftConnections
+        : sendConnections;
+  const catalogCapabilities = [
+    ...(readConnections.length > 0 ? ["search and read messages and threads"] : []),
+    ...(draftConnections.length > 0 ? ["create new drafts"] : []),
+    ...(sendConnections.length > 0 ? ["send new emails"] : []),
+  ];
 
   return {
     id: "gmail",
@@ -232,12 +253,7 @@ export async function resolveGmailActions(
       labelConnections.length === 1
         ? `Gmail (${connectionLabel(labelConnections[0]!)})`
         : `Gmail (${labelConnections.length} accounts)`,
-    description:
-      readConnections.length > 0 && sendConnections.length > 0
-        ? "Search and read messages and threads, and send new emails."
-        : readConnections.length > 0
-          ? "Search and read messages and threads."
-          : "Send new emails.",
+    description: `Use Gmail to ${formatSentenceList(catalogCapabilities)}.`,
     actions,
   };
 }
@@ -274,23 +290,72 @@ function permissionAnnotation(
   };
 }
 
-function sendEmailAction(connections: readonly GmailConnection[]): ResolvedGoatAction {
-  const accountParam =
-    connections.length > 1
-      ? {
-          account: {
-            type: "string" as const,
-            minLength: 1,
-            maxLength: 400,
-            description: `Which connected Gmail account should send the email. One of: ${connections
-              .map((connection) => JSON.stringify(connectionLabel(connection)))
-              .join(", ")}.`,
-          },
-        }
-      : {};
-  const required = ["to", "subject", "body"];
-  if (connections.length > 1) required.push("account");
+function createDraftAction(connections: readonly GmailConnection[]): ResolvedGoatAction {
+  return {
+    id: "gmail.create_draft",
+    provider: "gmail",
+    capability: "draft",
+    ...permissionAnnotation("draft", connections),
+    description:
+      "Save a new plain-text draft in a connected Gmail account for the user to review, edit, and manually send. Use only when the user explicitly asked to save a Gmail draft. This action never sends email, replies to threads, or attaches files.",
+    params: emailActionParams(connections, "save the draft"),
+    execute: async (params, context) => {
+      const email = parseEmailActionParams(params, connections);
+      await assertGmailDraftStillEnabled(context.userWorkosId, email.connection);
 
+      const response = (await gmailApiCall(
+        context,
+        email.connection,
+        new URL(`${GMAIL_BASE}/drafts`),
+        {
+          method: "POST",
+          body: {
+            message: {
+              raw: createRawEmail({
+                from: email.connection.accountEmail!,
+                to: email.to,
+                cc: email.cc,
+                bcc: email.bcc,
+                subject: email.subject,
+                body: email.body,
+              }),
+            },
+          },
+        },
+      )) as {
+        id?: string;
+        message?: { id?: string; threadId?: string; labelIds?: string[] };
+      };
+      if (!response.id || !response.message?.id) {
+        throw new Error("Gmail did not return the created draft and message ids.");
+      }
+      return {
+        account: connectionLabel(email.connection),
+        integrationId: email.connection.integrationId,
+        draft: {
+          id: response.id,
+          messageId: response.message.id,
+          ...(response.message.threadId
+            ? {
+                threadId: response.message.threadId,
+                sourceRef: gmailThreadSourceRef(response.message.threadId),
+              }
+            : {}),
+          url: gmailDraftPermalink(email.connection, response.message.id),
+          ...(Array.isArray(response.message.labelIds)
+            ? {
+                labelIds: response.message.labelIds
+                  .filter((label): label is string => typeof label === "string")
+                  .slice(0, 20),
+              }
+            : {}),
+        },
+      };
+    },
+  };
+}
+
+function sendEmailAction(connections: readonly GmailConnection[]): ResolvedGoatAction {
   return {
     id: "gmail.send_email",
     provider: "gmail",
@@ -298,81 +363,25 @@ function sendEmailAction(connections: readonly GmailConnection[]): ResolvedGoatA
     ...permissionAnnotation("write", connections),
     description:
       "Send a new plain-text email from a connected Gmail account. Use only when the user explicitly asked to send it. This does not create drafts, reply to threads, or attach files.",
-    params: {
-      type: "object",
-      additionalProperties: false,
-      required,
-      properties: {
-        to: {
-          type: "array",
-          minItems: 1,
-          maxItems: MAX_EMAIL_RECIPIENTS,
-          items: { type: "string", format: "email", maxLength: MAX_EMAIL_ADDRESS_CHARS },
-          description: "Primary recipient email addresses.",
-        },
-        cc: {
-          type: "array",
-          maxItems: MAX_EMAIL_RECIPIENTS,
-          items: { type: "string", format: "email", maxLength: MAX_EMAIL_ADDRESS_CHARS },
-          description: "Optional CC recipient email addresses.",
-        },
-        bcc: {
-          type: "array",
-          maxItems: MAX_EMAIL_RECIPIENTS,
-          items: { type: "string", format: "email", maxLength: MAX_EMAIL_ADDRESS_CHARS },
-          description: "Optional BCC recipient email addresses.",
-        },
-        subject: {
-          type: "string",
-          minLength: 1,
-          maxLength: MAX_EMAIL_SUBJECT_CHARS,
-          description: "Email subject.",
-        },
-        body: {
-          type: "string",
-          minLength: 1,
-          maxLength: MAX_EMAIL_BODY_CHARS,
-          description: "Plain-text email body.",
-        },
-        ...accountParam,
-      },
-    },
+    params: emailActionParams(connections, "send the email"),
     execute: async (params, context) => {
-      const hasMultipleAccounts = connections.length > 1;
-      assertOnlyKnownSendParams(params, hasMultipleAccounts);
-      const connection = resolveConnection(
-        connections,
-        hasMultipleAccounts ? optionalStringParam(params, "account") : undefined,
-      );
-      const to = validateEmailAddresses(params.to, "to", true);
-      const cc = validateEmailAddresses(params.cc, "cc", false);
-      const bcc = validateEmailAddresses(params.bcc, "bcc", false);
-      if (to.length + cc.length + bcc.length > MAX_EMAIL_RECIPIENTS) {
-        throw new GoatActionInvalidParamsError(
-          `An email can have at most ${MAX_EMAIL_RECIPIENTS} recipients across "to", "cc", and "bcc".`,
-        );
-      }
-      const subject = requiredBoundedString(params, "subject", MAX_EMAIL_SUBJECT_CHARS);
-      if (/[\r\n\0]/.test(subject)) {
-        throw new GoatActionInvalidParamsError('"subject" cannot contain line breaks.');
-      }
-      const body = requiredBoundedBody(params);
-      await assertGmailSendStillEnabled(context.userWorkosId, connection);
+      const email = parseEmailActionParams(params, connections);
+      await assertGmailSendStillEnabled(context.userWorkosId, email.connection);
 
       const response = (await gmailApiCall(
         context,
-        connection,
+        email.connection,
         new URL(`${GMAIL_BASE}/messages/send`),
         {
           method: "POST",
           body: {
             raw: createRawEmail({
-              from: connection.accountEmail!,
-              to,
-              cc,
-              bcc,
-              subject,
-              body,
+              from: email.connection.accountEmail!,
+              to: email.to,
+              cc: email.cc,
+              bcc: email.bcc,
+              subject: email.subject,
+              body: email.body,
             }),
           },
         },
@@ -381,15 +390,15 @@ function sendEmailAction(connections: readonly GmailConnection[]): ResolvedGoatA
         throw new Error("Gmail did not return the sent message id.");
       }
       return {
-        account: connectionLabel(connection),
-        integrationId: connection.integrationId,
+        account: connectionLabel(email.connection),
+        integrationId: email.connection.integrationId,
         message: {
           id: response.id,
           ...(response.threadId
             ? {
                 threadId: response.threadId,
                 sourceRef: gmailThreadSourceRef(response.threadId),
-                url: gmailThreadPermalink(connection, response.threadId),
+                url: gmailThreadPermalink(email.connection, response.threadId),
               }
             : {}),
           ...(Array.isArray(response.labelIds)
@@ -405,12 +414,114 @@ function sendEmailAction(connections: readonly GmailConnection[]): ResolvedGoatA
   };
 }
 
-const SEND_EMAIL_PARAM_KEYS = ["to", "cc", "bcc", "subject", "body"] as const;
+function emailActionParams(
+  connections: readonly GmailConnection[],
+  accountPurpose: string,
+): ResolvedGoatAction["params"] {
+  const accountParam =
+    connections.length > 1
+      ? {
+          account: {
+            type: "string" as const,
+            minLength: 1,
+            maxLength: 400,
+            description: `Which connected Gmail account should ${accountPurpose}. One of: ${connections
+              .map((connection) => JSON.stringify(connectionLabel(connection)))
+              .join(", ")}.`,
+          },
+        }
+      : {};
+  const required = ["to", "subject", "body"];
+  if (connections.length > 1) required.push("account");
 
-function assertOnlyKnownSendParams(params: Record<string, unknown>, allowAccount: boolean): void {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required,
+    properties: {
+      to: {
+        type: "array",
+        minItems: 1,
+        maxItems: MAX_EMAIL_RECIPIENTS,
+        items: { type: "string", format: "email", maxLength: MAX_EMAIL_ADDRESS_CHARS },
+        description: "Primary recipient email addresses.",
+      },
+      cc: {
+        type: "array",
+        maxItems: MAX_EMAIL_RECIPIENTS,
+        items: { type: "string", format: "email", maxLength: MAX_EMAIL_ADDRESS_CHARS },
+        description: "Optional CC recipient email addresses.",
+      },
+      bcc: {
+        type: "array",
+        maxItems: MAX_EMAIL_RECIPIENTS,
+        items: { type: "string", format: "email", maxLength: MAX_EMAIL_ADDRESS_CHARS },
+        description: "Optional BCC recipient email addresses.",
+      },
+      subject: {
+        type: "string",
+        minLength: 1,
+        maxLength: MAX_EMAIL_SUBJECT_CHARS,
+        description: "Email subject.",
+      },
+      body: {
+        type: "string",
+        minLength: 1,
+        maxLength: MAX_EMAIL_BODY_CHARS,
+        description: "Plain-text email body.",
+      },
+      ...accountParam,
+    },
+  };
+}
+
+type ParsedEmailActionParams = {
+  connection: GmailConnection;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  body: string;
+};
+
+function parseEmailActionParams(
+  params: Record<string, unknown>,
+  connections: readonly GmailConnection[],
+): ParsedEmailActionParams {
+  const hasMultipleAccounts = connections.length > 1;
+  assertOnlyKnownEmailParams(params, hasMultipleAccounts);
+  const connection = resolveConnection(
+    connections,
+    hasMultipleAccounts ? optionalStringParam(params, "account") : undefined,
+  );
+  const to = validateEmailAddresses(params.to, "to", true);
+  const cc = validateEmailAddresses(params.cc, "cc", false);
+  const bcc = validateEmailAddresses(params.bcc, "bcc", false);
+  if (to.length + cc.length + bcc.length > MAX_EMAIL_RECIPIENTS) {
+    throw new GoatActionInvalidParamsError(
+      `An email can have at most ${MAX_EMAIL_RECIPIENTS} recipients across "to", "cc", and "bcc".`,
+    );
+  }
+  const subject = requiredBoundedString(params, "subject", MAX_EMAIL_SUBJECT_CHARS);
+  if (/[\r\n\0]/.test(subject)) {
+    throw new GoatActionInvalidParamsError('"subject" cannot contain line breaks.');
+  }
+  return {
+    connection,
+    to,
+    cc,
+    bcc,
+    subject,
+    body: requiredBoundedBody(params),
+  };
+}
+
+const EMAIL_PARAM_KEYS = ["to", "cc", "bcc", "subject", "body"] as const;
+
+function assertOnlyKnownEmailParams(params: Record<string, unknown>, allowAccount: boolean): void {
   const unknown = Object.keys(params).filter(
     (key) =>
-      !SEND_EMAIL_PARAM_KEYS.includes(key as (typeof SEND_EMAIL_PARAM_KEYS)[number]) &&
+      !EMAIL_PARAM_KEYS.includes(key as (typeof EMAIL_PARAM_KEYS)[number]) &&
       !(allowAccount && key === "account"),
   );
   if (unknown.length > 0) {
@@ -533,6 +644,41 @@ function encodeMimeHeader(value: string) {
     .join("\r\n ");
 }
 
+async function assertGmailDraftStillEnabled(
+  userWorkosId: string,
+  connection: GmailConnection,
+): Promise<void> {
+  const rows = await getDb()
+    .select({
+      status: goatIntegrations.status,
+      scopes: goatIntegrations.scopes,
+      capabilityModes: goatIntegrations.capabilityModes,
+    })
+    .from(goatIntegrations)
+    .where(
+      and(
+        eq(goatIntegrations.id, connection.integrationId),
+        eq(goatIntegrations.userWorkosId, userWorkosId),
+        eq(goatIntegrations.provider, "gmail"),
+      ),
+    )
+    .limit(1);
+  const row = rows[0];
+  if (!row || row.status !== "connected" || !hasGoatGmailDraftScope(row.scopes)) {
+    throw new GoatActionAuthError(
+      "auth_expired",
+      "gmail",
+      `Reconnect Gmail for ${connectionLabel(connection)} in Settings → Integrations to enable drafts, then retry.`,
+    );
+  }
+  if (effectiveCapabilityMode("gmail", "draft", row.capabilityModes) === "off") {
+    throw new GoatActionPermissionError(
+      "gmail",
+      `Creating drafts is turned off for ${connectionLabel(connection)}. It can be changed under Settings → Integrations.`,
+    );
+  }
+}
+
 async function assertGmailSendStillEnabled(
   userWorkosId: string,
   connection: GmailConnection,
@@ -630,6 +776,12 @@ function connectionLabel(connection: GmailConnection) {
   return normalized.length > 100 ? `${normalized.slice(0, 100)}…` : normalized;
 }
 
+function formatSentenceList(items: string[]) {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
+}
+
 async function gmailApiCall(
   context: GoatActionExecuteContext,
   connection: GmailConnection,
@@ -714,6 +866,11 @@ function gmailThreadSourceRef(threadId: string) {
 function gmailThreadPermalink(connection: GmailConnection, threadId: string) {
   const account = encodeURIComponent(connection.accountEmail?.trim() || "0");
   return `https://mail.google.com/mail/u/${account}/#all/${encodeURIComponent(threadId)}`;
+}
+
+function gmailDraftPermalink(connection: GmailConnection, messageId: string) {
+  const account = encodeURIComponent(connection.accountEmail?.trim() || "0");
+  return `https://mail.google.com/mail/u/${account}/#drafts?compose=${encodeURIComponent(messageId)}`;
 }
 
 function headerMap(headers: GmailHeader[] | undefined) {
