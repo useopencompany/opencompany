@@ -100,6 +100,7 @@ function workspace() {
     workosOrganizationId: null,
     slug: null,
     createdByWorkosId: "user_1",
+    capabilitySessionBudgetUsdMicros: null,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     updatedAt: new Date("2026-01-01T00:00:00.000Z"),
   };

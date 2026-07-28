@@ -303,8 +303,7 @@ describe("MessageBubble assistant errors", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("renders and resolves a one-time paid capability approval card", async () => {
-    const user = userEvent.setup();
+  it("renders legacy paid capability approvals as inert historical cards", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -312,13 +311,12 @@ describe("MessageBubble assistant errors", () => {
           new Response(
             JSON.stringify({
               runId: "gcr_abc",
-              status: "awaiting_approval",
+              status: "expired",
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
       ),
     );
-    const onCapabilityApproval = vi.fn(async () => "approved");
     const message: GoatChatUiMessage = {
       id: "assistant_approval",
       role: "assistant",
@@ -352,26 +350,73 @@ describe("MessageBubble assistant errors", () => {
         },
       ],
     };
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByText("Approve paid capability?")).toBeVisible();
+    expect(screen.getByText(/Maximum charge \$0\.36/)).toBeVisible();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(await screen.findByText("Expired")).toBeVisible();
+  });
+
+  it("renders a native paid capability approval with cost and distinguishing params", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              runId: "gcr_abc",
+              source: "lead",
+              action: "lead.find_person_email",
+              status: "awaiting_approval",
+              maxCostUsdMicros: 360_000,
+              sessionBudgetUsdMicros: 100_000,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    const onActionApproval = vi.fn(async () => undefined);
+    const message: GoatChatUiMessage = {
+      id: "assistant_native_approval",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_action_approval",
+          state: "approval-requested",
+          input: {
+            action: "lead.find_person_email",
+            params: { email: "ada@example.com" },
+          },
+          approval: { id: "approval_1" },
+        },
+      ],
+    };
+
     render(
       <MessageBubble
         message={message}
         taskLookup={emptyTaskLookup}
-        onCapabilityApproval={onCapabilityApproval}
+        onActionApproval={onActionApproval}
+        allowActionApproval
       />,
     );
 
-    expect(screen.getByText("Approve paid capability?")).toBeVisible();
-    expect(screen.getByText(/Maximum charge \$0\.36/)).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Approve once" }));
+    expect(screen.getByText("Run paid lookup?")).toBeVisible();
+    expect(await screen.findByText(/Up to \$0\.36/)).toBeVisible();
+    expect(screen.getByText("ada@example.com")).toBeVisible();
+    expect(screen.getByText(/session's \$0\.10 budget/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Approve for $0.36" }));
     await waitFor(() =>
-      expect(onCapabilityApproval).toHaveBeenCalledWith({
-        decision: "approve",
-        runId: "gcr_abc",
+      expect(onActionApproval).toHaveBeenCalledWith({
+        approvalId: "approval_1",
         action: "lead.find_person_email",
-        params: { email: "ada@example.com" },
+        decision: "accept",
       }),
     );
-    expect(await screen.findByRole("button", { name: "Continue approved action" })).toBeVisible();
   });
 
   it("renders historical use_capability parts through the generic tool row without crashing", () => {

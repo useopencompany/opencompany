@@ -1163,6 +1163,13 @@
       "when": 1785240000003,
       "tag": "0165_goat_subagent_event_types",
       "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 1785240000004,
+      "tag": "0166_goat_capability_session_budget",
+      "breakpoints": true
     }
   ]
 }

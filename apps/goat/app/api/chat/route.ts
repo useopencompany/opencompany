@@ -6,6 +6,10 @@ import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
+import {
+  approveGoatCapabilityRunByToolCall,
+  cancelGoatCapabilityRunByToolCall,
+} from "@opencompany/db/goat-capabilities";
 import { hasPositiveGoatCreditBalance, recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import { type GoatChatMessageDebugTrace, goatChatSandboxUsage } from "@opencompany/db/goat-schema";
 import {
@@ -37,6 +41,8 @@ import type { GoatCapabilityTurnState, GoatResolvedActionCatalog } from "@/lib/a
 import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
+import { MANAGED_CAPABILITY_ACTIONS_BY_ID } from "@/lib/capabilities/catalog";
+import { evaluateManagedCapabilityApproval } from "@/lib/capabilities/execute";
 import {
   createDbGoatChatStore,
   createGoatChatApprovalContinuationTurn,
@@ -131,13 +137,6 @@ type ChatRequestBody = {
   model?: unknown;
   message?: unknown;
   mentions?: unknown;
-  capabilityApproval?: unknown;
-};
-
-type CapabilityApprovalContinuation = {
-  runId: string;
-  action: string;
-  params: Record<string, unknown>;
 };
 
 export async function POST(request: Request): Promise<Response> {
@@ -147,10 +146,6 @@ export async function POST(request: Request): Promise<Response> {
 
   const body = await readJsonBody(request);
   if (!body.ok) return new Response(body.error, { status: 400 });
-  const capabilityApproval = parseCapabilityApprovalContinuation(body.value.capabilityApproval);
-  if (body.value.capabilityApproval !== undefined && !capabilityApproval) {
-    return new Response("Invalid paid capability continuation.", { status: 400 });
-  }
 
   // Two request shapes share this route: a user message starting a normal
   // turn, and the client's re-send of the latest assistant message carrying
@@ -390,7 +385,12 @@ export async function POST(request: Request): Promise<Response> {
     userMessageContent: string;
     storedMessages: Awaited<ReturnType<typeof createGoatChatUserTurn>>["storedMessages"];
     messages: GoatChatUiMessage[];
-    respondedApprovalIds: string[];
+    respondedApprovals: Array<{
+      approvalId: string;
+      toolCallId: string;
+      action: string;
+      approved: boolean;
+    }>;
     continuationTaskId: string | null;
   };
   let turn: ChatTurnState;
@@ -416,6 +416,16 @@ export async function POST(request: Request): Promise<Response> {
       // Approvals the user talked past get denied now, so the history stays
       // convertible and the stale card resolves in the UI.
       const dismissed = await dismissStaleGoatChatApprovals(userTurn, store);
+      await Promise.allSettled(
+        dismissed.toolCallIds.map((toolCallId) =>
+          cancelGoatCapabilityRunByToolCall({
+            toolCallId,
+            chatSessionId: userTurn.session.id,
+            userWorkosId: context.user.workosUserId,
+            workspaceId: context.workspace.id,
+          }),
+        ),
+      );
       turn = {
         session: userTurn.session,
         sessionCreated: userTurn.sessionCreated,
@@ -424,7 +434,7 @@ export async function POST(request: Request): Promise<Response> {
         userMessageContent: userInput.prompt,
         storedMessages: userTurn.storedMessages,
         messages: dismissed.changed ? dismissed.messages : userTurn.messages,
-        respondedApprovalIds: [],
+        respondedApprovals: [],
         continuationTaskId: null,
       };
     } else {
@@ -442,6 +452,34 @@ export async function POST(request: Request): Promise<Response> {
         });
         return new Response(continuation.error, { status: 409 });
       }
+      const managedResponses = continuation.respondedApprovals.filter((approval) =>
+        MANAGED_CAPABILITY_ACTIONS_BY_ID.has(approval.action),
+      );
+      await Promise.allSettled(
+        managedResponses.map(async (approval) => {
+          const row = approval.approved
+            ? await approveGoatCapabilityRunByToolCall({
+                toolCallId: approval.toolCallId,
+                chatSessionId: continuation.session.id,
+                userWorkosId: context.user.workosUserId,
+                workspaceId: context.workspace.id,
+              })
+            : await cancelGoatCapabilityRunByToolCall({
+                toolCallId: approval.toolCallId,
+                chatSessionId: continuation.session.id,
+                userWorkosId: context.user.workosUserId,
+                workspaceId: context.workspace.id,
+              });
+          if (row) {
+            recordGoatCounter(GOAT_METRICS.capabilityApprovalsTotal, 1, {
+              "goat.capability_source": row.source,
+              "goat.capability_action": row.action,
+              "goat.approval_decision": approval.approved ? "approve" : "cancel",
+              "goat.outcome": row.status,
+            });
+          }
+        }),
+      );
       turn = {
         session: continuation.session,
         sessionCreated: false,
@@ -450,7 +488,7 @@ export async function POST(request: Request): Promise<Response> {
         userMessageContent: continuation.lastUserMessage?.content ?? "",
         storedMessages: continuation.storedMessages,
         messages: continuation.messages,
-        respondedApprovalIds: continuation.respondedApprovalIds,
+        respondedApprovals: continuation.respondedApprovals,
         continuationTaskId: continuation.storedMessages.at(-1)?.taskId ?? null,
       };
     }
@@ -518,6 +556,8 @@ export async function POST(request: Request): Promise<Response> {
   const generationSignal = resumeEnabled ? stopController.signal : request.signal;
   const capabilityTurnState: GoatCapabilityTurnState = {
     quotedTotalUsdMicros: 0,
+    admittedToolCallIds: [],
+    quotesByToolCallId: new Map(),
     asyncRunsStarted: 0,
   };
   let stopWatcherCleanup: (() => void) | null = null;
@@ -538,11 +578,6 @@ export async function POST(request: Request): Promise<Response> {
   ]);
   let loadedSkillCount = resolvedSkills.length;
   let loadedSkillBytes = goatSkillsByteLength(resolvedSkills);
-  if (capabilityApproval) {
-    for (const action of actionCatalog.actions) {
-      if (action.id === capabilityApproval.action) prelistedActionSourceIds.add(action.provider);
-    }
-  }
   const releaseStreamCoordination = () => {
     stopWatcherCleanup?.();
     stopWatcherCleanup = null;
@@ -817,6 +852,24 @@ export async function POST(request: Request): Promise<Response> {
             ...(prelistedActionSourceIds.size > 0
               ? { prelistedSourceIds: [...prelistedActionSourceIds] }
               : {}),
+            needsApproval: async (call) => {
+              const spec = MANAGED_CAPABILITY_ACTIONS_BY_ID.get(call.action);
+              if (!spec) return false;
+              try {
+                return await evaluateManagedCapabilityApproval({
+                  spec,
+                  params: call.params,
+                  toolCallId: call.toolCallId,
+                  workspaceId: context.workspace.id,
+                  userWorkosId: context.user.workosUserId,
+                  chatSessionId: turn.session.id,
+                  turnState: capabilityTurnState,
+                  signal: generationSignal,
+                });
+              } catch {
+                return false;
+              }
+            },
             execute: (call) =>
               executeChatActionCall({
                 catalog: actionCatalog,
@@ -830,9 +883,6 @@ export async function POST(request: Request): Promise<Response> {
                 chatSessionId: turn.session.id,
                 toolCallId: call.toolCallId,
                 capabilityTurnState,
-                ...(capabilityApproval
-                  ? { capabilityApprovalRunId: capabilityApproval.runId }
-                  : {}),
                 attributes: {
                   ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
                   "goat.chat_session_id": turn.session.id,
@@ -1091,8 +1141,9 @@ export async function POST(request: Request): Promise<Response> {
       prepareOpenCompanyChatStep({
         stepNumber,
         maxSteps: maxChatSteps,
-        forceApprovedAction: Boolean(capabilityApproval),
-        finalizeAfterApproval: turn.respondedApprovalIds.length > 0,
+        finalizeAfterApproval: turn.respondedApprovals.some(
+          (approval) => !MANAGED_CAPABILITY_ACTIONS_BY_ID.has(approval.action),
+        ),
       }),
     ...(toolContext.repairToolCall
       ? { experimental_repairToolCall: toolContext.repairToolCall }
@@ -1124,8 +1175,10 @@ export async function POST(request: Request): Promise<Response> {
         userMessageId: turn.userMessageId,
         // A continuation is a second debit for the same user message; suffix
         // the key so it is not deduped against the paused turn's debit.
-        ...(turn.respondedApprovalIds.length > 0
-          ? { idempotencyKeySuffix: `:approval:${turn.respondedApprovalIds[0]}` }
+        ...(turn.respondedApprovals.length > 0
+          ? {
+              idempotencyKeySuffix: `:approval:${turn.respondedApprovals[0]?.approvalId ?? "unknown"}`,
+            }
           : {}),
       });
       debugTrace = createOpenCompanyChatDebugTrace({
@@ -1406,7 +1459,6 @@ async function executeChatActionCall(input: {
   workspaceId: string;
   chatSessionId: string;
   toolCallId: string;
-  capabilityApprovalRunId?: string;
   capabilityTurnState: GoatCapabilityTurnState;
   attributes: Record<string, string | number | boolean | null | undefined>;
   chatSpan: ReturnType<typeof startGoatSpan>;
@@ -1435,9 +1487,6 @@ async function executeChatActionCall(input: {
       workspaceId: input.workspaceId,
       chatSessionId: input.chatSessionId,
       toolCallId: input.toolCallId,
-      ...(input.capabilityApprovalRunId
-        ? { capabilityApprovalRunId: input.capabilityApprovalRunId }
-        : {}),
       capabilityTurnState: input.capabilityTurnState,
       signal: input.signal,
       currentDate: input.currentDate,
@@ -1620,26 +1669,6 @@ async function readJsonBody(
   } catch {
     return { ok: false, error: "Invalid chat request." };
   }
-}
-
-function parseCapabilityApprovalContinuation(
-  value: unknown,
-): CapabilityApprovalContinuation | null {
-  if (!isRecord(value)) return null;
-  const runId = normalizedOptionalString(value.runId);
-  const action = normalizedOptionalString(value.action);
-  if (
-    !runId ||
-    runId.length > 160 ||
-    !/^gcr_[a-f0-9]+$/.test(runId) ||
-    !action ||
-    action.length > 160 ||
-    !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(action) ||
-    !isRecord(value.params)
-  ) {
-    return null;
-  }
-  return { runId, action, params: value.params };
 }
 
 function parseUserMessage(value: unknown): GoatChatUiMessage | null {

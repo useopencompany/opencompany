@@ -55,8 +55,42 @@ const analyticsMocks = vi.hoisted(() => ({
   captureGoatServerEvent: vi.fn(async () => {}),
 }));
 
+const capabilityMocks = vi.hoisted(() => ({
+  approveByToolCall: vi.fn(),
+  cancelByToolCall: vi.fn(),
+  evaluateApproval: vi.fn(async () => false),
+}));
+
 vi.mock("@opencompany/analytics/goat/server", () => ({
   captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+}));
+
+vi.mock("@opencompany/db/goat-capabilities", () => ({
+  approveGoatCapabilityRunByToolCall: capabilityMocks.approveByToolCall,
+  cancelGoatCapabilityRunByToolCall: capabilityMocks.cancelByToolCall,
+}));
+
+vi.mock("@/lib/capabilities/execute", () => ({
+  evaluateManagedCapabilityApproval: capabilityMocks.evaluateApproval,
+}));
+
+vi.mock("@/lib/capabilities/catalog", () => ({
+  MANAGED_CAPABILITY_ACTIONS_BY_ID: new Map([
+    [
+      "x.search_posts",
+      {
+        id: "x.search_posts",
+        source: "x",
+        provider: "tikhub",
+        endpoint: "/search",
+        executionMode: "sync",
+        priceType: "PER_CALL",
+        description: "Search X posts.",
+        params: { type: "object" },
+        mapInput: vi.fn(),
+      },
+    ],
+  ]),
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -95,7 +129,11 @@ vi.mock("@/lib/chat", () => ({
   createDbGoatChatStore: vi.fn(() => ({})),
   createGoatChatApprovalContinuationTurn: vi.fn(),
   createGoatChatUserTurn: vi.fn(),
-  dismissStaleGoatChatApprovals: vi.fn(async () => ({ changed: false, messages: [] })),
+  dismissStaleGoatChatApprovals: vi.fn(async () => ({
+    changed: false,
+    messages: [],
+    toolCallIds: [],
+  })),
   newGoatChatMessageId: vi.fn(() => "assistant_1"),
   persistGoatChatAssistantMessage: vi.fn(),
 }));
@@ -671,109 +709,6 @@ describe("POST /api/chat", () => {
     expect(executeGoatAction).toHaveBeenCalledTimes(1);
   });
 
-  it("requires an approved continuation through use_action with its bound run id", async () => {
-    mockAuth();
-    mockCreateTurn();
-    const catalog = {
-      providers: [
-        {
-          id: "x" as const,
-          kind: "managed" as const,
-          label: "X",
-          description: "Search public X data.",
-        },
-      ],
-      actions: [
-        {
-          id: "x.search_posts",
-          provider: "x" as const,
-          capability: "read" as const,
-          description: "Search X posts.",
-          params: { type: "object" as const, properties: {} },
-          permissionMode: "on" as const,
-          execute: vi.fn(),
-        },
-      ],
-    };
-    mockResolveGoatActionCatalog().mockResolvedValue(catalog);
-    mockExecuteGoatAction().mockResolvedValue({
-      ok: true,
-      action: "x.search_posts",
-      result: { untrustedProviderData: true, resultCount: 1 },
-    });
-    let execution: Promise<unknown> | null = null;
-    mockStreamText().mockImplementation((options: unknown) => {
-      const settings = options as {
-        system?: string;
-        prepareStep?: (input: { stepNumber: number }) => unknown;
-        tools?: Record<string, { execute?: unknown }>;
-      };
-      expect(settings.system).toContain("<action_sources>");
-      expect(settings.system).not.toContain("<brain_fill>");
-      expect(settings.prepareStep?.({ stepNumber: 0 })).toEqual({
-        activeTools: [USE_ACTION_TOOL_NAME],
-        toolChoice: "required",
-      });
-      expect(
-        settings.prepareStep?.({
-          stepNumber: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX - 1,
-        }),
-      ).toEqual({
-        activeTools: [],
-        toolChoice: "none",
-      });
-      const actionTool = settings.tools?.[USE_ACTION_TOOL_NAME];
-      if (typeof actionTool?.execute !== "function") {
-        throw new Error("use_action was not configured.");
-      }
-      execution = actionTool.execute(
-        { action: "x.search_posts", params: { query: "goat" } },
-        { toolCallId: "approval_call_1", messages: [] },
-      ) as Promise<unknown>;
-      return {
-        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
-      } as never;
-    });
-
-    const response = await POST(
-      jsonRequest({
-        sessionId: "session_1",
-        model: "openai/gpt-5.5",
-        capabilityApproval: {
-          runId: "gcr_abc123",
-          action: "x.search_posts",
-          params: { query: "goat" },
-        },
-        message: {
-          id: "ui_user_approval",
-          role: "user",
-          parts: [
-            {
-              type: "text",
-              text: 'Continue x.search_posts with {"query":"goat"}',
-            },
-          ],
-        },
-      }),
-    );
-    expect(response.status).toBe(200);
-    await execution;
-    expect(executeGoatAction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actionId: "x.search_posts",
-        params: { query: "goat" },
-        workspaceId: "goat_ws_user_1",
-        chatSessionId: "session_1",
-        toolCallId: "approval_call_1",
-        capabilityApprovalRunId: "gcr_abc123",
-        capabilityTurnState: {
-          quotedTotalUsdMicros: 0,
-          asyncRunsStarted: 0,
-        },
-      }),
-    );
-  });
-
   it.each([
     ["an approved", true],
     ["a declined", false],
@@ -792,7 +727,14 @@ describe("POST /api/chat", () => {
       },
       storedMessages: [],
       messages: [],
-      respondedApprovalIds: ["approval_1"],
+      respondedApprovals: [
+        {
+          approvalId: "approval_1",
+          toolCallId: "send_email_1",
+          action: "gmail.send_email",
+          approved,
+        },
+      ],
     });
     mockStreamText().mockImplementation((options: unknown) => {
       const settings = options as {
@@ -830,6 +772,81 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
+  });
+
+  it.each([
+    ["approved", true],
+    ["declined", false],
+  ])("keeps a %s capability continuation tool-enabled", async (_label, approved) => {
+    mockAuth();
+    mockCreateGoatChatApprovalContinuationTurn().mockResolvedValue({
+      ok: true,
+      session: {
+        id: "session_1",
+        model: "openai/gpt-5.5",
+        engine: "opencompany",
+      },
+      lastUserMessage: {
+        id: "user_message_1",
+        content: "Research Goat.",
+      },
+      storedMessages: [],
+      messages: [],
+      respondedApprovals: [
+        {
+          approvalId: "approval_1",
+          toolCallId: "paid_lookup_1",
+          action: "x.search_posts",
+          approved,
+        },
+      ],
+    });
+    mockStreamText().mockImplementation((options: unknown) => {
+      const settings = options as {
+        prepareStep?: (input: { stepNumber: number }) => unknown;
+      };
+      expect(settings.prepareStep?.({ stepNumber: 0 })).toEqual({});
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        sessionId: "session_1",
+        message: {
+          id: "assistant_1",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-use_action",
+              toolCallId: "paid_lookup_1",
+              state: "approval-responded",
+              input: {
+                action: "x.search_posts",
+                params: { query: "goat" },
+              },
+              approval: { id: "approval_1", approved },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const expected = {
+      toolCallId: "paid_lookup_1",
+      chatSessionId: "session_1",
+      userWorkosId: "user_1",
+      workspaceId: "goat_ws_user_1",
+    };
+    if (approved) {
+      expect(capabilityMocks.approveByToolCall).toHaveBeenCalledWith(expected);
+      expect(capabilityMocks.cancelByToolCall).not.toHaveBeenCalled();
+    } else {
+      expect(capabilityMocks.cancelByToolCall).toHaveBeenCalledWith(expected);
+      expect(capabilityMocks.approveByToolCall).not.toHaveBeenCalled();
+    }
   });
 
   it("forwards a valid browser-reserved id to new chat persistence", async () => {

@@ -359,7 +359,14 @@ describe("createGoatChatApprovalContinuationTurn", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.respondedApprovalIds).toEqual(["appr_1"]);
+    expect(result.respondedApprovals).toEqual([
+      {
+        approvalId: "appr_1",
+        toolCallId: "call_1",
+        action: "google_calendar.create_event",
+        approved: true,
+      },
+    ]);
     expect(result.lastUserMessage?.content).toBe("add my sync");
 
     const persisted = messages.find((message) => message.id === "assistant_1");
@@ -459,6 +466,7 @@ describe("dismissStaleGoatChatApprovals", () => {
 
     const result = await dismissStaleGoatChatApprovals(followUp, store);
     expect(result.changed).toBe(true);
+    expect(result.toolCallIds).toEqual(["call_1"]);
 
     const persisted = messages.find((message) => message.id === "assistant_1");
     const parts = persisted?.debugTrace?.uiMessageParts as Array<Record<string, unknown>>;
@@ -479,6 +487,7 @@ describe("dismissStaleGoatChatApprovals", () => {
     ]);
     const result = await dismissStaleGoatChatApprovals(turn, store);
     expect(result.changed).toBe(false);
+    expect(result.toolCallIds).toEqual([]);
   });
 });
 

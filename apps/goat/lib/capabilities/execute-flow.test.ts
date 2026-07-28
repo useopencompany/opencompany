@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   consumeApproval: vi.fn(),
   createRun: vi.fn(),
+  getBudget: vi.fn(),
+  sumSpend: vi.fn(),
   isWorkspaceCapabilityEnabled: vi.fn(),
   markStarted: vi.fn(),
   markSettlementFailure: vi.fn(),
@@ -14,13 +16,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@opencompany/db/goat-capabilities", () => ({
-  consumeGoatCapabilityApproval: mocks.consumeApproval,
+  consumeGoatCapabilityApprovalByToolCall: mocks.consumeApproval,
   createGoatCapabilityRun: mocks.createRun,
+  getGoatCapabilitySessionBudgetUsdMicros: mocks.getBudget,
   isGoatWorkspaceCapabilityEnabled: mocks.isWorkspaceCapabilityEnabled,
   markGoatCapabilityRunStarted: mocks.markStarted,
   markGoatCapabilityRunSettlementFailure: mocks.markSettlementFailure,
   markGoatCapabilityRunStopping: mocks.markStopping,
   settleGoatCapabilityRun: mocks.settleRun,
+  sumGoatCapabilitySessionSpendUsdMicros: mocks.sumSpend,
 }));
 vi.mock("@opencompany/db/goat-credits", () => ({
   getGoatCreditBalanceUsdMicros: mocks.getBalance,
@@ -30,12 +34,10 @@ vi.mock("@/lib/billing/auto-refill", () => ({
   maybeTriggerGoatAutoRefill: mocks.autoRefill,
 }));
 
-import {
-  GoatActionApprovalRequiredError,
-  type GoatActionExecuteContext,
-} from "@/lib/actions/types";
+import type { GoatActionExecuteContext } from "@/lib/actions/types";
 import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
 import {
+  evaluateManagedCapabilityApproval,
   executeManagedCapability,
   GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
 } from "@/lib/capabilities/execute";
@@ -51,6 +53,8 @@ describe("executeManagedCapability", () => {
     vi.unstubAllEnvs();
     vi.stubEnv("GOAT_MANAGED_CAPABILITIES_KILL_SWITCH", "");
     mocks.getBalance.mockResolvedValue(10_000_000);
+    mocks.getBudget.mockResolvedValue(5_000_000);
+    mocks.sumSpend.mockResolvedValue(0);
     mocks.isWorkspaceCapabilityEnabled.mockResolvedValue(true);
     mocks.createRun.mockImplementation(async (input) => auditRow(input));
     mocks.consumeApproval.mockResolvedValue(null);
@@ -423,21 +427,27 @@ describe("executeManagedCapability", () => {
     expect(client.inspect).not.toHaveBeenCalled();
   });
 
-  it("creates a 15-minute exact approval without starting an expensive action", async () => {
+  it("creates a 15-minute exact approval when a quote would exceed the session budget", async () => {
+    mocks.getBudget.mockResolvedValue(100_000);
     const client = fakeClient({
       inspection: inspectPrice(0.3),
       run: providerRun(),
     });
     const now = new Date("2026-07-23T10:00:00.000Z");
+    const approvalContext = context();
     await expect(
-      executeManagedCapability({
+      evaluateManagedCapabilityApproval({
         spec: spec("lead.find_person_email", "lead", "pdl", "/v5/person/enrich"),
         params: { query: "ada@example.com" },
-        context: context(),
+        toolCallId: "tool_1",
+        workspaceId: "workspace_1",
+        userWorkosId: "user_1",
+        chatSessionId: "chat_1",
+        turnState: approvalContext.capabilityTurnState!,
         client,
         now: () => now,
       }),
-    ).rejects.toBeInstanceOf(GoatActionApprovalRequiredError);
+    ).resolves.toBe(true);
     expect(mocks.createRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "awaiting_approval",
@@ -450,14 +460,109 @@ describe("executeManagedCapability", () => {
     expect(client.run).not.toHaveBeenCalled();
   });
 
-  it("consumes only an approval that still covers the exact action and parameter hash", async () => {
+  it("falls through without a card when quote inspection fails", async () => {
+    const client = fakeClient({
+      inspection: inspectPrice(0.0015),
+      run: providerRun(),
+    });
+    client.inspect.mockRejectedValueOnce(new Error("inspect unavailable"));
+    const approvalContext = context();
+
+    await expect(
+      evaluateManagedCapabilityApproval({
+        spec: spec(),
+        params: { query: "openai" },
+        toolCallId: "tool_1",
+        workspaceId: "workspace_1",
+        userWorkosId: "user_1",
+        chatSessionId: "chat_1",
+        turnState: approvalContext.capabilityTurnState!,
+        client,
+      }),
+    ).resolves.toBe(false);
+    expect(mocks.createRun).not.toHaveBeenCalled();
+  });
+
+  it("accounts for multiple admitted calls before their run rows exist", async () => {
+    mocks.getBudget.mockResolvedValue(3_000);
+    const approvalContext = context();
+    const client = fakeClient({
+      inspection: inspectPrice(0.0015),
+      run: providerRun(),
+    });
+
+    await expect(
+      evaluateManagedCapabilityApproval({
+        spec: spec(),
+        params: { query: "first" },
+        toolCallId: "tool_1",
+        workspaceId: "workspace_1",
+        userWorkosId: "user_1",
+        chatSessionId: "chat_1",
+        turnState: approvalContext.capabilityTurnState!,
+        client,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      evaluateManagedCapabilityApproval({
+        spec: spec(),
+        params: { query: "second" },
+        toolCallId: "tool_2",
+        workspaceId: "workspace_1",
+        userWorkosId: "user_1",
+        chatSessionId: "chat_1",
+        turnState: approvalContext.capabilityTurnState!,
+        client,
+      }),
+    ).resolves.toBe(true);
+
+    expect(approvalContext.capabilityTurnState).toMatchObject({
+      quotedTotalUsdMicros: 1_800,
+      admittedToolCallIds: ["tool_1"],
+    });
+    expect(mocks.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolCallId: "tool_2",
+        status: "awaiting_approval",
+      }),
+    );
+  });
+
+  it("reuses the gate quote during execution without inspecting twice", async () => {
+    const client = fakeClient({
+      inspection: inspectPrice(0.0015),
+      run: providerRun({ cost: { value: 0.0015, currency: "USD" } }),
+    });
+    const approvalContext = context();
+    await expect(
+      evaluateManagedCapabilityApproval({
+        spec: spec(),
+        params: { query: "openai" },
+        toolCallId: "tool_1",
+        workspaceId: "workspace_1",
+        userWorkosId: "user_1",
+        chatSessionId: "chat_1",
+        turnState: approvalContext.capabilityTurnState!,
+        client,
+      }),
+    ).resolves.toBe(false);
+    await executeManagedCapability({
+      spec: spec(),
+      params: { query: "openai" },
+      context: approvalContext,
+      client,
+    });
+    expect(client.inspect).toHaveBeenCalledTimes(1);
+    expect(client.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("consumes only an approval that still covers the exact tool call, action, and parameter hash", async () => {
     mocks.consumeApproval.mockResolvedValue(auditRow({ status: "executing" }));
     const client = fakeClient({
       inspection: inspectPrice(0.3),
       run: providerRun({ cost: { value: 0.3, currency: "USD" } }),
     });
     const approvalContext = context();
-    approvalContext.capabilityApprovalRunId = "gcr_approved";
     await executeManagedCapability({
       spec: spec("lead.find_person_email", "lead", "pdl", "/v5/person/enrich"),
       params: { query: "ada@example.com" },
@@ -466,7 +571,7 @@ describe("executeManagedCapability", () => {
     });
     expect(mocks.consumeApproval).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: "gcr_approved",
+        toolCallId: "tool_1",
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: "chat_1",
@@ -477,16 +582,16 @@ describe("executeManagedCapability", () => {
     );
 
     mocks.consumeApproval.mockResolvedValueOnce(null);
+    mocks.getBudget.mockResolvedValueOnce(100_000);
+    const changedApprovalContext = context();
     await expect(
       executeManagedCapability({
         spec: spec("lead.find_person_email", "lead", "pdl", "/v5/person/enrich"),
         params: { query: "changed@example.com" },
-        context: approvalContext,
+        context: changedApprovalContext,
         client,
       }),
-    ).rejects.toMatchObject({
-      code: "provider_error",
-    });
+    ).rejects.toMatchObject({ code: "approval_required" });
   });
 
   it("rejects insufficient workspace credits before creating or running", async () => {
@@ -532,7 +637,7 @@ describe("executeManagedCapability", () => {
         executeManagedCapability({
           spec: { ...spec(), executionMode: "async" },
           params: { query: `query ${index + 1}` },
-          context: sharedContext,
+          context: { ...sharedContext, toolCallId: `tool_${index + 1}` },
           client,
           pollIntervalMs: 1,
         }),
@@ -553,10 +658,57 @@ describe("executeManagedCapability", () => {
     expect(clients.reduce((calls, client) => calls + client.getRun.mock.calls.length, 0)).toBe(
       GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
     );
-    expect(sharedContext.capabilityTurnState).toEqual({
+    expect(sharedContext.capabilityTurnState).toMatchObject({
       quotedTotalUsdMicros: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN * 12_000,
       asyncRunsStarted: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+      admittedToolCallIds: Array.from(
+        { length: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN },
+        (_, index) => `tool_${index + 1}`,
+      ),
     });
+    expect(sharedContext.capabilityTurnState?.quotesByToolCallId.size).toBe(
+      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+    );
+  });
+
+  it("releases a pre-admitted quote when the asynchronous run limit is reached", async () => {
+    const sharedContext = context();
+    sharedContext.capabilityTurnState!.asyncRunsStarted = GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN;
+    const client = fakeClient({
+      inspection: inspectPrice(0.01),
+      run: providerRun(),
+    });
+    const action = { ...spec(), executionMode: "async" as const };
+
+    await expect(
+      evaluateManagedCapabilityApproval({
+        spec: action,
+        params: { query: "one more" },
+        toolCallId: "tool_1",
+        workspaceId: "workspace_1",
+        userWorkosId: "user_1",
+        chatSessionId: "chat_1",
+        turnState: sharedContext.capabilityTurnState!,
+        client,
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      executeManagedCapability({
+        spec: action,
+        params: { query: "one more" },
+        context: sharedContext,
+        client,
+      }),
+    ).rejects.toMatchObject({ code: "call_budget" });
+
+    expect(client.inspect).toHaveBeenCalledTimes(1);
+    expect(client.run).not.toHaveBeenCalled();
+    expect(sharedContext.capabilityTurnState).toMatchObject({
+      quotedTotalUsdMicros: 0,
+      admittedToolCallIds: [],
+      asyncRunsStarted: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+    });
+    expect(sharedContext.capabilityTurnState?.quotesByToolCallId.size).toBe(0);
   });
 
   it("allows sequential catalog-sync actions when Monid returns async job envelopes", async () => {
@@ -587,6 +739,7 @@ describe("executeManagedCapability", () => {
       client: firstClient,
       pollIntervalMs: 1,
     });
+    sharedContext.toolCallId = "tool_2";
     await executeManagedCapability({
       spec: spec(),
       params: { query: "second" },
@@ -601,9 +754,10 @@ describe("executeManagedCapability", () => {
     expect(secondClient.getRun).toHaveBeenCalledTimes(1);
     expect(firstClient.stopRun).not.toHaveBeenCalled();
     expect(secondClient.stopRun).not.toHaveBeenCalled();
-    expect(sharedContext.capabilityTurnState).toEqual({
+    expect(sharedContext.capabilityTurnState).toMatchObject({
       quotedTotalUsdMicros: 3_600,
       asyncRunsStarted: 0,
+      admittedToolCallIds: ["tool_1", "tool_2"],
     });
   });
 });
@@ -614,7 +768,12 @@ function context(): GoatActionExecuteContext {
     workspaceId: "workspace_1",
     chatSessionId: "chat_1",
     toolCallId: "tool_1",
-    capabilityTurnState: { quotedTotalUsdMicros: 0, asyncRunsStarted: 0 },
+    capabilityTurnState: {
+      quotedTotalUsdMicros: 0,
+      admittedToolCallIds: [],
+      quotesByToolCallId: new Map(),
+      asyncRunsStarted: 0,
+    },
     signal: new AbortController().signal,
     currentDate: new Date("2026-07-23T10:00:00.000Z"),
     userTimezone: "UTC",

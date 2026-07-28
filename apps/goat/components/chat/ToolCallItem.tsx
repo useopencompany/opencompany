@@ -42,25 +42,18 @@ export type CodexToolAction =
       answers: Record<string, { answers: string[] }>;
     };
 
-export type CapabilityApprovalAction = {
-  decision: "approve" | "cancel";
-  runId: string;
-  action: string;
-  params: Record<string, unknown>;
-};
-
 export type ActionApprovalDecision = "accept" | "accept_always" | "decline";
 
 export type ActionApprovalRequest = {
   approvalId: string;
   action: string;
   decision: ActionApprovalDecision;
+  reason?: string;
 };
 
 export function ToolCallItem({
   tool,
   onCodexAction,
-  onCapabilityApproval,
   allowCodexPlanActions = false,
   onActionApproval,
   allowActionApproval = false,
@@ -68,7 +61,6 @@ export function ToolCallItem({
 }: {
   tool: ToolCallView;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
-  onCapabilityApproval?: ((action: CapabilityApprovalAction) => Promise<string>) | undefined;
   allowCodexPlanActions?: boolean;
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
   allowActionApproval?: boolean;
@@ -91,7 +83,7 @@ export function ToolCallItem({
     return <CodexQuestionRow tool={tool} onAction={onCodexAction} />;
   }
   if (tool.name === USE_ACTION_TOOL_NAME && capabilityApprovalFromTool(tool)) {
-    return <CapabilityApprovalRow tool={tool} onAction={onCapabilityApproval} />;
+    return <LegacyCapabilityApprovalRow tool={tool} />;
   }
   if (
     tool.name === USE_ACTION_TOOL_NAME &&
@@ -101,23 +93,18 @@ export function ToolCallItem({
     // A pending approval mid-thread (the user kept chatting past it) stays a
     // plain row: only the latest assistant message is actionable.
     if (allowActionApproval && onActionApproval) {
+      if (managedCapabilityActionFromTool(tool)) {
+        return <CapabilityApprovalCard tool={tool} onDecision={onActionApproval} />;
+      }
       return <ActionApprovalCard tool={tool} onDecision={onActionApproval} />;
     }
   }
   return <ToolCallRow tool={tool} />;
 }
 
-function CapabilityApprovalRow({
-  tool,
-  onAction,
-}: {
-  tool: ToolCallView;
-  onAction?: ((action: CapabilityApprovalAction) => Promise<string>) | undefined;
-}) {
+function LegacyCapabilityApprovalRow({ tool }: { tool: ToolCallView }) {
   const approval = capabilityApprovalFromTool(tool)!;
   const [status, setStatus] = useState(approval.status);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -137,25 +124,6 @@ function CapabilityApprovalRow({
     return () => controller.abort();
   }, [approval.runId]);
 
-  const run = (decision: "approve" | "cancel") => {
-    if (!onAction || submitting) return;
-    setError(null);
-    setSubmitting(true);
-    void onAction({
-      decision,
-      runId: approval.runId,
-      action: approval.action,
-      params: approval.params,
-    })
-      .then(setStatus)
-      .catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "Could not update this approval.");
-      })
-      .finally(() => setSubmitting(false));
-  };
-
-  const canDecide = status === "awaiting_approval";
-  const canContinue = status === "approved";
   return (
     <div
       data-testid="chat-capability-approval"
@@ -169,39 +137,149 @@ function CapabilityApprovalRow({
         Maximum charge {formatUsdMicros(approval.maxCostUsdMicros)}, including the platform fee. The
         final charge may be lower.
       </p>
-      {canDecide ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={!onAction || submitting}
-            onClick={() => run("approve")}
-            className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {submitting ? "Approving..." : "Approve once"}
-          </button>
-          <button
-            type="button"
-            disabled={!onAction || submitting}
-            onClick={() => run("cancel")}
-            className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
-          >
-            Cancel
-          </button>
-        </div>
-      ) : canContinue ? (
+      <p className="mt-2 text-[11px] font-medium text-ink-subtle">
+        {capabilityApprovalStatusLabel(status)}
+      </p>
+    </div>
+  );
+}
+
+function CapabilityApprovalCard({
+  tool,
+  onDecision,
+}: {
+  tool: ToolCallView;
+  onDecision: (request: ActionApprovalRequest) => Promise<void>;
+}) {
+  const approvalId = tool.approvalId;
+  const action = managedCapabilityActionFromTool(tool);
+  const [quote, setQuote] = useState<{
+    source: string;
+    action: string;
+    status: string;
+    maxCostUsdMicros: number;
+    sessionBudgetUsdMicros: number;
+  } | null>(null);
+  const [submitting, setSubmitting] = useState<"accept" | "decline" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const summary = actionApprovalSummary(tool.input);
+
+  useEffect(() => {
+    if (!tool.toolCallId) return;
+    const controller = new AbortController();
+    void fetch(`/api/capabilities/approvals/by-tool-call/${encodeURIComponent(tool.toolCallId)}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not load the paid lookup quote.");
+        const value = (await response.json()) as Record<string, unknown>;
+        if (
+          typeof value.source !== "string" ||
+          typeof value.action !== "string" ||
+          typeof value.status !== "string" ||
+          typeof value.maxCostUsdMicros !== "number" ||
+          typeof value.sessionBudgetUsdMicros !== "number"
+        ) {
+          throw new Error("The paid lookup quote is invalid.");
+        }
+        setQuote({
+          source: value.source,
+          action: value.action,
+          status: value.status,
+          maxCostUsdMicros: value.maxCostUsdMicros,
+          sessionBudgetUsdMicros: value.sessionBudgetUsdMicros,
+        });
+      })
+      .catch((cause) => {
+        if (!controller.signal.aborted) {
+          setError(
+            cause instanceof Error ? cause.message : "Could not load the paid lookup quote.",
+          );
+        }
+      });
+    return () => controller.abort();
+  }, [tool.toolCallId]);
+
+  if (!approvalId || !action) return <ToolCallRow tool={tool} />;
+  const approvalAvailable = quote?.status === "awaiting_approval";
+
+  const decide = (decision: "accept" | "decline") => {
+    if (submitting || (decision === "accept" && !approvalAvailable)) return;
+    setError(null);
+    setSubmitting(decision);
+    void onDecision({
+      approvalId,
+      action,
+      decision,
+      ...(decision === "decline"
+        ? {
+            reason:
+              "The user declined this paid lookup. Do not retry it; continue without that data.",
+          }
+        : {}),
+    }).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : "Could not send your decision.");
+      setSubmitting(null);
+    });
+  };
+
+  return (
+    <div
+      data-testid="chat-capability-approval"
+      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <div className="text-[12px] font-semibold text-ink">Run paid lookup?</div>
+      <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+        {quote
+          ? `${capabilitySourceLabel(quote.source)} · ${capabilityActionLabel(quote.action)}`
+          : capabilityActionLabel(action)}
+      </p>
+      {summary.lines.length > 0 ? (
+        <dl className="mt-2 space-y-1">
+          {summary.lines.map((line) => (
+            <div key={line.label} className="flex gap-2 text-[12px] leading-5">
+              <dt className="w-20 shrink-0 text-ink-subtle">{line.label}</dt>
+              <dd className="min-w-0 break-words text-ink-muted">{line.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {quote ? (
+        <>
+          <p className="mt-2 text-[11px] leading-4 text-ink-subtle">
+            Up to {formatUsdMicros(quote.maxCostUsdMicros)}, including the platform fee — the final
+            charge may be lower.
+          </p>
+          <p className="mt-1 text-[11px] leading-4 text-ink-subtle">
+            This would exceed this session&apos;s {formatUsdMicros(quote.sessionBudgetUsdMicros)}{" "}
+            budget.
+          </p>
+        </>
+      ) : null}
+      <div className="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
-          disabled={!onAction || submitting}
-          onClick={() => run("approve")}
-          className="mt-3 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
+          disabled={!approvalAvailable || submitting !== null}
+          onClick={() => decide("accept")}
+          className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
         >
-          {submitting ? "Continuing..." : "Continue approved action"}
+          {submitting === "accept"
+            ? "Running..."
+            : approvalAvailable && quote
+              ? `Approve for ${formatUsdMicros(quote.maxCostUsdMicros)}`
+              : quote
+                ? capabilityApprovalStatusLabel(quote.status)
+                : "Loading price..."}
         </button>
-      ) : (
-        <p className="mt-2 text-[11px] font-medium text-ink-subtle">
-          {capabilityApprovalStatusLabel(status)}
-        </p>
-      )}
+        <button
+          type="button"
+          disabled={submitting !== null}
+          onClick={() => decide("decline")}
+          className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
       {error ? (
         <p className="mt-2 text-[11px] text-danger" role="alert">
           {error}
@@ -318,6 +396,22 @@ function capabilityApprovalFromTool(tool: ToolCallView) {
   };
 }
 
+const MANAGED_CAPABILITY_SOURCE_IDS = new Set([
+  "x",
+  "linkedin",
+  "youtube",
+  "instagram",
+  "tiktok",
+  "lead",
+  "seo",
+]);
+
+function managedCapabilityActionFromTool(tool: ToolCallView) {
+  if (!isRecord(tool.input) || typeof tool.input.action !== "string") return null;
+  const source = tool.input.action.split(".", 1)[0] ?? "";
+  return MANAGED_CAPABILITY_SOURCE_IDS.has(source) ? tool.input.action : null;
+}
+
 function capabilitySourceLabel(source: string) {
   const labels: Record<string, string> = {
     x: "X",
@@ -341,6 +435,7 @@ function capabilityActionLabel(action: string) {
 }
 
 function capabilityApprovalStatusLabel(status: string) {
+  if (status === "awaiting_approval" || status === "approved") return "No longer available";
   if (status === "canceled") return "Canceled";
   if (status === "expired") return "Expired";
   if (status === "failed") return "Failed";

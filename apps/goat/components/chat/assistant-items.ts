@@ -65,6 +65,7 @@ export type ChatTaskCardView = {
 export type ChatTaskLookup = ReadonlyMap<string, ChatTaskCardView>;
 
 export type ToolCallView = {
+  toolCallId: string;
   name: string;
   label: string;
   status: "running" | "completed" | "failed" | "waiting" | "stopped";
@@ -257,6 +258,7 @@ export function toolCallViewFromPart(
       ? readString(output.status)
       : null;
   return {
+    toolCallId: typeof part.toolCallId === "string" ? part.toolCallId : "",
     name,
     label: name === USE_ACTION_TOOL_NAME ? actionToolLabel(part.input) : toolLabel(name),
     status,

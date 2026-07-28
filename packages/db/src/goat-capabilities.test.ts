@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  approveGoatCapabilityRunByToolCall,
+  cancelGoatCapabilityRunByToolCall,
+  consumeGoatCapabilityApprovalByToolCall,
+  GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS,
   GOAT_MANAGED_CAPABILITY_SOURCES,
+  getGoatCapabilityApprovalByToolCall,
+  getGoatCapabilitySessionBudgetUsdMicros,
   isGoatWorkspaceCapabilityEnabled,
   listGoatWorkspaceCapabilities,
+  setGoatCapabilitySessionBudget,
   setGoatWorkspaceCapability,
+  sumGoatCapabilitySessionSpendUsdMicros,
 } from "./goat-capabilities";
 
 describe("Goat workspace capabilities", () => {
@@ -65,6 +73,147 @@ describe("Goat workspace capabilities", () => {
   });
 });
 
+describe("Goat capability session budgets", () => {
+  it("uses the default budget only when the workspace override is null or missing", async () => {
+    await expect(
+      getGoatCapabilitySessionBudgetUsdMicros("workspace_1", fluentDb({ selects: [] })),
+    ).resolves.toBe(GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS);
+    await expect(
+      getGoatCapabilitySessionBudgetUsdMicros(
+        "workspace_1",
+        fluentDb({ selects: [[{ budgetUsdMicros: null }]] }),
+      ),
+    ).resolves.toBe(GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS);
+    await expect(
+      getGoatCapabilitySessionBudgetUsdMicros(
+        "workspace_1",
+        fluentDb({ selects: [[{ budgetUsdMicros: 2_500_000 }]] }),
+      ),
+    ).resolves.toBe(2_500_000);
+  });
+
+  it("stores a positive micros override and rejects invalid values", async () => {
+    const db = fluentDb({ updates: [[{ budgetUsdMicros: 2_500_000 }]] });
+    await expect(
+      setGoatCapabilitySessionBudget({
+        workspaceId: "workspace_1",
+        budgetUsdMicros: 2_500_000,
+        db,
+      }),
+    ).resolves.toBe(2_500_000);
+    await expect(
+      setGoatCapabilitySessionBudget({
+        workspaceId: "workspace_1",
+        budgetUsdMicros: 0,
+        db,
+      }),
+    ).rejects.toThrow(/positive whole number/i);
+  });
+
+  it("returns the database session-spend aggregate and accepts exclusions", async () => {
+    const db = fluentDb({ selects: [[{ totalUsdMicros: 425_000 }]] });
+    await expect(
+      sumGoatCapabilitySessionSpendUsdMicros({
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_1",
+        excludeToolCallIds: ["tool_1", "tool_1"],
+        db,
+      }),
+    ).resolves.toBe(425_000);
+  });
+});
+
+describe("Goat capability approvals by tool call", () => {
+  const approval = {
+    id: "gcr_1",
+    toolCallId: "tool_1",
+    status: "awaiting_approval",
+    action: "lead.enrich_person",
+    inputHash: "a".repeat(64),
+    quoteTotalCostUsdMicros: 360_000,
+    createdAt: new Date("2026-07-23T10:00:00.000Z"),
+  };
+
+  it("loads the newest owned row after lazily expiring stale approvals", async () => {
+    const db = fluentDb({
+      updates: [[]],
+      selects: [[approval]],
+    });
+    await expect(
+      getGoatCapabilityApprovalByToolCall({
+        toolCallId: "tool_1",
+        chatSessionId: "chat_1",
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        now: new Date("2026-07-23T10:05:00.000Z"),
+        db,
+      }),
+    ).resolves.toEqual(approval);
+  });
+
+  it("approves or cancels the newest pending row", async () => {
+    const approved = { ...approval, status: "approved" };
+    await expect(
+      approveGoatCapabilityRunByToolCall({
+        toolCallId: "tool_1",
+        chatSessionId: "chat_1",
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        db: fluentDb({
+          updates: [[], [approved]],
+          selects: [[approval]],
+        }),
+      }),
+    ).resolves.toEqual(approved);
+
+    const canceled = { ...approval, status: "canceled" };
+    await expect(
+      cancelGoatCapabilityRunByToolCall({
+        toolCallId: "tool_1",
+        chatSessionId: "chat_1",
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        db: fluentDb({
+          updates: [[], [canceled]],
+          selects: [[approval]],
+        }),
+      }),
+    ).resolves.toEqual(canceled);
+  });
+
+  it("consumes an approved row once and returns null when the guarded update loses", async () => {
+    const approved = { ...approval, status: "approved" };
+    const executing = { ...approval, status: "executing" };
+    const input = {
+      toolCallId: "tool_1",
+      chatSessionId: "chat_1",
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+      action: "lead.enrich_person",
+      inputHash: "a".repeat(64),
+      quoteTotalCostUsdMicros: 360_000,
+    };
+    await expect(
+      consumeGoatCapabilityApprovalByToolCall({
+        ...input,
+        db: fluentDb({
+          updates: [[], [executing]],
+          selects: [[approved]],
+        }),
+      }),
+    ).resolves.toEqual(executing);
+    await expect(
+      consumeGoatCapabilityApprovalByToolCall({
+        ...input,
+        db: fluentDb({
+          updates: [[], []],
+          selects: [[approved]],
+        }),
+      }),
+    ).resolves.toBeNull();
+  });
+});
+
 function selectDb(rows: Array<{ source: string; enabled: boolean }>) {
   return {
     select: vi.fn(() => ({
@@ -84,5 +233,37 @@ function selectOneDb(rows: Array<{ enabled: boolean }>) {
         })),
       })),
     })),
+  };
+}
+
+function fluentDb(input: { selects?: unknown[][]; updates?: unknown[][] }) {
+  const selects = [...(input.selects ?? [])];
+  const updates = [...(input.updates ?? [])];
+  return {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => rowsChain(selects.shift() ?? [])),
+      })),
+    })),
+    update: vi.fn(() => {
+      const rows = updates.shift() ?? [];
+      return {
+        set: vi.fn(() => ({
+          where: vi.fn(() => rowsChain(rows)),
+        })),
+      };
+    }),
+  };
+}
+
+function rowsChain(rows: unknown[]) {
+  const promise = Promise.resolve(rows);
+  return {
+    then: promise.then.bind(promise),
+    limit: vi.fn(async () => rows),
+    orderBy: vi.fn(() => ({
+      limit: vi.fn(async () => rows),
+    })),
+    returning: vi.fn(async () => rows),
   };
 }

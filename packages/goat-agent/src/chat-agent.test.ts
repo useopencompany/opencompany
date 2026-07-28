@@ -56,4 +56,15 @@ describe("prepareOpenCompanyChatStep maxSteps", () => {
       toolChoice: "none",
     });
   });
+
+  it("does not force a paid action on a resumed approval step", () => {
+    expect(
+      prepareOpenCompanyChatStep({
+        stepNumber: 0,
+        forceApprovedAction: true,
+      } as Parameters<typeof prepareOpenCompanyChatStep>[0] & {
+        forceApprovedAction: boolean;
+      }),
+    ).toEqual({});
+  });
 });

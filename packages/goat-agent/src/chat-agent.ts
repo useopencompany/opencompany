@@ -200,6 +200,11 @@ export type ActionDispatcher = {
     params: Record<string, unknown>;
     toolCallId: string;
   }) => Promise<UseActionToolOutput>;
+  needsApproval?: (input: {
+    action: string;
+    params: Record<string, unknown>;
+    toolCallId: string;
+  }) => Promise<boolean>;
 };
 
 export type SkillDispatcher = {
@@ -207,13 +212,6 @@ export type SkillDispatcher = {
   prelistedSkillIds?: readonly string[];
   execute: (input: { skill: string }) => Promise<UseSkillToolOutput>;
 };
-
-// An action in "ask" mode pauses the stream on a tool-approval request the
-// user answers in the chat UI; the approved call executes on the follow-up
-// approval-continuation request with the recorded input.
-function actionNeedsApproval(catalog: GoatChatActionCatalog, actionId: string) {
-  return catalog.actions.find((action) => action.id === actionId)?.permissionMode === "ask";
-}
 
 // Main chat (and the MCP connector) get a read-only brain surface: recall and
 // inspect only. Every write path — new content and edits to existing records —
@@ -1017,8 +1015,32 @@ export function createOpenCompanyChatToolContext(input: {
     });
     tools[USE_ACTION_TOOL_NAME] = tool<UseActionToolInput, UseActionToolOutput>({
       description: USE_ACTION_TOOL_DESCRIPTION,
-      needsApproval: async (args) =>
-        actionNeedsApproval(actions.catalog, typeof args.action === "string" ? args.action : ""),
+      needsApproval: async (args, executionContext) => {
+        const action = typeof args.action === "string" ? args.action : "";
+        const resolvedAction = actions.catalog.actions.find((entry) => entry.id === action);
+        if (!resolvedAction) return false;
+        if (resolvedAction.permissionMode === "ask") return true;
+        if (!listedActionSourceIds.has(resolvedAction.source) || !actions.needsApproval) {
+          return false;
+        }
+        const params =
+          args.params && typeof args.params === "object" && !Array.isArray(args.params)
+            ? args.params
+            : {};
+        const toolCallId =
+          executionContext &&
+          typeof executionContext === "object" &&
+          "toolCallId" in executionContext &&
+          typeof executionContext.toolCallId === "string"
+            ? executionContext.toolCallId
+            : "";
+        if (!toolCallId) return false;
+        try {
+          return await actions.needsApproval({ action, params, toolCallId });
+        } catch {
+          return false;
+        }
+      },
       inputSchema: jsonSchema<UseActionToolInput>({
         type: "object",
         additionalProperties: false,
@@ -1239,7 +1261,6 @@ function actionAbortReason(abortSignal: AbortSignal) {
 
 export function prepareOpenCompanyChatStep(input: {
   stepNumber: number;
-  forceApprovedAction?: boolean;
   // Background task runs use a larger budget than an interactive chat turn; the
   // final step is always reserved with toolChoice "none" so the model produces
   // a text answer instead of a dangling tool call.
@@ -1260,14 +1281,6 @@ export function prepareOpenCompanyChatStep(input: {
     return {
       activeTools: [],
       toolChoice: "none" as const,
-    };
-  }
-  if (input.forceApprovedAction && input.stepNumber === 0) {
-    return {
-      activeTools: [USE_ACTION_TOOL_NAME],
-      // Only use_action is active, so "required" remains deterministic without
-      // the named-tool choice that Kimi K3 rejects while thinking is enabled.
-      toolChoice: "required" as const,
     };
   }
   return {};

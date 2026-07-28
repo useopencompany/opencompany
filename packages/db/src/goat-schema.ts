@@ -572,6 +572,9 @@ export const goatWorkspaces = goat.table(
     createdByWorkosId: text("created_by_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "restrict" }),
+    capabilitySessionBudgetUsdMicros: bigint("capability_session_budget_usd_micros", {
+      mode: "number",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2998,6 +3001,7 @@ export const goatCapabilityRuns = goat.table(
       table.workspaceId,
       table.createdAt,
     ),
+    chatSessionIdx: index("goat_capability_runs_chat_session_idx").on(table.chatSessionId),
     reconciliationIdx: index("goat_capability_runs_reconciliation_idx")
       .on(table.updatedAt, table.id)
       .where(

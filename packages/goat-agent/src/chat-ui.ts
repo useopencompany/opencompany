@@ -854,7 +854,15 @@ export function pendingApprovalIdsFromStoredParts(parts: unknown): string[] {
 export function applyApprovalResponsesToStoredParts(
   storedParts: unknown,
   clientParts: unknown,
-): { parts: unknown[]; respondedApprovalIds: string[] } {
+): {
+  parts: unknown[];
+  respondedApprovals: Array<{
+    approvalId: string;
+    toolCallId: string;
+    action: string;
+    approved: boolean;
+  }>;
+} {
   const parts = Array.isArray(storedParts) ? storedParts : [];
   const decisions = new Map<string, { approved: boolean; reason?: string }>();
   if (Array.isArray(clientParts)) {
@@ -873,7 +881,12 @@ export function applyApprovalResponsesToStoredParts(
     }
   }
 
-  const respondedApprovalIds: string[] = [];
+  const respondedApprovals: Array<{
+    approvalId: string;
+    toolCallId: string;
+    action: string;
+    approved: boolean;
+  }> = [];
   const merged = parts.map((part) => {
     const pending = asPendingApprovalPart(part);
     if (!pending) return part;
@@ -889,14 +902,20 @@ export function applyApprovalResponsesToStoredParts(
         },
       };
     }
-    respondedApprovalIds.push(pending.approval.id);
+    const input = isRecord(pending.input) ? pending.input : {};
+    respondedApprovals.push({
+      approvalId: pending.approval.id,
+      toolCallId: pending.toolCallId,
+      action: typeof input.action === "string" ? input.action : "",
+      approved: decision.approved,
+    });
     return {
       ...pending,
       state: "approval-responded",
       approval: { id: pending.approval.id, ...decision },
     };
   });
-  return { parts: merged, respondedApprovalIds };
+  return { parts: merged, respondedApprovals };
 }
 
 // A user message sent while approvals were still pending dismisses them: the
@@ -905,13 +924,16 @@ export function applyApprovalResponsesToStoredParts(
 export function dismissPendingApprovalsInStoredParts(parts: unknown): {
   parts: unknown[];
   changed: boolean;
+  toolCallIds: string[];
 } {
-  if (!Array.isArray(parts)) return { parts: [], changed: false };
+  if (!Array.isArray(parts)) return { parts: [], changed: false, toolCallIds: [] };
   let changed = false;
+  const toolCallIds: string[] = [];
   const dismissed = parts.map((part) => {
     const pending = asPendingApprovalPart(part);
     if (!pending) return part;
     changed = true;
+    toolCallIds.push(pending.toolCallId);
     return {
       ...pending,
       state: "output-denied",
@@ -922,7 +944,7 @@ export function dismissPendingApprovalsInStoredParts(parts: unknown): {
       },
     };
   });
-  return { parts: dismissed, changed };
+  return { parts: dismissed, changed, toolCallIds };
 }
 
 function chatMessageCreatedAtMs(value: Date | string) {
