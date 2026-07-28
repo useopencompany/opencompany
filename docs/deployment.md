@@ -146,6 +146,10 @@ Set the Goat project envs in Infisical `prod` + `/goat` and sync that path into 
 Production environment. Create a separate Goat WorkOS Application in the same WorkOS environment as
 the core app, then register the Goat redirect URI on that Application:
 
+Create a separate `Goat` project in the existing PostHog organization. Store its
+`NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` and `NEXT_PUBLIC_GOAT_POSTHOG_HOST` values in this path; do not
+reuse the legacy web project's token.
+
 Managed social and lead capabilities additionally require `MONID_API_KEY` in that same `/goat`
 path. `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes those managed sources from new chats
 without disabling connected-integration actions.
