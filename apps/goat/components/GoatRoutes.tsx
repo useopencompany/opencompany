@@ -56,7 +56,7 @@ import {
   createGoatSkillAction,
   updateGoatSkillAction,
 } from "@/lib/skill-actions";
-import type { GoatSkillListItem, GoatWorkspaceSkill } from "@/lib/skills";
+import type { GoatSkillCatalogItem, GoatSkillListItem, GoatWorkspaceSkill } from "@/lib/skills";
 import {
   GOAT_WORKFLOW_TASK_STATUS_COPY,
   type GoatWorkflowTaskDisplayStatus,
@@ -935,10 +935,12 @@ export function GoatWorkflowEditorRoute({
   workflow,
   initialStatus,
   canEdit,
+  skillCatalog,
 }: {
   workflow: GoatWorkspaceWorkflow;
   initialStatus: "draft" | "active";
   canEdit: boolean;
+  skillCatalog: GoatSkillCatalogItem[];
 }) {
   const router = useRouter();
   const [name, setName] = useState(workflow.name);
@@ -1079,6 +1081,7 @@ export function GoatWorkflowEditorRoute({
                   readOnly={!canEdit}
                   compact
                   placeholder="Describe step by step what this workflow should do when fired."
+                  skillMentions={skillCatalog}
                 />
               </div>
             </EditorField>
@@ -1094,6 +1097,13 @@ export function GoatWorkflowEditorRoute({
               isArchiving={isArchiving}
               saved={saved}
             />
+          ) : null}
+
+          {canEdit && skillCatalog.length > 0 ? (
+            <p className="text-[12px] leading-5 text-ink-subtle">
+              Type <span className="font-medium text-ink">@</span> in the instructions to mention a
+              skill — it&apos;s resolved and included whenever this workflow runs.
+            </p>
           ) : null}
         </div>
       </div>

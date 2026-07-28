@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { GoatWorkflowEditorRoute } from "@/components/GoatRoutes";
 import { currentGoatUser } from "@/lib/auth";
+import { listGoatSkillCatalog } from "@/lib/skills";
 import { getGoatWorkflow } from "@/lib/workflows";
 
 type WorkflowEditorPageProps = {
@@ -10,7 +11,10 @@ type WorkflowEditorPageProps = {
 export default async function WorkflowEditorPage({ params }: WorkflowEditorPageProps) {
   const { slug } = await params;
   const context = await currentGoatUser();
-  const workflow = await getGoatWorkflow(context.workspace.id, slug);
+  const [workflow, skillCatalog] = await Promise.all([
+    getGoatWorkflow(context.workspace.id, slug),
+    listGoatSkillCatalog(context.workspace.id),
+  ]);
 
   if (!workflow) {
     return (
@@ -39,6 +43,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
       workflow={workflow}
       initialStatus={workflow.status}
       canEdit={context.role === "admin"}
+      skillCatalog={skillCatalog}
     />
   );
 }
