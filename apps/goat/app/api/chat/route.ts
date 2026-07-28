@@ -37,7 +37,11 @@ import {
 import { after } from "next/server";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import { executeGoatAction } from "@/lib/actions/execute";
-import type { GoatCapabilityTurnState, GoatResolvedActionCatalog } from "@/lib/actions/types";
+import type {
+  GoatActionExecuteContext,
+  GoatCapabilityTurnState,
+  GoatResolvedActionCatalog,
+} from "@/lib/actions/types";
 import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
@@ -64,6 +68,7 @@ import {
 } from "@/lib/chat-agent";
 import { saveChatAttachmentsToGoatBrain } from "@/lib/chat-attachment-capture";
 import {
+  downloadGoatChatAttachment,
   extractGoatChatAttachmentTexts,
   hydrateGoatChatAttachmentParts,
   parseGoatChatAttachmentsInput,
@@ -883,6 +888,32 @@ export async function POST(request: Request): Promise<Response> {
                 chatSessionId: turn.session.id,
                 toolCallId: call.toolCallId,
                 capabilityTurnState,
+                loadAttachments: async (attachmentIds) => {
+                  const attachmentsById = new Map(
+                    turn.storedMessages
+                      .filter((message) => message.role === "user")
+                      .flatMap((message) => message.attachments ?? [])
+                      .map((attachment) => [attachment.id, attachment]),
+                  );
+                  return Promise.all(
+                    attachmentIds.map(async (attachmentId) => {
+                      const attachment = attachmentsById.get(attachmentId);
+                      if (!attachment) {
+                        throw new Error(
+                          `Attachment ${attachmentId} was not found in this conversation.`,
+                        );
+                      }
+                      const bytes = await downloadGoatChatAttachment(attachment.blobUrl);
+                      return {
+                        id: attachment.id,
+                        filename: attachment.filename,
+                        mediaType: attachment.mediaType,
+                        sizeBytes: attachment.sizeBytes,
+                        bytes,
+                      };
+                    }),
+                  );
+                },
                 attributes: {
                   ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
                   "goat.chat_session_id": turn.session.id,
@@ -1107,9 +1138,12 @@ export async function POST(request: Request): Promise<Response> {
               kind: source.kind ?? "integration",
             })),
             connectedIntegrations: actionCatalog.providers.filter(
-              // Stripe is live operational finance data, not durable company
-              // knowledge to survey or capture during automatic Brain fill.
-              (source) => source.kind !== "managed" && source.id !== "stripe",
+              // Operational action sources are not durable company knowledge
+              // to survey or capture during automatic Brain fill.
+              (source) =>
+                source.kind !== "managed" &&
+                source.id !== "stripe" &&
+                source.id !== "kleinanzeigen",
             ),
           }
         : {}),
@@ -1460,6 +1494,7 @@ async function executeChatActionCall(input: {
   chatSessionId: string;
   toolCallId: string;
   capabilityTurnState: GoatCapabilityTurnState;
+  loadAttachments: NonNullable<GoatActionExecuteContext["loadAttachments"]>;
   attributes: Record<string, string | number | boolean | null | undefined>;
   chatSpan: ReturnType<typeof startGoatSpan>;
 }): Promise<UseActionToolOutput> {
@@ -1491,6 +1526,7 @@ async function executeChatActionCall(input: {
       signal: input.signal,
       currentDate: input.currentDate,
       userTimezone: input.userTimezone,
+      loadAttachments: input.loadAttachments,
     });
     actionSpan.end({
       "goat.outcome": result.ok ? "success" : "failure",

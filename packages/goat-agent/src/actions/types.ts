@@ -11,7 +11,8 @@ export type GoatActionProviderId =
   | "attio"
   | "github"
   | "stripe"
-  | "latitude";
+  | "latitude"
+  | "kleinanzeigen";
 
 export type GoatActionSourceId = GoatActionProviderId | GoatManagedCapabilitySource;
 
@@ -78,6 +79,15 @@ export type GoatActionExecuteContext = {
   signal: AbortSignal;
   currentDate: Date;
   userTimezone: string;
+  loadAttachments?: (attachmentIds: readonly string[]) => Promise<
+    Array<{
+      id: string;
+      filename: string;
+      mediaType: string;
+      sizeBytes: number;
+      bytes: Uint8Array;
+    }>
+  >;
 };
 
 export type ResolvedGoatAction = GoatActionDescriptor & {

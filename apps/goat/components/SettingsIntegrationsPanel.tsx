@@ -127,6 +127,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     monogram: "L",
     tileClass: "bg-[#171717] text-white",
   },
+  kleinanzeigen: {
+    label: "Kleinanzeigen",
+    description: "Create approved listings from images you paste into Chat.",
+    monogram: "K",
+    tileClass: "bg-[#86B817] text-white",
+  },
   slack: {
     label: "Slack",
     description: "Let Goat search and read your Slack conversations.",
@@ -280,6 +286,7 @@ const PERSONAL_ACCOUNT_PROVIDERS = [
   "google_drive",
   "slack",
   "latitude",
+  "kleinanzeigen",
 ] as const satisfies readonly GoatPersonalAccountProvider[];
 
 function countConnectedAccounts(
@@ -379,6 +386,10 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="slack"
               accounts={integrations.personalAccounts.slack}
+            />
+            <IntegrationProviderGroupCard
+              provider="kleinanzeigen"
+              accounts={integrations.personalAccounts.kleinanzeigen}
             />
             <IntegrationProviderGroupCard
               provider="latitude"
@@ -615,7 +626,13 @@ function IntegrationProviderGroupCard({
       footer={
         <ConnectLink
           href={connectHref}
-          label={provider === "google_calendar" ? "Reconnect or add" : "Add account"}
+          label={
+            provider === "kleinanzeigen"
+              ? "Manage"
+              : provider === "google_calendar"
+                ? "Reconnect or add"
+                : "Add account"
+          }
         />
       }
     />
@@ -716,14 +733,16 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
               {gmailScopeUpgradeLabel}
             </a>
           ) : null}
-          <button
-            type="button"
-            onClick={beginDisconnect}
-            disabled={isPending}
-            className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
-          >
-            Disconnect
-          </button>
+          {account.provider !== "kleinanzeigen" ? (
+            <button
+              type="button"
+              onClick={beginDisconnect}
+              disabled={isPending}
+              className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+            >
+              Disconnect
+            </button>
+          ) : null}
         </div>
       </div>
       {account.connected ? (
@@ -1172,6 +1191,7 @@ function integrationConnectHref(provider: Exclude<IntegrationMetaKey, "codex">) 
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
   if (provider === "latitude")
     return "/api/integrations/latitude/start?returnTo=/settings/integrations";
+  if (provider === "kleinanzeigen") return "/settings/kleinanzeigen";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";
 }
 
