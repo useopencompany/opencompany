@@ -414,6 +414,89 @@ describe("runGoatCodexChatTurn", () => {
     expect(statements).toContainEqual(expect.stringContaining("codex_turn_id"));
   });
 
+  it("rearms recovery only after persisting a replacement engine turn", async () => {
+    dbMocks.selectRows.push([]);
+    appServerMocks.runCodexAppServerTurn.mockImplementationOnce(
+      async (input: {
+        onRecoveryStart?: () => Promise<void>;
+        onEngineTurnId?: (turnId: string) => Promise<void>;
+      }) => {
+        await input.onRecoveryStart?.();
+        await input.onEngineTurnId?.("turn_recovered");
+        return {
+          sessionId: "thread_existing",
+          status: "success",
+          result: "Done.",
+          error: null,
+          usage: null,
+          goal: null,
+        };
+      },
+    );
+
+    await runGoatCodexChatTurn({
+      turn: {
+        ...codexTurn(),
+        attempts: 2,
+        codexTurnId: "turn_missing",
+        recoveryAttempts: 0,
+      },
+      session: codexSession(),
+      env: env(),
+      recovery: { reason: "lease_reclaimed" },
+    });
+
+    const statements = dbMocks.execute.mock.calls.map(([query]) => sqlText(query));
+    const recoveryClaimIndex = statements.findIndex((statement) =>
+      statement.includes("recovery_attempts = turn.recovery_attempts + 1"),
+    );
+    const replacementPersistIndex = statements.findIndex(
+      (statement) =>
+        statement.includes("codex_turn_id") &&
+        statement.includes("turn.codex_turn_id IS DISTINCT FROM") &&
+        statement.includes("THEN 0"),
+    );
+
+    expect(recoveryClaimIndex).toBeGreaterThanOrEqual(0);
+    expect(replacementPersistIndex).toBeGreaterThan(recoveryClaimIndex);
+  });
+
+  it("keeps recovery consumed when no replacement engine turn is persisted", async () => {
+    dbMocks.selectRows.push([]);
+    appServerMocks.runCodexAppServerTurn.mockImplementationOnce(
+      async (input: { onRecoveryStart?: () => Promise<void> }) => {
+        await input.onRecoveryStart?.();
+        throw new Error("turn/start failed");
+      },
+    );
+
+    await runGoatCodexChatTurn({
+      turn: {
+        ...codexTurn(),
+        attempts: 2,
+        codexTurnId: "turn_missing",
+        recoveryAttempts: 0,
+      },
+      session: codexSession(),
+      env: env(),
+      recovery: { reason: "lease_reclaimed" },
+    });
+
+    const statements = dbMocks.execute.mock.calls.map(([query]) => sqlText(query));
+    expect(
+      statements.filter((statement) =>
+        statement.includes("recovery_attempts = turn.recovery_attempts + 1"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      statements.some(
+        (statement) =>
+          statement.includes("codex_turn_id") &&
+          statement.includes("turn.codex_turn_id IS DISTINCT FROM"),
+      ),
+    ).toBe(false);
+  });
+
   it("restarts the daemon before recovery when a dead proxy owned a user question", async () => {
     dbMocks.selectRows.push([]);
     const projector = {

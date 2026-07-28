@@ -330,9 +330,11 @@ the next worker `thread/resume` the same stored Codex turn id. The reconnect rec
 items and a terminal turn that landed while no runner was attached; stable per-item event keys make
 that replay idempotent. Lease claims count infrastructure ownership changes, while
 `recovery_attempts` increments only when the original Codex turn is missing or was interrupted and
-the worker must start one guarded continuation. A dead proxy with a pending user-input request
-forces that guarded continuation because server-initiated requests cannot move between client
-connections.
+the worker must start one guarded continuation. Persisting the replacement Codex turn id rearms
+that guard for the new engine turn, so long-running chats can survive repeated deploys without
+allowing two continuations for the same missing turn. A dead proxy with a pending user-input
+request forces that guarded continuation because server-initiated requests cannot move between
+client connections.
 
 Session skills are reconciled before every Cloud Codex turn under
 `/home/user/opencompany-goat/codex-chat/.agents/skills/`. The managed-skills manifest removes only
