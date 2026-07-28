@@ -270,12 +270,12 @@ describe("MessageBubble assistant errors", () => {
           toolCallId: "tool_action_approval",
           state: "output-available",
           input: {
-            action: "lead.enrich_person",
+            action: "lead.find_person_email",
             params: { email: "ada@example.com" },
           },
           output: {
             ok: false,
-            action: "lead.enrich_person",
+            action: "lead.find_person_email",
             error: {
               code: "approval_required",
               source: "lead",
@@ -283,7 +283,7 @@ describe("MessageBubble assistant errors", () => {
               approval: {
                 runId: "gcr_abc",
                 source: "lead",
-                action: "lead.enrich_person",
+                action: "lead.find_person_email",
                 maxCostUsdMicros: 360_000,
                 expiresAt: "2026-07-23T10:15:00.000Z",
                 status: "awaiting_approval",
@@ -329,12 +329,12 @@ describe("MessageBubble assistant errors", () => {
           toolCallId: "tool_action_approval",
           state: "output-available",
           input: {
-            action: "lead.enrich_person",
+            action: "lead.find_person_email",
             params: { email: "ada@example.com" },
           },
           output: {
             ok: false,
-            action: "lead.enrich_person",
+            action: "lead.find_person_email",
             error: {
               code: "approval_required",
               source: "lead",
@@ -342,7 +342,7 @@ describe("MessageBubble assistant errors", () => {
               approval: {
                 runId: "gcr_abc",
                 source: "lead",
-                action: "lead.enrich_person",
+                action: "lead.find_person_email",
                 maxCostUsdMicros: 360_000,
                 expiresAt: "2026-07-23T10:15:00.000Z",
                 status: "awaiting_approval",
@@ -367,7 +367,7 @@ describe("MessageBubble assistant errors", () => {
       expect(onCapabilityApproval).toHaveBeenCalledWith({
         decision: "approve",
         runId: "gcr_abc",
-        action: "lead.enrich_person",
+        action: "lead.find_person_email",
         params: { email: "ada@example.com" },
       }),
     );

@@ -12,7 +12,9 @@ import StarterKit from "@tiptap/starter-kit";
 import { Bold, Code, Heading1, Heading2, Italic } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
+import { createSkillMentionPlugin } from "@/components/SkillMentionSuggestion";
 import { isExternalHref, sourceChipDisplay, sourceHrefForRef } from "@/lib/brain-source-links";
+import type { GoatSkillCatalogItem } from "@/lib/skills";
 
 const EMPTY_BRAIN_LINKS: Record<string, string> = {};
 
@@ -24,6 +26,7 @@ export function MarkdownGoatBrainEditor({
   onNavigateInternal,
   compact = false,
   placeholder = "Start writing...",
+  skillMentions,
 }: {
   content: string;
   onChange: (content: string) => void;
@@ -36,6 +39,11 @@ export function MarkdownGoatBrainEditor({
   // (e.g. workflow/skill instructions) instead of a full brain document page.
   compact?: boolean;
   placeholder?: string;
+  // When set, typing "@" opens an autocomplete of these skills and inserts
+  // literal `@skill/<id>` text — the same token workflow-tasks.ts already
+  // resolves at fire time. Captured once at mount, like `content`; callers
+  // that need this pass a stable, server-fetched catalog.
+  skillMentions?: GoatSkillCatalogItem[];
 }) {
   const [isEmpty, setIsEmpty] = useState(content.trim().length === 0);
   const [, refreshToolbar] = useState(0);
@@ -72,6 +80,16 @@ export function MarkdownGoatBrainEditor({
           editingEnabled: !readOnly,
           onNavigateInternal: navigateInternal,
         }),
+        ...(skillMentions && !readOnly
+          ? [
+              Extension.create({
+                name: "skillMention",
+                addProseMirrorPlugins() {
+                  return [createSkillMentionPlugin(this.editor, skillMentions)];
+                },
+              }),
+            ]
+          : []),
       ],
       content: initialContent,
       contentType: "markdown",

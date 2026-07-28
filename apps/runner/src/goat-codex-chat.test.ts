@@ -1,7 +1,11 @@
 import { CODEX_COMMAND_TOOL_PART_TYPE, type CodexUiMessagePart } from "@opencompany/agent-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
-import { runGoatCodexChatTurn, summarizeCodexChatRecoveryProgress } from "./goat-codex-chat";
+import {
+  claimCodexChatRecovery,
+  runGoatCodexChatTurn,
+  summarizeCodexChatRecoveryProgress,
+} from "./goat-codex-chat";
 import {
   GoatCodexChatHandoffError,
   GoatCodexChatRetryableInfrastructureError,
@@ -671,6 +675,56 @@ describe("runGoatCodexChatTurn", () => {
   });
 });
 
+describe("claimCodexChatRecovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMocks.execute.mockReset().mockResolvedValue({ rows: [{ id: "goat_codex_turn_1" }] });
+  });
+
+  it("caps recovery at a single attempt by default", async () => {
+    await claimCodexChatRecovery({
+      turn: codexTurn(),
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+    });
+    const query = dbMocks.execute.mock.calls[0]?.[0];
+    expect(sqlText(query)).toContain("recovery_attempts <");
+    expect(sqlNumbers(query)).toContain(1);
+  });
+
+  it("allows a higher ceiling for idempotent engines (Claude Code)", async () => {
+    await claimCodexChatRecovery({
+      turn: codexTurn(),
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+      maxRecoveryAttempts: 10,
+    });
+    const query = dbMocks.execute.mock.calls[0]?.[0];
+    expect(sqlText(query)).toContain("recovery_attempts <");
+    expect(sqlNumbers(query)).toContain(10);
+  });
+
+  it("throws the default Codex message once the ceiling is reached", async () => {
+    dbMocks.execute.mockResolvedValue({ rows: [] });
+    await expect(
+      claimCodexChatRecovery({ turn: codexTurn(), leaseId: "lease_1", leaseOwner: "runner_1" }),
+    ).rejects.toThrow("could not safely resume this turn");
+  });
+
+  it("throws the provided message once a higher ceiling is exhausted", async () => {
+    dbMocks.execute.mockResolvedValue({ rows: [] });
+    await expect(
+      claimCodexChatRecovery({
+        turn: codexTurn(),
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        maxRecoveryAttempts: 10,
+        exhaustedMessage: "too many runner restarts",
+      }),
+    ).rejects.toThrow("too many runner restarts");
+  });
+});
+
 describe("summarizeCodexChatRecoveryProgress", () => {
   it("summarizes persisted assistant progress for a recovery prompt", () => {
     const parts: CodexUiMessagePart[] = [
@@ -739,6 +793,13 @@ function sqlText(query: unknown): string {
       return "";
     })
     .join("");
+}
+
+// Embedded numeric `${value}` interpolations land in queryChunks as raw Number chunks that
+// sqlText intentionally skips; expose them so tests can assert on bound integer values.
+function sqlNumbers(query: unknown): number[] {
+  const chunks = (query as { queryChunks?: unknown[] }).queryChunks ?? [];
+  return chunks.filter((chunk): chunk is number => typeof chunk === "number");
 }
 
 function fakeSandbox(sandboxId: string) {

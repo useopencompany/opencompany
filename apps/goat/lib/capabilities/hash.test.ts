@@ -4,15 +4,15 @@ import { hashCapabilityInput } from "@/lib/capabilities/hash";
 describe("hashCapabilityInput", () => {
   it("is stable across object key order and changes for any bound parameter", () => {
     const first = hashCapabilityInput({
-      action: "lead.enrich_person",
+      action: "lead.find_person_email",
       params: { company: "Analytical Engines", name: "Ada Lovelace" },
     });
     const reordered = hashCapabilityInput({
       params: { name: "Ada Lovelace", company: "Analytical Engines" },
-      action: "lead.enrich_person",
+      action: "lead.find_person_email",
     });
     const changed = hashCapabilityInput({
-      action: "lead.enrich_person",
+      action: "lead.find_person_email",
       params: { company: "Different Company", name: "Ada Lovelace" },
     });
     expect(first).toBe(reordered);
