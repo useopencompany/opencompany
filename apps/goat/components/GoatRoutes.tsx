@@ -39,6 +39,7 @@ import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import { GoatSurface, type GoatTaskView } from "@/components/GoatSurface";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
+import { KleinanzeigenIntegrationSetup } from "@/components/KleinanzeigenIntegrationSetup";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
@@ -408,6 +409,21 @@ export function GoatStripeSettingsRoute() {
         initialState={integrations.stripe}
         canManage={workspace.role === "admin"}
       />
+    </GoatSettingsContent>
+  );
+}
+
+export function GoatKleinanzeigenSettingsRoute() {
+  const { integrations } = useGoatAppData();
+  const account = integrations.personalAccounts.kleinanzeigen[0] ?? null;
+
+  return (
+    <GoatSettingsContent
+      title="Kleinanzeigen"
+      description="Publish approved listings from images in Chat"
+      backLink={{ href: "/settings/integrations", label: "Integrations" }}
+    >
+      <KleinanzeigenIntegrationSetup initialAccount={account} />
     </GoatSettingsContent>
   );
 }

@@ -417,6 +417,38 @@ describe("SettingsIntegrationsPanel", () => {
     ).toHaveAttribute("href", "/api/integrations/latitude/start?returnTo=/settings/integrations");
   });
 
+  it("shows Kleinanzeigen as a personal integration with approval-gated publishing", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_kleinanzeigen",
+        provider: "kleinanzeigen",
+        externalId: "browser_use_kleinanzeigen",
+        connectionLabel: "Kleinanzeigen",
+        accountName: "Personal Browser Use",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    const card = screen
+      .getByText("Create approved listings from images you paste into Chat.")
+      .closest("div.rounded-2xl");
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    expect(
+      within(card as HTMLElement).getByRole("group", {
+        name: "Publish listings permission",
+      }),
+    ).toHaveTextContent("Ask");
+    expect(within(card as HTMLElement).getByRole("link", { name: "Manage" })).toHaveAttribute(
+      "href",
+      "/settings/kleinanzeigen",
+    );
+  });
+
   it("shows a workspace-owned Stripe connection and test-mode label", () => {
     const integrations = goatIntegrationStateFromRows([
       {

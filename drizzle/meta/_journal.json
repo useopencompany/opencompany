@@ -1170,6 +1170,13 @@
       "when": 1785240000004,
       "tag": "0166_goat_capability_session_budget",
       "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "7",
+      "when": 1785240000005,
+      "tag": "0167_goat_kleinanzeigen_browser_actions",
+      "breakpoints": true
     }
   ]
 }
