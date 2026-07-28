@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { GoatIntegrationProvider } from "@opencompany/db/goat-schema";
-import { GOAT_GMAIL_READ_SCOPE, GOAT_GMAIL_SEND_SCOPE } from "@/lib/integrations/gmail-scopes";
+import { GOAT_GMAIL_COMPOSE_SCOPE, GOAT_GMAIL_READ_SCOPE } from "@/lib/integrations/gmail-scopes";
 import {
   GOAT_GOOGLE_DOCS_WRITE_SCOPE,
   GOAT_GOOGLE_DRIVE_READ_SCOPE,
@@ -29,7 +29,10 @@ export const GOAT_GOOGLE_PROVIDER_CONFIG: Record<
     provider: "gmail",
     routeSegment: "gmail",
     displayName: "Gmail",
-    scopes: [GOAT_GMAIL_READ_SCOPE, GOAT_GMAIL_SEND_SCOPE, ...OPENID_SCOPES],
+    // gmail.compose is the narrowest Gmail API scope that can create drafts.
+    // It also authorizes sending, which Goat gates separately in its own
+    // per-account permission model.
+    scopes: [GOAT_GMAIL_READ_SCOPE, GOAT_GMAIL_COMPOSE_SCOPE, ...OPENID_SCOPES],
   },
   google_calendar: {
     provider: "google_calendar",

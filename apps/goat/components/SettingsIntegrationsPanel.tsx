@@ -51,7 +51,7 @@ import {
   type GoatStripeProviderState,
   goatIntegrationStateFromRows,
 } from "@/lib/integration-state";
-import { hasGoatGmailSendScope } from "@/lib/integrations/gmail-scopes";
+import { hasGoatGmailDraftScope, hasGoatGmailSendScope } from "@/lib/integrations/gmail-scopes";
 import { hasGoatGoogleDriveWriteScope } from "@/lib/integrations/google-drive-scopes";
 import {
   goatIntegrationConnectionError,
@@ -615,8 +615,12 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
     account.provider === "google_drive" &&
     account.connected &&
     !hasGoatGoogleDriveWriteScope(account.scopes);
-  const needsGmailSendScope =
-    account.provider === "gmail" && account.connected && !hasGoatGmailSendScope(account.scopes);
+  const gmailScopeUpgradeLabel =
+    account.provider === "gmail" && account.connected && !hasGoatGmailDraftScope(account.scopes)
+      ? hasGoatGmailSendScope(account.scopes)
+        ? "Enable drafts"
+        : "Enable drafts & sending"
+      : null;
 
   const beginDisconnect = () => {
     setError(null);
@@ -675,12 +679,12 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
               Enable editing
             </a>
           ) : null}
-          {needsGmailSendScope ? (
+          {gmailScopeUpgradeLabel ? (
             <a
               href={integrationConnectHref("gmail")}
               className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
             >
-              Enable sending
+              {gmailScopeUpgradeLabel}
             </a>
           ) : null}
           <button

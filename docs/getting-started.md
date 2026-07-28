@@ -276,11 +276,13 @@ The Inngest values in `.env.example` are for background jobs. Local `bun run dev
   enable the Gmail, Google Calendar, Google Drive, and Google Docs APIs, and put
   `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and
   `GOOGLE_INTEGRATION_STATE_SECRET` in Infisical `dev` + `/web` and `/runner`. On the OAuth consent
-  screen, Gmail's `gmail.readonly` and Drive's `drive.readonly` scopes are **restricted**, while
-  Calendar and the `documents` scope used for confirmation-gated Google Doc edits are
-  **sensitive**. For external/production users Google requires app verification, and restricted
-  server-side access may require a security assessment. Until verification, add yourself as a
-  **test user** on the consent screen — the flow works fully for test users.
+  screen, Gmail's `gmail.readonly` and `gmail.compose` scopes and Drive's `drive.readonly` scope are
+  **restricted**, while Calendar and the `documents` scope used for confirmation-gated Google Doc
+  edits are **sensitive**. `gmail.compose` is the narrowest grant that can create Gmail drafts and
+  also permits sending at the Google API layer; Goat keeps draft creation and sending separate in
+  its per-account permissions. For external/production users Google requires app verification, and
+  restricted server-side access may require a security assessment. Until verification, add yourself
+  as a **test user** on the consent screen — the flow works fully for test users.
 - **Neon logical replication (one-time per project):** enable logical replication in the Neon console
   (project → Settings) so Electric can create its replication slot. Project-level, so it covers every
   branch. `bun run setup` starts Electric but cannot flip this toggle for you.
