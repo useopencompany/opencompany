@@ -125,7 +125,7 @@ export const USE_ACTION_PARAMS_DESCRIPTION =
   "Arguments matching the selected action's list_actions schema exactly. Preserve parameter names and types, and use stable ids returned by earlier actions when chaining. Pass an empty object only when the schema has no required arguments.";
 
 export const LIST_SKILLS_TOOL_DESCRIPTION =
-  "Discover user-authored skills available from the active Brain. Skills are reusable workflows and operating instructions that may help with the user's request. Search by a short task-focused query, or omit query to browse. The result contains safe catalog metadata only. Call list_skills before use_skill; a skill id returned successfully remains eligible for use on later turns in this chat while it is still available.";
+  "Discover user-authored skills available from the active Brain. Skills are reusable workflows and operating instructions that may help with the user's request. Search by a short task-focused query, or omit query to browse. The result contains catalog metadata for matching only, not instructions. Call list_skills before use_skill; a skill id returned successfully remains eligible for use on later turns in this chat while it is still available.";
 
 export const LIST_SKILLS_QUERY_DESCRIPTION =
   'Optional task-focused search across skill ids, names, and descriptions. Use a few distinctive words, for example "product feature" or "customer interview". Omit to browse the catalog.';
