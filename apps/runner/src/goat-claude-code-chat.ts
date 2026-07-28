@@ -1,6 +1,8 @@
 import {
   type ClaudeCodeTurnSummary,
+  claudeCodeModelSupportsReasoningEffort,
   createClaudeCodeEventNormalizer,
+  isCodexReasoningEffort,
   shellQuote,
 } from "@opencompany/agent-runtime";
 import {
@@ -290,6 +292,12 @@ export async function runGoatClaudeCodeChatTurn(input: {
           workdir: CLAUDE_CHAT_WORKDIR,
           promptPath,
           model: session.model || null,
+          reasoningEffort:
+            claudeCodeModelSupportsReasoningEffort(session.model) &&
+            typeof turn.settings?.reasoningEffort === "string" &&
+            isCodexReasoningEffort(turn.settings.reasoningEffort)
+              ? turn.settings.reasoningEffort
+              : null,
           resumeSessionId: resume,
         }),
         envs: buildClaudeCommandEnv({

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   updateResults: [] as unknown[][],
   codexConnected: vi.fn(),
+  claudeConnected: vi.fn(),
   getSandboxStatus: vi.fn(),
   killSandbox: vi.fn(),
   wake: vi.fn(),
@@ -36,7 +37,7 @@ vi.mock("@/lib/codex-auth", () => ({
 
 // Pulls in @/lib/auth (authkit), which vitest cannot resolve.
 vi.mock("@/lib/claude-code-auth", () => ({
-  isGoatClaudeCodeConnectedForUser: vi.fn(async () => false),
+  isGoatClaudeCodeConnectedForUser: mocks.claudeConnected,
 }));
 
 vi.mock("@/lib/task-runner", () => ({
@@ -82,6 +83,7 @@ describe("createGoatCodexChatMessage", () => {
     mocks.selectResults.length = 0;
     mocks.execute.mockResolvedValue({ rows: [] });
     mocks.codexConnected.mockResolvedValue(true);
+    mocks.claudeConnected.mockResolvedValue(true);
     mocks.wake.mockResolvedValue(undefined);
     mocks.select.mockImplementation(() => createSelectBuilder(mocks.selectResults.shift() ?? []));
   });
@@ -126,6 +128,22 @@ describe("createGoatCodexChatMessage", () => {
     });
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(mocks.wake).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid Claude settings before writing", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "hello",
+      engine: "claude_code",
+      settings: { reasoningEffort: "max" },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 400,
+      error: "Invalid Claude reasoning effort.",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 
   it("rejects sends while Codex is disconnected", async () => {
@@ -216,6 +234,22 @@ describe("createGoatCodexChatMessage", () => {
     const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
     expect(statement.queryChunks).toContain("openai/gpt-5.6-terra");
     expect(statement.queryChunks).toContain("gpt-5.6-terra");
+  });
+
+  it("persists the selected Claude model and effort on a new chat", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "clone my repo",
+      engine: "claude_code",
+      model: "anthropic/claude-opus-4.8",
+      settings: { reasoningEffort: "xhigh" },
+    });
+
+    expect(result).toMatchObject({ ok: true, mode: "started" });
+    const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
+    expect(statement.queryChunks).toContain("anthropic/claude-opus-4.8");
+    expect(statement.queryChunks).toContain("claude-opus-4-8");
+    expect(statement.queryChunks).toContain('{"reasoningEffort":"xhigh"}');
   });
 
   it("returns 404 for an unknown or foreign session", async () => {

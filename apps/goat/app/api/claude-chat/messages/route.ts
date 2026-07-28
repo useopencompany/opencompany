@@ -22,6 +22,7 @@ type ClaudeChatMessageBody = {
   prompt?: unknown;
   message?: unknown;
   model?: unknown;
+  settings?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -90,6 +91,7 @@ export async function POST(request: Request) {
     attachments: parsedAttachments.attachments,
     ...(clientMessageId ? { clientMessageId } : {}),
     ...(body.value.model !== undefined ? { model: body.value.model } : {}),
+    settings: body.value.settings,
     engine: "claude_code",
   });
   if (!result.ok) return new Response(result.error, { status: result.status });

@@ -58,10 +58,10 @@ export function parseCodexChatSettings(
 
 export function normalizeCodexChatSettings(
   value: GoatCodexChatTurnSettings | null | undefined,
+  defaultReasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 ): NormalizedCodexChatSettings {
   return {
-    reasoningEffort:
-      readReasoningEffort(value?.reasoningEffort) ?? DEFAULT_CODEX_CHAT_REASONING_EFFORT,
+    reasoningEffort: readReasoningEffort(value?.reasoningEffort) ?? defaultReasoningEffort,
     planModeReasoningEffort: readReasoningEffort(value?.planModeReasoningEffort) ?? null,
     goalMode: normalizeGoalMode(value?.goalMode),
   };
@@ -69,8 +69,9 @@ export function normalizeCodexChatSettings(
 
 export function codexComposerSettingsFromTurnSettings(
   value: GoatCodexChatTurnSettings | null | undefined,
+  defaultReasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 ): GoatCodexComposerSettingsView {
-  const settings = normalizeCodexChatSettings(value);
+  const settings = normalizeCodexChatSettings(value, defaultReasoningEffort);
   return {
     reasoningEffort: settings.reasoningEffort,
     planModeEnabled: settings.planModeReasoningEffort !== null,
