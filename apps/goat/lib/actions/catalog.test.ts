@@ -217,6 +217,10 @@ describe("resolveGoatActionCatalog", () => {
     expect(catalog.actions.filter((action) => action.provider === "x")).toHaveLength(7);
     expect(catalog.actions.filter((action) => action.provider === "lead")).toHaveLength(5);
     expect(catalog.actions.filter((action) => action.provider === "seo")).toHaveLength(6);
+    expect(catalog.actions.find((action) => action.id === "youtube.get_transcript")).toMatchObject({
+      provider: "youtube",
+      maxResultChars: 256_000,
+    });
 
     vi.stubEnv("GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS", "x.search_posts");
     const endpointDisabledCatalog = await resolveGoatActionCatalog({

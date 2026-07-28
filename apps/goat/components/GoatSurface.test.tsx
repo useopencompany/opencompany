@@ -1862,6 +1862,28 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
+  it("labels Claude Code sandbox chats as Claude Code, not Codex", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        recentChats={[
+          codexChatSummary({
+            id: "goat_chat_claude_1",
+            title: "Claude task",
+            engine: "claude_code",
+            status: "idle",
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Claude Code · Ready")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Claude Code task status: Ready" })).toBeInTheDocument();
+    expect(screen.queryByText(/Codex · /)).not.toBeInTheDocument();
+  });
+
   it("keeps active and pinned Codex tasks visible and sorts active work first", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));

@@ -254,6 +254,15 @@ function engineChatKindFromChat(
   return null;
 }
 
+// Cloud coding-CLI chats (Codex + Claude Code) share the same home card and status
+// indicator; only the display label differs by engine. Defaults to "Codex" so the
+// shared surface stays labeled for any non-Claude engine that reaches it.
+function codexEngineLabel(engine: GoatChatEngine | null | undefined): string {
+  return engine === "claude_code"
+    ? ENGINE_CHAT_CONFIG.claude_code.label
+    : ENGINE_CHAT_CONFIG.codex.label;
+}
+
 export type GoatTaskView = {
   id: string;
   displayId: string;
@@ -1963,6 +1972,7 @@ export function GoatSurface({
                 {activeEngineChat?.engine === "codex" ||
                 activeEngineChat?.engine === "claude_code" ? (
                   <CodexSessionStatusIndicator
+                    engine={activeEngineChat.engine}
                     runtime={codexRuntime}
                     optimisticStatus={
                       engineSubmitting ? "starting" : engineRunning ? "running" : null
@@ -3439,10 +3449,12 @@ function codexRuntimeMeta(runtime: GoatCodexRuntimeView | null): CodexRuntimeMet
 }
 
 function CodexSessionStatusIndicator({
+  engine,
   runtime,
   optimisticStatus,
   sandboxStatus,
 }: {
+  engine: GoatChatEngine;
   runtime: GoatCodexRuntimeView | null;
   optimisticStatus: "starting" | "running" | null;
   sandboxStatus: GoatCodexSandboxStatus | null;
@@ -3473,13 +3485,14 @@ function CodexSessionStatusIndicator({
       : sandboxStatus === "deleted"
         ? " The previous sandbox expired; a new one will start on the next message."
         : "";
-  const title = `Codex is ${meta.label.toLowerCase()}.${sandboxDetail}`;
+  const engineLabel = codexEngineLabel(engine);
+  const title = `${engineLabel} is ${meta.label.toLowerCase()}.${sandboxDetail}`;
 
   return (
     <div
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-[12px] font-medium leading-4 text-ink-muted shadow-[0_1px_3px_rgba(15,15,15,0.04)]"
       title={title}
-      aria-label={`Codex status: ${meta.label}`}
+      aria-label={`${engineLabel} status: ${meta.label}`}
     >
       <span className={cn("size-2 rounded-full", meta.dotClass)} aria-hidden="true" />
       <span>{meta.label}</span>
@@ -4112,6 +4125,7 @@ function CodexTaskRow({
 }) {
   const router = useRouter();
   const meta = codexRuntimeMeta(chat.codexRuntime ?? null);
+  const engineLabel = codexEngineLabel(chat.engine);
   const href = chatHref(chat.id);
   const prefetchChat = () => router.prefetch(href);
   const updatedAt = chat.codexRuntime?.updatedAt ?? chat.updatedAt;
@@ -4132,7 +4146,7 @@ function CodexTaskRow({
       >
         <span
           role="img"
-          aria-label={`Codex task status: ${meta.label}`}
+          aria-label={`${engineLabel} task status: ${meta.label}`}
           className={cn("size-2.5 shrink-0 rounded-full", meta.dotClass)}
         />
         <div className="min-w-0 flex-1">
@@ -4145,7 +4159,7 @@ function CodexTaskRow({
             </span>
           </div>
           <p className={cn("truncate text-[12.5px] leading-4", meta.textClass)}>
-            Codex · {meta.label}
+            {engineLabel} · {meta.label}
             {errorPreview ? ` · ${errorPreview}` : ""}
           </p>
         </div>

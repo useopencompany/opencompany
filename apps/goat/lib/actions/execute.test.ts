@@ -3,6 +3,7 @@ import {
   clampActionResult,
   executeGoatAction,
   MAX_ACTION_RESULT_CHARS,
+  MAX_EXPANDED_ACTION_RESULT_CHARS,
 } from "@/lib/actions/execute";
 import {
   GoatActionAuthError,
@@ -11,7 +12,10 @@ import {
   type ResolvedGoatAction,
 } from "@/lib/actions/types";
 
-function catalogWith(execute: ResolvedGoatAction["execute"]): GoatResolvedActionCatalog {
+function catalogWith(
+  execute: ResolvedGoatAction["execute"],
+  options: Pick<ResolvedGoatAction, "maxResultChars"> = {},
+): GoatResolvedActionCatalog {
   return {
     providers: [{ id: "slack", label: "Slack", description: "Read Slack messages." }],
     actions: [
@@ -22,6 +26,7 @@ function catalogWith(execute: ResolvedGoatAction["execute"]): GoatResolvedAction
         permissionMode: "on",
         description: "fetch",
         params: { type: "object" },
+        ...options,
         execute,
       },
     ],
@@ -67,6 +72,23 @@ describe("executeGoatAction", () => {
       { channel: "C1" },
       expect.objectContaining({ userTimezone: "UTC" }),
     );
+  });
+
+  it("honors an action-specific expanded result allowance", async () => {
+    const expanded = { transcript: "x".repeat(MAX_ACTION_RESULT_CHARS + 100) };
+    const result = await executeGoatAction(
+      baseInput(
+        catalogWith(async () => expanded, {
+          maxResultChars: MAX_EXPANDED_ACTION_RESULT_CHARS,
+        }),
+      ),
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      action: "slack.fetch_history",
+      result: expanded,
+    });
   });
 
   it("maps auth errors to structured results with the reconnect hint", async () => {
@@ -167,5 +189,17 @@ describe("clampActionResult", () => {
       payload: { truncated: true },
     });
     expect(JSON.stringify(clamped).length).toBeLessThanOrEqual(MAX_ACTION_RESULT_CHARS);
+  });
+
+  it("allows a deliberately expanded result without exceeding the hard cap", () => {
+    const expanded = { transcript: "x".repeat(MAX_ACTION_RESULT_CHARS + 100) };
+    expect(clampActionResult(expanded, MAX_EXPANDED_ACTION_RESULT_CHARS)).toBe(expanded);
+
+    const oversized = {
+      transcript: "x".repeat(MAX_EXPANDED_ACTION_RESULT_CHARS + 100),
+    };
+    expect(
+      JSON.stringify(clampActionResult(oversized, Number.MAX_SAFE_INTEGER)).length,
+    ).toBeLessThanOrEqual(MAX_EXPANDED_ACTION_RESULT_CHARS);
   });
 });

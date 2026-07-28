@@ -215,9 +215,12 @@ trace, and billed once from the settled provider cost plus the platform fee. The
 `goat.capability_runs` row stores only the parameter hash and lifecycle/cost metadata; only the
 safety-bounded action result enters the requesting chat. The hourly billing reconciler settles
 interrupted or delayed runs.
-YouTube transcript search fetches one full timestamped transcript through a reviewed Monid-backed
-Apify actor, searches it server-side for the requested phrase, and returns only bounded timestamped
-context windows to the chat.
+YouTube transcript actions fetch one full timestamped transcript through a reviewed Monid-backed
+Apify actor and validate that it belongs to the requested video. `youtube.get_transcript` returns
+the complete transcript as one plain-text result with video and language metadata, using a larger
+action-result allowance reserved for this validated shape; oversized transcripts fail explicitly
+instead of being silently truncated. `youtube.find_in_transcript` searches the same provider result
+server-side and returns only bounded timestamped context windows for a requested phrase.
 `MONID_API_KEY` belongs in Infisical `prod` + `/goat`, and
 `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new turns.
 `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint

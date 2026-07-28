@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeCapabilityResult } from "@/lib/capabilities/sanitize";
+import {
+  MAX_CAPABILITY_PAYLOAD_STRING_CHARS,
+  sanitizeCapabilityResult,
+} from "@/lib/capabilities/sanitize";
 
 describe("sanitizeCapabilityResult", () => {
   it("redacts credentials while preserving approved contact data", () => {
@@ -82,6 +85,36 @@ describe("sanitizeCapabilityResult", () => {
     expect(result.payload).toEqual({
       matches: [{ text: "first" }, { text: "second" }, { text: "third" }],
     });
+  });
+
+  it("preserves a validated full transcript under an explicit string limit", () => {
+    const transcript = "full transcript ".repeat(2_000);
+    const transcriptWithLink = `${transcript} https://youtube.com/watch?v=other123456`;
+    const result = sanitizeCapabilityResult({
+      source: "youtube",
+      action: "youtube.get_transcript",
+      expectedLimit: 1,
+      payloadStringLimit: transcriptWithLink.length,
+      discoverPayloadLinks: false,
+      canonicalLinks: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+      payload: { transcript: transcriptWithLink },
+      resultCount: 1,
+      totalCostUsdMicros: 9_000,
+    });
+
+    expect(result.payload).toEqual({ transcript: transcriptWithLink });
+    expect(result.canonicalLinks).toEqual(["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]);
+
+    const oversized = sanitizeCapabilityResult({
+      source: "youtube",
+      action: "youtube.get_transcript",
+      expectedLimit: 1,
+      payloadStringLimit: Number.MAX_SAFE_INTEGER,
+      payload: { transcript: "x".repeat(MAX_CAPABILITY_PAYLOAD_STRING_CHARS + 100) },
+    });
+    expect((oversized.payload as { transcript: string }).transcript).toHaveLength(
+      MAX_CAPABILITY_PAYLOAD_STRING_CHARS + 1,
+    );
   });
 
   it("returns only canonical links for the selected platform", () => {
