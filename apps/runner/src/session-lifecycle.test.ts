@@ -340,7 +340,7 @@ describe("acquireCodexSandboxForTurn", () => {
 
     expect(e2bMocks.connect).toHaveBeenCalledWith("sbx_existing", {
       timeoutMs: 3_600_000,
-      requestTimeoutMs: 30_000,
+      requestTimeoutMs: 120_000,
     });
     expect(e2bMocks.create).not.toHaveBeenCalled();
     expect(sandbox.commands.run).not.toHaveBeenCalled();
@@ -434,7 +434,7 @@ describe("acquireCodexSandboxForTurn", () => {
     expect(e2bMocks.connect).toHaveBeenCalledTimes(1);
     expect(e2bMocks.connect).toHaveBeenCalledWith("sbx_stale", {
       timeoutMs: 3_600_000,
-      requestTimeoutMs: 30_000,
+      requestTimeoutMs: 120_000,
     });
     expect(e2bMocks.create).toHaveBeenCalledTimes(1);
     expect(materializeMocks.materializeAgentBundleForSession).toHaveBeenCalled();
