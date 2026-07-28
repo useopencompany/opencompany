@@ -15,8 +15,13 @@ describe("validateGoatClaudeCodeToken", () => {
     });
   });
 
-  it("rejects tokens with embedded whitespace", () => {
-    expect(validateGoatClaudeCodeToken("sk-ant-oat01-abcdefghij klmnopqrstuvwxyz").ok).toBe(false);
+  it("normalizes tokens copied from wrapped terminal output", () => {
+    const token = "sk-ant-oat01-abcdefghijklmnopqrstuvwxyz";
+
+    expect(validateGoatClaudeCodeToken("sk-ant-oat01-abcdefghij \r\n\tklmnopqrstuvwxyz")).toEqual({
+      ok: true,
+      token,
+    });
   });
 
   it("rejects other credential formats", () => {
