@@ -4,8 +4,9 @@ import { createLogger } from "@opencompany/observability";
 import posthog from "posthog-js";
 import { type ReactNode, useEffect } from "react";
 import type { GoatAnalyticsEventName, GoatAnalyticsEventProperties } from "./goat-events";
+import { type GoatAnalyticsPerson, goatAnalyticsPersonProperties } from "./goat-person";
 
-export type GoatAnalyticsIdentity = {
+export type GoatAnalyticsIdentity = GoatAnalyticsPerson & {
   userId: string;
   workspaceId: string;
 };
@@ -120,7 +121,7 @@ function identifyGoatUser(identity: GoatAnalyticsIdentity) {
     if (typeof previousUserId === "string" && previousUserId !== identity.userId) {
       posthog.reset();
     }
-    posthog.identify(identity.userId, { workspace_id: identity.workspaceId });
+    posthog.identify(identity.userId, goatAnalyticsPersonProperties(identity));
   } catch (error) {
     debugLog("identify failed", error);
   }

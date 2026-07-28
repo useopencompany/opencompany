@@ -162,6 +162,11 @@ describe("syncGoatUser", () => {
       "signup_completed",
       authUser.id,
       { source: "user_sync" },
+      {
+        email: authUser.email,
+        firstName: authUser.firstName,
+        lastName: authUser.lastName,
+      },
     );
   });
 
