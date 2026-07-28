@@ -64,7 +64,8 @@ export type GoatIntegrationProvider =
   | "granola"
   | "fathom"
   | "attio"
-  | "stripe";
+  | "stripe"
+  | "latitude";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear) are always personal. Installation-bound
@@ -227,6 +228,8 @@ export type GoatTaskToolName =
   | "calendar_get_freebusy"
   | "linear_search_tools"
   | "linear_use_tool"
+  | "latitude_search_tools"
+  | "latitude_use_tool"
   | "github_clone_repository"
   | "github_shell"
   | "github_status"
@@ -1369,7 +1372,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1418,7 +1421,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1472,7 +1475,7 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",

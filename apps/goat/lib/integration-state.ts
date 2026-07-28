@@ -178,7 +178,8 @@ export type GoatPersonalAccountProvider =
   | "hubspot"
   | "granola"
   | "fathom"
-  | "attio";
+  | "attio"
+  | "latitude";
 
 export type GoatIntegrationState = {
   gmail: GoatGoogleProviderState;
@@ -240,6 +241,7 @@ export function goatPersonalAccountsFromRows(
     granola: [],
     fathom: [],
     attio: [],
+    latitude: [],
   };
   for (const row of rows) {
     if (row.status === "disconnected") continue;
@@ -258,7 +260,8 @@ export function goatPersonalAccountsFromRows(
       row.provider === "hubspot" ||
       row.provider === "granola" ||
       row.provider === "fathom" ||
-      row.provider === "attio"
+      row.provider === "attio" ||
+      row.provider === "latitude"
     ) {
       personalAccounts[row.provider].push(accountViewFromRow(row.provider, row));
     }
