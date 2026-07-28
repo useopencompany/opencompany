@@ -9,6 +9,7 @@ import type {
   GoatTaskEventType,
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
+  GoatTaskReportedOutcome,
   GoatTaskStage,
   GoatTaskStatus,
   GoatTaskToolName,
@@ -26,10 +27,14 @@ export type GoatTaskRow = {
   model: string;
   schedule_id: string | null;
   scheduled_for: string | null;
+  workflow_id: string | null;
+  workflow_brain_ref: string | null;
   status: GoatTaskStatus;
   stage: GoatTaskStage;
   result: string | null;
   error: string | null;
+  reported_outcome: GoatTaskReportedOutcome | null;
+  outcome_comment: string | null;
   harness_spec: unknown;
   debug_trace: unknown;
   sandbox_id: string | null;

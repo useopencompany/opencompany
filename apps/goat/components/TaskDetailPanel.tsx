@@ -15,7 +15,13 @@ import { useState, useTransition } from "react";
 import { TaskHarnessRunView } from "@/components/TaskHarnessRunView";
 import { TaskRunLiveProvider } from "@/components/TaskRunPanel";
 import { formatUsdMicros } from "@/lib/cost-format";
-import { formatGoatStartedAt, GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
+import {
+  formatGoatStartedAt,
+  GOAT_STAGE_COPY,
+  GOAT_STATUS_COPY,
+  GOAT_WORKFLOW_TASK_STATUS_COPY,
+  goatWorkflowTaskDisplayStatus,
+} from "@/lib/task-display";
 import type {
   GoatHarnessRunViewModel,
   GoatRunHarnessConfig,
@@ -63,6 +69,16 @@ function TaskDetailContent({ run }: { run: GoatHarnessRunViewModel }) {
           value={`${GOAT_STATUS_COPY[task.status]} - ${GOAT_STAGE_COPY[task.stage]}`}
           active={isActive}
         />
+        {task.workflowId && task.reportedOutcome ? (
+          <DetailRow
+            label="Outcome"
+            value={
+              task.outcomeComment?.trim()
+                ? `${GOAT_WORKFLOW_TASK_STATUS_COPY[goatWorkflowTaskDisplayStatus(task)]} - ${task.outcomeComment.trim()}`
+                : GOAT_WORKFLOW_TASK_STATUS_COPY[goatWorkflowTaskDisplayStatus(task)]
+            }
+          />
+        ) : null}
         <DetailRow label="Cost" value={formatUsdMicros(run.cost.totalCostUsdMicros)} icon="cost" />
       </section>
 

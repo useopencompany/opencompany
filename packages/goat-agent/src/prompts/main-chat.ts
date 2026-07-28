@@ -1,4 +1,4 @@
-import { MAX_WEB_FETCH_CALLS_PER_TURN, MAX_WEB_SEARCH_CALLS_PER_TURN } from "@/lib/chat-limits";
+import { MAX_WEB_FETCH_CALLS_PER_TURN, MAX_WEB_SEARCH_CALLS_PER_TURN } from "../chat-limits";
 
 function promptBlock(name: string, lines: readonly string[]) {
   return [`<${name}>`, ...lines, `</${name}>`].join("\n");

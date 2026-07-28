@@ -20,15 +20,15 @@ vi.mock("@opencompany/db/client", () => ({
   }),
 }));
 
-vi.mock("@/lib/integration-state", () => ({
+vi.mock("@opencompany/goat-agent/integration-state", () => ({
   goatGoogleIntegrationStateFromRows: mocks.goatGoogleIntegrationStateFromRows,
 }));
 
-vi.mock("@/lib/integrations/github", () => ({
+vi.mock("@opencompany/goat-agent/integrations/github", () => ({
   getGoatGitHubIntegrationState: mocks.getGoatGitHubIntegrationState,
 }));
 
-vi.mock("@/lib/integrations/linear-mcp", () => ({
+vi.mock("@opencompany/goat-agent/integrations/linear-mcp", () => ({
   getGoatLinearIntegrationState: mocks.getGoatLinearIntegrationState,
 }));
 

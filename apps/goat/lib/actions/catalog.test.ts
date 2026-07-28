@@ -16,18 +16,18 @@ vi.mock("@opencompany/db/goat-capabilities", () => ({
   listGoatWorkspaceCapabilities: mocks.listGoatWorkspaceCapabilities,
 }));
 
-vi.mock("@/lib/actions/attio", () => ({ resolveAttioActions: mocks.resolveAttioActions }));
-vi.mock("@/lib/actions/slack", () => ({ resolveSlackActions: mocks.resolveSlackActions }));
-vi.mock("@/lib/actions/gmail", () => ({ resolveGmailActions: mocks.resolveGmailActions }));
-vi.mock("@/lib/actions/google-calendar", () => ({
+vi.mock("@opencompany/goat-agent/actions/attio", () => ({ resolveAttioActions: mocks.resolveAttioActions }));
+vi.mock("@opencompany/goat-agent/actions/slack", () => ({ resolveSlackActions: mocks.resolveSlackActions }));
+vi.mock("@opencompany/goat-agent/actions/gmail", () => ({ resolveGmailActions: mocks.resolveGmailActions }));
+vi.mock("@opencompany/goat-agent/actions/google-calendar", () => ({
   resolveGoogleCalendarActions: mocks.resolveGoogleCalendarActions,
 }));
-vi.mock("@/lib/actions/google-drive", () => ({
+vi.mock("@opencompany/goat-agent/actions/google-drive", () => ({
   resolveGoogleDriveActions: mocks.resolveGoogleDriveActions,
 }));
-vi.mock("@/lib/actions/linear", () => ({ resolveLinearActions: mocks.resolveLinearActions }));
-vi.mock("@/lib/actions/github", () => ({ resolveGitHubActions: mocks.resolveGitHubActions }));
-vi.mock("@/lib/actions/stripe", () => ({ resolveStripeActions: mocks.resolveStripeActions }));
+vi.mock("@opencompany/goat-agent/actions/linear", () => ({ resolveLinearActions: mocks.resolveLinearActions }));
+vi.mock("@opencompany/goat-agent/actions/github", () => ({ resolveGitHubActions: mocks.resolveGitHubActions }));
+vi.mock("@opencompany/goat-agent/actions/stripe", () => ({ resolveStripeActions: mocks.resolveStripeActions }));
 
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import type { GoatActionProviderCatalog } from "@/lib/actions/types";

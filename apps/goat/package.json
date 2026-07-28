@@ -24,6 +24,7 @@
     "@opencompany/billing": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/file-extract": "workspace:*",
+    "@opencompany/goat-agent": "workspace:*",
     "@opencompany/goat-brain": "workspace:*",
     "@opencompany/goat-observability": "workspace:*",
     "@opencompany/observability": "workspace:*",

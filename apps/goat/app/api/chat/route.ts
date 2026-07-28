@@ -41,6 +41,7 @@ import {
   readGoatBrainSkillMentionRefs,
   resolveGoatBrainSkillMentions,
 } from "@/lib/brain-skills";
+import { readGoatBrainWorkflowMentionRef } from "@/lib/brain-workflows";
 import {
   createDbGoatChatStore,
   createGoatChatApprovalContinuationTurn,
@@ -234,6 +235,17 @@ export async function POST(request: Request): Promise<Response> {
         return new Response(error.message, { status: 400 });
       }
       throw error;
+    }
+  }
+  if (message) {
+    const parsedWorkflowMention = readGoatBrainWorkflowMentionRef(
+      message.metadata?.mentions ?? body.value.mentions,
+    );
+    if (!parsedWorkflowMention.ok) {
+      return new Response(parsedWorkflowMention.error, { status: 400 });
+    }
+    if (parsedWorkflowMention.mention) {
+      return new Response("Start workflow tasks through the workflows endpoint.", { status: 400 });
     }
   }
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();

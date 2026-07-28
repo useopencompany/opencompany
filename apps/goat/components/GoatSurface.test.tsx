@@ -1281,6 +1281,84 @@ describe("GoatSurface chat streaming UI", () => {
     });
   });
 
+  it("starts a selected workflow in the background without creating a chat turn", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/brain/skills") {
+        return Response.json({ skills: [] });
+      }
+      if (url === "/api/brain/workflows" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_1",
+              displayId: "TASK-1",
+              name: "Morning Test",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      if (url === "/api/brain/workflows") {
+        return Response.json({
+          workflows: [
+            {
+              brainRef: "goat_brain_1",
+              id: "morning-test",
+              name: "Morning Test",
+              description: "Run the morning checks.",
+            },
+          ],
+        });
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_1",
+          title: "Existing chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [],
+        }}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "#morning");
+    await user.click(await screen.findByRole("option", { name: /Morning Test/i }));
+    await user.type(textarea, "run today's checks");
+    await user.click(screen.getByRole("button", { name: "Start task" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/brain/workflows",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/brain/workflows" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      workflow: {
+        kind: "workflow",
+        brainRef: "goat_brain_1",
+        id: "morning-test",
+      },
+      description: "#morning-test run today's checks",
+    });
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+    expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("does not show Codex mention options when Codex is not connected", async () => {
     const user = userEvent.setup();
 

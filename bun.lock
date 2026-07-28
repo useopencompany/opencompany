@@ -61,6 +61,7 @@
         "@opencompany/billing": "workspace:*",
         "@opencompany/db": "workspace:*",
         "@opencompany/file-extract": "workspace:*",
+        "@opencompany/goat-agent": "workspace:*",
         "@opencompany/goat-brain": "workspace:*",
         "@opencompany/goat-observability": "workspace:*",
         "@opencompany/observability": "workspace:*",
@@ -159,6 +160,7 @@
         "@opencompany/crypto": "workspace:*",
         "@opencompany/db": "workspace:*",
         "@opencompany/file-extract": "workspace:*",
+        "@opencompany/goat-agent": "workspace:*",
         "@opencompany/goat-brain": "workspace:*",
         "@opencompany/goat-observability": "workspace:*",
         "@opencompany/memory": "workspace:*",
@@ -334,6 +336,25 @@
       "dependencies": {
         "exceljs": "^4.4.0",
         "mammoth": "^1.11.0",
+      },
+      "devDependencies": {
+        "@types/node": "^25.9.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.7",
+      },
+    },
+    "packages/goat-agent": {
+      "name": "@opencompany/goat-agent",
+      "version": "0.1.0",
+      "dependencies": {
+        "@ai-sdk/mcp": "^1.0.44",
+        "@opencompany/agent-runtime": "workspace:*",
+        "@opencompany/db": "workspace:*",
+        "@opencompany/goat-brain": "workspace:*",
+        "@opencompany/goat-observability": "workspace:*",
+        "@opencompany/statsig": "workspace:*",
+        "ai": "^6.0.189",
+        "drizzle-orm": "^0.45.2",
       },
       "devDependencies": {
         "@types/node": "^25.9.1",
@@ -927,6 +948,8 @@
     "@opencompany/file-extract": ["@opencompany/file-extract@workspace:packages/file-extract"],
 
     "@opencompany/goat": ["@opencompany/goat@workspace:apps/goat"],
+
+    "@opencompany/goat-agent": ["@opencompany/goat-agent@workspace:packages/goat-agent"],
 
     "@opencompany/goat-brain": ["@opencompany/goat-brain@workspace:packages/goat-brain"],
 

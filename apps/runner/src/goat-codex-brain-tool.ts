@@ -7,6 +7,7 @@ import {
 } from "@opencompany/db/goat-brain-read";
 import { goatBrainToolRuns } from "@opencompany/db/goat-schema";
 import { getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
+import type { GoatBrainToolInput, GoatBrainToolOutput } from "@opencompany/goat-agent/chat-ui";
 import {
   GOAT_BRAIN_ENTITY_TYPES,
   GOAT_BRAIN_READ_TOOL_DESCRIPTION,
@@ -202,6 +203,65 @@ const defaultDependencies: GoatCodexBrainToolDependencies = {
   getTimeline: getGoatBrainTimeline,
   listDocuments: listGoatBrainDocuments,
 };
+
+// Reusable read-only Brain tool for the opencompany-engine task chat loop. Same
+// read plane as the Codex Brain tool, wrapped into the chat GoatBrainToolOutput
+// shape so it can be injected as `runBrainCli` into createOpenCompanyChatToolContext.
+export async function runGoatTaskBrainRead(input: {
+  brainRef: string;
+  userWorkosId: string;
+  chatSessionId: string;
+  gatewayApiKey: string;
+  toolInput: GoatBrainToolInput;
+  // biome-ignore lint/suspicious/noExplicitAny: matches the file's db handle typing.
+  db?: any;
+}): Promise<GoatBrainToolOutput> {
+  const db = input.db ?? getDb();
+  const startedAt = Date.now();
+  const traceId = `goat_brain_run_${randomUUID()}`;
+  try {
+    const access = await getGoatBrainAccess(
+      { userWorkosId: input.userWorkosId, brainRef: input.brainRef },
+      { db },
+    );
+    if (!access) throw new Error("You no longer have access to this Brain.");
+    const normalized = normalizeGoatBrainReadToolInput(input.toolInput);
+    if (!isGoatBrainRetrievalCommand(normalized.command)) {
+      throw new Error(`The Brain tool does not support "${normalized.command}".`);
+    }
+    const parsed = await executeReadCommand({
+      brainRef: input.brainRef,
+      userWorkosId: input.userWorkosId,
+      chatSessionId: input.chatSessionId,
+      gatewayApiKey: input.gatewayApiKey,
+      toolInput: { ...normalized, command: normalized.command },
+      db,
+      dependencies: defaultDependencies,
+    });
+    return {
+      ok: true,
+      brainRef: input.brainRef,
+      exitCode: 0,
+      stdout: JSON.stringify(parsed),
+      stderr: "",
+      command: normalized.command,
+      parsed,
+      traceId,
+      durationMs: Math.max(0, Date.now() - startedAt),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      brainRef: input.brainRef,
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      error: error instanceof Error ? error.message : "The Brain lookup failed.",
+      traceId,
+      durationMs: Math.max(0, Date.now() - startedAt),
+    };
+  }
+}
 
 async function executeReadCommand(input: {
   brainRef: string;

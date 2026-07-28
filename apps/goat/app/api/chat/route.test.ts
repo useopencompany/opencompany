@@ -163,6 +163,37 @@ describe("POST /api/chat", () => {
     await expect(response.text()).resolves.toContain("Messages can be at most");
   });
 
+  it("rejects workflow mentions before creating a normal chat turn", async () => {
+    mockAuth();
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.5",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          metadata: {
+            mentions: [
+              {
+                kind: "workflow",
+                brainRef: ACTIVE_BRAIN.id,
+                id: "morning-test",
+              },
+            ],
+          },
+          parts: [{ type: "text", text: "#morning-test" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe(
+      "Start workflow tasks through the workflows endpoint.",
+    );
+    expect(createGoatChatUserTurn).not.toHaveBeenCalled();
+    expect(streamText).not.toHaveBeenCalled();
+  });
+
   it("resolves the action catalog for every non-engine request without a beta flag", async () => {
     mockAuth();
     mockCreateTurn();

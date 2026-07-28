@@ -35,8 +35,16 @@ vi.mock("@opencompany/observability/braintrust", () => ({
   flushBraintrust: async () => {},
 }));
 
+const goatChatLoopMock = vi.hoisted(() => ({
+  runGoatTaskChatLoop: vi.fn(),
+}));
+
 vi.mock("./goat-brain", () => goatBrainMock);
 vi.mock("./goat-codex", () => goatCodexMock);
+// The opencompany-engine chat loop is exercised directly in
+// goat-task-chat-loop.test.ts; here we mock it to test executeGoatTask's
+// orchestration (message lifecycle, outcome events) around it.
+vi.mock("./goat-task-chat-loop", () => goatChatLoopMock);
 
 type GoatTask = typeof goatTasks.$inferSelect;
 
@@ -55,12 +63,6 @@ const harnessSpec: GoatHarnessSpec = {
   maxModelSteps: 8,
   resultMode: "assistant_final",
 };
-const reportHarnessSpec: GoatHarnessSpec = {
-  ...harnessSpec,
-  systemPrompt: "Write a sourced research report.",
-  resultMode: "brain_markdown_report",
-};
-
 beforeEach(() => {
   vi.clearAllMocks();
   goatBrainMock.createGoatBrainMarkdownReportForTask.mockResolvedValue({
@@ -80,6 +82,10 @@ beforeEach(() => {
     sandboxEndedAt: new Date("2026-01-01T00:01:00.000Z"),
     model: "gpt-5.5",
     usage: { inputTokens: 20, outputTokens: 5, totalTokens: 25 },
+  });
+  goatChatLoopMock.runGoatTaskChatLoop.mockResolvedValue({
+    assistantContent: "Done.",
+    usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
   });
 });
 
@@ -642,15 +648,12 @@ describe("planGoatHarness", () => {
 });
 
 describe("executeGoatTask", () => {
-  it("persists assistant content and returns final assistant text as the result", async () => {
-    aiMock.generateObject.mockResolvedValueOnce({ object: harnessSpec });
-    aiMock.streamText.mockReturnValueOnce({
-      fullStream: streamParts(
-        { type: "text-delta", text: "Done" },
-        { type: "text-delta", text: "." },
-        { type: "finish-step", usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } },
-      ),
-      text: Promise.resolve("Done."),
+  it("runs opencompany tasks as a hidden main-chat run and records the reported outcome", async () => {
+    goatChatLoopMock.runGoatTaskChatLoop.mockResolvedValueOnce({
+      assistantContent: "Here is the answer.",
+      usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+      reportedOutcome: "needs_attention",
+      outcomeComment: "Couldn't verify one source.",
     });
     const sink = createSink();
 
@@ -663,165 +666,43 @@ describe("executeGoatTask", () => {
         reportStage: vi.fn(async () => {}),
       }),
     ).resolves.toEqual({
-      result: "Done.",
+      result: "Here is the answer.",
       harnessSpec,
       debugTrace: expect.objectContaining({ schemaVersion: "goat.debug.v1" }),
+      reportedOutcome: "needs_attention",
+      outcomeComment: "Couldn't verify one source.",
     });
 
+    // No planner runs for the opencompany engine, and no harness.planned event.
+    expect(aiMock.generateObject).not.toHaveBeenCalled();
+    expect(sink.appendEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "harness.planned" }),
+    );
+
+    expect(goatChatLoopMock.runGoatTaskChatLoop).toHaveBeenCalledWith(
+      expect.objectContaining({ harnessSpec, assistantMessageId: "assistant_msg_1" }),
+    );
     expect(sink.createAssistantMessage).toHaveBeenCalledWith({
       content: "",
       modelMessage: { role: "assistant", content: "" },
     });
-    expect(sink.updateMessageContent).toHaveBeenCalledWith({
-      messageId: "assistant_msg_1",
-      content: "Done.",
-    });
     expect(sink.completeMessage).toHaveBeenCalledWith({
       messageId: "assistant_msg_1",
-      content: "Done.",
-      modelMessage: { role: "assistant", content: "Done." },
+      content: "Here is the answer.",
+      modelMessage: { role: "assistant", content: "Here is the answer." },
     });
-    expect(sink.appendEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "harness.planned",
-        payload: expect.objectContaining({
-          model,
-          tools: ["exa_search"],
-          skills: [],
-          resultMode: "assistant_final",
-        }),
-      }),
-    );
-    expect(sink.recordModelUsage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: "assistant_msg_1",
-        phase: "execution",
-        stepIndex: 0,
-        modelProvider: "vercel-ai-gateway",
-        modelName: model,
-        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
-      }),
-    );
-    expect(aiMock.generateObject).toHaveBeenCalledWith(
-      expect.objectContaining({
-        providerOptions: {
-          gateway: {
-            user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
-            tags: expect.arrayContaining([
-              "app:goat",
-              "env:test",
-              "feature:task",
-              "task:goat_task_1",
-            ]),
-          },
-        },
-      }),
-    );
-    expect(aiMock.streamText).toHaveBeenCalledWith(
-      expect.objectContaining({
-        providerOptions: {
-          gateway: {
-            user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
-            tags: expect.arrayContaining([
-              "app:goat",
-              "env:test",
-              "feature:task",
-              "task:goat_task_1",
-            ]),
-          },
-        },
-      }),
-    );
-  });
-
-  it("records planner usage and every execution finish-step", async () => {
-    aiMock.generateObject.mockResolvedValueOnce({
-      object: harnessSpec,
-      usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 },
+    expect(sink.appendEvent).toHaveBeenCalledWith({
+      type: "message.completed",
+      messageId: "assistant_msg_1",
+      payload: { role: "assistant", usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } },
     });
-    aiMock.streamText.mockReturnValueOnce({
-      fullStream: streamParts(
-        { type: "text-delta", text: "Done" },
-        { type: "finish-step", usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } },
-        { type: "finish-step", usage: { inputTokens: 20, outputTokens: 4, totalTokens: 24 } },
-      ),
-      text: Promise.resolve("Done."),
+    expect(sink.appendEvent).toHaveBeenCalledWith({
+      type: "task.status",
+      payload: {
+        reportedOutcome: "needs_attention",
+        outcomeComment: "Couldn't verify one source.",
+      },
     });
-    const sink = createSink();
-
-    await executeGoatTask({
-      task: task(),
-      env: env(),
-      signal: new AbortController().signal,
-      sink,
-      reportStage: vi.fn(async () => {}),
-    });
-
-    expect(sink.recordModelUsage).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        phase: "planner",
-        stepIndex: 0,
-        modelProvider: "vercel-ai-gateway",
-        modelName: "anthropic/claude-sonnet-4.6",
-        usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 },
-      }),
-    );
-    expect(sink.recordModelUsage).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        messageId: "assistant_msg_1",
-        phase: "execution",
-        stepIndex: 0,
-        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
-      }),
-    );
-    expect(sink.recordModelUsage).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({
-        messageId: "assistant_msg_1",
-        phase: "execution",
-        stepIndex: 1,
-        usage: { inputTokens: 20, outputTokens: 4, totalTokens: 24 },
-      }),
-    );
-  });
-
-  it("reserves the last Goat model step for a no-tool final answer", async () => {
-    aiMock.generateObject.mockResolvedValueOnce({ object: harnessSpec });
-    aiMock.streamText.mockReturnValueOnce({
-      fullStream: streamParts(
-        { type: "text-delta", text: "Done." },
-        { type: "finish-step", usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } },
-      ),
-      text: Promise.resolve("Done."),
-    });
-
-    await executeGoatTask({
-      task: task(),
-      env: env(),
-      signal: new AbortController().signal,
-      sink: createSink(),
-      reportStage: vi.fn(async () => {}),
-    });
-
-    const request = aiMock.streamText.mock.calls[0]?.[0] as {
-      prepareStep?: (input: { stepNumber: number }) => unknown;
-    };
-
-    expect(request.prepareStep?.({ stepNumber: harnessSpec.maxModelSteps - 2 })).toEqual({});
-    const finalSettings = request.prepareStep?.({ stepNumber: harnessSpec.maxModelSteps - 1 });
-    expect(finalSettings).toMatchObject({
-      activeTools: [],
-      toolChoice: "none",
-      system: expect.stringContaining("Do not call any more tools"),
-    });
-    const system =
-      finalSettings && typeof finalSettings === "object" && "system" in finalSettings
-        ? String(finalSettings.system)
-        : "";
-    expect(system).toContain(harnessSpec.systemPrompt);
-    expect(system).toContain("provide the best final answer now");
   });
 
   it("runs Codex harnesses through the Codex sandbox executor", async () => {
@@ -835,17 +716,11 @@ describe("executeGoatTask", () => {
         repository: "octo/repo",
         createPullRequest: true,
         reasoningEffort: "high",
-        goalMode: {
-          objective: "Fix octo/repo and verify tests pass.",
-          tokenBudget: 200_000,
-        },
+        goalMode: { objective: "Fix octo/repo and verify tests pass.", tokenBudget: 200_000 },
       },
     };
     aiMock.generateObject.mockResolvedValueOnce({ object: codexHarnessSpec });
     goatCodexMock.runGoatCodexTask.mockImplementationOnce(async (input) => {
-      await input.onOutput?.(
-        "Codex command completed: /bin/bash -lc 'git status --short --branch'",
-      );
       await input.onRuntimeEvents?.([
         {
           method: "item/agentMessage/delta",
@@ -861,37 +736,7 @@ describe("executeGoatTask", () => {
           params: {
             threadId: "thread_existing",
             turnId: "turn_1",
-            item: {
-              id: "agent_1",
-              type: "agentMessage",
-              text: "I'll clone the repository.",
-            },
-          },
-        },
-        {
-          method: "item/completed",
-          params: {
-            threadId: "thread_existing",
-            turnId: "turn_1",
-            item: {
-              id: "reasoning_1",
-              type: "reasoning",
-              text: "Checked the repository state.",
-            },
-          },
-        },
-        {
-          method: "item/completed",
-          params: {
-            threadId: "thread_existing",
-            turnId: "turn_1",
-            item: {
-              id: "cmd_1",
-              type: "commandExecution",
-              command: "git log --oneline -10",
-              status: "completed",
-              exitCode: 0,
-            },
+            item: { id: "agent_1", type: "agentMessage", text: "I'll clone the repository." },
           },
         },
       ]);
@@ -908,17 +753,16 @@ describe("executeGoatTask", () => {
 
     await expect(
       executeGoatTask({
-        task: task({ codexEngineSessionId: "thread_existing" }),
+        task: task({ codexEngineSessionId: "thread_existing", harnessSpec: codexHarnessSpec }),
         env: env(),
         signal: new AbortController().signal,
         sink,
         reportStage: vi.fn(async () => {}),
       }),
-    ).resolves.toMatchObject({
-      result: "Codex completed.",
-      harnessSpec: codexHarnessSpec,
-    });
+    ).resolves.toMatchObject({ result: "Codex completed.", harnessSpec: codexHarnessSpec });
 
+    // The opencompany chat loop is never used for a Codex task.
+    expect(goatChatLoopMock.runGoatTaskChatLoop).not.toHaveBeenCalled();
     expect(goatCodexMock.runGoatCodexTask).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
@@ -926,10 +770,7 @@ describe("executeGoatTask", () => {
         existingEngineSessionId: "thread_existing",
         repository: "octo/repo",
         createPullRequest: true,
-        goalMode: {
-          objective: "Fix octo/repo and verify tests pass.",
-          tokenBudget: 200_000,
-        },
+        goalMode: { objective: "Fix octo/repo and verify tests pass.", tokenBudget: 200_000 },
         onEngineSessionId: sink.updateCodexEngineSessionId,
         onRuntimeEvents: expect.any(Function),
       }),
@@ -938,128 +779,13 @@ describe("executeGoatTask", () => {
       messageId: "assistant_msg_1",
       content: "I'll clone the repository.",
     });
-    expect(sink.updateMessageContent).not.toHaveBeenCalledWith({
-      messageId: "assistant_msg_1",
-      content: expect.stringContaining("Codex command completed"),
-    });
-    expect(sink.appendEvent).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: "assistant.delta" }),
-    );
-    expect(sink.appendEvent).toHaveBeenCalledWith({
-      type: "message.completed",
-      messageId: "assistant_msg_1",
-      payload: expect.objectContaining({
-        source: "codex_app_server",
-        role: "assistant",
-        content: "I'll clone the repository.",
-        itemId: "agent_1",
-      }),
-    });
-    expect(sink.appendEvent).toHaveBeenCalledWith({
-      type: "reasoning.completed",
-      messageId: "assistant_msg_1",
-      payload: expect.objectContaining({
-        source: "codex_app_server",
-        text: "Checked the repository state.",
-        itemId: "reasoning_1",
-      }),
-    });
-    expect(sink.appendEvent).toHaveBeenCalledWith({
-      type: "tool.completed",
-      messageId: "assistant_msg_1",
-      payload: expect.objectContaining({
-        source: "codex_app_server",
-        toolCallId: "cmd_1",
-        toolName: "codex_command",
-        output: { status: "completed", exitCode: 0 },
-      }),
-    });
     expect(sink.recordSandboxUsage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sandboxId: "sbx_codex",
-        activeMs: 60_000,
-        rawMetrics: expect.objectContaining({
-          goalMode: true,
-          goalStatus: null,
-        }),
-      }),
-    );
-    expect(sink.recordModelUsage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        modelProvider: "openai",
-        modelName: "gpt-5.5",
-        costOverride: expect.objectContaining({
-          costBasis: { source: "codex_subscription" },
-        }),
-      }),
+      expect.objectContaining({ sandboxId: "sbx_codex", activeMs: 60_000 }),
     );
   });
 
-  it("saves brain markdown reports as artifacts and returns the brain link", async () => {
-    aiMock.generateObject.mockResolvedValueOnce({ object: reportHarnessSpec });
-    aiMock.streamText.mockReturnValueOnce({
-      fullStream: streamParts(
-        { type: "text-delta", text: "# Marseille Market Research\n\nFindings." },
-        { type: "finish-step", usage: { inputTokens: 20, outputTokens: 8, totalTokens: 28 } },
-      ),
-      text: Promise.resolve("# Marseille Market Research\n\nFindings."),
-    });
-    const sink = createSink();
-
-    await expect(
-      executeGoatTask({
-        task: task({ name: "Marseille market research" }),
-        env: env(),
-        signal: new AbortController().signal,
-        sink,
-        reportStage: vi.fn(async () => {}),
-      }),
-    ).resolves.toEqual({
-      result:
-        "Research report saved to Brain: [Marseille Market Research](/brain/research/marseille-market-research).\n\nArtifact: `research/marseille-market-research.md`",
-      harnessSpec: expect.objectContaining({ resultMode: "brain_markdown_report" }),
-      debugTrace: expect.objectContaining({ schemaVersion: "goat.debug.v1" }),
-      artifact: expect.objectContaining({
-        type: "brain_markdown_report",
-        brainPath: "research/marseille-market-research.md",
-      }),
-    });
-
-    expect(goatBrainMock.createGoatBrainMarkdownReportForTask).toHaveBeenCalledWith({
-      userWorkosId: "user_1",
-      taskId: "goat_task_1",
-      title: "Marseille market research",
-      markdown: "# Marseille Market Research\n\nFindings.",
-    });
-    expect(sink.updateMessageContent).not.toHaveBeenCalled();
-    expect(sink.completeMessage).toHaveBeenCalledWith({
-      messageId: "assistant_msg_1",
-      content:
-        "Research report saved to Brain: [Marseille Market Research](/brain/research/marseille-market-research).\n\nArtifact: `research/marseille-market-research.md`",
-      modelMessage: {
-        role: "assistant",
-        content:
-          "Research report saved to Brain: [Marseille Market Research](/brain/research/marseille-market-research).\n\nArtifact: `research/marseille-market-research.md`",
-      },
-    });
-    expect(sink.appendEvent).toHaveBeenCalledWith({
-      type: "artifact.created",
-      messageId: "assistant_msg_1",
-      payload: {
-        artifact: expect.objectContaining({
-          type: "brain_markdown_report",
-          url: "/brain/research/marseille-market-research",
-        }),
-      },
-    });
-  });
-
-  it("fails the assistant message when final assistant content is empty", async () => {
-    aiMock.generateObject.mockResolvedValueOnce({ object: harnessSpec });
-    aiMock.streamText.mockReturnValueOnce({
-      fullStream: streamParts({ type: "finish-step", usage: {} }),
-      text: Promise.resolve(" "),
-    });
+  it("fails the assistant message when the chat loop returns empty content", async () => {
+    goatChatLoopMock.runGoatTaskChatLoop.mockResolvedValueOnce({ assistantContent: " " });
     const sink = createSink();
 
     await expect(
@@ -1077,19 +803,12 @@ describe("executeGoatTask", () => {
       error: "Goat task completed without a final assistant message.",
     });
     expect(sink.appendEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "message.failed",
-        messageId: "assistant_msg_1",
-      }),
+      expect.objectContaining({ type: "message.failed", messageId: "assistant_msg_1" }),
     );
   });
 
   it("preserves the root execution error when failing the assistant message also fails", async () => {
-    aiMock.generateObject.mockResolvedValueOnce({ object: harnessSpec });
-    aiMock.streamText.mockReturnValueOnce({
-      fullStream: streamParts({ type: "finish-step", usage: {} }),
-      text: Promise.resolve(" "),
-    });
+    goatChatLoopMock.runGoatTaskChatLoop.mockResolvedValueOnce({ assistantContent: " " });
     const sink = createSink();
     vi.mocked(sink.failMessage).mockRejectedValueOnce(new Error("cleanup write failed"));
 
@@ -1127,10 +846,6 @@ function createSink(): GoatTaskRunSink {
   };
 }
 
-async function* streamParts(...parts: Array<Record<string, unknown>>) {
-  for (const part of parts) yield part;
-}
-
 function task(overrides: Partial<GoatTask> = {}): GoatTask {
   const now = new Date("2026-01-01T00:00:00.000Z");
   return {
@@ -1142,10 +857,14 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     model,
     scheduleId: null,
     scheduledFor: null,
+    workflowId: null,
+    workflowBrainRef: null,
     status: "running",
     stage: "planning",
     result: null,
     error: null,
+    reportedOutcome: null,
+    outcomeComment: null,
     harnessSpec,
     debugTrace: {},
     codexEngineSessionId: null,

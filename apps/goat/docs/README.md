@@ -47,13 +47,16 @@ Browser
         OR, when Background tasks is enabled in Preferences, call start_task
           insert goat.tasks row
           POST /internal/goat/tasks/:taskId/run
-    OR Local Codex mode
-      POST /api/local-codex/messages
-        enqueue local Codex bridge command
-    OR Cloud Codex mode
-      POST /api/codex-chat/messages
-        persist the message and attachment metadata
-        enqueue a turn for the cloud Codex chat worker
+  GoatSurface #workflow submit
+    POST /api/brain/workflows
+      insert goat.tasks row without creating a chat session or chat messages
+  GoatSurface Local Codex mode
+    POST /api/local-codex/messages
+      enqueue local Codex bridge command
+  GoatSurface Cloud Codex mode
+    POST /api/codex-chat/messages
+      persist the message and attachment metadata
+      enqueue a turn for the cloud Codex chat worker
 
 Runner
   Goat task worker wakes/polls
@@ -98,6 +101,11 @@ while manually typed lookalikes stay plain text. The server resolves that metada
 current user's active-Brain access, rejects stale or cross-Brain references, and caps a turn at 16
 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable snapshot
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
+
+Selecting a workflow with `#<id>` changes the composer action from **Send message** to **Start
+task**. Submission posts directly to `/api/brain/workflows`, starts the durable task in the
+background, and leaves the current Home or chat surface in place. It does not call the foreground
+chat model or persist user/assistant chat messages for the workflow launch.
 
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
 matching `/chat/<id>` URL immediately with the native History API, without starting a server
@@ -211,7 +219,8 @@ main chat even though ordinary deeper or multi-source work routes to a backgroun
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The
 database flag defaults off, so the standard Goat experience is chat plus Brain without background
-task spawning. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
+task spawning. Explicitly starting a `#workflow` opts the user into background tasks so its durable
+run can be claimed. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
 
 The default chat model is `anthropic/claude-sonnet-5`. New tasks store the chat-selected model at
 creation time, then the runner planner chooses the task execution model from its allowed model

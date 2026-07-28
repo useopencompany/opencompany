@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   dbRows: [] as unknown[],
 }));
 
-vi.mock("@/lib/integrations/slack", () => ({
+vi.mock("@opencompany/goat-agent/integrations/slack", () => ({
   slackApiRequest: mocks.slackApiRequest,
 }));
 vi.mock("@opencompany/db/goat-integrations", () => ({

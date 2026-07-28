@@ -1,6 +1,7 @@
 export const HARD_DEFAULT_GOAT_BRAIN_FOLDERS = [
   "inbox",
   "skills",
+  "workflows",
   "people",
   "companies",
   "evidence",
@@ -19,6 +20,7 @@ export const DEFAULT_GOAT_BRAIN_FOLDERS = [
   "inbox",
   ...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
   "skills",
+  "workflows",
   "people",
   "companies",
   "evidence",
@@ -112,6 +114,9 @@ export type GoatBrainFrontmatter = {
   relations: GoatBrainRelation[];
   title?: string;
   description?: string;
+  // Workflow docs only: the model/engine mention token the workflow runs on
+  // (e.g. "kimi-k2.6", "codex"). Ignored for other document kinds.
+  model?: string;
   aliases?: string[];
   sources?: GoatBrainSource[];
   mergedInto?: string;

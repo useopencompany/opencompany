@@ -229,9 +229,20 @@ export type GoatTaskToolName =
   | "github_clone_repository"
   | "github_shell"
   | "github_status"
-  | "github_open_pull_request";
+  | "github_open_pull_request"
+  // Shared main-chat tools, used by opencompany-engine task runs (tasks are a
+  // hidden main-chat run). Persisted to goat.task_messages.tool_name (text).
+  | "goat_brain"
+  | "save_to_brain"
+  | "web_search"
+  | "web_fetch"
+  | "list_actions"
+  | "use_action"
+  | "update_task_status";
 
 export type GoatTaskSkillId = "first-principles" | "yc-office-hours";
+
+export type GoatTaskReportedOutcome = "done" | "needs_attention";
 
 export type GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1";
@@ -243,6 +254,15 @@ export type GoatHarnessSpec = {
   skills: GoatTaskSkillId[];
   maxModelSteps: number;
   resultMode: "assistant_final" | "brain_markdown_report";
+  // Extra system-prompt blocks appended after the shared chat system prompt for
+  // opencompany-engine task runs (e.g. compiled workflow instructions + skills).
+  // The runner's chat loop feeds these as extraSystemBlocks.
+  systemBlocks?: string[];
+  workflow?: {
+    id: string;
+    brainRef: string;
+    skillIds: string[];
+  };
   codex?: {
     repository?: string | null;
     createPullRequest?: boolean;
@@ -2401,6 +2421,10 @@ export const goatTasks = goat.table(
     stage: text("stage").$type<GoatTaskStage>().notNull().default("queued"),
     result: text("result"),
     error: text("error"),
+    workflowId: text("workflow_id"),
+    workflowBrainRef: text("workflow_brain_ref"),
+    reportedOutcome: text("reported_outcome").$type<GoatTaskReportedOutcome>(),
+    outcomeComment: text("outcome_comment"),
     harnessSpec: jsonb("harness_spec").$type<GoatHarnessSpec>().notNull().default(sql`'{}'::jsonb`),
     debugTrace: jsonb("debug_trace")
       .$type<GoatTaskDebugTrace>()
@@ -2441,6 +2465,10 @@ export const goatTasks = goat.table(
     stageCheck: check(
       "goat_tasks_stage_check",
       sql`${table.stage} IN ('queued', 'planning', 'sandboxing', 'running', 'completed', 'failed', 'canceled')`,
+    ),
+    reportedOutcomeCheck: check(
+      "goat_tasks_reported_outcome_check",
+      sql`${table.reportedOutcome} IS NULL OR ${table.reportedOutcome} IN ('done', 'needs_attention')`,
     ),
   }),
 );

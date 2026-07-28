@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   createMCPClient: vi.fn(),
 }));
 
-vi.mock("@/lib/integrations/linear-mcp", () => ({
+vi.mock("@opencompany/goat-agent/integrations/linear-mcp", () => ({
   GOAT_LINEAR_MCP_ENDPOINT_URL: "https://mcp.linear.app/mcp",
   getGoatLinearIntegrationState: mocks.getGoatLinearIntegrationState,
   loadGoatLinearMcpWorkerConnection: mocks.loadGoatLinearMcpWorkerConnection,
