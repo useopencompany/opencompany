@@ -666,6 +666,71 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
+  it("selects a Claude model and submits per-turn reasoning effort", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: requestChatSessionId(init, "goat_chat_claude_1"),
+          userMessageId: "goat_chat_msg_claude_user",
+          assistantMessageId: "goat_chat_msg_claude_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        claudeCodeConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Claude Code sandbox"));
+
+    expect(
+      screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Plan mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Goal mode" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }));
+    await user.click(screen.getByRole("option", { name: /Claude Haiku 4\.5/ }));
+    expect(
+      screen.queryByRole("button", { name: /Claude reasoning effort/ }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Claude model: Claude Haiku 4.5" }));
+    await user.click(screen.getByRole("option", { name: /Claude Opus 4\.8/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    );
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Inspect this repository");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/claude-chat/messages", expect.any(Object)),
+    );
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/claude-chat/messages")!;
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      newSessionId: expect.stringMatching(/^goat_chat_/),
+      model: "anthropic/claude-opus-4.8",
+      settings: { reasoningEffort: "xhigh" },
+      message: {
+        role: "user",
+        parts: [{ type: "text", text: "Inspect this repository" }],
+      },
+    });
+  });
+
   it("submits selected Brain skills to cloud Codex", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

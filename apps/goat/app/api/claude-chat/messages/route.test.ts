@@ -82,6 +82,8 @@ describe("POST /api/claude-chat/messages", () => {
             mentions: [{ kind: "skill", id: "coding-work" }],
           },
         },
+        model: "anthropic/claude-opus-4.8",
+        settings: { reasoningEffort: "xhigh" },
       }),
     );
 
@@ -96,6 +98,8 @@ describe("POST /api/claude-chat/messages", () => {
         workspaceId: "workspace_1",
         engine: "claude_code",
         prompt: "Implement this",
+        model: "anthropic/claude-opus-4.8",
+        settings: { reasoningEffort: "xhigh" },
         skills: [
           {
             id: "coding-work",
