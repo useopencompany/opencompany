@@ -31,6 +31,12 @@ vi.mock("@/lib/codex-auth", () => ({
 }));
 
 // Pulls in @/lib/auth (authkit), which vitest cannot resolve.
+vi.mock("@/lib/claude-code-auth", () => ({
+  disconnectGoatClaudeCodeAuth: vi.fn(async () => ({ ok: true })),
+  saveGoatClaudeCodeToken: vi.fn(async () => ({ ok: true })),
+}));
+
+// Pulls in @/lib/auth (authkit), which vitest cannot resolve.
 vi.mock("@/lib/integration-account-actions", () => ({
   disconnectGoatIntegrationAccountAction: vi.fn(async () => ({ ok: true })),
   getGoatIntegrationAccountUsageAction: vi.fn(async () => ({
@@ -100,6 +106,22 @@ describe("SettingsIntegrationsPanel", () => {
 
     expect(screen.queryByText("Goat MCP")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "/settings/mcp" })).not.toBeInTheDocument();
+  });
+
+  it("shows a saved Claude Code token as pending until a successful turn validates it", () => {
+    const integrations = goatIntegrationStateFromRows([]) as GoatIntegrationState;
+    integrations.claude_code = {
+      provider: "claude_code",
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      lastValidatedAt: null,
+    };
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    expect(screen.getByText("Token saved; validation pending")).toBeInTheDocument();
   });
 
   it("switches between the workspace and personal scopes", () => {

@@ -76,6 +76,28 @@ export function codexCliModelNameForModelId(modelId: string): string | null {
     : null;
 }
 
+// Sonnet is the default because it is fully covered by Claude subscription limits on
+// every plan; larger tiers are gated behind usage credits on some plans.
+export const CLAUDE_CODE_DEFAULT_MODEL_ID: AgentModelId = "anthropic/claude-sonnet-5";
+export const CLAUDE_CODE_AGENT_MODEL_IDS = [
+  "anthropic/claude-sonnet-5",
+  "anthropic/claude-opus-4.8",
+  "anthropic/claude-haiku-4.5",
+] as const satisfies readonly AgentModelId[];
+
+const CLAUDE_CODE_MODEL_ID_SET = new Set<string>(CLAUDE_CODE_AGENT_MODEL_IDS);
+
+export function isClaudeCodeModelId(value: string): value is AgentModelId {
+  return CLAUDE_CODE_MODEL_ID_SET.has(value);
+}
+
+// Gateway ids use dotted versions ("claude-opus-4.8"); the Claude CLI and API use
+// dashed ones ("claude-opus-4-8").
+export function claudeCodeCliModelNameForModelId(modelId: string): string | null {
+  if (!isClaudeCodeModelId(modelId)) return null;
+  return modelId.replace(/^anthropic\//, "").replace(/\./g, "-");
+}
+
 // Ratings were seeded from public data on 2026-06-03 (Artificial Analysis
 // Intelligence Index, output tokens/sec; OpenRouter / provider output pricing)
 // using these buckets. Keep new models consistent with them:

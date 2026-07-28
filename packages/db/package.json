@@ -16,6 +16,10 @@
       "types": "./src/codex-auth.ts",
       "default": "./src/codex-auth.ts"
     },
+    "./goat-claude-code-auth": {
+      "types": "./src/goat-claude-code-auth.ts",
+      "default": "./src/goat-claude-code-auth.ts"
+    },
     "./goat-codex-auth": {
       "types": "./src/goat-codex-auth.ts",
       "default": "./src/goat-codex-auth.ts"

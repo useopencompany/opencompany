@@ -74,6 +74,7 @@ export type GoatAppInitialData = {
   integrations: GoatIntegrationState;
   featureFlags: GoatFeatureFlags;
   codexConnected: boolean;
+  claudeCodeConnected: boolean;
   chatResumeEnabled: boolean;
   mcpSetup: {
     preferredClient: GoatMcpClient | null;
@@ -298,6 +299,7 @@ function GoatAppLiveDataSubscriptions({
     return {
       ...liveIntegrations,
       codex: initialData.integrations.codex,
+      claude_code: initialData.integrations.claude_code,
       jamie: {
         ...liveIntegrations.jamie,
         integrationId: initialData.integrations.jamie.integrationId,

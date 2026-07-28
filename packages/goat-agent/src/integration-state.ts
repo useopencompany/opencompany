@@ -151,6 +151,14 @@ export type GoatCodexProviderState = {
   lastValidatedAt: string | null;
 };
 
+export type GoatClaudeCodeProviderState = {
+  provider: "claude_code";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "not_connected";
+  statusReason: string | null;
+  lastValidatedAt: string | null;
+};
+
 // One connected account of a personal provider. A user can hold several
 // accounts per provider (two Gmails, two Slack workspaces) — uniqueness in the
 // DB is (user, provider, external_id), so a second OAuth pass creates a
@@ -194,6 +202,7 @@ export type GoatIntegrationState = {
   attio: GoatAttioProviderState;
   stripe: GoatStripeProviderState;
   codex: GoatCodexProviderState;
+  claude_code: GoatClaudeCodeProviderState;
   // All of the user's connected accounts per personal provider. The
   // single-account states above remain the "primary connection" view used by
   // onboarding and zero states; multi-account UI reads this instead.
@@ -306,6 +315,13 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     stripe: stripeProviderState(byProvider.get("stripe")),
     codex: {
       provider: "codex",
+      connected: false,
+      status: "not_connected",
+      statusReason: null,
+      lastValidatedAt: null,
+    },
+    claude_code: {
+      provider: "claude_code",
       connected: false,
       status: "not_connected",
       statusReason: null,

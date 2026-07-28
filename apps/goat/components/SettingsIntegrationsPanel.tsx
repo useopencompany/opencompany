@@ -2,6 +2,7 @@
 
 import { toast } from "@opencompany/ui/components/sonner";
 import {
+  AnthropicIcon,
   AttioIcon,
   FathomIcon,
   GitHubIcon,
@@ -27,6 +28,7 @@ import {
   type GoatProviderCapability,
   providerCapabilities,
 } from "@/lib/actions/capabilities";
+import { disconnectGoatClaudeCodeAuth, saveGoatClaudeCodeToken } from "@/lib/claude-code-auth";
 import {
   disconnectGoatCodexAuth,
   type GoatCodexDeviceAuthFlow,
@@ -39,6 +41,7 @@ import {
   setGoatIntegrationCapabilityModeAction,
 } from "@/lib/integration-account-actions";
 import {
+  type GoatClaudeCodeProviderState,
   type GoatCodexProviderState,
   type GoatGitHubProviderState,
   type GoatGoogleProviderState,
@@ -63,7 +66,13 @@ import { createGoatCollections, type GoatIntegrationRow } from "@/lib/task-colle
 // monogram fallback where no square vector mark exists), the colored logo tile,
 // and a short connection-focused description. Keyed by provider so the card
 // components derive everything from the provider string.
-type IntegrationMetaKey = GoatPersonalAccountProvider | "github" | "jamie" | "stripe" | "codex";
+type IntegrationMetaKey =
+  | GoatPersonalAccountProvider
+  | "github"
+  | "jamie"
+  | "stripe"
+  | "codex"
+  | "claude_code";
 
 type IntegrationMeta = {
   label: string;
@@ -160,6 +169,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: OpenAIIcon,
     tileClass: "bg-black text-white",
   },
+  claude_code: {
+    label: "Claude Code",
+    description: "Connect your Claude subscription so Goat can run coding tasks.",
+    Icon: AnthropicIcon,
+    tileClass: "bg-[#CC785C] text-white",
+  },
 };
 
 export function SettingsIntegrationsPanel({
@@ -233,6 +248,7 @@ function LiveSettingsIntegrations({
     return {
       ...liveIntegrations,
       codex: initialIntegrations.codex,
+      claude_code: initialIntegrations.claude_code,
       jamie: {
         ...liveIntegrations.jamie,
         integrationId: initialIntegrations.jamie.integrationId,
@@ -290,7 +306,8 @@ function countWorkspaceConnected(integrations: GoatIntegrationState) {
 function countPersonalConnected(integrations: GoatIntegrationState) {
   return (
     countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS) +
-    (integrations.codex.connected ? 1 : 0)
+    (integrations.codex.connected ? 1 : 0) +
+    (integrations.claude_code.connected ? 1 : 0)
   );
 }
 
@@ -368,6 +385,7 @@ function IntegrationCards({
               accounts={integrations.personalAccounts.latitude}
             />
             <CodexIntegrationCard integration={integrations.codex} />
+            <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
           </div>
         </section>
       )}
@@ -989,6 +1007,126 @@ function CodexIntegrationCard({ integration }: { integration: GoatCodexProviderS
               Disconnect
             </button>
           ) : null}
+        </div>
+      }
+    />
+  );
+}
+
+function ClaudeCodeIntegrationCard({ integration }: { integration: GoatClaudeCodeProviderState }) {
+  const router = useRouter();
+  const [token, setToken] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const submitToken = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await saveGoatClaudeCodeToken(token);
+      if (result.ok) {
+        setToken("");
+        setShowForm(false);
+        router.refresh();
+      } else {
+        setError(result.error);
+      }
+    });
+  };
+
+  const disconnect = () => {
+    setError(null);
+    startTransition(async () => {
+      await disconnectGoatClaudeCodeAuth();
+      setShowForm(false);
+      router.refresh();
+    });
+  };
+
+  const accountLabel =
+    integration.status === "connected"
+      ? integration.lastValidatedAt
+        ? `Connected ${formatDateTime(integration.lastValidatedAt)}`
+        : "Token saved; validation pending"
+      : integration.statusReason;
+
+  return (
+    <IntegrationCard
+      meta={INTEGRATION_META.claude_code}
+      body={
+        <div className="flex flex-col gap-2">
+          {accountLabel ? (
+            <p className="truncate text-[12px] leading-4 text-ink-subtle">{accountLabel}</p>
+          ) : null}
+          {showForm ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-[12px] leading-5 text-ink-muted">
+                Run <span className="font-mono font-semibold text-ink">claude setup-token</span> on
+                your machine, approve in the browser, and paste the token here. Tokens last about a
+                year.
+              </p>
+              <input
+                type="password"
+                value={token}
+                onChange={(event) => setToken(event.target.value)}
+                placeholder="sk-ant-oat…"
+                autoComplete="off"
+                spellCheck={false}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              />
+            </div>
+          ) : null}
+          {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
+        </div>
+      }
+      footer={
+        <div className="flex items-center gap-2">
+          {showForm ? (
+            <>
+              <button
+                type="button"
+                onClick={submitToken}
+                disabled={isPending || !token.trim()}
+                aria-busy={isPending}
+                className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
+              >
+                {isPending ? "Working" : "Save token"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm(false);
+                  setToken("");
+                  setError(null);
+                }}
+                disabled={isPending}
+                className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowForm(true)}
+                disabled={isPending}
+                className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
+              >
+                {buttonLabel(integration.status, isPending)}
+              </button>
+              {integration.connected ? (
+                <button
+                  type="button"
+                  onClick={disconnect}
+                  disabled={isPending}
+                  className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+                >
+                  Disconnect
+                </button>
+              ) : null}
+            </>
+          )}
         </div>
       }
     />

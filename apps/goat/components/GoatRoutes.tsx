@@ -113,6 +113,7 @@ export function GoatHomeRoute({
         recentChats={data.recentChats}
         archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
+        claudeCodeConnected={data.claudeCodeConnected}
         localCodexBetaEnabled={data.featureFlags.localCodexBridge}
         taskSpawningEnabled={data.featureFlags.taskSpawning}
         chatResumeEnabled={data.chatResumeEnabled}

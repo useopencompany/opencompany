@@ -34,6 +34,11 @@ vi.mock("@/lib/codex-auth", () => ({
   isGoatCodexConnectedForUser: mocks.codexConnected,
 }));
 
+// Pulls in @/lib/auth (authkit), which vitest cannot resolve.
+vi.mock("@/lib/claude-code-auth", () => ({
+  isGoatClaudeCodeConnectedForUser: vi.fn(async () => false),
+}));
+
 vi.mock("@/lib/task-runner", () => ({
   getGoatCodexSandboxStatus: mocks.getSandboxStatus,
   killGoatCodexSandbox: mocks.killSandbox,
