@@ -263,6 +263,8 @@ Create or switch to the production WorkOS environment.
   `https://<production-web-domain>/auth/callback`
 - Add the Goat production redirect URI to the Goat Application:
   `https://<production-goat-domain>/auth/callback`
+- Set the Goat Application's User invitation URL to:
+  `https://<production-goat-domain>/auth/invite`
 - Set `NEXT_PUBLIC_WORKOS_REDIRECT_URI` to the same value in Vercel.
 - Generate a 32+ character `WORKOS_COOKIE_PASSWORD`.
 

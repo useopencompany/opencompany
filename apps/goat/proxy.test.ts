@@ -79,6 +79,10 @@ describe("localGoatHttpsRedirectUrl", () => {
 });
 
 describe("Goat public routes", () => {
+  it("allows invitation links to start authentication", () => {
+    expect(isUnauthenticatedPath("/auth/invite")).toBe(true);
+  });
+
   it("allows shared chats and their attachment routes without authentication", () => {
     expect(isUnauthenticatedPath("/share/goat_chat_share_123")).toBe(true);
     expect(
