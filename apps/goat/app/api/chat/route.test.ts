@@ -1,3 +1,4 @@
+import { BROWSER_TOOL_NAMES } from "@opencompany/browser-tools";
 import { convertToModelMessages, streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
@@ -7,10 +8,15 @@ import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
   activateAndListGoatChatSessionSkills,
   GoatBrainSkillMentionError,
+  listGoatBrainSkillCatalog,
   resolveGoatBrainSkillMentions,
 } from "@/lib/brain-skills";
-import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
-import { OPENCOMPANY_CHAT_MAX_STEPS } from "@/lib/chat-agent";
+import {
+  createGoatChatApprovalContinuationTurn,
+  createGoatChatUserTurn,
+  persistGoatChatAssistantMessage,
+} from "@/lib/chat";
+import { OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX } from "@/lib/chat-agent";
 import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import {
@@ -20,10 +26,12 @@ import {
   GOAT_BRAIN_TOOL_PART_TYPE,
   LIST_ACTIONS_TOOL_NAME,
   LIST_ACTIONS_TOOL_PART_TYPE,
+  LIST_SKILLS_TOOL_NAME,
   SAVE_TO_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
   START_TASK_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
+  USE_SKILL_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
@@ -34,6 +42,20 @@ import {
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
 import { POST } from "./route";
+
+const browserMocks = vi.hoisted(() => ({
+  createSession: vi.fn(),
+  dbInsert: vi.fn(),
+  dbValues: vi.fn(),
+  execute: vi.fn(),
+  getUsage: vi.fn(),
+}));
+
+vi.mock("@opencompany/db/client", () => ({
+  getDb: vi.fn(() => ({
+    insert: browserMocks.dbInsert,
+  })),
+}));
 
 vi.mock("@/lib/chat-request-auth", () => ({
   resolveGoatChatRequestContext: vi.fn(),
@@ -56,6 +78,7 @@ vi.mock("@/lib/brain-skills", async (importOriginal) => {
   return {
     ...actual,
     activateAndListGoatChatSessionSkills: vi.fn(),
+    listGoatBrainSkillCatalog: vi.fn(),
     resolveGoatBrainSkillMentions: vi.fn(),
   };
 });
@@ -101,6 +124,10 @@ vi.mock("@/lib/actions/execute", () => ({
   executeGoatAction: vi.fn(),
 }));
 
+vi.mock("@/lib/sandbox/browser-tools", () => ({
+  createChatBrowserToolSession: browserMocks.createSession,
+}));
+
 vi.mock("ai", () => ({
   convertToModelMessages: vi.fn(async () => []),
   createGateway: vi.fn(() => (model: string) => ({ model })),
@@ -117,10 +144,18 @@ describe("POST /api/chat", () => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
     vi.stubEnv("VERCEL_AI_GATEWAY_API_KEY", "test-key");
+    browserMocks.createSession.mockReturnValue({
+      execute: browserMocks.execute,
+      getUsage: browserMocks.getUsage,
+    });
+    browserMocks.dbInsert.mockReturnValue({ values: browserMocks.dbValues });
+    browserMocks.dbValues.mockResolvedValue(undefined);
+    browserMocks.getUsage.mockReturnValue(null);
     mockListGoatTaskSchedulesForUser().mockResolvedValue([]);
     mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
     mockIsGoatChatActionsKilled().mockReturnValue(false);
     mockResolveGoatActionCatalog().mockResolvedValue({ providers: [], actions: [] });
+    vi.mocked(listGoatBrainSkillCatalog).mockResolvedValue([]);
     vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([]);
     vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([]);
   });
@@ -189,6 +224,139 @@ describe("POST /api/chat", () => {
     });
   });
 
+  it("lets main chat discover and load active Brain skills", async () => {
+    mockAuth();
+    mockCreateTurn();
+    vi.mocked(listGoatBrainSkillCatalog).mockResolvedValue([
+      {
+        brainRef: ACTIVE_BRAIN.id,
+        id: "product-feature",
+        name: "Product feature",
+        description: "Build and verify product changes.",
+      },
+    ]);
+    vi.mocked(resolveGoatBrainSkillMentions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "product-feature",
+          name: "Product feature",
+          description: "Build and verify product changes.",
+          instructions: "Inspect the product flow, implement the change, and verify it.",
+        },
+      ]);
+    let skillOutput: unknown;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const typed = options as {
+        system?: string;
+        tools?: Record<string, { execute?: unknown }>;
+      };
+      expect(typed.system).toContain("<skill_source>");
+      const listSkills = typed.tools?.[LIST_SKILLS_TOOL_NAME]?.execute;
+      const useSkill = typed.tools?.[USE_SKILL_TOOL_NAME]?.execute;
+      if (typeof listSkills !== "function" || typeof useSkill !== "function") {
+        throw new Error("Skill discovery tools were not configured.");
+      }
+      const execution = Promise.resolve(
+        listSkills({ query: "product" }, { toolCallId: "list_skill_1", messages: [] }),
+      ).then(() =>
+        useSkill({ skill: "product-feature" }, { toolCallId: "use_skill_1", messages: [] }),
+      );
+      return {
+        toUIMessageStreamResponse: vi.fn(async () => {
+          skillOutput = await execution;
+          return new Response(null, { status: 200 });
+        }),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Help me implement this product change."));
+
+    expect(response.status).toBe(200);
+    expect(listGoatBrainSkillCatalog).toHaveBeenCalledWith(ACTIVE_BRAIN.id);
+    expect(resolveGoatBrainSkillMentions).toHaveBeenLastCalledWith({
+      activeBrainRef: ACTIVE_BRAIN.id,
+      mentions: [{ brainRef: ACTIVE_BRAIN.id, id: "product-feature" }],
+    });
+    expect(skillOutput).toEqual({
+      ok: true,
+      skill: {
+        id: "product-feature",
+        name: "Product feature",
+        description: "Build and verify product changes.",
+        instructions: "Inspect the product flow, implement the change, and verify it.",
+      },
+    });
+  });
+
+  it("does not reload skill instructions that are already active in the chat", async () => {
+    mockAuth();
+    mockCreateTurn();
+    vi.mocked(listGoatBrainSkillCatalog).mockResolvedValue([
+      {
+        brainRef: ACTIVE_BRAIN.id,
+        id: "product-feature",
+        name: "Product feature",
+        description: "Build and verify product changes.",
+      },
+    ]);
+    vi.mocked(resolveGoatBrainSkillMentions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "product-feature",
+          name: "Product feature",
+          description: "Build and verify product changes.",
+          instructions: "Inspect, implement, and verify.",
+        },
+      ]);
+    vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([
+      {
+        chatSessionId: "session_1",
+        skillId: "product-feature",
+        brainRef: ACTIVE_BRAIN.id,
+        activatedMessageId: "user_message_0",
+        name: "Product feature",
+        description: "Build and verify product changes.",
+        instructions: "Inspect, implement, and verify.",
+        createdAt: new Date("2026-07-27T00:00:00Z"),
+      },
+    ]);
+    let skillOutput: unknown;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tools = (options as { tools?: Record<string, { execute?: unknown }> }).tools ?? {};
+      const listSkills = tools[LIST_SKILLS_TOOL_NAME]?.execute;
+      const useSkill = tools[USE_SKILL_TOOL_NAME]?.execute;
+      if (typeof listSkills !== "function" || typeof useSkill !== "function") {
+        throw new Error("Skill discovery tools were not configured.");
+      }
+      const execution = Promise.resolve(
+        listSkills({}, { toolCallId: "list_skill_1", messages: [] }),
+      ).then(() =>
+        useSkill({ skill: "product-feature" }, { toolCallId: "use_skill_1", messages: [] }),
+      );
+      return {
+        toUIMessageStreamResponse: vi.fn(async () => {
+          skillOutput = await execution;
+          return new Response(null, { status: 200 });
+        }),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Keep working on the product change."));
+
+    expect(response.status).toBe(200);
+    expect(skillOutput).toEqual({
+      ok: false,
+      skill: "product-feature",
+      error: {
+        code: "already_loaded",
+        message:
+          'Skill "@skill/product-feature" is already available in this chat. Follow its existing instructions without loading it again.',
+      },
+    });
+  });
+
   it("exposes Stripe actions without automatically surveying live finance data for Brain fill", async () => {
     mockAuth();
     mockCreateTurn();
@@ -242,6 +410,55 @@ describe("POST /api/chat", () => {
     const response = await POST(validChatRequest("What's new in #general?"));
     expect(response.status).toBe(200);
     expect(resolveGoatActionCatalog).not.toHaveBeenCalled();
+  });
+
+  it("streams context usage metadata as each model step finishes", async () => {
+    mockAuth();
+    mockCreateTurn();
+    const metadataUpdates: unknown[] = [];
+    mockStreamText().mockImplementation(
+      () =>
+        ({
+          toUIMessageStreamResponse: vi.fn(
+            (options: { messageMetadata: (event: { part: unknown }) => unknown }) => {
+              metadataUpdates.push(options.messageMetadata({ part: { type: "start" } }));
+              metadataUpdates.push(
+                options.messageMetadata({
+                  part: {
+                    type: "finish-step",
+                    usage: {
+                      inputTokens: 12_000,
+                      outputTokens: 800,
+                      totalTokens: 12_800,
+                    },
+                  },
+                }),
+              );
+              metadataUpdates.push(
+                options.messageMetadata({
+                  part: {
+                    type: "finish-step",
+                    usage: {
+                      inputTokens: 18_000,
+                      outputTokens: 1_200,
+                    },
+                  },
+                }),
+              );
+              return new Response(null, { status: 200 });
+            },
+          ),
+        }) as never,
+    );
+
+    const response = await POST(validChatRequest("Use the tools and summarize the result."));
+
+    expect(response.status).toBe(200);
+    expect(metadataUpdates).toEqual([
+      { sessionId: "session_1" },
+      { sessionId: "session_1", contextTokens: 12_800 },
+      { sessionId: "session_1", contextTokens: 19_200 },
+    ]);
   });
 
   it("forwards use_action calls to the executor and returns its result", async () => {
@@ -443,7 +660,11 @@ describe("POST /api/chat", () => {
         activeTools: [USE_ACTION_TOOL_NAME],
         toolChoice: "required",
       });
-      expect(settings.prepareStep?.({ stepNumber: OPENCOMPANY_CHAT_MAX_STEPS - 1 })).toEqual({
+      expect(
+        settings.prepareStep?.({
+          stepNumber: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX - 1,
+        }),
+      ).toEqual({
         activeTools: [],
         toolChoice: "none",
       });
@@ -497,6 +718,64 @@ describe("POST /api/chat", () => {
         },
       }),
     );
+  });
+
+  it.each([
+    ["an approved", true],
+    ["a declined", false],
+  ])("keeps %s integration approval continuation answer-only", async (_label, approved) => {
+    mockAuth();
+    mockCreateGoatChatApprovalContinuationTurn().mockResolvedValue({
+      ok: true,
+      session: {
+        id: "session_1",
+        model: "openai/gpt-5.5",
+        engine: "opencompany",
+      },
+      lastUserMessage: {
+        id: "user_message_1",
+        content: "Send the email.",
+      },
+      storedMessages: [],
+      messages: [],
+      respondedApprovalIds: ["approval_1"],
+    });
+    mockStreamText().mockImplementation((options: unknown) => {
+      const settings = options as {
+        prepareStep?: (input: { stepNumber: number }) => unknown;
+      };
+      expect(settings.prepareStep?.({ stepNumber: 0 })).toEqual({
+        activeTools: [],
+        toolChoice: "none",
+      });
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        sessionId: "session_1",
+        message: {
+          id: "assistant_1",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-use_action",
+              toolCallId: "send_email_1",
+              state: "approval-responded",
+              input: {
+                action: "gmail.send_email",
+                params: { to: ["founder@example.com"], subject: "Feature request", body: "Hello" },
+              },
+              approval: { id: "approval_1", approved },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
   });
 
   it("forwards a valid browser-reserved id to new chat persistence", async () => {
@@ -757,6 +1036,7 @@ describe("POST /api/chat", () => {
       expect.objectContaining({
         providerOptions: {
           gateway: {
+            caching: "auto",
             user: expect.stringMatching(/^goat-[0-9a-f]{16}$/),
             tags: expect.arrayContaining([
               "app:goat",
@@ -1261,7 +1541,7 @@ describe("POST /api/chat", () => {
     });
   });
 
-  it("omits public-web tools when EXA_API_KEY is absent", async () => {
+  it("omits Exa tools while retaining browser tools when EXA_API_KEY is absent", async () => {
     vi.stubEnv("EXA_API_KEY", "");
     mockAuth();
     mockCreateTurn();
@@ -1270,17 +1550,27 @@ describe("POST /api/chat", () => {
         system?: string;
         stopWhen?: unknown;
         prepareStep?: (input: { stepNumber: number }) => unknown;
-        tools?: { web_fetch?: unknown; web_search?: unknown };
+        tools?: Record<string, unknown>;
       };
-      expect(typedOptions.stopWhen).toEqual({ count: OPENCOMPANY_CHAT_MAX_STEPS });
-      expect(typedOptions.prepareStep?.({ stepNumber: OPENCOMPANY_CHAT_MAX_STEPS - 1 })).toEqual({
+      expect(typedOptions.stopWhen).toEqual({
+        count: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
+      });
+      expect(
+        typedOptions.prepareStep?.({
+          stepNumber: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX - 1,
+        }),
+      ).toEqual({
         activeTools: [],
         toolChoice: "none",
       });
       expect(typedOptions.tools?.web_fetch).toBeUndefined();
       expect(typedOptions.tools?.web_search).toBeUndefined();
+      for (const name of BROWSER_TOOL_NAMES) {
+        expect(typedOptions.tools?.[name]).toBeDefined();
+      }
       expect(typedOptions.system).not.toContain("Use web_fetch when the user provides");
       expect(typedOptions.system).not.toContain("Use the web_search tool inside chat");
+      expect(typedOptions.system).toContain("Use browser tools for rendered public pages");
       return {
         toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
       } as never;
@@ -1298,6 +1588,116 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(browserMocks.createSession).toHaveBeenCalledOnce();
+  });
+
+  it("adds sandbox browser tools and the larger step budget by default", async () => {
+    vi.stubEnv("EXA_API_KEY", "");
+    mockAuth();
+    mockCreateTurn();
+    mockStreamText().mockImplementation((options: unknown) => {
+      const typedOptions = options as {
+        system?: string;
+        stopWhen?: unknown;
+        prepareStep?: (input: { stepNumber: number }) => unknown;
+        tools?: Record<string, unknown>;
+      };
+      expect(typedOptions.stopWhen).toEqual({
+        count: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
+      });
+      expect(
+        typedOptions.prepareStep?.({
+          stepNumber: OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX - 1,
+        }),
+      ).toEqual({
+        activeTools: [],
+        toolChoice: "none",
+      });
+      expect(Object.keys(typedOptions.tools ?? {})).toEqual(
+        expect.arrayContaining([...BROWSER_TOOL_NAMES]),
+      );
+      expect(typedOptions.system).toContain("Use browser tools for rendered public pages");
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Open example.com in the browser."));
+
+    expect(response.status).toBe(200);
+    expect(browserMocks.createSession).toHaveBeenCalledWith({
+      chatSessionId: "session_1",
+      userWorkosId: "user_1",
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it("records one metering row after a browser sandbox is touched", async () => {
+    vi.stubEnv("EXA_API_KEY", "");
+    mockAuth();
+    mockCreateTurn();
+    const startedAt = new Date("2026-07-27T10:00:00.000Z");
+    const endedAt = new Date("2026-07-27T10:00:02.500Z");
+    browserMocks.getUsage.mockReturnValue({
+      sandboxId: "sbx_session_1",
+      sandboxName: "goat-chat-session_1",
+      startedAt,
+      endedAt,
+      activeMs: 2500,
+      rawMetrics: { commandCount: 2 },
+    });
+    mockPersistGoatChatAssistantMessage().mockResolvedValue({} as never);
+    mockStreamText().mockImplementation(
+      () =>
+        ({
+          toUIMessageStreamResponse: vi.fn(
+            async (options: {
+              onFinish: (event: {
+                responseMessage: {
+                  id: string;
+                  role: "assistant";
+                  parts: Array<{ type: "text"; text: string }>;
+                };
+                finishReason: string;
+                isAborted: boolean;
+              }) => Promise<void>;
+            }) => {
+              await options.onFinish({
+                responseMessage: {
+                  id: "assistant_1",
+                  role: "assistant",
+                  parts: [{ type: "text", text: "Example Domain." }],
+                },
+                finishReason: "stop",
+                isAborted: false,
+              });
+              return new Response(null, { status: 200 });
+            },
+          ),
+        }) as never,
+    );
+
+    const response = await POST(validChatRequest("Open example.com."));
+
+    expect(response.status).toBe(200);
+    expect(browserMocks.dbInsert).toHaveBeenCalledOnce();
+    expect(browserMocks.dbValues).toHaveBeenCalledWith({
+      chatSessionId: "session_1",
+      userWorkosId: "user_1",
+      userMessageId: "user_message_1",
+      sandboxId: "sbx_session_1",
+      startedAt,
+      endedAt,
+      activeMs: 2500,
+      rawMetrics: {
+        commandCount: 2,
+        sandboxName: "goat-chat-session_1",
+      },
+      costBasis: {
+        provider: "vercel-sandbox",
+        status: "unpriced",
+      },
+    });
   });
 
   it("uses structured Codex mention metadata when starting a task", async () => {
@@ -1859,6 +2259,7 @@ function mockCreateTurn() {
     session: {
       id: "session_1",
       model: "openai/gpt-5.5",
+      engine: "opencompany",
     },
     userMessage: {
       id: "user_message_1",
@@ -1874,6 +2275,10 @@ function mockResolveGoatChatRequestContext() {
 
 function mockCreateGoatChatUserTurn() {
   return vi.mocked(createGoatChatUserTurn as unknown as () => Promise<unknown>);
+}
+
+function mockCreateGoatChatApprovalContinuationTurn() {
+  return vi.mocked(createGoatChatApprovalContinuationTurn as unknown as () => Promise<unknown>);
 }
 
 function mockPersistGoatChatAssistantMessage() {

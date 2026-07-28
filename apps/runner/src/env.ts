@@ -21,6 +21,9 @@ export type RunnerEnv = {
   // RUNNER_PUBLIC_URL: the runner loads the repo-root .env, where that var points at
   // localhost in local dev and would wrongly activate sandbox callbacks.
   publicUrl: string | undefined;
+  // Public Goat origin used only by the runner host to call private, bearer-protected
+  // endpoints. Integration credentials and this bearer token never enter Codex sandboxes.
+  goatAppUrl?: string | undefined;
   // Kill switch for the LLM broker: set RUNNER_LLM_BROKER_ENABLED=false to revert to
   // direct key injection without a deploy.
   llmBrokerEnabled: boolean;
@@ -93,6 +96,7 @@ export function loadEnv(): RunnerEnv {
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
     openaiCodexApiKey: optionalEnv("OPENAI_CODEX_API_KEY"),
     publicUrl: optionalEnv("RUNNER_LLM_BROKER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
+    goatAppUrl: optionalEnv("GOAT_NEXT_PUBLIC_APP_URL"),
     llmBrokerEnabled: optionalBooleanEnv("RUNNER_LLM_BROKER_ENABLED", true),
     integrationCredentialEncryptionKey: requiredEncryptionKey(),
     exaApiKey: optionalEnv("EXA_API_KEY"),

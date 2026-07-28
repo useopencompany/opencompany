@@ -330,6 +330,31 @@ export async function markGoatCapabilityRunStopping(input: {
     );
 }
 
+export async function markGoatCapabilityRunSettlementFailure(input: {
+  id: string;
+  errorCode: string;
+  errorMessage: string;
+  now?: Date;
+  db?: DbLike;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  await db
+    .update(goatCapabilityRuns)
+    .set({
+      errorCode: input.errorCode,
+      errorMessage: input.errorMessage,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(goatCapabilityRuns.id, input.id),
+        inArray(goatCapabilityRuns.status, ["executing", "running", "stopping"]),
+        sql`${goatCapabilityRuns.settledAt} IS NULL`,
+      ),
+    );
+}
+
 export async function settleGoatCapabilityRun(input: {
   id: string;
   status: Extract<GoatCapabilityRunStatus, "succeeded" | "failed" | "stopped" | "timed_out">;

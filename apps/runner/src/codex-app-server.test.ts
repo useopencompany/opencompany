@@ -345,6 +345,7 @@ describe("runCodexAppServerTurn", () => {
     const sandbox = fakeSandbox();
     const runtimeEvents: Record<string, unknown>[] = [];
     const persistedEngineIds: string[] = [];
+    const baselineSnapshots: string[][] = [];
 
     const summary = await runCodexAppServerTurn({
       sandbox: sandbox as never,
@@ -375,6 +376,10 @@ describe("runCodexAppServerTurn", () => {
       },
       onEngineTurnId: async (turnId) => {
         persistedEngineIds.push(`turn:${turnId}`);
+      },
+      onBeforeEngineTurnStart: async (baselineTurnIds) => {
+        baselineSnapshots.push(baselineTurnIds);
+        expect(sandbox.sentMethods()).not.toContain("turn/start");
       },
       onActivity: async () => undefined,
     });
@@ -434,6 +439,7 @@ describe("runCodexAppServerTurn", () => {
       result: "Codex completed.",
     });
     expect(runtimeEvents.map((event) => event.method)).toContain("turn/completed");
+    expect(baselineSnapshots).toEqual([[]]);
     expect(persistedEngineIds).toEqual(["thread:thread_started", "turn:turn_1"]);
   });
 
@@ -534,6 +540,98 @@ describe("runCodexAppServerTurn", () => {
     expect(summary).toMatchObject({ status: "success", result: "Codex completed." });
   });
 
+  it("reattaches an unpersisted turn only when it is absent from the durable baseline", async () => {
+    const sandbox = fakeSandbox({ resumedTurn: "active" });
+    const persistedTurnIds: string[] = [];
+
+    await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "recovery fallback only",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: null,
+      existingEngineSessionId: "thread_existing",
+      existingEngineTurnId: null,
+      existingEngineTurnBaselineIds: [],
+      reattachExistingTurn: true,
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async () => undefined,
+      onEngineTurnId: async (turnId) => {
+        persistedTurnIds.push(turnId);
+      },
+      onActivity: async () => undefined,
+    });
+
+    expect(sandbox.sentMethods()).toEqual(["initialize", "initialized", "thread/resume"]);
+    expect(persistedTurnIds).toEqual(["turn_existing"]);
+  });
+
+  it("does not adopt an unrelated active turn from before the durable baseline", async () => {
+    const sandbox = fakeSandbox({ resumedTurn: "active" });
+    const onRecoveryStart = vi.fn(async () => undefined);
+
+    await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "inspect state before continuing",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: null,
+      existingEngineSessionId: "thread_existing",
+      existingEngineTurnId: null,
+      existingEngineTurnBaselineIds: ["turn_existing"],
+      reattachExistingTurn: true,
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async () => undefined,
+      onRecoveryStart,
+      onActivity: async () => undefined,
+    });
+
+    expect(onRecoveryStart).toHaveBeenCalledOnce();
+    expect(sandbox.sentMethods()).toContain("turn/start");
+  });
+
+  it("reattaches a guarded replacement when the prior engine id is unavailable", async () => {
+    const sandbox = fakeSandbox({ resumedTurn: "active" });
+    const onRecoveryStart = vi.fn(async () => undefined);
+
+    await runCodexAppServerTurn({
+      sandbox: sandbox as never,
+      codexWorkRoot,
+      codexHome,
+      skillFingerprint: "skills_a",
+      task: "inspect state before continuing",
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      planModeReasoningEffort: null,
+      existingEngineSessionId: "thread_existing",
+      existingEngineTurnId: "turn_missing",
+      existingEngineTurnBaselineIds: [],
+      reattachExistingTurn: true,
+      auth: apiAuth,
+      githubAuth: { githubToken: null, githubAuthHeader: null },
+      timeoutMs: 60_000,
+      checkAbort: async () => undefined,
+      onRuntimeEvents: async () => undefined,
+      onRecoveryStart,
+      onActivity: async () => undefined,
+    });
+
+    expect(onRecoveryStart).not.toHaveBeenCalled();
+    expect(sandbox.sentMethods()).not.toContain("turn/start");
+  });
+
   it("reconciles a completion missed while no runner was connected", async () => {
     const sandbox = fakeSandbox({ resumedTurn: "completed" });
 
@@ -598,7 +696,7 @@ describe("runCodexAppServerTurn", () => {
   });
 
   it("starts one guarded recovery only when the original turn is unavailable", async () => {
-    const sandbox = fakeSandbox();
+    const sandbox = fakeSandbox({ resumedTurn: "active" });
     const onRecoveryStart = vi.fn(async () => undefined);
 
     await runCodexAppServerTurn({
