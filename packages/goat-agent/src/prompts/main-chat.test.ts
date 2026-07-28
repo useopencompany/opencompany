@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createOpenCompanyChatSystemPrompt } from "@/lib/prompts/main-chat";
+import { createOpenCompanyChatSystemPrompt } from "./main-chat";
 
 const CONNECTED_INTEGRATIONS = [
   {
@@ -40,11 +40,11 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     expect(base).not.toContain("use_skill");
   });
 
-  it("advertises Brain skills through progressive discovery only when available", () => {
+  it("advertises workspace skills through progressive discovery only when available", () => {
     const prompt = createOpenCompanyChatSystemPrompt({ skillsAvailable: true });
 
     expect(prompt).toContain("<skill_source>");
-    expect(prompt).toContain("User-authored skills are available from the active Brain");
+    expect(prompt).toContain("User-authored skills are available from the active workspace");
     expect(prompt).toContain("Call list_skills");
     expect(prompt).toContain("call use_skill with an exact returned id");
     expect(prompt).toContain("reusable workflow or specialized operating guidance");

@@ -30,7 +30,7 @@ vi.mock("@opencompany/db/goat-integrations", () => ({
   saveGoatIntegrationCredential: mocks.saveCredential,
   markGoatIntegrationStatus: mocks.markStatus,
 }));
-vi.mock("@/lib/app-url", () => ({
+vi.mock("@opencompany/goat-agent/app-url", () => ({
   getGoatAppUrl: () => "https://goat.example",
 }));
 
@@ -42,7 +42,7 @@ import {
   hasGoatAttioRecordWriteScopes,
   parseGoatAttioScopes,
   validateGoatAttioApiKey,
-} from "@/lib/integrations/attio";
+} from "@opencompany/goat-agent/integrations/attio";
 
 beforeEach(() => {
   mocks.insertedValues = undefined;

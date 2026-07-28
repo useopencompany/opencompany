@@ -20,6 +20,16 @@ import {
   isGoatBrainSkillFolder,
   serializeGoatBrainSkillMarkdown,
 } from "@opencompany/goat-brain/skills";
+import { isGoatBrainWorkflowFolder } from "@opencompany/goat-brain/workflows";
+import {
+  DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
+  GOAT_WORKFLOW_MODEL_OPTIONS,
+} from "@/lib/workflow-model-options";
+
+const DEFAULT_WORKFLOW_MODEL_LABEL =
+  GOAT_WORKFLOW_MODEL_OPTIONS.find((option) => option.token === DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN)
+    ?.label ?? "Kimi K2.6";
+
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import { useLiveQuery } from "@tanstack/react-db";
@@ -53,6 +63,7 @@ import {
   Sparkles,
   Trash2,
   Users,
+  Workflow as WorkflowIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -79,6 +90,7 @@ import {
   createGoatBrainDocumentAction,
   createGoatBrainFolderAction,
   createGoatBrainSkillAction,
+  createGoatBrainWorkflowAction,
   deleteGoatBrainDocumentAction,
   deleteGoatBrainFolderAction,
   renameGoatBrainDocumentAction,
@@ -86,6 +98,7 @@ import {
   replaceGoatBrainAssetAction,
   updateGoatBrainDocumentAction,
   updateGoatBrainSkillAction,
+  updateGoatBrainWorkflowAction,
   uploadGoatBrainAssetAction,
 } from "@/lib/brain-actions";
 import {
@@ -258,12 +271,13 @@ function LiveGoatBrainView({
     [collections],
   );
   const documents = useMemo(() => {
-    if (filesLoading && !fileRows?.length) return initialDocuments;
+    if (filesLoading && !fileRows?.length) return initialDocuments.filter(isKnowledgeDocument);
     const timelinesByDocument = groupTimelineRows(
       (timelineRows ?? []) as GoatBrainTimelineEntryRow[],
     );
     return ((fileRows ?? []) as GoatBrainDocumentRow[])
       .map((row) => documentViewFromRow(row, timelinesByDocument.get(row.id)))
+      .filter(isKnowledgeDocument)
       .toSorted(compareBrainDocuments);
   }, [fileRows, filesLoading, initialDocuments, timelineRows]);
   const folders = useMemo(() => {
@@ -271,9 +285,11 @@ function LiveGoatBrainView({
       (filesLoading && !fileRows?.length) ||
       (foldersLoading && !folderRows?.length && initialFolders.length > 0)
     ) {
-      return initialFolders;
+      return initialFolders.filter(isKnowledgeFolderView);
     }
-    return deriveFolderViews(documents, (folderRows ?? []) as GoatBrainFolderRow[]);
+    return deriveFolderViews(documents, (folderRows ?? []) as GoatBrainFolderRow[]).filter(
+      isKnowledgeFolderView,
+    );
   }, [documents, fileRows?.length, filesLoading, folderRows, foldersLoading, initialFolders]);
   const draftIngestStatesByBrainId = useMemo(
     () =>
@@ -381,12 +397,14 @@ function GoatBrainEditor({
     docId: string | null;
     value: string;
     description: string;
+    model: string;
     detailsOpen: boolean;
     timelineOpen: boolean;
   }>({
     docId: initialDocument?.id ?? null,
     value: documentEditorBody(initialDocument),
     description: initialDocument?.description ?? "",
+    model: documentWorkflowModel(initialDocument),
     detailsOpen: false,
     timelineOpen: false,
   });
@@ -440,22 +458,28 @@ function GoatBrainEditor({
       docId: selectedDocument?.id ?? null,
       value: documentEditorBody(selectedDocument),
       description: selectedDocument?.description ?? "",
+      model: documentWorkflowModel(selectedDocument),
       detailsOpen: false,
       timelineOpen: false,
     });
   }
   const editorValue = docPanelState.value;
   const editorDescription = docPanelState.description;
+  const editorModel = docPanelState.model;
   const selectedBody = documentEditorBody(selectedDocument);
   const isSelectedSkill = Boolean(
-    selectedDocument && isGoatBrainSkillFolder(selectedDocument.folderPath),
+    selectedDocument && isSkillLikeBrainFolder(selectedDocument.folderPath),
+  );
+  const isSelectedWorkflow = Boolean(
+    selectedDocument && isGoatBrainWorkflowFolder(selectedDocument.folderPath),
   );
   const dirty = Boolean(
     selectedDocument &&
       (editorValue !== selectedBody ||
-        (isSelectedSkill && editorDescription !== (selectedDocument.description ?? ""))),
+        (isSelectedSkill && editorDescription !== (selectedDocument.description ?? "")) ||
+        (isSelectedWorkflow && editorModel !== documentWorkflowModel(selectedDocument))),
   );
-  const editorSnapshot = JSON.stringify([editorValue, editorDescription]);
+  const editorSnapshot = JSON.stringify([editorValue, editorDescription, editorModel]);
   const activeFolder = selectedDocument?.folderPath ?? selectedFolder;
   const activePath = overviewSelected
     ? ""
@@ -633,12 +657,22 @@ function GoatBrainEditor({
             instructions: body,
             expectedContentHash,
           })
-        : await updateGoatBrainDocumentAction({
-            brainRef,
-            documentId,
-            body,
-            expectedContentHash,
-          });
+        : isGoatBrainWorkflowFolder(selectedDocument.folderPath)
+          ? await updateGoatBrainWorkflowAction({
+              brainRef,
+              documentId,
+              name: selectedDocument.title,
+              description: editorDescription,
+              instructions: body,
+              model: editorModel,
+              expectedContentHash,
+            })
+          : await updateGoatBrainDocumentAction({
+              brainRef,
+              documentId,
+              body,
+              expectedContentHash,
+            });
       if (autosaveRef.current.docId !== documentId) return;
       if (!result.ok) {
         autosaveRef.current.failedValue = editorSnapshot;
@@ -696,7 +730,7 @@ function GoatBrainEditor({
     if (!selectedDocument) return;
     try {
       const skillIsComplete =
-        isGoatBrainSkillFolder(selectedDocument.folderPath) && Boolean(editorValue.trim());
+        isSkillLikeBrainFolder(selectedDocument.folderPath) && Boolean(editorValue.trim());
       await navigator.clipboard.writeText(
         skillIsComplete
           ? serializeGoatBrainSkillMarkdown({
@@ -778,13 +812,21 @@ function GoatBrainEditor({
   const submitSkillDialog = (name: string, description: string) => {
     const folderPath = fileDialogFolder;
     if (!brainRef || !folderPath || !canEditBrain) return;
+    const creatingWorkflow = isGoatBrainWorkflowFolder(folderPath);
     startCreateTransition(async () => {
-      const result = await createGoatBrainSkillAction({
-        brainRef,
-        folderPath,
-        name,
-        description,
-      });
+      const result = creatingWorkflow
+        ? await createGoatBrainWorkflowAction({
+            brainRef,
+            folderPath,
+            name,
+            description,
+          })
+        : await createGoatBrainSkillAction({
+            brainRef,
+            folderPath,
+            name,
+            description,
+          });
       if (!result.ok) {
         toast.error(result.message);
         return;
@@ -802,7 +844,7 @@ function GoatBrainEditor({
         }));
         selectDocument(createdDocument);
       }
-      toast.success("Skill created");
+      toast.success(creatingWorkflow ? "Workflow created" : "Skill created");
     });
   };
 
@@ -869,8 +911,12 @@ function GoatBrainEditor({
 
   const uploadAssetFile = async (file: File | undefined) => {
     if (!file || !brainRef || isUploading || !canEditBrain) return;
-    if (isGoatBrainSkillFolder(activeFolder)) {
-      toast.error("Skills are Markdown-only and cannot contain uploads.");
+    if (isSkillLikeBrainFolder(activeFolder)) {
+      toast.error(
+        isGoatBrainWorkflowFolder(activeFolder)
+          ? "Workflows are Markdown-only and cannot contain uploads."
+          : "Skills are Markdown-only and cannot contain uploads.",
+      );
       return;
     }
     const invalid = validateBrainAssetFile(file);
@@ -1320,6 +1366,7 @@ function GoatBrainEditor({
             routeBrainId={selectedBrainId}
             editorValue={editorValue}
             editorDescription={editorDescription}
+            editorModel={editorModel}
             detailsOpen={docPanelState.detailsOpen}
             timelineOpen={isSelectedSkill ? false : docPanelState.timelineOpen}
             isDocPending={isDocPending}
@@ -1332,6 +1379,9 @@ function GoatBrainEditor({
                 state.description === description ? state : { ...state, description },
               )
             }
+            onModelChange={(model) =>
+              setDocPanelState((state) => (state.model === model ? state : { ...state, model }))
+            }
             onRenameTitle={renameDocument}
             onNavigateInternal={navigateToBrainHref}
           />
@@ -1341,7 +1391,7 @@ function GoatBrainEditor({
         <BrainContextMenu
           ref={contextMenuRef}
           state={contextMenu}
-          creatingSkill={isGoatBrainSkillFolder(contextMenu.fileFolderPath)}
+          creating={brainFileKindForFolder(contextMenu.fileFolderPath)}
           onCreateFile={() => {
             setContextMenu(null);
             setFileDialogFolder(contextMenu.fileFolderPath);
@@ -1358,8 +1408,9 @@ function GoatBrainEditor({
         />
       ) : null}
       {fileDialogFolder && canEditBrain ? (
-        isGoatBrainSkillFolder(fileDialogFolder) ? (
+        isSkillLikeBrainFolder(fileDialogFolder) ? (
           <SkillDialog
+            kind={isGoatBrainWorkflowFolder(fileDialogFolder) ? "workflow" : "skill"}
             pending={isCreatePending}
             onClose={() => setFileDialogFolder(null)}
             onSubmit={submitSkillDialog}
@@ -1387,13 +1438,13 @@ function GoatBrainEditor({
 function BrainContextMenu({
   ref,
   state,
-  creatingSkill,
+  creating,
   onCreateFile,
   onCreateFolder,
 }: {
   ref?: Ref<HTMLDivElement>;
   state: BrainContextMenuState;
-  creatingSkill: boolean;
+  creating: "skill" | "workflow" | "file";
   onCreateFile: () => void;
   onCreateFolder: () => void;
 }) {
@@ -1420,13 +1471,21 @@ function BrainContextMenu({
       <ContextMenuButton
         autoFocus
         icon={
-          creatingSkill ? (
+          creating === "skill" ? (
             <Sparkles size={14} strokeWidth={1.8} />
+          ) : creating === "workflow" ? (
+            <WorkflowIcon size={14} strokeWidth={1.8} />
           ) : (
             <FilePlus2 size={14} strokeWidth={1.8} />
           )
         }
-        label={creatingSkill ? "New skill" : "New Markdown file"}
+        label={
+          creating === "skill"
+            ? "New skill"
+            : creating === "workflow"
+              ? "New workflow"
+              : "New Markdown file"
+        }
         onClick={onCreateFile}
       />
       <ContextMenuButton
@@ -1442,13 +1501,16 @@ function SkillDialog({
   pending,
   onClose,
   onSubmit,
+  kind = "skill",
 }: {
   pending: boolean;
   onClose: () => void;
   onSubmit: (name: string, description: string) => void;
+  kind?: "skill" | "workflow";
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const isWorkflow = kind === "workflow";
 
   return (
     <div
@@ -1458,10 +1520,12 @@ function SkillDialog({
       }}
       role="dialog"
       aria-modal="true"
-      aria-label="New skill"
+      aria-label={isWorkflow ? "New workflow" : "New skill"}
     >
       <div className="flex w-full max-w-[420px] flex-col gap-3 rounded-lg bg-canvas p-4 shadow-xl">
-        <div className="text-[14px] font-semibold text-ink">New skill</div>
+        <div className="text-[14px] font-semibold text-ink">
+          {isWorkflow ? "New workflow" : "New skill"}
+        </div>
         <label className="flex flex-col gap-1 text-[12px] text-ink-subtle">
           Name
           <input
@@ -1472,7 +1536,7 @@ function SkillDialog({
             onKeyDown={(event) => {
               if (event.key === "Escape") onClose();
             }}
-            placeholder="Coding work"
+            placeholder={isWorkflow ? "Weekly report" : "Coding work"}
             className="rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
           />
         </label>
@@ -1486,7 +1550,11 @@ function SkillDialog({
             onKeyDown={(event) => {
               if (event.key === "Escape") onClose();
             }}
-            placeholder="How this skill guides coding sessions"
+            placeholder={
+              isWorkflow
+                ? "What this workflow does when it runs as a task"
+                : "How this skill guides coding sessions"
+            }
             className="resize-none rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
           />
         </label>
@@ -1766,12 +1834,14 @@ function BrainDocumentPanel({
   routeBrainId,
   editorValue,
   editorDescription,
+  editorModel,
   detailsOpen,
   timelineOpen,
   isDocPending,
   readOnly,
   onEditorChange,
   onDescriptionChange,
+  onModelChange,
   onRenameTitle,
   onNavigateInternal,
 }: {
@@ -1782,12 +1852,14 @@ function BrainDocumentPanel({
   routeBrainId: string | null;
   editorValue: string;
   editorDescription: string;
+  editorModel: string;
   detailsOpen: boolean;
   timelineOpen: boolean;
   isDocPending: boolean;
   readOnly: boolean;
   onEditorChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
+  onModelChange: (value: string) => void;
   onRenameTitle: (title: string) => void;
   onNavigateInternal: (href: string) => boolean;
 }) {
@@ -1803,7 +1875,8 @@ function BrainDocumentPanel({
     );
   }
 
-  const isSkill = isGoatBrainSkillFolder(selectedDocument.folderPath);
+  const isSkill = isSkillLikeBrainFolder(selectedDocument.folderPath);
+  const isWorkflow = isGoatBrainWorkflowFolder(selectedDocument.folderPath);
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
@@ -1834,9 +1907,31 @@ function BrainDocumentPanel({
                     readOnly={readOnly}
                     disabled={isDocPending}
                     onChange={(event) => onDescriptionChange(event.target.value)}
-                    placeholder="Describe when this skill should be used"
+                    placeholder={
+                      isWorkflow
+                        ? "Describe what this workflow does when it runs"
+                        : "Describe when this skill should be used"
+                    }
                     className="resize-none rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-normal leading-5 text-ink outline-none transition-colors focus:border-border-strong disabled:opacity-60"
                   />
+                </label>
+              ) : null}
+              {isWorkflow ? (
+                <label className="mt-4 flex flex-col gap-2 text-[12px] font-medium text-ink-muted">
+                  Model
+                  <select
+                    value={editorModel}
+                    disabled={isDocPending || readOnly}
+                    onChange={(event) => onModelChange(event.target.value)}
+                    className="w-fit min-w-[260px] rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-normal leading-5 text-ink outline-none transition-colors focus:border-border-strong disabled:opacity-60"
+                  >
+                    <option value="">Default ({DEFAULT_WORKFLOW_MODEL_LABEL})</option>
+                    {GOAT_WORKFLOW_MODEL_OPTIONS.map((option) => (
+                      <option key={option.token} value={option.token}>
+                        {option.label} — {option.hint}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               ) : null}
               <div className="mt-6">
@@ -2043,7 +2138,7 @@ function BrainMetadataSidebar({
         </section>
       ) : null}
 
-      {!isGoatBrainSkillFolder(document.folderPath) ? (
+      {!isSkillLikeBrainFolder(document.folderPath) ? (
         <SidebarTimelineSection document={document} />
       ) : null}
 
@@ -2510,6 +2605,8 @@ function FolderIcon({ path }: { path: string }) {
       return <Inbox size={14} strokeWidth={1.8} className={className} />;
     case "skills":
       return <Sparkles size={14} strokeWidth={1.8} className={className} />;
+    case "workflows":
+      return <WorkflowIcon size={14} strokeWidth={1.8} className={className} />;
     case "thoughts":
       return <Brain size={14} strokeWidth={1.8} className={className} />;
     case "companies":
@@ -2532,6 +2629,9 @@ function FolderIcon({ path }: { path: string }) {
 function FileIcon({ path }: { path: string }) {
   if (isGoatBrainSkillFolder(path)) {
     return <Sparkles size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />;
+  }
+  if (isGoatBrainWorkflowFolder(path)) {
+    return <WorkflowIcon size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />;
   }
   if (/\.(ts|tsx|js|jsx|json|css|sql|sh|py|rs|go)$/i.test(path)) {
     return <FileCode2 size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />;
@@ -2778,10 +2878,40 @@ function documentInlineLinkText(document: GoatBrainDocumentView) {
 function documentEditorBody(document: GoatBrainDocumentView | null | undefined) {
   if (!document) return "";
   const body = normalizeGoatBrainCompiledTruth(document.body, document.title);
-  return isGoatBrainSkillFolder(document.folderPath) &&
+  return isSkillLikeBrainFolder(document.folderPath) &&
     body.trim() === GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER
     ? ""
     : body;
+}
+
+// Skills and workflows share the structured name/description/instructions editing surface.
+function isSkillLikeBrainFolder(path: string) {
+  return isGoatBrainSkillFolder(path) || isGoatBrainWorkflowFolder(path);
+}
+
+// Workflows and skills were extracted out of the Brain into their own
+// workspace-scoped surfaces (/workflows and /settings/skills). Hide their former
+// reserved folders and documents from the Brain tree so the Brain stays purely
+// knowledge/context. Existing rows are removed by the backfill + cleanup
+// migration; this also hides them in the window before that runs.
+function isKnowledgeDocument(document: { folderPath: string }): boolean {
+  return !isSkillLikeBrainFolder(document.folderPath);
+}
+
+function isKnowledgeFolderView(folder: { path: string }): boolean {
+  return !isSkillLikeBrainFolder(folder.path);
+}
+
+// The workflow's model choice lives in doc frontmatter (`model:`); "" = default.
+function documentWorkflowModel(document: GoatBrainDocumentView | null | undefined) {
+  if (!document || !isGoatBrainWorkflowFolder(document.folderPath)) return "";
+  return parseGoatBrainDocument(document.content).frontmatter.model?.trim() ?? "";
+}
+
+function brainFileKindForFolder(path: string): "skill" | "workflow" | "file" {
+  if (isGoatBrainSkillFolder(path)) return "skill";
+  if (isGoatBrainWorkflowFolder(path)) return "workflow";
+  return "file";
 }
 
 function ancestorFolderPaths(path: string) {

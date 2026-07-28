@@ -39,6 +39,12 @@ const vector = customType<{ data: string }>({
 
 export type GoatTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
+// Workflows and skills share a simple draft/active lifecycle: `draft` is
+// editable-but-not-yet-usable, `active` is available to fire (workflows) or
+// attach (skills). Mirrors the frontmatter `status` the Brain docs carried.
+export type GoatWorkflowStatus = "draft" | "active";
+export type GoatSkillStatus = "draft" | "active";
+
 export type GoatHarnessEngine = "opencompany" | "codex";
 
 export type GoatTaskStage =
@@ -233,9 +239,20 @@ export type GoatTaskToolName =
   | "github_clone_repository"
   | "github_shell"
   | "github_status"
-  | "github_open_pull_request";
+  | "github_open_pull_request"
+  // Shared main-chat tools, used by opencompany-engine task runs (tasks are a
+  // hidden main-chat run). Persisted to goat.task_messages.tool_name (text).
+  | "goat_brain"
+  | "save_to_brain"
+  | "web_search"
+  | "web_fetch"
+  | "list_actions"
+  | "use_action"
+  | "update_task_status";
 
 export type GoatTaskSkillId = "first-principles" | "yc-office-hours";
+
+export type GoatTaskReportedOutcome = "done" | "needs_attention";
 
 export type GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1";
@@ -247,6 +264,16 @@ export type GoatHarnessSpec = {
   skills: GoatTaskSkillId[];
   maxModelSteps: number;
   resultMode: "assistant_final" | "brain_markdown_report";
+  // Extra system-prompt blocks appended after the shared chat system prompt for
+  // opencompany-engine task runs (e.g. compiled workflow instructions + skills).
+  // The runner's chat loop feeds these as extraSystemBlocks.
+  systemBlocks?: string[];
+  workflow?: {
+    // The workspace-scoped workflow slug that spawned this task.
+    id: string;
+    workspaceId: string;
+    skillIds: string[];
+  };
   codex?: {
     repository?: string | null;
     createPullRequest?: boolean;
@@ -2431,6 +2458,84 @@ export const goatTaskSchedules = goat.table(
   }),
 );
 
+// Workspace-scoped automations. Formerly stored as markdown documents in a
+// reserved `workflows/` Brain folder; extracted here so "how work happens" is a
+// first-class, company-level primitive rather than Brain (knowledge) content.
+// `slug` is the stable handle used by the `#` composer mention and persisted as
+// `tasks.workflow_id` when a workflow fires.
+export const goatWorkflows = goat.table(
+  "workflows",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    instructions: text("instructions").notNull().default(""),
+    // Engine/model token from the editor's Model dropdown (e.g. "kimi-k2.6",
+    // "codex"); empty when the workflow has not picked one explicitly.
+    model: text("model").notNull().default(""),
+    status: text("status").$type<GoatWorkflowStatus>().notNull().default("draft"),
+    createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => ({
+    // Slug is the mention handle; unique per workspace among live rows so an
+    // archived workflow's slug can be reused.
+    workspaceSlugIdx: uniqueIndex("goat_workflows_workspace_slug_idx")
+      .on(table.workspaceId, table.slug)
+      .where(sql`${table.archivedAt} IS NULL`),
+    workspaceUpdatedIdx: index("goat_workflows_workspace_updated_idx").on(
+      table.workspaceId,
+      table.archivedAt,
+      table.updatedAt,
+    ),
+    statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
+  }),
+);
+
+// Workspace-scoped, reusable agent capabilities. Formerly stored in a reserved
+// `skills/` Brain folder; extracted alongside workflows. `slug` is the handle
+// used by the `@skill/<slug>` composer mention. Attaching a skill to a chat
+// still snapshots its content immutably into `goatChatSessionSkills`.
+export const goatSkills = goat.table(
+  "skills",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    instructions: text("instructions").notNull().default(""),
+    status: text("status").$type<GoatSkillStatus>().notNull().default("draft"),
+    createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => ({
+    workspaceSlugIdx: uniqueIndex("goat_skills_workspace_slug_idx")
+      .on(table.workspaceId, table.slug)
+      .where(sql`${table.archivedAt} IS NULL`),
+    workspaceUpdatedIdx: index("goat_skills_workspace_updated_idx").on(
+      table.workspaceId,
+      table.archivedAt,
+      table.updatedAt,
+    ),
+    statusCheck: check("goat_skills_status_check", sql`${table.status} IN ('draft', 'active')`),
+  }),
+);
+
 export const goatTasks = goat.table(
   "tasks",
   {
@@ -2452,6 +2557,10 @@ export const goatTasks = goat.table(
     stage: text("stage").$type<GoatTaskStage>().notNull().default("queued"),
     result: text("result"),
     error: text("error"),
+    workflowId: text("workflow_id"),
+    workflowBrainRef: text("workflow_brain_ref"),
+    reportedOutcome: text("reported_outcome").$type<GoatTaskReportedOutcome>(),
+    outcomeComment: text("outcome_comment"),
     harnessSpec: jsonb("harness_spec").$type<GoatHarnessSpec>().notNull().default(sql`'{}'::jsonb`),
     debugTrace: jsonb("debug_trace")
       .$type<GoatTaskDebugTrace>()
@@ -2492,6 +2601,10 @@ export const goatTasks = goat.table(
     stageCheck: check(
       "goat_tasks_stage_check",
       sql`${table.stage} IN ('queued', 'planning', 'sandboxing', 'running', 'completed', 'failed', 'canceled')`,
+    ),
+    reportedOutcomeCheck: check(
+      "goat_tasks_reported_outcome_check",
+      sql`${table.reportedOutcome} IS NULL OR ${table.reportedOutcome} IN ('done', 'needs_attention')`,
     ),
   }),
 );
@@ -4283,3 +4396,5 @@ export type GoatCapabilityRun = typeof goatCapabilityRuns.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
 export type GoatChatSandboxUsage = typeof goatChatSandboxUsage.$inferSelect;
 export type GoatChatSessionSkill = typeof goatChatSessionSkills.$inferSelect;
+export type GoatWorkflow = typeof goatWorkflows.$inferSelect;
+export type GoatSkill = typeof goatSkills.$inferSelect;

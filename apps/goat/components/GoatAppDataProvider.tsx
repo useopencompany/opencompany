@@ -150,10 +150,11 @@ function GoatAppLiveDataSubscriptions({
   onData: (value: GoatAppData) => void;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
+  // Tasks are not gated on the task-spawning flag: firing a workflow enables
+  // the flag server-side, and its task must appear in the sidebar immediately.
   const { data: taskRows, isLoading: tasksLoading } = useLiveQuery(
-    (q) =>
-      initialData.featureFlags.taskSpawning ? q.from({ task: collections.tasks }) : undefined,
-    [initialData.featureFlags.taskSpawning, collections],
+    (q) => q.from({ task: collections.tasks }),
+    [collections],
   );
   const { data: scheduleRows, isLoading: schedulesLoading } = useLiveQuery(
     (q) =>
@@ -173,7 +174,6 @@ function GoatAppLiveDataSubscriptions({
   );
 
   const tasks = useMemo(() => {
-    if (!initialData.featureFlags.taskSpawning) return [];
     if (tasksLoading && !taskRows?.length) return initialData.tasks;
     return ((taskRows ?? []) as GoatTaskRow[])
       .map(taskRowToView)
@@ -185,7 +185,7 @@ function GoatAppLiveDataSubscriptions({
             isRecentGoatHomeActivity(task.createdAt)),
       )
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [initialData.featureFlags.taskSpawning, initialData.tasks, taskRows, tasksLoading]);
+  }, [initialData.tasks, taskRows, tasksLoading]);
 
   const schedules = useMemo(() => {
     if (!initialData.featureFlags.taskSpawning) return [];
@@ -358,10 +358,13 @@ function taskRowToView(row: GoatTaskRow): GoatTaskView {
     model: row.model,
     scheduleId: row.schedule_id,
     scheduledFor: row.scheduled_for,
+    workflowId: row.workflow_id,
     status: row.status,
     stage: row.stage,
     result: row.result,
     error: row.error,
+    reportedOutcome: row.reported_outcome,
+    outcomeComment: row.outcome_comment,
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

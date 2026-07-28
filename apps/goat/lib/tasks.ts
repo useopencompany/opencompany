@@ -32,7 +32,6 @@ export type CancelTaskResult = {
 
 export async function listCurrentUserGoatTasks() {
   const { user } = await currentGoatUser();
-  if (!user.taskSpawningEnabled) return [];
   return getDb()
     .select()
     .from(goatTasks)
@@ -255,6 +254,8 @@ export async function createGoatTaskForUser(input: {
   harnessSpec?: GoatHarnessSpec;
   scheduleId?: string;
   scheduledFor?: Date;
+  workflowId?: string;
+  workflowBrainRef?: string;
 }) {
   const initialTaskSpawningState = await loadGoatTaskSpawningState(input.userWorkosId);
   if (initialTaskSpawningState === null) {
@@ -292,6 +293,8 @@ export async function createGoatTaskForUser(input: {
           model,
           schedule_id,
           scheduled_for,
+          workflow_id,
+          workflow_brain_ref,
           status,
           stage,
           next_run_at,
@@ -307,6 +310,8 @@ export async function createGoatTaskForUser(input: {
           ${harnessSpec.model},
           ${input.scheduleId ?? null},
           ${input.scheduledFor ?? null},
+          ${input.workflowId ?? null},
+          ${input.workflowBrainRef ?? null},
           'queued',
           'queued',
           ${now},
@@ -354,10 +359,14 @@ export async function createGoatTaskForUser(input: {
         task.model AS "model",
         task.schedule_id AS "scheduleId",
         task.scheduled_for AS "scheduledFor",
+        task.workflow_id AS "workflowId",
+        task.workflow_brain_ref AS "workflowBrainRef",
         task.status AS "status",
         task.stage AS "stage",
         task.result AS "result",
         task.error AS "error",
+        task.reported_outcome AS "reportedOutcome",
+        task.outcome_comment AS "outcomeComment",
         task.harness_spec AS "harnessSpec",
         task.debug_trace AS "debugTrace",
         task.codex_engine_session_id AS "codexEngineSessionId",

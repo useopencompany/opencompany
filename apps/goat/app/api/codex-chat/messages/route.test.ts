@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoatAuthContext } from "@/lib/auth";
 import { currentGoatUser } from "@/lib/auth";
-import { GoatBrainSkillMentionError, resolveGoatBrainSkillMentions } from "@/lib/brain-skills";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import { createGoatCodexChatMessage } from "@/lib/codex-chat";
+import { GoatSkillMentionError, resolveGoatSkillMentions } from "@/lib/skills";
 import { POST } from "./route";
 
 vi.mock("@/lib/auth", () => ({
@@ -18,9 +18,9 @@ vi.mock("@/lib/chat-title", () => ({
   generateGoatChatTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
 }));
 
-vi.mock("@/lib/brain-skills", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/brain-skills")>();
-  return { ...actual, resolveGoatBrainSkillMentions: vi.fn() };
+vi.mock("@/lib/skills", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/skills")>();
+  return { ...actual, resolveGoatSkillMentions: vi.fn() };
 });
 
 vi.mock("next/server", () => ({
@@ -61,7 +61,7 @@ describe("POST /api/codex-chat/messages", () => {
       assistantMessageId: "goat_chat_msg_assistant",
       mode: "started",
     });
-    vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([]);
+    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([]);
   });
 
   it("rejects malformed JSON shapes", async () => {
@@ -202,7 +202,7 @@ describe("POST /api/codex-chat/messages", () => {
   });
 
   it("forwards a validated skill snapshot for native session activation", async () => {
-    vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([
+    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([
       {
         id: "coding-work",
         name: "Coding work",
@@ -217,7 +217,7 @@ describe("POST /api/codex-chat/messages", () => {
           role: "user",
           parts: [{ type: "text", text: "Implement this" }],
           metadata: {
-            mentions: [{ kind: "skill", brainRef: "goat_brain_1", id: "coding-work" }],
+            mentions: [{ kind: "skill", id: "coding-work" }],
           },
         },
       }),
@@ -230,7 +230,7 @@ describe("POST /api/codex-chat/messages", () => {
         skills: [
           {
             id: "coding-work",
-            brainRef: "goat_brain_1",
+            brainRef: "workspace_1",
             name: "Coding work",
             description: "How coding work should happen.",
             instructions: "Inspect, implement, and verify.",
@@ -241,8 +241,8 @@ describe("POST /api/codex-chat/messages", () => {
   });
 
   it("rejects stale structured skill references before queueing", async () => {
-    vi.mocked(resolveGoatBrainSkillMentions).mockRejectedValue(
-      new GoatBrainSkillMentionError("Skill is unavailable."),
+    vi.mocked(resolveGoatSkillMentions).mockRejectedValue(
+      new GoatSkillMentionError("Skill is unavailable."),
     );
     const response = await POST(
       jsonRequest({
@@ -251,7 +251,7 @@ describe("POST /api/codex-chat/messages", () => {
           role: "user",
           parts: [{ type: "text", text: "Implement this" }],
           metadata: {
-            mentions: [{ kind: "skill", brainRef: "goat_brain_1", id: "missing" }],
+            mentions: [{ kind: "skill", id: "missing" }],
           },
         },
       }),

@@ -38,18 +38,6 @@ import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
-  activateAndListGoatChatSessionSkills,
-  attachGoatBrainSkillsToPrompt,
-  GoatBrainSkillMentionError,
-  type GoatChatSessionSkillSnapshot,
-  goatBrainSkillsByteLength,
-  listGoatBrainSkillCatalog,
-  MAX_GOAT_CHAT_SKILL_BYTES,
-  MAX_GOAT_CHAT_SKILLS,
-  readGoatBrainSkillMentionRefs,
-  resolveGoatBrainSkillMentions,
-} from "@/lib/brain-skills";
-import {
   createDbGoatChatStore,
   createGoatChatApprovalContinuationTurn,
   createGoatChatUserTurn,
@@ -108,6 +96,18 @@ import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import type { ChatBrowserToolSession } from "@/lib/sandbox/browser-tools";
 import {
+  activateAndListGoatChatSessionSkills,
+  attachGoatSkillsToPrompt,
+  type GoatChatSessionSkillSnapshot,
+  GoatSkillMentionError,
+  goatSkillsByteLength,
+  listGoatSkillCatalog,
+  MAX_GOAT_CHAT_SKILL_BYTES,
+  MAX_GOAT_CHAT_SKILLS,
+  readGoatSkillMentionRefs,
+  resolveGoatSkillMentions,
+} from "@/lib/skills";
+import {
   createGoatTaskScheduleForUser,
   deleteGoatTaskScheduleForUser,
   type GoatTaskScheduleView,
@@ -115,6 +115,7 @@ import {
   updateGoatTaskScheduleForUser,
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
+import { readGoatWorkflowMentionRef } from "@/lib/workflows";
 
 export const maxDuration = 800;
 export const runtime = "nodejs";
@@ -229,24 +230,35 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  let resolvedSkills: Awaited<ReturnType<typeof resolveGoatBrainSkillMentions>> = [];
+  let resolvedSkills: Awaited<ReturnType<typeof resolveGoatSkillMentions>> = [];
   if (message) {
-    const parsedSkillMentions = readGoatBrainSkillMentionRefs(
+    const parsedSkillMentions = readGoatSkillMentionRefs(
       message.metadata?.mentions ?? body.value.mentions,
     );
     if (!parsedSkillMentions.ok) {
       return new Response(parsedSkillMentions.error, { status: 400 });
     }
     try {
-      resolvedSkills = await resolveGoatBrainSkillMentions({
-        activeBrainRef: context.activeBrain?.id ?? null,
+      resolvedSkills = await resolveGoatSkillMentions({
+        workspaceId: context.workspace.id,
         mentions: parsedSkillMentions.mentions,
       });
     } catch (error) {
-      if (error instanceof GoatBrainSkillMentionError) {
+      if (error instanceof GoatSkillMentionError) {
         return new Response(error.message, { status: 400 });
       }
       throw error;
+    }
+  }
+  if (message) {
+    const parsedWorkflowMention = readGoatWorkflowMentionRef(
+      message.metadata?.mentions ?? body.value.mentions,
+    );
+    if (!parsedWorkflowMention.ok) {
+      return new Response(parsedWorkflowMention.error, { status: 400 });
+    }
+    if (parsedWorkflowMention.mention) {
+      return new Response("Start workflow tasks through the workflows endpoint.", { status: 400 });
     }
   }
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
@@ -294,8 +306,8 @@ export async function POST(request: Request): Promise<Response> {
           return emptyCatalog;
         })
       : Promise.resolve(emptyCatalog),
-    !requestedEngine && context.activeBrain
-      ? listGoatBrainSkillCatalog(context.activeBrain.id).catch((error) => {
+    !requestedEngine
+      ? listGoatSkillCatalog(context.workspace.id).catch((error) => {
           logger.warn("Goat chat skill catalog resolution failed", {
             event: "goat.chat_skill_catalog_resolution_failed",
             error,
@@ -457,7 +469,7 @@ export async function POST(request: Request): Promise<Response> {
     sessionSkills = await activateAndListGoatChatSessionSkills({
       chatSessionId: turn.session.id,
       activatedMessageId: turn.userMessageId,
-      brainRef: context.activeBrain?.id ?? "",
+      workspaceRef: context.workspace.id,
       skills: message ? resolvedSkills : [],
     });
   } catch (error) {
@@ -515,7 +527,7 @@ export async function POST(request: Request): Promise<Response> {
     ...usedSkillIdsFromMessages(turn.messages),
   ]);
   let loadedSkillCount = resolvedSkills.length;
-  let loadedSkillBytes = goatBrainSkillsByteLength(resolvedSkills);
+  let loadedSkillBytes = goatSkillsByteLength(resolvedSkills);
   if (capabilityApproval) {
     for (const action of actionCatalog.actions) {
       if (action.id === capabilityApproval.action) prelistedActionSourceIds.add(action.provider);
@@ -698,7 +710,7 @@ export async function POST(request: Request): Promise<Response> {
             }),
         }
       : {}),
-    ...(skillCatalog.length > 0 && context.activeBrain
+    ...(skillCatalog.length > 0
       ? {
           skills: {
             catalog: skillCatalog.map((skill) => ({
@@ -709,9 +721,9 @@ export async function POST(request: Request): Promise<Response> {
             ...(prelistedSkillIds.size > 0 ? { prelistedSkillIds: [...prelistedSkillIds] } : {}),
             execute: async ({ skill }: { skill: string }) => {
               try {
-                const [resolved] = await resolveGoatBrainSkillMentions({
-                  activeBrainRef: context.activeBrain?.id ?? null,
-                  mentions: [{ brainRef: context.activeBrain?.id ?? "", id: skill }],
+                const [resolved] = await resolveGoatSkillMentions({
+                  workspaceId: context.workspace.id,
+                  mentions: [{ id: skill }],
                 });
                 if (!resolved) {
                   return {
@@ -733,7 +745,7 @@ export async function POST(request: Request): Promise<Response> {
                     },
                   };
                 }
-                const skillBytes = goatBrainSkillsByteLength([resolved]);
+                const skillBytes = goatSkillsByteLength([resolved]);
                 if (
                   loadedSkillCount >= MAX_GOAT_CHAT_SKILLS ||
                   loadedSkillBytes + skillBytes > MAX_GOAT_CHAT_SKILL_BYTES
@@ -760,7 +772,7 @@ export async function POST(request: Request): Promise<Response> {
                   },
                 };
               } catch (error) {
-                if (error instanceof GoatBrainSkillMentionError) {
+                if (error instanceof GoatSkillMentionError) {
                   return {
                     ok: false as const,
                     skill,
@@ -1051,10 +1063,7 @@ export async function POST(request: Request): Promise<Response> {
           return activatedSkills.length > 0
             ? replaceGoatChatUiMessageText(
                 uiMessage,
-                attachGoatBrainSkillsToPrompt(
-                  textFromGoatChatUiMessage(uiMessage),
-                  activatedSkills,
-                ),
+                attachGoatSkillsToPrompt(textFromGoatChatUiMessage(uiMessage), activatedSkills),
               )
             : uiMessage;
         }),

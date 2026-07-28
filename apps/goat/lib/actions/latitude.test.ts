@@ -1,11 +1,11 @@
 import { createMCPClient } from "@ai-sdk/mcp";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveLatitudeActions } from "@/lib/actions/latitude";
-import { GoatActionInvalidParamsError, GoatActionPermissionError } from "@/lib/actions/types";
 import {
   getGoatLatitudeIntegrationState,
   loadGoatLatitudeMcpWorkerConnection,
-} from "@/lib/integrations/latitude-mcp";
+} from "@opencompany/goat-agent/integrations/latitude-mcp";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveLatitudeActions } from "@/lib/actions/latitude";
+import { GoatActionInvalidParamsError, GoatActionPermissionError } from "@/lib/actions/types";
 
 const clientMocks = vi.hoisted(() => ({
   listTools: vi.fn(),
@@ -19,7 +19,7 @@ vi.mock("@ai-sdk/mcp", () => ({
   createMCPClient: vi.fn(async () => clientMocks),
 }));
 
-vi.mock("@/lib/integrations/latitude-mcp", () => ({
+vi.mock("@opencompany/goat-agent/integrations/latitude-mcp", () => ({
   GOAT_LATITUDE_MCP_ENDPOINT_URL: "https://api.latitude.so/v1/mcp",
   getGoatLatitudeIntegrationState: vi.fn(),
   loadGoatLatitudeMcpWorkerConnection: vi.fn(),

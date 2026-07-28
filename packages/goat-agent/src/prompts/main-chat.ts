@@ -2,7 +2,7 @@ import {
   MAX_BROWSER_CALLS_PER_TURN,
   MAX_WEB_FETCH_CALLS_PER_TURN,
   MAX_WEB_SEARCH_CALLS_PER_TURN,
-} from "@/lib/chat-limits";
+} from "../chat-limits";
 
 function promptBlock(name: string, lines: readonly string[]) {
   return [`<${name}>`, ...lines, `</${name}>`].join("\n");
@@ -201,7 +201,7 @@ export function createOpenCompanyChatSystemPrompt(
     ...(skillsAvailable
       ? [
           promptBlock("skill_source", [
-            "User-authored skills are available from the active Brain.",
+            "User-authored skills are available from the active workspace.",
             "Call list_skills to discover relevant skill ids and descriptions, then call use_skill with an exact returned id to load its instructions.",
           ]),
         ]

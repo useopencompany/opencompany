@@ -1,4 +1,8 @@
-import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
+import type {
+  GoatTaskReportedOutcome,
+  GoatTaskStage,
+  GoatTaskStatus,
+} from "@opencompany/db/goat-schema";
 
 export const GOAT_STAGE_COPY: Record<GoatTaskStage, string> = {
   queued: "Waiting for runner",
@@ -17,6 +21,26 @@ export const GOAT_STATUS_COPY: Record<GoatTaskStatus, string> = {
   failed: "Failed",
   canceled: "Canceled",
 };
+
+// User-facing status for workflow tasks: the worker owns `status`; the agent's
+// post-run report decides done vs needs-attention on top of a succeeded run.
+export type GoatWorkflowTaskDisplayStatus = "running" | "failed" | "done" | "needs-attention";
+
+export const GOAT_WORKFLOW_TASK_STATUS_COPY: Record<GoatWorkflowTaskDisplayStatus, string> = {
+  running: "Running",
+  failed: "Failed",
+  done: "Done",
+  "needs-attention": "Needs attention",
+};
+
+export function goatWorkflowTaskDisplayStatus(task: {
+  status: GoatTaskStatus;
+  reportedOutcome?: GoatTaskReportedOutcome | null;
+}): GoatWorkflowTaskDisplayStatus {
+  if (task.status === "queued" || task.status === "running") return "running";
+  if (task.status === "failed" || task.status === "canceled") return "failed";
+  return task.reportedOutcome === "needs_attention" ? "needs-attention" : "done";
+}
 
 export function toGoatTaskTitle(text: string): string {
   const trimmed = text.trim().replace(/[.!]+$/, "");

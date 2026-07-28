@@ -6,12 +6,6 @@ import { executeGoatAction } from "@/lib/actions/execute";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
-  activateAndListGoatChatSessionSkills,
-  GoatBrainSkillMentionError,
-  listGoatBrainSkillCatalog,
-  resolveGoatBrainSkillMentions,
-} from "@/lib/brain-skills";
-import {
   createGoatChatApprovalContinuationTurn,
   createGoatChatUserTurn,
   persistGoatChatAssistantMessage,
@@ -35,6 +29,12 @@ import {
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
+import {
+  activateAndListGoatChatSessionSkills,
+  GoatSkillMentionError,
+  listGoatSkillCatalog,
+  resolveGoatSkillMentions,
+} from "@/lib/skills";
 import {
   deleteGoatTaskScheduleForUser,
   listGoatTaskSchedulesForUser,
@@ -81,13 +81,13 @@ vi.mock("@/lib/brain-capture", () => ({
   captureToGoatBrainInbox: vi.fn(),
 }));
 
-vi.mock("@/lib/brain-skills", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/brain-skills")>();
+vi.mock("@/lib/skills", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/skills")>();
   return {
     ...actual,
     activateAndListGoatChatSessionSkills: vi.fn(),
-    listGoatBrainSkillCatalog: vi.fn(),
-    resolveGoatBrainSkillMentions: vi.fn(),
+    listGoatSkillCatalog: vi.fn(),
+    resolveGoatSkillMentions: vi.fn(),
   };
 });
 
@@ -163,8 +163,8 @@ describe("POST /api/chat", () => {
     mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
     mockIsGoatChatActionsKilled().mockReturnValue(false);
     mockResolveGoatActionCatalog().mockResolvedValue({ providers: [], actions: [] });
-    vi.mocked(listGoatBrainSkillCatalog).mockResolvedValue([]);
-    vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([]);
+    vi.mocked(listGoatSkillCatalog).mockResolvedValue([]);
+    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([]);
     vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([]);
   });
 
@@ -206,6 +206,37 @@ describe("POST /api/chat", () => {
     await expect(response.text()).resolves.toContain("Messages can be at most");
   });
 
+  it("rejects workflow mentions before creating a normal chat turn", async () => {
+    mockAuth();
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.5",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          metadata: {
+            mentions: [
+              {
+                kind: "workflow",
+                brainRef: ACTIVE_BRAIN.id,
+                id: "morning-test",
+              },
+            ],
+          },
+          parts: [{ type: "text", text: "#morning-test" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe(
+      "Start workflow tasks through the workflows endpoint.",
+    );
+    expect(createGoatChatUserTurn).not.toHaveBeenCalled();
+    expect(streamText).not.toHaveBeenCalled();
+  });
+
   it("resolves the action catalog for every non-engine request without a beta flag", async () => {
     mockAuth();
     mockCreateTurn();
@@ -243,18 +274,17 @@ describe("POST /api/chat", () => {
     );
   });
 
-  it("lets main chat discover and load active Brain skills", async () => {
+  it("lets main chat discover and load active workspace skills", async () => {
     mockAuth();
     mockCreateTurn();
-    vi.mocked(listGoatBrainSkillCatalog).mockResolvedValue([
+    vi.mocked(listGoatSkillCatalog).mockResolvedValue([
       {
-        brainRef: ACTIVE_BRAIN.id,
         id: "product-feature",
         name: "Product feature",
         description: "Build and verify product changes.",
       },
     ]);
-    vi.mocked(resolveGoatBrainSkillMentions)
+    vi.mocked(resolveGoatSkillMentions)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
@@ -292,10 +322,10 @@ describe("POST /api/chat", () => {
     const response = await POST(validChatRequest("Help me implement this product change."));
 
     expect(response.status).toBe(200);
-    expect(listGoatBrainSkillCatalog).toHaveBeenCalledWith(ACTIVE_BRAIN.id);
-    expect(resolveGoatBrainSkillMentions).toHaveBeenLastCalledWith({
-      activeBrainRef: ACTIVE_BRAIN.id,
-      mentions: [{ brainRef: ACTIVE_BRAIN.id, id: "product-feature" }],
+    expect(listGoatSkillCatalog).toHaveBeenCalledWith("goat_ws_user_1");
+    expect(resolveGoatSkillMentions).toHaveBeenLastCalledWith({
+      workspaceId: "goat_ws_user_1",
+      mentions: [{ id: "product-feature" }],
     });
     expect(skillOutput).toEqual({
       ok: true,
@@ -311,15 +341,14 @@ describe("POST /api/chat", () => {
   it("does not reload skill instructions that are already active in the chat", async () => {
     mockAuth();
     mockCreateTurn();
-    vi.mocked(listGoatBrainSkillCatalog).mockResolvedValue([
+    vi.mocked(listGoatSkillCatalog).mockResolvedValue([
       {
-        brainRef: ACTIVE_BRAIN.id,
         id: "product-feature",
         name: "Product feature",
         description: "Build and verify product changes.",
       },
     ]);
-    vi.mocked(resolveGoatBrainSkillMentions)
+    vi.mocked(resolveGoatSkillMentions)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
@@ -846,7 +875,7 @@ describe("POST /api/chat", () => {
 
   it("activates a selected skill on its message while preserving stored content", async () => {
     mockAuth();
-    vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([
+    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([
       {
         id: "coding-work",
         name: "Coding work",
@@ -892,7 +921,7 @@ describe("POST /api/chat", () => {
           role: "user",
           parts: [{ type: "text", text: "Implement this" }],
           metadata: {
-            mentions: [{ kind: "skill", brainRef: "goat_brain_user_1", id: "coding-work" }],
+            mentions: [{ kind: "skill", id: "coding-work" }],
           },
         },
       }),
@@ -906,7 +935,7 @@ describe("POST /api/chat", () => {
     expect(activateAndListGoatChatSessionSkills).toHaveBeenCalledWith({
       chatSessionId: "session_1",
       activatedMessageId: "user_message_2",
-      brainRef: "goat_brain_user_1",
+      workspaceRef: "goat_ws_user_1",
       skills: [expect.objectContaining({ id: "coding-work" })],
     });
     const modelUiMessages = vi.mocked(convertToModelMessages).mock
@@ -979,8 +1008,8 @@ describe("POST /api/chat", () => {
 
   it("rejects stale structured skill references before storing the turn", async () => {
     mockAuth();
-    vi.mocked(resolveGoatBrainSkillMentions).mockRejectedValue(
-      new GoatBrainSkillMentionError("Skill is unavailable."),
+    vi.mocked(resolveGoatSkillMentions).mockRejectedValue(
+      new GoatSkillMentionError("Skill is unavailable."),
     );
 
     const response = await POST(
@@ -991,7 +1020,7 @@ describe("POST /api/chat", () => {
           role: "user",
           parts: [{ type: "text", text: "Implement this" }],
           metadata: {
-            mentions: [{ kind: "skill", brainRef: "goat_brain_user_1", id: "missing" }],
+            mentions: [{ kind: "skill", id: "missing" }],
           },
         },
       }),

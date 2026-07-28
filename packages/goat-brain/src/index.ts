@@ -21,3 +21,4 @@ export * from "./tool-surface";
 export * from "./usage";
 export * from "./validate";
 export * from "./wiki-links";
+export * from "./workflows";
