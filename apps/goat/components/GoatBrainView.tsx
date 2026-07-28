@@ -119,6 +119,7 @@ type Props = {
   routeBrainId?: string | null;
   initialOverview?: boolean;
   overviewStats?: GoatBrainOverviewStats | null;
+  initialDataLoaded?: boolean;
 };
 
 type BrainTreeNode = {
@@ -164,6 +165,7 @@ const AUTOSAVE_DELAY_MS = 1200;
 const EMPTY_DRAFT_INGEST_STATES: ReadonlyMap<string, GoatBrainDraftIngestState> = new Map();
 const EMPTY_OVERVIEW_STATS: GoatBrainOverviewStats = {
   windowStartedAt: "9999-12-31T23:59:59.999Z",
+  itemsAddedLast7Days: 0,
   retrievalsLast7Days: 0,
   activeSources: 0,
 };
@@ -178,6 +180,7 @@ export function GoatBrainView({
   routeBrainId,
   initialOverview = false,
   overviewStats = null,
+  initialDataLoaded = true,
 }: Props) {
   const hydrated = useHydrated();
   if (!hydrated) {
@@ -192,6 +195,8 @@ export function GoatBrainView({
         routeBrainId={routeBrainId ?? null}
         initialOverview={initialOverview}
         overviewStats={overviewStats}
+        initialDataLoaded={initialDataLoaded}
+        brainDataLoading={!initialDataLoaded}
       />
     );
   }
@@ -206,6 +211,7 @@ export function GoatBrainView({
       routeBrainId={routeBrainId ?? null}
       initialOverview={initialOverview}
       overviewStats={overviewStats}
+      initialDataLoaded={initialDataLoaded}
     />
   );
 }
@@ -220,6 +226,7 @@ function LiveGoatBrainView({
   routeBrainId,
   initialOverview = false,
   overviewStats = null,
+  initialDataLoaded = true,
 }: Props) {
   const collections = useMemo(() => createGoatCollections(), []);
   const brainCollections = useMemo(
@@ -276,6 +283,7 @@ function LiveGoatBrainView({
       ),
     [captureSourceItemRows, ingestJobRows],
   );
+  const brainDataLoading = !initialDataLoaded && filesLoading && !fileRows?.length;
 
   return (
     <GoatBrainEditor
@@ -290,6 +298,8 @@ function LiveGoatBrainView({
       routeBrainId={routeBrainId ?? null}
       initialOverview={initialOverview}
       overviewStats={overviewStats}
+      initialDataLoaded={initialDataLoaded}
+      brainDataLoading={brainDataLoading}
     />
   );
 }
@@ -306,9 +316,11 @@ function GoatBrainEditor({
   routeBrainId,
   initialOverview = false,
   overviewStats = null,
+  brainDataLoading = false,
 }: Props & {
   edgeRows?: GoatBrainEdgeRow[];
   draftIngestStatesByBrainId?: ReadonlyMap<string, GoatBrainDraftIngestState>;
+  brainDataLoading?: boolean;
 }) {
   const router = useRouter();
   const navInset = useGoatNavInset();
@@ -1059,7 +1071,11 @@ function GoatBrainEditor({
             </div>
           ) : (
             <div className="px-2 py-8 text-[12.5px] leading-5 text-ink-muted">
-              {documents.length === 0 ? "No brain files yet." : "No files match that search."}
+              {brainDataLoading
+                ? "Loading brain…"
+                : documents.length === 0
+                  ? "No brain files yet."
+                  : "No files match that search."}
             </div>
           )}
           {archivedDocuments.length > 0 ? (
@@ -1288,7 +1304,6 @@ function GoatBrainEditor({
           <GoatBrainOverview
             brainName={brain.name}
             brainRef={brainRef}
-            documents={documents}
             stats={overviewStats ?? EMPTY_OVERVIEW_STATS}
           />
         ) : !selectedDocument && documents.length === 0 && brainRef && canEditBrain ? (
