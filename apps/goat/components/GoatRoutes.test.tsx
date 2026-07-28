@@ -364,7 +364,12 @@ describe("GoatWorkflowEditorRoute", () => {
     };
 
     const { container } = render(
-      <GoatWorkflowEditorRoute workflow={workflow} initialStatus="draft" canEdit />,
+      <GoatWorkflowEditorRoute
+        workflow={workflow}
+        initialStatus="draft"
+        canEdit
+        skillCatalog={[]}
+      />,
     );
 
     expect(container.querySelector("textarea")).toBeNull();
@@ -381,6 +386,36 @@ describe("GoatWorkflowEditorRoute", () => {
         }),
       ),
     );
+  });
+
+  it("hints at @-mentioning a skill only when the workspace has one to mention", () => {
+    const workflow = {
+      id: "test-workflow",
+      name: "Test workflow",
+      description: "Does a thing",
+      instructions: "Step one.",
+      model: "",
+    };
+
+    const { rerender } = render(
+      <GoatWorkflowEditorRoute
+        workflow={workflow}
+        initialStatus="draft"
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+    expect(screen.queryByText(/mention a skill/i)).not.toBeInTheDocument();
+
+    rerender(
+      <GoatWorkflowEditorRoute
+        workflow={workflow}
+        initialStatus="draft"
+        canEdit
+        skillCatalog={[{ id: "standup-notes", name: "Standup notes", description: "" }]}
+      />,
+    );
+    expect(screen.getByText(/mention a skill/i)).toBeInTheDocument();
   });
 });
 
