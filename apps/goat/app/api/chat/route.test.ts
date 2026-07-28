@@ -11,7 +11,11 @@ import {
   listGoatBrainSkillCatalog,
   resolveGoatBrainSkillMentions,
 } from "@/lib/brain-skills";
-import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
+import {
+  createGoatChatApprovalContinuationTurn,
+  createGoatChatUserTurn,
+  persistGoatChatAssistantMessage,
+} from "@/lib/chat";
 import { OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX } from "@/lib/chat-agent";
 import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
@@ -714,6 +718,64 @@ describe("POST /api/chat", () => {
         },
       }),
     );
+  });
+
+  it.each([
+    ["an approved", true],
+    ["a declined", false],
+  ])("keeps %s integration approval continuation answer-only", async (_label, approved) => {
+    mockAuth();
+    mockCreateGoatChatApprovalContinuationTurn().mockResolvedValue({
+      ok: true,
+      session: {
+        id: "session_1",
+        model: "openai/gpt-5.5",
+        engine: "opencompany",
+      },
+      lastUserMessage: {
+        id: "user_message_1",
+        content: "Send the email.",
+      },
+      storedMessages: [],
+      messages: [],
+      respondedApprovalIds: ["approval_1"],
+    });
+    mockStreamText().mockImplementation((options: unknown) => {
+      const settings = options as {
+        prepareStep?: (input: { stepNumber: number }) => unknown;
+      };
+      expect(settings.prepareStep?.({ stepNumber: 0 })).toEqual({
+        activeTools: [],
+        toolChoice: "none",
+      });
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        sessionId: "session_1",
+        message: {
+          id: "assistant_1",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-use_action",
+              toolCallId: "send_email_1",
+              state: "approval-responded",
+              input: {
+                action: "gmail.send_email",
+                params: { to: ["founder@example.com"], subject: "Feature request", body: "Hello" },
+              },
+              approval: { id: "approval_1", approved },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
   });
 
   it("forwards a valid browser-reserved id to new chat persistence", async () => {
@@ -2212,6 +2274,10 @@ function mockResolveGoatChatRequestContext() {
 
 function mockCreateGoatChatUserTurn() {
   return vi.mocked(createGoatChatUserTurn as unknown as () => Promise<unknown>);
+}
+
+function mockCreateGoatChatApprovalContinuationTurn() {
+  return vi.mocked(createGoatChatApprovalContinuationTurn as unknown as () => Promise<unknown>);
 }
 
 function mockPersistGoatChatAssistantMessage() {

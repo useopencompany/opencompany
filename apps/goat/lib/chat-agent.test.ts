@@ -7,6 +7,7 @@ import {
   MAX_LIST_SKILL_RESULTS,
   OPENCOMPANY_CHAT_MAX_STEPS,
   OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
+  prepareOpenCompanyChatStep,
   runOpenCompanyChatAgent,
 } from "@/lib/chat-agent";
 import {
@@ -49,6 +50,18 @@ import {
 } from "@/lib/prompts";
 
 describe("runOpenCompanyChatAgent", () => {
+  it("keeps the post-approval model step answer-only", () => {
+    expect(
+      prepareOpenCompanyChatStep({
+        stepNumber: 0,
+        finalizeAfterApproval: true,
+      }),
+    ).toEqual({
+      activeTools: [],
+      toolChoice: "none",
+    });
+  });
+
   it("reserves the final model step for an answer without tools", async () => {
     await runOpenCompanyChatAgent({
       messages: [{ role: "user", content: "research this in chat" }],
