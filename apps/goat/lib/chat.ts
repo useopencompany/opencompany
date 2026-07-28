@@ -259,7 +259,12 @@ export async function createGoatChatApprovalContinuationTurn(
       lastUserMessage: GoatStoredChatMessage | null;
       storedMessages: GoatStoredChatMessage[];
       messages: GoatChatUiMessage[];
-      respondedApprovalIds: string[];
+      respondedApprovals: Array<{
+        approvalId: string;
+        toolCallId: string;
+        action: string;
+        approved: boolean;
+      }>;
     }
   | { ok: false; error: string }
 > {
@@ -283,11 +288,11 @@ export async function createGoatChatApprovalContinuationTurn(
     };
   }
 
-  const { parts, respondedApprovalIds } = applyApprovalResponsesToStoredParts(
+  const { parts, respondedApprovals } = applyApprovalResponsesToStoredParts(
     lastStored.debugTrace.uiMessageParts,
     input.message.parts,
   );
-  if (respondedApprovalIds.length === 0) {
+  if (respondedApprovals.length === 0) {
     return { ok: false, error: "No pending approvals to respond to." };
   }
 
@@ -314,7 +319,7 @@ export async function createGoatChatApprovalContinuationTurn(
     lastUserMessage,
     storedMessages,
     messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
-    respondedApprovalIds,
+    respondedApprovals,
   };
 }
 
@@ -325,16 +330,20 @@ export async function createGoatChatApprovalContinuationTurn(
 export async function dismissStaleGoatChatApprovals(
   turn: { storedMessages: GoatStoredChatMessage[] },
   store: GoatChatStore = createDbGoatChatStore(),
-): Promise<{ changed: boolean; messages: GoatChatUiMessage[] }> {
+): Promise<{ changed: boolean; messages: GoatChatUiMessage[]; toolCallIds: string[] }> {
   let changedAny = false;
+  const toolCallIds: string[] = [];
   const storedMessages = await Promise.all(
     turn.storedMessages.map(async (message) => {
       if (message.role !== "assistant" || !message.debugTrace?.uiMessageParts) return message;
-      const { parts, changed } = dismissPendingApprovalsInStoredParts(
-        message.debugTrace.uiMessageParts,
-      );
+      const {
+        parts,
+        changed,
+        toolCallIds: dismissedToolCallIds,
+      } = dismissPendingApprovalsInStoredParts(message.debugTrace.uiMessageParts);
       if (!changed) return message;
       changedAny = true;
+      toolCallIds.push(...dismissedToolCallIds);
       const debugTrace = { ...message.debugTrace, uiMessageParts: parts };
       await persistGoatChatAssistantMessage(
         {
@@ -352,6 +361,7 @@ export async function dismissStaleGoatChatApprovals(
   return {
     changed: changedAny,
     messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
+    toolCallIds,
   };
 }
 

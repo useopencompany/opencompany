@@ -1258,6 +1258,10 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
   },
 ];
 
+export const MANAGED_CAPABILITY_ACTIONS_BY_ID = new Map(
+  MANAGED_CAPABILITY_ACTIONS.map((action) => [action.id, action]),
+);
+
 export function managedCapabilityActionsForSource(source: GoatManagedCapabilitySource) {
   return MANAGED_CAPABILITY_ACTIONS.filter((action) => action.source === source);
 }

@@ -82,6 +82,8 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     expect(prompt).toContain("If use_action returns invalid_params");
     expect(prompt).toContain("make at most one corrected call");
     expect(prompt).toContain("make at most one substantially simplified retry");
+    expect(prompt).toContain("chat session's spending limit");
+    expect(prompt).toContain("one-off approval card");
     expect(prompt).toContain("<brain_fill>");
     expect(prompt).toContain("Survey breadth before depth");
     expect(prompt).toContain("exception to normal task routing");

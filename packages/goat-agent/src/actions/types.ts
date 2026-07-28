@@ -55,7 +55,18 @@ export type GoatActionSourceDescriptor = {
 
 export type GoatCapabilityTurnState = {
   quotedTotalUsdMicros: number;
+  admittedToolCallIds: string[];
+  quotesByToolCallId: Map<string, GoatCapabilityQuote>;
   asyncRunsStarted: number;
+};
+
+export type GoatCapabilityQuote = {
+  inputHash: string;
+  quoteProviderCostUsdMicros: number;
+  quotePlatformFeeUsdMicros: number;
+  quoteTotalCostUsdMicros: number;
+  decision: "auto" | "approval_required";
+  runId?: string;
 };
 
 export type GoatActionExecuteContext = {
@@ -63,7 +74,6 @@ export type GoatActionExecuteContext = {
   workspaceId?: string;
   chatSessionId?: string;
   toolCallId?: string;
-  capabilityApprovalRunId?: string;
   capabilityTurnState?: GoatCapabilityTurnState;
   signal: AbortSignal;
   currentDate: Date;
@@ -150,20 +160,15 @@ export class GoatActionInvalidParamsError extends Error {
   }
 }
 
-export class GoatActionApprovalRequiredError extends Error {
-  readonly approval: GoatActionApprovalView;
-
-  constructor(approval: GoatActionApprovalView) {
-    super("Approve this paid capability once to continue.");
-    this.name = "GoatActionApprovalRequiredError";
-    this.approval = approval;
-  }
-}
-
 export class GoatActionExecutionError extends Error {
   readonly code: Extract<
     GoatActionErrorCode,
-    "provider_error" | "insufficient_credits" | "disabled" | "call_budget" | "timeout"
+    | "provider_error"
+    | "insufficient_credits"
+    | "disabled"
+    | "call_budget"
+    | "timeout"
+    | "approval_required"
   >;
 
   constructor(code: GoatActionExecutionError["code"], message: string) {

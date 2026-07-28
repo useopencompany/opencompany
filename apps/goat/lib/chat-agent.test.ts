@@ -1183,6 +1183,58 @@ describe("list_actions and use_action tools", () => {
     });
   });
 
+  it("delegates native approval checks only for discovered non-write actions", async () => {
+    const needsApproval = vi.fn(async () => true);
+    const approvalCatalog: GoatChatActionCatalog = {
+      sources: catalog.sources,
+      actions: [
+        catalog.actions[0]!,
+        {
+          ...catalog.actions[1]!,
+          permissionMode: "ask",
+        },
+      ],
+    };
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      actions: {
+        catalog: approvalCatalog,
+        execute: vi.fn(),
+        needsApproval,
+      },
+    });
+
+    await expect(
+      evaluateUseActionApproval(context.tools, {
+        action: "slack.fetch_history",
+        params: { channel: "C123" },
+      }),
+    ).resolves.toBe(false);
+    expect(needsApproval).not.toHaveBeenCalled();
+
+    await executeListActionsTool(context.tools, { source: "slack" });
+    await expect(
+      evaluateUseActionApproval(context.tools, {
+        action: "slack.fetch_history",
+        params: { channel: "C123" },
+      }),
+    ).resolves.toBe(true);
+    expect(needsApproval).toHaveBeenCalledWith({
+      action: "slack.fetch_history",
+      params: { channel: "C123" },
+      toolCallId: "call_approval",
+    });
+
+    await expect(
+      evaluateUseActionApproval(context.tools, {
+        action: "linear.list_issues",
+        params: {},
+      }),
+    ).resolves.toBe(true);
+    expect(needsApproval).toHaveBeenCalledTimes(1);
+  });
+
   it("requires list_actions separately for each source before dispatch", async () => {
     const execute = vi.fn(async ({ action }: { action: string }) => okResult(action));
     const context = createOpenCompanyChatToolContext({
@@ -1778,6 +1830,21 @@ async function executeUseActionTool(
     toolCallId: "call_1",
     messages: [],
     ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+  });
+}
+
+async function evaluateUseActionApproval(
+  tools: unknown,
+  input: UseActionToolInput,
+): Promise<boolean> {
+  type Tools = Record<typeof USE_ACTION_TOOL_NAME, { needsApproval?: unknown }>;
+  const tool = (tools as Tools)[USE_ACTION_TOOL_NAME];
+  if (typeof tool?.needsApproval !== "function") {
+    throw new Error(`${USE_ACTION_TOOL_NAME} needsApproval function was not configured.`);
+  }
+  return tool.needsApproval(input, {
+    toolCallId: "call_approval",
+    messages: [],
   });
 }
 

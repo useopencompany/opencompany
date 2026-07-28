@@ -1,5 +1,4 @@
 import {
-  GoatActionApprovalRequiredError,
   type GoatActionApprovalView,
   GoatActionAuthError,
   type GoatActionErrorCode,
@@ -36,7 +35,6 @@ export async function executeGoatAction(input: {
   workspaceId?: string;
   chatSessionId?: string;
   toolCallId?: string;
-  capabilityApprovalRunId?: string;
   capabilityTurnState?: GoatCapabilityTurnState;
   signal: AbortSignal;
   currentDate: Date;
@@ -64,11 +62,10 @@ export async function executeGoatAction(input: {
       ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
       ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
       ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
-      ...(input.capabilityApprovalRunId
-        ? { capabilityApprovalRunId: input.capabilityApprovalRunId }
-        : {}),
       capabilityTurnState: input.capabilityTurnState ?? {
         quotedTotalUsdMicros: 0,
+        admittedToolCallIds: [],
+        quotesByToolCallId: new Map(),
         asyncRunsStarted: 0,
       },
       signal,
@@ -89,18 +86,6 @@ export async function executeGoatAction(input: {
         ok: false,
         action: action.id,
         error: { code: error.code, source: error.provider, message: error.message },
-      };
-    }
-    if (error instanceof GoatActionApprovalRequiredError) {
-      return {
-        ok: false,
-        action: action.id,
-        error: {
-          code: "approval_required",
-          source: action.provider,
-          message: error.message,
-          approval: error.approval,
-        },
       };
     }
     if (error instanceof GoatActionExecutionError) {
