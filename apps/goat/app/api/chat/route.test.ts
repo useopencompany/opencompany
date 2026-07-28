@@ -768,7 +768,7 @@ describe("POST /api/chat", () => {
         capabilityApprovalRunId: "gcr_abc123",
         capabilityTurnState: {
           quotedTotalUsdMicros: 0,
-          asyncRunStarted: false,
+          asyncRunsStarted: 0,
         },
       }),
     );

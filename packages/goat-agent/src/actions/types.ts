@@ -55,7 +55,7 @@ export type GoatActionSourceDescriptor = {
 
 export type GoatCapabilityTurnState = {
   quotedTotalUsdMicros: number;
-  asyncRunStarted: boolean;
+  asyncRunsStarted: number;
 };
 
 export type GoatActionExecuteContext = {

@@ -35,7 +35,10 @@ import {
   type GoatActionExecuteContext,
 } from "@/lib/actions/types";
 import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
-import { executeManagedCapability } from "@/lib/capabilities/execute";
+import {
+  executeManagedCapability,
+  GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+} from "@/lib/capabilities/execute";
 import {
   MonidApiError,
   type MonidClient,
@@ -506,40 +509,54 @@ describe("executeManagedCapability", () => {
     expect(client.run).not.toHaveBeenCalled();
   });
 
-  it("permits only one asynchronous run per turn and polls a permitted run", async () => {
-    const blockedContext = context();
-    blockedContext.capabilityTurnState!.asyncRunStarted = true;
-    const blockedClient = fakeClient({
-      inspection: inspectPrice(0.01),
-      run: providerRun({ status: "RUNNING" }),
-    });
-    await expect(
-      executeManagedCapability({
-        spec: { ...spec(), executionMode: "async" },
-        params: { query: "openai" },
-        context: blockedContext,
-        client: blockedClient,
+  it("permits six asynchronous runs per turn and rejects a seventh without quoting it", async () => {
+    const sharedContext = context();
+    const clients = Array.from({ length: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN + 1 }, (_, index) =>
+      fakeClient({
+        inspection: inspectPrice(0.01),
+        run: providerRun({
+          runId: `monid_run_${index + 1}`,
+          status: "RUNNING",
+          cost: null,
+        }),
+        polled: providerRun({
+          runId: `monid_run_${index + 1}`,
+          status: "COMPLETED",
+          cost: { value: 0.01, currency: "USD" },
+        }),
       }),
-    ).rejects.toMatchObject({ code: "call_budget" });
-    expect(blockedClient.run).not.toHaveBeenCalled();
+    );
 
-    const client = fakeClient({
-      inspection: inspectPrice(0.01),
-      run: providerRun({ status: "RUNNING", cost: null }),
-      polled: providerRun({
-        status: "COMPLETED",
-        cost: { value: 0.01, currency: "USD" },
-      }),
+    const results = await Promise.allSettled(
+      clients.map((client, index) =>
+        executeManagedCapability({
+          spec: { ...spec(), executionMode: "async" },
+          params: { query: `query ${index + 1}` },
+          context: sharedContext,
+          client,
+          pollIntervalMs: 1,
+        }),
+      ),
+    );
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(
+      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+    );
+    const [rejected] = results.filter((result) => result.status === "rejected");
+    expect(rejected?.reason).toMatchObject({
+      code: "call_budget",
+      message: `Only ${GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
     });
-    await executeManagedCapability({
-      spec: { ...spec(), executionMode: "async" },
-      params: { query: "openai" },
-      context: context(),
-      client,
-      pollIntervalMs: 1,
+    expect(clients.reduce((calls, client) => calls + client.run.mock.calls.length, 0)).toBe(
+      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+    );
+    expect(clients.reduce((calls, client) => calls + client.getRun.mock.calls.length, 0)).toBe(
+      GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+    );
+    expect(sharedContext.capabilityTurnState).toEqual({
+      quotedTotalUsdMicros: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN * 12_000,
+      asyncRunsStarted: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
     });
-    expect(client.run).toHaveBeenCalledTimes(1);
-    expect(client.getRun).toHaveBeenCalledTimes(1);
   });
 
   it("allows sequential catalog-sync actions when Monid returns async job envelopes", async () => {
@@ -586,7 +603,7 @@ describe("executeManagedCapability", () => {
     expect(secondClient.stopRun).not.toHaveBeenCalled();
     expect(sharedContext.capabilityTurnState).toEqual({
       quotedTotalUsdMicros: 3_600,
-      asyncRunStarted: false,
+      asyncRunsStarted: 0,
     });
   });
 });
@@ -597,7 +614,7 @@ function context(): GoatActionExecuteContext {
     workspaceId: "workspace_1",
     chatSessionId: "chat_1",
     toolCallId: "tool_1",
-    capabilityTurnState: { quotedTotalUsdMicros: 0, asyncRunStarted: false },
+    capabilityTurnState: { quotedTotalUsdMicros: 0, asyncRunsStarted: 0 },
     signal: new AbortController().signal,
     currentDate: new Date("2026-07-23T10:00:00.000Z"),
     userTimezone: "UTC",
