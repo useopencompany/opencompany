@@ -13,6 +13,7 @@ import {
 
 export const GOAT_ACTION_TIMEOUT_MS = 20_000;
 export const MAX_ACTION_RESULT_CHARS = 16_000;
+export const MAX_EXPANDED_ACTION_RESULT_CHARS = 256_000;
 
 export type GoatActionResult =
   | { ok: true; action: string; result: unknown }
@@ -74,7 +75,11 @@ export async function executeGoatAction(input: {
       currentDate: input.currentDate,
       userTimezone: input.userTimezone,
     });
-    return { ok: true, action: action.id, result: clampActionResult(result) };
+    return {
+      ok: true,
+      action: action.id,
+      result: clampActionResult(result, action.maxResultChars),
+    };
   } catch (error) {
     // A parent-chat abort is not an action failure; let the turn's own
     // cancellation handling deal with it.
@@ -152,22 +157,31 @@ export async function executeGoatAction(input: {
 
 // Providers already shape and truncate their payloads; this is the guard rail
 // that keeps a pathological response from flooding the chat context.
-export function clampActionResult(value: unknown): unknown {
+export function clampActionResult(value: unknown, requestedMaxChars?: number): unknown {
+  const maxChars =
+    typeof requestedMaxChars === "number" &&
+    Number.isInteger(requestedMaxChars) &&
+    requestedMaxChars > 0
+      ? Math.max(
+          MAX_ACTION_RESULT_CHARS,
+          Math.min(requestedMaxChars, MAX_EXPANDED_ACTION_RESULT_CHARS),
+        )
+      : MAX_ACTION_RESULT_CHARS;
   let json: string;
   try {
     json = JSON.stringify(value) ?? "null";
   } catch {
-    return fitActionPreview(String(value), (resultPreview) => ({
+    return fitActionPreview(String(value), maxChars, (resultPreview) => ({
       truncated: true,
       note: "Result was not serializable.",
       resultPreview,
     }));
   }
-  if (json.length <= MAX_ACTION_RESULT_CHARS) return value;
+  if (json.length <= maxChars) return value;
   const note = "Result truncated; narrow the request (smaller limit, tighter query).";
   if (isRecord(value) && value.untrustedProviderData === true) {
     const payloadJson = JSON.stringify(value.payload) ?? "null";
-    return fitActionPreview(payloadJson, (resultPreview) => ({
+    return fitActionPreview(payloadJson, maxChars, (resultPreview) => ({
       ...value,
       canonicalLinks: Array.isArray(value.canonicalLinks) ? value.canonicalLinks.slice(0, 5) : [],
       payload: {
@@ -177,14 +191,18 @@ export function clampActionResult(value: unknown): unknown {
       },
     }));
   }
-  return fitActionPreview(json, (resultPreview) => ({
+  return fitActionPreview(json, maxChars, (resultPreview) => ({
     truncated: true,
     note,
     resultPreview,
   }));
 }
 
-function fitActionPreview(source: string, create: (preview: string) => Record<string, unknown>) {
+function fitActionPreview(
+  source: string,
+  maxChars: number,
+  create: (preview: string) => Record<string, unknown>,
+) {
   let low = 0;
   let high = source.length;
   let best = create("");
@@ -192,7 +210,7 @@ function fitActionPreview(source: string, create: (preview: string) => Record<st
     const length = Math.floor((low + high) / 2);
     const candidate = create(source.slice(0, length));
     const serialized = JSON.stringify(candidate);
-    if (serialized.length <= MAX_ACTION_RESULT_CHARS) {
+    if (serialized.length <= maxChars) {
       best = candidate;
       low = length + 1;
     } else {
