@@ -109,6 +109,20 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  latitude: [
+    {
+      id: "read",
+      label: "Read Latitude",
+      description: "Inspect projects, traces, signals, datasets, evaluations, and workspace data.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Manage Latitude",
+      description: "Create or change resources in your Latitude organization.",
+      defaultMode: "ask",
+    },
+  ],
 };
 
 export function isGoatCapabilityMode(value: unknown): value is GoatCapabilityMode {

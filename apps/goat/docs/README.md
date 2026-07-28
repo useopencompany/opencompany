@@ -27,7 +27,7 @@ The Goat task path is not currently a full OpenCompany `.agent` session. It reus
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
 does not yet use `agent_sessions`, `.agent` files, Brain mounts, skills, approvals, or
 `delegate_to_agent`. It does expose selected user-scoped MCP integrations through the Goat
-task harness, starting with Linear.
+task harness, including Linear and Latitude.
 
 The wider OpenCompany runner does have a full multi-agent session loop. Goat can either keep its
 lighter task harness and grow it, or move durable Goat work onto that full session substrate.
@@ -63,7 +63,7 @@ Runner
     claim queued task with lease
     plan harness spec with Gateway planner model
     create durable assistant task message
-    streamText with Gateway, Exa, Gmail, Calendar, and Linear MCP tools
+    streamText with Gateway, Exa, Gmail, Calendar, Linear MCP, and Latitude MCP tools
       append durable message and tool events
     use final assistant message as the task result
     mark task succeeded, failed, or canceled
@@ -193,13 +193,16 @@ comments. Attio exposes bounded fuzzy search across standard people, companies, 
 field, and membership discovery; and bounded list reads with saved-view filters, explicit filters,
 sorting, and pagination. Explicitly requested Gmail sends, Google Doc edits, Attio record and
 list-entry updates, Linear writes, and Google Calendar event creation require confirmation by default
-and can be configured under Integrations. An explicit account or workspace is required when several
-are connected. Stripe exposes read-only workspace metrics for balance activity by period, current
-balances, subscription health with estimated MRR, and open receivables. Stripe uses an encrypted
-restricted API key and is excluded from automatic Brain-fill surveying because those financial
-metrics are live operational state. Disconnected or disabled capabilities are absent from the
-catalog, guessed action ids cannot bypass it, and all provider credentials remain server-side.
-Deeper or multi-source connected-account work continues through background tasks.
+and can be configured under Integrations. Latitude's live MCP catalog is mapped into the same action
+surface: tools annotated read-only default to On, while mutations and tools without that annotation
+default to Ask. An explicit account or workspace is required when several are connected. Stripe
+exposes read-only workspace
+metrics for balance activity by period, current balances, subscription health with estimated MRR,
+and open receivables. Stripe uses an encrypted restricted API key and is excluded from automatic
+Brain-fill surveying because those financial metrics are live operational state. Disconnected or
+disabled capabilities are absent from the catalog, guessed action ids cannot bypass it, and all
+provider credentials remain server-side. Deeper or multi-source connected-account work continues
+through background tasks.
 
 Managed X, LinkedIn, YouTube, Instagram, TikTok, prospecting, and Semrush SEO actions use a fixed
 server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Prospecting includes
@@ -596,8 +599,13 @@ Available task harness tools:
 - `calendar_get_freebusy`
 - `linear_search_tools`
 - `linear_use_tool`
+- `latitude_search_tools`
+- `latitude_use_tool`
 - The Google tools run server-side in the runner and resolve encrypted OAuth credentials from the
   database.
+- The Linear and Latitude MCP meta-tools discover each server's current tool catalog before
+  executing an exact remote tool name. Latitude task writes are used only for explicit user
+  requests.
 
 E2B remains available elsewhere in the runner as a future tool backend; new Goat task runs do not
 depend on `/tmp/goat-harness.mjs`, `GOAT_OUTPUT_PATH`, progress stdout parsing, or a sandbox bridge.

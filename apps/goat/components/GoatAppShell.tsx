@@ -1,6 +1,6 @@
+import { GoatAnalyticsProvider } from "@opencompany/analytics/goat/client";
 import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
-import { StatsigAnalyticsProvider } from "@opencompany/statsig/client";
 import type { ReactNode } from "react";
 import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatAppDataProvider";
 import { currentGoatUser } from "@/lib/auth";
@@ -137,17 +137,14 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <StatsigAnalyticsProvider
+    <GoatAnalyticsProvider
       identity={{
         userId: user.workosUserId,
         workspaceId: workspace.id,
-        email: authUser.email,
-        firstName: authUser.firstName,
-        lastName: authUser.lastName,
       }}
     >
       <GoatAppDataProvider initialData={initialData}>{children}</GoatAppDataProvider>
-    </StatsigAnalyticsProvider>
+    </GoatAnalyticsProvider>
   );
 }
 

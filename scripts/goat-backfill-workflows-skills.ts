@@ -1,6 +1,6 @@
 // Backfill goat.workflows and goat.skills from the reserved Brain folders they
 // used to live in. Extraction moved Workflows/Skills out of the Brain into their
-// own workspace-scoped tables (migration 0162); this copies existing content
+// own workspace-scoped tables (migration 0163); this copies existing content
 // over so nothing disappears when the surfaces move.
 //
 // - Non-destructive: only inserts. The old Brain docs are removed by a separate,

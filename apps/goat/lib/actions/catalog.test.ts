@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   resolveGmailActions: vi.fn(),
   resolveGoogleCalendarActions: vi.fn(),
   resolveGoogleDriveActions: vi.fn(),
+  resolveLatitudeActions: vi.fn(),
   resolveLinearActions: vi.fn(),
   resolveGitHubActions: vi.fn(),
   resolveStripeActions: vi.fn(),
@@ -31,6 +32,9 @@ vi.mock("@opencompany/goat-agent/actions/google-calendar", () => ({
 vi.mock("@opencompany/goat-agent/actions/google-drive", () => ({
   resolveGoogleDriveActions: mocks.resolveGoogleDriveActions,
 }));
+vi.mock("@opencompany/goat-agent/actions/latitude", () => ({
+  resolveLatitudeActions: mocks.resolveLatitudeActions,
+}));
 vi.mock("@opencompany/goat-agent/actions/linear", () => ({
   resolveLinearActions: mocks.resolveLinearActions,
 }));
@@ -50,6 +54,7 @@ function providerCatalog(
     | "gmail"
     | "google_calendar"
     | "google_drive"
+    | "latitude"
     | "linear"
     | "attio"
     | "github"
@@ -95,6 +100,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGoogleCalendarActions.mockResolvedValue(providerCatalog("google_calendar"));
     mocks.resolveGoogleDriveActions.mockResolvedValue(providerCatalog("google_drive"));
     mocks.resolveLinearActions.mockResolvedValue(providerCatalog("linear"));
+    mocks.resolveLatitudeActions.mockResolvedValue(providerCatalog("latitude"));
     mocks.resolveAttioActions.mockResolvedValue(providerCatalog("attio"));
     mocks.resolveGitHubActions.mockResolvedValue(providerCatalog("github"));
     mocks.resolveStripeActions.mockResolvedValue(providerCatalog("stripe"));
@@ -108,6 +114,7 @@ describe("resolveGoatActionCatalog", () => {
       "google_calendar",
       "google_drive",
       "linear",
+      "latitude",
       "attio",
       "github",
       "stripe",
@@ -117,6 +124,7 @@ describe("resolveGoatActionCatalog", () => {
       "google_calendar description",
       "google_drive description",
       "linear description",
+      "latitude description",
       "attio description",
       "github description",
       "stripe description",
@@ -126,6 +134,7 @@ describe("resolveGoatActionCatalog", () => {
       "google_calendar.read_something",
       "google_drive.read_something",
       "linear.read_something",
+      "latitude.read_something",
       "attio.read_something",
       "github.read_something",
       "stripe.read_something",
@@ -140,6 +149,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
+    mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
@@ -157,6 +167,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
+    mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
@@ -176,6 +187,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
+    mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
@@ -228,6 +240,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveGoogleCalendarActions.mockResolvedValue(null);
     mocks.resolveGoogleDriveActions.mockResolvedValue(null);
     mocks.resolveLinearActions.mockResolvedValue(null);
+    mocks.resolveLatitudeActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
