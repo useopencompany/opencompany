@@ -4,6 +4,7 @@ import {
   type ActionDispatcher,
   createOpenCompanyChatToolContext,
   MAX_ACTION_CALLS_PER_TURN,
+  MAX_LIST_SKILL_RESULTS,
   OPENCOMPANY_CHAT_MAX_STEPS,
   OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
   runOpenCompanyChatAgent,
@@ -18,15 +19,21 @@ import {
   type GoatBrainToolInput,
   type GoatChatActionCatalog,
   LIST_ACTIONS_TOOL_NAME,
+  LIST_SKILLS_TOOL_NAME,
   type ListActionsToolInput,
   type ListActionsToolOutput,
+  type ListSkillsToolInput,
+  type ListSkillsToolOutput,
   SAVE_TO_BRAIN_TOOL_NAME,
   type SaveToBrainToolInput,
   type SaveToBrainToolOutput,
   START_TASK_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
+  USE_SKILL_TOOL_NAME,
   type UseActionToolInput,
   type UseActionToolOutput,
+  type UseSkillToolInput,
+  type UseSkillToolOutput,
   WEB_FETCH_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
   type WebFetchToolInput,
@@ -915,6 +922,132 @@ describe("browser tools", () => {
   });
 });
 
+describe("list_skills and use_skill tools", () => {
+  const catalog = [
+    {
+      id: "product-feature",
+      name: "Product feature",
+      description: "Plan, implement, and verify product changes.",
+    },
+    {
+      id: "customer-interviews",
+      name: "Customer interviews",
+      description: "Prepare and synthesize customer interviews.",
+    },
+  ];
+
+  it("is absent without an available skill catalog", () => {
+    const withoutSkills = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+    });
+    expect(withoutSkills.tools[LIST_SKILLS_TOOL_NAME]).toBeUndefined();
+    expect(withoutSkills.tools[USE_SKILL_TOOL_NAME]).toBeUndefined();
+
+    const empty = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      skills: { catalog: [], execute: vi.fn() },
+    });
+    expect(empty.tools[LIST_SKILLS_TOOL_NAME]).toBeUndefined();
+    expect(empty.tools[USE_SKILL_TOOL_NAME]).toBeUndefined();
+  });
+
+  it("searches safe catalog metadata and caps broad discovery results", async () => {
+    const broadCatalog = Array.from({ length: MAX_LIST_SKILL_RESULTS + 2 }, (_, index) => ({
+      id: `workflow-${index}`,
+      name: `Workflow ${index}`,
+      description: "A reusable product workflow.",
+    }));
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      skills: { catalog: broadCatalog, execute: vi.fn() },
+    });
+
+    expect(extractUseSkillEnum(context.tools)).toEqual(broadCatalog.map((skill) => skill.id));
+    expect(await executeListSkillsTool(context.tools, {})).toMatchObject({
+      ok: true,
+      total: MAX_LIST_SKILL_RESULTS + 2,
+      truncated: true,
+      skills: broadCatalog.slice(0, MAX_LIST_SKILL_RESULTS),
+    });
+    expect(
+      await executeListSkillsTool(context.tools, {
+        query: `${MAX_LIST_SKILL_RESULTS + 1}`,
+      }),
+    ).toEqual({
+      ok: true,
+      total: 1,
+      truncated: false,
+      skills: [broadCatalog[MAX_LIST_SKILL_RESULTS + 1]],
+    });
+  });
+
+  it("requires discovery before loading a skill and returns its instructions", async () => {
+    const execute = vi.fn(
+      async ({ skill }: { skill: string }): Promise<UseSkillToolOutput> => ({
+        ok: true,
+        skill: {
+          ...catalog.find((candidate) => candidate.id === skill)!,
+          instructions: "Inspect the request, make the change, then verify it.",
+        },
+      }),
+    );
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      skills: { catalog, execute },
+    });
+
+    expect(await executeUseSkillTool(context.tools, { skill: "product-feature" })).toEqual({
+      ok: false,
+      skill: "product-feature",
+      error: {
+        code: "invalid_params",
+        message: 'Call list_skills and use an exact returned id before loading "product-feature".',
+      },
+    });
+    expect(execute).not.toHaveBeenCalled();
+
+    const discovery = await executeListSkillsTool(context.tools, { query: "product change" });
+    expect(discovery.skills).toEqual([catalog[0]]);
+    await expect(
+      executeUseSkillTool(context.tools, { skill: "product-feature" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      skill: {
+        id: "product-feature",
+        instructions: "Inspect the request, make the change, then verify it.",
+      },
+    });
+    expect(execute).toHaveBeenCalledWith({ skill: "product-feature" });
+  });
+
+  it("honors skill ids discovered on an earlier chat turn", async () => {
+    const execute = vi.fn(
+      async ({ skill }: { skill: string }): Promise<UseSkillToolOutput> => ({
+        ok: true,
+        skill: { ...catalog[0]!, id: skill, instructions: "Follow this workflow." },
+      }),
+    );
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      skills: {
+        catalog,
+        prelistedSkillIds: ["product-feature", "removed-skill"],
+        execute,
+      },
+    });
+
+    await expect(
+      executeUseSkillTool(context.tools, { skill: "product-feature" }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("list_actions and use_action tools", () => {
   const catalog: GoatChatActionCatalog = {
     sources: [
@@ -1610,6 +1743,42 @@ async function executeUseActionTool(
     messages: [],
     ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
   });
+}
+
+function extractUseSkillEnum(tools: unknown) {
+  type SkillSchema = { properties?: { skill?: { enum?: string[] } } };
+  type Tools = Record<
+    typeof USE_SKILL_TOOL_NAME,
+    { inputSchema?: SkillSchema & { jsonSchema?: SkillSchema } }
+  >;
+  const inputSchema = (tools as Tools)[USE_SKILL_TOOL_NAME]?.inputSchema;
+  return (
+    inputSchema?.properties?.skill?.enum ?? inputSchema?.jsonSchema?.properties?.skill?.enum ?? []
+  );
+}
+
+async function executeListSkillsTool(
+  tools: unknown,
+  input: ListSkillsToolInput,
+): Promise<ListSkillsToolOutput> {
+  type Tools = Record<typeof LIST_SKILLS_TOOL_NAME, { execute?: unknown }>;
+  const tool = (tools as Tools)[LIST_SKILLS_TOOL_NAME];
+  if (typeof tool?.execute !== "function") {
+    throw new Error(`${LIST_SKILLS_TOOL_NAME} execute function was not configured.`);
+  }
+  return tool.execute(input, { toolCallId: "skill_list_0", messages: [] });
+}
+
+async function executeUseSkillTool(
+  tools: unknown,
+  input: UseSkillToolInput,
+): Promise<UseSkillToolOutput> {
+  type Tools = Record<typeof USE_SKILL_TOOL_NAME, { execute?: unknown }>;
+  const tool = (tools as Tools)[USE_SKILL_TOOL_NAME];
+  if (typeof tool?.execute !== "function") {
+    throw new Error(`${USE_SKILL_TOOL_NAME} execute function was not configured.`);
+  }
+  return tool.execute(input, { toolCallId: "skill_use_0", messages: [] });
 }
 
 async function needsApprovalForUseAction(tools: unknown, input: UseActionToolInput) {

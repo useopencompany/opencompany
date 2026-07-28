@@ -8,6 +8,7 @@ import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
   activateAndListGoatChatSessionSkills,
   GoatBrainSkillMentionError,
+  listGoatBrainSkillCatalog,
   resolveGoatBrainSkillMentions,
 } from "@/lib/brain-skills";
 import { createGoatChatUserTurn, persistGoatChatAssistantMessage } from "@/lib/chat";
@@ -21,10 +22,12 @@ import {
   GOAT_BRAIN_TOOL_PART_TYPE,
   LIST_ACTIONS_TOOL_NAME,
   LIST_ACTIONS_TOOL_PART_TYPE,
+  LIST_SKILLS_TOOL_NAME,
   SAVE_TO_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
   START_TASK_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
+  USE_SKILL_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
@@ -71,6 +74,7 @@ vi.mock("@/lib/brain-skills", async (importOriginal) => {
   return {
     ...actual,
     activateAndListGoatChatSessionSkills: vi.fn(),
+    listGoatBrainSkillCatalog: vi.fn(),
     resolveGoatBrainSkillMentions: vi.fn(),
   };
 });
@@ -147,6 +151,7 @@ describe("POST /api/chat", () => {
     mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
     mockIsGoatChatActionsKilled().mockReturnValue(false);
     mockResolveGoatActionCatalog().mockResolvedValue({ providers: [], actions: [] });
+    vi.mocked(listGoatBrainSkillCatalog).mockResolvedValue([]);
     vi.mocked(resolveGoatBrainSkillMentions).mockResolvedValue([]);
     vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([]);
   });
@@ -212,6 +217,139 @@ describe("POST /api/chat", () => {
     expect(resolveGoatActionCatalog).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "goat_ws_user_1",
+    });
+  });
+
+  it("lets main chat discover and load active Brain skills", async () => {
+    mockAuth();
+    mockCreateTurn();
+    vi.mocked(listGoatBrainSkillCatalog).mockResolvedValue([
+      {
+        brainRef: ACTIVE_BRAIN.id,
+        id: "product-feature",
+        name: "Product feature",
+        description: "Build and verify product changes.",
+      },
+    ]);
+    vi.mocked(resolveGoatBrainSkillMentions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "product-feature",
+          name: "Product feature",
+          description: "Build and verify product changes.",
+          instructions: "Inspect the product flow, implement the change, and verify it.",
+        },
+      ]);
+    let skillOutput: unknown;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const typed = options as {
+        system?: string;
+        tools?: Record<string, { execute?: unknown }>;
+      };
+      expect(typed.system).toContain("<skill_source>");
+      const listSkills = typed.tools?.[LIST_SKILLS_TOOL_NAME]?.execute;
+      const useSkill = typed.tools?.[USE_SKILL_TOOL_NAME]?.execute;
+      if (typeof listSkills !== "function" || typeof useSkill !== "function") {
+        throw new Error("Skill discovery tools were not configured.");
+      }
+      const execution = Promise.resolve(
+        listSkills({ query: "product" }, { toolCallId: "list_skill_1", messages: [] }),
+      ).then(() =>
+        useSkill({ skill: "product-feature" }, { toolCallId: "use_skill_1", messages: [] }),
+      );
+      return {
+        toUIMessageStreamResponse: vi.fn(async () => {
+          skillOutput = await execution;
+          return new Response(null, { status: 200 });
+        }),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Help me implement this product change."));
+
+    expect(response.status).toBe(200);
+    expect(listGoatBrainSkillCatalog).toHaveBeenCalledWith(ACTIVE_BRAIN.id);
+    expect(resolveGoatBrainSkillMentions).toHaveBeenLastCalledWith({
+      activeBrainRef: ACTIVE_BRAIN.id,
+      mentions: [{ brainRef: ACTIVE_BRAIN.id, id: "product-feature" }],
+    });
+    expect(skillOutput).toEqual({
+      ok: true,
+      skill: {
+        id: "product-feature",
+        name: "Product feature",
+        description: "Build and verify product changes.",
+        instructions: "Inspect the product flow, implement the change, and verify it.",
+      },
+    });
+  });
+
+  it("does not reload skill instructions that are already active in the chat", async () => {
+    mockAuth();
+    mockCreateTurn();
+    vi.mocked(listGoatBrainSkillCatalog).mockResolvedValue([
+      {
+        brainRef: ACTIVE_BRAIN.id,
+        id: "product-feature",
+        name: "Product feature",
+        description: "Build and verify product changes.",
+      },
+    ]);
+    vi.mocked(resolveGoatBrainSkillMentions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "product-feature",
+          name: "Product feature",
+          description: "Build and verify product changes.",
+          instructions: "Inspect, implement, and verify.",
+        },
+      ]);
+    vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([
+      {
+        chatSessionId: "session_1",
+        skillId: "product-feature",
+        brainRef: ACTIVE_BRAIN.id,
+        activatedMessageId: "user_message_0",
+        name: "Product feature",
+        description: "Build and verify product changes.",
+        instructions: "Inspect, implement, and verify.",
+        createdAt: new Date("2026-07-27T00:00:00Z"),
+      },
+    ]);
+    let skillOutput: unknown;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tools = (options as { tools?: Record<string, { execute?: unknown }> }).tools ?? {};
+      const listSkills = tools[LIST_SKILLS_TOOL_NAME]?.execute;
+      const useSkill = tools[USE_SKILL_TOOL_NAME]?.execute;
+      if (typeof listSkills !== "function" || typeof useSkill !== "function") {
+        throw new Error("Skill discovery tools were not configured.");
+      }
+      const execution = Promise.resolve(
+        listSkills({}, { toolCallId: "list_skill_1", messages: [] }),
+      ).then(() =>
+        useSkill({ skill: "product-feature" }, { toolCallId: "use_skill_1", messages: [] }),
+      );
+      return {
+        toUIMessageStreamResponse: vi.fn(async () => {
+          skillOutput = await execution;
+          return new Response(null, { status: 200 });
+        }),
+      } as never;
+    });
+
+    const response = await POST(validChatRequest("Keep working on the product change."));
+
+    expect(response.status).toBe(200);
+    expect(skillOutput).toEqual({
+      ok: false,
+      skill: "product-feature",
+      error: {
+        code: "already_loaded",
+        message:
+          'Skill "@skill/product-feature" is already available in this chat. Follow its existing instructions without loading it again.',
+      },
     });
   });
 
