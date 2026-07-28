@@ -18,6 +18,15 @@ const toolContextMock = vi.hoisted(() => ({
   ),
   prepareOpenCompanyChatStep: vi.fn(() => ({})),
 }));
+const workspaceMock = vi.hoisted(() => ({
+  getDefaultGoatBrainForUser: vi.fn(async () => null),
+  getGoatBrainAccess: vi.fn(async () => null),
+  getGoatWorkspaceRole: vi.fn<() => Promise<"admin" | "member" | null>>(async () => null),
+  listAccessibleGoatBrains: vi.fn(async () => []),
+}));
+const actionCatalogMock = vi.hoisted(() => ({
+  resolveGoatActionCatalog: vi.fn(async () => ({ providers: [], actions: [] })),
+}));
 
 vi.mock("ai", () => ({
   streamText: aiMock.streamText,
@@ -39,17 +48,15 @@ vi.mock("@opencompany/goat-agent/chat-agent", () => toolContextMock);
 vi.mock("@opencompany/goat-agent/prompts", () => ({
   createOpenCompanyChatSystemPrompt: () => "SYSTEM",
 }));
-vi.mock("@opencompany/goat-agent/actions/catalog", () => ({
-  resolveGoatActionCatalog: vi.fn(async () => ({ providers: [], actions: [] })),
-}));
+vi.mock("@opencompany/goat-agent/actions/catalog", () => actionCatalogMock);
 vi.mock("@opencompany/goat-agent/actions/execute", () => ({ executeGoatAction: vi.fn() }));
 vi.mock("@opencompany/goat-agent/chat-web-fetch", () => ({ executeGoatChatExaFetch: vi.fn() }));
 vi.mock("@opencompany/goat-agent/chat-web-search", () => ({ executeGoatChatExaSearch: vi.fn() }));
 // No brain resolves → the loop wires no runBrainCli and no actions, keeping the
 // stream→sink mapping the whole focus of this test.
 vi.mock("@opencompany/db/goat-workspaces", () => ({
-  getDefaultGoatBrainForUser: vi.fn(async () => null),
-  getGoatBrainAccess: vi.fn(async () => null),
+  DEFAULT_GOAT_BRAIN_SLUG: "general",
+  ...workspaceMock,
 }));
 vi.mock("./db", () => ({ getDb: () => ({}) }));
 vi.mock("./goat-codex-brain-tool", () => ({ runGoatTaskBrainRead: vi.fn() }));
@@ -76,6 +83,11 @@ beforeEach(() => {
     repairToolCall: undefined,
   });
   toolContextMock.prepareOpenCompanyChatStep.mockReturnValue({});
+  workspaceMock.getDefaultGoatBrainForUser.mockResolvedValue(null);
+  workspaceMock.getGoatBrainAccess.mockResolvedValue(null);
+  workspaceMock.getGoatWorkspaceRole.mockResolvedValue(null);
+  workspaceMock.listAccessibleGoatBrains.mockResolvedValue([]);
+  actionCatalogMock.resolveGoatActionCatalog.mockResolvedValue({ providers: [], actions: [] });
 });
 
 describe("runGoatTaskChatLoop", () => {
@@ -177,6 +189,77 @@ describe("runGoatTaskChatLoop", () => {
 
     expect(result.reportedOutcome).toBe("needs_attention");
     expect(result.outcomeComment).toBe("Needs review.");
+  });
+
+  it("binds workflow tools to the workspace persisted in the harness spec", async () => {
+    workspaceMock.getGoatWorkspaceRole.mockResolvedValue("member");
+    workspaceMock.listAccessibleGoatBrains.mockResolvedValue([
+      {
+        id: "brain_target",
+        workspaceId: "workspace_target",
+        slug: "general",
+        name: "General",
+      } as never,
+    ]);
+    aiMock.streamText.mockReturnValueOnce({
+      fullStream: streamParts({
+        type: "finish-step",
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      }),
+      text: Promise.resolve("Summary."),
+    });
+    const workflowHarnessSpec: GoatHarnessSpec = {
+      ...harnessSpec,
+      workflow: {
+        id: "launch-brief",
+        workspaceId: "workspace_target",
+        skillIds: [],
+      },
+    };
+
+    await runGoatTaskChatLoop({
+      env: env(),
+      task: task({ workflowId: "launch-brief", harnessSpec: workflowHarnessSpec }),
+      harnessSpec: workflowHarnessSpec,
+      signal: new AbortController().signal,
+      sink: createSink(),
+      assistantMessageId: "assistant_msg_1",
+    });
+
+    expect(workspaceMock.listAccessibleGoatBrains).toHaveBeenCalledWith(
+      { userWorkosId: "user_1", workspaceId: "workspace_target" },
+      { db: {} },
+    );
+    expect(actionCatalogMock.resolveGoatActionCatalog).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_target",
+    });
+    expect(workspaceMock.getDefaultGoatBrainForUser).not.toHaveBeenCalled();
+  });
+
+  it("stops a workflow task when workspace access has been revoked", async () => {
+    const workflowHarnessSpec: GoatHarnessSpec = {
+      ...harnessSpec,
+      workflow: {
+        id: "launch-brief",
+        workspaceId: "workspace_target",
+        skillIds: [],
+      },
+    };
+
+    await expect(
+      runGoatTaskChatLoop({
+        env: env(),
+        task: task({ workflowId: "launch-brief", harnessSpec: workflowHarnessSpec }),
+        harnessSpec: workflowHarnessSpec,
+        signal: new AbortController().signal,
+        sink: createSink(),
+        assistantMessageId: "assistant_msg_1",
+      }),
+    ).rejects.toThrow("no longer have access");
+
+    expect(actionCatalogMock.resolveGoatActionCatalog).not.toHaveBeenCalled();
+    expect(aiMock.streamText).not.toHaveBeenCalled();
   });
 });
 

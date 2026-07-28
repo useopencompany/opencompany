@@ -36,6 +36,8 @@ export type GoatWorkflowListItem = {
 
 export type GoatWorkflowCatalogItem = Pick<GoatWorkspaceWorkflow, "id" | "name" | "description">;
 
+export type GoatWorkflowDetail = GoatWorkspaceWorkflow & { status: GoatWorkflowStatus };
+
 export type GoatWorkflowMentionRef = { id: string };
 
 export type GoatWorkflowMutationResult =
@@ -83,7 +85,13 @@ export async function listGoatWorkflowCatalog(
       description: goatWorkflows.description,
     })
     .from(goatWorkflows)
-    .where(and(eq(goatWorkflows.workspaceId, workspaceId), isNull(goatWorkflows.archivedAt)))
+    .where(
+      and(
+        eq(goatWorkflows.workspaceId, workspaceId),
+        eq(goatWorkflows.status, "active"),
+        isNull(goatWorkflows.archivedAt),
+      ),
+    )
     .orderBy(asc(goatWorkflows.name));
 
   return rows.map((row) => ({ id: row.slug, name: row.name, description: row.description }));
@@ -112,7 +120,7 @@ export async function getGoatWorkflow(
   workspaceId: string,
   slug: string,
   db: Db = getDb(),
-): Promise<GoatWorkspaceWorkflow | null> {
+): Promise<GoatWorkflowDetail | null> {
   const [row] = await db
     .select({
       slug: goatWorkflows.slug,
@@ -120,6 +128,7 @@ export async function getGoatWorkflow(
       description: goatWorkflows.description,
       instructions: goatWorkflows.instructions,
       model: goatWorkflows.model,
+      status: goatWorkflows.status,
     })
     .from(goatWorkflows)
     .where(
@@ -137,6 +146,7 @@ export async function getGoatWorkflow(
     description: row.description,
     instructions: row.instructions,
     model: row.model,
+    status: row.status,
   };
 }
 
@@ -149,7 +159,7 @@ export async function resolveGoatWorkflowMention(input: {
     throw new GoatWorkflowMentionError("No active workspace is available for workflow mentions.");
   }
   const workflow = await getGoatWorkflow(input.workspaceId, input.mention.id, input.db ?? getDb());
-  if (!workflow || !workflow.instructions.trim()) {
+  if (!workflow || workflow.status !== "active" || !workflow.instructions.trim()) {
     throw new GoatWorkflowMentionError(
       `Workflow "#${input.mention.id}" is unavailable or incomplete.`,
     );
@@ -159,7 +169,12 @@ export async function resolveGoatWorkflowMention(input: {
 
 // --- Authoring (mutations) ---------------------------------------------------
 
-function validateGoatWorkflowFields(input: { name: string; description: string }): string | null {
+export function validateGoatWorkflowFields(input: {
+  name: string;
+  description: string;
+  instructions?: string;
+  status?: GoatWorkflowStatus;
+}): string | null {
   const name = input.name.trim();
   const description = input.description.trim();
   if (!name) return "Workflow name cannot be empty.";
@@ -171,6 +186,9 @@ function validateGoatWorkflowFields(input: { name: string; description: string }
   }
   if (description.includes("<") || description.includes(">")) {
     return 'Workflow descriptions cannot contain "<" or ">".';
+  }
+  if (input.status === "active" && !input.instructions?.trim()) {
+    return "Add workflow instructions before making it active.";
   }
   return null;
 }
@@ -211,7 +229,7 @@ export async function updateGoatWorkflow(input: {
   // Model mention token ("kimi-k2.6", "codex", ...); undefined keeps the stored
   // value, "" clears it back to the default.
   model?: string;
-  status?: GoatWorkflowStatus;
+  status: GoatWorkflowStatus;
 }): Promise<GoatWorkflowMutationResult> {
   const invalid = validateGoatWorkflowFields(input);
   if (invalid) return { ok: false, message: invalid };
@@ -227,7 +245,7 @@ export async function updateGoatWorkflow(input: {
       description: input.description.trim(),
       instructions: input.instructions,
       ...(input.model !== undefined ? { model: model ?? "" } : {}),
-      ...(input.status ? { status: input.status } : {}),
+      status: input.status,
       updatedAt: new Date(),
     })
     .where(

@@ -1,7 +1,7 @@
 import { GoatSkillEditorRoute } from "@/components/GoatRoutes";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import { currentGoatUser } from "@/lib/auth";
-import { getGoatSkill, listGoatSkills } from "@/lib/skills";
+import { getGoatSkill } from "@/lib/skills";
 
 type SkillEditorPageProps = {
   params: Promise<{ slug: string }>;
@@ -10,10 +10,7 @@ type SkillEditorPageProps = {
 export default async function SkillEditorPage({ params }: SkillEditorPageProps) {
   const { slug } = await params;
   const context = await currentGoatUser();
-  const [skill, list] = await Promise.all([
-    getGoatSkill(context.workspace.id, slug),
-    listGoatSkills(context.workspace.id),
-  ]);
+  const skill = await getGoatSkill(context.workspace.id, slug);
 
   if (!skill) {
     return (
@@ -27,9 +24,11 @@ export default async function SkillEditorPage({ params }: SkillEditorPageProps) 
     );
   }
 
-  const status = list.find((item) => item.slug === slug)?.status ?? "draft";
-
   return (
-    <GoatSkillEditorRoute skill={skill} initialStatus={status} canEdit={context.role === "admin"} />
+    <GoatSkillEditorRoute
+      skill={skill}
+      initialStatus={skill.status}
+      canEdit={context.role === "admin"}
+    />
   );
 }

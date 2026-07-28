@@ -27,6 +27,18 @@ const recentChatsMock = vi.hoisted(() => ({
     pinnedAt: string | null;
   }>,
 }));
+const tasksMock = vi.hoisted(() => ({
+  value: [] as Array<{
+    id: string;
+    displayId: string;
+    name: string;
+    workflowId: string | null;
+    status: "queued" | "running" | "succeeded" | "failed" | "canceled";
+    reportedOutcome: "done" | "needs_attention" | null;
+    outcomeComment: string | null;
+    archivedAt: string | null;
+  }>,
+}));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock.value,
@@ -75,6 +87,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       description: null,
       visibility: "workspace",
     },
+    tasks: tasksMock.value,
     recentChats: recentChatsMock.value,
     mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
   }),
@@ -87,6 +100,7 @@ describe("GoatSidebar", () => {
     workspaceRoleMock.value = "admin";
     mcpSetupMock.completedAt = null;
     recentChatsMock.value = [];
+    tasksMock.value = [];
   });
 
   it("renders home, the brain list, and footer links", () => {
@@ -179,6 +193,41 @@ describe("GoatSidebar", () => {
       "href",
       "/brain/goat_brain_1",
     );
+  });
+
+  it("shows live workflow tasks without surfacing ad-hoc tasks", () => {
+    pathnameMock.value = "/tasks/TASK-7";
+    tasksMock.value = [
+      {
+        id: "goat_task_workflow",
+        displayId: "TASK-7",
+        name: "Prepare launch brief",
+        workflowId: "launch-brief",
+        status: "succeeded",
+        reportedOutcome: "needs_attention",
+        outcomeComment: "Needs legal review",
+        archivedAt: null,
+      },
+      {
+        id: "goat_task_ad_hoc",
+        displayId: "TASK-8",
+        name: "Research competitors",
+        workflowId: null,
+        status: "running",
+        reportedOutcome: null,
+        outcomeComment: null,
+        archivedAt: null,
+      },
+    ];
+
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const taskNav = screen.getByRole("navigation", { name: "Workflow tasks" });
+    const workflowTask = within(taskNav).getByRole("link", { name: /Prepare launch brief/ });
+    expect(workflowTask).toHaveAttribute("href", "/tasks/TASK-7");
+    expect(workflowTask).toHaveAttribute("aria-current", "page");
+    expect(within(workflowTask).getByText("Needs legal review")).toBeInTheDocument();
+    expect(within(taskNav).queryByText("Research competitors")).not.toBeInTheDocument();
   });
 
   it("does not show brain creation to workspace members", () => {

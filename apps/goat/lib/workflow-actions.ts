@@ -1,5 +1,6 @@
 "use server";
 
+import { isValidGoatBrainId } from "@opencompany/goat-brain";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import {
@@ -26,6 +27,13 @@ export async function createGoatWorkflowAction(input: {
   name: string;
   description?: string;
 }): Promise<GoatWorkflowMutationResult> {
+  if (
+    !input ||
+    typeof input.name !== "string" ||
+    (input.description !== undefined && typeof input.description !== "string")
+  ) {
+    return { ok: false, message: "Invalid workflow details." };
+  }
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
   const result = await createGoatWorkflow({
@@ -44,8 +52,19 @@ export async function updateGoatWorkflowAction(input: {
   description: string;
   instructions: string;
   model?: string;
-  status?: "draft" | "active";
+  status: "draft" | "active";
 }): Promise<GoatWorkflowMutationResult> {
+  if (
+    !input ||
+    !isValidGoatBrainId(input.slug) ||
+    typeof input.name !== "string" ||
+    typeof input.description !== "string" ||
+    typeof input.instructions !== "string" ||
+    (input.model !== undefined && typeof input.model !== "string") ||
+    (input.status !== "draft" && input.status !== "active")
+  ) {
+    return { ok: false, message: "Invalid workflow details." };
+  }
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
   const result = await updateGoatWorkflow({ workspaceId: gate.workspaceId, ...input });
@@ -59,6 +78,9 @@ export async function updateGoatWorkflowAction(input: {
 export async function archiveGoatWorkflowAction(input: {
   slug: string;
 }): Promise<GoatWorkflowMutationResult> {
+  if (!input || !isValidGoatBrainId(input.slug)) {
+    return { ok: false, message: "Invalid workflow." };
+  }
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
   const result = await archiveGoatWorkflow({ workspaceId: gate.workspaceId, slug: input.slug });

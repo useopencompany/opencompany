@@ -1,6 +1,6 @@
 // Backfill goat.workflows and goat.skills from the reserved Brain folders they
 // used to live in. Extraction moved Workflows/Skills out of the Brain into their
-// own workspace-scoped tables (migration 0157); this copies existing content
+// own workspace-scoped tables (migration 0162); this copies existing content
 // over so nothing disappears when the surfaces move.
 //
 // - Non-destructive: only inserts. The old Brain docs are removed by a separate,
@@ -13,7 +13,7 @@
 //
 // Usage: DATABASE_URL=postgres://... bun run scripts/goat-backfill-workflows-skills.ts
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import {
   goatBrainDocuments,
@@ -57,8 +57,13 @@ async function main() {
 
 // Sort so "general"-Brain docs are inserted first: they win the un-suffixed slug
 // when two Brains in one workspace share it.
-function generalFirst<T extends { meta: BrainMeta }>(rows: T[]): T[] {
-  return [...rows].sort((a, b) => Number(b.meta.isGeneral) - Number(a.meta.isGeneral));
+function generalFirst<T extends { meta: BrainMeta; sourceKey: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const workspaceOrder = a.meta.workspaceId.localeCompare(b.meta.workspaceId);
+    if (workspaceOrder !== 0) return workspaceOrder;
+    const generalOrder = Number(b.meta.isGeneral) - Number(a.meta.isGeneral);
+    return generalOrder !== 0 ? generalOrder : a.sourceKey.localeCompare(b.sourceKey);
+  });
 }
 
 async function backfillWorkflows(db: ReturnType<typeof getDb>, brainMeta: Map<string, BrainMeta>) {
@@ -83,14 +88,20 @@ async function backfillWorkflows(db: ReturnType<typeof getDb>, brainMeta: Map<st
       if (!meta || row.format !== "markdown") return [];
       const workflow = goatBrainWorkflowFromDocument(parseGoatBrainDocument(row.content));
       if (!workflow || workflow.id !== row.brainId) return [];
-      return [{ meta, workflow }];
+      return [{ meta, sourceKey: `${row.brainRef}:${row.brainId}`, workflow }];
     }),
   );
 
-  // Existing slugs per workspace (idempotency + collision tracking).
+  // Stable target IDs distinguish a rerun from a different Brain document that
+  // happens to use the same slug. Slugs alone cannot make that distinction.
   const existing = await db
-    .select({ workspaceId: goatWorkflows.workspaceId, slug: goatWorkflows.slug })
+    .select({
+      id: goatWorkflows.id,
+      workspaceId: goatWorkflows.workspaceId,
+      slug: goatWorkflows.slug,
+    })
     .from(goatWorkflows);
+  const existingIds = new Set(existing.map((row) => row.id));
   const takenByWorkspace = new Map<string, Set<string>>();
   for (const row of existing) {
     getSet(takenByWorkspace, row.workspaceId).add(row.slug);
@@ -99,13 +110,13 @@ async function backfillWorkflows(db: ReturnType<typeof getDb>, brainMeta: Map<st
   let inserted = 0;
   let skipped = 0;
   let suffixed = 0;
-  for (const { meta, workflow } of parsed) {
-    const taken = getSet(takenByWorkspace, meta.workspaceId);
-    if (taken.has(workflow.id)) {
-      // Already migrated (re-run) — skip.
+  for (const { meta, sourceKey, workflow } of parsed) {
+    const id = migratedId("goat_wf", meta.workspaceId, sourceKey);
+    if (existingIds.has(id)) {
       skipped++;
       continue;
     }
+    const taken = getSet(takenByWorkspace, meta.workspaceId);
     const slug = uniqueSlug(taken, workflow.id);
     if (slug !== workflow.id) {
       suffixed++;
@@ -115,7 +126,7 @@ async function backfillWorkflows(db: ReturnType<typeof getDb>, brainMeta: Map<st
     }
     taken.add(slug);
     await db.insert(goatWorkflows).values({
-      id: `goat_wf_${randomUUID()}`,
+      id,
       workspaceId: meta.workspaceId,
       slug,
       name: workflow.name,
@@ -124,6 +135,7 @@ async function backfillWorkflows(db: ReturnType<typeof getDb>, brainMeta: Map<st
       model: workflow.model,
       status: "active",
     });
+    existingIds.add(id);
     inserted++;
   }
   console.log(
@@ -153,13 +165,14 @@ async function backfillSkills(db: ReturnType<typeof getDb>, brainMeta: Map<strin
       if (!meta || row.format !== "markdown") return [];
       const skill = goatBrainSkillFromDocument(parseGoatBrainDocument(row.content));
       if (!skill || skill.id !== row.brainId) return [];
-      return [{ meta, skill }];
+      return [{ meta, skill, sourceKey: `${row.brainRef}:${row.brainId}` }];
     }),
   );
 
   const existing = await db
-    .select({ workspaceId: goatSkills.workspaceId, slug: goatSkills.slug })
+    .select({ id: goatSkills.id, workspaceId: goatSkills.workspaceId, slug: goatSkills.slug })
     .from(goatSkills);
+  const existingIds = new Set(existing.map((row) => row.id));
   const takenByWorkspace = new Map<string, Set<string>>();
   for (const row of existing) {
     getSet(takenByWorkspace, row.workspaceId).add(row.slug);
@@ -168,12 +181,13 @@ async function backfillSkills(db: ReturnType<typeof getDb>, brainMeta: Map<strin
   let inserted = 0;
   let skipped = 0;
   let suffixed = 0;
-  for (const { meta, skill } of parsed) {
-    const taken = getSet(takenByWorkspace, meta.workspaceId);
-    if (taken.has(skill.id)) {
+  for (const { meta, skill, sourceKey } of parsed) {
+    const id = migratedId("goat_skill", meta.workspaceId, sourceKey);
+    if (existingIds.has(id)) {
       skipped++;
       continue;
     }
+    const taken = getSet(takenByWorkspace, meta.workspaceId);
     const slug = uniqueSlug(taken, skill.id);
     if (slug !== skill.id) {
       suffixed++;
@@ -183,7 +197,7 @@ async function backfillSkills(db: ReturnType<typeof getDb>, brainMeta: Map<strin
     }
     taken.add(slug);
     await db.insert(goatSkills).values({
-      id: `goat_skill_${randomUUID()}`,
+      id,
       workspaceId: meta.workspaceId,
       slug,
       name: skill.name,
@@ -191,6 +205,7 @@ async function backfillSkills(db: ReturnType<typeof getDb>, brainMeta: Map<strin
       instructions: skill.instructions,
       status: "active",
     });
+    existingIds.add(id);
     inserted++;
   }
   console.log(
@@ -205,6 +220,18 @@ function getSet(map: Map<string, Set<string>>, key: string): Set<string> {
     map.set(key, set);
   }
   return set;
+}
+
+function migratedId(
+  kind: "goat_wf" | "goat_skill",
+  workspaceId: string,
+  sourceKey: string,
+): string {
+  const digest = createHash("sha256")
+    .update(`${kind}:${workspaceId}:${sourceKey}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `${kind}_${digest}`;
 }
 
 function uniqueSlug(taken: Set<string>, base: string): string {

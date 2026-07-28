@@ -44,6 +44,8 @@ export type GoatSkillListItem = {
 
 export type GoatSkillCatalogItem = Pick<GoatWorkspaceSkill, "id" | "name" | "description">;
 
+export type GoatSkillDetail = GoatWorkspaceSkill & { status: GoatSkillStatus };
+
 export type GoatSkillMentionRef = { id: string };
 
 export type GoatSkillMutationResult = { ok: true; slug: string } | { ok: false; message: string };
@@ -97,7 +99,13 @@ export async function listGoatSkillCatalog(
       description: goatSkills.description,
     })
     .from(goatSkills)
-    .where(and(eq(goatSkills.workspaceId, workspaceId), isNull(goatSkills.archivedAt)))
+    .where(
+      and(
+        eq(goatSkills.workspaceId, workspaceId),
+        eq(goatSkills.status, "active"),
+        isNull(goatSkills.archivedAt),
+      ),
+    )
     .orderBy(asc(goatSkills.name));
 
   return rows.map((row) => ({ id: row.slug, name: row.name, description: row.description }));
@@ -125,13 +133,14 @@ export async function getGoatSkill(
   workspaceId: string,
   slug: string,
   db: Db = getDb(),
-): Promise<GoatWorkspaceSkill | null> {
+): Promise<GoatSkillDetail | null> {
   const [row] = await db
     .select({
       slug: goatSkills.slug,
       name: goatSkills.name,
       description: goatSkills.description,
       instructions: goatSkills.instructions,
+      status: goatSkills.status,
     })
     .from(goatSkills)
     .where(
@@ -148,6 +157,7 @@ export async function getGoatSkill(
     name: row.name,
     description: row.description,
     instructions: row.instructions,
+    status: row.status,
   };
 }
 
@@ -179,6 +189,7 @@ export async function resolveGoatSkillMentions(input: {
     .where(
       and(
         eq(goatSkills.workspaceId, input.workspaceId),
+        eq(goatSkills.status, "active"),
         inArray(
           goatSkills.slug,
           unique.map((mention) => mention.id),
@@ -199,7 +210,7 @@ export async function resolveGoatSkillMentions(input: {
   );
   const skills = unique.map((mention) => {
     const skill = byId.get(mention.id);
-    if (!skill) {
+    if (!skill || !skill.instructions.trim()) {
       throw new GoatSkillMentionError(`Skill "@skill/${mention.id}" is unavailable or incomplete.`);
     }
     return skill;
@@ -289,6 +300,8 @@ export function attachGoatSkillsToPrompt(prompt: string, skills: GoatWorkspaceSk
 export function validateGoatSkillFields(input: {
   name: string;
   description: string;
+  instructions?: string;
+  status?: GoatSkillStatus;
 }): string | null {
   const name = input.name.trim();
   const description = input.description.trim();
@@ -301,6 +314,9 @@ export function validateGoatSkillFields(input: {
   }
   if (description.includes("<") || description.includes(">")) {
     return 'Skill descriptions cannot contain "<" or ">".';
+  }
+  if (input.status === "active" && !input.instructions?.trim()) {
+    return "Add skill instructions before making it active.";
   }
   return null;
 }
@@ -337,7 +353,7 @@ export async function updateGoatSkill(input: {
   name: string;
   description: string;
   instructions: string;
-  status?: GoatSkillStatus;
+  status: GoatSkillStatus;
 }): Promise<GoatSkillMutationResult> {
   const invalid = validateGoatSkillFields(input);
   if (invalid) return { ok: false, message: invalid };
@@ -348,7 +364,7 @@ export async function updateGoatSkill(input: {
       name: input.name.trim(),
       description: input.description.trim(),
       instructions: input.instructions,
-      ...(input.status ? { status: input.status } : {}),
+      status: input.status,
       updatedAt: new Date(),
     })
     .where(

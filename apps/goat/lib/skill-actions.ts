@@ -1,5 +1,6 @@
 "use server";
 
+import { isValidGoatBrainId } from "@opencompany/goat-brain";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import {
@@ -26,6 +27,13 @@ export async function createGoatSkillAction(input: {
   name: string;
   description?: string;
 }): Promise<GoatSkillMutationResult> {
+  if (
+    !input ||
+    typeof input.name !== "string" ||
+    (input.description !== undefined && typeof input.description !== "string")
+  ) {
+    return { ok: false, message: "Invalid skill details." };
+  }
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
   const result = await createGoatSkill({
@@ -43,8 +51,18 @@ export async function updateGoatSkillAction(input: {
   name: string;
   description: string;
   instructions: string;
-  status?: "draft" | "active";
+  status: "draft" | "active";
 }): Promise<GoatSkillMutationResult> {
+  if (
+    !input ||
+    !isValidGoatBrainId(input.slug) ||
+    typeof input.name !== "string" ||
+    typeof input.description !== "string" ||
+    typeof input.instructions !== "string" ||
+    (input.status !== "draft" && input.status !== "active")
+  ) {
+    return { ok: false, message: "Invalid skill details." };
+  }
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
   const result = await updateGoatSkill({ workspaceId: gate.workspaceId, ...input });
@@ -58,6 +76,9 @@ export async function updateGoatSkillAction(input: {
 export async function archiveGoatSkillAction(input: {
   slug: string;
 }): Promise<GoatSkillMutationResult> {
+  if (!input || !isValidGoatBrainId(input.slug)) {
+    return { ok: false, message: "Invalid skill." };
+  }
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
   const result = await archiveGoatSkill({ workspaceId: gate.workspaceId, slug: input.slug });

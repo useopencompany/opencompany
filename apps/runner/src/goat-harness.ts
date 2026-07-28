@@ -418,10 +418,9 @@ type GoatWorkflowTaskOutcome = {
   outcomeComment: string;
 };
 
-// Uniform post-run closer for workflow tasks on both engines. The main run cannot report its
-// own outcome: the opencompany stream reserves its final step with toolChoice "none", and Codex
-// cannot call Goat tools at all. One cheap forced update_task_status call closes the loop; any
-// failure here degrades to a null outcome (displayed as done) rather than failing the task.
+// Post-run closer for Codex workflow tasks, which cannot call Goat tools to
+// report their own status. Any failure here degrades to a null outcome
+// (displayed as done) rather than failing the task.
 async function runGoatWorkflowTaskCloser(input: {
   env: RunnerEnv;
   task: GoatTask;

@@ -4,7 +4,13 @@ import type {
   GoatTaskToolName,
   goatTasks,
 } from "@opencompany/db/goat-schema";
-import { getDefaultGoatBrainForUser, getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
+import {
+  DEFAULT_GOAT_BRAIN_SLUG,
+  getDefaultGoatBrainForUser,
+  getGoatBrainAccess,
+  getGoatWorkspaceRole,
+  listAccessibleGoatBrains,
+} from "@opencompany/db/goat-workspaces";
 import { resolveGoatActionCatalog } from "@opencompany/goat-agent/actions/catalog";
 import { executeGoatAction } from "@opencompany/goat-agent/actions/execute";
 import type { GoatResolvedActionCatalog } from "@opencompany/goat-agent/actions/types";
@@ -44,6 +50,7 @@ const DEFAULT_TASK_MAX_MODEL_STEPS = 16;
 const TASK_WEB_SEARCH_CALLS_PER_TURN = 20;
 const TASK_WEB_FETCH_CALLS_PER_TURN = 20;
 const TASK_ACTION_CALLS_PER_TURN = 20;
+const TASK_OUTCOME_COMMENT_MAX_LENGTH = 200;
 
 const TASK_SYSTEM_BLOCK = [
   "<background_task_run>",
@@ -98,18 +105,43 @@ async function runGoatTaskChatLoopInner(input: {
   const currentDate = new Date();
   const userMessage = harnessSpec.initialUserMessage?.trim() || task.prompt;
 
-  // Resolve the run's brain: a workflow task targets its authoring brain; an
-  // ad-hoc task uses the user's default brain. Also gives us the workspace id
-  // that github/stripe action resolvers need.
-  const brain = task.workflowBrainRef
-    ? ((
+  // New workflow tasks persist their workspace in the immutable harness spec.
+  // Bind actions to that workspace and select its General Brain for read-only
+  // context. Falling back to the user's first workspace would cross tenant
+  // boundaries for users who belong to more than one workspace.
+  let brain: Awaited<ReturnType<typeof getDefaultGoatBrainForUser>> = null;
+  let workspaceId = "";
+  const workflowWorkspaceId = harnessSpec.workflow?.workspaceId?.trim();
+  if (workflowWorkspaceId) {
+    const [workspaceRole, brains] = await Promise.all([
+      getGoatWorkspaceRole(
+        { userWorkosId: task.userWorkosId, workspaceId: workflowWorkspaceId },
+        { db },
+      ),
+      listAccessibleGoatBrains(
+        { userWorkosId: task.userWorkosId, workspaceId: workflowWorkspaceId },
+        { db },
+      ),
+    ]);
+    if (!workspaceRole) {
+      throw new Error("You no longer have access to the workflow workspace.");
+    }
+    workspaceId = workflowWorkspaceId;
+    brain =
+      brains.find((candidate) => candidate.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
+  } else if (task.workflowBrainRef) {
+    brain =
+      (
         await getGoatBrainAccess(
           { userWorkosId: task.userWorkosId, brainRef: task.workflowBrainRef },
           { db },
         )
-      )?.brain ?? null)
-    : await getDefaultGoatBrainForUser(task.userWorkosId, { db });
-  const workspaceId = brain?.workspaceId ?? "";
+      )?.brain ?? null;
+    workspaceId = brain?.workspaceId ?? "";
+  } else {
+    brain = await getDefaultGoatBrainForUser(task.userWorkosId, { db });
+    workspaceId = brain?.workspaceId ?? "";
+  }
 
   // Same integration action catalog as chat, minus managed capabilities (no
   // resolver injected) and minus approval-mode actions (a headless run can't
@@ -221,7 +253,7 @@ async function runGoatTaskChatLoopInner(input: {
       : {}),
     updateTaskStatus: async ({ status, comment }) => {
       reportedOutcome = status satisfies GoatTaskReportedStatus as GoatTaskReportedOutcome;
-      outcomeComment = comment;
+      outcomeComment = comment.trim().slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH);
     },
   });
 
