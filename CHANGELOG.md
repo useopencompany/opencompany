@@ -7,8 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-28
+
+### Added
+- Claude Code is now a persistent sandbox chat engine in Goat, with subscription authentication, model and effort controls, attachments, resumable sessions, and expandable subagent traces (#928, #930, #935) — @louis and @opencompany-bot.
+- Build durable workspace workflows and reusable skills, edit their instructions with rich Markdown, and mention skills from workflow instructions with autocomplete (#927, #934, #937) — @louis and @opencompany-bot.
+- Main chat can discover and use relevant workspace skills without requiring an explicit `@skill` mention (#909) — @opencompany-bot.
+- Cloud Codex tasks can safely read from connected tools that are enabled for read-only access, without exposing provider credentials to the sandbox (#914) — @opencompany-bot.
+- Goat can create Gmail drafts without sending them, controlled by a separate per-account permission (#922) — @opencompany-bot.
+- Latitude is now available as a personal integration for chat and background tasks, with per-capability read and write controls (#925) — @opencompany-bot.
+- Switch between workspaces or create a new one directly from the workspace picker (#901) — @opencompany-bot.
+- Search within timestamped YouTube transcripts or bring a complete transcript into chat (#920, #933) — @louis and @opencompany-bot.
+- Look up a known prospect's work email from their name and company or LinkedIn profile, without re-running broad prospect research (#938) — @opencompany-bot.
+- Workspace admins can cap paid capability spend per chat, with one-off approval when a request would exceed the budget (#941) — @louis.
+
+### Changed
+- Paid research turns can now run up to six long-running capability calls instead of one (#940) — @louis.
+- Opening a Brain overview is now instant, even for Brains with many large documents (#919) — @opencompany-bot.
+- Claude Sonnet chats now reuse prompt context more efficiently through automatic prompt caching (#899) — @louis.
+- Goat analytics now use a minimal PostHog setup with four allowlisted events and no autocapture, session recording, heatmaps, or message content (#923, #931) — @opencompany-bot and @louis.
+- Chat headers use tighter spacing so the conversation has more room (#936) — @opencompany-bot.
+
 ### Fixed
-- Goat now explicitly looks up a known prospect's work email from their name and company or LinkedIn profile, without re-running broad prospect research.
+- Approving or declining a connected-tool action no longer repeats a successful write in the same turn (#917) — @louis.
+- Cloud Codex work now survives runner deployments, paused-sandbox resumes, and transient sandbox placement failures more reliably (#918, #921, #924, #926) — @louis.
+- Workspace invitations now open the invited workspace directly and keep the active workspace in sync after sign-in (#902) — @opencompany-bot.
+- Claude Code setup accepts tokens copied with wrapping whitespace, and its home cards now show the correct engine and status (#929, #932) — @louis.
+- Long Claude Code turns can survive repeated runner handoffs without stranding the work (#939) — @louis.
 
 ## [1.2.0] - 2026-07-27
 
