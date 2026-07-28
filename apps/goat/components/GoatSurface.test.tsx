@@ -669,12 +669,11 @@ describe("GoatSurface chat streaming UI", () => {
   it("submits selected Brain skills to cloud Codex", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/brain/skills") {
+      if (String(input) === "/api/skills") {
         return new Response(
           JSON.stringify({
             skills: [
               {
-                brainRef: "goat_brain_1",
                 id: "coding-work",
                 name: "Coding work",
                 description: "How coding work should happen.",
@@ -722,7 +721,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(body.message).toMatchObject({
       parts: [{ type: "text", text: "@skill/coding-work implement this" }],
       metadata: {
-        mentions: [{ kind: "skill", brainRef: "goat_brain_1", id: "coding-work" }],
+        mentions: [{ kind: "skill", id: "coding-work" }],
       },
     });
   });
@@ -1285,10 +1284,10 @@ describe("GoatSurface chat streaming UI", () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/brain/skills") {
+      if (url === "/api/skills") {
         return Response.json({ skills: [] });
       }
-      if (url === "/api/brain/workflows" && init?.method === "POST") {
+      if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
           {
             task: {
@@ -1300,11 +1299,10 @@ describe("GoatSurface chat streaming UI", () => {
           { status: 201 },
         );
       }
-      if (url === "/api/brain/workflows") {
+      if (url === "/api/workflows") {
         return Response.json({
           workflows: [
             {
-              brainRef: "goat_brain_1",
               id: "morning-test",
               name: "Morning Test",
               description: "Run the morning checks.",
@@ -1338,17 +1336,16 @@ describe("GoatSurface chat streaming UI", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/brain/workflows",
+        "/api/workflows",
         expect.objectContaining({ method: "POST" }),
       ),
     );
     const [, request] = fetchMock.mock.calls.find(
-      ([url, init]) => String(url) === "/api/brain/workflows" && init?.method === "POST",
+      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
     )!;
     expect(JSON.parse(String(request?.body))).toEqual({
       workflow: {
         kind: "workflow",
-        brainRef: "goat_brain_1",
         id: "morning-test",
       },
       description: "#morning-test run today's checks",
@@ -1425,13 +1422,11 @@ describe("GoatSurface chat streaming UI", () => {
           JSON.stringify({
             skills: [
               {
-                brainRef: "goat_brain_1",
                 id: "coding-work",
                 name: "Coding work",
                 description: "Use focused verification for code changes.",
               },
               {
-                brainRef: "goat_brain_1",
                 id: "writing-work",
                 name: "Writing work",
                 description: "Write clear product copy.",
@@ -1469,7 +1464,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
       text: "@skill/coding-work then continue",
       metadata: {
-        mentions: [{ kind: "skill", brainRef: "goat_brain_1", id: "coding-work" }],
+        mentions: [{ kind: "skill", id: "coding-work" }],
       },
     });
   });
@@ -1482,13 +1477,11 @@ describe("GoatSurface chat streaming UI", () => {
           JSON.stringify({
             skills: [
               {
-                brainRef: "goat_brain_1",
                 id: "product-feature",
                 name: "Product feature",
                 description: "Plan and shape a product feature.",
               },
               {
-                brainRef: "goat_brain_1",
                 id: "add-integration-to-main-chat",
                 name: "Add integration to main chat",
                 description: "Add a new integration to the main chat.",
@@ -1527,10 +1520,9 @@ describe("GoatSurface chat streaming UI", () => {
       text: pastedText,
       metadata: {
         mentions: [
-          { kind: "skill", brainRef: "goat_brain_1", id: "product-feature" },
+          { kind: "skill", id: "product-feature" },
           {
             kind: "skill",
-            brainRef: "goat_brain_1",
             id: "add-integration-to-main-chat",
           },
         ],
@@ -1542,14 +1534,13 @@ describe("GoatSurface chat streaming UI", () => {
     const user = userEvent.setup();
     let catalogCalls = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/brain/skills") {
+      if (String(input) === "/api/skills") {
         catalogCalls += 1;
         if (catalogCalls === 1) return new Response("nope", { status: 500 });
         return new Response(
           JSON.stringify({
             skills: [
               {
-                brainRef: "goat_brain_1",
                 id: "coding-work",
                 name: "Coding work",
                 description: "Use focused verification for code changes.",

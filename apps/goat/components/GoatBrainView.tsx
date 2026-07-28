@@ -264,12 +264,13 @@ function LiveGoatBrainView({
     [collections],
   );
   const documents = useMemo(() => {
-    if (filesLoading && !fileRows?.length) return initialDocuments;
+    if (filesLoading && !fileRows?.length) return initialDocuments.filter(isKnowledgeDocument);
     const timelinesByDocument = groupTimelineRows(
       (timelineRows ?? []) as GoatBrainTimelineEntryRow[],
     );
     return ((fileRows ?? []) as GoatBrainDocumentRow[])
       .map((row) => documentViewFromRow(row, timelinesByDocument.get(row.id)))
+      .filter(isKnowledgeDocument)
       .toSorted(compareBrainDocuments);
   }, [fileRows, filesLoading, initialDocuments, timelineRows]);
   const folders = useMemo(() => {
@@ -277,9 +278,11 @@ function LiveGoatBrainView({
       (filesLoading && !fileRows?.length) ||
       (foldersLoading && !folderRows?.length && initialFolders.length > 0)
     ) {
-      return initialFolders;
+      return initialFolders.filter(isKnowledgeFolderView);
     }
-    return deriveFolderViews(documents, (folderRows ?? []) as GoatBrainFolderRow[]);
+    return deriveFolderViews(documents, (folderRows ?? []) as GoatBrainFolderRow[]).filter(
+      isKnowledgeFolderView,
+    );
   }, [documents, fileRows?.length, filesLoading, folderRows, foldersLoading, initialFolders]);
   const draftIngestStatesByBrainId = useMemo(
     () =>
@@ -2869,6 +2872,19 @@ function documentEditorBody(document: GoatBrainDocumentView | null | undefined) 
 // Skills and workflows share the structured name/description/instructions editing surface.
 function isSkillLikeBrainFolder(path: string) {
   return isGoatBrainSkillFolder(path) || isGoatBrainWorkflowFolder(path);
+}
+
+// Workflows and skills were extracted out of the Brain into their own
+// workspace-scoped surfaces (/workflows and /settings/skills). Hide their former
+// reserved folders and documents from the Brain tree so the Brain stays purely
+// knowledge/context. Existing rows are removed by the backfill + cleanup
+// migration; this also hides them in the window before that runs.
+function isKnowledgeDocument(document: { folderPath: string }): boolean {
+  return !isSkillLikeBrainFolder(document.folderPath);
+}
+
+function isKnowledgeFolderView(folder: { path: string }): boolean {
+  return !isSkillLikeBrainFolder(folder.path);
 }
 
 // The workflow's model choice lives in doc frontmatter (`model:`); "" = default.

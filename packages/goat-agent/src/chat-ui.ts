@@ -67,13 +67,13 @@ export type GoatChatMention =
       id: "codex";
     }
   | {
+      // `id` is the workspace-scoped skill slug (the @skill/<id> handle).
       kind: "skill";
-      brainRef: string;
       id: string;
     }
   | {
+      // `id` is the workspace-scoped workflow slug (the # handle).
       kind: "workflow";
-      brainRef: string;
       id: string;
     };
 

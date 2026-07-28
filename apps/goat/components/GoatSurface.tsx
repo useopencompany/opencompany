@@ -84,8 +84,6 @@ import type {
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useGoatCreditBalance } from "@/components/chat/useGoatCreditBalance";
 import { useHydrated } from "@/components/useHydrated";
-import type { GoatBrainSkillCatalogItem } from "@/lib/brain-skills";
-import type { GoatBrainWorkflowCatalogItem } from "@/lib/brain-workflows";
 import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import {
@@ -132,6 +130,7 @@ import {
   normalizeGoatModel,
 } from "@/lib/model-options";
 import { consumeGoatOnboardingKickoffPrompt } from "@/lib/onboarding-kickoff";
+import type { GoatSkillCatalogItem } from "@/lib/skills";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
@@ -150,6 +149,7 @@ import {
 } from "@/lib/task-schedules";
 import { archiveGoatTaskAction } from "@/lib/tasks";
 import { updateGoatTimezoneAction } from "@/lib/user-preferences";
+import type { GoatWorkflowCatalogItem } from "@/lib/workflows";
 
 const TEXTAREA_MAX_HEIGHT_PX = 128;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
@@ -305,8 +305,8 @@ export function GoatSurface({
   const [input, setInput] = useState("");
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
-  const [skillCatalog, setSkillCatalog] = useState<GoatBrainSkillCatalogItem[]>([]);
-  const [workflowCatalog, setWorkflowCatalog] = useState<GoatBrainWorkflowCatalogItem[]>([]);
+  const [skillCatalog, setSkillCatalog] = useState<GoatSkillCatalogItem[]>([]);
+  const [workflowCatalog, setWorkflowCatalog] = useState<GoatWorkflowCatalogItem[]>([]);
   const [mentionOptionIndex, setMentionOptionIndex] = useState(0);
   const [mode, setMode] = useState<"home" | "chat">(() => (initialChat ? "chat" : "home"));
   const [chatSessionId, setChatSessionId] = useState<string | null>(initialChat?.id ?? null);
@@ -2569,8 +2569,8 @@ function buildCodexComposerSettings(input: {
 function isSupportedMention(mention: GoatChatMention): mention is GoatChatMention {
   return (
     (mention.kind === "engine" && mention.id === "codex") ||
-    (mention.kind === "skill" && Boolean(mention.brainRef) && Boolean(mention.id)) ||
-    (mention.kind === "workflow" && Boolean(mention.brainRef) && Boolean(mention.id))
+    (mention.kind === "skill" && Boolean(mention.id)) ||
+    (mention.kind === "workflow" && Boolean(mention.id))
   );
 }
 
@@ -2632,11 +2632,11 @@ function skillMentionsFromPastedText(input: {
   pastedText: string;
   fullInput: string;
   skillIds: ReadonlySet<string>;
-  skills: GoatBrainSkillCatalogItem[];
+  skills: GoatSkillCatalogItem[];
 }): GoatChatMention[] {
   return input.skills.flatMap((skill) => {
     if (!input.skillIds.has(skill.id)) return [];
-    const mention: GoatChatMention = { kind: "skill", brainRef: skill.brainRef, id: skill.id };
+    const mention: GoatChatMention = { kind: "skill", id: skill.id };
     return goatChatMentionIsVisible(input.pastedText, mention) &&
       goatChatMentionIsVisible(input.fullInput, mention)
       ? [mention]
@@ -2659,13 +2659,12 @@ function workflowMentionsFromPastedText(input: {
   pastedText: string;
   fullInput: string;
   workflowIds: ReadonlySet<string>;
-  workflows: GoatBrainWorkflowCatalogItem[];
+  workflows: GoatWorkflowCatalogItem[];
 }): GoatChatMention[] {
   const matches = input.workflows.flatMap((workflow) => {
     if (!input.workflowIds.has(workflow.id)) return [];
     const mention: GoatChatMention = {
       kind: "workflow",
-      brainRef: workflow.brainRef,
       id: workflow.id,
     };
     return goatChatMentionIsVisible(input.pastedText, mention) &&
@@ -2694,8 +2693,8 @@ function mergeVisibleGoatChatMentions(
 
 function buildMentionOptions(input: {
   token: ActiveMentionToken | null;
-  skills: GoatBrainSkillCatalogItem[];
-  workflows: GoatBrainWorkflowCatalogItem[];
+  skills: GoatSkillCatalogItem[];
+  workflows: GoatWorkflowCatalogItem[];
   selectedMentions: GoatChatMention[];
   codexConnected: boolean;
   skillsEnabled: boolean;
@@ -2721,7 +2720,7 @@ function buildMentionOptions(input: {
         token: `#${workflow.id}`,
         label: workflow.name,
         description: workflow.description,
-        mention: { kind: "workflow", brainRef: workflow.brainRef, id: workflow.id },
+        mention: { kind: "workflow", id: workflow.id },
       });
     }
     return options;
@@ -2745,7 +2744,7 @@ function buildMentionOptions(input: {
       token: `@skill/${skill.id}`,
       label: skill.name,
       description: skill.description,
-      mention: { kind: "skill", brainRef: skill.brainRef, id: skill.id },
+      mention: { kind: "skill", id: skill.id },
     });
   }
   return options;
@@ -2797,11 +2796,10 @@ function renderComposerInputOverlay(value: string, mentions: GoatChatMention[]) 
   );
 }
 
-function isGoatBrainSkillCatalogItem(value: unknown): value is GoatBrainSkillCatalogItem {
+function isGoatSkillCatalogItem(value: unknown): value is GoatSkillCatalogItem {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
   return (
-    typeof item.brainRef === "string" &&
     typeof item.id === "string" &&
     typeof item.name === "string" &&
     typeof item.description === "string"
@@ -2809,19 +2807,19 @@ function isGoatBrainSkillCatalogItem(value: unknown): value is GoatBrainSkillCat
 }
 
 async function fetchGoatBrainSkillCatalog(signal?: AbortSignal) {
-  const response = await fetch("/api/brain/skills", signal ? { signal } : {});
+  const response = await fetch("/api/skills", signal ? { signal } : {});
   if (!response.ok) throw new Error(`Skill catalog request failed (${response.status})`);
   const payload = (await response.json()) as { skills?: unknown };
-  return Array.isArray(payload.skills) ? payload.skills.filter(isGoatBrainSkillCatalogItem) : [];
+  return Array.isArray(payload.skills) ? payload.skills.filter(isGoatSkillCatalogItem) : [];
 }
 
 async function fetchGoatBrainWorkflowCatalog(signal?: AbortSignal) {
-  const response = await fetch("/api/brain/workflows", signal ? { signal } : {});
+  const response = await fetch("/api/workflows", signal ? { signal } : {});
   if (!response.ok) throw new Error(`Workflow catalog request failed (${response.status})`);
   const payload = (await response.json()) as { workflows?: unknown };
   // Same wire shape as the skill catalog item.
   return Array.isArray(payload.workflows)
-    ? (payload.workflows.filter(isGoatBrainSkillCatalogItem) as GoatBrainWorkflowCatalogItem[])
+    ? (payload.workflows.filter(isGoatSkillCatalogItem) as GoatWorkflowCatalogItem[])
     : [];
 }
 
@@ -2829,7 +2827,7 @@ async function startGoatWorkflowTask(input: {
   workflow: Extract<GoatChatMention, { kind: "workflow" }>;
   description: string;
 }) {
-  const response = await fetch("/api/brain/workflows", {
+  const response = await fetch("/api/workflows", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),

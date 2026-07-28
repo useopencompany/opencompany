@@ -7,27 +7,28 @@ import type {
   GoatTaskToolName,
 } from "@opencompany/db/goat-schema";
 import { goatTasks, goatUsers } from "@opencompany/db/goat-schema";
-import {
-  type GoatBrainSkill,
-  type GoatBrainWorkflow,
-  serializeGoatBrainSkillMarkdown,
-} from "@opencompany/goat-brain";
+import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
 import { and, eq } from "drizzle-orm";
-import { type GoatBrainSkillMentionRef, resolveGoatBrainSkillMentions } from "@/lib/brain-skills";
-import {
-  GoatBrainWorkflowMentionError,
-  type GoatBrainWorkflowMentionRef,
-  resolveGoatBrainWorkflowMention,
-} from "@/lib/brain-workflows";
 import { generateGoatChatTitle } from "@/lib/chat-title";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
+import {
+  type GoatSkillMentionRef,
+  type GoatWorkspaceSkill,
+  resolveGoatSkillMentions,
+} from "@/lib/skills";
 import { createGoatTaskForUser } from "@/lib/tasks";
 import {
   DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
   type GoatWorkflowModelToken,
   isGoatWorkflowModelToken,
 } from "@/lib/workflow-model-options";
+import {
+  GoatWorkflowMentionError,
+  type GoatWorkflowMentionRef,
+  type GoatWorkspaceWorkflow,
+  resolveGoatWorkflowMention,
+} from "@/lib/workflows";
 
 export type GoatWorkflowEngineSelection = {
   engine: GoatHarnessEngine;
@@ -63,7 +64,7 @@ export function parseGoatWorkflowEngineSelection(workflow: {
   const frontmatterToken = workflow.model?.trim().toLowerCase() ?? "";
   if (frontmatterToken) {
     if (!isGoatWorkflowModelToken(frontmatterToken)) {
-      throw new GoatBrainWorkflowMentionError(
+      throw new GoatWorkflowMentionError(
         `This workflow's model "${frontmatterToken}" is not available. Pick a model in the workflow editor.`,
       );
     }
@@ -77,7 +78,7 @@ export function parseGoatWorkflowEngineSelection(workflow: {
     selected.set(token, GOAT_WORKFLOW_MODEL_MENTIONS[token]);
   }
   if (selected.size > 1) {
-    throw new GoatBrainWorkflowMentionError(
+    throw new GoatWorkflowMentionError(
       `This workflow mentions more than one model (${[...selected.keys()]
         .map((token) => `@${token}`)
         .join(", ")}). Keep exactly one model mention in the workflow instructions.`,
@@ -86,22 +87,19 @@ export function parseGoatWorkflowEngineSelection(workflow: {
   return [...selected.values()][0] ?? DEFAULT_GOAT_WORKFLOW_SELECTION;
 }
 
-export function extractGoatWorkflowSkillMentionRefs(
-  instructions: string,
-  brainRef: string,
-): GoatBrainSkillMentionRef[] {
+export function extractGoatWorkflowSkillMentionRefs(instructions: string): GoatSkillMentionRef[] {
   const ids = new Set<string>();
   for (const match of instructions.matchAll(WORKFLOW_SKILL_MENTION_PATTERN)) {
     const id = match[2]?.toLowerCase();
     if (id) ids.add(id);
   }
-  return [...ids].map((id) => ({ brainRef, id }));
+  return [...ids].map((id) => ({ id }));
 }
 
 export function compileGoatWorkflowHarnessSpec(input: {
-  workflow: GoatBrainWorkflow;
-  brainRef: string;
-  skills: GoatBrainSkill[];
+  workflow: GoatWorkspaceWorkflow;
+  workspaceId: string;
+  skills: GoatWorkspaceSkill[];
   tools: GoatTaskToolName[];
   selection: GoatWorkflowEngineSelection;
   description: string;
@@ -143,7 +141,7 @@ export function compileGoatWorkflowHarnessSpec(input: {
     resultMode: "assistant_final",
     workflow: {
       id: input.workflow.id,
-      brainRef: input.brainRef,
+      workspaceId: input.workspaceId,
       skillIds: input.skills.map((skill) => skill.id),
     },
   };
@@ -151,27 +149,26 @@ export function compileGoatWorkflowHarnessSpec(input: {
 
 export async function createGoatTaskFromWorkflow(input: {
   userWorkosId: string;
-  activeBrainRef: string | null;
-  mention: GoatBrainWorkflowMentionRef;
+  workspaceId: string | null;
+  mention: GoatWorkflowMentionRef;
   description: string;
 }): Promise<GoatTask> {
-  const workflow = await resolveGoatBrainWorkflowMention({
-    activeBrainRef: input.activeBrainRef,
+  const workflow = await resolveGoatWorkflowMention({
+    workspaceId: input.workspaceId,
     mention: input.mention,
   });
+  // resolveGoatWorkflowMention throws when workspaceId is null, so it is set here.
+  const workspaceId = input.workspaceId as string;
   const selection = parseGoatWorkflowEngineSelection(workflow);
   if (selection.engine === "codex" && !(await isGoatCodexConnectedForUser(input.userWorkosId))) {
-    throw new GoatBrainWorkflowMentionError(
+    throw new GoatWorkflowMentionError(
       `Workflow "#${workflow.id}" runs on Codex, but Codex is not connected. Connect Codex in Settings first.`,
     );
   }
 
-  const skillRefs = extractGoatWorkflowSkillMentionRefs(
-    workflow.instructions,
-    input.mention.brainRef,
-  );
-  const skills = await resolveGoatBrainSkillMentions({
-    activeBrainRef: input.activeBrainRef,
+  const skillRefs = extractGoatWorkflowSkillMentionRefs(workflow.instructions);
+  const skills = await resolveGoatSkillMentions({
+    workspaceId,
     mentions: skillRefs,
   });
   const tools = await getGoatAvailableHarnessTools(input.userWorkosId);
@@ -179,7 +176,7 @@ export async function createGoatTaskFromWorkflow(input: {
 
   const harnessSpec = compileGoatWorkflowHarnessSpec({
     workflow,
-    brainRef: input.mention.brainRef,
+    workspaceId,
     skills,
     tools,
     selection,
@@ -203,8 +200,9 @@ export async function createGoatTaskFromWorkflow(input: {
     model: selection.model,
     name: workflow.name,
     harnessSpec,
+    // `workflowId` now holds the workspace-scoped workflow slug. `workflowBrainRef`
+    // is deprecated (kept nullable on the column) and no longer written.
     workflowId: workflow.id,
-    workflowBrainRef: input.mention.brainRef,
   });
 }
 

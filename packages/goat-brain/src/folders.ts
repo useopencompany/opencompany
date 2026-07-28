@@ -28,10 +28,8 @@ const MIDDLE_FOLDER_RANK = new Map<string, number>(
   GOAT_BRAIN_MIDDLE_FOLDER_ORDER.map((folder, index) => [folder, index]),
 );
 const ENTITY_FOLDER_RANK = new Map<string, number>([
-  ["skills", 0],
-  ["workflows", 1],
-  ["people", 2],
-  ["companies", 3],
+  ["people", 0],
+  ["companies", 1],
 ]);
 
 export function defaultGoatBrainFolderManifestEntries(): GoatBrainFolderManifestEntry[] {

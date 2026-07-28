@@ -48,7 +48,7 @@ Browser
           insert goat.tasks row
           POST /internal/goat/tasks/:taskId/run
   GoatSurface #workflow submit
-    POST /api/brain/workflows
+    POST /api/workflows
       insert goat.tasks row without creating a chat session or chat messages
   GoatSurface Local Codex mode
     POST /api/local-codex/messages
@@ -94,16 +94,16 @@ recent open chat session. It passes those into `GoatSurface`.
 - `model`: the current chat model.
 - `message`: only the newest UI message.
 
-The composer can attach eligible pages from the active Brain's protected `skills/` folder with
-`@skill/<id>`. The visible token is paired with structured `{ kind: "skill", brainRef, id }`
-metadata. Exact skill tokens pasted into the composer are resolved against the active Brain catalog,
+The composer can attach the workspace's skills (`goat.skills`) with `@skill/<slug>`. The visible
+token is paired with structured `{ kind: "skill", id }` metadata (`id` is the workspace-scoped
+skill slug). Exact skill tokens pasted into the composer are resolved against the workspace catalog,
 while manually typed lookalikes stay plain text. The server resolves that metadata again under the
-current user's active-Brain access, rejects stale or cross-Brain references, and caps a turn at 16
+current user's active workspace, rejects unavailable references, and caps a turn at 16
 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable snapshot
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
 Selecting a workflow with `#<id>` changes the composer action from **Send message** to **Start
-task**. Submission posts directly to `/api/brain/workflows`, starts the durable task in the
+task**. Submission posts directly to `/api/workflows`, starts the durable task in the
 background, and leaves the current Home or chat surface in place. It does not call the foreground
 chat model or persist user/assistant chat messages for the workflow launch.
 

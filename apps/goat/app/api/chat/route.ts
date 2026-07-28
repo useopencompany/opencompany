@@ -34,15 +34,6 @@ import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
 import {
-  activateAndListGoatChatSessionSkills,
-  attachGoatBrainSkillsToPrompt,
-  GoatBrainSkillMentionError,
-  type GoatChatSessionSkillSnapshot,
-  readGoatBrainSkillMentionRefs,
-  resolveGoatBrainSkillMentions,
-} from "@/lib/brain-skills";
-import { readGoatBrainWorkflowMentionRef } from "@/lib/brain-workflows";
-import {
   createDbGoatChatStore,
   createGoatChatApprovalContinuationTurn,
   createGoatChatUserTurn,
@@ -96,6 +87,14 @@ import { executeGoatChatExaFetch } from "@/lib/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
+  activateAndListGoatChatSessionSkills,
+  attachGoatSkillsToPrompt,
+  type GoatChatSessionSkillSnapshot,
+  GoatSkillMentionError,
+  readGoatSkillMentionRefs,
+  resolveGoatSkillMentions,
+} from "@/lib/skills";
+import {
   createGoatTaskScheduleForUser,
   deleteGoatTaskScheduleForUser,
   type GoatTaskScheduleView,
@@ -103,6 +102,7 @@ import {
   updateGoatTaskScheduleForUser,
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
+import { readGoatWorkflowMentionRef } from "@/lib/workflows";
 
 export const maxDuration = 800;
 export const runtime = "nodejs";
@@ -217,28 +217,28 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  let resolvedSkills: Awaited<ReturnType<typeof resolveGoatBrainSkillMentions>> = [];
+  let resolvedSkills: Awaited<ReturnType<typeof resolveGoatSkillMentions>> = [];
   if (message) {
-    const parsedSkillMentions = readGoatBrainSkillMentionRefs(
+    const parsedSkillMentions = readGoatSkillMentionRefs(
       message.metadata?.mentions ?? body.value.mentions,
     );
     if (!parsedSkillMentions.ok) {
       return new Response(parsedSkillMentions.error, { status: 400 });
     }
     try {
-      resolvedSkills = await resolveGoatBrainSkillMentions({
-        activeBrainRef: context.activeBrain?.id ?? null,
+      resolvedSkills = await resolveGoatSkillMentions({
+        workspaceId: context.workspace.id,
         mentions: parsedSkillMentions.mentions,
       });
     } catch (error) {
-      if (error instanceof GoatBrainSkillMentionError) {
+      if (error instanceof GoatSkillMentionError) {
         return new Response(error.message, { status: 400 });
       }
       throw error;
     }
   }
   if (message) {
-    const parsedWorkflowMention = readGoatBrainWorkflowMentionRef(
+    const parsedWorkflowMention = readGoatWorkflowMentionRef(
       message.metadata?.mentions ?? body.value.mentions,
     );
     if (!parsedWorkflowMention.ok) {
@@ -441,7 +441,7 @@ export async function POST(request: Request): Promise<Response> {
     sessionSkills = await activateAndListGoatChatSessionSkills({
       chatSessionId: turn.session.id,
       activatedMessageId: turn.userMessageId,
-      brainRef: context.activeBrain?.id ?? "",
+      workspaceRef: context.workspace.id,
       skills: message ? resolvedSkills : [],
     });
   } catch (error) {
@@ -909,10 +909,7 @@ export async function POST(request: Request): Promise<Response> {
           return activatedSkills.length > 0
             ? replaceGoatChatUiMessageText(
                 uiMessage,
-                attachGoatBrainSkillsToPrompt(
-                  textFromGoatChatUiMessage(uiMessage),
-                  activatedSkills,
-                ),
+                attachGoatSkillsToPrompt(textFromGoatChatUiMessage(uiMessage), activatedSkills),
               )
             : uiMessage;
         }),

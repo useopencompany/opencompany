@@ -277,13 +277,13 @@ describe("goat-brain cli", () => {
       stderr: expect.stringContaining('Folder "inbox" is required and already exists.'),
     });
     await expect(
-      run(["folder", "--root", root, "delete", "--path", "skills"]),
+      run(["folder", "--root", root, "delete", "--path", "companies"]),
     ).resolves.toMatchObject({
       exitCode: 1,
-      stderr: expect.stringContaining('Folder "skills" is required and cannot be removed.'),
+      stderr: expect.stringContaining('Folder "companies" is required and cannot be removed.'),
     });
     await expect(
-      run(["folder", "--root", root, "rename", "--from", "skills", "--to", "abilities"]),
+      run(["folder", "--root", root, "rename", "--from", "companies", "--to", "orgs"]),
     ).resolves.toMatchObject({
       exitCode: 1,
       stderr: expect.stringContaining("Required folders cannot be renamed."),

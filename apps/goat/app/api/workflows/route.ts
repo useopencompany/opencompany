@@ -1,20 +1,19 @@
 import { after, NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
-import { GoatBrainSkillMentionError } from "@/lib/brain-skills";
-import {
-  GoatBrainWorkflowMentionError,
-  listGoatBrainWorkflowCatalog,
-  readGoatBrainWorkflowMentionRef,
-} from "@/lib/brain-workflows";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
+import { GoatSkillMentionError } from "@/lib/skills";
 import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
+import {
+  GoatWorkflowMentionError,
+  listGoatWorkflowCatalog,
+  readGoatWorkflowMentionRef,
+} from "@/lib/workflows";
 
 export async function GET() {
   const context = await currentGoatUser({ optional: true });
   if (!context) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!context.activeBrain) return NextResponse.json({ workflows: [] });
 
-  const workflows = await listGoatBrainWorkflowCatalog(context.activeBrain.id);
+  const workflows = await listGoatWorkflowCatalog(context.workspace.id);
   return NextResponse.json({ workflows });
 }
 
@@ -49,7 +48,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsedMention = readGoatBrainWorkflowMentionRef([input.workflow]);
+  const parsedMention = readGoatWorkflowMentionRef([input.workflow]);
   if (!parsedMention.ok || !parsedMention.mention) {
     return NextResponse.json(
       { error: parsedMention.ok ? "A workflow is required." : parsedMention.error },
@@ -60,7 +59,7 @@ export async function POST(request: Request) {
   try {
     const task = await createGoatTaskFromWorkflow({
       userWorkosId: context.user.workosUserId,
-      activeBrainRef: context.activeBrain?.id ?? null,
+      workspaceId: context.workspace.id,
       mention: parsedMention.mention,
       description,
     });
@@ -85,10 +84,7 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
-    if (
-      error instanceof GoatBrainWorkflowMentionError ||
-      error instanceof GoatBrainSkillMentionError
-    ) {
+    if (error instanceof GoatWorkflowMentionError || error instanceof GoatSkillMentionError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     throw error;

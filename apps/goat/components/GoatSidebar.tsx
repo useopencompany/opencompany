@@ -14,6 +14,7 @@ import {
   PlugZap,
   ScrollText,
   Settings,
+  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -111,6 +112,7 @@ export function GoatSidebar({
   const settingsActive =
     (pathname === "/settings" || pathname.startsWith("/settings/")) && !mcpSetupActive;
   const homeActive = pathname === "/";
+  const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
 
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
@@ -159,6 +161,12 @@ export function GoatSidebar({
               }
               window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT));
             }}
+          />
+          <SidebarNavRow
+            href="/workflows"
+            icon={Workflow}
+            label="Workflows"
+            active={workflowsActive}
           />
           {!mcpSetup.completedAt ? (
             <SidebarNavRow
@@ -247,11 +255,20 @@ function GoatSidebarTasks() {
     .slice(0, SIDEBAR_TASKS_LIMIT);
   if (workflowTasks.length === 0) return null;
 
+  const tasksActive = pathname === "/tasks";
+
   return (
     <div className="pt-4">
-      <div className="px-4 pb-1 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+      <Link
+        href="/tasks"
+        prefetch
+        aria-current={tasksActive ? "page" : undefined}
+        className={`mx-2 mb-1 flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+          tasksActive ? "text-ink" : "text-ink-subtle hover:text-ink"
+        }`}
+      >
         Tasks
-      </div>
+      </Link>
       <nav aria-label="Workflow tasks" className="flex flex-col gap-px px-2">
         {workflowTasks.map((task) => {
           const displayStatus = goatWorkflowTaskDisplayStatus(task);

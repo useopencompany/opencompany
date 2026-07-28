@@ -1,7 +1,8 @@
+// Workflows and skills used to live here as reserved folders. They were
+// extracted into their own workspace-scoped tables (goat.workflows /
+// goat.skills) so the Brain stays purely knowledge/context.
 export const HARD_DEFAULT_GOAT_BRAIN_FOLDERS = [
   "inbox",
-  "skills",
-  "workflows",
   "people",
   "companies",
   "evidence",
@@ -19,8 +20,6 @@ export const ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS = [
 export const DEFAULT_GOAT_BRAIN_FOLDERS = [
   "inbox",
   ...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
-  "skills",
-  "workflows",
   "people",
   "companies",
   "evidence",
