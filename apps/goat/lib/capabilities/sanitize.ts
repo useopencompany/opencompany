@@ -41,14 +41,22 @@ export function sanitizeCapabilityResult(input: {
   action: string;
   payload: unknown;
   expectedLimit: number;
+  payloadArrayLimit?: number;
   canonicalLinks?: string[];
   resultCount?: number | null;
   totalCostUsdMicros?: number | null;
 }): SanitizedCapabilityResult {
   const discoveredLinks = new Set<string>();
+  const payloadArrayLimit = input.payloadArrayLimit;
+  const requestedArrayLimit =
+    typeof payloadArrayLimit === "number" &&
+    Number.isInteger(payloadArrayLimit) &&
+    payloadArrayLimit > 0
+      ? payloadArrayLimit
+      : input.expectedLimit;
   const payload = sanitizeValue(input.payload, {
     depth: 0,
-    arrayLimit: Math.max(1, Math.min(input.expectedLimit, MAX_ARRAY_ITEMS)),
+    arrayLimit: Math.max(1, Math.min(requestedArrayLimit, MAX_ARRAY_ITEMS)),
     discoveredLinks,
     source: input.source,
   });
