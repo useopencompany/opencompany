@@ -245,6 +245,18 @@ body {
   margin: 1.1em 0 0.3em;
   font-size: 17px;
 }
+.tiptap-brain-compact h1 {
+  margin: 0.6em 0 0.22em;
+  font-size: 19px;
+}
+.tiptap-brain-compact h2 {
+  margin: 0.6em 0 0.2em;
+  font-size: 16px;
+}
+.tiptap-brain-compact h3 {
+  margin: 0.55em 0 0.18em;
+  font-size: 14px;
+}
 .tiptap-brain ul,
 .tiptap-brain ol {
   padding-left: 1.35em;

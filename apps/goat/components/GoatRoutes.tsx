@@ -39,6 +39,7 @@ import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import { GoatSurface, type GoatTaskView } from "@/components/GoatSurface";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
+import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { StripeIntegrationSetup } from "@/components/StripeIntegrationSetup";
@@ -1066,17 +1067,20 @@ export function GoatWorkflowEditorRoute({
             </EditorField>
 
             <EditorField label="Instructions">
-              <textarea
-                value={instructions}
-                disabled={!canEdit}
-                spellCheck={false}
-                onChange={(event) => {
-                  setInstructions(event.target.value);
-                  markDirty();
-                }}
-                placeholder="Describe step by step what this workflow should do when fired."
-                className="min-h-[320px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
-              />
+              <div
+                className={`rounded-lg border border-border bg-surface px-3 py-2.5 transition-colors focus-within:ring-1 focus-within:ring-ink/20 ${!canEdit ? "opacity-70" : ""}`}
+              >
+                <MarkdownGoatBrainEditor
+                  content={instructions}
+                  onChange={(value) => {
+                    setInstructions(value);
+                    markDirty();
+                  }}
+                  readOnly={!canEdit}
+                  compact
+                  placeholder="Describe step by step what this workflow should do when fired."
+                />
+              </div>
             </EditorField>
           </div>
 
@@ -1394,17 +1398,20 @@ export function GoatSkillEditorRoute({
         </EditorField>
 
         <EditorField label="Instructions">
-          <textarea
-            value={instructions}
-            disabled={!canEdit}
-            spellCheck={false}
-            onChange={(event) => {
-              setInstructions(event.target.value);
-              markDirty();
-            }}
-            placeholder="Describe the capability this skill gives the agent."
-            className="min-h-[320px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
-          />
+          <div
+            className={`rounded-lg border border-border bg-surface px-3 py-2.5 transition-colors focus-within:ring-1 focus-within:ring-ink/20 ${!canEdit ? "opacity-70" : ""}`}
+          >
+            <MarkdownGoatBrainEditor
+              content={instructions}
+              onChange={(value) => {
+                setInstructions(value);
+                markDirty();
+              }}
+              readOnly={!canEdit}
+              compact
+              placeholder="Describe the capability this skill gives the agent."
+            />
+          </div>
         </EditorField>
       </div>
 

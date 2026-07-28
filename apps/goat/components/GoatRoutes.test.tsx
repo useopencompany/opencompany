@@ -3,7 +3,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatBrainView } from "@/components/GoatBrainView";
-import { GoatBrainRoute, GoatMcpSettingsRoute, GoatPreferencesSettingsRoute } from "./GoatRoutes";
+import {
+  GoatBrainRoute,
+  GoatMcpSettingsRoute,
+  GoatPreferencesSettingsRoute,
+  GoatSkillEditorRoute,
+  GoatWorkflowEditorRoute,
+} from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -29,6 +35,18 @@ const appDataMock = vi.hoisted(() => ({
 const userPreferencesMock = vi.hoisted(() => ({
   updateGoatLocalCodexBetaAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateGoatTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+}));
+
+const workflowActionsMock = vi.hoisted(() => ({
+  updateGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
+  archiveGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
+  createGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
+}));
+
+const skillActionsMock = vi.hoisted(() => ({
+  updateGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
+  archiveGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
+  createGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
 }));
 
 const themeMock = vi.hoisted(() => ({
@@ -106,6 +124,18 @@ vi.mock("@/components/SettingsIntegrationsPanel", () => ({
 vi.mock("@/lib/user-preferences", () => ({
   updateGoatLocalCodexBetaAction: userPreferencesMock.updateGoatLocalCodexBetaAction,
   updateGoatTaskSpawningAction: userPreferencesMock.updateGoatTaskSpawningAction,
+}));
+
+vi.mock("@/lib/workflow-actions", () => ({
+  updateGoatWorkflowAction: workflowActionsMock.updateGoatWorkflowAction,
+  archiveGoatWorkflowAction: workflowActionsMock.archiveGoatWorkflowAction,
+  createGoatWorkflowAction: workflowActionsMock.createGoatWorkflowAction,
+}));
+
+vi.mock("@/lib/skill-actions", () => ({
+  updateGoatSkillAction: skillActionsMock.updateGoatSkillAction,
+  archiveGoatSkillAction: skillActionsMock.archiveGoatSkillAction,
+  createGoatSkillAction: skillActionsMock.createGoatSkillAction,
 }));
 
 vi.mock("@/components/ThemeProvider", () => ({
@@ -314,6 +344,76 @@ describe("GoatBrainRoute", () => {
         initialDataLoaded: false,
       }),
       undefined,
+    );
+  });
+});
+
+describe("GoatWorkflowEditorRoute", () => {
+  beforeEach(() => {
+    workflowActionsMock.updateGoatWorkflowAction.mockClear();
+    routerMock.refresh.mockReset();
+  });
+
+  it("edits instructions with a rich text editor instead of a plain textarea", async () => {
+    const workflow = {
+      id: "test-workflow",
+      name: "Test workflow",
+      description: "Does a thing",
+      instructions: "Step one.\n\nStep two.",
+      model: "",
+    };
+
+    const { container } = render(
+      <GoatWorkflowEditorRoute workflow={workflow} initialStatus="draft" canEdit />,
+    );
+
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(await screen.findByText("Step one.")).toBeInTheDocument();
+    expect(screen.getByText("Step two.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(workflowActionsMock.updateGoatWorkflowAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: "test-workflow",
+          instructions: "Step one.\n\nStep two.",
+        }),
+      ),
+    );
+  });
+});
+
+describe("GoatSkillEditorRoute", () => {
+  beforeEach(() => {
+    skillActionsMock.updateGoatSkillAction.mockClear();
+    routerMock.refresh.mockReset();
+  });
+
+  it("edits instructions with a rich text editor instead of a plain textarea", async () => {
+    const skill = {
+      id: "test-skill",
+      name: "Test skill",
+      description: "Does a thing",
+      instructions: "Use this when asked.",
+    };
+
+    const { container } = render(
+      <GoatSkillEditorRoute skill={skill} initialStatus="draft" canEdit />,
+    );
+
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(await screen.findByText("Use this when asked.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(skillActionsMock.updateGoatSkillAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: "test-skill",
+          instructions: "Use this when asked.",
+        }),
+      ),
     );
   });
 });
