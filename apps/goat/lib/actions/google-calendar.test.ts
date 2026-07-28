@@ -19,10 +19,14 @@ vi.mock("@opencompany/db/client", () => ({
   }),
 }));
 vi.mock("@opencompany/goat-agent/integrations/google-access-token", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@opencompany/goat-agent/integrations/google-access-token")>();
+  const actual =
+    await importOriginal<
+      typeof import("@opencompany/goat-agent/integrations/google-access-token")
+    >();
   return { ...actual, googleApiCall: mocks.googleApiCall };
 });
 
+import { GoogleAccessAuthError } from "@opencompany/goat-agent/integrations/google-access-token";
 import { resolveGoogleCalendarActions } from "@/lib/actions/google-calendar";
 import {
   GoatActionAuthError,
@@ -30,7 +34,6 @@ import {
   GoatActionInvalidParamsError,
   GoatActionPermissionError,
 } from "@/lib/actions/types";
-import { GoogleAccessAuthError } from "@opencompany/goat-agent/integrations/google-access-token";
 
 const CONTEXT: GoatActionExecuteContext = {
   userWorkosId: "user_1",
