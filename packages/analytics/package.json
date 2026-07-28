@@ -8,11 +8,15 @@
     "./events": "./src/events.ts",
     "./client": "./src/client.tsx",
     "./goat": "./src/goat.ts",
+    "./goat/client": "./src/goat-client.tsx",
+    "./goat/events": "./src/goat-events.ts",
+    "./goat/server": "./src/goat-server.ts",
     "./server": "./src/server.ts"
   },
   "scripts": {
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -22,10 +26,14 @@
     "react": "19.2.6"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^25.9.1",
     "@types/react": "19.2.15",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
-    "typescript": "^6.0.3"
+    "jsdom": "^29.1.1",
+    "react-dom": "19.2.6",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }

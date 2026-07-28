@@ -1,4 +1,5 @@
 import { modelSupportsAttachments } from "@opencompany/agent-runtime";
+import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
@@ -18,7 +19,6 @@ import {
 } from "@opencompany/goat-observability";
 import { flushLatitude, latitudeTelemetry } from "@opencompany/goat-observability/latitude";
 import { createLogger } from "@opencompany/observability";
-import { captureStatsigServerEvent } from "@opencompany/statsig/server";
 import {
   convertToModelMessages,
   createGateway,
@@ -470,21 +470,10 @@ export async function POST(request: Request): Promise<Response> {
         apiKey: gatewayApiKey,
       }).catch(() => undefined),
     );
-    if (turn.sessionCreated) {
-      after(
-        captureStatsigServerEvent("chat_started", context.user.workosUserId, {
-          user_id: context.user.workosUserId,
-          workspace_id: context.workspace.id,
-          session_id: turn.session.id,
-        }),
-      );
-    }
-    // Fires on every user turn (new chats and follow-ups). `is_first_message` lets the PM
-    // segment new conversations from continued ones, while the raw count measures engagement
-    // volume and per-session grouping gives conversation depth.
+    // One event covers both new and continued chats. `is_first_message` keeps the new-chat
+    // funnel queryable without double-capturing the first user action.
     after(
-      captureStatsigServerEvent("chat_message_sent", context.user.workosUserId, {
-        user_id: context.user.workosUserId,
+      captureGoatServerEvent("chat_message_sent", context.user.workosUserId, {
         workspace_id: context.workspace.id,
         session_id: turn.session.id,
         is_first_message: turn.sessionCreated,

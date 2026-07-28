@@ -6,6 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adoptWorkOSOrganizationMemberships, syncGoatUser } from "@/lib/auth";
 import { getWorkOSClient } from "@/lib/workos-client";
 
+const analyticsMocks = vi.hoisted(() => ({
+  captureGoatServerEvent: vi.fn(async () => {}),
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+}));
+
 vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(),
 }));
@@ -129,6 +137,11 @@ describe("syncGoatUser", () => {
     expect(dbMock.update).not.toHaveBeenCalled();
     expect(recordGoatSignupMock).toHaveBeenCalledOnce();
     expect(recordGoatSignupMock).toHaveBeenCalledWith({ source: "user_sync" });
+    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+      "signup_completed",
+      authUser.id,
+      { source: "user_sync" },
+    );
   });
 
   it("updates an existing Goat user without recording another signup", async () => {
@@ -148,6 +161,7 @@ describe("syncGoatUser", () => {
       updatedAt: now,
     });
     expect(recordGoatSignupMock).not.toHaveBeenCalled();
+    expect(analyticsMocks.captureGoatServerEvent).not.toHaveBeenCalled();
   });
 
   it("throws when neither insert nor update returns a user", async () => {
