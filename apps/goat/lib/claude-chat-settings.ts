@@ -2,13 +2,9 @@ import { isCodexReasoningEffort } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { GoatCodexChatTurnSettings } from "@opencompany/db/goat-schema";
 
-// Claude Code defaults current Sonnet models to high effort. Keeping the default explicit makes
-// the composer and queued turn agree, while each invocation can still override it with --effort.
+// High is the balanced Claude Code default for capable coding work. Keeping it explicit makes the
+// composer and queued turn agree, while each invocation can still override it with --effort.
 export const DEFAULT_CLAUDE_CHAT_REASONING_EFFORT: CodexReasoningEffort = "high";
-
-export type ClaudeChatComposerSettings = {
-  reasoningEffort: CodexReasoningEffort;
-};
 
 export function parseClaudeChatSettings(
   value: unknown,
