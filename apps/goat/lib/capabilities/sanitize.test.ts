@@ -8,7 +8,7 @@ describe("sanitizeCapabilityResult", () => {
   it("redacts credentials while preserving approved contact data", () => {
     const result = sanitizeCapabilityResult({
       source: "lead",
-      action: "lead.enrich_person",
+      action: "lead.find_person_email",
       expectedLimit: 1,
       payload: {
         email: "ada@example.com",
