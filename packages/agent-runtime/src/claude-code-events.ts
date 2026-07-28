@@ -16,7 +16,7 @@ export type ClaudeCodeTurnSummary = {
   sessionId: string | null;
 };
 
-type ClaudeToolKind = "command" | "file_change" | "web_search" | "plan" | "tool";
+type ClaudeToolKind = "command" | "file_change" | "web_search" | "plan" | "subagent" | "tool";
 
 type ClaudeToolUse = {
   kind: ClaudeToolKind;
@@ -25,6 +25,8 @@ type ClaudeToolUse = {
   query?: string | undefined;
   server?: string | undefined;
   tool?: string | undefined;
+  description?: string | undefined;
+  subagentType?: string | undefined;
 };
 
 const FILE_CHANGE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
@@ -111,9 +113,10 @@ function normalizeAssistantMessage(
   raw: Record<string, unknown>,
   toolUses: Map<string, ClaudeToolUse>,
 ): CodexAppServerNormalizedEvent[] {
-  // Subagent traffic (Task tool) carries parent_tool_use_id; the parent Task tool part
-  // already represents that work, so nested content is not projected.
-  if (readString(raw.parent_tool_use_id)) return [];
+  // Subagent traffic (Task tool) carries parent_tool_use_id. Rather than dropping it, we stamp
+  // every emitted event with the parent tool call id so the UI-parts reducer nests the subagent's
+  // steps under its parent Task part (see applyEventToSubagentChild).
+  const parentToolCallId = readString(raw.parent_tool_use_id);
   const message = readRecord(raw.message);
   const content = Array.isArray(message?.content) ? message.content : [];
   const messageId = readString(message?.id) ?? "assistant";
@@ -176,6 +179,22 @@ function normalizeAssistantMessage(
       return;
     }
 
+    if (name === "Task") {
+      const description = readString(input.description) ?? undefined;
+      const subagentType = readString(input.subagent_type) ?? undefined;
+      const prompt = readString(input.prompt) ?? undefined;
+      toolUses.set(toolUseId, { kind: "subagent", description, subagentType });
+      events.push(
+        normalized("subagent.started", raw, {
+          itemId: toolUseId,
+          description,
+          subagentType,
+          prompt,
+        }),
+      );
+      return;
+    }
+
     const mcpMatch = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(name);
     const toolInfo: ClaudeToolUse = mcpMatch
       ? { kind: "tool", server: mcpMatch[1], tool: mcpMatch[2] }
@@ -190,14 +209,14 @@ function normalizeAssistantMessage(
     );
   });
 
-  return events;
+  return stampParent(events, parentToolCallId);
 }
 
 function normalizeUserMessage(
   raw: Record<string, unknown>,
   toolUses: Map<string, ClaudeToolUse>,
 ): CodexAppServerNormalizedEvent[] {
-  if (readString(raw.parent_tool_use_id)) return [];
+  const parentToolCallId = readString(raw.parent_tool_use_id);
   const message = readRecord(raw.message);
   const content = Array.isArray(message?.content) ? message.content : [];
   const events: CodexAppServerNormalizedEvent[] = [];
@@ -267,6 +286,18 @@ function normalizeUserMessage(
 
     if (started.kind === "plan") continue;
 
+    if (started.kind === "subagent") {
+      events.push(
+        normalized("subagent.completed", raw, {
+          itemId: toolUseId,
+          status: isError ? "failed" : "completed",
+          result: isError ? undefined : (truncate(outputText, 2_000) ?? undefined),
+          error: isError ? (truncate(outputText, 600) ?? "Subagent failed.") : undefined,
+        }),
+      );
+      continue;
+    }
+
     events.push(
       normalized("mcp_tool.completed", raw, {
         itemId: toolUseId,
@@ -278,7 +309,21 @@ function normalizeUserMessage(
     );
   }
 
-  return events;
+  return stampParent(events, parentToolCallId);
+}
+
+// Subagent (Task) steps arrive as top-level assistant/user messages tagged with
+// parent_tool_use_id. Stamping that id onto each normalized event lets the UI-parts reducer
+// route the event into the parent Task part's children instead of the top-level turn.
+function stampParent(
+  events: CodexAppServerNormalizedEvent[],
+  parentToolCallId: string | null,
+): CodexAppServerNormalizedEvent[] {
+  if (!parentToolCallId) return events;
+  return events.map((event) => ({
+    ...event,
+    payload: { ...event.payload, parentToolCallId },
+  }));
 }
 
 function renderTodoList(value: unknown): string | null {

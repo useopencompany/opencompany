@@ -1958,7 +1958,7 @@ export function GoatSurface({
         </div>
       ) : (
         <div className="flex min-h-0 w-full flex-1 flex-col items-center">
-          <div className="w-full px-6 pb-2 pt-5">
+          <div className="w-full px-6 pb-2 pt-3">
             <div className="flex w-full items-center justify-between gap-3">
               <ChatTitleHeader
                 title={activeChatTitle}
