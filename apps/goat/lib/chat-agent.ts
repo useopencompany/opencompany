@@ -1067,9 +1067,19 @@ function actionAbortReason(abortSignal: AbortSignal) {
 export function prepareOpenCompanyChatStep(input: {
   stepNumber: number;
   forceApprovedAction?: boolean;
+  finalizeAfterApproval?: boolean;
   maxSteps?: number;
 }) {
   const maxSteps = input.maxSteps ?? OPENCOMPANY_CHAT_MAX_STEPS;
+  // The AI SDK executes approved tool calls before the first continuation
+  // model step. Keep that step answer-only so a completed write cannot spawn
+  // another approval request in the same user turn.
+  if (input.finalizeAfterApproval) {
+    return {
+      activeTools: [],
+      toolChoice: "none" as const,
+    };
+  }
   if (input.stepNumber >= maxSteps - 1) {
     return {
       activeTools: [],

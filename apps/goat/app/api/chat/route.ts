@@ -974,6 +974,7 @@ export async function POST(request: Request): Promise<Response> {
         stepNumber,
         maxSteps: maxChatSteps,
         forceApprovedAction: Boolean(capabilityApproval),
+        finalizeAfterApproval: turn.respondedApprovalIds.length > 0,
       }),
     ...(toolContext.repairToolCall
       ? { experimental_repairToolCall: toolContext.repairToolCall }
