@@ -64,7 +64,7 @@ describe("connectSandbox", () => {
 
     expect(e2bMocks.connect).toHaveBeenCalledWith("sbx_existing", {
       timeoutMs: 3_600_000,
-      requestTimeoutMs: 30_000,
+      requestTimeoutMs: 120_000,
     });
     expect(observations).toEqual([
       expect.objectContaining({
@@ -160,7 +160,7 @@ describe("createOrConnectSandbox", () => {
     ]);
   });
 
-  it("resumes existing sandboxes with the active runner timeout", async () => {
+  it("allows paused sandboxes longer to resume while restoring the active runner timeout", async () => {
     const sandbox = {
       sandboxId: "sbx_existing",
       setTimeout: vi.fn().mockResolvedValue(undefined),
@@ -180,7 +180,7 @@ describe("createOrConnectSandbox", () => {
     expect(result).toBe(sandbox);
     expect(e2bMocks.connect).toHaveBeenCalledWith("sbx_existing", {
       timeoutMs: 3_600_000,
-      requestTimeoutMs: 30_000,
+      requestTimeoutMs: 120_000,
     });
     expect(observations).toEqual([
       expect.objectContaining({

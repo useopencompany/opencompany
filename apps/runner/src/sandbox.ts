@@ -27,6 +27,10 @@ export type SandboxLatencyObservation = {
 // turn outliving it would be frozen mid-command until autoResume wakes the sandbox.
 const ACTIVE_SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 const SANDBOX_REQUEST_TIMEOUT_MS = 30_000;
+// Resuming a paused sandbox can take longer than an ordinary control-plane request. Keep the
+// larger deadline scoped to connect so transient E2B cold starts do not make a durable session
+// unusable while routine sandbox operations still fail promptly.
+const SANDBOX_CONNECT_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
 const SANDBOX_USER = "user";
 const SANDBOX_ROOT_USER = "root";
 const METADATA_ROOT = "/home/user/.opencompany";
@@ -125,7 +129,7 @@ export async function connectSandbox(input: {
   try {
     const sandbox = await Sandbox.connect(input.sandboxId, {
       timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
-      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+      requestTimeoutMs: SANDBOX_CONNECT_REQUEST_TIMEOUT_MS,
     });
     emitSandboxLatency(input.onLatency, {
       operation: "connect",
