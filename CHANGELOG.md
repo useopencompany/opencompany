@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Goat now explicitly looks up a known prospect's work email from their name and company or LinkedIn profile, without re-running broad prospect research.
+
 ## [1.2.0] - 2026-07-27
 
 ### Added

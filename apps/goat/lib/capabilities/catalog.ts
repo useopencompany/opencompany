@@ -2,6 +2,7 @@ import type { GoatManagedCapabilitySource } from "@opencompany/db/goat-schema";
 import type { JSONSchema7 } from "ai";
 import { MAX_EXPANDED_ACTION_RESULT_CHARS } from "@/lib/actions/execute";
 import { GoatActionInvalidParamsError } from "@/lib/actions/types";
+import { shapePdlPersonEmailOutput } from "@/lib/capabilities/pdl-person";
 import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize";
 import {
   shapeYoutubeTranscriptOutput,
@@ -64,7 +65,7 @@ export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
   lead: {
     label: "Prospecting",
     description:
-      "Find targeted professional prospects and enrich contact details through reviewed managed providers.",
+      "Look up work emails for known prospects by name and company or by LinkedIn URL, and find new targeted professional prospects.",
   },
   seo: {
     label: "SEO",
@@ -276,6 +277,15 @@ const PDL_PROSPECT_DATA_INCLUDE = [
   "job_company_industry_v2",
   "job_company_linkedin_url",
   "job_company_location_name",
+  "location_name",
+  "linkedin_url",
+  "work_email",
+].join(",");
+const PDL_PERSON_EMAIL_DATA_INCLUDE = [
+  "full_name",
+  "job_title",
+  "job_title_levels",
+  "job_company_name",
   "location_name",
   "linkedin_url",
   "work_email",
@@ -786,24 +796,45 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     },
   },
   {
-    id: "lead.enrich_person",
+    id: "lead.find_person_email",
     source: "lead",
-    description: "Enrich one person from an email, phone, LinkedIn URL, or full name plus company.",
+    description:
+      "Find a known prospect's work email from their LinkedIn URL or full name plus company or location. Use this when the user already knows whom they want to contact; do not run a broader prospect search first.",
     params: {
       type: "object",
       additionalProperties: false,
       properties: {
-        email: { type: "string", format: "email", maxLength: 320 },
-        phone: { type: "string", minLength: 7, maxLength: 40 },
-        linkedinUrl: { type: "string", format: "uri", maxLength: 1_000 },
-        name: { type: "string", minLength: 1, maxLength: 200 },
-        company: { type: "string", minLength: 1, maxLength: 200 },
+        linkedinUrl: {
+          type: "string",
+          format: "uri",
+          maxLength: 1_000,
+          description: "The prospect's public LinkedIn person URL, when known.",
+        },
+        name: {
+          type: "string",
+          minLength: 3,
+          maxLength: 200,
+          description: "The prospect's full name, including at least first and last name.",
+        },
+        company: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description:
+            "The prospect's current company name, website, or LinkedIn company URL. Pair with name.",
+        },
+        location: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description:
+            "Optional city, region, or country to disambiguate the prospect. Can replace company when paired with name.",
+        },
       },
       anyOf: [
-        { required: ["email"] },
-        { required: ["phone"] },
         { required: ["linkedinUrl"] },
         { required: ["name", "company"] },
+        { required: ["name", "location"] },
       ],
     },
     provider: "pdl",
@@ -811,34 +842,36 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     priceType: "PER_CALL",
     executionMode: "sync",
     mapInput: (raw) => {
-      const params = checkedParams(raw, ["email", "phone", "linkedinUrl", "name", "company"]);
-      const email = optionalText(params, "email", 320);
-      const phone = optionalText(params, "phone", 40);
+      const params = checkedParams(raw, ["linkedinUrl", "name", "company", "location"]);
       const profile = optionalText(params, "linkedinUrl", 1_000);
       const name = optionalText(params, "name", 200);
       const company = optionalText(params, "company", 200);
-      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        throw new GoatActionInvalidParamsError('"email" is not a valid email address.');
+      const location = optionalText(params, "location", 200);
+      if (name && !/\S+\s+\S+/.test(name)) {
+        throw new GoatActionInvalidParamsError('"name" must include at least first and last name.');
       }
       const canonicalLinks = profile ? [linkedinUrl(profile, "person")] : [];
-      if (!email && !phone && !profile && !(name && company)) {
+      if (!profile && !(name && (company || location))) {
         throw new GoatActionInvalidParamsError(
-          "Provide email, phone, linkedinUrl, or both name and company.",
+          "Provide linkedinUrl, or provide name with company or location.",
         );
       }
       return {
         providerInput: compact({
-          email,
-          phone,
           profile: profile ? canonicalLinks[0] : undefined,
           name,
           company,
-          include_if_matched: true,
+          location,
+          min_likelihood: 6,
+          required: "work_email",
+          titlecase: true,
+          data_include: PDL_PERSON_EMAIL_DATA_INCLUDE,
         }),
         resultLimit: 1,
         canonicalLinks,
       };
     },
+    mapOutput: (output) => shapePdlPersonEmailOutput(output),
   },
   {
     id: "lead.search_prospects",
@@ -1261,7 +1294,9 @@ export function managedCapabilityContractProbeParams(id: string): Record<string,
   if (id === "instagram.list_hashtag_posts") return { query: "#ai" };
   if (id === "tiktok.get_search_trends") return {};
   if (id === "tiktok.get_hashtag_trends") return { country: "US" };
-  if (id === "lead.enrich_person") return { email: "ada@example.com" };
+  if (id === "lead.find_person_email") {
+    return { name: "Ada Lovelace", company: "Analytical Engines" };
+  }
   if (id === "lead.get_linkedin_contact") {
     return { url: "https://www.linkedin.com/in/ada-lovelace" };
   }

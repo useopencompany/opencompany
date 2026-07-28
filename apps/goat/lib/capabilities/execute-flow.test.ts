@@ -428,7 +428,7 @@ describe("executeManagedCapability", () => {
     const now = new Date("2026-07-23T10:00:00.000Z");
     await expect(
       executeManagedCapability({
-        spec: spec("lead.enrich_person", "lead", "pdl", "/v5/person/enrich"),
+        spec: spec("lead.find_person_email", "lead", "pdl", "/v5/person/enrich"),
         params: { query: "ada@example.com" },
         context: context(),
         client,
@@ -456,7 +456,7 @@ describe("executeManagedCapability", () => {
     const approvalContext = context();
     approvalContext.capabilityApprovalRunId = "gcr_approved";
     await executeManagedCapability({
-      spec: spec("lead.enrich_person", "lead", "pdl", "/v5/person/enrich"),
+      spec: spec("lead.find_person_email", "lead", "pdl", "/v5/person/enrich"),
       params: { query: "ada@example.com" },
       context: approvalContext,
       client,
@@ -467,7 +467,7 @@ describe("executeManagedCapability", () => {
         userWorkosId: "user_1",
         workspaceId: "workspace_1",
         chatSessionId: "chat_1",
-        action: "lead.enrich_person",
+        action: "lead.find_person_email",
         quoteTotalCostUsdMicros: 360_000,
         inputHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
@@ -476,7 +476,7 @@ describe("executeManagedCapability", () => {
     mocks.consumeApproval.mockResolvedValueOnce(null);
     await expect(
       executeManagedCapability({
-        spec: spec("lead.enrich_person", "lead", "pdl", "/v5/person/enrich"),
+        spec: spec("lead.find_person_email", "lead", "pdl", "/v5/person/enrich"),
         params: { query: "changed@example.com" },
         context: approvalContext,
         client,

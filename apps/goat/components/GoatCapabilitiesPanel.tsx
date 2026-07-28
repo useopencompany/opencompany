@@ -32,7 +32,7 @@ const CAPABILITY_COPY: Record<GoatManagedCapabilitySource, { label: string; desc
     },
     lead: {
       label: "Prospecting",
-      description: "Find targeted professional prospects and enrich their contact details.",
+      description: "Look up work emails for known prospects or find new targeted professionals.",
     },
     seo: {
       label: "SEO",

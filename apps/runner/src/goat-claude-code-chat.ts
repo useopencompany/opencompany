@@ -55,6 +55,15 @@ const CLAUDE_CHAT_WORKDIR = "/home/user/opencompany-goat/claude-chat";
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
 
+// Claude Code recovery is an idempotent re-run of `claude --resume` against the persisted sandbox,
+// so it is safe to repeat across successive handoffs. Unlike Codex there is no engine-turn to
+// durably adopt, so nothing rearms the recovery guard between handoffs — a single-attempt cap would
+// strand any turn caught by two deploys. Allow several recoveries (each real infra churn, not model
+// misbehaviour, since a held lease is never reclaimed) while still bounding a genuine poison loop.
+const CLAUDE_CHAT_MAX_RECOVERY_ATTEMPTS = 10;
+const CLAUDE_CHAT_RECOVERY_EXHAUSTED_MESSAGE =
+  "This turn was interrupted by too many runner restarts to resume safely. Send your message again to continue.";
+
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-claude-code-chat" });
 
 export const GOAT_CLAUDE_CODE_CHAT_REAUTH_MESSAGE =
@@ -195,7 +204,13 @@ export async function runGoatClaudeCodeChatTurn(input: {
     checkExternalAbort();
     if (input.recovery) {
       executionStage = "claim_recovery";
-      await claimCodexChatRecovery({ turn, leaseId, leaseOwner });
+      await claimCodexChatRecovery({
+        turn,
+        leaseId,
+        leaseOwner,
+        maxRecoveryAttempts: CLAUDE_CHAT_MAX_RECOVERY_ATTEMPTS,
+        exhaustedMessage: CLAUDE_CHAT_RECOVERY_EXHAUSTED_MESSAGE,
+      });
     }
     const attachments = await loadGoatCodexChatAttachments(turn);
     checkExternalAbort();

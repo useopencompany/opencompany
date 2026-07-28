@@ -797,7 +797,15 @@ export async function claimCodexChatRecovery(input: {
   turn: GoatCodexChatTurn;
   leaseId: string;
   leaseOwner: string;
+  // Codex caps recovery at a single attempt and rearms the guard only after durably adopting a
+  // replacement engine turn (see persistCodexChatEngineTurnId). Engines whose recovery is an
+  // idempotent re-run — Claude Code reruns `claude --resume` against the persisted sandbox — pass
+  // a higher ceiling so several handoffs (e.g. back-to-back deploys during one long turn) do not
+  // strand the turn, while still breaking a genuine poison loop.
+  maxRecoveryAttempts?: number;
+  exhaustedMessage?: string;
 }) {
+  const maxRecoveryAttempts = input.maxRecoveryAttempts ?? 1;
   const result = await getDb().execute(sql`
     UPDATE goat.codex_chat_turns AS turn
     SET recovery_attempts = turn.recovery_attempts + 1,
@@ -807,12 +815,13 @@ export async function claimCodexChatRecovery(input: {
       AND turn.lease_id = ${input.leaseId}
       AND turn.lease_owner = ${input.leaseOwner}
       AND turn.status = 'running'
-      AND turn.recovery_attempts < 1
+      AND turn.recovery_attempts < ${maxRecoveryAttempts}
     RETURNING turn.id
   `);
   if (rowsFromExecute(result).length > 0) return;
   throw new Error(
-    "Codex could not safely resume this turn because the previous recovery did not persist a resumable engine turn. Send your message again to continue.",
+    input.exhaustedMessage ??
+      "Codex could not safely resume this turn because the previous recovery did not persist a resumable engine turn. Send your message again to continue.",
   );
 }
 

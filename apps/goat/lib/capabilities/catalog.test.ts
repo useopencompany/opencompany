@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GoatActionInvalidParamsError } from "@/lib/actions/types";
 import {
   MANAGED_CAPABILITY_ACTIONS,
+  MANAGED_CAPABILITY_SOURCE_DETAILS,
   managedCapabilityContractProbeParams,
 } from "@/lib/capabilities/catalog";
 import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize";
@@ -26,7 +27,7 @@ describe("managed capability catalog", () => {
       "youtube.find_in_transcript": "apify:/starvibe/youtube-video-transcript",
       "instagram.search_reels": "tikhub:/api/v1/instagram/v2/search_reels",
       "tiktok.get_search_trends": "tikhub:/api/v1/tiktok/web/fetch_trending_searchwords",
-      "lead.enrich_person": "pdl:/v5/person/enrich",
+      "lead.find_person_email": "pdl:/v5/person/enrich",
       "lead.search_prospects": "pdl:/v5/person/search",
       "lead.search_people_by_name": "apify:/harvestapi/linkedin-profile-search-by-name",
       "lead.list_company_employees": "apify:/harvestapi/linkedin-company-employees",
@@ -37,6 +38,9 @@ describe("managed capability catalog", () => {
       "seo.get_keyword_metrics": "semrush:/keyword_metrics",
       "seo.get_backlink_overview": "semrush:/backlinks_overview",
     });
+    expect(MANAGED_CAPABILITY_SOURCE_DETAILS.lead.description).toMatch(
+      /look up work emails for known prospects/i,
+    );
   });
 
   it("validates and maps every adapter while enforcing the product caps", () => {
@@ -260,6 +264,57 @@ describe("managed capability catalog", () => {
       resultLimit: 7,
       canonicalLinks: [],
     });
+  });
+
+  it("maps a known prospect to a confidence-gated work-email lookup", () => {
+    const findPersonEmail = action("lead.find_person_email");
+    expect(findPersonEmail.description).toMatch(/known prospect's work email/i);
+    expect(findPersonEmail.description).toMatch(/do not run a broader prospect search/i);
+    expect(
+      findPersonEmail.mapInput({
+        name: "Ada Lovelace",
+        company: "Analytical Engines",
+        location: "London",
+      }),
+    ).toEqual({
+      providerInput: {
+        name: "Ada Lovelace",
+        company: "Analytical Engines",
+        location: "London",
+        min_likelihood: 6,
+        required: "work_email",
+        titlecase: true,
+        data_include: expect.stringContaining("work_email"),
+      },
+      resultLimit: 1,
+      canonicalLinks: [],
+    });
+    expect(
+      findPersonEmail.mapInput({
+        linkedinUrl: "https://linkedin.com/in/ada-lovelace?trk=public",
+      }),
+    ).toMatchObject({
+      providerInput: {
+        profile: "https://www.linkedin.com/in/ada-lovelace",
+        min_likelihood: 6,
+        required: "work_email",
+      },
+      canonicalLinks: ["https://www.linkedin.com/in/ada-lovelace"],
+    });
+    expect(() => findPersonEmail.mapInput({ name: "Ada Lovelace" })).toThrow(
+      /name with company or location/i,
+    );
+    expect(() =>
+      findPersonEmail.mapInput({
+        name: "Ada",
+        company: "Analytical Engines",
+      }),
+    ).toThrow(/first and last name/i);
+    expect(() =>
+      findPersonEmail.mapInput({
+        linkedinUrl: "https://example.com/ada",
+      }),
+    ).toThrow(/not allowed/i);
   });
 
   it("rejects unbounded or contradictory prospect searches", () => {
