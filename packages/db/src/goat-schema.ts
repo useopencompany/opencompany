@@ -389,7 +389,9 @@ export type GoatTaskDebugTrace = {
 };
 
 export type GoatChatRole = "user" | "assistant";
-export type GoatChatEngine = "opencompany" | "local_codex" | "codex";
+export type GoatChatEngine = "opencompany" | "local_codex" | "codex" | "claude_code";
+// Engines whose turns run through the sandboxed coding-CLI queue (goat.codex_chat_*).
+export type GoatCodexChatEngine = "codex" | "claude_code";
 
 export type GoatChatAttachmentKind = "image" | "pdf" | "docx" | "xlsx" | "srt";
 export type GoatChatMessageAttachment = {
@@ -2799,7 +2801,7 @@ export const goatChatSessions = goat.table(
     ),
     engineCheck: check(
       "goat_chat_sessions_engine_check",
-      sql`${table.engine} IN ('opencompany', 'local_codex', 'codex')`,
+      sql`${table.engine} IN ('opencompany', 'local_codex', 'codex', 'claude_code')`,
     ),
   }),
 );
@@ -3249,6 +3251,7 @@ export const goatCodexChatSessions = goat.table(
     chatSessionId: text("chat_session_id")
       .notNull()
       .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    engine: text("engine").$type<GoatCodexChatEngine>().notNull().default("codex"),
     model: text("model").notNull().default("gpt-5.5"),
     brainRef: text("brain_ref").references(() => goatBrains.id, {
       onDelete: "set null",
@@ -3287,6 +3290,10 @@ export const goatCodexChatSessions = goat.table(
     statusCheck: check(
       "goat_codex_chat_sessions_status_check",
       sql`${table.status} IN ('queued', 'starting', 'idle', 'running', 'failed', 'interrupted', 'closed')`,
+    ),
+    engineCheck: check(
+      "goat_codex_chat_sessions_engine_check",
+      sql`${table.engine} IN ('codex', 'claude_code')`,
     ),
   }),
 );
@@ -3531,6 +3538,35 @@ export const goatCodexDeviceAuthFlows = goat.table(
     statusCheck: check(
       "goat_codex_device_auth_flows_status_check",
       sql`${table.status} IN ('pending', 'code_ready', 'completed', 'failed', 'expired')`,
+    ),
+  }),
+);
+
+// Claude Code subscription auth: one long-lived setup-token per user, pasted in
+// settings (no device flow exists for Claude Code). Strictly per-user — sharing a
+// subscription credential across users is prohibited by Anthropic's terms.
+export const goatClaudeCodeCredentials = goat.table(
+  "claude_code_credentials",
+  {
+    userWorkosId: text("user_workos_id")
+      .primaryKey()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    encryptedAuthJson: jsonb("encrypted_auth_json")
+      .$type<GoatIntegrationCredentialEncryptedPayload>()
+      .notNull(),
+    encryptionKeyVersion: integer("encryption_key_version").notNull(),
+    status: text("status").$type<GoatCodexCredentialStatus>().notNull().default("connected"),
+    statusReason: text("status_reason"),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    statusIdx: index("goat_claude_code_credentials_status_idx").on(table.status),
+    statusCheck: check(
+      "goat_claude_code_credentials_status_check",
+      sql`${table.status} IN ('connected', 'needs_reauth')`,
     ),
   }),
 );
@@ -3910,6 +3946,16 @@ export const goatCodexDeviceAuthFlowsRelations = relations(goatCodexDeviceAuthFl
   }),
 }));
 
+export const goatClaudeCodeCredentialsRelations = relations(
+  goatClaudeCodeCredentials,
+  ({ one }) => ({
+    user: one(goatUsers, {
+      fields: [goatClaudeCodeCredentials.userWorkosId],
+      references: [goatUsers.workosUserId],
+    }),
+  }),
+);
+
 export const goatIntegrationsRelations = relations(goatIntegrations, ({ one, many }) => ({
   user: one(goatUsers, {
     fields: [goatIntegrations.userWorkosId],
@@ -4216,6 +4262,7 @@ export type GoatIntegrationCredential = typeof goatIntegrationCredentials.$infer
 export type GoatBrainSourceItem = typeof goatBrainSourceItems.$inferSelect;
 export type GoatBrainIngestJob = typeof goatBrainIngestJobs.$inferSelect;
 export type GoatCodexCredential = typeof goatCodexCredentials.$inferSelect;
+export type GoatClaudeCodeCredential = typeof goatClaudeCodeCredentials.$inferSelect;
 export type GoatCodexDeviceAuthFlow = typeof goatCodexDeviceAuthFlows.$inferSelect;
 export type GoatTaskSchedule = typeof goatTaskSchedules.$inferSelect;
 export type GoatTaskScheduleRun = typeof goatTaskScheduleRuns.$inferSelect;

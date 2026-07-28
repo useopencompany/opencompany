@@ -102,6 +102,7 @@ import {
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
+import { CLAUDE_PICKER_VALUE } from "@/lib/claude-chat-constants";
 import {
   CODEX_CHAT_DEFAULT_MODEL_ID,
   CODEX_PICKER_VALUE,
@@ -160,7 +161,7 @@ type ActiveMentionToken = {
 };
 
 type MentionOption =
-  | { kind: "engine"; token: "@codex"; label: string; mention: GoatChatMention }
+  | { kind: "engine"; token: "@codex" | "@claude"; label: string; mention: GoatChatMention }
   | {
       kind: "skill";
       token: string;
@@ -171,7 +172,7 @@ type MentionOption =
 
 // Engine chats (Local Codex bridge, cloud Codex sandbox) bypass useChat entirely: sends go to an
 // engine endpoint, streaming arrives as Electric row updates, and stop is an interrupt call.
-type GoatEngineChatKind = "local_codex" | "codex";
+type GoatEngineChatKind = "local_codex" | "codex" | "claude_code";
 type CodexComposerSettings = GoatCodexComposerSettingsView;
 type CodexComposerUiState = {
   reasoningEffort: CodexReasoningEffort;
@@ -201,6 +202,14 @@ const ENGINE_CHAT_CONFIG: Record<
     interruptEndpoint: (chatSessionId) =>
       `/api/codex-chat/sessions/${encodeURIComponent(chatSessionId)}/interrupt`,
   },
+  claude_code: {
+    label: "Claude Code",
+    messagesEndpoint: "/api/claude-chat/messages",
+    // Claude chats share the codex_chat session/turn rows, so the codex interrupt
+    // and sandbox-status routes are engine-agnostic.
+    interruptEndpoint: (chatSessionId) =>
+      `/api/codex-chat/sessions/${encodeURIComponent(chatSessionId)}/interrupt`,
+  },
 };
 
 function engineChatKindFromChat(
@@ -209,6 +218,7 @@ function engineChatKindFromChat(
 ): GoatEngineChatKind | null {
   if (!chat) return null;
   if (chat.engine === "codex") return "codex";
+  if (chat.engine === "claude_code") return "claude_code";
   if (chat.engine === "local_codex" && localCodexBetaEnabled) return "local_codex";
   return null;
 }
@@ -242,6 +252,7 @@ export function GoatSurface({
   recentChats = [],
   archivedChats = [],
   codexConnected = false,
+  claudeCodeConnected = false,
   localCodexBetaEnabled = false,
   taskSpawningEnabled = false,
   chatResumeEnabled = false,
@@ -255,6 +266,7 @@ export function GoatSurface({
   recentChats?: readonly GoatChatSummaryView[];
   archivedChats?: readonly GoatChatSummaryView[];
   codexConnected?: boolean;
+  claudeCodeConnected?: boolean;
   localCodexBetaEnabled?: boolean;
   taskSpawningEnabled?: boolean;
   chatResumeEnabled?: boolean;
@@ -307,6 +319,7 @@ export function GoatSurface({
     () =>
       readLastGoatChatSelection(userWorkosId, {
         codexConnected,
+        claudeCodeConnected,
         localCodexBetaEnabled,
       }),
     () => normalizeGoatModel(defaultModel),
@@ -315,6 +328,7 @@ export function GoatSurface({
     if (!initialChat) return null;
     const engine = engineChatKindFromChat(initialChat, localCodexBetaEnabled);
     if (engine === "codex") return CODEX_PICKER_VALUE;
+    if (engine === "claude_code") return CLAUDE_PICKER_VALUE;
     if (engine === "local_codex") return LOCAL_CODEX_PICKER_VALUE;
     return normalizeGoatModel(initialChat.model);
   });
@@ -581,11 +595,14 @@ export function GoatSurface({
   }, [activeInitialChatEngine, chatSessionId, engineChatSession]);
   const isLocalCodexMode = localCodexBetaEnabled && chatModel === LOCAL_CODEX_PICKER_VALUE;
   const isCodexMode = chatModel === CODEX_PICKER_VALUE;
+  const isClaudeMode = chatModel === CLAUDE_PICKER_VALUE;
   const selectedEngine: GoatEngineChatKind | null = isLocalCodexMode
     ? "local_codex"
     : isCodexMode
       ? "codex"
-      : null;
+      : isClaudeMode
+        ? "claude_code"
+        : null;
   const activeEngine = activeEngineChat?.engine ?? selectedEngine;
   const isEngineChat = activeEngine !== null;
   // Hard stop: with enforcement on and an empty balance, block new sends
@@ -601,7 +618,9 @@ export function GoatSurface({
   );
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
-    if (mention.kind === "engine") return codexConnected;
+    if (mention.kind === "engine") {
+      return mention.id === "claude" ? claudeCodeConnected : codexConnected;
+    }
     return activeEngine !== "local_codex";
   });
   const mentionOptions = buildMentionOptions({
@@ -609,6 +628,7 @@ export function GoatSurface({
     skills: skillCatalog,
     selectedMentions: activeSelectedMentions,
     codexConnected,
+    claudeCodeConnected,
     skillsEnabled: activeEngine !== "local_codex",
   });
   const localCodexFeatureDisabledForChat = Boolean(
@@ -624,7 +644,9 @@ export function GoatSurface({
     userWorkosId,
     modelName: String(chatModel),
     enabled: attachmentsEnabled && !engineSubmitting,
-    ...(activeEngine === "codex" ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES } : {}),
+    ...(activeEngine === "codex" || activeEngine === "claude_code"
+      ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
+      : {}),
   });
   const clearComposerAttachments = composerAttachments.clearAttachments;
 
@@ -700,7 +722,9 @@ export function GoatSurface({
     [optimisticallyArchivedChatIds, recentChats],
   );
   const trimmedNewChatPrompt = newChatPrompt.trim();
-  const showCodexComposerControls = isEngineChat && !localCodexFeatureDisabledForChat;
+  // Reasoning-effort / plan-mode / goal-mode are codex concepts; the Claude engine has none.
+  const showCodexComposerControls =
+    isEngineChat && activeEngine !== "claude_code" && !localCodexFeatureDisabledForChat;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -817,9 +841,11 @@ export function GoatSurface({
           ? LOCAL_CODEX_PICKER_VALUE
           : engineTarget === "codex"
             ? CODEX_PICKER_VALUE
-            : chat
-              ? normalizeGoatModel(chat.model)
-              : null,
+            : engineTarget === "claude_code"
+              ? CLAUDE_PICKER_VALUE
+              : chat
+                ? normalizeGoatModel(chat.model)
+                : null,
       );
       setCodexModel(normalizeCodexChatModelId(chat?.model));
       setEngineChatSession(
@@ -827,7 +853,11 @@ export function GoatSurface({
       );
       applyCodexComposerUiState(nextCodexComposerState);
       setCodexSandboxStatus(null);
-      setCodexRuntime(engineTarget === "codex" ? (chat?.codexRuntime ?? null) : null);
+      setCodexRuntime(
+        engineTarget === "codex" || engineTarget === "claude_code"
+          ? (chat?.codexRuntime ?? null)
+          : null,
+      );
       setEngineRunning(false);
       clearActiveTurn();
       setOptimisticTurnDurations(new Map());
@@ -1179,7 +1209,7 @@ export function GoatSurface({
         settings: settings.settings,
         userMessageId,
         attachments: attachmentsMetadata,
-        mentions: engine === "codex" ? mentions.filter(isSkillMention) : [],
+        mentions: engine === "local_codex" ? [] : mentions.filter(isSkillMention),
         ...(engine === "codex" && !existingEngineSessionId ? { model: codexModel } : {}),
       })
         .then((result) => {
@@ -1786,7 +1816,8 @@ export function GoatSurface({
                 {chatSessionId && persistedChatSessionId === chatSessionId && hasMessages ? (
                   <ChatShareButton chatSessionId={chatSessionId} disabled={isAgentWorking} />
                 ) : null}
-                {activeEngineChat?.engine === "codex" ? (
+                {activeEngineChat?.engine === "codex" ||
+                activeEngineChat?.engine === "claude_code" ? (
                   <CodexSessionStatusIndicator
                     runtime={codexRuntime}
                     optimisticStatus={
@@ -1833,10 +1864,10 @@ export function GoatSurface({
                 <ThinkingIndicator
                   startedAtMs={activeTurnTimerStartedAtMs}
                   label={
-                    isEngineChat
+                    isEngineChat && activeEngine
                       ? codexRuntime?.status === "queued"
-                        ? "Codex is queued"
-                        : "Codex is working"
+                        ? `${ENGINE_CHAT_CONFIG[activeEngine].label} is queued`
+                        : `${ENGINE_CHAT_CONFIG[activeEngine].label} is working`
                       : "Goat is working"
                   }
                 />
@@ -1855,7 +1886,8 @@ export function GoatSurface({
           setRunning={setEngineRunning}
         />
       ) : null}
-      {mode === "chat" && activeEngineChat?.engine === "codex" ? (
+      {mode === "chat" &&
+      (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
         <LiveCodexChatSessionStatus
           chatSessionId={activeEngineChat.chatSessionId}
           setRunning={setEngineRunning}
@@ -2097,6 +2129,7 @@ export function GoatSurface({
                 disabled={isGenerating || Boolean(chatSessionId)}
                 localCodexBetaEnabled={localCodexBetaEnabled}
                 codexConnected={codexConnected}
+                claudeCodeConnected={claudeCodeConnected}
               />
               {showCodexComposerControls ? (
                 <CodexComposerControls
@@ -2176,7 +2209,7 @@ function visibleHomeTasks(input: {
   const codexItems: GoatHomeTaskItem[] = input.chats
     .filter(
       (chat) =>
-        chat.engine === "codex" &&
+        (chat.engine === "codex" || chat.engine === "claude_code") &&
         !input.optimisticallyArchivedChatIds.has(chat.id) &&
         chat.codexRuntime?.status !== "closed" &&
         (Boolean(chat.pinnedAt) ||
@@ -2433,7 +2466,7 @@ function buildCodexComposerSettings(input: {
 
 function isSupportedMention(mention: GoatChatMention): mention is GoatChatMention {
   return (
-    (mention.kind === "engine" && mention.id === "codex") ||
+    (mention.kind === "engine" && (mention.id === "codex" || mention.id === "claude")) ||
     (mention.kind === "skill" && Boolean(mention.brainRef) && Boolean(mention.id))
   );
 }
@@ -2462,7 +2495,8 @@ function findActiveMentionToken(value: string, caret: number): ActiveMentionToke
 }
 
 function goatChatMentionToken(mention: GoatChatMention) {
-  return mention.kind === "engine" ? "@codex" : `@skill/${mention.id}`;
+  if (mention.kind === "engine") return mention.id === "claude" ? "@claude" : "@codex";
+  return `@skill/${mention.id}`;
 }
 
 function goatChatMentionIsVisible(value: string, mention: GoatChatMention) {
@@ -2515,6 +2549,7 @@ function buildMentionOptions(input: {
   skills: GoatBrainSkillCatalogItem[];
   selectedMentions: GoatChatMention[];
   codexConnected: boolean;
+  claudeCodeConnected: boolean;
   skillsEnabled: boolean;
 }): MentionOption[] {
   if (!input.token) return [];
@@ -2523,6 +2558,9 @@ function buildMentionOptions(input: {
   if (input.codexConnected && (!query || "codex".startsWith(query))) {
     options.push({ kind: "engine", token: "@codex", label: "Codex", mention: CODEX_MENTION });
   }
+  // No "@claude" option yet: engine mentions steer the main-chat agent's start_task
+  // harness, which does not support the Claude engine. Claude chats start from the
+  // model picker's Engines group.
   if (!input.skillsEnabled) return options;
 
   const selectedSkillIds = new Set(
@@ -2854,6 +2892,8 @@ function ChatTitleHeader({
         <Code2 size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
       ) : engine === "codex" ? (
         <OpenAIIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+      ) : engine === "claude_code" ? (
+        <AnthropicIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
       ) : (
         <GoatModelProviderIcon
           modelId={model}
@@ -3739,17 +3779,20 @@ function GoatModelPicker({
   disabled,
   localCodexBetaEnabled,
   codexConnected = false,
+  claudeCodeConnected = false,
 }: {
   value: GoatChatModelSelection;
   onChange: (modelId: GoatChatModelSelection) => void;
   disabled: boolean;
   localCodexBetaEnabled: boolean;
   codexConnected?: boolean;
+  claudeCodeConnected?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const isLocalCodexSelected = localCodexBetaEnabled && value === LOCAL_CODEX_PICKER_VALUE;
   const isCodexSelected = value === CODEX_PICKER_VALUE;
-  const isEngineSelected = isLocalCodexSelected || isCodexSelected;
+  const isClaudeSelected = value === CLAUDE_PICKER_VALUE;
+  const isEngineSelected = isLocalCodexSelected || isCodexSelected || isClaudeSelected;
   const selectedModel = !isEngineSelected
     ? (findGoatModel(value) ?? findGoatModel(DEFAULT_GOAT_MODEL))
     : null;
@@ -3766,6 +3809,8 @@ function GoatModelPicker({
           <Code2 size={13} strokeWidth={1.9} className="shrink-0" />
         ) : isCodexSelected ? (
           <OpenAIIcon size={13} strokeWidth={1.9} className="shrink-0" />
+        ) : isClaudeSelected ? (
+          <AnthropicIcon size={13} strokeWidth={1.9} className="shrink-0" />
         ) : (
           <GoatModelProviderIcon
             modelId={selectedModel?.id ?? DEFAULT_GOAT_MODEL}
@@ -3779,7 +3824,9 @@ function GoatModelPicker({
             ? "Local Codex"
             : isCodexSelected
               ? "Codex"
-              : (selectedModel?.label ?? "Model")}
+              : isClaudeSelected
+                ? "Claude Code"
+                : (selectedModel?.label ?? "Model")}
         </span>
         <ChevronDown size={12} strokeWidth={2} className="shrink-0" />
       </PopoverTrigger>
@@ -3792,7 +3839,7 @@ function GoatModelPicker({
           <CommandInput placeholder="Search models..." />
           <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
             <CommandEmpty>No models found.</CommandEmpty>
-            {codexConnected || localCodexBetaEnabled ? (
+            {codexConnected || claudeCodeConnected || localCodexBetaEnabled ? (
               <CommandGroup heading="Engines">
                 {codexConnected ? (
                   <CommandItem
@@ -3818,6 +3865,38 @@ function GoatModelPicker({
                       <div className="truncate font-medium leading-4">Codex</div>
                       <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
                         Cloud Codex sandbox
+                      </div>
+                    </div>
+                  </CommandItem>
+                ) : null}
+                {claudeCodeConnected ? (
+                  <CommandItem
+                    value={CLAUDE_PICKER_VALUE}
+                    keywords={["Claude", "Claude Code", "cloud", "sandbox", "engine"]}
+                    onSelect={() => {
+                      onChange(CLAUDE_PICKER_VALUE);
+                      setOpen(false);
+                    }}
+                    title="Chat with Claude Code in a persistent cloud sandbox."
+                    className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                  >
+                    <Check
+                      size={13}
+                      strokeWidth={2}
+                      className={cn(
+                        "shrink-0 text-ink",
+                        isClaudeSelected ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                    <AnthropicIcon
+                      size={14}
+                      strokeWidth={1.85}
+                      className="shrink-0 text-ink-muted"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium leading-4">Claude Code</div>
+                      <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                        Cloud Claude Code sandbox
                       </div>
                     </div>
                   </CommandItem>

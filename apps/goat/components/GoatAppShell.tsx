@@ -6,9 +6,14 @@ import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatA
 import { currentGoatUser } from "@/lib/auth";
 import { listCurrentUserRecentGoatChats } from "@/lib/chat";
 import { isGoatChatResumeEnabled } from "@/lib/chat-streams";
+import { loadCurrentGoatClaudeCodeAuthSettings } from "@/lib/claude-code-auth";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
-import { type GoatCodexProviderState, type GoatIntegrationState } from "@/lib/integration-state";
+import {
+  type GoatClaudeCodeProviderState,
+  type GoatCodexProviderState,
+  type GoatIntegrationState,
+} from "@/lib/integration-state";
 import { getGoatAttioIntegrationState } from "@/lib/integrations/attio";
 import { getGoatFathomIntegrationState } from "@/lib/integrations/fathom";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
@@ -40,6 +45,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     attio,
     stripe,
     codex,
+    claudeCode,
     workspaceMembers,
     personalAccounts,
   ] = await Promise.all([
@@ -56,6 +62,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatAttioIntegrationState(user.workosUserId),
     getGoatStripeIntegrationState(workspace.id),
     loadCurrentGoatCodexAuthSettings(),
+    loadCurrentGoatClaudeCodeAuthSettings(),
     listGoatWorkspaceMembers(workspace.id),
     getGoatPersonalAccounts(user.workosUserId),
   ]);
@@ -123,9 +130,17 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
         statusReason: codex.statusReason,
         lastValidatedAt: codex.lastValidatedAt,
       },
+      claudeCode: {
+        provider: "claude_code",
+        connected: claudeCode.status === "connected",
+        status: claudeCode.status ?? "not_connected",
+        statusReason: claudeCode.statusReason,
+        lastValidatedAt: claudeCode.lastValidatedAt,
+      },
     }),
     featureFlags,
     codexConnected: codex.status === "connected",
+    claudeCodeConnected: claudeCode.status === "connected",
     chatResumeEnabled: isGoatChatResumeEnabled(),
     mcpSetup: {
       preferredClient: user.preferredMcpClient,
@@ -176,6 +191,7 @@ function buildIntegrationState(input: {
   stripe: GoatIntegrationState["stripe"];
   personalAccounts: GoatIntegrationState["personalAccounts"];
   codex: GoatCodexProviderState;
+  claudeCode: GoatClaudeCodeProviderState;
 }): GoatIntegrationState {
   return {
     gmail: input.googleIntegrations.gmail,
@@ -190,6 +206,7 @@ function buildIntegrationState(input: {
     attio: input.attio,
     stripe: input.stripe,
     codex: input.codex,
+    claude_code: input.claudeCode,
     personalAccounts: input.personalAccounts,
   };
 }

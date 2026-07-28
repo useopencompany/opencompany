@@ -472,7 +472,7 @@ export async function runGoatCodexChatTurn(input: {
   return outcome;
 }
 
-async function codexChatTurnLeaseIsHeld(input: {
+export async function codexChatTurnLeaseIsHeld(input: {
   turn: GoatCodexChatTurn;
   leaseId: string;
   leaseOwner: string;
@@ -612,7 +612,7 @@ function currentInteractionLeaseSql() {
   )`;
 }
 
-async function loadGoatCodexChatSessionSkills(turn: GoatCodexChatTurn) {
+export async function loadGoatCodexChatSessionSkills(turn: GoatCodexChatTurn) {
   return getDb()
     .select({
       skillId: goatChatSessionSkills.skillId,
@@ -681,7 +681,7 @@ export async function loadGoatGitHubAuthForUser(userWorkosId: string) {
   return { githubToken, githubAuthHeader: gitAuthHeader(githubToken) };
 }
 
-async function updateCodexChatSessionIfLeaseHeld(input: {
+export async function updateCodexChatSessionIfLeaseHeld(input: {
   turn: GoatCodexChatTurn;
   leaseId: string;
   leaseOwner: string;
@@ -709,7 +709,7 @@ async function updateCodexChatSessionIfLeaseHeld(input: {
   }
 }
 
-async function markCodexChatSandboxTimeoutArmed(input: {
+export async function markCodexChatSandboxTimeoutArmed(input: {
   sessionId: string;
   userWorkosId: string;
   sandboxId: string;
@@ -744,7 +744,7 @@ async function persistCodexChatEngineTurnId(input: {
   if (rowsFromExecute(result).length === 0) throw new GoatCodexChatLeaseLostError();
 }
 
-async function claimCodexChatRecovery(input: {
+export async function claimCodexChatRecovery(input: {
   turn: GoatCodexChatTurn;
   leaseId: string;
   leaseOwner: string;
@@ -767,7 +767,7 @@ async function claimCodexChatRecovery(input: {
   );
 }
 
-function createTurnAbortCheck(input: {
+export function createTurnAbortCheck(input: {
   turnId: string;
   leaseId: string;
   leaseOwner: string;
@@ -862,7 +862,7 @@ function buildCodexChatRecoveryTask(input: {
     .join("\n");
 }
 
-async function loadGoatCodexChatAttachments(
+export async function loadGoatCodexChatAttachments(
   turn: GoatCodexChatTurn,
 ): Promise<GoatChatMessageAttachment[]> {
   const [message] = await getDb()
@@ -878,7 +878,7 @@ async function loadGoatCodexChatAttachments(
   return message?.attachments ?? [];
 }
 
-async function materializeGoatCodexChatAttachments(input: {
+export async function materializeGoatCodexChatAttachments(input: {
   sandbox: SandboxHandle;
   turnId: string;
   attachments: GoatChatMessageAttachment[];
@@ -922,7 +922,7 @@ async function materializeGoatCodexChatAttachments(input: {
   };
 }
 
-function codexChatAttachmentPromptLines(paths: string[]) {
+export function codexChatAttachmentPromptLines(paths: string[]) {
   if (paths.length === 0) return [];
   return [
     "",

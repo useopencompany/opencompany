@@ -31,6 +31,12 @@ vi.mock("@/lib/codex-auth", () => ({
 }));
 
 // Pulls in @/lib/auth (authkit), which vitest cannot resolve.
+vi.mock("@/lib/claude-code-auth", () => ({
+  disconnectGoatClaudeCodeAuth: vi.fn(async () => ({ ok: true })),
+  saveGoatClaudeCodeToken: vi.fn(async () => ({ ok: true })),
+}));
+
+// Pulls in @/lib/auth (authkit), which vitest cannot resolve.
 vi.mock("@/lib/integration-account-actions", () => ({
   disconnectGoatIntegrationAccountAction: vi.fn(async () => ({ ok: true })),
   getGoatIntegrationAccountUsageAction: vi.fn(async () => ({

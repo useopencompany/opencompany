@@ -752,7 +752,8 @@ async function loadCodexRuntimeForChatSession(input: {
   userWorkosId: string;
   session: GoatChatSession;
 }) {
-  if (input.session.engine !== "codex") return null;
+  // Claude Code chats share the codex_chat_sessions runtime rows.
+  if (input.session.engine !== "codex" && input.session.engine !== "claude_code") return null;
   return (
     (await input.store.loadCodexRuntime?.({
       userWorkosId: input.userWorkosId,
