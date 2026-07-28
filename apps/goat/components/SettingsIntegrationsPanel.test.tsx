@@ -360,6 +360,41 @@ describe("SettingsIntegrationsPanel", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("connects Latitude as a personal OAuth integration with guarded writes", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_latitude",
+        provider: "latitude",
+        externalId: "latitude_mcp",
+        connectionLabel: "Latitude",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    const latitudeCard = screen
+      .getByText("Observe, understand, and improve your AI agents from Goat.")
+      .closest("div.rounded-2xl");
+    expect(latitudeCard).not.toBeNull();
+    expect(within(latitudeCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    expect(
+      within(latitudeCard as HTMLElement).getByRole("group", {
+        name: "Read Latitude permission",
+      }),
+    ).toHaveTextContent("On");
+    expect(
+      within(latitudeCard as HTMLElement).getByRole("group", {
+        name: "Manage Latitude permission",
+      }),
+    ).toHaveTextContent("Ask");
+    expect(
+      within(latitudeCard as HTMLElement).getByRole("link", { name: "Add account" }),
+    ).toHaveAttribute("href", "/api/integrations/latitude/start?returnTo=/settings/integrations");
+  });
+
   it("shows a workspace-owned Stripe connection and test-mode label", () => {
     const integrations = goatIntegrationStateFromRows([
       {

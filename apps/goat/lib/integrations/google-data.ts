@@ -9,6 +9,7 @@ import type {
 } from "@/lib/integration-state";
 import { goatGoogleIntegrationStateFromRows } from "@/lib/integration-state";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
+import { getGoatLatitudeIntegrationState } from "@/lib/integrations/latitude-mcp";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 
 const GOOGLE_PROVIDERS: GoatIntegrationProvider[] = ["gmail", "google_calendar", "google_drive"];
@@ -132,9 +133,10 @@ export async function getGoatGoogleDriveSourceIntegrationState(
 export async function getGoatAvailableHarnessTools(
   userWorkosId: string,
 ): Promise<GoatTaskToolName[]> {
-  const [state, linear, github] = await Promise.all([
+  const [state, linear, latitude, github] = await Promise.all([
     getGoatGoogleIntegrationState(userWorkosId),
     getGoatLinearIntegrationState(userWorkosId),
+    getGoatLatitudeIntegrationState(userWorkosId),
     getGoatGitHubIntegrationState(userWorkosId),
   ]);
   const tools: GoatTaskToolName[] = ["exa_search"];
@@ -154,6 +156,9 @@ export async function getGoatAvailableHarnessTools(
   }
   if (linear.connected) {
     tools.push("linear_search_tools", "linear_use_tool");
+  }
+  if (latitude.connected) {
+    tools.push("latitude_search_tools", "latitude_use_tool");
   }
   if (github.connected) {
     tools.push(

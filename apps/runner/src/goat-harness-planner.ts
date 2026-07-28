@@ -12,10 +12,11 @@ const TOOL_PROVIDER_MAP: Record<string, GoatTaskToolName[]> = {
     "calendar_get_freebusy",
   ],
   linear: ["linear_search_tools", "linear_use_tool"],
+  latitude: ["latitude_search_tools", "latitude_use_tool"],
   github: ["github_clone_repository", "github_shell", "github_status", "github_open_pull_request"],
 };
 
-const PLANNABLE_PROVIDERS = ["gmail", "google_calendar", "linear", "github"] as const;
+const PLANNABLE_PROVIDERS = ["gmail", "google_calendar", "linear", "latitude", "github"] as const;
 const GOAT_BROWSER_TOOLS = [
   "browser_open",
   "browser_snapshot",

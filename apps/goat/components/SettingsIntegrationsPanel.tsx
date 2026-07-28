@@ -112,6 +112,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: LinearIcon,
     tileClass: "bg-[#5E6AD2] text-white",
   },
+  latitude: {
+    label: "Latitude",
+    description: "Observe, understand, and improve your AI agents from Goat.",
+    monogram: "L",
+    tileClass: "bg-[#171717] text-white",
+  },
   slack: {
     label: "Slack",
     description: "Let Goat search and read your Slack conversations.",
@@ -257,6 +263,7 @@ const PERSONAL_ACCOUNT_PROVIDERS = [
   "google_calendar",
   "google_drive",
   "slack",
+  "latitude",
 ] as const satisfies readonly GoatPersonalAccountProvider[];
 
 function countConnectedAccounts(
@@ -355,6 +362,10 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="slack"
               accounts={integrations.personalAccounts.slack}
+            />
+            <IntegrationProviderGroupCard
+              provider="latitude"
+              accounts={integrations.personalAccounts.latitude}
             />
             <CodexIntegrationCard integration={integrations.codex} />
           </div>
@@ -1003,19 +1014,7 @@ function integrationStatus(
   return "Connect";
 }
 
-function integrationConnectHref(
-  provider:
-    | GoatGoogleProviderState["provider"]
-    | "linear"
-    | "github"
-    | "jamie"
-    | "slack"
-    | "hubspot"
-    | "granola"
-    | "fathom"
-    | "attio"
-    | "stripe",
-) {
+function integrationConnectHref(provider: Exclude<IntegrationMetaKey, "codex">) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
     return "/api/integrations/google-calendar/start?returnTo=/settings/integrations";
@@ -1033,6 +1032,8 @@ function integrationConnectHref(
   if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
+  if (provider === "latitude")
+    return "/api/integrations/latitude/start?returnTo=/settings/integrations";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";
 }
 
