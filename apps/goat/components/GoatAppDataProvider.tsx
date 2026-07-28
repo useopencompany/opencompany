@@ -28,6 +28,13 @@ import {
 } from "@/lib/task-collections";
 import type { GoatTaskScheduleView } from "@/lib/task-schedules";
 
+// Codex and Claude Code chats both persist their runtime in goat.codex_chat_sessions,
+// so home/archived cards must attach codexRuntime for either engine. Attaching it only
+// for "codex" leaves Claude cards stuck on the null-runtime "Connecting" label.
+function hasCodexChatRuntime(engine: GoatChatSessionRow["engine"]): boolean {
+  return engine === "codex" || engine === "claude_code";
+}
+
 type GoatUserView = {
   // Scopes client-side chat attachment uploads (blob prefix goat-chat/{id}/).
   workosUserId: string;
@@ -223,8 +230,9 @@ function GoatAppLiveDataSubscriptions({
         model: row.model as AgentModelId,
         engine: row.engine,
         codexComposerSettings: initial?.codexComposerSettings ?? null,
-        codexRuntime:
-          row.engine === "codex" ? (liveCodexRuntime ?? initial?.codexRuntime ?? null) : null,
+        codexRuntime: hasCodexChatRuntime(row.engine)
+          ? (liveCodexRuntime ?? initial?.codexRuntime ?? null)
+          : null,
         preview: initial?.preview ?? "No messages yet.",
         updatedAt: row.updated_at,
         pinnedAt: row.pinned_at,
@@ -283,7 +291,9 @@ function GoatAppLiveDataSubscriptions({
         model: row.model as AgentModelId,
         engine: row.engine,
         codexComposerSettings: null,
-        codexRuntime: row.engine === "codex" ? (codexRuntimeByChatId.get(row.id) ?? null) : null,
+        codexRuntime: hasCodexChatRuntime(row.engine)
+          ? (codexRuntimeByChatId.get(row.id) ?? null)
+          : null,
         preview: "Archived",
         updatedAt: row.updated_at,
         pinnedAt: null,
