@@ -14,6 +14,13 @@ const routerMock = vi.hoisted(() => ({
 const workspaceRoleMock = vi.hoisted(() => ({
   value: "admin" as "admin" | "member",
 }));
+const workspacesMock = vi.hoisted(() => ({
+  value: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }] as Array<{
+    id: string;
+    name: string;
+    role: "admin" | "member";
+  }>,
+}));
 const mcpSetupMock = vi.hoisted(() => ({ completedAt: null as string | null }));
 const recentChatsMock = vi.hoisted(() => ({
   value: [] as Array<{
@@ -33,13 +40,16 @@ vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
 }));
 
-vi.mock("@/lib/workspace-actions", () => ({
+const workspaceActionsMock = vi.hoisted(() => ({
   switchGoatBrainAction: vi.fn(),
   switchGoatWorkspaceAction: vi.fn(),
   createGoatBrainAction: vi.fn(),
+  createGoatWorkspaceAction: vi.fn(),
   setGoatBrainAccessAction: vi.fn(),
   getGoatBrainAccessDetailsAction: vi.fn(),
 }));
+
+vi.mock("@/lib/workspace-actions", () => workspaceActionsMock);
 
 const chatActionsMock = vi.hoisted(() => ({
   closeGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
@@ -57,7 +67,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
       avatarUrl: null,
     },
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value },
-    workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value }],
+    workspaces: workspacesMock.value,
     workspaceMembers: [],
     brains: [
       {
@@ -85,6 +95,7 @@ describe("GoatSidebar", () => {
     vi.clearAllMocks();
     pathnameMock.value = "/";
     workspaceRoleMock.value = "admin";
+    workspacesMock.value = [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }];
     mcpSetupMock.completedAt = null;
     recentChatsMock.value = [];
   });
@@ -118,6 +129,86 @@ describe("GoatSidebar", () => {
     expect(changelog).toHaveAttribute("href", "/changelog");
     expect(feedback.nextElementSibling).toBe(changelog);
     expect(changelog.nextElementSibling).toBe(settings);
+  });
+
+  it("opens an organization picker even when the user has one organization", async () => {
+    const user = userEvent.setup();
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Switch organization. Current organization: Ada's Workspace",
+      }),
+    );
+
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: /^Ada's Workspace/ }),
+    ).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: "Create organization..." })).toBeInTheDocument();
+  });
+
+  it("switches to another organization from the picker", async () => {
+    workspaceActionsMock.switchGoatWorkspaceAction.mockResolvedValue({ ok: true });
+    workspacesMock.value = [
+      { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
+      { id: "goat_ws_2", name: "Research Labs", role: "member" },
+    ];
+    const user = userEvent.setup();
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Switch organization. Current organization: Ada's Workspace",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: /Research Labs/ }));
+
+    expect(workspaceActionsMock.switchGoatWorkspaceAction).toHaveBeenCalledWith("goat_ws_2");
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledOnce());
+  });
+
+  it("creates a new organization from the picker", async () => {
+    workspaceActionsMock.createGoatWorkspaceAction.mockResolvedValue({
+      ok: true,
+      workspaceId: "goat_ws_new",
+    });
+    const user = userEvent.setup();
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Switch organization. Current organization: Ada's Workspace",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Create organization..." }));
+    await user.type(screen.getByRole("textbox", { name: "Organization name" }), "Analytical Co");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(workspaceActionsMock.createGoatWorkspaceAction).toHaveBeenCalledWith("Analytical Co");
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledOnce());
+  });
+
+  it("shows organization creation errors inline", async () => {
+    workspaceActionsMock.createGoatWorkspaceAction.mockResolvedValue({
+      ok: false,
+      error: "Could not create the organization.",
+    });
+    const user = userEvent.setup();
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Switch organization. Current organization: Ada's Workspace",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Create organization..." }));
+    await user.type(screen.getByRole("textbox", { name: "Organization name" }), "Analytical Co");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not create the organization.",
+    );
+    expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
   it("requests an immediate home reset on a normal Home click", async () => {

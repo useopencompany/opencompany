@@ -9,12 +9,14 @@ import {
 } from "@opencompany/db/goat-schema";
 import {
   createGoatBrain,
+  createGoatWorkspaceForUser,
   DEFAULT_GOAT_BRAIN_SLUG,
   getGoatBrainAccess,
   listAccessibleGoatBrains,
   listGoatBrainMemberIds,
   listGoatWorkspaceMembers,
   listGoatWorkspacesForUser,
+  newGoatWorkspaceId,
   removeGoatWorkspaceMember,
   replaceGoatBrainMembers,
   updateGoatBrainEnrichmentEnabled,
@@ -22,9 +24,11 @@ import {
   updateGoatBrainVisibility,
   updateGoatWorkspaceName,
 } from "@opencompany/db/goat-workspaces";
+import { switchToOrganization } from "@workos-inc/authkit-nextjs";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
+import { unstable_rethrow } from "next/navigation";
 import {
   currentGoatUser,
   GOAT_ACTIVE_BRAIN_COOKIE,
@@ -34,9 +38,20 @@ import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
 
 const MEMBER_ROLE = "member";
+const ADMIN_ROLE = "admin";
+const WORKSPACE_NAME_MAX_LENGTH = 80;
+const CREATE_WORKSPACE_ERROR_MESSAGE = "Could not create the organization. Please try again.";
+const ACTIVATE_WORKSPACE_ERROR_MESSAGE =
+  "Could not switch organizations. Please try again.";
+const ACTIVATE_CREATED_WORKSPACE_ERROR_MESSAGE =
+  "The organization was created, but could not be activated. Please try switching to it.";
 
 export type GoatWorkspaceActionResult =
   | { ok: true; warning?: string }
+  | { ok: false; error: string };
+
+export type GoatWorkspaceCreateResult =
+  | { ok: true; workspaceId: string }
   | { ok: false; error: string };
 
 export type GoatWorkspaceMemberView = {
@@ -64,6 +79,47 @@ function errorResult(error: unknown, fallback: string): { ok: false; error: stri
   return { ok: false, error: error instanceof Error ? error.message : fallback };
 }
 
+function validateWorkspaceName(name: unknown) {
+  if (typeof name !== "string") {
+    return { ok: false as const, error: "Name cannot be empty." };
+  }
+  const trimmed = name.trim();
+  if (!trimmed) return { ok: false as const, error: "Name cannot be empty." };
+  if (trimmed.length > WORKSPACE_NAME_MAX_LENGTH) {
+    return { ok: false as const, error: "Name is too long (max 80 chars)." };
+  }
+  return { ok: true as const, name: trimmed };
+}
+
+async function activateGoatWorkspace(input: {
+  workspaceId: string;
+  workosOrganizationId: string;
+  brainId: string | null;
+}) {
+  // WorkOS owns the authenticated organization context, including any
+  // organization-specific SSO/MFA requirements. Goat's cookies only remember
+  // which local workspace and brain to render after AuthKit has switched.
+  await switchToOrganization(input.workosOrganizationId, {
+    revalidationStrategy: "none",
+  });
+
+  const cookieStore = await cookies();
+  cookieStore.set(GOAT_ACTIVE_WORKSPACE_COOKIE, input.workspaceId, {
+    path: "/",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+  if (input.brainId) {
+    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, input.brainId, {
+      path: "/",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+  } else {
+    cookieStore.delete(GOAT_ACTIVE_BRAIN_COOKIE);
+  }
+}
+
 export async function switchGoatBrainAction(brainRef: string): Promise<GoatWorkspaceActionResult> {
   const { user } = await currentGoatUser();
   const access = await getGoatBrainAccess({ userWorkosId: user.workosUserId, brainRef });
@@ -86,6 +142,9 @@ export async function switchGoatWorkspaceAction(
   const workspaces = await listGoatWorkspacesForUser(context.user.workosUserId);
   const target = workspaces.find((entry) => entry.workspace.id === workspaceId);
   if (!target) return { ok: false, error: "You do not have access to that workspace." };
+  if (!target.workspace.workosOrganizationId) {
+    return { ok: false, error: "That workspace is not linked to a WorkOS organization." };
+  }
 
   const brains = await listAccessibleGoatBrains({
     userWorkosId: context.user.workosUserId,
@@ -94,24 +153,108 @@ export async function switchGoatWorkspaceAction(
   const activeBrain =
     brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
 
-  const cookieStore = await cookies();
-  cookieStore.set(GOAT_ACTIVE_WORKSPACE_COOKIE, target.workspace.id, {
-    path: "/",
-    sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 365,
-  });
-  if (activeBrain) {
-    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, activeBrain.id, {
-      path: "/",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 365,
+  try {
+    await activateGoatWorkspace({
+      workspaceId: target.workspace.id,
+      workosOrganizationId: target.workspace.workosOrganizationId,
+      brainId: activeBrain?.id ?? null,
     });
-  } else {
-    cookieStore.delete(GOAT_ACTIVE_BRAIN_COOKIE);
+  } catch (error) {
+    // AuthKit uses redirects for organization-specific SSO and MFA. Preserve
+    // that framework control flow while translating ordinary refresh failures
+    // into the server action's inline-error contract.
+    unstable_rethrow(error);
+    console.error("[goat] Failed to activate workspace organization", {
+      workspaceId: target.workspace.id,
+      workosOrganizationId: target.workspace.workosOrganizationId,
+      error,
+    });
+    return { ok: false, error: ACTIVATE_WORKSPACE_ERROR_MESSAGE };
   }
 
   revalidatePath("/", "layout");
   return { ok: true };
+}
+
+export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWorkspaceCreateResult> {
+  const validation = validateWorkspaceName(name);
+  if (!validation.ok) return validation;
+
+  const context = await currentGoatUser();
+  const workspaceId = newGoatWorkspaceId();
+  const workos = getWorkOSClient();
+  let workosOrganizationId: string | null = null;
+  let localWorkspacePersisted = false;
+  let created: Awaited<ReturnType<typeof createGoatWorkspaceForUser>> | null = null;
+
+  try {
+    const organization = await workos.organizations.createOrganization(
+      {
+        name: validation.name,
+        externalId: workspaceId,
+        metadata: {
+          goat_workspace_id: workspaceId,
+        },
+      },
+      { idempotencyKey: workspaceId },
+    );
+    workosOrganizationId = organization.id;
+
+    await workos.userManagement.createOrganizationMembership({
+      organizationId: organization.id,
+      userId: context.authUser.id,
+      roleSlug: ADMIN_ROLE,
+    });
+
+    created = await createGoatWorkspaceForUser({
+      workspaceId,
+      workosOrganizationId: organization.id,
+      userWorkosId: context.user.workosUserId,
+      name: organization.name || validation.name,
+    });
+    localWorkspacePersisted = true;
+  } catch (error) {
+    console.error("[goat] Failed to create workspace organization", {
+      workspaceId,
+      workosOrganizationId,
+      localWorkspacePersisted,
+      error,
+    });
+    if (workosOrganizationId && !localWorkspacePersisted) {
+      try {
+        await workos.organizations.deleteOrganization(workosOrganizationId);
+      } catch (cleanupError) {
+        console.error("[goat] Failed to clean up workspace organization", {
+          workspaceId,
+          workosOrganizationId,
+          error: cleanupError,
+        });
+      }
+    }
+    return { ok: false, error: CREATE_WORKSPACE_ERROR_MESSAGE };
+  }
+
+  try {
+    await activateGoatWorkspace({
+      workspaceId: created.workspace.id,
+      workosOrganizationId: created.workspace.workosOrganizationId ?? workosOrganizationId,
+      brainId: created.brain.id,
+    });
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[goat] Failed to activate newly created workspace organization", {
+      workspaceId: created.workspace.id,
+      workosOrganizationId: created.workspace.workosOrganizationId ?? workosOrganizationId,
+      error,
+    });
+    // The WorkOS organization and local workspace are durable at this point.
+    // Keep them intact and invalidate the picker so the user can retry the
+    // switch instead of creating a duplicate organization.
+    revalidatePath("/", "layout");
+    return { ok: false, error: ACTIVATE_CREATED_WORKSPACE_ERROR_MESSAGE };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true, workspaceId: created.workspace.id };
 }
 
 export async function createGoatBrainAction(input: {
