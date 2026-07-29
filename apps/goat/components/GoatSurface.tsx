@@ -724,7 +724,10 @@ export function GoatSurface({
   const composerAttachments = useGoatChatAttachments({
     userWorkosId,
     modelName: String(chatModel),
-    enabled: attachmentsEnabled && !engineSubmitting,
+    // Cmd+K mounts a second composer with its own window-level drop listener.
+    // Keep the main composer visible behind the modal, but let only the quick
+    // composer consume dropped files while the palette is open.
+    enabled: attachmentsEnabled && !engineSubmitting && !newChatCommandOpen,
     ...(activeEngine === "codex" || activeEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
       : {}),

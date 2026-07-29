@@ -2250,6 +2250,35 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
   });
 
+  it("routes a dropped file only to the Cmd+K composer while the palette is open", async () => {
+    const user = userEvent.setup();
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+        userWorkosId="user_1"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    const file = new File(["pdf"], "brief.pdf", { type: "application/pdf" });
+    fireEvent.drop(window, {
+      dataTransfer: {
+        types: ["Files"],
+        files: [file],
+      },
+    });
+
+    await waitFor(() => expect(attachmentUploadMock.upload).toHaveBeenCalledTimes(1));
+    expect(attachmentUploadMock.upload).toHaveBeenCalledWith("user_1", file, "application/pdf");
+    expect(await within(dialog).findByText("PDF")).toBeInTheDocument();
+  });
+
   it("submits Codex engine chats from Cmd+K in the background without adopting them into view", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
