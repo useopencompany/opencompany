@@ -20,7 +20,7 @@ Goat's product events are:
 | --- | --- |
 | `app_opened` | Signed-in active users |
 | `signup_completed` | New-user conversion |
-| `chat_message_sent` | Chat engagement and conversation depth; `is_first_message` also measures new chats |
+| `chat_message_sent` | Main-chat engagement across OpenCompany, Codex, and Claude Code engines; `is_first_message` also measures new chats |
 | `integration_added` | Integration activation |
 | `brain_source_added` | A new enabled integration source was attached to a Brain |
 | `brain_ingestion_completed` | A full Brain ingestion job completed successfully |

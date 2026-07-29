@@ -6,6 +6,14 @@ import { createGoatCodexChatMessage } from "@/lib/codex-chat";
 import { GoatSkillMentionError, resolveGoatSkillMentions } from "@/lib/skills";
 import { POST } from "./route";
 
+const analyticsMocks = vi.hoisted(() => ({
+  captureGoatServerEvent: vi.fn(async () => undefined),
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+}));
+
 vi.mock("@/lib/auth", () => ({
   currentGoatUser: vi.fn(),
 }));
@@ -60,6 +68,11 @@ describe("POST /api/codex-chat/messages", () => {
       userMessageId: "goat_chat_msg_user",
       assistantMessageId: "goat_chat_msg_assistant",
       mode: "started",
+      analytics: {
+        isFirstMessage: true,
+        engine: "codex",
+        model: "openai/gpt-5.6-sol",
+      },
     });
     vi.mocked(resolveGoatSkillMentions).mockResolvedValue([]);
   });
@@ -73,6 +86,18 @@ describe("POST /api/codex-chat/messages", () => {
   });
 
   it("accepts UI message payloads", async () => {
+    mockCreateGoatCodexChatMessage().mockResolvedValueOnce({
+      ok: true,
+      sessionId: "goat_chat_1",
+      userMessageId: "goat_chat_msg_user",
+      assistantMessageId: "goat_chat_msg_assistant",
+      mode: "started",
+      analytics: {
+        isFirstMessage: false,
+        engine: "codex",
+        model: "openai/gpt-5.6-terra",
+      },
+    });
     const response = await POST(
       jsonRequest({
         sessionId: "goat_chat_1",
@@ -85,6 +110,13 @@ describe("POST /api/codex-chat/messages", () => {
     );
 
     expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "goat_chat_1",
+      userMessageId: "goat_chat_msg_user",
+      assistantMessageId: "goat_chat_msg_assistant",
+      mode: "started",
+    });
     expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
@@ -97,6 +129,24 @@ describe("POST /api/codex-chat/messages", () => {
       settings: undefined,
     });
     expect(mockGenerateGoatChatTitleForMessage()).not.toHaveBeenCalled();
+    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+      "chat_message_sent",
+      "user_1",
+      {
+        workspace_id: "workspace_1",
+        session_id: "goat_chat_1",
+        is_first_message: false,
+        engine: "codex",
+        model: "openai/gpt-5.6-terra",
+        message_length: 5,
+      },
+      {
+        workspaceId: "workspace_1",
+        email: "ada@example.com",
+        firstName: "Ada",
+        lastName: "Lovelace",
+      },
+    );
   });
 
   it("forwards a valid browser-reserved id for a new chat", async () => {
@@ -173,6 +223,18 @@ describe("POST /api/codex-chat/messages", () => {
   });
 
   it("forwards the selected model for a new Codex sandbox", async () => {
+    mockCreateGoatCodexChatMessage().mockResolvedValueOnce({
+      ok: true,
+      sessionId: "goat_chat_1",
+      userMessageId: "goat_chat_msg_user",
+      assistantMessageId: "goat_chat_msg_assistant",
+      mode: "started",
+      analytics: {
+        isFirstMessage: true,
+        engine: "codex",
+        model: "openai/gpt-5.6-luna",
+      },
+    });
     const response = await POST(
       jsonRequest({
         prompt: "hello",
@@ -183,6 +245,16 @@ describe("POST /api/codex-chat/messages", () => {
     expect(response.status).toBe(202);
     expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith(
       expect.objectContaining({ model: "openai/gpt-5.6-luna" }),
+    );
+    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+      "chat_message_sent",
+      "user_1",
+      expect.objectContaining({
+        is_first_message: true,
+        engine: "codex",
+        model: "openai/gpt-5.6-luna",
+      }),
+      expect.any(Object),
     );
   });
 

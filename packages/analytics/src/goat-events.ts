@@ -11,6 +11,7 @@ export type GoatAnalyticsEventPropertiesByName = {
     workspace_id: string;
     session_id: string;
     is_first_message: boolean;
+    engine: "opencompany" | "local_codex" | "codex" | "claude_code";
     model: string;
     message_length: number;
   };
@@ -62,7 +63,14 @@ export const goatAnalyticsEvents = {
   chat_message_sent: {
     name: "chat_message_sent",
     description: "A user sent a message in Goat main chat.",
-    safeProperties: ["workspace_id", "session_id", "is_first_message", "model", "message_length"],
+    safeProperties: [
+      "workspace_id",
+      "session_id",
+      "is_first_message",
+      "engine",
+      "model",
+      "message_length",
+    ],
   },
   integration_added: {
     name: "integration_added",

@@ -1,5 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import { captureGoatChatMessageSent } from "@/lib/chat-analytics";
 import { parseGoatChatAttachmentsInput } from "@/lib/chat-attachments";
 import { parseOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
@@ -95,6 +96,7 @@ export async function POST(request: Request) {
     engine: "claude_code",
   });
   if (!result.ok) return new Response(result.error, { status: result.status });
+  const { analytics, ...responseBody } = result;
 
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!sessionId && prompt) {
@@ -106,8 +108,19 @@ export async function POST(request: Request) {
       }).catch(() => undefined),
     );
   }
+  after(
+    captureGoatChatMessageSent({
+      user: context.user,
+      workspaceId: context.workspace.id,
+      sessionId: result.sessionId,
+      isFirstMessage: analytics.isFirstMessage,
+      engine: analytics.engine,
+      model: analytics.model,
+      messageLength: prompt.length,
+    }),
+  );
 
-  return NextResponse.json(result, { status: 202 });
+  return NextResponse.json(responseBody, { status: 202 });
 }
 
 function readPrompt(body: ClaudeChatMessageBody) {

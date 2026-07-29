@@ -325,6 +325,7 @@ describe("POST /api/chat", () => {
         workspace_id: "goat_ws_user_1",
         session_id: "session_1",
         is_first_message: true,
+        engine: "opencompany",
         model: "openai/gpt-5.5",
       }),
       {
