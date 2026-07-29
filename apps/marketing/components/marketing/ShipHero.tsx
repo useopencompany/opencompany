@@ -10,8 +10,8 @@ export function ShipHero() {
           Turn feature ideas into shipped PRs.
         </h1>
         <p className="mx-auto mt-6 max-w-lg text-pretty font-medium text-[15px] text-ink-subtle leading-7 opacity-60">
-          Ship runs on the coding agents you already use — Codex and Claude Code — triggered by
-          what your users report, with your company's context built in.
+          Ship runs on the coding agents you already use — Codex and Claude Code — triggered by what
+          your users report, with your company's context built in.
         </p>
         <div className="mt-9 flex justify-center">
           <EmailCaptureForm />

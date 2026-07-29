@@ -21,8 +21,8 @@ export function ShipDemo() {
                 Demo — coming soon
               </p>
               <p className="max-w-md font-mono text-[15px] text-white/80 leading-7">
-                Slack ticket → Ship picks it up → Codex builds with your conventions → PR opens
-                for review.
+                Slack ticket → Ship picks it up → Codex builds with your conventions → PR opens for
+                review.
               </p>
             </div>
           )}
