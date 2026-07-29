@@ -1964,6 +1964,7 @@ export function GoatSurface({
                     title={activeChatTitle}
                     model={activeChatModel}
                     engine={activeChatEngine}
+                    isTask={Boolean(activeTaskConversation)}
                   />
                   <div className="flex shrink-0 items-center gap-2">
                     {!activeTaskConversation &&
@@ -4035,10 +4036,12 @@ function ChatTitleHeader({
   title,
   model,
   engine,
+  isTask = false,
 }: {
   title: string;
   model: string;
   engine: GoatChatEngine;
+  isTask?: boolean;
 }) {
   return (
     <div className="flex min-w-0 items-center gap-2 text-ink">
@@ -4057,6 +4060,11 @@ function ChatTitleHeader({
       <span className="max-w-[min(420px,calc(100vw-7rem))] truncate text-[12.5px] font-medium leading-4">
         {title}
       </span>
+      {isTask ? (
+        <span className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
+          Task
+        </span>
+      ) : null}
     </div>
   );
 }

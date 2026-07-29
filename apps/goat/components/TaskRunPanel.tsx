@@ -3,7 +3,6 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
-import { TaskHarnessRunView } from "@/components/TaskHarnessRunView";
 import { useHydrated } from "@/components/useHydrated";
 import {
   createGoatCollections,
@@ -15,14 +14,6 @@ import {
   type GoatTaskToolUsageRow,
 } from "@/lib/task-collections";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
-
-export function TaskRunPanel({ initialRun }: { initialRun: GoatHarnessRunViewModel }) {
-  return (
-    <TaskRunLiveProvider initialRun={initialRun}>
-      {(run) => <TaskHarnessRunView run={run} />}
-    </TaskRunLiveProvider>
-  );
-}
 
 export function TaskRunLiveProvider({
   initialRun,

@@ -311,6 +311,7 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     expect(screen.getByText("Morning workflow")).toBeInTheDocument();
+    expect(screen.getByText("Task")).toBeInTheDocument();
     expect(screen.getByText("The workflow is complete.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /share/i })).not.toBeInTheDocument();
 
@@ -452,6 +453,9 @@ describe("GoatSurface chat streaming UI", () => {
         }}
       />,
     );
+
+    expect(screen.getByText("Chat")).toBeInTheDocument();
+    expect(screen.queryByText("Task")).not.toBeInTheDocument();
 
     await user.type(screen.getByPlaceholderText("Reply..."), "Unsent draft");
     act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
