@@ -316,6 +316,7 @@ export function createGoatCodexChatProjector(input: {
           WHERE queued.codex_chat_session_id = ${target.codexChatSessionId}
             AND queued.user_workos_id = ${target.userWorkosId}
             AND queued.status = 'queued'
+            AND (queued.run_after IS NULL OR queued.run_after <= ${now})
             AND EXISTS (SELECT 1 FROM settled_turn)
           ORDER BY queued.created_at ASC, queued.id ASC
           LIMIT 1

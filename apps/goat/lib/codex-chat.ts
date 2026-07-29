@@ -3,6 +3,7 @@ import {
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
   GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
+  isCloudCodingEngine,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -12,16 +13,18 @@ import {
   goatChatSessions,
   goatCodexChatSessions,
 } from "@opencompany/db/goat-schema";
+import {
+  emptyAssistantDebugTrace,
+  nextGoatChatMessageCreatedAt,
+} from "@opencompany/goat-agent/chat-ui";
 import type { GoatBrainSkill } from "@opencompany/goat-brain";
 import { and, eq, isNull, notInArray, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
-import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
 import { CLAUDE_CHAT_DEFAULT_MODEL_ID, parseClaudeChatModelId } from "@/lib/claude-chat-constants";
 import { parseClaudeChatSettings } from "@/lib/claude-chat-settings";
 import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
-  CODEX_CHAT_DEFAULT_MODEL,
   CODEX_CHAT_DEFAULT_MODEL_ID,
   CODEX_CHAT_PROMPT_MAX_LENGTH,
   parseCodexChatModelId,
@@ -30,8 +33,10 @@ import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
 import { toGoatTaskTitle } from "@/lib/task-display";
 import {
   type GoatCodexSandboxStatus,
+  GoatCodingWorkspaceRequestError,
   getGoatCodexSandboxStatus,
   killGoatCodexSandbox,
+  requestGoatCodingWorkspaceRuntimeAccess,
   triggerGoatCodexChatWake,
 } from "@/lib/task-runner";
 
@@ -259,6 +264,41 @@ export async function getGoatCodexChatSandboxStatus(input: {
   }
 }
 
+export async function createGoatCodingWorkspaceRuntimeAccess(input: {
+  userWorkosId: string;
+  chatSessionId: string;
+}) {
+  const session = await loadCodexChatSessionForChat(input);
+  if (!session)
+    return { ok: false as const, statusCode: 404, error: "Coding workspace session not found." };
+  if (session.status === "closed" || !isCloudCodingEngine(session.engine)) {
+    return { ok: false as const, statusCode: 404, error: "Coding workspace session not found." };
+  }
+  if (!session.sandboxId) {
+    return {
+      ok: false as const,
+      statusCode: 409,
+      error: "The coding workspace is not ready yet. Send a message first.",
+    };
+  }
+
+  try {
+    return {
+      ok: true as const,
+      access: await requestGoatCodingWorkspaceRuntimeAccess({
+        codingSessionId: session.id,
+        userWorkosId: input.userWorkosId,
+      }),
+    };
+  } catch (error) {
+    return {
+      ok: false as const,
+      statusCode: error instanceof GoatCodingWorkspaceRequestError ? error.statusCode : 502,
+      error: error instanceof Error ? error.message : "Unable to connect to the coding workspace.",
+    };
+  }
+}
+
 // Settles the engine session and kills its e2b sandbox after the parent chat is closed.
 // A session with in-flight work (queued/starting/running) is left alone: the runner settles it
 // and the sandbox idle timeout pauses the sandbox regardless, so nothing keeps running either way.
@@ -266,9 +306,10 @@ export async function closeGoatCodexChatSessionForChat(input: {
   userWorkosId: string;
   chatSessionId: string;
 }) {
+  const now = new Date();
   const [session] = await getDb()
     .update(goatCodexChatSessions)
-    .set({ status: "closed", activeTurnId: null, updatedAt: new Date() })
+    .set({ status: "closed", activeTurnId: null, updatedAt: now })
     .where(
       and(
         eq(goatCodexChatSessions.chatSessionId, input.chatSessionId),
@@ -277,6 +318,11 @@ export async function closeGoatCodexChatSessionForChat(input: {
       ),
     )
     .returning({ sandboxId: goatCodexChatSessions.sandboxId });
+  await cancelQueuedCodexChatWakeups({
+    userWorkosId: input.userWorkosId,
+    chatSessionId: input.chatSessionId,
+    now,
+  });
   if (!session?.sandboxId) return;
 
   // Best-effort: a paused sandbox that outlives the kill only costs storage until e2b's
@@ -483,7 +529,33 @@ async function enqueueExistingCodexChatMessage(input: {
     input.session.status === "running";
 
   await getDb().execute(sql`
-    WITH inserted_user_message AS (
+    WITH cancelled_wakeups AS (
+      UPDATE goat.codex_chat_turns
+      SET status = 'interrupted',
+          completed_at = ${now},
+          updated_at = ${now}
+      WHERE codex_chat_session_id = ${input.session.id}
+        AND user_workos_id = ${input.userWorkosId}
+        AND status = 'queued'
+        AND run_after IS NOT NULL
+      RETURNING assistant_message_id
+    ),
+    aborted_wakeup_messages AS (
+      UPDATE goat.chat_messages AS message
+      SET debug_trace = COALESCE(message.debug_trace, '{}'::jsonb)
+            || jsonb_build_object(
+              'aborted',
+              true,
+              'schemaVersion',
+              ${CODEX_CHAT_DEBUG_SCHEMA_VERSION}::text
+            ),
+          updated_at = ${now}
+      FROM cancelled_wakeups
+      WHERE message.id = cancelled_wakeups.assistant_message_id
+        AND message.role = 'assistant'
+      RETURNING message.id
+    ),
+    inserted_user_message AS (
       INSERT INTO goat.chat_messages (
         id, session_id, role, content, attachments, created_at, updated_at
       )
@@ -570,6 +642,15 @@ async function enqueueExistingCodexChatMessage(input: {
     WHERE id = ${input.session.chatSessionId}
       AND user_workos_id = ${input.userWorkosId}
   `);
+  if (input.session.engine === "claude_code") {
+    // The first cancellation is atomic with the send. This second, idempotent pass catches a
+    // wakeup that held the session lock and committed while this statement was waiting.
+    await cancelQueuedCodexChatWakeups({
+      userWorkosId: input.userWorkosId,
+      codexChatSessionId: input.session.id,
+      now: new Date(),
+    });
+  }
 
   return {
     ok: true,
@@ -585,12 +666,43 @@ async function enqueueExistingCodexChatMessage(input: {
   };
 }
 
-function emptyAssistantDebugTrace(model: string = CODEX_CHAT_DEFAULT_MODEL) {
-  return {
-    schemaVersion: CODEX_CHAT_DEBUG_SCHEMA_VERSION,
-    model,
-    uiMessageParts: [],
-  };
+async function cancelQueuedCodexChatWakeups(
+  input: {
+    userWorkosId: string;
+    now: Date;
+  } & (
+    | { codexChatSessionId: string; chatSessionId?: never }
+    | { chatSessionId: string; codexChatSessionId?: never }
+  ),
+) {
+  const sessionPredicate = input.codexChatSessionId
+    ? sql`codex_chat_session_id = ${input.codexChatSessionId}`
+    : sql`chat_session_id = ${input.chatSessionId}`;
+  await getDb().execute(sql`
+    WITH cancelled_wakeups AS (
+      UPDATE goat.codex_chat_turns
+      SET status = 'interrupted',
+          completed_at = ${input.now},
+          updated_at = ${input.now}
+      WHERE ${sessionPredicate}
+        AND user_workos_id = ${input.userWorkosId}
+        AND status = 'queued'
+        AND run_after IS NOT NULL
+      RETURNING assistant_message_id
+    )
+    UPDATE goat.chat_messages AS message
+    SET debug_trace = COALESCE(message.debug_trace, '{}'::jsonb)
+          || jsonb_build_object(
+            'aborted',
+            true,
+            'schemaVersion',
+            ${CODEX_CHAT_DEBUG_SCHEMA_VERSION}::text
+          ),
+        updated_at = ${input.now}
+    FROM cancelled_wakeups
+    WHERE message.id = cancelled_wakeups.assistant_message_id
+      AND message.role = 'assistant'
+  `);
 }
 
 function attachmentsJsonbValue(attachments: GoatChatMessageAttachment[]) {

@@ -14,6 +14,7 @@ import {
   type LucideIcon as IconComponent,
   LinearIcon,
   OpenAIIcon,
+  PostHogIcon,
   SlackIcon,
   StripeIcon,
 } from "@opencompany/ui/icons";
@@ -50,6 +51,7 @@ import {
   type GoatJamieProviderState,
   type GoatLinearProviderState,
   type GoatPersonalAccountProvider,
+  type GoatPostHogProviderState,
   type GoatSlackProviderState,
   type GoatStripeProviderState,
   goatIntegrationStateFromRows,
@@ -70,6 +72,7 @@ type IntegrationMetaKey =
   | GoatPersonalAccountProvider
   | "github"
   | "jamie"
+  | "posthog"
   | "stripe"
   | "codex"
   | "claude_code";
@@ -120,6 +123,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Connect issues, projects, and comments from Linear.",
     Icon: LinearIcon,
     tileClass: "bg-[#5E6AD2] text-white",
+  },
+  posthog: {
+    label: "PostHog",
+    description: "Explore product analytics and create focused insights from Goat.",
+    Icon: PostHogIcon,
+    tileClass: "bg-[#F54E00] text-white",
   },
   latitude: {
     label: "Latitude",
@@ -298,6 +307,7 @@ function countWorkspaceConnected(integrations: GoatIntegrationState) {
     (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.linear) === "Connected" ? 1 : 0) +
+    (integrationStatus(integrations.posthog) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
     countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
   );
@@ -339,6 +349,7 @@ function IntegrationCards({
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.linear} />
+            <IntegrationCardRow integration={integrations.posthog} />
             <IntegrationCardRow integration={integrations.stripe} canConnect={isWorkspaceAdmin} />
             <IntegrationProviderGroupCard
               provider="hubspot"
@@ -522,6 +533,7 @@ function IntegrationCardRow({
   integration:
     | GoatGoogleProviderState
     | GoatLinearProviderState
+    | GoatPostHogProviderState
     | GoatGitHubProviderState
     | GoatJamieProviderState
     | GoatSlackProviderState
@@ -533,7 +545,7 @@ function IntegrationCardRow({
   const connectHref = integrationConnectHref(integration.provider);
   const connected = status === "Connected";
   const accountLabel =
-    integration.provider === "linear"
+    integration.provider === "linear" || integration.provider === "posthog"
       ? integration.accountName
       : integration.provider === "github"
         ? integration.accountName
@@ -547,7 +559,9 @@ function IntegrationCardRow({
               ? [integration.teamName, integration.accountName].filter(Boolean).join(" · ") || null
               : (integration.accountEmail ?? integration.accountName);
   const capabilityBody =
-    connected && integration.provider === "linear" && integration.integrationId ? (
+    connected &&
+    (integration.provider === "linear" || integration.provider === "posthog") &&
+    integration.integrationId ? (
       <CapabilityModeRows
         integrationId={integration.integrationId}
         provider={integration.provider}
@@ -775,7 +789,7 @@ function CapabilityModeRows({
   capabilityModes,
 }: {
   integrationId: string;
-  provider: GoatPersonalAccountProvider;
+  provider: GoatPersonalAccountProvider | "posthog";
   capabilityModes: Record<string, unknown>;
 }) {
   const capabilities = providerCapabilities(provider);
@@ -1139,6 +1153,7 @@ function integrationStatus(
   integration:
     | GoatGoogleProviderState
     | GoatLinearProviderState
+    | GoatPostHogProviderState
     | GoatGitHubProviderState
     | GoatJamieProviderState
     | GoatSlackProviderState
@@ -1174,6 +1189,8 @@ function integrationConnectHref(provider: Exclude<IntegrationMetaKey, "codex">) 
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
   if (provider === "latitude")
     return "/api/integrations/latitude/start?returnTo=/settings/integrations";
+  if (provider === "posthog")
+    return "/api/integrations/posthog/start?returnTo=/settings/integrations";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";
 }
 

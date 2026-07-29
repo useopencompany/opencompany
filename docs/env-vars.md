@@ -64,7 +64,7 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `GOAT_STRIPE_OAUTH_CLIENT_ID` / `GOAT_STRIPE_OAUTH_SECRET_KEY` | Vercel Goat envs | Public Stripe App OAuth client id and matching app-developer API key used to exchange and refresh workspace Stripe grants. Keep this key separate from `GOAT_STRIPE_API_KEY`, which is only for OpenCompany's own billing. |
 | `GOAT_STRIPE_OAUTH_STATE_SECRET` | Vercel Goat envs | 32+ character secret used only to sign Stripe App OAuth state. Redirect URI: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/stripe/callback`. |
 | `GOAT_STRIPE_APP_WEBHOOK_SECRET` | Vercel Goat envs | Signing secret for Stripe App lifecycle events delivered to `${GOAT_NEXT_PUBLIC_APP_URL}/api/webhooks/stripe-app`. Subscribe to `account.application.authorized` and `account.application.deauthorized` on connected accounts. |
-| `MCP_OAUTH_STATE_SECRET` | Vercel web/Goat envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. Goat Linear's direct callback is `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/linear/callback`. |
+| `MCP_OAUTH_STATE_SECRET` | Vercel web/Goat envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. Goat's direct remote-MCP callbacks include `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/linear/callback` and `.../api/integrations/posthog/callback`. |
 | `SLACK_MCP_CLIENT_ID` / `SLACK_MCP_CLIENT_SECRET` | Vercel, Render | Slack hosted MCP OAuth app credentials. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
 
@@ -224,7 +224,7 @@ Set these in the separate Vercel project for Goat:
 | `ELECTRIC_SOURCE_ID` / `ELECTRIC_SOURCE_SECRET` | Electric Cloud only | Electric Cloud source auth. |
 | `ELECTRIC_SECRET` / `ELECTRIC_TOKEN` | Self-hosted Electric only | Optional self-hosted Electric auth. |
 | `REDIS_URL` (or `KV_URL`) | No | Enables resumable Goat chat streams (`resumable-stream`): refreshes reattach to in-flight turns, disconnects no longer cancel generation, and the stop button cancels via `/api/chat/[sessionId]/stop`. Without it, chat still works; a mid-stream disconnect persists the partial response instead. |
-| `GOAT_CHAT_ACTIONS_KILL_SWITCH` | No | Set to `true` to globally disable Goat chat actions (the `list_actions`/`use_action` tools over Attio, Slack, Gmail, Google Calendar, Google Drive, and Linear) for everyone, without a deploy rollback. Chat actions are otherwise on by default for connected integrations. |
+| `GOAT_CHAT_ACTIONS_KILL_SWITCH` | No | Set to `true` to globally disable Goat chat actions (the `list_actions`/`use_action` tools over Attio, Slack, Gmail, Google Calendar, Google Drive, Linear, PostHog, and other supported connections) for everyone, without a deploy rollback. Chat actions are otherwise on by default for connected integrations. |
 | `GOAT_CHAT_SANDBOX_IMAGE` | Recommended with browser sandbox | Complete Vercel Container Registry image reference built from `apps/goat/sandbox-image`. Without it, the first browser use provisions `agent-browser` and Chromium in a stock Node 24 sandbox. See `docs/goat-chat-sandbox.md`. |
 | `MONID_API_KEY` | Yes | Server-only API key for Goat’s curated managed social and lead capabilities. Store it in Infisical `prod` + `/goat`; it must never reach the browser or runner. |
 | `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH` | No | Set to `true` to remove all managed social and lead capabilities from new chat turns without disabling connected-integration actions. Already-started runs continue through billing reconciliation. |
@@ -345,8 +345,10 @@ Set these in the Render `opencompany-runner` service.
 | `DATABASE_URL` | Hosted only | Same hosted Neon database used by web. Do not store this in Infisical `dev`; local setup writes branch DB URLs to `.env.local`. |
 | `RUNNER_INTERNAL_TOKEN` | Yes | Must match Vercel. |
 | `GOAT_NEXT_PUBLIC_APP_URL` | Yes for Cloud Codex actions | Canonical Goat origin. The runner calls its private integration-action gateway with `RUNNER_INTERNAL_TOKEN`; neither value enters the Codex sandbox. |
-| `RUNNER_STREAM_TOKEN_SECRET` | Yes | Runner signing secret used for hosted-tool polling job ids. |
+| `RUNNER_STREAM_TOKEN_SECRET` | Yes | Runner signing secret used for hosted-tool polling ids plus coding workspace tickets and preview capabilities. |
 | `RUNNER_ALLOWED_ORIGINS` | Yes | Comma-separated browser origins allowed for runner requests. |
+| `RUNNER_PREVIEW_BASE_DOMAIN` | Goat cloud coding workspaces | Wildcard preview base hostname routed to the runner for persistent Codex and Claude Code chats, without a scheme (for example `preview.goat.example.com`). Configure both the base and `*.preview.goat.example.com` on Render. Local development can use `preview.localhost:3040`. |
+| `RUNNER_PREVIEW_PROTOCOL` | No | Preview URL scheme, `http` or `https`. Hosted previews default to `https`; `bun run dev:goat` injects the correct local value. |
 | `DURABLE_STREAMS_URL` | Yes | Durable Streams base URL for model/tool transcript appends. Must match Vercel. |
 | `DURABLE_STREAMS_TOKEN` | Yes | Bearer token for the Durable Streams service. Must match Vercel. |
 | `BLOB_READ_WRITE_TOKEN` | Yes | Private `opencompany-attachments` Blob store token. Downloads attachment bytes (images/PDFs) to inline into model calls. Must match Vercel. |
@@ -376,7 +378,7 @@ Set these in the Render `opencompany-runner` service.
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Must match Vercel. |
 | `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Must match Vercel. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |
-| `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` | Goat Codex chat only | Idle timeout for persistent Goat Codex chat sandboxes, defaults to `300000` (5 minutes). Sandboxes pause on idle and auto-resume on the next message. |
+| `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` | Goat cloud coding chats | Legacy-named idle timeout for persistent Goat Codex and Claude Code chat sandboxes, defaults to `300000` (5 minutes). Sandboxes pause on idle and auto-resume on the next message. |
 | `RUNNER_GOAT_TASK_WORKER_ENABLED` | Goat only | Enables the experimental Goat task worker and `/goat/tools/*` runner callbacks. Defaults to `false` so normal runner deployments do not poll Goat tables or expose Goat tool execution. |
 | `RUNNER_TOOL_ARG_REPAIR_ENABLED` | No | Kill switch for the model-based deferred-tool argument repair fallback (Layer 3). Deterministic validation + coercion always run; this only gates the small-model repair. Defaults to `true`. |
 | `RUNNER_WORKER_CONCURRENCY` | No | Max parallel sessions per instance, defaults to `8` (prod 40). Bounded by the event loop + E2B sandbox quota + gateway rate limits, not CPU/RAM. |

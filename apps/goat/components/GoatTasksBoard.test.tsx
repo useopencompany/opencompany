@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoatTaskRow } from "@/lib/task-collections";
 import { GOAT_TASK_BOARD_COLUMN_CAP, GoatTasksBoardRoute } from "./GoatTasksBoard";
 
@@ -63,7 +63,13 @@ vi.mock("@/lib/use-task-summary", () => ({
 }));
 
 describe("GoatTasksBoardRoute", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     appDataMock.featureFlags.taskSpawning = true;
     appDataMock.taskRows = [];
@@ -159,9 +165,15 @@ describe("GoatTasksBoardRoute", () => {
     const sheet = screen.getByRole("dialog");
     expect(within(sheet).getByText("TASK-12")).toBeInTheDocument();
     expect(within(sheet).getByText("Write a concise launch brief.")).toBeInTheDocument();
+    expect(within(sheet).getByText("Completed")).toBeInTheDocument();
     expect(within(sheet).getByText("The launch brief is ready.")).toBeInTheDocument();
+    expect(within(sheet).getByText("Launch Brief")).toBeInTheDocument();
     expect(within(sheet).getByText("$0.1234")).toBeInTheDocument();
     expect(within(sheet).getByText("3m 12s")).toBeInTheDocument();
+    expect(within(sheet).getByRole("link", { name: "View run" })).toHaveAttribute(
+      "href",
+      "/tasks/TASK-12/run",
+    );
     expect(within(sheet).getByRole("link", { name: "Open full view" })).toHaveAttribute(
       "href",
       "/tasks/TASK-12",
@@ -211,6 +223,50 @@ describe("GoatTasksBoardRoute", () => {
     ).toBeDisabled();
   });
 
+  it("logs a failed task's error as its own activity entry", async () => {
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({
+        id: "failed",
+        name: "Sync CRM contacts",
+        status: "failed",
+        error: "Could not reach the CRM API.",
+        created_at: "2026-07-29T09:00:00.000Z",
+        updated_at: "2026-07-29T09:01:00.000Z",
+      }),
+    ];
+
+    render(<GoatTasksBoardRoute workflowNames={{}} />);
+    await user.click(screen.getByRole("link", { name: "Open Sync CRM contacts" }));
+
+    const sheet = screen.getByRole("dialog");
+    const activity = within(sheet.querySelector("ol") as HTMLOListElement);
+    expect(activity.getByText("Failed")).toBeInTheDocument();
+    expect(activity.getByText("Could not reach the CRM API.")).toBeInTheDocument();
+    expect(activity.queryByText("Completed")).not.toBeInTheDocument();
+  });
+
+  it("shows only the created entry in the activity log for a freshly queued task", async () => {
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({
+        id: "queued",
+        name: "Research the market",
+        status: "queued",
+        created_at: "2026-07-29T09:00:00.000Z",
+        updated_at: "2026-07-29T09:00:00.000Z",
+      }),
+    ];
+
+    render(<GoatTasksBoardRoute workflowNames={{}} />);
+    await user.click(screen.getByRole("link", { name: "Open Research the market" }));
+
+    const sheet = screen.getByRole("dialog");
+    const activity = within(sheet.querySelector("ol") as HTMLOListElement);
+    expect(activity.getByText("Created")).toBeInTheDocument();
+    expect(activity.getAllByRole("listitem")).toHaveLength(1);
+  });
+
   it("shows a skeleton until the canonical live task dataset is ready", () => {
     appDataMock.tasksReady = false;
 
@@ -240,6 +296,41 @@ describe("GoatTasksBoardRoute", () => {
     ).toBeInTheDocument();
     await user.click(within(doneColumn).getByRole("button", { name: "Show 2 more" }));
     expect(within(doneColumn).getAllByRole("link")).toHaveLength(GOAT_TASK_BOARD_COLUMN_CAP + 2);
+  });
+
+  it("defaults to the last 7 days and hides older terminal tasks until widened", async () => {
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({
+        id: "recent-done",
+        name: "Recently completed task",
+        status: "succeeded",
+        updated_at: "2026-07-28T09:00:00.000Z",
+      }),
+      taskRow({
+        id: "old-done",
+        name: "Old completed task",
+        status: "succeeded",
+        updated_at: "2026-06-01T09:00:00.000Z",
+      }),
+      taskRow({
+        id: "old-running",
+        name: "Stalled in-progress task",
+        status: "running",
+        updated_at: "2026-06-01T09:00:00.000Z",
+      }),
+    ];
+
+    render(<GoatTasksBoardRoute workflowNames={{}} />);
+
+    expect(screen.getByText("Recently completed task")).toBeInTheDocument();
+    expect(screen.queryByText("Old completed task")).not.toBeInTheDocument();
+    expect(screen.getByText("Stalled in-progress task")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: "Filter tasks by time range" }));
+    await user.click(await screen.findByRole("option", { name: "All time" }));
+
+    expect(await screen.findByText("Old completed task")).toBeInTheDocument();
   });
 
   it("shows the Tasks & Workflows beta gate when disabled", () => {

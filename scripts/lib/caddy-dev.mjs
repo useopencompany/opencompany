@@ -135,7 +135,7 @@ function goatCaddyfile({ host, port, targetPort }) {
 \tskip_install_trust
 }
 
-${host}:${port} {
+${host}:${port}, *.preview.localhost:${port} {
 \treverse_proxy 127.0.0.1:${targetPort}
 \tencode zstd gzip
 }

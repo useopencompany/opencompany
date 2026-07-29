@@ -18,7 +18,14 @@ const pgDialect = new PgDialect();
 describe("workspace automation lifecycle", () => {
   it("only lists active workflows in the composer catalog", async () => {
     const builder = createSelectBuilder([
-      { slug: "launch-brief", name: "Launch brief", description: "Prepare the brief" },
+      {
+        slug: "launch-brief",
+        name: "Launch brief",
+        description: "Prepare the brief",
+        instructions: "Draft the launch brief.",
+        model: "",
+        steps: [],
+      },
     ]);
     const db = { select: vi.fn(() => builder) };
 
@@ -36,6 +43,8 @@ describe("workspace automation lifecycle", () => {
         description: "Prepare the brief",
         instructions: "Draft the launch brief.",
         model: "",
+        steps: [],
+        trigger: "manual",
         status: "draft",
       },
     ]);
@@ -93,7 +102,8 @@ describe("workspace automation lifecycle", () => {
       validateGoatWorkflowFields({
         name: "Launch brief",
         description: "",
-        instructions: "  ",
+        trigger: "manual",
+        steps: [{ id: "step-1", title: "", model: "", instructions: "  " }],
         status: "active",
       }),
     ).toMatch(/instructions/);

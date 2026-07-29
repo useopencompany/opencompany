@@ -965,6 +965,7 @@ function codexTurn() {
     leaseId: "lease_1",
     leaseOwner: "runner_1",
     leaseExpiresAt: new Date("2026-07-10T12:05:00Z"),
+    runAfter: null,
     completedAt: null,
     createdAt: now,
     updatedAt: now,

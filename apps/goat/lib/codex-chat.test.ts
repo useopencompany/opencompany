@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeGoatCodexChatSessionForChat,
   createGoatCodexChatMessage as createGoatCodexChatMessageImpl,
+  createGoatCodingWorkspaceRuntimeAccess,
   getGoatCodexChatSandboxStatus,
   interruptGoatCodexChatSession,
 } from "@/lib/codex-chat";
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   claudeConnected: vi.fn(),
   getSandboxStatus: vi.fn(),
   killSandbox: vi.fn(),
+  runtimeAccess: vi.fn(),
   wake: vi.fn(),
 }));
 
@@ -41,6 +43,15 @@ vi.mock("@/lib/claude-code-auth", () => ({
 }));
 
 vi.mock("@/lib/task-runner", () => ({
+  requestGoatCodingWorkspaceRuntimeAccess: mocks.runtimeAccess,
+  GoatCodingWorkspaceRequestError: class GoatCodingWorkspaceRequestError extends Error {
+    constructor(
+      message: string,
+      readonly statusCode: number,
+    ) {
+      super(message);
+    }
+  },
   getGoatCodexSandboxStatus: mocks.getSandboxStatus,
   killGoatCodexSandbox: mocks.killSandbox,
   triggerGoatCodexChatWake: mocks.wake,
@@ -321,6 +332,38 @@ describe("createGoatCodexChatMessage", () => {
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
 
+  it("supersedes every queued scheduled wakeup when a real user message arrives", async () => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          engine: "claude_code",
+          model: "claude-opus-4-8",
+          status: "idle",
+        },
+        chat_sessions: {
+          model: "anthropic/claude-opus-4.8",
+        },
+      },
+    ]);
+
+    await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      sessionId: "goat_chat_1",
+      prompt: "I have an update",
+      engine: "claude_code",
+    });
+
+    const statement = sqlText(mocks.execute.mock.calls[0]?.[0]);
+    expect(statement).toContain("cancelled_wakeups AS");
+    expect(statement).toContain("status = 'interrupted'");
+    expect(statement).toContain("run_after IS NOT NULL");
+    expect(statement).toContain("'aborted'");
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    expect(sqlText(mocks.execute.mock.calls[1]?.[0])).toContain("run_after IS NOT NULL");
+  });
+
   it("persists newly activated native skill snapshots with queued turns", async () => {
     mocks.selectResults.push([
       {
@@ -474,6 +517,7 @@ describe("closeGoatCodexChatSessionForChat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateResults.length = 0;
+    mocks.execute.mockResolvedValue({ rows: [] });
     mocks.update.mockImplementation(() => createUpdateBuilder(mocks.updateResults.shift() ?? []));
     mocks.killSandbox.mockResolvedValue(true);
   });
@@ -487,6 +531,8 @@ describe("closeGoatCodexChatSessionForChat", () => {
     });
 
     expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(sqlText(mocks.execute.mock.calls[0]?.[0])).toContain("cancelled_wakeups AS");
+    expect(sqlText(mocks.execute.mock.calls[0]?.[0])).toContain("run_after IS NOT NULL");
     expect(mocks.killSandbox).toHaveBeenCalledWith("sbx_123");
   });
 
@@ -574,5 +620,133 @@ describe("getGoatCodexChatSandboxStatus", () => {
       }),
     ).resolves.toEqual({ ok: true, status: "sleeping" });
     expect(mocks.getSandboxStatus).toHaveBeenCalledWith("sbx_123");
+  });
+});
+
+describe("createGoatCodingWorkspaceRuntimeAccess", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.selectResults.length = 0;
+    mocks.select.mockImplementation(() => createSelectBuilder(mocks.selectResults.shift() ?? []));
+  });
+
+  it("resolves the owner-bound Codex session without exposing its sandbox id", async () => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          userWorkosId: "user_1",
+          engine: "codex",
+          sandboxId: "sbx_secret",
+          status: "idle",
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
+        },
+      },
+    ]);
+    mocks.runtimeAccess.mockResolvedValue({
+      websocketUrl: "wss://runner.example.com/goat/runtime",
+      ticket: "ticket_1",
+      expiresAt: 60_000,
+      sandboxStatus: "sleeping",
+    });
+
+    const result = await createGoatCodingWorkspaceRuntimeAccess({
+      userWorkosId: "user_1",
+      chatSessionId: "goat_chat_1",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      access: { ticket: "ticket_1", sandboxStatus: "sleeping" },
+    });
+    expect(result).not.toHaveProperty("access.sandboxId");
+    expect(mocks.runtimeAccess).toHaveBeenCalledWith({
+      codingSessionId: "goat_codex_chat_1",
+      userWorkosId: "user_1",
+    });
+  });
+
+  it("rejects foreign sessions before asking the runner for a ticket", async () => {
+    mocks.selectResults.push([]);
+
+    await expect(
+      createGoatCodingWorkspaceRuntimeAccess({
+        userWorkosId: "user_other",
+        chatSessionId: "goat_chat_1",
+      }),
+    ).resolves.toMatchObject({ ok: false, statusCode: 404 });
+    expect(mocks.runtimeAccess).not.toHaveBeenCalled();
+  });
+
+  it("resolves owner-bound Claude Code sessions through the shared workspace runtime", async () => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          userWorkosId: "user_1",
+          engine: "claude_code",
+          sandboxId: "sbx_secret",
+          status: "idle",
+        },
+        chat_sessions: {
+          model: "anthropic/claude-sonnet-4-6",
+        },
+      },
+    ]);
+
+    mocks.runtimeAccess.mockResolvedValue({
+      websocketUrl: "wss://runner.example.com/goat/runtime",
+      ticket: "ticket_claude",
+      expiresAt: 60_000,
+      sandboxStatus: "running",
+    });
+
+    await expect(
+      createGoatCodingWorkspaceRuntimeAccess({
+        userWorkosId: "user_1",
+        chatSessionId: "goat_chat_1",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      access: { ticket: "ticket_claude", sandboxStatus: "running" },
+    });
+    expect(mocks.runtimeAccess).toHaveBeenCalledWith({
+      codingSessionId: "goat_codex_chat_1",
+      userWorkosId: "user_1",
+    });
+  });
+
+  it.each([
+    ["closed", "codex", "sbx_secret", "closed", 404],
+    ["unsupported", "opencompany", "sbx_secret", "idle", 404],
+    ["missing sandbox", "codex", null, "idle", 409],
+  ])("rejects %s sessions before asking the runner for a ticket", async (_case, engine, sandboxId, status, statusCode) => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          userWorkosId: "user_1",
+          engine,
+          sandboxId,
+          status,
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
+        },
+      },
+    ]);
+
+    await expect(
+      createGoatCodingWorkspaceRuntimeAccess({
+        userWorkosId: "user_1",
+        chatSessionId: "goat_chat_1",
+      }),
+    ).resolves.toMatchObject({ ok: false, statusCode });
+    expect(mocks.runtimeAccess).not.toHaveBeenCalled();
   });
 });

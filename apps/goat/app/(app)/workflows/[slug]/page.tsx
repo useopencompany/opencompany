@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { GoatWorkflowEditorRoute, TasksWorkflowsDisabledRoute } from "@/components/GoatRoutes";
+import { TasksWorkflowsDisabledRoute } from "@/components/GoatRoutes";
+import { GoatWorkflowEditor } from "@/components/GoatWorkflowEditor";
 import { currentGoatUser } from "@/lib/auth";
 import { listGoatSkillCatalog } from "@/lib/skills";
 import { getGoatWorkflow } from "@/lib/workflows";
@@ -43,9 +44,8 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
   }
 
   return (
-    <GoatWorkflowEditorRoute
+    <GoatWorkflowEditor
       workflow={workflow}
-      initialStatus={workflow.status}
       canEdit={context.role === "admin"}
       skillCatalog={skillCatalog}
     />
