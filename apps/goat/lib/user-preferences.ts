@@ -41,3 +41,24 @@ export async function updateGoatTaskSpawningAction(enabled: boolean) {
     enabled: updated?.taskSpawningEnabled ?? user.taskSpawningEnabled,
   } as const;
 }
+
+export async function updateGoatAutoModelRoutingAction(enabled: boolean) {
+  const { user } = await currentGoatUser();
+  const nextEnabled = enabled === true;
+  if (nextEnabled === user.autoModelRoutingEnabled) {
+    return { ok: true, enabled: nextEnabled } as const;
+  }
+
+  const [updated] = await getDb()
+    .update(goatUsers)
+    .set({ autoModelRoutingEnabled: nextEnabled, updatedAt: new Date() })
+    .where(eq(goatUsers.workosUserId, user.workosUserId))
+    .returning({ autoModelRoutingEnabled: goatUsers.autoModelRoutingEnabled });
+
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return {
+    ok: Boolean(updated),
+    enabled: updated?.autoModelRoutingEnabled ?? user.autoModelRoutingEnabled,
+  } as const;
+}

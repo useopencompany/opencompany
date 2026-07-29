@@ -60,7 +60,10 @@ import {
 } from "@/lib/skill-actions";
 import type { GoatSkillCatalogItem, GoatSkillListItem, GoatWorkspaceSkill } from "@/lib/skills";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
-import { updateGoatTaskSpawningAction } from "@/lib/user-preferences";
+import {
+  updateGoatAutoModelRoutingAction,
+  updateGoatTaskSpawningAction,
+} from "@/lib/user-preferences";
 import {
   archiveGoatWorkflowAction,
   createGoatWorkflowAction,
@@ -224,6 +227,13 @@ export function GoatPreferencesSettingsRoute() {
           description="Fire workflows, run tracked background tasks, and schedule recurring routines."
           checked={featureFlags.taskSpawning}
           update={updateGoatTaskSpawningAction}
+        />
+        <BetaFeatureSwitch
+          icon={Sparkles}
+          label="Automatic model routing"
+          description="Let Goat choose a model from your first message and keep it for the chat."
+          checked={featureFlags.autoModelRouting}
+          update={updateGoatAutoModelRoutingAction}
         />
       </section>
     </GoatSettingsContent>
