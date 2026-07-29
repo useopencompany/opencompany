@@ -35,6 +35,7 @@ const chatMock = vi.hoisted(() => ({
 
 const routerMock = vi.hoisted(() => ({
   prefetch: vi.fn(),
+  push: vi.fn(),
   refresh: vi.fn(),
   replace: vi.fn(),
 }));
@@ -204,6 +205,7 @@ describe("GoatSurface chat streaming UI", () => {
     chatMock.stop.mockReset();
     routerMock.prefetch.mockReset();
     chatMock.preparedRequestBodies = [];
+    routerMock.push.mockReset();
     routerMock.refresh.mockReset();
     routerMock.replace.mockReset();
     historyMock.replaceState.mockReset();
@@ -2061,7 +2063,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.queryByText("Market research")).not.toBeInTheDocument();
   });
 
-  it("opens the new chat command with Cmd+K and starts a background chat", async () => {
+  it("opens the same composer as main chat with Cmd+K and starts a background chat without navigating", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
@@ -2087,13 +2089,23 @@ describe("GoatSurface chat streaming UI", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
 
     await user.keyboard("{Meta>}k{/Meta}");
-    await user.type(
-      screen.getByPlaceholderText("Search chats or describe a new one..."),
-      "Research Q3",
+    const quickComposerInput = screen.getByPlaceholderText(
+      "Ask Goat anything, or describe a task...",
     );
+    // Same controls as the main composer: model picker, attach button, submit button.
+    expect(screen.getAllByLabelText("Model")).toHaveLength(2);
+    expect(screen.getAllByLabelText("Attach files")).toHaveLength(2);
+    await user.type(quickComposerInput, "Research Q3");
     await user.keyboard("{Enter}");
 
     const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
@@ -2119,9 +2131,153 @@ describe("GoatSurface chat streaming UI", () => {
     });
     expect(body.message.id).toMatch(/^ui_background_/);
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(routerMock.push).not.toHaveBeenCalled();
     expect(
-      screen.queryByPlaceholderText("Search chats or describe a new one..."),
+      screen.queryByPlaceholderText("Ask Goat anything, or describe a task..."),
     ).not.toBeInTheDocument();
+    // Never navigates away from the home screen it was opened on.
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+  });
+
+  it("submits Codex engine chats from Cmd+K in the background without adopting them into view", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: requestChatSessionId(init, "goat_chat_codex_1"),
+          userMessageId: "goat_chat_msg_codex_user",
+          assistantMessageId: "goat_chat_msg_codex_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Model" }));
+    // The model picker's popover content portals outside the dialog's DOM subtree.
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.type(
+      within(dialog).getByPlaceholderText("Ask Goat anything, or describe a task..."),
+      "Clone my repo",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
+    const body = JSON.parse(String((init as RequestInit).body));
+    expect(body).toMatchObject({
+      message: { role: "user", parts: [{ type: "text", text: "Clone my repo" }] },
+    });
+    expect(body.newSessionId).toMatch(/^goat_chat_/);
+    // Never adopted into the visible thread and never navigated to.
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    expect(routerMock.push).not.toHaveBeenCalled();
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps the Cmd+K composer open and the draft intact when goal mode settings are invalid", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Model" }));
+    // Popover content (model list, goal mode fields) portals outside the dialog's DOM subtree.
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(within(dialog).getByRole("button", { name: "Goal mode" }));
+    await user.click(screen.getByRole("checkbox", { name: "Goal mode" }));
+    await user.type(screen.getByPlaceholderText("Objective"), "Fix the flaky tests");
+    await user.type(screen.getByPlaceholderText("Token budget"), "abc");
+    const quickComposerInput = within(dialog).getByPlaceholderText(
+      "Ask Goat anything, or describe a task...",
+    );
+    await user.type(quickComposerInput, "Run the failing suite");
+    await user.click(within(dialog).getByRole("button", { name: "Send message" }));
+
+    // Invalid settings must be caught before the dialog closes or any request fires —
+    // otherwise the draft is lost behind a misleading "started" toast (regression guard).
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/codex-chat/messages")).toBe(false);
+    expect(routerMock.refresh).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(quickComposerInput).toHaveValue("Run the failing suite");
+  });
+
+  it("does not persist the Cmd+K model choice as the app-wide remembered model", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+        userWorkosId="user_1"
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Model" }));
+    // The model picker's popover content portals outside the dialog's DOM subtree.
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+
+    expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBeNull();
+  });
+
+  it("searches and jumps to an existing chat from the Cmd+K palette without affecting the quick composer", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_1",
+            title: "Q2 planning",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Let's plan Q2",
+            updatedAt: currentTimestamp(),
+          },
+        ]}
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.type(within(dialog).getByPlaceholderText("Search chats..."), "Q2 planning");
+    const result = await within(dialog).findByText("Q2 planning");
+    await user.click(result);
+
+    expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_1");
   });
 
   it("does not navigate or refresh when the stream confirms the reserved session id", async () => {
