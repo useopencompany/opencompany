@@ -599,75 +599,6 @@ describe("GoatSurface chat streaming UI", () => {
     );
   });
 
-  it("shows Local Codex only when the beta flag is enabled and submits to the local endpoint", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      void input;
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          sessionId: requestChatSessionId(init, "goat_chat_local_1"),
-          userMessageId: "goat_chat_msg_local_user",
-          assistantMessageId: "goat_chat_msg_local_assistant",
-          mode: "started",
-        }),
-        { status: 202, headers: { "Content-Type": "application/json" } },
-      );
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        localCodexBetaEnabled
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Local Codex"));
-    expect(screen.queryByRole("button", { name: "Plan mode" })).not.toBeInTheDocument();
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Inspect");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/local-codex/messages", expect.any(Object)),
-    );
-    expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/local-codex/messages")!;
-    const body = JSON.parse(String((init as RequestInit).body));
-    expect(body).toMatchObject({
-      newSessionId: expect.stringMatching(/^goat_chat_/),
-      message: {
-        id: expect.stringMatching(/^goat_chat_msg_/),
-        role: "user",
-        parts: [{ type: "text", text: "Inspect" }],
-      },
-      settings: {
-        reasoningEffort: "medium",
-        planModeEnabled: false,
-        goalMode: null,
-      },
-    });
-    expect(historyMock.replaceState).toHaveBeenCalledWith(null, "", `/chat/${body.newSessionId}`);
-    expect(routerMock.replace).not.toHaveBeenCalled();
-    expect(routerMock.refresh).not.toHaveBeenCalled();
-
-    const textarea = await screen.findByPlaceholderText("Reply...");
-    await user.type(textarea, "Follow up after this");
-
-    expect(textarea).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
-
-    await user.keyboard("{Enter}");
-
-    expect(textarea).toHaveValue("Follow up after this");
-    expect(
-      fetchMock.mock.calls.filter(([url]) => url === "/api/local-codex/messages"),
-    ).toHaveLength(1);
-  });
-
   it("shows the Codex engine only when Codex is connected", async () => {
     const user = userEvent.setup();
 
@@ -1363,30 +1294,6 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByPlaceholderText("Token budget")).toHaveValue("200000");
   });
 
-  it("keeps existing local Codex chats read-only when the beta flag is disabled", () => {
-    render(
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={{
-          id: "goat_chat_local_1",
-          title: "Local Codex",
-          model: DEFAULT_GOAT_MODEL,
-          engine: "local_codex",
-          messages: [],
-        }}
-      />,
-    );
-
-    expect(
-      screen.getByText(
-        "Local Codex beta is disabled. Enable it in Goat Settings to use Local Codex.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Reply...")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
-  });
-
   it("keeps using the returned chat session id when the AI SDK transport is long-lived", async () => {
     const user = userEvent.setup();
 
@@ -1787,33 +1694,6 @@ describe("GoatSurface chat streaming UI", () => {
     expect(catalogCalls).toBe(2);
   });
 
-  it("does not offer Brain skills in Local Codex mode", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    render(
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        localCodexBetaEnabled
-        userWorkosId="user_1"
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Local Codex"));
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "@skill/coding");
-
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    // The credit-balance hook fetches on mount; no skill-catalog request may fire.
-    const skillCatalogCalls = fetchMock.mock.calls.filter(
-      ([url]) => !String(url).startsWith("/api/billing/balance"),
-    );
-    expect(skillCatalogCalls).toHaveLength(0);
-    expect(screen.queryByRole("listbox", { name: "Mention menu" })).not.toBeInTheDocument();
-  });
-
   it("keeps a completed new chat visible while server props refresh", async () => {
     const user = userEvent.setup();
 
@@ -1901,14 +1781,6 @@ describe("GoatSurface chat streaming UI", () => {
             preview: "Compare the latest pricing.",
             updatedAt: currentTimestamp(),
           },
-          {
-            id: "local_1",
-            title: "Local cleanup",
-            model: DEFAULT_GOAT_MODEL,
-            engine: "local_codex",
-            preview: "Clean local files.",
-            updatedAt: currentTimestamp(),
-          },
         ]}
       />,
     );
@@ -1931,7 +1803,6 @@ describe("GoatSurface chat streaming UI", () => {
     ).toHaveClass("bg-success");
     expect(within(chatsSection!).queryByText("Fix deployment")).not.toBeInTheDocument();
     expect(within(chatsSection!).getByText("Market research")).toBeInTheDocument();
-    expect(within(chatsSection!).getByText("Local cleanup")).toBeInTheDocument();
     expect(
       within(container)
         .getAllByRole("heading")

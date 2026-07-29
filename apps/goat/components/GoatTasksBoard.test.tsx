@@ -6,7 +6,7 @@ import type { GoatTaskRow } from "@/lib/task-collections";
 import { GOAT_TASK_BOARD_COLUMN_CAP, GoatTasksBoardRoute } from "./GoatTasksBoard";
 
 const appDataMock = vi.hoisted(() => ({
-  featureFlags: { taskSpawning: true, localCodexBridge: false },
+  featureFlags: { taskSpawning: true },
   taskRows: [] as GoatTaskRow[],
   tasksReady: true,
   schedules: [

@@ -64,7 +64,6 @@ export function isolatedGoatDevEnvironment(ports, { httpsDisabled = false } = {}
     GOAT_HTTPS_PORT: ports.https,
     GOAT_NEXT_PUBLIC_APP_URL: appOrigin,
     GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: `${appOrigin}/auth/callback`,
-    GOAT_LOCAL_BRIDGE_BASE_URL: `http://127.0.0.1:${ports.app}`,
     PORT: ports.runner,
     RUNNER_INTERNAL_URL: runnerOrigin,
     RUNNER_PUBLIC_URL: runnerOrigin,

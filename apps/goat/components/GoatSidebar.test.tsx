@@ -102,7 +102,6 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
     recentChats: recentChatsMock.value,
     featureFlags: {
       taskSpawning: featureFlagsMock.taskSpawning,
-      localCodexBridge: false,
     },
     mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
   }),

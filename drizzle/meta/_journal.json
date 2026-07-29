@@ -1177,6 +1177,13 @@
       "when": 1785270615449,
       "tag": "0167_goat_remove_browser_listing_experiment",
       "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "7",
+      "when": 1785326400000,
+      "tag": "0168_remove_goat_local_codex_bridge",
+      "breakpoints": true
     }
   ]
 }
