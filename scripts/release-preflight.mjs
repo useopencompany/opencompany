@@ -61,13 +61,17 @@ const groups = {
       "RUNNER_INTERNAL_TOKEN",
       "ELECTRIC_URL",
       "MONID_API_KEY",
+      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
+      "GOAT_STRIPE_OAUTH_CLIENT_ID",
+      "GOAT_STRIPE_OAUTH_SECRET_KEY",
+      "GOAT_STRIPE_OAUTH_STATE_SECRET",
+      "GOAT_STRIPE_APP_WEBHOOK_SECRET",
       "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
       "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
     ],
     optional: [
       "RUNNER_INTERNAL_URL",
       "EXA_API_KEY",
-      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
       "MCP_OAUTH_STATE_SECRET",
       "CRON_SECRET",
       "RESEND_API_KEY",
@@ -213,6 +217,12 @@ const githubIntegrationStateSecret = process.env.GITHUB_INTEGRATION_STATE_SECRET
 if (!isUnset(githubIntegrationStateSecret) && githubIntegrationStateSecret.length < 32) {
   failed = true;
   console.log("\nGITHUB_INTEGRATION_STATE_SECRET must be at least 32 characters.");
+}
+
+const stripeOAuthStateSecret = process.env.GOAT_STRIPE_OAUTH_STATE_SECRET;
+if (!isUnset(stripeOAuthStateSecret) && stripeOAuthStateSecret.length < 32) {
+  failed = true;
+  console.log("\nGOAT_STRIPE_OAUTH_STATE_SECRET must be at least 32 characters.");
 }
 
 const redirectUri = process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI;

@@ -478,7 +478,7 @@ describe("SettingsIntegrationsPanel", () => {
         provider: "stripe",
         externalId: "acct_123",
         connectionLabel: "Acme Payments",
-        accountType: "stripe_test_restricted_key",
+        accountType: "stripe_oauth_test",
         status: "connected",
       },
     ]) as GoatIntegrationState;

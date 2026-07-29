@@ -1226,6 +1226,13 @@
       "when": 1785340800000,
       "tag": "0174_goat_workflow_steps",
       "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "7",
+      "when": 1785340800001,
+      "tag": "0175_goat_stripe_oauth",
+      "breakpoints": true
     }
   ]
 }

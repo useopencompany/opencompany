@@ -563,6 +563,22 @@ function stripeProviderState(row: IntegrationStateRow | undefined): GoatStripePr
     };
   }
 
+  const accountType = row.accountType ?? row.account_type;
+  const livemode =
+    accountType === "stripe_oauth_live" ? true : accountType === "stripe_oauth_test" ? false : null;
+  if (livemode === null) {
+    return {
+      provider: "stripe",
+      connected: false,
+      status: "needs_reauth",
+      integrationId: row.id ?? null,
+      accountName:
+        row.connectionLabel ?? row.connection_label ?? row.accountName ?? row.account_name ?? null,
+      livemode: null,
+      statusReason: "Reconnect Stripe to authorize read-only access.",
+    };
+  }
+
   return {
     provider: "stripe",
     connected: row.status === "connected",
@@ -570,12 +586,7 @@ function stripeProviderState(row: IntegrationStateRow | undefined): GoatStripePr
     integrationId: row.id ?? null,
     accountName:
       row.connectionLabel ?? row.connection_label ?? row.accountName ?? row.account_name ?? null,
-    livemode:
-      (row.accountType ?? row.account_type) === "stripe_live_restricted_key"
-        ? true
-        : (row.accountType ?? row.account_type) === "stripe_test_restricted_key"
-          ? false
-          : null,
+    livemode,
     statusReason: row.statusReason ?? row.status_reason ?? null,
   };
 }

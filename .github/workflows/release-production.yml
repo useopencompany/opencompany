@@ -174,6 +174,103 @@ jobs:
         if: ${{ github.event_name == 'workflow_run' && steps.production-release.outputs.should_release == 'false' }}
         run: echo "This automatic release was superseded before migrations/deploy, so production was not changed."
 
+      - name: Check Stripe OAuth cutover prerequisites
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
+        run: |
+          node <<'NODE'
+          const required = [
+            "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
+            "GOAT_STRIPE_OAUTH_CLIENT_ID",
+            "GOAT_STRIPE_OAUTH_SECRET_KEY",
+            "GOAT_STRIPE_OAUTH_STATE_SECRET",
+            "GOAT_STRIPE_APP_WEBHOOK_SECRET",
+          ];
+
+          function isPlaceholder(value) {
+            const normalized = value.trim().toLowerCase();
+            return (
+              normalized === "" ||
+              normalized.includes("replace-with") ||
+              normalized.includes("changeme") ||
+              normalized.includes("your-") ||
+              normalized === "placeholder"
+            );
+          }
+
+          async function main() {
+            const projectId = process.env.GOAT_VERCEL_PROJECT_ID;
+            const teamId = process.env.VERCEL_ORG_ID;
+            const token = process.env.VERCEL_TOKEN;
+
+            if (!projectId || !teamId || !token) {
+              throw new Error(
+                "GOAT_VERCEL_PROJECT_ID, VERCEL_ORG_ID, and VERCEL_TOKEN are required.",
+              );
+            }
+
+            const listResponse = await fetch(
+              `https://api.vercel.com/v10/projects/${projectId}/env?teamId=${teamId}&target=production`,
+              { headers: { Authorization: `Bearer ${token}` } },
+            );
+            if (!listResponse.ok) {
+              throw new Error(
+                `Could not fetch Goat Vercel env metadata: ${listResponse.status} ${listResponse.statusText}`,
+              );
+            }
+
+            const { envs } = await listResponse.json();
+            const productionEnv = envs.filter(
+              (env) =>
+                Array.isArray(env.target) &&
+                env.target.includes("production") &&
+                !env.gitBranch,
+            );
+            const values = new Map();
+
+            for (const key of required) {
+              const matches = productionEnv.filter((env) => env.key === key);
+              if (matches.length !== 1) {
+                throw new Error(
+                  `Goat must have exactly one production ${key}; found ${matches.length}.`,
+                );
+              }
+
+              const valueResponse = await fetch(
+                `https://api.vercel.com/v1/projects/${projectId}/env/${matches[0].id}?teamId=${teamId}`,
+                { headers: { Authorization: `Bearer ${token}` } },
+              );
+              if (!valueResponse.ok) {
+                throw new Error(
+                  `Could not verify Goat production ${key}: ${valueResponse.status} ${valueResponse.statusText}`,
+                );
+              }
+
+              const env = await valueResponse.json();
+              if (
+                env.decrypted !== true ||
+                typeof env.value !== "string" ||
+                isPlaceholder(env.value)
+              ) {
+                throw new Error(`Goat production ${key} is empty or still a placeholder.`);
+              }
+              values.set(key, env.value.trim());
+            }
+
+            if (values.get("GOAT_STRIPE_OAUTH_STATE_SECRET").length < 32) {
+              throw new Error(
+                "Goat production GOAT_STRIPE_OAUTH_STATE_SECRET must be at least 32 characters.",
+              );
+            }
+
+            console.log("Verified Goat production Stripe OAuth cutover prerequisites.");
+          }
+
+          main().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
       - name: Create GitHub deployment
         id: github-deployment
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
@@ -372,6 +469,11 @@ jobs:
             "GOAT_HUBSPOT_CLIENT_ID",
             "GOAT_HUBSPOT_CLIENT_SECRET",
             "GOAT_HUBSPOT_STATE_SECRET",
+            "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
+            "GOAT_STRIPE_OAUTH_CLIENT_ID",
+            "GOAT_STRIPE_OAUTH_SECRET_KEY",
+            "GOAT_STRIPE_OAUTH_STATE_SECRET",
+            "GOAT_STRIPE_APP_WEBHOOK_SECRET",
           ];
 
           async function listProductionEnv(projectId, label, teamId, token) {

@@ -31,9 +31,12 @@ export function goatIntegrationConnectionError(provider: string | null, reason: 
     case "slack_denied":
     case "linear_denied":
     case "hubspot_denied":
+    case "stripe_denied":
     case "latitude_denied":
     case "posthog_denied":
       return `${name} authorization was cancelled.`;
+    case "missing_permissions":
+      return `${name} did not grant every required read-only permission. Please try again.`;
     case "missing_code":
     case "missing_installation_id":
     case "invalid_state":

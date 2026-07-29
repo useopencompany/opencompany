@@ -1,8 +1,10 @@
 import {
   GoatStripeApiError,
   type GoatStripeConnection,
+  GoatStripeOAuthAuthError,
   loadGoatStripeConnection,
   markGoatStripeConnectionNeedsReauth,
+  refreshGoatStripeConnectionAccessToken,
   requestGoatStripeApi,
 } from "../integrations/stripe";
 import {
@@ -204,7 +206,7 @@ export async function resolveStripeActions(
               connect_reserved?: StripeBalanceAmount[];
               instant_available?: StripeBalanceAmount[];
             }>({
-              apiKey: connection.apiKey,
+              accessToken: connection.accessToken,
               path: "/balance",
               signal: context.signal,
             }),
@@ -291,12 +293,29 @@ async function withStripeAuth<T>(connection: GoatStripeConnection, run: () => Pr
   try {
     return await run();
   } catch (error) {
+    if (error instanceof GoatStripeApiError && error.status === 401) {
+      try {
+        connection.accessToken = await refreshGoatStripeConnectionAccessToken(connection);
+        return await run();
+      } catch (refreshError) {
+        if (refreshError instanceof GoatStripeOAuthAuthError) {
+          await markGoatStripeConnectionNeedsReauth(connection).catch(() => undefined);
+          throw new GoatActionAuthError(
+            "auth_expired",
+            "stripe",
+            "Stripe authorization expired or was revoked. Reconnect Stripe in Settings → Integrations, then retry.",
+          );
+        }
+        if (refreshError instanceof GoatStripeApiError) error = refreshError;
+        else throw refreshError;
+      }
+    }
     if (error instanceof GoatStripeApiError && (error.status === 401 || error.status === 403)) {
       await markGoatStripeConnectionNeedsReauth(connection).catch(() => undefined);
       throw new GoatActionAuthError(
         "auth_expired",
         "stripe",
-        "Stripe rejected the saved restricted key or a required read permission. Reconnect Stripe in Settings → Integrations, then retry.",
+        "Stripe authorization expired, was revoked, or lost a required read permission. Reconnect Stripe in Settings → Integrations, then retry.",
       );
     }
     throw error;
@@ -315,7 +334,7 @@ async function listStripePages<T extends { id?: string }>(input: {
   let hasMore = false;
   for (let page = 0; page < input.maxPages; page += 1) {
     const response = await requestGoatStripeApi<StripeList<T>>({
-      apiKey: input.connection.apiKey,
+      accessToken: input.connection.accessToken,
       path: input.path,
       params: {
         ...input.params,

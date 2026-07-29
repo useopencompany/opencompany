@@ -20,13 +20,14 @@ Stripe is intentionally excluded from automatic Brain-fill surveys because these
 
 Only a workspace admin can connect or disconnect Stripe.
 
-1. In Stripe, open **Developers → API keys**.
-2. Create a restricted key named **Goat**.
-3. Give the key read access to **Balance**, **Subscriptions**, and **Invoices**. Balance read access includes balance transactions. Leave all write permissions off.
-4. Copy the `rk_live_…` key, or an `rk_test_…` key while testing.
-5. In Goat, open **Settings → Integrations → Stripe**, paste the restricted key, and connect.
+1. In Goat, open **Settings → Integrations → Stripe** and choose **Connect Stripe**.
+2. Stripe opens its app authorization screen. Sign in, select the Stripe account for this workspace, and review the requested permissions.
+3. Approve the read-only account, balance, subscription, invoice, and app-lifecycle event permissions. The lifecycle permission lets Goat remove stored access when the app is uninstalled. You must be an administrator of the Stripe account.
+4. Stripe returns you to Goat with the connected account.
 
-Goat validates each required read endpoint before saving the key. Unrestricted `sk_…` keys are rejected. The restricted key is encrypted with the integration credential key, remains server-side, and is never sent to the model or browser after submission.
+Goat validates each required read endpoint before completing the connection. Stripe OAuth access and refresh tokens are encrypted with the integration credential key, remain server-side, and are never sent to the model or browser. Access tokens refresh automatically, and Stripe rotates the refresh token on every exchange. Goat never requests a write permission and cannot create charges, refunds, subscriptions, or invoices.
+
+Disconnecting in Goat deletes its stored authorization. Uninstalling Goat under **Stripe → Settings → Installed apps** also disconnects the matching Goat workspace automatically.
 
 ## Use it in chat
 

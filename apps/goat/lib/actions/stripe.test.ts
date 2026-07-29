@@ -8,18 +8,23 @@ const mocks = vi.hoisted(() => {
       this.status = status;
     }
   }
+  class MockGoatStripeOAuthAuthError extends Error {}
   return {
     GoatStripeApiError: MockGoatStripeApiError,
+    GoatStripeOAuthAuthError: MockGoatStripeOAuthAuthError,
     loadGoatStripeConnection: vi.fn(),
     markGoatStripeConnectionNeedsReauth: vi.fn(),
+    refreshGoatStripeConnectionAccessToken: vi.fn(),
     requestGoatStripeApi: vi.fn(),
   };
 });
 
 vi.mock("@opencompany/goat-agent/integrations/stripe", () => ({
   GoatStripeApiError: mocks.GoatStripeApiError,
+  GoatStripeOAuthAuthError: mocks.GoatStripeOAuthAuthError,
   loadGoatStripeConnection: mocks.loadGoatStripeConnection,
   markGoatStripeConnectionNeedsReauth: mocks.markGoatStripeConnectionNeedsReauth,
+  refreshGoatStripeConnectionAccessToken: mocks.refreshGoatStripeConnectionAccessToken,
   requestGoatStripeApi: mocks.requestGoatStripeApi,
 }));
 
@@ -32,14 +37,17 @@ const connection = {
   accountId: "acct_123",
   accountName: "Acme Payments",
   livemode: true,
-  apiKey: `rk_live_${"a".repeat(24)}`,
+  accessToken: "oauth_access_token_123",
 };
 
 beforeEach(() => {
+  connection.accessToken = "oauth_access_token_123";
   mocks.loadGoatStripeConnection.mockReset();
   mocks.loadGoatStripeConnection.mockResolvedValue(connection);
   mocks.markGoatStripeConnectionNeedsReauth.mockReset();
   mocks.markGoatStripeConnectionNeedsReauth.mockResolvedValue(undefined);
+  mocks.refreshGoatStripeConnectionAccessToken.mockReset();
+  mocks.refreshGoatStripeConnectionAccessToken.mockResolvedValue("oauth_access_token_refreshed");
   mocks.requestGoatStripeApi.mockReset();
 });
 
@@ -303,7 +311,21 @@ describe("resolveStripeActions", () => {
     expect(largestOpenInvoices[1]).not.toHaveProperty("url");
   });
 
-  it("marks the connection for reauth when Stripe rejects the key", async () => {
+  it("refreshes once after a rejected access token", async () => {
+    mocks.requestGoatStripeApi
+      .mockRejectedValueOnce(new mocks.GoatStripeApiError(401))
+      .mockResolvedValueOnce({ available: [], pending: [] });
+
+    await expect(executeAction("stripe.get_balance", {})).resolves.toMatchObject({
+      available: [],
+      pending: [],
+    });
+    expect(mocks.refreshGoatStripeConnectionAccessToken).toHaveBeenCalledWith(connection);
+    expect(connection.accessToken).toBe("oauth_access_token_refreshed");
+    expect(mocks.markGoatStripeConnectionNeedsReauth).not.toHaveBeenCalled();
+  });
+
+  it("marks the connection for reauth when refreshed OAuth access is still rejected", async () => {
     mocks.requestGoatStripeApi.mockRejectedValue(new mocks.GoatStripeApiError(401));
 
     await expect(executeAction("stripe.get_balance", {})).rejects.toBeInstanceOf(
