@@ -185,7 +185,7 @@ describe("createGoatCodexChatMessage", () => {
     expect(sqlText(statement)).toContain("brain_ref, workspace_id");
     expect(statement.queryChunks).toContain("brain_1");
     expect(statement.queryChunks).toContain("workspace_1");
-    expect(statement.queryChunks).toContain("goat-codex-host-tools.v2");
+    expect(statement.queryChunks).toContain("goat-codex-host-tools.v3");
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
 

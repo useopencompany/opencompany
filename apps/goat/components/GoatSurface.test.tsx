@@ -30,7 +30,7 @@ const chatMock = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   stop: vi.fn(),
   finishSessionId: null as string | null,
-  finishWithSessionId: null as ((sessionId: string) => void) | null,
+  finishWithSessionId: null as ((sessionId: string, model?: string) => void) | null,
   sendError: null as Error | null,
   preparedRequestBodies: [] as unknown[],
   lastResume: null as boolean | null,
@@ -127,12 +127,12 @@ vi.mock("@ai-sdk/react", async () => {
       );
       chatMock.lastResume = options.resume ?? false;
       const transportRef = React.useRef(options.transport);
-      chatMock.finishWithSessionId = (sessionId: string) => {
+      chatMock.finishWithSessionId = (sessionId: string, model?: string) => {
         options.onFinish?.({
           message: {
             id: "assistant_1",
             role: "assistant",
-            metadata: { sessionId },
+            metadata: { sessionId, ...(model ? { model } : {}) },
             parts: [{ type: "text", text: "Done." }],
           },
         });
@@ -508,6 +508,37 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       model: "anthropic/claude-opus-4.8",
     });
+  });
+
+  it("shows Auto only behind its flag and adopts the routed model after the first turn", async () => {
+    const user = userEvent.setup();
+
+    const { rerender } = render(
+      <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.queryByText("Picks once from your first message")).not.toBeInTheDocument();
+
+    rerender(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        autoModelRoutingEnabled
+      />,
+    );
+    await user.click(screen.getByText("Picks once from your first message"));
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Auto");
+
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "What is 2 + 2?");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.preparedRequestBodies[0]).toMatchObject({ model: "auto" });
+    const sessionId = (chatMock.preparedRequestBodies[0] as { newSessionId: string }).newSessionId;
+    act(() => chatMock.finishWithSessionId?.(sessionId, "moonshotai/kimi-k2.6"));
+
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K2.6");
+    expect(screen.getByRole("button", { name: "Model" })).toBeDisabled();
   });
 
   it("remembers the last main chat model when returning Home and remounting", async () => {

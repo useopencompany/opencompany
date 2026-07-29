@@ -11,6 +11,7 @@ export * from "./events";
 export * from "./exa-search";
 export * from "./github-cli";
 export * from "./goat-codex-actions";
+export * from "./goat-codex-brain-capture";
 export * from "./ids";
 export * from "./memory-keeper";
 export * from "./mentions";

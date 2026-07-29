@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   captureAnalytics: vi.fn(),
   enqueue: vi.fn(),
+  findExistingCapture: vi.fn(),
   findExistingPointer: vi.fn(),
   nextBrainId: vi.fn(),
   upsertFile: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("@opencompany/db/goat-brain-ingest", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/db/goat-brain-ingest")>();
   return {
     ...actual,
+    findExistingGoatBrainChatCaptureIngest: mocks.findExistingCapture,
     findExistingGoatBrainPointerIngest: mocks.findExistingPointer,
     upsertGoatBrainSourceItemAndEnqueue: mocks.enqueue,
   };
@@ -49,6 +51,7 @@ describe("captureToGoatBrainInbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.nextBrainId.mockResolvedValue("launch-decision");
+    mocks.findExistingCapture.mockResolvedValue(null);
     mocks.findExistingPointer.mockResolvedValue(null);
     mocks.enqueue.mockResolvedValue({
       jobId: "goat_brain_job_1",
@@ -150,11 +153,66 @@ describe("captureToGoatBrainInbox", () => {
       title: "Existing launch decision",
       jobId: "goat_brain_job_existing",
       enqueued: false,
+      alreadyCaptured: true,
       quotaPaused: false,
     });
     expect(mocks.nextBrainId).not.toHaveBeenCalled();
     expect(mocks.upsertFile).not.toHaveBeenCalled();
     expect(mocks.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("reuses a durable chat capture idempotency key after a recovered tool call", async () => {
+    mocks.findExistingCapture.mockResolvedValue({
+      jobId: "goat_brain_job_existing",
+      status: "queued",
+      planPaused: false,
+      draftBrainId: "existing-launch-decision",
+      draftFolder: "inbox",
+      title: "Existing launch decision",
+    });
+
+    const result = await captureToGoatBrainInbox({
+      ...BASE_INPUT,
+      text: "The team approved the launch plan.",
+      source: {
+        ...BASE_INPUT.source,
+        idempotencyKey: "codex-save:stable-capture-key",
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      draftBrainId: "existing-launch-decision",
+      alreadyCaptured: true,
+    });
+    expect(mocks.findExistingCapture).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      sourceConnectionId: "session_1",
+      externalId: "codex-save:stable-capture-key",
+      brainRef: "goat_brain_1",
+    });
+    expect(mocks.nextBrainId).not.toHaveBeenCalled();
+    expect(mocks.upsertFile).not.toHaveBeenCalled();
+    expect(mocks.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("persists a new durable chat capture with its idempotency key", async () => {
+    await captureToGoatBrainInbox({
+      ...BASE_INPUT,
+      text: "The team approved the launch plan.",
+      source: {
+        ...BASE_INPUT.source,
+        idempotencyKey: "codex-save:stable-capture-key",
+      },
+    });
+
+    expect(mocks.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        item: expect.objectContaining({
+          externalId: "codex-save:stable-capture-key",
+        }),
+      }),
+    );
   });
 
   it("requires content when a source provider cannot be hydrated", async () => {

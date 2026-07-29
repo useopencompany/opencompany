@@ -1,7 +1,19 @@
-export const GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION = "goat-codex-host-tools.v2";
+export const GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION_V2 = "goat-codex-host-tools.v2";
+export const GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION = "goat-codex-host-tools.v3";
 export const GOAT_CODEX_LIST_ACTIONS_TOOL_NAME = "list_actions";
 export const GOAT_CODEX_USE_ACTION_TOOL_NAME = "use_action";
 export const GOAT_CODEX_MAX_ACTION_CALLS_PER_TURN = 16;
+
+export const GOAT_CODEX_ACTION_HOST_TOOL_CONTRACT_VERSIONS = [
+  GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION_V2,
+  GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
+] as const;
+
+export function isGoatCodexActionHostToolContractVersion(
+  value: string | null | undefined,
+): boolean {
+  return GOAT_CODEX_ACTION_HOST_TOOL_CONTRACT_VERSIONS.some((version) => version === value);
+}
 
 export type GoatCodexActionSource = {
   id: string;

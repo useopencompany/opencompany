@@ -752,6 +752,33 @@ describe("runGoatCodexChatTurn", () => {
       }),
     );
   });
+
+  it("registers Brain capture for v3 Brain-pinned sessions", async () => {
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: {
+        ...codexSession(),
+        brainRef: "brain_1",
+        workspaceId: "workspace_1",
+        hostToolContractVersion: "goat-codex-host-tools.v3",
+      },
+      env: env({ goatAppUrl: "https://goat.example.com" }),
+    });
+
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dynamicTools: [
+          expect.objectContaining({ spec: expect.objectContaining({ name: "goat_brain" }) }),
+          expect.objectContaining({ spec: expect.objectContaining({ name: "save_to_brain" }) }),
+          expect.objectContaining({ spec: expect.objectContaining({ name: "list_actions" }) }),
+          expect.objectContaining({ spec: expect.objectContaining({ name: "use_action" }) }),
+        ],
+        task: expect.stringContaining(
+          "A save_to_brain tool is available for the Brain pinned to this chat.",
+        ),
+      }),
+    );
+  });
 });
 
 describe("claimCodexChatRecovery", () => {
