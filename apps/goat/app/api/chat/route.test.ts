@@ -401,8 +401,8 @@ describe("POST /api/chat", () => {
     });
   });
 
-  it("starts an active workflow from main chat even when ad-hoc task tools are disabled", async () => {
-    mockAuth({ role: "member", taskSpawningEnabled: false });
+  it("starts an active workflow for an opted-in member without ad-hoc task tools", async () => {
+    mockAuth({ role: "member", taskSpawningEnabled: true });
     mockCreateTurn();
     vi.mocked(listGoatWorkflowCatalog).mockResolvedValue([
       {
@@ -1398,6 +1398,7 @@ describe("POST /api/chat", () => {
       const saveTool = typedOptions.tools?.[SAVE_TO_BRAIN_TOOL_NAME];
       expect(saveTool).toBeDefined();
       expect(typedOptions.tools?.[START_TASK_TOOL_NAME]).toBeUndefined();
+      expect(typedOptions.tools?.[START_WORKFLOW_TOOL_NAME]).toBeUndefined();
       expect(typedOptions.tools?.[SCHEDULE_TASK_TOOL_NAME]).toBeUndefined();
       expect(typedOptions.tools?.[EDIT_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
       expect(typedOptions.tools?.[DELETE_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
@@ -1504,6 +1505,7 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(listGoatWorkflowCatalog).not.toHaveBeenCalled();
     expect(listGoatTaskSchedulesForUser).not.toHaveBeenCalled();
     expect(createGoatTaskForUser).not.toHaveBeenCalled();
   });

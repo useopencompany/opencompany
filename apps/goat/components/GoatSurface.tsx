@@ -683,9 +683,7 @@ export function GoatSurface({
       creditBalance.balanceUsdMicros > 0 &&
       creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
   );
-  // Workflows are not gated on the task-spawning setting: firing one opts the
-  // user into background tasks server-side.
-  const workflowMentionsEnabled = !activeEngine && !activeTaskConversation;
+  const workflowMentionsEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
