@@ -16,6 +16,10 @@
       "types": "./src/codex-auth.ts",
       "default": "./src/codex-auth.ts"
     },
+    "./goat-claude-code-auth": {
+      "types": "./src/goat-claude-code-auth.ts",
+      "default": "./src/goat-claude-code-auth.ts"
+    },
     "./goat-codex-auth": {
       "types": "./src/goat-codex-auth.ts",
       "default": "./src/goat-codex-auth.ts"
@@ -27,6 +31,10 @@
     "./goat-integrations": {
       "types": "./src/goat-integrations.ts",
       "default": "./src/goat-integrations.ts"
+    },
+    "./goat-repo-configs": {
+      "types": "./src/goat-repo-configs.ts",
+      "default": "./src/goat-repo-configs.ts"
     },
     "./goat-brain-files": {
       "types": "./src/goat-brain-files.ts",
@@ -59,6 +67,10 @@
     "./goat-github": {
       "types": "./src/goat-github.ts",
       "default": "./src/goat-github.ts"
+    },
+    "./goat-harness": {
+      "types": "./src/goat-harness.ts",
+      "default": "./src/goat-harness.ts"
     },
     "./goat-schema": {
       "types": "./src/goat-schema.ts",
@@ -103,6 +115,10 @@
     "./goat-workspaces": {
       "types": "./src/goat-workspaces.ts",
       "default": "./src/goat-workspaces.ts"
+    },
+    "./goat-onboarding-emails": {
+      "types": "./src/goat-onboarding-emails.ts",
+      "default": "./src/goat-onboarding-emails.ts"
     },
     "./goat-billing": {
       "types": "./src/goat-billing.ts",
@@ -149,6 +165,7 @@
     "@opencompany/goat-brain": "workspace:*",
     "@neondatabase/serverless": "^1.1.0",
     "@vercel/blob": "^2.4.0",
+    "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.13.1"
   },

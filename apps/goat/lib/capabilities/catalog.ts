@@ -1,6 +1,13 @@
 import type { GoatManagedCapabilitySource } from "@opencompany/db/goat-schema";
 import type { JSONSchema7 } from "ai";
+import { MAX_EXPANDED_ACTION_RESULT_CHARS } from "@/lib/actions/execute";
 import { GoatActionInvalidParamsError } from "@/lib/actions/types";
+import { shapePdlPersonEmailOutput } from "@/lib/capabilities/pdl-person";
+import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize";
+import {
+  shapeYoutubeTranscriptOutput,
+  shapeYoutubeTranscriptSearchOutput,
+} from "@/lib/capabilities/youtube-transcript";
 
 export type ManagedCapabilityExecutionMode = "sync" | "async";
 export type ManagedCapabilityInputLocation = "body" | "queryParams" | "pathParams";
@@ -8,6 +15,9 @@ export type ManagedCapabilityInputLocation = "body" | "queryParams" | "pathParam
 export type ManagedCapabilityMappedInput = {
   providerInput: Record<string, unknown>;
   resultLimit: number;
+  payloadArrayLimit?: number;
+  payloadStringLimit?: number;
+  discoverPayloadLinks?: boolean;
   canonicalLinks: string[];
 };
 
@@ -21,7 +31,9 @@ export type ManagedCapabilityActionSpec = {
   priceType: "PER_CALL" | "PER_RESULT";
   executionMode: ManagedCapabilityExecutionMode;
   inputLocation?: ManagedCapabilityInputLocation;
+  maxActionResultChars?: number;
   mapInput: (params: Record<string, unknown>) => ManagedCapabilityMappedInput;
+  mapOutput?: (output: unknown, params: Record<string, unknown>) => unknown;
 };
 
 export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
@@ -53,7 +65,7 @@ export const MANAGED_CAPABILITY_SOURCE_DETAILS: Record<
   lead: {
     label: "Prospecting",
     description:
-      "Find targeted professional prospects and enrich contact details through reviewed managed providers.",
+      "Look up work emails for known prospects by name and company or by LinkedIn URL, and find new targeted professional prospects.",
   },
   seo: {
     label: "SEO",
@@ -159,6 +171,50 @@ const VIDEO_PARAMS = {
   },
   required: ["video"],
 } as const satisfies JSONSchema7;
+const YOUTUBE_TRANSCRIPT_SEARCH_PARAMS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    video: VIDEO_PARAMS.properties.video,
+    query: {
+      type: "string",
+      minLength: 1,
+      maxLength: 200,
+      description:
+        "Case-insensitive phrase to find in the transcript, such as a sponsor, brand, person, or topic name. Retry with a spelling variant only when the first search has no matches.",
+    },
+    language: {
+      type: "string",
+      pattern: "^[a-z]{2}$",
+      description:
+        "Preferred transcript language as a lowercase ISO 639-1 code, such as en or de. The provider falls back when that caption language is unavailable.",
+    },
+    contextSeconds: {
+      type: "integer",
+      minimum: 15,
+      maximum: 120,
+      default: 60,
+      description: "Seconds of transcript context to return before and after each match.",
+    },
+    maxMatches: {
+      type: "integer",
+      minimum: 1,
+      maximum: 3,
+      default: 3,
+      description: "Maximum non-overlapping timestamped excerpts to return.",
+    },
+  },
+  required: ["video", "query"],
+} as const satisfies JSONSchema7;
+const YOUTUBE_TRANSCRIPT_PARAMS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    video: VIDEO_PARAMS.properties.video,
+    language: YOUTUBE_TRANSCRIPT_SEARCH_PARAMS.properties.language,
+  },
+  required: ["video"],
+} as const satisfies JSONSchema7;
 const VIDEO_LIST_PARAMS = {
   type: "object",
   additionalProperties: false,
@@ -195,6 +251,7 @@ const CONTENT_LIST_PARAMS = {
 
 const TIKHUB = "tikhub" as const;
 const SEMRUSH = "semrush" as const;
+const YOUTUBE_TRANSCRIPT_PAYLOAD_ARRAY_LIMIT = 20;
 const PDL_PROSPECT_JOB_LEVELS = [
   "cxo",
   "owner",
@@ -220,6 +277,15 @@ const PDL_PROSPECT_DATA_INCLUDE = [
   "job_company_industry_v2",
   "job_company_linkedin_url",
   "job_company_location_name",
+  "location_name",
+  "linkedin_url",
+  "work_email",
+].join(",");
+const PDL_PERSON_EMAIL_DATA_INCLUDE = [
+  "full_name",
+  "job_title",
+  "job_title_levels",
+  "job_company_name",
   "location_name",
   "linkedin_url",
   "work_email",
@@ -496,11 +562,8 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     "Get details for one public YouTube video.",
     "/api/v1/youtube/web_v2/get_video_info_v2",
   ),
-  youtubeVideoAction(
-    "youtube.get_transcript",
-    "Get available captions or transcript for one public YouTube video.",
-    "/api/v1/youtube/web_v2/get_video_captions",
-  ),
+  youtubeTranscriptAction(),
+  youtubeTranscriptSearchAction(),
   youtubeVideoListAction(
     "youtube.list_comments",
     "List public comments on a YouTube video.",
@@ -733,24 +796,45 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     },
   },
   {
-    id: "lead.enrich_person",
+    id: "lead.find_person_email",
     source: "lead",
-    description: "Enrich one person from an email, phone, LinkedIn URL, or full name plus company.",
+    description:
+      "Find a known prospect's work email from their LinkedIn URL or full name plus company or location. Use this when the user already knows whom they want to contact; do not run a broader prospect search first.",
     params: {
       type: "object",
       additionalProperties: false,
       properties: {
-        email: { type: "string", format: "email", maxLength: 320 },
-        phone: { type: "string", minLength: 7, maxLength: 40 },
-        linkedinUrl: { type: "string", format: "uri", maxLength: 1_000 },
-        name: { type: "string", minLength: 1, maxLength: 200 },
-        company: { type: "string", minLength: 1, maxLength: 200 },
+        linkedinUrl: {
+          type: "string",
+          format: "uri",
+          maxLength: 1_000,
+          description: "The prospect's public LinkedIn person URL, when known.",
+        },
+        name: {
+          type: "string",
+          minLength: 3,
+          maxLength: 200,
+          description: "The prospect's full name, including at least first and last name.",
+        },
+        company: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description:
+            "The prospect's current company name, website, or LinkedIn company URL. Pair with name.",
+        },
+        location: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description:
+            "Optional city, region, or country to disambiguate the prospect. Can replace company when paired with name.",
+        },
       },
       anyOf: [
-        { required: ["email"] },
-        { required: ["phone"] },
         { required: ["linkedinUrl"] },
         { required: ["name", "company"] },
+        { required: ["name", "location"] },
       ],
     },
     provider: "pdl",
@@ -758,34 +842,36 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
     priceType: "PER_CALL",
     executionMode: "sync",
     mapInput: (raw) => {
-      const params = checkedParams(raw, ["email", "phone", "linkedinUrl", "name", "company"]);
-      const email = optionalText(params, "email", 320);
-      const phone = optionalText(params, "phone", 40);
+      const params = checkedParams(raw, ["linkedinUrl", "name", "company", "location"]);
       const profile = optionalText(params, "linkedinUrl", 1_000);
       const name = optionalText(params, "name", 200);
       const company = optionalText(params, "company", 200);
-      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        throw new GoatActionInvalidParamsError('"email" is not a valid email address.');
+      const location = optionalText(params, "location", 200);
+      if (name && !/\S+\s+\S+/.test(name)) {
+        throw new GoatActionInvalidParamsError('"name" must include at least first and last name.');
       }
       const canonicalLinks = profile ? [linkedinUrl(profile, "person")] : [];
-      if (!email && !phone && !profile && !(name && company)) {
+      if (!profile && !(name && (company || location))) {
         throw new GoatActionInvalidParamsError(
-          "Provide email, phone, linkedinUrl, or both name and company.",
+          "Provide linkedinUrl, or provide name with company or location.",
         );
       }
       return {
         providerInput: compact({
-          email,
-          phone,
           profile: profile ? canonicalLinks[0] : undefined,
           name,
           company,
-          include_if_matched: true,
+          location,
+          min_likelihood: 6,
+          required: "work_email",
+          titlecase: true,
+          data_include: PDL_PERSON_EMAIL_DATA_INCLUDE,
         }),
         resultLimit: 1,
         canonicalLinks,
       };
     },
+    mapOutput: (output) => shapePdlPersonEmailOutput(output),
   },
   {
     id: "lead.search_prospects",
@@ -1172,6 +1258,10 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
   },
 ];
 
+export const MANAGED_CAPABILITY_ACTIONS_BY_ID = new Map(
+  MANAGED_CAPABILITY_ACTIONS.map((action) => [action.id, action]),
+);
+
 export function managedCapabilityActionsForSource(source: GoatManagedCapabilitySource) {
   return MANAGED_CAPABILITY_ACTIONS.filter((action) => action.source === source);
 }
@@ -1208,12 +1298,25 @@ export function managedCapabilityContractProbeParams(id: string): Record<string,
   if (id === "instagram.list_hashtag_posts") return { query: "#ai" };
   if (id === "tiktok.get_search_trends") return {};
   if (id === "tiktok.get_hashtag_trends") return { country: "US" };
-  if (id === "lead.enrich_person") return { email: "ada@example.com" };
+  if (id === "lead.find_person_email") {
+    return { name: "Ada Lovelace", company: "Analytical Engines" };
+  }
   if (id === "lead.get_linkedin_contact") {
     return { url: "https://www.linkedin.com/in/ada-lovelace" };
   }
   if (id === "lead.list_company_employees") {
     return { companyUrl: "https://www.linkedin.com/company/openai" };
+  }
+  if (id === "youtube.get_transcript") {
+    return {
+      video: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    };
+  }
+  if (id === "youtube.find_in_transcript") {
+    return {
+      video: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      query: "never gonna give you up",
+    };
   }
   if (id.startsWith("linkedin.")) {
     if (id.includes("company")) {
@@ -1470,6 +1573,109 @@ function youtubeVideoAction(
       };
     },
   };
+}
+
+function youtubeTranscriptAction(): ManagedCapabilityActionSpec {
+  return {
+    id: "youtube.get_transcript",
+    source: "youtube",
+    description:
+      "Get the complete plain-text transcript of one public YouTube video. Use this when the entire transcript is needed; use youtube.find_in_transcript for one quote, sponsor, person, or topic.",
+    params: YOUTUBE_TRANSCRIPT_PARAMS,
+    provider: "apify",
+    endpoint: "/starvibe/youtube-video-transcript",
+    priceType: "PER_RESULT",
+    executionMode: "async",
+    inputLocation: "body",
+    maxActionResultChars: MAX_EXPANDED_ACTION_RESULT_CHARS,
+    mapInput: (raw) => {
+      const input = youtubeTranscriptInput(raw);
+      return {
+        providerInput: compact({
+          youtube_url: input.video.url,
+          language: input.language,
+        }),
+        resultLimit: 1,
+        payloadArrayLimit: YOUTUBE_TRANSCRIPT_PAYLOAD_ARRAY_LIMIT,
+        payloadStringLimit: MAX_CAPABILITY_PAYLOAD_STRING_CHARS,
+        discoverPayloadLinks: false,
+        canonicalLinks: [input.video.url],
+      };
+    },
+    mapOutput: (output, raw) => {
+      const input = youtubeTranscriptInput(raw);
+      return shapeYoutubeTranscriptOutput(output, input.video.url);
+    },
+  };
+}
+
+function youtubeTranscriptSearchAction(): ManagedCapabilityActionSpec {
+  return {
+    id: "youtube.find_in_transcript",
+    source: "youtube",
+    description:
+      "Find a phrase anywhere in a public YouTube video's full transcript and return bounded timestamped excerpts around each match. Use this for sponsor reads, quotes, named topics, or other specific moments instead of downloading an unbounded transcript.",
+    params: YOUTUBE_TRANSCRIPT_SEARCH_PARAMS,
+    provider: "apify",
+    endpoint: "/starvibe/youtube-video-transcript",
+    priceType: "PER_RESULT",
+    executionMode: "async",
+    inputLocation: "body",
+    mapInput: (raw) => {
+      const input = youtubeTranscriptSearchInput(raw);
+      return {
+        providerInput: compact({
+          youtube_url: input.video.url,
+          language: input.language,
+        }),
+        resultLimit: 1,
+        payloadArrayLimit: YOUTUBE_TRANSCRIPT_PAYLOAD_ARRAY_LIMIT,
+        canonicalLinks: [input.video.url],
+      };
+    },
+    mapOutput: (output, raw) => {
+      const input = youtubeTranscriptSearchInput(raw);
+      return shapeYoutubeTranscriptSearchOutput(output, {
+        videoUrl: input.video.url,
+        query: input.query,
+        contextSeconds: input.contextSeconds,
+        maxMatches: input.maxMatches,
+      });
+    },
+  };
+}
+
+function youtubeTranscriptInput(raw: Record<string, unknown>) {
+  const params = checkedParams(raw, ["video", "language"]);
+  return {
+    video: parseContentIdentity(requiredText(params, "video", 1_000), "youtube_video"),
+    language: youtubeTranscriptLanguage(params),
+  };
+}
+
+function youtubeTranscriptSearchInput(raw: Record<string, unknown>) {
+  const params = checkedParams(raw, ["video", "query", "language", "contextSeconds", "maxMatches"]);
+  const query = requiredText(params, "query", 200);
+  if (!/[\p{L}\p{N}]/u.test(query)) {
+    throw new GoatActionInvalidParamsError('"query" must contain at least one letter or number.');
+  }
+  return {
+    video: parseContentIdentity(requiredText(params, "video", 1_000), "youtube_video"),
+    query,
+    language: youtubeTranscriptLanguage(params),
+    contextSeconds: integerParam(params, "contextSeconds", 15, 120, 60),
+    maxMatches: integerParam(params, "maxMatches", 1, 3, 3),
+  };
+}
+
+function youtubeTranscriptLanguage(params: Record<string, unknown>) {
+  const language = optionalText(params, "language", 2);
+  if (language && !/^[a-z]{2}$/.test(language)) {
+    throw new GoatActionInvalidParamsError(
+      '"language" must be a lowercase two-letter ISO 639-1 code.',
+    );
+  }
+  return language;
 }
 
 function youtubeVideoListAction(

@@ -9,6 +9,7 @@ export const PLATFORM_FEE_BPS = 2000;
 
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;
+const MODEL_PRICING_VERSION = "2026-07-29.standard.2";
 
 type PricingProvider =
   | "openai"
@@ -21,8 +22,10 @@ type PricingProvider =
   | "xai"
   | "zai";
 
+type BillableModelId = AgentModelId | "google/gemini-3.1-flash-lite";
+
 type ModelPricing = {
-  model: AgentModelId;
+  model: BillableModelId;
   provider: PricingProvider;
   inputUsdMicrosPerMillion: number;
   cachedInputUsdMicrosPerMillion: number;
@@ -74,7 +77,7 @@ export type WorkspaceUsageDebitInput = {
 // prices: when verifying or changing an entry, note it as
 // `// verified YYYY-MM-DD` on the entry and bump the pricingVersion below —
 // a stale entry silently misprices real debits.
-const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
+const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
   "openai/gpt-5.6-sol": {
     model: "openai/gpt-5.6-sol",
     provider: "openai",
@@ -202,6 +205,24 @@ const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
     cachedInputUsdMicrosPerMillion: 30_000,
     cacheWriteUsdMicrosPerMillion: 250_000,
     outputUsdMicrosPerMillion: 1_500_000,
+  },
+  // verified 2026-07-29 against Google's published Gemini API rates
+  "google/gemini-3.1-flash-lite": {
+    model: "google/gemini-3.1-flash-lite",
+    provider: "google",
+    inputUsdMicrosPerMillion: 250_000,
+    cachedInputUsdMicrosPerMillion: 30_000,
+    cacheWriteUsdMicrosPerMillion: 250_000,
+    outputUsdMicrosPerMillion: 1_500_000,
+  },
+  // verified 2026-07-29 against DeepSeek's published rates and Vercel AI Gateway route
+  "deepseek/deepseek-v4-pro": {
+    model: "deepseek/deepseek-v4-pro",
+    provider: "deepseek",
+    inputUsdMicrosPerMillion: 435_000,
+    cachedInputUsdMicrosPerMillion: 3_625,
+    cacheWriteUsdMicrosPerMillion: 435_000,
+    outputUsdMicrosPerMillion: 870_000,
   },
   "deepseek/deepseek-v4-flash": {
     model: "deepseek/deepseek-v4-flash",
@@ -513,7 +534,7 @@ export function calculateModelUsageCost(input: UsageCostInput): UsageCostResult 
       kind: "model_usage",
       modelName: input.modelName,
       provider: pricing.provider,
-      pricingVersion: "2026-05-22.standard",
+      pricingVersion: MODEL_PRICING_VERSION,
       platformFeeBps: PLATFORM_FEE_BPS,
       longContextApplied: longContextMultiplier.input !== 1 || longContextMultiplier.output !== 1,
       tokenCounts: {
@@ -596,7 +617,7 @@ export function calculateHostedToolUsageCost(input: {
       // priced from that catalog (per upstream request, at metering time).
       pricingVersion:
         costSource === "platform_model_pricing" || costSource === "broker_metered"
-          ? "2026-05-22.standard"
+          ? MODEL_PRICING_VERSION
           : "provider-reported.2026-05-22",
       platformFeeBps: PLATFORM_FEE_BPS,
     },

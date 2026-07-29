@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
-import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
   appendGoatStripeIntegrationStatus,
   connectGoatStripeIntegration,
@@ -61,11 +60,6 @@ export async function GET(request: Request) {
       workspaceId: current.workspace.id,
       tokens,
       identity: validation.identity,
-    });
-    await captureGoatIntegrationAddedAnalytics({
-      userWorkosId: current.user.workosUserId,
-      workspaceId: current.workspace.id,
-      provider: "stripe",
     });
     return NextResponse.redirect(
       new URL(appendGoatStripeIntegrationStatus(state.returnTo, "connected"), url),

@@ -1,10 +1,15 @@
 import { getDb } from "@opencompany/db/client";
-import { goatBrainSources, goatBrainToolRuns } from "@opencompany/db/goat-schema";
+import {
+  goatBrainDocuments,
+  goatBrainSources,
+  goatBrainToolRuns,
+} from "@opencompany/db/goat-schema";
 import { and, count, eq, gte, inArray, ne } from "drizzle-orm";
 import { GOAT_BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
 
 export type GoatBrainOverviewStats = {
   windowStartedAt: string;
+  itemsAddedLast7Days: number;
   retrievalsLast7Days: number;
   activeSources: number;
 };
@@ -20,7 +25,13 @@ export async function getGoatBrainOverviewStats(
   db = getDb(),
 ): Promise<GoatBrainOverviewStats> {
   const cutoff = new Date(now.getTime() - SEVEN_DAYS_MS);
-  const [[retrievals], [sources]] = await Promise.all([
+  const [[itemsAdded], [retrievals], [sources]] = await Promise.all([
+    db
+      .select({ value: count() })
+      .from(goatBrainDocuments)
+      .where(
+        and(eq(goatBrainDocuments.brainRef, brainRef), gte(goatBrainDocuments.createdAt, cutoff)),
+      ),
     db
       .select({ value: count() })
       .from(goatBrainToolRuns)
@@ -46,6 +57,7 @@ export async function getGoatBrainOverviewStats(
 
   return {
     windowStartedAt: cutoff.toISOString(),
+    itemsAddedLast7Days: itemsAdded?.value ?? 0,
     retrievalsLast7Days: retrievals?.value ?? 0,
     activeSources: sources?.value ?? 0,
   };

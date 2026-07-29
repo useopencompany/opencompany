@@ -1,9 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { normalizeGoatBrainId } from "../../goat-brain/src/index";
+import {
+  defaultGoatBrainFolderManifestEntries,
+  normalizeGoatBrainId,
+} from "../../goat-brain/src/index";
 import { getDb } from "./client";
 import { GOAT_STARTER_CREDIT_USD_CENTS } from "./goat-billing-constants";
-import { seedDefaultGoatBrainFolders } from "./goat-brain-files";
+import { hashGoatBrainContent, seedDefaultGoatBrainFolders } from "./goat-brain-files";
 import { grantGoatStarterCredit } from "./goat-credits";
 import {
   type GoatBrain,
@@ -13,6 +16,7 @@ import {
   type GoatUser,
   type GoatWorkspace,
   type GoatWorkspaceRole,
+  goatBrainFolders,
   goatBrainMembers,
   goatBrains,
   goatOnboarding,
@@ -307,6 +311,86 @@ export async function createDefaultGoatWorkspaceForUser(
       error,
     );
   }
+}
+
+// Creates the local resources for a user-created WorkOS organization. The
+// workspace, admin membership, default brain, and required folder rows are one
+// Neon batch so a failed provision never leaves a partially usable workspace.
+export async function createGoatWorkspaceForUser(
+  input: {
+    workspaceId: string;
+    workosOrganizationId: string;
+    userWorkosId: string;
+    name: string;
+  },
+  options: { db?: DbClient } = {},
+): Promise<{ workspace: GoatWorkspace; brain: GoatBrain }> {
+  const db = options.db ?? getDb();
+  const name = input.name.trim();
+  if (!name) throw new Error("Workspace name cannot be empty.");
+
+  const brainId = newGoatBrainId(DEFAULT_GOAT_BRAIN_SLUG);
+  const workspaceInsert = db
+    .insert(goatWorkspaces)
+    .values({
+      id: input.workspaceId,
+      workosOrganizationId: input.workosOrganizationId,
+      name,
+      createdByWorkosId: input.userWorkosId,
+    })
+    .returning();
+  const membershipInsert = db.insert(goatWorkspaceMembers).values({
+    id: `goat_wsm_${randomUUID()}`,
+    workspaceId: input.workspaceId,
+    userWorkosId: input.userWorkosId,
+    role: "admin",
+  });
+  const brainInsert = db
+    .insert(goatBrains)
+    .values({
+      id: brainId,
+      workspaceId: input.workspaceId,
+      name: DEFAULT_GOAT_BRAIN_NAME,
+      slug: DEFAULT_GOAT_BRAIN_SLUG,
+      visibility: "workspace",
+      createdByWorkosId: input.userWorkosId,
+    })
+    .returning();
+  const folderInserts = defaultGoatBrainFolderManifestEntries().map((folder) =>
+    db.insert(goatBrainFolders).values({
+      id: `goat_brain_folder_${hashGoatBrainContent(`${brainId}:${folder.path}`).slice(0, 24)}`,
+      userWorkosId: input.userWorkosId,
+      brainRef: brainId,
+      path: folder.path,
+      source: folder.source,
+    }),
+  );
+
+  const [workspaceRows, , brainRows] = await db.batch([
+    workspaceInsert,
+    membershipInsert,
+    brainInsert,
+    ...folderInserts,
+  ]);
+  const workspace = workspaceRows[0];
+  const brain = brainRows[0];
+  if (!workspace || !brain) throw new Error("Could not persist the Goat workspace.");
+
+  // Starter-credit writes are idempotent and deliberately non-blocking: a
+  // billing outage must not turn a successfully created organization into a
+  // partially cleaned-up workspace.
+  try {
+    await grantGoatStarterCredit({
+      workspaceId: workspace.id,
+      userWorkosId: input.userWorkosId,
+      amountCents: GOAT_STARTER_CREDIT_USD_CENTS,
+      db,
+    });
+  } catch (error) {
+    console.warn(`Failed to grant the starter credit for Goat workspace ${workspace.id}.`, error);
+  }
+
+  return { workspace, brain };
 }
 
 // Adopts local memberships for WorkOS organizations the user already belongs

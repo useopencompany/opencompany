@@ -8,23 +8,26 @@ import {
   Check,
   ChevronsUpDown,
   House,
+  ListTodo,
   Loader2,
   PanelLeft,
   Pin,
   PlugZap,
+  Plus,
   ScrollText,
   Settings,
+  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { type MouseEventHandler, useState, useTransition } from "react";
+import { type FormEvent, type MouseEventHandler, useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
 import { GoatSidebarFeedback } from "@/components/GoatSidebarFeedback";
 import { closeGoatChatSessionAction, setGoatChatPinnedAction } from "@/lib/chat-actions";
 import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
 import type { GoatChatSummaryView } from "@/lib/chat-ui";
-import { switchGoatWorkspaceAction } from "@/lib/workspace-actions";
+import { createGoatWorkspaceAction, switchGoatWorkspaceAction } from "@/lib/workspace-actions";
 
 function GoatIcon({ className }: { className?: string }) {
   return (
@@ -100,12 +103,14 @@ export function GoatSidebar({
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
-  const { mcpSetup, user } = useGoatAppData();
+  const { featureFlags, mcpSetup, user } = useGoatAppData();
   const pathname = usePathname();
   const mcpSetupActive = !mcpSetup.completedAt && pathname === "/settings/mcp";
   const settingsActive =
     (pathname === "/settings" || pathname.startsWith("/settings/")) && !mcpSetupActive;
   const homeActive = pathname === "/";
+  const tasksActive = pathname === "/tasks" || pathname.startsWith("/tasks/");
+  const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
 
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const displayName = name || user.email;
@@ -155,6 +160,17 @@ export function GoatSidebar({
               window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT));
             }}
           />
+          {featureFlags.taskSpawning ? (
+            <>
+              <SidebarNavRow href="/tasks" icon={ListTodo} label="Tasks" active={tasksActive} />
+              <SidebarNavRow
+                href="/workflows"
+                icon={Workflow}
+                label="Workflows"
+                active={workflowsActive}
+              />
+            </>
+          ) : null}
           {!mcpSetup.completedAt ? (
             <SidebarNavRow
               href="/settings/mcp"
@@ -447,42 +463,65 @@ function GoatWorkspaceSwitcher() {
   const { workspace, workspaces } = useGoatAppData();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const closePicker = () => {
+    setOpen(false);
+    setCreateOpen(false);
+    setName("");
+    setError(null);
+  };
 
   const switchWorkspace = (workspaceId: string) => {
     if (workspaceId === workspace.id) {
-      setOpen(false);
+      closePicker();
       return;
     }
+    setError(null);
     startTransition(async () => {
       const result = await switchGoatWorkspaceAction(workspaceId);
       if (!result.ok) {
-        toast.error(result.error);
+        setError(result.error);
         return;
       }
-      setOpen(false);
+      closePicker();
       router.push("/");
       router.refresh();
     });
   };
 
-  if (workspaces.length <= 1) {
-    return (
-      <Link
-        href="/settings/workspace"
-        prefetch
-        className="group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        <GoatIcon className="h-3.5 w-3.5 shrink-0 text-ink/60" />
-        <span className="min-w-0 flex-1 truncate font-medium leading-tight">{workspace.name}</span>
-      </Link>
-    );
-  }
+  const createWorkspace = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    startTransition(async () => {
+      const result = await createGoatWorkspaceAction(name);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      closePicker();
+      router.push("/");
+      router.refresh();
+    });
+  };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) {
+          setOpen(true);
+          return;
+        }
+        closePicker();
+      }}
+    >
       <PopoverTrigger
         type="button"
+        aria-label={`Switch organization. Current organization: ${workspace.name}`}
         disabled={isPending}
         className="group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60 data-[popup-open]:bg-surface-active data-[popup-open]:text-ink"
       >
@@ -506,6 +545,7 @@ function GoatWorkspaceSwitcher() {
               <button
                 type="button"
                 key={entry.id}
+                aria-current={active ? "true" : undefined}
                 disabled={isPending}
                 onClick={() => switchWorkspace(entry.id)}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
@@ -525,6 +565,62 @@ function GoatWorkspaceSwitcher() {
             );
           })}
         </div>
+        <div className="my-1 h-px bg-border" />
+        {createOpen ? (
+          <form onSubmit={createWorkspace} className="space-y-2 p-1">
+            <label className="sr-only" htmlFor="new-goat-organization-name">
+              Organization name
+            </label>
+            <input
+              id="new-goat-organization-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              autoFocus
+              maxLength={80}
+              placeholder="Organization name"
+              disabled={isPending}
+              className="h-8 w-full rounded-md border border-border bg-canvas px-2 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong focus:ring-2 focus:ring-ink/[0.04] disabled:opacity-60"
+            />
+            <div className="flex items-center gap-1.5">
+              <button
+                type="submit"
+                disabled={isPending}
+                className="inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md bg-ink px-2 text-[12px] font-medium text-canvas transition-opacity disabled:opacity-60"
+              >
+                {isPending ? <Loader2 size={12} className="animate-spin" /> : null}
+                Create
+              </button>
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => {
+                  setCreateOpen(false);
+                  setError(null);
+                }}
+                className="h-7 rounded-md px-2 text-[12px] font-medium text-ink-muted hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setCreateOpen(true);
+              setError(null);
+            }}
+            className="flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-[12.5px] font-medium tracking-[-0.005em] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <Plus size={13} strokeWidth={2} className="shrink-0" />
+            <span className="min-w-0 flex-1 truncate">Create organization...</span>
+          </button>
+        )}
+        {error ? (
+          <p role="alert" className="px-2 pb-1 pt-1 text-[11.5px] leading-4 text-danger">
+            {error}
+          </p>
+        ) : null}
       </PopoverContent>
     </Popover>
   );

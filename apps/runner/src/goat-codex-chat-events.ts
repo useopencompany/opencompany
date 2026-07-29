@@ -53,8 +53,12 @@ export function createGoatCodexChatProjector(input: {
   target: GoatCodexChatProjectorTarget;
   redact: (value: string) => string;
   initialParts?: CodexUiMessagePart[];
+  // Engines that don't speak the codex app-server protocol (Claude Code) inject their
+  // own raw-event → normalized-event translation; everything downstream is shared.
+  normalizeEvent?: (raw: Record<string, unknown>) => CodexAppServerNormalizedEvent[];
 }) {
   const { target, redact } = input;
+  const normalizeEvent = input.normalizeEvent ?? normalizeCodexAppServerEvent;
   let parts: CodexUiMessagePart[] = input.initialParts ?? [];
   let turnError: string | null = null;
   let auditFailureReported = false;
@@ -371,7 +375,7 @@ export function createGoatCodexChatProjector(input: {
     push(rawEvents: Record<string, unknown>[]) {
       return serializeProjection(async () => {
         for (const raw of rawEvents) {
-          for (const event of normalizeCodexAppServerEvent(raw)) {
+          for (const event of normalizeEvent(raw)) {
             await handleEvent(event);
           }
         }

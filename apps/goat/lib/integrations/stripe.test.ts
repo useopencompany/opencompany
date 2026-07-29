@@ -36,7 +36,7 @@ import {
   refreshGoatStripeOAuthTokens,
   validateGoatStripeOAuthAccess,
   verifyGoatStripeOAuthState,
-} from "@/lib/integrations/stripe";
+} from "@opencompany/goat-agent/integrations/stripe";
 
 beforeEach(() => {
   persistenceMocks.insertedValues = undefined;

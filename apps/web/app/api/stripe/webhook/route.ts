@@ -1,3 +1,4 @@
+import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
   releasePendingForWorkspace,
@@ -6,6 +7,7 @@ import {
 } from "@opencompany/db/goat-billing";
 import {
   fulfillGoatTopUpCheckoutSession,
+  goatUsdMicrosToCents,
   markGoatCheckoutRecordFailed,
   recordGoatAutoRefillCredit,
 } from "@opencompany/db/goat-credits";
@@ -73,6 +75,16 @@ export async function POST(request: Request) {
           await captureGoatTopUpPaymentMethod(session).catch((error) => {
             console.error(`Failed to capture the Goat top-up payment method.`, error);
           });
+          await captureGoatServerEvent(
+            "billing_topup_completed",
+            session.metadata?.userWorkosId ?? workspaceId,
+            {
+              workspace_id: workspaceId,
+              topup_type: "manual",
+              amount_cents: result.amountCents,
+              balance_cents: result.balanceCents,
+            },
+          );
           await captureServerEvent("goat_billing_topup_completed", workspaceId, {
             workspace_id: workspaceId,
             checkout_record_id: result.checkoutRecordId,
@@ -143,11 +155,19 @@ async function handleGoatAutoRefillPaymentIntentSucceeded(intent: Stripe.Payment
   const workspaceId = intent.metadata?.goatWorkspaceId;
   const amountCents = Number(intent.metadata?.amountCents);
   if (!workspaceId || !Number.isSafeInteger(amountCents) || amountCents <= 0) return;
-  await recordGoatAutoRefillCredit({
+  const credit = await recordGoatAutoRefillCredit({
     workspaceId,
     amountCents,
     paymentIntentId: intent.id,
   });
+  if (credit.ok) {
+    await captureGoatServerEvent("billing_topup_completed", workspaceId, {
+      workspace_id: workspaceId,
+      topup_type: "auto_refill",
+      amount_cents: amountCents,
+      balance_cents: goatUsdMicrosToCents(credit.balanceUsdMicros),
+    });
+  }
   await settleGoatAutoRefill({ workspaceId }).catch(() => undefined);
   await releasePendingForWorkspace(workspaceId).catch((error) => {
     console.error(`Failed to release paused ingestion for ${workspaceId}.`, error);

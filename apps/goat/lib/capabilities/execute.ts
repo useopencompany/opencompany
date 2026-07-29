@@ -2,12 +2,15 @@ import "server-only";
 
 import { calculatePlatformFeeUsdMicros, USD_MICROS_PER_DOLLAR } from "@opencompany/billing";
 import {
-  consumeGoatCapabilityApproval,
+  consumeGoatCapabilityApprovalByToolCall,
   createGoatCapabilityRun,
+  getGoatCapabilitySessionBudgetUsdMicros,
   isGoatWorkspaceCapabilityEnabled,
+  markGoatCapabilityRunSettlementFailure,
   markGoatCapabilityRunStarted,
   markGoatCapabilityRunStopping,
   settleGoatCapabilityRun,
+  sumGoatCapabilitySessionSpendUsdMicros,
 } from "@opencompany/db/goat-capabilities";
 import { getGoatCreditBalanceUsdMicros, recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import type { GoatCapabilityRun } from "@opencompany/db/goat-schema";
@@ -17,9 +20,10 @@ import {
   recordGoatHistogram,
 } from "@opencompany/goat-observability";
 import {
-  GoatActionApprovalRequiredError,
   type GoatActionExecuteContext,
   GoatActionExecutionError,
+  type GoatCapabilityQuote,
+  type GoatCapabilityTurnState,
 } from "@/lib/actions/types";
 import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
@@ -35,13 +39,13 @@ import {
 import { sanitizeCapabilityResult } from "@/lib/capabilities/sanitize";
 
 export const GOAT_CAPABILITY_APPROVAL_EXPIRES_MS = 15 * 60 * 1_000;
-export const GOAT_CAPABILITY_AUTO_ACTION_MAX_USD_MICROS = 100_000;
-export const GOAT_CAPABILITY_AUTO_TURN_MAX_USD_MICROS = 500_000;
+export const GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN = 6;
 export const GOAT_CAPABILITY_POLL_MAX_MS = 120_000;
 export const GOAT_CAPABILITY_ACTION_TIMEOUT_MS = 125_000;
 export const assertInspectionMatches = assertManagedCapabilityInspection;
 
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
+const GOAT_ACTION_QUOTE_TIMEOUT_MS = 20_000;
 
 export function isGoatManagedCapabilitiesKilled() {
   return process.env.GOAT_MANAGED_CAPABILITIES_KILL_SWITCH === "true";
@@ -54,6 +58,99 @@ export function isGoatManagedCapabilityActionKilled(actionId: string) {
       .map((value) => value.trim())
       .filter(Boolean),
   ).has(actionId);
+}
+
+export async function evaluateManagedCapabilityApproval(input: {
+  spec: ManagedCapabilityActionSpec;
+  params: Record<string, unknown>;
+  toolCallId: string;
+  workspaceId: string;
+  userWorkosId: string;
+  chatSessionId: string;
+  turnState: GoatCapabilityTurnState;
+  client?: MonidClient;
+  signal?: AbortSignal;
+  now?: () => Date;
+}): Promise<boolean> {
+  try {
+    if (isGoatManagedCapabilitiesKilled() || isGoatManagedCapabilityActionKilled(input.spec.id)) {
+      return false;
+    }
+    const client = managedCapabilityClient(input.client);
+    if (
+      !(await isGoatWorkspaceCapabilityEnabled({
+        workspaceId: input.workspaceId,
+        source: input.spec.source,
+      }))
+    ) {
+      return false;
+    }
+
+    const inputHash = hashCapabilityInput({
+      action: input.spec.id,
+      params: input.params,
+    });
+    const cached = input.turnState.quotesByToolCallId.get(input.toolCallId);
+    if (cached) {
+      return cached.inputHash === inputHash && cached.decision === "approval_required";
+    }
+
+    const mapped = input.spec.mapInput(input.params);
+    const quoteTimeoutSignal = AbortSignal.timeout(GOAT_ACTION_QUOTE_TIMEOUT_MS);
+    const inspection = await client.inspect(
+      { provider: input.spec.provider, endpoint: input.spec.endpoint },
+      input.signal ? AbortSignal.any([input.signal, quoteTimeoutSignal]) : quoteTimeoutSignal,
+    );
+    assertInspectionMatches(input.spec, mapped, inspection);
+    const quote = capabilityQuote(inputHash, inspection, mapped.resultLimit);
+    const [budgetUsdMicros, spentUsdMicros] = await Promise.all([
+      getGoatCapabilitySessionBudgetUsdMicros(input.workspaceId),
+      sumGoatCapabilitySessionSpendUsdMicros({
+        workspaceId: input.workspaceId,
+        chatSessionId: input.chatSessionId,
+        excludeToolCallIds: input.turnState.admittedToolCallIds,
+      }),
+    ]);
+    if (
+      spentUsdMicros + input.turnState.quotedTotalUsdMicros + quote.quoteTotalCostUsdMicros <=
+      budgetUsdMicros
+    ) {
+      admitCapabilityQuote(input.turnState, input.toolCallId, {
+        ...quote,
+        decision: "auto",
+      });
+      return false;
+    }
+
+    const createdAt = input.now?.() ?? new Date();
+    const run = await createGoatCapabilityRun({
+      workspaceId: input.workspaceId,
+      userWorkosId: input.userWorkosId,
+      chatSessionId: input.chatSessionId,
+      toolCallId: input.toolCallId,
+      source: input.spec.source,
+      action: input.spec.id,
+      inputHash,
+      provider: input.spec.provider,
+      endpoint: input.spec.endpoint,
+      status: "awaiting_approval",
+      quoteProviderCostUsdMicros: quote.quoteProviderCostUsdMicros,
+      quotePlatformFeeUsdMicros: quote.quotePlatformFeeUsdMicros,
+      quoteTotalCostUsdMicros: quote.quoteTotalCostUsdMicros,
+      approvalExpiresAt: new Date(createdAt.getTime() + GOAT_CAPABILITY_APPROVAL_EXPIRES_MS),
+      now: createdAt,
+    });
+    input.turnState.quotesByToolCallId.set(input.toolCallId, {
+      ...quote,
+      decision: "approval_required",
+      runId: run.id,
+    });
+    return true;
+  } catch {
+    // AI SDK treats needsApproval failures as stream errors. Execution owns
+    // user-visible capability errors, so the gate always falls through.
+    return false;
+  }
 }
 
 export async function executeManagedCapability(input: {
@@ -76,16 +173,7 @@ export async function executeManagedCapability(input: {
       "This paid capability action is temporarily unavailable.",
     );
   }
-  const apiKey = process.env.MONID_API_KEY?.trim();
-  const client =
-    input.client ??
-    new MonidClient({
-      apiKey:
-        apiKey ??
-        (() => {
-          throw new GoatActionExecutionError("disabled", "Paid capabilities are not configured.");
-        })(),
-    });
+  const client = managedCapabilityClient(input.client);
   const now = input.now ?? (() => new Date());
   const workspaceId = input.context.workspaceId;
   const chatSessionId = input.context.chatSessionId;
@@ -112,108 +200,117 @@ export async function executeManagedCapability(input: {
     action: input.spec.id,
     params: input.params,
   });
-
-  const inspection = await client.inspect(
-    { provider: input.spec.provider, endpoint: input.spec.endpoint },
-    input.context.signal,
-  );
-  assertInspectionMatches(input.spec, mapped, inspection);
-  const quoteProviderCostUsdMicros = calculateMaximumProviderQuoteUsdMicros(
-    inspection,
-    mapped.resultLimit,
-  );
-  const quotePlatformFeeUsdMicros = calculatePlatformFeeUsdMicros(quoteProviderCostUsdMicros);
-  const quoteTotalCostUsdMicros = quoteProviderCostUsdMicros + quotePlatformFeeUsdMicros;
+  const toolCallId = input.context.toolCallId ?? "";
+  const cachedQuote = toolCallId ? turnState.quotesByToolCallId.get(toolCallId) : undefined;
+  if (cachedQuote && cachedQuote.inputHash !== inputHash) {
+    throw new GoatActionExecutionError(
+      "provider_error",
+      "The paid capability input changed after it was quoted.",
+    );
+  }
+  let quote =
+    cachedQuote?.inputHash === inputHash
+      ? cachedQuote
+      : await inspectCapabilityQuote({
+          spec: input.spec,
+          mapped,
+          inputHash,
+          client,
+          signal: input.context.signal,
+        });
 
   const balanceUsdMicros = await getGoatCreditBalanceUsdMicros(workspaceId);
-  if (balanceUsdMicros < quoteTotalCostUsdMicros) {
+  if (balanceUsdMicros < quote.quoteTotalCostUsdMicros) {
     throw new GoatActionExecutionError(
       "insufficient_credits",
       "This workspace does not have enough credits for the maximum quoted cost.",
     );
   }
 
-  turnState.quotedTotalUsdMicros += quoteTotalCostUsdMicros;
-  const requiresApproval =
-    quoteTotalCostUsdMicros > GOAT_CAPABILITY_AUTO_ACTION_MAX_USD_MICROS ||
-    turnState.quotedTotalUsdMicros > GOAT_CAPABILITY_AUTO_TURN_MAX_USD_MICROS;
-
-  const willExecute = Boolean(input.context.capabilityApprovalRunId) || !requiresApproval;
-  if (input.spec.executionMode === "async" && willExecute) {
-    if (turnState.asyncRunStarted) {
-      throw new GoatActionExecutionError(
-        "call_budget",
-        "Only one long-running paid capability can be started in a turn.",
-      );
+  try {
+    claimAsyncCapabilityRun(input.spec, turnState);
+  } catch (error) {
+    if (toolCallId && cachedQuote?.decision === "auto") {
+      releaseCapabilityQuote(turnState, toolCallId);
     }
-    // Claim synchronously before the next await so parallel tool calls cannot
-    // both pass the per-turn long-run gate.
-    turnState.asyncRunStarted = true;
+    throw error;
   }
 
   let auditRun: GoatCapabilityRun;
-  if (input.context.capabilityApprovalRunId) {
-    const approved = await consumeGoatCapabilityApproval({
-      id: input.context.capabilityApprovalRunId,
-      userWorkosId: input.context.userWorkosId,
-      workspaceId,
-      chatSessionId,
-      action: input.spec.id,
-      inputHash,
-      quoteTotalCostUsdMicros,
-      now: now(),
-    });
-    if (!approved) {
-      throw new GoatActionExecutionError(
-        "provider_error",
-        "This approval is expired, already used, belongs to another request, or no longer covers the current quote.",
-      );
-    }
-    auditRun = approved;
-  } else if (requiresApproval) {
-    const createdAt = now();
+  if (cachedQuote?.inputHash === inputHash && cachedQuote.decision === "auto") {
     auditRun = await createGoatCapabilityRun({
       workspaceId,
       userWorkosId: input.context.userWorkosId,
       chatSessionId,
-      ...(input.context.toolCallId ? { toolCallId: input.context.toolCallId } : {}),
-      source: input.spec.source,
-      action: input.spec.id,
-      inputHash,
-      provider: input.spec.provider,
-      endpoint: input.spec.endpoint,
-      status: "awaiting_approval",
-      quoteProviderCostUsdMicros,
-      quotePlatformFeeUsdMicros,
-      quoteTotalCostUsdMicros,
-      approvalExpiresAt: new Date(createdAt.getTime() + GOAT_CAPABILITY_APPROVAL_EXPIRES_MS),
-      now: createdAt,
-    });
-    throw new GoatActionApprovalRequiredError({
-      runId: auditRun.id,
-      source: input.spec.source,
-      action: input.spec.id,
-      maxCostUsdMicros: quoteTotalCostUsdMicros,
-      expiresAt: auditRun.approvalExpiresAt!.toISOString(),
-      status: "awaiting_approval",
-    });
-  } else {
-    auditRun = await createGoatCapabilityRun({
-      workspaceId,
-      userWorkosId: input.context.userWorkosId,
-      chatSessionId,
-      ...(input.context.toolCallId ? { toolCallId: input.context.toolCallId } : {}),
+      ...(toolCallId ? { toolCallId } : {}),
       source: input.spec.source,
       action: input.spec.id,
       inputHash,
       provider: input.spec.provider,
       endpoint: input.spec.endpoint,
       status: "executing",
-      quoteProviderCostUsdMicros,
-      quotePlatformFeeUsdMicros,
-      quoteTotalCostUsdMicros,
+      quoteProviderCostUsdMicros: quote.quoteProviderCostUsdMicros,
+      quotePlatformFeeUsdMicros: quote.quotePlatformFeeUsdMicros,
+      quoteTotalCostUsdMicros: quote.quoteTotalCostUsdMicros,
       now: now(),
     });
+  } else {
+    const approved = toolCallId
+      ? await consumeGoatCapabilityApprovalByToolCall({
+          toolCallId,
+          userWorkosId: input.context.userWorkosId,
+          workspaceId,
+          chatSessionId,
+          action: input.spec.id,
+          inputHash,
+          quoteTotalCostUsdMicros: quote.quoteTotalCostUsdMicros,
+          now: now(),
+        })
+      : null;
+    if (approved) {
+      auditRun = approved;
+    } else {
+      const [budgetUsdMicros, spentUsdMicros] = await Promise.all([
+        getGoatCapabilitySessionBudgetUsdMicros(workspaceId),
+        sumGoatCapabilitySessionSpendUsdMicros({
+          workspaceId,
+          chatSessionId,
+          excludeToolCallIds: turnState.admittedToolCallIds,
+        }),
+      ]);
+      if (
+        spentUsdMicros + turnState.quotedTotalUsdMicros + quote.quoteTotalCostUsdMicros >
+        budgetUsdMicros
+      ) {
+        releaseAsyncCapabilityRun(input.spec, turnState);
+        throw new GoatActionExecutionError(
+          "approval_required",
+          "This paid lookup still exceeds the session budget. Ask again only if the user wants a fresh approval card.",
+        );
+      }
+      quote = { ...quote, decision: "auto" };
+      if (toolCallId) {
+        admitCapabilityQuote(turnState, toolCallId, quote);
+      } else {
+        turnState.quotedTotalUsdMicros += quote.quoteTotalCostUsdMicros;
+      }
+      auditRun = await createGoatCapabilityRun({
+        workspaceId,
+        userWorkosId: input.context.userWorkosId,
+        chatSessionId,
+        ...(toolCallId ? { toolCallId } : {}),
+        source: input.spec.source,
+        action: input.spec.id,
+        inputHash,
+        provider: input.spec.provider,
+        endpoint: input.spec.endpoint,
+        status: "executing",
+        quoteProviderCostUsdMicros: quote.quoteProviderCostUsdMicros,
+        quotePlatformFeeUsdMicros: quote.quotePlatformFeeUsdMicros,
+        quoteTotalCostUsdMicros: quote.quoteTotalCostUsdMicros,
+        now: now(),
+      });
+    }
   }
 
   let currentRun: MonidRun | null = null;
@@ -264,7 +361,10 @@ export async function executeManagedCapability(input: {
       }).catch(() => undefined);
     }
     if (currentRun && (input.context.signal.aborted || isCapabilityPollTimeout(error))) {
-      await markGoatCapabilityRunStopping({ id: auditRun.id, now: now() }).catch(() => undefined);
+      await markGoatCapabilityRunStopping({
+        id: auditRun.id,
+        now: now(),
+      }).catch(() => undefined);
       await stopRunBestEffort(client, currentRun.runId);
       if (isCapabilityPollTimeout(error)) {
         throw new GoatActionExecutionError(
@@ -297,6 +397,26 @@ export async function executeManagedCapability(input: {
     throw error;
   }
 
+  let payload = currentRun.output;
+  if (input.spec.mapOutput) {
+    try {
+      payload = input.spec.mapOutput(currentRun.output, input.params);
+    } catch (error) {
+      await settleManagedCapabilityRun({
+        auditRun,
+        providerRun: currentRun,
+        forceFailure: {
+          code: "provider_output_invalid",
+          message: "The capability returned data that could not be safely used.",
+        },
+      });
+      if (error instanceof GoatActionExecutionError) throw error;
+      throw new GoatActionExecutionError(
+        "provider_error",
+        "The capability returned data that could not be safely used.",
+      );
+    }
+  }
   const settlement = await settleManagedCapabilityRun({
     auditRun,
     providerRun: currentRun,
@@ -307,8 +427,17 @@ export async function executeManagedCapability(input: {
   return sanitizeCapabilityResult({
     source: input.spec.source,
     action: input.spec.id,
-    payload: currentRun.output,
+    payload,
     expectedLimit: mapped.resultLimit,
+    ...(mapped.payloadArrayLimit === undefined
+      ? {}
+      : { payloadArrayLimit: mapped.payloadArrayLimit }),
+    ...(mapped.payloadStringLimit === undefined
+      ? {}
+      : { payloadStringLimit: mapped.payloadStringLimit }),
+    ...(mapped.discoverPayloadLinks === undefined
+      ? {}
+      : { discoverPayloadLinks: mapped.discoverPayloadLinks }),
     canonicalLinks: mapped.canonicalLinks,
     ...(currentRun.resultCount === undefined ? {} : { resultCount: currentRun.resultCount }),
     totalCostUsdMicros: settlement.totalCostUsdMicros,
@@ -334,6 +463,13 @@ export async function settleManagedCapabilityRun(input: {
   const providerCostUsdMicros = providerRunCostUsdMicros(input.providerRun);
 
   if (providerCostUsdMicros === null) {
+    if (input.forceFailure) {
+      await markGoatCapabilityRunSettlementFailure({
+        id: input.auditRun.id,
+        errorCode: input.forceFailure.code,
+        errorMessage: input.forceFailure.message,
+      });
+    }
     return {
       success,
       totalCostUsdMicros: null,
@@ -438,6 +574,96 @@ export function calculateMaximumProviderQuoteUsdMicros(
   }
   const units = inspection.price.type === "PER_RESULT" ? resultLimit : 1;
   return usdToMicros(inspection.price.amount * units) + usdToMicros(inspection.price.flatFee ?? 0);
+}
+
+function managedCapabilityClient(client?: MonidClient) {
+  if (client) return client;
+  const apiKey = process.env.MONID_API_KEY?.trim();
+  if (!apiKey) {
+    throw new GoatActionExecutionError("disabled", "Paid capabilities are not configured.");
+  }
+  return new MonidClient({ apiKey });
+}
+
+function capabilityQuote(
+  inputHash: string,
+  inspection: MonidInspection,
+  resultLimit: number,
+): Omit<GoatCapabilityQuote, "decision" | "runId"> {
+  const quoteProviderCostUsdMicros = calculateMaximumProviderQuoteUsdMicros(
+    inspection,
+    resultLimit,
+  );
+  const quotePlatformFeeUsdMicros = calculatePlatformFeeUsdMicros(quoteProviderCostUsdMicros);
+  return {
+    inputHash,
+    quoteProviderCostUsdMicros,
+    quotePlatformFeeUsdMicros,
+    quoteTotalCostUsdMicros: quoteProviderCostUsdMicros + quotePlatformFeeUsdMicros,
+  };
+}
+
+async function inspectCapabilityQuote(input: {
+  spec: ManagedCapabilityActionSpec;
+  mapped: ReturnType<ManagedCapabilityActionSpec["mapInput"]>;
+  inputHash: string;
+  client: MonidClient;
+  signal: AbortSignal;
+}) {
+  const inspection = await input.client.inspect(
+    { provider: input.spec.provider, endpoint: input.spec.endpoint },
+    input.signal,
+  );
+  assertInspectionMatches(input.spec, input.mapped, inspection);
+  return {
+    ...capabilityQuote(input.inputHash, inspection, input.mapped.resultLimit),
+    decision: "auto" as const,
+  };
+}
+
+function admitCapabilityQuote(
+  turnState: GoatCapabilityTurnState,
+  toolCallId: string,
+  quote: GoatCapabilityQuote,
+) {
+  if (turnState.quotesByToolCallId.has(toolCallId)) return;
+  turnState.quotedTotalUsdMicros += quote.quoteTotalCostUsdMicros;
+  turnState.admittedToolCallIds.push(toolCallId);
+  turnState.quotesByToolCallId.set(toolCallId, quote);
+}
+
+function releaseCapabilityQuote(turnState: GoatCapabilityTurnState, toolCallId: string) {
+  const quote = turnState.quotesByToolCallId.get(toolCallId);
+  if (!quote) return;
+  turnState.quotesByToolCallId.delete(toolCallId);
+  turnState.admittedToolCallIds = turnState.admittedToolCallIds.filter((id) => id !== toolCallId);
+  turnState.quotedTotalUsdMicros = Math.max(
+    0,
+    turnState.quotedTotalUsdMicros - quote.quoteTotalCostUsdMicros,
+  );
+}
+
+function claimAsyncCapabilityRun(
+  spec: ManagedCapabilityActionSpec,
+  turnState: GoatCapabilityTurnState,
+) {
+  if (spec.executionMode !== "async") return;
+  if (turnState.asyncRunsStarted >= GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN) {
+    throw new GoatActionExecutionError(
+      "call_budget",
+      `Only ${GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
+    );
+  }
+  // Claim before the next await so parallel calls cannot exceed the limit.
+  turnState.asyncRunsStarted += 1;
+}
+
+function releaseAsyncCapabilityRun(
+  spec: ManagedCapabilityActionSpec,
+  turnState: GoatCapabilityTurnState,
+) {
+  if (spec.executionMode !== "async") return;
+  turnState.asyncRunsStarted = Math.max(0, turnState.asyncRunsStarted - 1);
 }
 
 export function providerRunCostUsdMicros(run: MonidRun): number | null {

@@ -124,6 +124,8 @@ Set these in Infisical `prod` + `/web` and sync them into Vercel:
 - `RUNNER_INTERNAL_TOKEN`
 - `DURABLE_STREAMS_URL`
 - `DURABLE_STREAMS_TOKEN`
+- `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN`
+- `NEXT_PUBLIC_GOAT_POSTHOG_HOST`
 - optional analytics, feedback, and observability env vars
 
 Forward production web logs to the Better Stack source `opencompany-web-production` using the
@@ -145,6 +147,10 @@ root to `apps/goat`:
 Set the Goat project envs in Infisical `prod` + `/goat` and sync that path into the Goat Vercel
 Production environment. Create a separate Goat WorkOS Application in the same WorkOS environment as
 the core app, then register the Goat redirect URI on that Application:
+
+Create a separate `Goat` project in the existing PostHog organization. Store its
+`NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` and `NEXT_PUBLIC_GOAT_POSTHOG_HOST` values in this path; do not
+reuse the legacy web project's token.
 
 Managed social and lead capabilities additionally require `MONID_API_KEY` in that same `/goat`
 path. `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes those managed sources from new chats
@@ -200,6 +206,8 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
+- `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN`
+- `NEXT_PUBLIC_GOAT_POSTHOG_HOST`
 - `EXA_API_KEY` (required when Goat tasks are enabled)
 - `RUNNER_GOAT_BROWSER_ENABLED` (optional; set `true` to allow Goat rendered-browser tasks)
 - `BROWSERLESS_API_KEY` (required when Goat Browser is enabled with the production Browserless default)
@@ -259,6 +267,8 @@ Create or switch to the production WorkOS environment.
   `https://<production-web-domain>/auth/callback`
 - Add the Goat production redirect URI to the Goat Application:
   `https://<production-goat-domain>/auth/callback`
+- Set the Goat Application's User invitation URL to:
+  `https://<production-goat-domain>/auth/invite`
 - Set `NEXT_PUBLIC_WORKOS_REDIRECT_URI` to the same value in Vercel.
 - Generate a 32+ character `WORKOS_COOKIE_PASSWORD`.
 

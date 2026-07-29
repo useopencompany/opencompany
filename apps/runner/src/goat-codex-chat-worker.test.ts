@@ -1,9 +1,13 @@
 import type { GoatCodexChatSession, GoatCodexChatTurn } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
-import { GoatCodexChatHandoffError } from "./goat-codex-chat-errors";
+import {
+  GoatCodexChatHandoffError,
+  GoatCodexChatRetryableInfrastructureError,
+} from "./goat-codex-chat-errors";
 import {
   claimNextGoatCodexChatTurn,
+  goatCodexChatRetryAt,
   resolveGoatCodexChatWorkerConcurrency,
   runClaimedTurn,
   startGoatCodexChatWorker,
@@ -238,8 +242,8 @@ describe("runClaimedTurn", () => {
     );
   });
 
-  it("uses durable continuation for the first reclaimed attempt", async () => {
-    await runClaimedTurn(turn({ attempts: 2 }), env());
+  it("recovers a persisted engine turn across the migration rollout", async () => {
+    await runClaimedTurn(turn({ attempts: 2, engineRecoveryRequired: false }), env());
 
     expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -251,8 +255,15 @@ describe("runClaimedTurn", () => {
     expect(telemetry.recordGoatHistogram).not.toHaveBeenCalled();
   });
 
-  it("reattaches after repeated lease claims instead of exhausting recovery", async () => {
-    await runClaimedTurn(turn({ attempts: 3 }), env());
+  it("recovers after crossing the engine boundary before an id was persisted", async () => {
+    await runClaimedTurn(
+      turn({
+        attempts: 3,
+        codexTurnId: null,
+        engineRecoveryRequired: true,
+      }),
+      env(),
+    );
 
     expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -261,6 +272,20 @@ describe("runClaimedTurn", () => {
       }),
     );
     expect(eventMocks.fail).not.toHaveBeenCalled();
+  });
+
+  it("retries pre-engine acquisition failures as a fresh turn", async () => {
+    await runClaimedTurn(
+      turn({
+        attempts: 2,
+        codexTurnId: null,
+        engineRecoveryRequired: false,
+      }),
+      env(),
+    );
+
+    const input = chatMocks.runGoatCodexChatTurn.mock.calls[0]?.[0];
+    expect(input).not.toHaveProperty("recovery");
   });
 
   it("releases its lease only after the Codex proxy reports a handoff", async () => {
@@ -277,6 +302,40 @@ describe("runClaimedTurn", () => {
     expect(release).toContain("SET lease_id = NULL");
     expect(release).toContain("lease_owner = NULL");
     expect(release).toContain("status = 'running'");
+  });
+
+  it("defers transient infrastructure failures with durable backoff", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T09:00:00.000Z"));
+    try {
+      const capacity = new Error("500: Failed to place sandbox");
+      capacity.name = "SandboxError";
+      chatMocks.runGoatCodexChatTurn.mockRejectedValueOnce(
+        new GoatCodexChatRetryableInfrastructureError(
+          "Codex sandbox capacity is temporarily unavailable.",
+          capacity,
+        ),
+      );
+
+      await runClaimedTurn(turn({ attempts: 1 }), env());
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const deferred = sqlText(dbMock.execute.mock.calls.at(-1)?.[0]);
+    expect(deferred).toContain("WITH deferred AS");
+    expect(deferred).toContain("lease_id = NULL");
+    expect(deferred).toContain("lease_owner = NULL");
+    expect(deferred).toContain("lease_expires_at");
+    expect(deferred).toContain("SET status = 'queued'");
+    expect(eventMocks.fail).not.toHaveBeenCalled();
+  });
+
+  it("caps infrastructure retry backoff at one minute", () => {
+    const now = new Date("2026-07-10T09:00:00.000Z");
+
+    expect(goatCodexChatRetryAt(now, 1)).toEqual(new Date("2026-07-10T09:00:05.000Z"));
+    expect(goatCodexChatRetryAt(now, 20)).toEqual(new Date("2026-07-10T09:01:00.000Z"));
   });
 });
 
@@ -296,6 +355,8 @@ function claimedTurnRow() {
     interrupt_requested_at: null,
     attempts: 1,
     recovery_attempts: 0,
+    engine_recovery_required: false,
+    engine_turn_baseline_ids: null,
     lease_id: "lease_1",
     lease_owner: "runner_1",
     lease_expires_at: "2026-07-10T09:05:00.000Z",
@@ -340,6 +401,8 @@ function turn(overrides: Partial<GoatCodexChatTurn> = {}): GoatCodexChatTurn {
     interruptRequestedAt: null,
     attempts: 1,
     recoveryAttempts: 0,
+    engineRecoveryRequired: false,
+    engineTurnBaselineIds: null,
     leaseId: "lease_1",
     leaseOwner: "runner_1",
     leaseExpiresAt: new Date("2026-07-10T09:05:00.000Z"),
@@ -356,8 +419,10 @@ function session(overrides: Partial<GoatCodexChatSession> = {}): GoatCodexChatSe
     id: "goat_codex_chat_1",
     userWorkosId: "user_1",
     chatSessionId: "goat_chat_1",
+    engine: "codex",
     model: "gpt-5.5",
     brainRef: null,
+    workspaceId: null,
     hostToolContractVersion: null,
     sandboxId: "sbx_1",
     codexThreadId: "thread_1",

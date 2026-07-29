@@ -1,15 +1,16 @@
 import { after, NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
-import {
-  GoatBrainSkillMentionError,
-  readGoatBrainSkillMentionRefs,
-  resolveGoatBrainSkillMentions,
-} from "@/lib/brain-skills";
+import { captureGoatChatMessageSent } from "@/lib/chat-analytics";
 import { parseGoatChatAttachmentsInput } from "@/lib/chat-attachments";
 import { parseOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import { type GoatChatUiMessage, textFromGoatChatUiMessage } from "@/lib/chat-ui";
 import { createGoatCodexChatMessage } from "@/lib/codex-chat";
+import {
+  GoatSkillMentionError,
+  readGoatSkillMentionRefs,
+  resolveGoatSkillMentions,
+} from "@/lib/skills";
 
 export const runtime = "nodejs";
 
@@ -43,18 +44,18 @@ export async function POST(request: Request) {
     return new Response("Invalid Codex chat message.", { status: 400 });
   }
 
-  const parsedSkillMentions = readGoatBrainSkillMentionRefs(messageMetadata?.mentions);
+  const parsedSkillMentions = readGoatSkillMentionRefs(messageMetadata?.mentions);
   if (!parsedSkillMentions.ok) {
     return new Response(parsedSkillMentions.error, { status: 400 });
   }
   let resolvedSkills;
   try {
-    resolvedSkills = await resolveGoatBrainSkillMentions({
-      activeBrainRef: context.activeBrain?.id ?? null,
+    resolvedSkills = await resolveGoatSkillMentions({
+      workspaceId: context.workspace.id,
       mentions: parsedSkillMentions.mentions,
     });
   } catch (error) {
-    if (error instanceof GoatBrainSkillMentionError) {
+    if (error instanceof GoatSkillMentionError) {
       return new Response(error.message, { status: 400 });
     }
     throw error;
@@ -74,13 +75,16 @@ export async function POST(request: Request) {
 
   const result = await createGoatCodexChatMessage({
     userWorkosId: context.user.workosUserId,
+    workspaceId: context.workspace.id,
     brainRef: context.activeBrain?.id ?? null,
     ...(sessionId ? { sessionId } : {}),
     ...(parsedNewSessionId.sessionId ? { newSessionId: parsedNewSessionId.sessionId } : {}),
     prompt,
+    // The snapshot's provenance ref (chat_session_skills.brain_ref) now carries
+    // the workspace id; skills are workspace-scoped, not Brain-scoped.
     skills: resolvedSkills.map((skill) => ({
       ...skill,
-      brainRef: context.activeBrain?.id ?? "",
+      brainRef: context.workspace.id,
     })),
     attachments: parsedAttachments.attachments,
     ...(clientMessageId ? { clientMessageId } : {}),
@@ -88,6 +92,7 @@ export async function POST(request: Request) {
     ...(body.value.model !== undefined ? { model: body.value.model } : {}),
   });
   if (!result.ok) return new Response(result.error, { status: result.status });
+  const { analytics, ...responseBody } = result;
 
   const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
   if (!sessionId && prompt) {
@@ -99,8 +104,19 @@ export async function POST(request: Request) {
       }).catch(() => undefined),
     );
   }
+  after(
+    captureGoatChatMessageSent({
+      user: context.user,
+      workspaceId: context.workspace.id,
+      sessionId: result.sessionId,
+      isFirstMessage: analytics.isFirstMessage,
+      engine: analytics.engine,
+      model: analytics.model,
+      messageLength: prompt.length,
+    }),
+  );
 
-  return NextResponse.json(result, { status: 202 });
+  return NextResponse.json(responseBody, { status: 202 });
 }
 
 function readPrompt(body: CodexChatMessageBody) {

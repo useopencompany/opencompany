@@ -3,7 +3,10 @@
   "installCommand": "bun install --frozen-lockfile",
   "buildCommand": "bun run vercel-build",
   "regions": ["fra1"],
-  "crons": [{ "path": "/api/billing/reconcile", "schedule": "0 * * * *" }],
+  "crons": [
+    { "path": "/api/billing/reconcile", "schedule": "0 * * * *" },
+    { "path": "/api/cron/onboarding-emails", "schedule": "0 * * * *" }
+  ],
   "git": {
     "deploymentEnabled": false
   }

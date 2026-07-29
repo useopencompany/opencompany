@@ -5,7 +5,8 @@ import type { GoatManagedCapabilitySource } from "@opencompany/db/goat-schema";
 const MAX_DEPTH = 8;
 const MAX_ARRAY_ITEMS = 50;
 const MAX_OBJECT_KEYS = 80;
-const MAX_STRING_CHARS = 4_000;
+const DEFAULT_MAX_STRING_CHARS = 4_000;
+export const MAX_CAPABILITY_PAYLOAD_STRING_CHARS = 240_000;
 
 const CREDENTIAL_KEY_PATTERN =
   /^(?:authorization|proxy-authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|client[-_]?secret|password|passwd|secret|cookie|set-cookie|private[-_]?key)$/i;
@@ -41,14 +42,33 @@ export function sanitizeCapabilityResult(input: {
   action: string;
   payload: unknown;
   expectedLimit: number;
+  payloadArrayLimit?: number;
+  payloadStringLimit?: number;
+  discoverPayloadLinks?: boolean;
   canonicalLinks?: string[];
   resultCount?: number | null;
   totalCostUsdMicros?: number | null;
 }): SanitizedCapabilityResult {
   const discoveredLinks = new Set<string>();
+  const payloadArrayLimit = input.payloadArrayLimit;
+  const requestedArrayLimit =
+    typeof payloadArrayLimit === "number" &&
+    Number.isInteger(payloadArrayLimit) &&
+    payloadArrayLimit > 0
+      ? payloadArrayLimit
+      : input.expectedLimit;
+  const payloadStringLimit = input.payloadStringLimit;
+  const requestedStringLimit =
+    typeof payloadStringLimit === "number" &&
+    Number.isInteger(payloadStringLimit) &&
+    payloadStringLimit > 0
+      ? payloadStringLimit
+      : DEFAULT_MAX_STRING_CHARS;
   const payload = sanitizeValue(input.payload, {
     depth: 0,
-    arrayLimit: Math.max(1, Math.min(input.expectedLimit, MAX_ARRAY_ITEMS)),
+    arrayLimit: Math.max(1, Math.min(requestedArrayLimit, MAX_ARRAY_ITEMS)),
+    stringLimit: Math.min(requestedStringLimit, MAX_CAPABILITY_PAYLOAD_STRING_CHARS),
+    discoverLinks: input.discoverPayloadLinks !== false,
     discoveredLinks,
     source: input.source,
   });
@@ -83,6 +103,8 @@ function sanitizeValue(
   context: {
     depth: number;
     arrayLimit: number;
+    stringLimit: number;
+    discoverLinks: boolean;
     discoveredLinks: Set<string>;
     source: GoatManagedCapabilitySource;
   },
@@ -91,8 +113,10 @@ function sanitizeValue(
     return value;
   }
   if (typeof value === "string") {
-    collectPlatformLinks(value, context.source, context.discoveredLinks);
-    return value.length > MAX_STRING_CHARS ? `${value.slice(0, MAX_STRING_CHARS)}…` : value;
+    if (context.discoverLinks) {
+      collectPlatformLinks(value, context.source, context.discoveredLinks);
+    }
+    return value.length > context.stringLimit ? `${value.slice(0, context.stringLimit)}…` : value;
   }
   if (typeof value === "bigint") return value.toString();
   if (typeof value !== "object") return String(value);

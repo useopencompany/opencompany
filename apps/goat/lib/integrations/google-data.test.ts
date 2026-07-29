@@ -4,6 +4,7 @@ import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
 const mocks = vi.hoisted(() => ({
   orderBy: vi.fn(),
   getGoatGitHubIntegrationState: vi.fn(),
+  getGoatLatitudeIntegrationState: vi.fn(),
   getGoatLinearIntegrationState: vi.fn(),
   goatGoogleIntegrationStateFromRows: vi.fn(),
 }));
@@ -20,16 +21,20 @@ vi.mock("@opencompany/db/client", () => ({
   }),
 }));
 
-vi.mock("@/lib/integration-state", () => ({
+vi.mock("@opencompany/goat-agent/integration-state", () => ({
   goatGoogleIntegrationStateFromRows: mocks.goatGoogleIntegrationStateFromRows,
 }));
 
-vi.mock("@/lib/integrations/github", () => ({
+vi.mock("@opencompany/goat-agent/integrations/github", () => ({
   getGoatGitHubIntegrationState: mocks.getGoatGitHubIntegrationState,
 }));
 
-vi.mock("@/lib/integrations/linear-mcp", () => ({
+vi.mock("@opencompany/goat-agent/integrations/linear-mcp", () => ({
   getGoatLinearIntegrationState: mocks.getGoatLinearIntegrationState,
+}));
+
+vi.mock("@/lib/integrations/latitude-mcp", () => ({
+  getGoatLatitudeIntegrationState: mocks.getGoatLatitudeIntegrationState,
 }));
 
 describe("getGoatAvailableHarnessTools", () => {
@@ -43,6 +48,7 @@ describe("getGoatAvailableHarnessTools", () => {
       google_calendar: { connected: false },
     });
     mocks.getGoatLinearIntegrationState.mockResolvedValue({ connected: false });
+    mocks.getGoatLatitudeIntegrationState.mockResolvedValue({ connected: false });
     mocks.getGoatGitHubIntegrationState.mockResolvedValue({ connected: false });
     delete process.env.APIFY_API_TOKEN;
   });

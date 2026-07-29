@@ -64,6 +64,7 @@ import { GITHUB_ACTIVITY_EVENT_TYPES, type GitHubActivityEventType } from "@open
 import { and, eq, isNull, ne, type SQL } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
+import { upsertGoatBrainSourceWithAnalytics } from "@/lib/brain-source-analytics";
 import type {
   GoatAttioProviderState,
   GoatFathomProviderState,
@@ -602,7 +603,8 @@ export async function setGoatBrainSourceEnabledAction(input: {
       }
     }
 
-    await upsertGoatBrainSource({
+    await upsertGoatBrainSourceWithAnalytics({
+      workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: input.provider,
       integrationId: input.integrationId,
@@ -667,7 +669,8 @@ export async function setGoatBrainSlackSourceAction(input: {
   }
 
   try {
-    await upsertGoatBrainSource({
+    await upsertGoatBrainSourceWithAnalytics({
+      workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "slack",
       integrationId: input.integrationId,
@@ -768,7 +771,8 @@ export async function setGoatBrainLinearSourceAction(input: {
   }
 
   try {
-    await upsertGoatBrainSource({
+    await upsertGoatBrainSourceWithAnalytics({
+      workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "linear",
       integrationId: input.integrationId,
@@ -813,7 +817,8 @@ export async function setGoatBrainHubspotSourceAction(input: {
   }
 
   try {
-    await upsertGoatBrainSource({
+    await upsertGoatBrainSourceWithAnalytics({
+      workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "hubspot",
       integrationId: input.integrationId,
@@ -858,7 +863,8 @@ export async function setGoatBrainAttioSourceAction(input: {
   }
 
   try {
-    await upsertGoatBrainSource({
+    await upsertGoatBrainSourceWithAnalytics({
+      workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "attio",
       integrationId: input.integrationId,
@@ -929,7 +935,8 @@ export async function setGoatBrainGitHubSourceAction(input: {
   }
 
   try {
-    await upsertGoatBrainSource({
+    await upsertGoatBrainSourceWithAnalytics({
+      workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "github",
       integrationId: input.integrationId,
@@ -975,7 +982,8 @@ export async function setGoatBrainGmailSourceAction(input: {
 
   try {
     const instructions = sanitizeGoatGmailInstructions(input.instructions);
-    await upsertGoatBrainSource({
+    await upsertGoatBrainSourceWithAnalytics({
+      workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "gmail",
       integrationId: input.integrationId,
@@ -1128,7 +1136,8 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
     if (!input.enabled) {
       const resources = resourceIds.flatMap((id) => existingResources.get(id) ?? []);
       const allFiles = input.allFiles ? existingAllFiles : null;
-      await upsertGoatBrainSource({
+      await upsertGoatBrainSourceWithAnalytics({
+        workspaceId: context.workspace.id,
         brainRef: input.brainRef,
         provider: "google_drive",
         integrationId: input.integrationId,
@@ -1232,7 +1241,8 @@ export async function setGoatBrainGoogleDriveSourceAction(input: {
       };
     });
 
-    await upsertGoatBrainSource({
+    await upsertGoatBrainSourceWithAnalytics({
+      workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "google_drive",
       integrationId: input.integrationId,

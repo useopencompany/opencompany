@@ -1,0 +1,40 @@
+export const AGENT_BROWSER_ACTION_POLICY = {
+  default: "deny",
+  allow: [
+    "launch",
+    "navigate",
+    "snapshot",
+    "click",
+    "type",
+    "fill",
+    "scroll",
+    "wait",
+    "screenshot",
+    "close",
+    "read",
+    "find",
+    "get",
+    "interact",
+    "getbyrole",
+    "getbytext",
+    "getbylabel",
+    "getbyplaceholder",
+    "getbyalttext",
+    "getbytitle",
+    "getbytestid",
+    "first",
+    "last",
+    "nth",
+    "url",
+    "title",
+    "gettext",
+    "inputvalue",
+    "getattribute",
+    "count",
+  ],
+  deny: ["eval", "download", "upload", "network", "state"],
+} as const;
+
+export function serializeActionPolicy() {
+  return `${JSON.stringify(AGENT_BROWSER_ACTION_POLICY, null, 2)}\n`;
+}

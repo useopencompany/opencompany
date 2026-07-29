@@ -1,10 +1,9 @@
 import type { CodexAppServerNormalizedEvent } from "./codex-app-server-events";
 
 // Shared projection of normalized Codex app-server events into AI SDK UIMessage parts.
-// Both the Goat local-codex bridge route and the cloud codex chat runner fold events
-// through this reducer so every engine persists the same normalized assistant-turn
-// shape (reasoning parts, codex_command tool parts, text parts) in
-// chat_messages.debug_trace.uiMessageParts.
+// The cloud Codex chat runner folds events through this reducer so every coding
+// engine persists the same normalized assistant-turn shape (reasoning parts,
+// codex_command tool parts, text parts) in chat_messages.debug_trace.uiMessageParts.
 
 export const CODEX_COMMAND_TOOL_NAME = "codex_command";
 export const CODEX_COMMAND_TOOL_PART_TYPE = `tool-${CODEX_COMMAND_TOOL_NAME}` as const;
@@ -17,6 +16,8 @@ export const CODEX_FILE_CHANGE_TOOL_NAME = "codex_file_change";
 export const CODEX_MCP_TOOL_NAME = "codex_mcp_tool";
 export const CODEX_DYNAMIC_TOOL_NAME = "codex_dynamic_tool";
 export const CODEX_WEB_SEARCH_TOOL_NAME = "codex_web_search";
+export const CODEX_SUBAGENT_TOOL_NAME = "codex_subagent";
+export const CODEX_SUBAGENT_TOOL_PART_TYPE = `tool-${CODEX_SUBAGENT_TOOL_NAME}` as const;
 
 export type CodexCommandToolInput = { command: string };
 export type CodexCommandToolOutput = {
@@ -62,11 +63,29 @@ type CodexUiStatusPartPayload =
       input: Record<string, unknown>;
       output: Record<string, unknown>;
     };
+// A Claude Code Task (subagent) call. Unlike other tool parts it carries a nested `children`
+// array holding the subagent's own reasoning / commands / tool calls, projected through the
+// same reducer so the UI can expand a subagent and show its full trace.
+export type CodexUiSubagentPart = {
+  type: typeof CODEX_SUBAGENT_TOOL_PART_TYPE;
+  toolCallId: string;
+  input: {
+    label: string;
+    description?: string;
+    subagentType?: string;
+    prompt?: string;
+  };
+  children: CodexUiMessagePart[];
+} & (
+  | { state: "input-available" }
+  | { state: "output-available"; output: { status: string; error?: string; result?: string } }
+);
 export type CodexUiMessagePart =
   | CodexUiTextPart
   | CodexUiReasoningPart
   | CodexUiCommandPart
-  | CodexUiStatusPart;
+  | CodexUiStatusPart
+  | CodexUiSubagentPart;
 
 export type CodexUiMessageProjection = {
   parts: CodexUiMessagePart[];
@@ -87,6 +106,12 @@ export function applyCodexEventToUiMessageParts(
   event: CodexAppServerNormalizedEvent,
   options: ApplyCodexEventOptions = {},
 ): CodexUiMessageProjection {
+  // Subagent steps carry the parent Task's tool call id; fold them into that part's children
+  // rather than the top-level turn (see createClaudeCodeEventNormalizer's stampParent).
+  const parentToolCallId = readString(event.payload.parentToolCallId);
+  if (parentToolCallId) {
+    return applyEventToSubagentChild(parts, parentToolCallId, event, options);
+  }
   switch (event.type) {
     case "assistant.completed": {
       const text = readString(event.payload.content);
@@ -152,6 +177,10 @@ export function applyCodexEventToUiMessageParts(
     case "mcp_tool.started":
     case "mcp_tool.completed": {
       return changed(upsertStatusPart(parts, event, CODEX_MCP_TOOL_NAME, mcpToolStatusPart(event)));
+    }
+    case "subagent.started":
+    case "subagent.completed": {
+      return changed(upsertSubagentPart(parts, event));
     }
     case "dynamic_tool.started":
     case "dynamic_tool.completed": {
@@ -294,6 +323,26 @@ export function finalizeCodexUiMessageParts(
         output: { ...part.input, status },
       };
     }
+    if (isSubagentPart(part)) {
+      // Settle the subagent's own in-flight children (dangling commands/statuses), then close
+      // the subagent itself if its Task tool_result never arrived.
+      const childProjection = finalizeCodexUiMessageParts(part.children, outcome, error);
+      const children = childProjection.changed ? childProjection.parts : part.children;
+      if (part.state === "output-available") {
+        if (!childProjection.changed) return part;
+        didChange = true;
+        return { ...part, children };
+      }
+      didChange = true;
+      return {
+        type: CODEX_SUBAGENT_TOOL_PART_TYPE,
+        toolCallId: part.toolCallId,
+        input: part.input,
+        children,
+        state: "output-available",
+        output: { status: outcome, ...(error ? { error } : {}) },
+      };
+    }
     return part;
   });
   return didChange ? changed(next) : unchanged(parts);
@@ -348,6 +397,46 @@ export function parseCodexUiMessageParts(value: unknown): CodexUiMessagePart[] {
           state: "output-error",
           input,
           errorText,
+        });
+      }
+      continue;
+    }
+    if (part.type === CODEX_SUBAGENT_TOOL_PART_TYPE && typeof part.toolCallId === "string") {
+      const rawInput = isRecord(part.input) ? part.input : {};
+      const input: CodexUiSubagentPart["input"] = {
+        label: readString(rawInput.label) ?? "Subagent",
+        ...(readString(rawInput.description)
+          ? { description: readString(rawInput.description) as string }
+          : {}),
+        ...(readString(rawInput.subagentType)
+          ? { subagentType: readString(rawInput.subagentType) as string }
+          : {}),
+        ...(readString(rawInput.prompt) ? { prompt: readString(rawInput.prompt) as string } : {}),
+      };
+      const children = parseCodexUiMessageParts(part.children);
+      if (part.state === "output-available") {
+        const output = isRecord(part.output) ? part.output : {};
+        const error = readString(output.error);
+        const result = readString(output.result);
+        parts.push({
+          type: CODEX_SUBAGENT_TOOL_PART_TYPE,
+          toolCallId: part.toolCallId,
+          input,
+          children,
+          state: "output-available",
+          output: {
+            status: readString(output.status) ?? "completed",
+            ...(error ? { error } : {}),
+            ...(result ? { result } : {}),
+          },
+        });
+      } else {
+        parts.push({
+          type: CODEX_SUBAGENT_TOOL_PART_TYPE,
+          toolCallId: part.toolCallId,
+          input,
+          children,
+          state: "input-available",
         });
       }
       continue;
@@ -551,10 +640,100 @@ function mcpToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusP
   };
 }
 
+// Routes a parent-stamped subagent event into the matching Task part's children, reusing the
+// reducer recursively. Claude Code does not nest Task within Task, so a single top-level lookup
+// covers every real case; an event whose parent part has not arrived yet is dropped.
+function applyEventToSubagentChild(
+  parts: readonly CodexUiMessagePart[],
+  parentToolCallId: string,
+  event: CodexAppServerNormalizedEvent,
+  options: ApplyCodexEventOptions,
+): CodexUiMessageProjection {
+  const index = parts.findIndex(
+    (part) => isSubagentPart(part) && part.toolCallId === parentToolCallId,
+  );
+  if (index < 0) return unchanged(parts);
+  const parent = parts[index] as CodexUiSubagentPart;
+  const { parentToolCallId: _ignored, ...childPayload } = event.payload;
+  const childEvent: CodexAppServerNormalizedEvent = { ...event, payload: childPayload };
+  const projection = applyCodexEventToUiMessageParts(parent.children, childEvent, options);
+  if (!projection.changed) return unchanged(parts);
+  const next = [...parts];
+  next[index] = { ...parent, children: projection.parts };
+  return changed(next);
+}
+
+function upsertSubagentPart(
+  parts: readonly CodexUiMessagePart[],
+  event: CodexAppServerNormalizedEvent,
+): CodexUiMessagePart[] {
+  const toolCallId =
+    readString(event.payload.itemId) ?? `${CODEX_SUBAGENT_TOOL_NAME}_${parts.length + 1}`;
+  const index = parts.findIndex((part) => isSubagentPart(part) && part.toolCallId === toolCallId);
+  const existing = index >= 0 ? (parts[index] as CodexUiSubagentPart) : null;
+  const input = existing?.input ?? subagentInput(event);
+  const children = existing?.children ?? [];
+  const part: CodexUiSubagentPart =
+    event.type === "subagent.completed"
+      ? {
+          type: CODEX_SUBAGENT_TOOL_PART_TYPE,
+          toolCallId,
+          input,
+          children,
+          state: "output-available",
+          output: subagentOutput(event),
+        }
+      : {
+          type: CODEX_SUBAGENT_TOOL_PART_TYPE,
+          toolCallId,
+          input,
+          children,
+          state: "input-available",
+        };
+  if (index < 0) return [...parts, part];
+  return parts.map((current, currentIndex) => (currentIndex === index ? part : current));
+}
+
+function subagentInput(event: CodexAppServerNormalizedEvent): CodexUiSubagentPart["input"] {
+  return {
+    label: "Subagent",
+    ...(readString(event.payload.subagentType)
+      ? { subagentType: readString(event.payload.subagentType) as string }
+      : {}),
+    ...(readString(event.payload.description)
+      ? { description: readString(event.payload.description) as string }
+      : {}),
+    ...(readString(event.payload.prompt)
+      ? { prompt: readString(event.payload.prompt) as string }
+      : {}),
+  };
+}
+
+function subagentOutput(
+  event: CodexAppServerNormalizedEvent,
+): Extract<CodexUiSubagentPart, { state: "output-available" }>["output"] {
+  const error = readString(event.payload.error);
+  const result = readString(event.payload.result);
+  return {
+    status: readString(event.payload.status) ?? "completed",
+    ...(error ? { error } : {}),
+    ...(result ? { result } : {}),
+  };
+}
+
+function isSubagentPart(part: CodexUiMessagePart): part is CodexUiSubagentPart {
+  return part.type === CODEX_SUBAGENT_TOOL_PART_TYPE;
+}
+
 function dynamicToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
   const tool = readString(event.payload.tool);
   const namespace = readString(event.payload.namespace);
-  const label = tool === "goat_brain" ? "Brain" : "OpenCompany tool";
+  const label =
+    tool === "goat_brain"
+      ? "Brain"
+      : tool === "save_to_brain"
+        ? "Save to Brain"
+        : "OpenCompany tool";
   const input = {
     label,
     ...(namespace ? { namespace } : {}),

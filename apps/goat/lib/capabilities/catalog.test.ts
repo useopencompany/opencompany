@@ -2,13 +2,15 @@ import { describe, expect, it } from "vitest";
 import { GoatActionInvalidParamsError } from "@/lib/actions/types";
 import {
   MANAGED_CAPABILITY_ACTIONS,
+  MANAGED_CAPABILITY_SOURCE_DETAILS,
   managedCapabilityContractProbeParams,
 } from "@/lib/capabilities/catalog";
+import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize";
 
 describe("managed capability catalog", () => {
   it("contains only the reviewed fixed action and endpoint allowlist", () => {
-    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(51);
-    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(51);
+    expect(MANAGED_CAPABILITY_ACTIONS).toHaveLength(52);
+    expect(new Set(MANAGED_CAPABILITY_ACTIONS.map((action) => action.id)).size).toBe(52);
     expect(
       Object.fromEntries(
         MANAGED_CAPABILITY_ACTIONS.map((action) => [
@@ -21,10 +23,11 @@ describe("managed capability catalog", () => {
       "x.search_profiles": "tikhub:/api/v1/twitter/web/fetch_search_timeline",
       "x.list_followers": "tikhub:/api/v1/twitter/web/fetch_user_followers",
       "linkedin.get_person_profile": "tikhub:/api/v1/linkedin/web_v2/get_user_profile",
-      "youtube.get_transcript": "tikhub:/api/v1/youtube/web_v2/get_video_captions",
+      "youtube.get_transcript": "apify:/starvibe/youtube-video-transcript",
+      "youtube.find_in_transcript": "apify:/starvibe/youtube-video-transcript",
       "instagram.search_reels": "tikhub:/api/v1/instagram/v2/search_reels",
       "tiktok.get_search_trends": "tikhub:/api/v1/tiktok/web/fetch_trending_searchwords",
-      "lead.enrich_person": "pdl:/v5/person/enrich",
+      "lead.find_person_email": "pdl:/v5/person/enrich",
       "lead.search_prospects": "pdl:/v5/person/search",
       "lead.search_people_by_name": "apify:/harvestapi/linkedin-profile-search-by-name",
       "lead.list_company_employees": "apify:/harvestapi/linkedin-company-employees",
@@ -35,6 +38,9 @@ describe("managed capability catalog", () => {
       "seo.get_keyword_metrics": "semrush:/keyword_metrics",
       "seo.get_backlink_overview": "semrush:/backlinks_overview",
     });
+    expect(MANAGED_CAPABILITY_SOURCE_DETAILS.lead.description).toMatch(
+      /look up work emails for known prospects/i,
+    );
   });
 
   it("validates and maps every adapter while enforcing the product caps", () => {
@@ -260,6 +266,57 @@ describe("managed capability catalog", () => {
     });
   });
 
+  it("maps a known prospect to a confidence-gated work-email lookup", () => {
+    const findPersonEmail = action("lead.find_person_email");
+    expect(findPersonEmail.description).toMatch(/known prospect's work email/i);
+    expect(findPersonEmail.description).toMatch(/do not run a broader prospect search/i);
+    expect(
+      findPersonEmail.mapInput({
+        name: "Ada Lovelace",
+        company: "Analytical Engines",
+        location: "London",
+      }),
+    ).toEqual({
+      providerInput: {
+        name: "Ada Lovelace",
+        company: "Analytical Engines",
+        location: "London",
+        min_likelihood: 6,
+        required: "work_email",
+        titlecase: true,
+        data_include: expect.stringContaining("work_email"),
+      },
+      resultLimit: 1,
+      canonicalLinks: [],
+    });
+    expect(
+      findPersonEmail.mapInput({
+        linkedinUrl: "https://linkedin.com/in/ada-lovelace?trk=public",
+      }),
+    ).toMatchObject({
+      providerInput: {
+        profile: "https://www.linkedin.com/in/ada-lovelace",
+        min_likelihood: 6,
+        required: "work_email",
+      },
+      canonicalLinks: ["https://www.linkedin.com/in/ada-lovelace"],
+    });
+    expect(() => findPersonEmail.mapInput({ name: "Ada Lovelace" })).toThrow(
+      /name with company or location/i,
+    );
+    expect(() =>
+      findPersonEmail.mapInput({
+        name: "Ada",
+        company: "Analytical Engines",
+      }),
+    ).toThrow(/first and last name/i);
+    expect(() =>
+      findPersonEmail.mapInput({
+        linkedinUrl: "https://example.com/ada",
+      }),
+    ).toThrow(/not allowed/i);
+  });
+
   it("rejects unbounded or contradictory prospect searches", () => {
     const searchProspects = action("lead.search_prospects");
     expect(() => searchProspects.mapInput({ requireWorkEmail: true })).toThrow(
@@ -309,6 +366,78 @@ describe("managed capability catalog", () => {
       resultLimit: 5,
       canonicalLinks: [`https://www.youtube.com/channel/${channelId}`],
     });
+  });
+
+  it("maps full transcripts and transcript searches to the reviewed Apify actor", () => {
+    const fullTranscript = action("youtube.get_transcript");
+    const transcriptSearch = action("youtube.find_in_transcript");
+    expect(fullTranscript).toMatchObject({
+      provider: "apify",
+      priceType: "PER_RESULT",
+      executionMode: "async",
+      inputLocation: "body",
+      maxActionResultChars: 256_000,
+    });
+    expect(
+      fullTranscript.mapInput({
+        video: "dQw4w9WgXcQ",
+        language: "en",
+      }),
+    ).toEqual({
+      providerInput: {
+        youtube_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        language: "en",
+      },
+      resultLimit: 1,
+      payloadArrayLimit: 20,
+      payloadStringLimit: MAX_CAPABILITY_PAYLOAD_STRING_CHARS,
+      discoverPayloadLinks: false,
+      canonicalLinks: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+    });
+    expect(transcriptSearch).toMatchObject({
+      provider: "apify",
+      priceType: "PER_RESULT",
+      executionMode: "async",
+      inputLocation: "body",
+    });
+    expect(
+      transcriptSearch.mapInput({
+        video: "https://youtu.be/dQw4w9WgXcQ",
+        query: "sponsor read",
+        language: "en",
+        contextSeconds: 45,
+        maxMatches: 2,
+      }),
+    ).toEqual({
+      providerInput: {
+        youtube_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        language: "en",
+      },
+      resultLimit: 1,
+      payloadArrayLimit: 20,
+      canonicalLinks: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+    });
+    expect(fullTranscript.description).toContain("complete plain-text transcript");
+    expect(fullTranscript.description).toContain("youtube.find_in_transcript");
+    expect(() =>
+      fullTranscript.mapInput({
+        video: "dQw4w9WgXcQ",
+        language: "EN",
+      }),
+    ).toThrow(/lowercase two-letter/i);
+    expect(() =>
+      transcriptSearch.mapInput({
+        video: "dQw4w9WgXcQ",
+        query: "...",
+      }),
+    ).toThrow(/letter or number/i);
+    expect(() =>
+      transcriptSearch.mapInput({
+        video: "dQw4w9WgXcQ",
+        query: "sponsor",
+        language: "EN",
+      }),
+    ).toThrow(/lowercase two-letter/i);
   });
 
   it("normalizes SEO targets and maps only the bounded Semrush inputs", () => {

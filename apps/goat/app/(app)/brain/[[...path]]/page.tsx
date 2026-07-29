@@ -16,13 +16,19 @@ export default async function GoatBrainPage({ params }: PageProps) {
   const routeBrainId = explicitBrain?.id ?? null;
   const brainPath = routeBrainId ? segments.slice(1) : segments;
   const isSettingsRoute = Boolean(explicitBrain && brainPath[0] === "settings");
-  const [brain, overviewStats] =
+  const isOverviewRoute =
+    brainPath.length === 0 || (brainPath.length === 1 && brainPath[0] === "overview");
+  // The overview only needs aggregate metrics. Loading every document here made
+  // navigation time and RSC payload size grow with the Brain, even though the
+  // live collection fills the file tree after the route is visible.
+  const [brain, overviewStats] = await Promise.all([
+    selectedBrain && !isSettingsRoute && !isOverviewRoute
+      ? listGoatBrainForBrain(selectedBrain.id)
+      : Promise.resolve(null),
     selectedBrain && !isSettingsRoute
-      ? await Promise.all([
-          listGoatBrainForBrain(selectedBrain.id),
-          getGoatBrainOverviewStats(selectedBrain.id),
-        ])
-      : [null, null];
+      ? getGoatBrainOverviewStats(selectedBrain.id)
+      : Promise.resolve(null),
+  ]);
 
   return (
     <GoatBrainRoute

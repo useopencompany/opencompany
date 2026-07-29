@@ -376,6 +376,15 @@ describe("Goat chat capture normalization", () => {
     expect(changed.contentHash).not.toBe(first.contentHash);
   });
 
+  it("accepts a stable external id for durable host-tool retries", () => {
+    const item = normalizeGoatChatCapture(
+      captureInput({ externalId: "codex-save:stable-capture-key" }),
+    );
+
+    expect(item.externalId).toBe("codex-save:stable-capture-key");
+    expect(isNormalizedGoatChatCaptureSourceItem(item)).toBe(true);
+  });
+
   it("omits an empty intent", () => {
     const item = normalizeGoatChatCapture(captureInput({ intent: "  " }));
     expect(item.content.capture.intent).toBeUndefined();

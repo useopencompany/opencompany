@@ -1,6 +1,8 @@
+// Workflows and skills used to live here as reserved folders. They were
+// extracted into their own workspace-scoped tables (goat.workflows /
+// goat.skills) so the Brain stays purely knowledge/context.
 export const HARD_DEFAULT_GOAT_BRAIN_FOLDERS = [
   "inbox",
-  "skills",
   "people",
   "companies",
   "evidence",
@@ -18,7 +20,6 @@ export const ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS = [
 export const DEFAULT_GOAT_BRAIN_FOLDERS = [
   "inbox",
   ...ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
-  "skills",
   "people",
   "companies",
   "evidence",
@@ -30,7 +31,7 @@ export type GoatBrainDefaultFolder = (typeof DEFAULT_GOAT_BRAIN_FOLDERS)[number]
 export type HardDefaultGoatBrainFolder = (typeof HARD_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
 export type AdjustableDefaultGoatBrainFolder =
   (typeof ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS)[number];
-export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx" | "xlsx" | "image";
+export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx" | "xlsx" | "srt" | "image";
 
 export const GOAT_BRAIN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
 export const GOAT_BRAIN_FOLDER_PATTERN = /^[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*){0,5}$/;
@@ -112,6 +113,9 @@ export type GoatBrainFrontmatter = {
   relations: GoatBrainRelation[];
   title?: string;
   description?: string;
+  // Workflow docs only: the model/engine mention token the workflow runs on
+  // (e.g. "kimi-k2.6", "codex"). Ignored for other document kinds.
+  model?: string;
   aliases?: string[];
   sources?: GoatBrainSource[];
   mergedInto?: string;

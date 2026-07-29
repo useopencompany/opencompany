@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost, calculatePlatformFeeUsdMicros } from "@opencompany/billing";
 import { releasePendingGoatIngestionReservations } from "@opencompany/db/goat-billing";
 import {
@@ -46,7 +47,6 @@ import {
 import { flushLatitude } from "@opencompany/goat-observability/latitude";
 import { captureException, createLogger } from "@opencompany/observability";
 import { flushBraintrust, traceBraintrust } from "@opencompany/observability/braintrust";
-import { captureStatsigServerEvent } from "@opencompany/statsig/server";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -666,14 +666,6 @@ export async function runClaimedGoatBrainIngestJob(input: {
     "goat.lease_owner": leaseOwner,
   } satisfies GoatAttributes;
   const runSpan = startGoatSpan(GOAT_SPANS.brainIngestRun, baseAttributes);
-  // Product-analytics counterpart to the observability span: one event per ingestion agent
-  // run. No-ops unless STATSIG_SERVER_SECRET_KEY is present in the runner env.
-  await captureStatsigServerEvent("brain_ingestion_run", input.job.userWorkosId, {
-    source: input.job.sourceProvider,
-    run_id: input.job.id,
-    ...(input.job.workspaceId ? { workspace_id: input.job.workspaceId } : {}),
-    ...(input.job.brainRef ? { brain_id: input.job.brainRef } : {}),
-  });
   let leaseActive = true;
   let telemetryFinished = false;
   const runAbort = new AbortController();
@@ -892,6 +884,19 @@ export async function runClaimedGoatBrainIngestJob(input: {
         "goat.failure_category": "lease_lost",
       });
       return;
+    }
+    if (input.job.kind !== "brain_pointer_hydrate" && input.job.workspaceId && input.job.brainRef) {
+      await captureGoatServerEvent(
+        "brain_ingestion_completed",
+        input.job.userWorkosId,
+        {
+          workspace_id: input.job.workspaceId,
+          brain_id: input.job.brainRef,
+          provider: input.job.sourceProvider,
+          source_type: input.job.sourceType,
+        },
+        { workspaceId: input.job.workspaceId },
+      );
     }
     finishTelemetry("success", {
       "goat.status": "succeeded",

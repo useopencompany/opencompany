@@ -28,7 +28,7 @@ export function useGoatChatAttachments(opts: {
   // Drives the per-file image/PDF capability gate; read at call time so a model
   // switch applies without re-creating callbacks.
   modelName: string;
-  // Disabled surfaces (currently Local Codex) ignore picker, paste, and drop input.
+  // Disabled surfaces ignore picker, paste, and drop input.
   enabled?: boolean;
   // Cloud engines can make uploaded files available through their own filesystem even when
   // the gateway model catalog does not advertise native PDF/image message parts.
@@ -88,6 +88,7 @@ export function useGoatChatAttachments(opts: {
           }
           const validation = validateGoatChatAttachmentCandidate({
             mediaType: file.type,
+            filename: file.name,
             sizeBytes: file.size,
           });
           if (!validation.ok) {
@@ -107,13 +108,13 @@ export function useGoatChatAttachments(opts: {
           next.push({
             id,
             filename: file.name,
-            mediaType: file.type,
+            mediaType: validation.mediaType,
             kind: validation.kind,
             sizeBytes: file.size,
             status: "uploading",
             ...(validation.kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
           });
-          void uploadGoatChatAttachmentBlob(userWorkosId, file)
+          void uploadGoatChatAttachmentBlob(userWorkosId, file, validation.mediaType)
             .then((res) => {
               if (mountedRef.current) {
                 setAttachments((cur) =>

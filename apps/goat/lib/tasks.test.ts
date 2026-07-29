@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import { cancelGoatTaskAction, createGoatTaskForUser } from "@/lib/tasks";
+import {
+  cancelGoatTaskAction,
+  continueGoatTaskAction,
+  createGoatTaskForUser,
+  getCurrentUserGoatTaskSummary,
+} from "@/lib/tasks";
 
 const mocks = vi.hoisted(() => {
   return {
@@ -33,6 +38,12 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
+
+beforeEach(() => {
+  vi.mocked(currentGoatUser).mockResolvedValue({
+    user: { workosUserId: "user_1" },
+  } as never);
+});
 
 describe("createGoatTaskForUser", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -113,7 +124,7 @@ describe("createGoatTaskForUser", () => {
     expect(sqlTextFromExecuteCall(0)).toContain("task_spawning_enabled = true");
   });
 
-  it("does not create or dispatch a task when background tasks are disabled", async () => {
+  it("does not create or dispatch a task when Tasks & Workflows is disabled", async () => {
     mocks.select.mockReturnValue({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
@@ -128,7 +139,7 @@ describe("createGoatTaskForUser", () => {
         prompt: "Research x",
         model: DEFAULT_GOAT_MODEL,
       }),
-    ).rejects.toThrow("Background tasks are disabled");
+    ).rejects.toThrow("Tasks & Workflows is disabled");
 
     expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
@@ -154,7 +165,7 @@ describe("createGoatTaskForUser", () => {
         prompt: "Research x",
         model: DEFAULT_GOAT_MODEL,
       }),
-    ).rejects.toThrow("Background tasks are disabled");
+    ).rejects.toThrow("Tasks & Workflows is disabled");
     expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
   });
 
@@ -176,6 +187,45 @@ describe("createGoatTaskForUser", () => {
   });
 });
 
+describe("getCurrentUserGoatTaskSummary", () => {
+  it("returns aggregate cost and active run duration without loading the full transcript", async () => {
+    vi.clearAllMocks();
+    mocks.select.mockReturnValue({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => [
+            {
+              id: "task_1",
+              displayId: "TASK-1",
+              userWorkosId: "user_1",
+              status: "succeeded",
+            },
+          ]),
+        })),
+      })),
+    });
+    mocks.execute.mockResolvedValue([
+      {
+        runStartedAt: "2026-01-01T00:00:10.000Z",
+        runCompletedAt: "2026-01-01T00:03:22.000Z",
+        usageRowCount: "3",
+        totalCostUsdMicros: "123400",
+      },
+    ]);
+
+    await expect(getCurrentUserGoatTaskSummary("TASK-1")).resolves.toEqual({
+      cost: {
+        hasRecordedCosts: true,
+        totalCostUsdMicros: 123_400,
+      },
+      durationMs: 192_000,
+    });
+    expect(mocks.execute).toHaveBeenCalledOnce();
+    expect(sqlTextFromExecuteCall(0)).toContain("SELECT MIN");
+    expect(sqlTextFromExecuteCall(0)).toContain("SELECT COUNT(*)");
+  });
+});
+
 describe("cancelGoatTaskAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -192,7 +242,7 @@ describe("cancelGoatTaskAction", () => {
         avatarUrl: null,
         timezone: "UTC",
         taskSpawningEnabled: true,
-        localCodexBetaEnabled: false,
+        autoModelRoutingEnabled: false,
         chatCapabilitiesBetaEnabled: false,
         preferredMcpClient: null,
         mcpSetupCompletedAt: null,
@@ -206,6 +256,7 @@ describe("cancelGoatTaskAction", () => {
         name: "Ada's Workspace",
         slug: null,
         createdByWorkosId: "user_1",
+        capabilitySessionBudgetUsdMicros: null,
         createdAt: new Date("2026-01-01T00:00:00.000Z"),
         updatedAt: new Date("2026-01-01T00:00:00.000Z"),
       },
@@ -218,6 +269,7 @@ describe("cancelGoatTaskAction", () => {
             name: "Ada's Workspace",
             slug: null,
             createdByWorkosId: "user_1",
+            capabilitySessionBudgetUsdMicros: null,
             createdAt: new Date("2026-01-01T00:00:00.000Z"),
             updatedAt: new Date("2026-01-01T00:00:00.000Z"),
           },
@@ -250,6 +302,54 @@ describe("cancelGoatTaskAction", () => {
       ok: false,
       error: "Could not stop task.",
     });
+  });
+});
+
+describe("continueGoatTaskAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("appends a user turn and requeues a completed task", async () => {
+    const messageId = "goat_task_msg_11111111-1111-4111-8111-111111111111";
+    mocks.execute.mockResolvedValueOnce([{ id: messageId, task_id: "goat_task_1" }]);
+
+    await expect(
+      continueGoatTaskAction("goat_task_1", "Check the afternoon too.", messageId),
+    ).resolves.toEqual({
+      ok: true,
+      error: null,
+      messageId,
+    });
+
+    expect(sqlTextFromExecuteCall(0)).toContain(
+      "task.status IN ('succeeded', 'failed', 'canceled')",
+    );
+    expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.task_messages");
+    expect(mocks.triggerGoatTaskRun).toHaveBeenCalledWith("goat_task_1", {
+      task_id: "goat_task_1",
+      event: "goat.runner_task_continued_dispatch",
+    });
+  });
+
+  it("does not append another turn while the task is active or inaccessible", async () => {
+    mocks.execute.mockResolvedValueOnce([]);
+
+    await expect(continueGoatTaskAction("goat_task_1", "Check again.")).resolves.toMatchObject({
+      ok: false,
+      messageId: null,
+    });
+
+    expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty reply before touching the database", async () => {
+    await expect(continueGoatTaskAction("goat_task_1", "   ")).resolves.toMatchObject({
+      ok: false,
+      messageId: null,
+    });
+
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
 

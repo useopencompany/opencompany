@@ -30,18 +30,19 @@ vi.mock("@opencompany/db/goat-integrations", () => ({
   saveGoatIntegrationCredential: mocks.saveCredential,
   markGoatIntegrationStatus: mocks.markStatus,
 }));
-vi.mock("@/lib/app-url", () => ({
+vi.mock("@opencompany/goat-agent/app-url", () => ({
   getGoatAppUrl: () => "https://goat.example",
 }));
 
 import {
   connectGoatAttioIntegration,
+  hasGoatAttioListConfigurationWriteScope,
   hasGoatAttioListReadScopes,
   hasGoatAttioListWriteScopes,
   hasGoatAttioRecordWriteScopes,
   parseGoatAttioScopes,
   validateGoatAttioApiKey,
-} from "@/lib/integrations/attio";
+} from "@opencompany/goat-agent/integrations/attio";
 
 beforeEach(() => {
   mocks.insertedValues = undefined;
@@ -98,6 +99,8 @@ describe("Attio API key scope handling", () => {
       true,
     );
     expect(hasGoatAttioListWriteScopes(["list_configuration:read", "list_entry:read"])).toBe(false);
+    expect(hasGoatAttioListConfigurationWriteScope(["list_configuration:read"])).toBe(false);
+    expect(hasGoatAttioListConfigurationWriteScope(["list_configuration:read-write"])).toBe(true);
   });
 
   it("returns Attio scopes with the validated workspace identity", async () => {

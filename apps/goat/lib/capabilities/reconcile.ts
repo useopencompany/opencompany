@@ -37,6 +37,13 @@ export async function reconcileGoatCapabilities(limit = 100) {
       }
       const contractMismatch =
         providerRun.provider !== auditRun.provider || providerRun.endpoint !== auditRun.endpoint;
+      const pendingForcedFailure =
+        auditRun.errorCode && auditRun.errorMessage
+          ? {
+              code: auditRun.errorCode,
+              message: auditRun.errorMessage,
+            }
+          : null;
       const result = await settleManagedCapabilityRun({
         auditRun,
         providerRun,
@@ -47,7 +54,9 @@ export async function reconcileGoatCapabilities(limit = 100) {
                 message: "The paid capability returned a run for a different reviewed endpoint.",
               },
             }
-          : {}),
+          : pendingForcedFailure
+            ? { forceFailure: pendingForcedFailure }
+            : {}),
       });
       if (result.totalCostUsdMicros === null) pending += 1;
       else settled += 1;

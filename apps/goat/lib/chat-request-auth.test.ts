@@ -225,7 +225,7 @@ function goatUser(overrides: { onboardedAt?: Date | null } = {}) {
     avatarUrl: null,
     timezone: "UTC",
     taskSpawningEnabled: true,
-    localCodexBetaEnabled: false,
+    autoModelRoutingEnabled: false,
     chatCapabilitiesBetaEnabled: false,
     preferredMcpClient: null,
     mcpSetupCompletedAt: null,

@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/lib/integrations/github", () => ({
+vi.mock("@opencompany/goat-agent/integrations/github", () => ({
   GoatGitHubApiError: mocks.ApiError,
   listConnectedGoatGitHubInstallations: mocks.connections,
   searchGoatGitHubIssues: mocks.searchIssues,

@@ -28,6 +28,13 @@ import {
 } from "@/lib/task-collections";
 import type { GoatTaskScheduleView } from "@/lib/task-schedules";
 
+// Codex and Claude Code chats both persist their runtime in goat.codex_chat_sessions,
+// so home/archived cards must attach codexRuntime for either engine. Attaching it only
+// for "codex" leaves Claude cards stuck on the null-runtime "Connecting" label.
+function hasCodexChatRuntime(engine: GoatChatSessionRow["engine"]): boolean {
+  return engine === "codex" || engine === "claude_code";
+}
+
 type GoatUserView = {
   // Scopes client-side chat attachment uploads (blob prefix goat-chat/{id}/).
   workosUserId: string;
@@ -74,6 +81,7 @@ export type GoatAppInitialData = {
   integrations: GoatIntegrationState;
   featureFlags: GoatFeatureFlags;
   codexConnected: boolean;
+  claudeCodeConnected: boolean;
   chatResumeEnabled: boolean;
   mcpSetup: {
     preferredClient: GoatMcpClient | null;
@@ -83,6 +91,7 @@ export type GoatAppInitialData = {
 
 type GoatAppData = GoatAppInitialData & {
   taskRows: GoatTaskRow[];
+  tasksReady: boolean;
   // Closed (archived) chats, surfaced in the command palette so the user can
   // search and restore them. Derived from the same live query as recentChats —
   // closed rows already stream to the client, they're just hidden elsewhere.
@@ -149,10 +158,11 @@ function GoatAppLiveDataSubscriptions({
   onData: (value: GoatAppData) => void;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
+  // Keep task rows live even while the feature is disabled so every surface has
+  // current data as soon as the user enables it. The UI gates on the feature flag.
   const { data: taskRows, isLoading: tasksLoading } = useLiveQuery(
-    (q) =>
-      initialData.featureFlags.taskSpawning ? q.from({ task: collections.tasks }) : undefined,
-    [initialData.featureFlags.taskSpawning, collections],
+    (q) => q.from({ task: collections.tasks }),
+    [collections],
   );
   const { data: scheduleRows, isLoading: schedulesLoading } = useLiveQuery(
     (q) =>
@@ -172,7 +182,6 @@ function GoatAppLiveDataSubscriptions({
   );
 
   const tasks = useMemo(() => {
-    if (!initialData.featureFlags.taskSpawning) return [];
     if (tasksLoading && !taskRows?.length) return initialData.tasks;
     return ((taskRows ?? []) as GoatTaskRow[])
       .map(taskRowToView)
@@ -184,7 +193,7 @@ function GoatAppLiveDataSubscriptions({
             isRecentGoatHomeActivity(task.createdAt)),
       )
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [initialData.featureFlags.taskSpawning, initialData.tasks, taskRows, tasksLoading]);
+  }, [initialData.tasks, taskRows, tasksLoading]);
 
   const schedules = useMemo(() => {
     if (!initialData.featureFlags.taskSpawning) return [];
@@ -222,8 +231,9 @@ function GoatAppLiveDataSubscriptions({
         model: row.model as AgentModelId,
         engine: row.engine,
         codexComposerSettings: initial?.codexComposerSettings ?? null,
-        codexRuntime:
-          row.engine === "codex" ? (liveCodexRuntime ?? initial?.codexRuntime ?? null) : null,
+        codexRuntime: hasCodexChatRuntime(row.engine)
+          ? (liveCodexRuntime ?? initial?.codexRuntime ?? null)
+          : null,
         preview: initial?.preview ?? "No messages yet.",
         updatedAt: row.updated_at,
         pinnedAt: row.pinned_at,
@@ -282,7 +292,9 @@ function GoatAppLiveDataSubscriptions({
         model: row.model as AgentModelId,
         engine: row.engine,
         codexComposerSettings: null,
-        codexRuntime: row.engine === "codex" ? (codexRuntimeByChatId.get(row.id) ?? null) : null,
+        codexRuntime: hasCodexChatRuntime(row.engine)
+          ? (codexRuntimeByChatId.get(row.id) ?? null)
+          : null,
         preview: "Archived",
         updatedAt: row.updated_at,
         pinnedAt: null,
@@ -298,6 +310,7 @@ function GoatAppLiveDataSubscriptions({
     return {
       ...liveIntegrations,
       codex: initialData.integrations.codex,
+      claude_code: initialData.integrations.claude_code,
       jamie: {
         ...liveIntegrations.jamie,
         integrationId: initialData.integrations.jamie.integrationId,
@@ -315,9 +328,19 @@ function GoatAppLiveDataSubscriptions({
       recentChats,
       archivedChats,
       integrations,
-      taskRows: initialData.featureFlags.taskSpawning ? ((taskRows ?? []) as GoatTaskRow[]) : [],
+      taskRows: (taskRows ?? []) as GoatTaskRow[],
+      tasksReady: !tasksLoading || (taskRows?.length ?? 0) > 0,
     }),
-    [archivedChats, initialData, integrations, recentChats, schedules, taskRows, tasks],
+    [
+      archivedChats,
+      initialData,
+      integrations,
+      recentChats,
+      schedules,
+      taskRows,
+      tasks,
+      tasksLoading,
+    ],
   );
 
   // TanStack DB currently has no server snapshot for useLiveQuery. Keep its
@@ -343,11 +366,12 @@ function initialGoatAppData(initialData: GoatAppInitialData): GoatAppData {
   return {
     ...initialData,
     taskRows: [],
+    tasksReady: false,
     archivedChats: [],
   };
 }
 
-function taskRowToView(row: GoatTaskRow): GoatTaskView {
+export function taskRowToView(row: GoatTaskRow): GoatTaskView {
   return {
     id: row.id,
     displayId: row.display_id,
@@ -356,10 +380,13 @@ function taskRowToView(row: GoatTaskRow): GoatTaskView {
     model: row.model,
     scheduleId: row.schedule_id,
     scheduledFor: row.scheduled_for,
+    workflowId: row.workflow_id,
     status: row.status,
     stage: row.stage,
     result: row.result,
     error: row.error,
+    reportedOutcome: row.reported_outcome,
+    outcomeComment: row.outcome_comment,
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

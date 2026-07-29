@@ -166,6 +166,8 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "PLAYWRIGHT_PORT",
   "NEXT_PUBLIC_POSTHOG_TOKEN",
   "NEXT_PUBLIC_POSTHOG_HOST",
+  "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
+  "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
   "NEXT_PUBLIC_ANALYTICS_DEBUG",
   "OPENCOMPANY_NGROK_REQUIRED",
   "OPENCOMPANY_NGROK_URL",
@@ -216,7 +218,6 @@ const LOCAL_DEV_DEFAULT_ENV_VALUES = {
 const GOAT_LOCAL_ENV_KEYS = [
   "GOAT_PORT",
   "GOAT_HTTPS_PORT",
-  "GOAT_LOCAL_PROJECTS_DIR",
   "DATABASE_URL",
   "WORKOS_CLIENT_ID",
   "WORKOS_API_KEY",
@@ -240,6 +241,8 @@ const GOAT_LOCAL_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
   "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
+  "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
+  "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
   ...GOAT_OBSERVABILITY_ENV_KEYS,
 ];
 
@@ -592,7 +595,9 @@ async function ensureGoatEnvFile() {
   }
 
   writeEnvValues(GOAT_ENV_PATH, values);
-  ok(`Updated ${GOAT_ENV_PATH} with Goat-local DB/Auth/runner/GitHub/Electric/observability env`);
+  ok(
+    `Updated ${GOAT_ENV_PATH} with Goat-local DB/Auth/runner/GitHub/Electric/observability/analytics env`,
+  );
 }
 
 async function ensurePersonalEnvFile() {

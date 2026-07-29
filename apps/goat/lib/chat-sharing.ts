@@ -17,6 +17,8 @@ export type PublicGoatChatView = Pick<GoatChatSessionView, "title" | "messages">
   shareId: string;
 };
 
+export type PublicGoatChatMetadata = Pick<PublicGoatChatView, "shareId" | "title">;
+
 type PublicGoatChatSessionRecord = Pick<GoatChatSessionView, "id" | "title">;
 
 export type GoatChatShareStore = {
@@ -25,6 +27,11 @@ export type GoatChatShareStore = {
     userWorkosId: string;
     chatSessionId: string;
   }): Promise<GoatChatShare | null>;
+  findShareForUser(input: {
+    userWorkosId: string;
+    chatSessionId: string;
+  }): Promise<GoatChatShare | null>;
+  revokeShare(input: { userWorkosId: string; chatSessionId: string }): Promise<boolean>;
   findShare(
     shareId: string,
   ): Promise<{ share: GoatChatShare; chatSession: PublicGoatChatSessionRecord } | null>;
@@ -53,14 +60,37 @@ export async function ensureGoatChatShareForUser(
   });
 }
 
+export async function findGoatChatShareForUser(
+  input: { userWorkosId: string; chatSessionId: string },
+  store: GoatChatShareStore = createDbGoatChatShareStore(),
+): Promise<GoatChatShare | null> {
+  const chatSessionId = input.chatSessionId.trim();
+  if (!chatSessionId) return null;
+
+  return store.findShareForUser({
+    userWorkosId: input.userWorkosId,
+    chatSessionId,
+  });
+}
+
+export async function revokeGoatChatShareForUser(
+  input: { userWorkosId: string; chatSessionId: string },
+  store: GoatChatShareStore = createDbGoatChatShareStore(),
+): Promise<boolean> {
+  const chatSessionId = input.chatSessionId.trim();
+  if (!chatSessionId) return false;
+
+  return store.revokeShare({
+    userWorkosId: input.userWorkosId,
+    chatSessionId,
+  });
+}
+
 export async function loadPublicGoatChat(
   shareIdInput: string,
   store: GoatChatShareStore = createDbGoatChatShareStore(),
 ): Promise<PublicGoatChatView | null> {
-  const shareId = shareIdInput.trim();
-  if (!isGoatChatShareId(shareId)) return null;
-
-  const result = await store.findShare(shareId);
+  const result = await findPublicGoatChat(shareIdInput, store);
   if (!result) return null;
 
   const messages = await store.listMessages(result.chatSession.id);
@@ -68,6 +98,19 @@ export async function loadPublicGoatChat(
     shareId: result.share.id,
     title: result.chatSession.title,
     messages: messages.map(toPublicGoatChatUiMessage),
+  };
+}
+
+export async function loadPublicGoatChatMetadata(
+  shareIdInput: string,
+  store: GoatChatShareStore = createDbGoatChatShareStore(),
+): Promise<PublicGoatChatMetadata | null> {
+  const result = await findPublicGoatChat(shareIdInput, store);
+  if (!result) return null;
+
+  return {
+    shareId: result.share.id,
+    title: result.chatSession.title,
   };
 }
 
@@ -104,6 +147,38 @@ export function createDbGoatChatShareStore(
       return share ?? null;
     },
 
+    async findShareForUser(input) {
+      const [share] = await db
+        .select({ share: goatChatShares })
+        .from(goatChatShares)
+        .innerJoin(goatChatSessions, eq(goatChatShares.chatSessionId, goatChatSessions.id))
+        .where(
+          and(
+            eq(goatChatShares.chatSessionId, input.chatSessionId),
+            eq(goatChatSessions.userWorkosId, input.userWorkosId),
+          ),
+        )
+        .limit(1);
+      return share?.share ?? null;
+    },
+
+    async revokeShare(input) {
+      const [ownedSession] = await db
+        .select({ id: goatChatSessions.id })
+        .from(goatChatSessions)
+        .where(
+          and(
+            eq(goatChatSessions.id, input.chatSessionId),
+            eq(goatChatSessions.userWorkosId, input.userWorkosId),
+          ),
+        )
+        .limit(1);
+      if (!ownedSession) return false;
+
+      await db.delete(goatChatShares).where(eq(goatChatShares.chatSessionId, ownedSession.id));
+      return true;
+    },
+
     async findShare(shareId) {
       const [result] = await db
         .select({
@@ -124,6 +199,12 @@ export function createDbGoatChatShareStore(
       return chatStore.listMessages(chatSessionId);
     },
   };
+}
+
+async function findPublicGoatChat(shareIdInput: string, store: GoatChatShareStore) {
+  const shareId = shareIdInput.trim();
+  if (!isGoatChatShareId(shareId)) return null;
+  return store.findShare(shareId);
 }
 
 function toPublicGoatChatUiMessage(message: GoatStoredChatMessage): GoatChatUiMessage {

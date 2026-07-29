@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
-import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
   connectGoatStripeIntegration,
   exchangeGoatStripeOAuthCode,
@@ -11,10 +10,6 @@ import { GET } from "./route";
 
 vi.mock("@/lib/auth", () => ({
   currentGoatUser: vi.fn(),
-}));
-
-vi.mock("@/lib/integrations/analytics", () => ({
-  captureGoatIntegrationAddedAnalytics: vi.fn(),
 }));
 
 vi.mock("@/lib/integrations/stripe", () => ({
@@ -30,7 +25,6 @@ vi.mock("@/lib/integrations/stripe", () => ({
 }));
 
 const currentGoatUserMock = vi.mocked(currentGoatUser);
-const captureAnalyticsMock = vi.mocked(captureGoatIntegrationAddedAnalytics);
 const connectMock = vi.mocked(connectGoatStripeIntegration);
 const exchangeCodeMock = vi.mocked(exchangeGoatStripeOAuthCode);
 const validateAccessMock = vi.mocked(validateGoatStripeOAuthAccess);
@@ -75,7 +69,6 @@ describe("Stripe OAuth callback route", () => {
     exchangeCodeMock.mockResolvedValue(tokens);
     validateAccessMock.mockResolvedValue({ ok: true, identity });
     connectMock.mockResolvedValue({ integrationId: "gint_stripe" });
-    captureAnalyticsMock.mockResolvedValue(undefined);
   });
 
   it("exchanges, validates, and persists the Stripe OAuth grant", async () => {
@@ -92,11 +85,6 @@ describe("Stripe OAuth callback route", () => {
       workspaceId: "workspace_1",
       tokens,
       identity,
-    });
-    expect(captureAnalyticsMock).toHaveBeenCalledWith({
-      userWorkosId: "user_1",
-      workspaceId: "workspace_1",
-      provider: "stripe",
     });
     expect(response.headers.get("location")).toContain("setup=connected");
   });

@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   createMCPClient: vi.fn(),
 }));
 
-vi.mock("@/lib/integrations/linear-mcp", () => ({
+vi.mock("@opencompany/goat-agent/integrations/linear-mcp", () => ({
   GOAT_LINEAR_MCP_ENDPOINT_URL: "https://mcp.linear.app/mcp",
   getGoatLinearIntegrationState: mocks.getGoatLinearIntegrationState,
   loadGoatLinearMcpWorkerConnection: mocks.loadGoatLinearMcpWorkerConnection,
@@ -161,6 +161,7 @@ describe("normalizeLinearUpdateIssueInput", () => {
         description: "  ",
         assignee: null,
         state: " Canceled ",
+        project: null,
         priority: 0,
         labels: [],
       }),
@@ -170,6 +171,7 @@ describe("normalizeLinearUpdateIssueInput", () => {
       description: "",
       assignee: null,
       state: "Canceled",
+      project: null,
       priority: 0,
       labels: [],
     });
@@ -182,6 +184,9 @@ describe("normalizeLinearUpdateIssueInput", () => {
     );
     expect(() => normalizeLinearUpdateIssueInput({ id: "GOAT-123", delete: true })).toThrow(
       "Unknown parameter",
+    );
+    expect(() => normalizeLinearUpdateIssueInput({ id: "GOAT-123", project: "" })).toThrow(
+      '"project" must be a non-empty string',
     );
   });
 });
@@ -245,6 +250,15 @@ describe("resolveLinearActions", () => {
       },
       params: {
         required: ["title", "team"],
+      },
+    });
+    expect(catalog?.actions.find((action) => action.id === "linear.update_issue")).toMatchObject({
+      params: {
+        properties: {
+          project: {
+            type: ["string", "null"],
+          },
+        },
       },
     });
     expect(mocks.createMCPClient).not.toHaveBeenCalled();
@@ -446,6 +460,43 @@ describe("linear action execution", () => {
       id: "issue_1",
       identifier: "GOAT-123",
       state: { name: "Canceled" },
+      sourceRef: "linear:issue:GOAT-123",
+      integrationId: "gint_linear_1",
+    });
+    expect(close).toHaveBeenCalled();
+  });
+
+  it("removes an issue's project through save_issue", async () => {
+    mocks.loadGoatLinearMcpWorkerConnection.mockResolvedValue({
+      ok: true,
+      integrationId: "gint_linear_1",
+      authProvider: {},
+    });
+    const remoteExecute = vi.fn(async () => ({
+      content: [
+        {
+          type: "text",
+          text: '{"id":"issue_1","identifier":"GOAT-123","project":null}',
+        },
+      ],
+    }));
+    const { close } = mockClient({ save_issue: { execute: remoteExecute } });
+
+    const catalog = await resolveLinearActions("user_1");
+    const updateIssue = catalog?.actions.find((action) => action.id === "linear.update_issue");
+    const result = await updateIssue?.execute({ id: " GOAT-123 ", project: null }, CONTEXT);
+
+    expect(remoteExecute).toHaveBeenCalledWith(
+      {
+        id: "GOAT-123",
+        project: null,
+      },
+      expect.anything(),
+    );
+    expect(result).toEqual({
+      id: "issue_1",
+      identifier: "GOAT-123",
+      project: null,
       sourceRef: "linear:issue:GOAT-123",
       integrationId: "gint_linear_1",
     });

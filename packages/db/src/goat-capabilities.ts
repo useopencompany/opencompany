@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
   type GoatCapabilityRunStatus,
   type GoatManagedCapabilitySource,
   goatCapabilityRuns,
   goatWorkspaceCapabilities,
+  goatWorkspaces,
 } from "./goat-schema";
 
 type DbLike = any;
@@ -20,10 +21,79 @@ export const GOAT_MANAGED_CAPABILITY_SOURCES = [
   "seo",
 ] as const satisfies readonly GoatManagedCapabilitySource[];
 
+export const GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS = 5_000_000;
+
 export type GoatWorkspaceCapabilityState = {
   source: GoatManagedCapabilitySource;
   enabled: boolean;
 };
+
+export async function getGoatCapabilitySessionBudgetUsdMicros(
+  workspaceId: string,
+  db: DbLike = getDb(),
+) {
+  const [row] = await db
+    .select({ budgetUsdMicros: goatWorkspaces.capabilitySessionBudgetUsdMicros })
+    .from(goatWorkspaces)
+    .where(eq(goatWorkspaces.id, workspaceId))
+    .limit(1);
+  return row?.budgetUsdMicros ?? GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS;
+}
+
+export async function setGoatCapabilitySessionBudget(input: {
+  workspaceId: string;
+  budgetUsdMicros: number | null;
+  db?: DbLike;
+}) {
+  if (
+    input.budgetUsdMicros !== null &&
+    (!Number.isSafeInteger(input.budgetUsdMicros) || input.budgetUsdMicros <= 0)
+  ) {
+    throw new Error("Capability session budget must be a positive whole number of USD micros.");
+  }
+  const db = input.db ?? getDb();
+  const [row] = await db
+    .update(goatWorkspaces)
+    .set({
+      capabilitySessionBudgetUsdMicros: input.budgetUsdMicros,
+      updatedAt: new Date(),
+    })
+    .where(eq(goatWorkspaces.id, input.workspaceId))
+    .returning({
+      budgetUsdMicros: goatWorkspaces.capabilitySessionBudgetUsdMicros,
+    });
+  if (!row) throw new Error("Could not update the capability session budget.");
+  return row.budgetUsdMicros ?? GOAT_CAPABILITY_SESSION_BUDGET_DEFAULT_USD_MICROS;
+}
+
+export async function sumGoatCapabilitySessionSpendUsdMicros(input: {
+  workspaceId: string;
+  chatSessionId: string;
+  excludeToolCallIds?: readonly string[];
+  db?: DbLike;
+}) {
+  const db = input.db ?? getDb();
+  const excludeToolCallIds = [...new Set(input.excludeToolCallIds?.filter(Boolean) ?? [])];
+  const [row] = await db
+    .select({
+      totalUsdMicros: sql<number>`coalesce(sum(coalesce(${goatCapabilityRuns.totalCostUsdMicros}, ${goatCapabilityRuns.quoteTotalCostUsdMicros})), 0)::bigint`,
+    })
+    .from(goatCapabilityRuns)
+    .where(
+      and(
+        eq(goatCapabilityRuns.workspaceId, input.workspaceId),
+        eq(goatCapabilityRuns.chatSessionId, input.chatSessionId),
+        sql`${goatCapabilityRuns.status} NOT IN ('awaiting_approval', 'canceled', 'expired')`,
+        excludeToolCallIds.length > 0
+          ? or(
+              isNull(goatCapabilityRuns.toolCallId),
+              notInArray(goatCapabilityRuns.toolCallId, excludeToolCallIds),
+            )
+          : undefined,
+      ),
+    );
+  return Number(row?.totalUsdMicros ?? 0);
+}
 
 export async function listGoatWorkspaceCapabilities(
   workspaceId: string,
@@ -176,6 +246,31 @@ async function expireGoatCapabilityApproval(
     );
 }
 
+async function expireGoatCapabilityApprovalsByToolCall(
+  input: {
+    toolCallId: string;
+    chatSessionId?: string;
+    userWorkosId: string;
+    workspaceId: string;
+    now: Date;
+  },
+  db: DbLike,
+) {
+  await db
+    .update(goatCapabilityRuns)
+    .set({ status: "expired", updatedAt: input.now })
+    .where(
+      and(
+        eq(goatCapabilityRuns.toolCallId, input.toolCallId),
+        input.chatSessionId ? eq(goatCapabilityRuns.chatSessionId, input.chatSessionId) : undefined,
+        eq(goatCapabilityRuns.userWorkosId, input.userWorkosId),
+        eq(goatCapabilityRuns.workspaceId, input.workspaceId),
+        inArray(goatCapabilityRuns.status, ["awaiting_approval", "approved"]),
+        lt(goatCapabilityRuns.approvalExpiresAt, input.now),
+      ),
+    );
+}
+
 export async function getGoatCapabilityApproval(input: {
   id: string;
   userWorkosId: string;
@@ -200,8 +295,9 @@ export async function getGoatCapabilityApproval(input: {
   return row ?? null;
 }
 
-export async function approveGoatCapabilityRun(input: {
-  id: string;
+export async function getGoatCapabilityApprovalByToolCall(input: {
+  toolCallId: string;
+  chatSessionId?: string;
   userWorkosId: string;
   workspaceId: string;
   now?: Date;
@@ -209,26 +305,52 @@ export async function approveGoatCapabilityRun(input: {
 }) {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
-  await expireGoatCapabilityApproval({ ...input, now }, db);
+  await expireGoatCapabilityApprovalsByToolCall({ ...input, now }, db);
+  const [row] = await db
+    .select()
+    .from(goatCapabilityRuns)
+    .where(
+      and(
+        eq(goatCapabilityRuns.toolCallId, input.toolCallId),
+        input.chatSessionId ? eq(goatCapabilityRuns.chatSessionId, input.chatSessionId) : undefined,
+        eq(goatCapabilityRuns.userWorkosId, input.userWorkosId),
+        eq(goatCapabilityRuns.workspaceId, input.workspaceId),
+      ),
+    )
+    .orderBy(desc(goatCapabilityRuns.createdAt), desc(goatCapabilityRuns.id))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function approveGoatCapabilityRunByToolCall(input: {
+  toolCallId: string;
+  chatSessionId: string;
+  userWorkosId: string;
+  workspaceId: string;
+  now?: Date;
+  db?: DbLike;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const current = await getGoatCapabilityApprovalByToolCall({ ...input, now, db });
+  if (!current) return null;
   const [approved] = await db
     .update(goatCapabilityRuns)
     .set({ status: "approved", approvedAt: now, updatedAt: now })
     .where(
       and(
-        eq(goatCapabilityRuns.id, input.id),
-        eq(goatCapabilityRuns.userWorkosId, input.userWorkosId),
-        eq(goatCapabilityRuns.workspaceId, input.workspaceId),
+        eq(goatCapabilityRuns.id, current.id),
         eq(goatCapabilityRuns.status, "awaiting_approval"),
         sql`${goatCapabilityRuns.approvalExpiresAt} > ${now.toISOString()}`,
       ),
     )
     .returning();
-  if (approved) return approved;
-  return getGoatCapabilityApproval({ ...input, now, db });
+  return approved ?? getGoatCapabilityApprovalByToolCall({ ...input, now, db });
 }
 
-export async function cancelGoatCapabilityRun(input: {
-  id: string;
+export async function cancelGoatCapabilityRunByToolCall(input: {
+  toolCallId: string;
+  chatSessionId: string;
   userWorkosId: string;
   workspaceId: string;
   now?: Date;
@@ -236,24 +358,23 @@ export async function cancelGoatCapabilityRun(input: {
 }) {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
+  const current = await getGoatCapabilityApprovalByToolCall({ ...input, now, db });
+  if (!current) return null;
   const [canceled] = await db
     .update(goatCapabilityRuns)
     .set({ status: "canceled", updatedAt: now })
     .where(
       and(
-        eq(goatCapabilityRuns.id, input.id),
-        eq(goatCapabilityRuns.userWorkosId, input.userWorkosId),
-        eq(goatCapabilityRuns.workspaceId, input.workspaceId),
+        eq(goatCapabilityRuns.id, current.id),
         inArray(goatCapabilityRuns.status, ["awaiting_approval", "approved"]),
       ),
     )
     .returning();
-  if (canceled) return canceled;
-  return getGoatCapabilityApproval({ ...input, now, db });
+  return canceled ?? getGoatCapabilityApprovalByToolCall({ ...input, now, db });
 }
 
-export async function consumeGoatCapabilityApproval(input: {
-  id: string;
+export async function consumeGoatCapabilityApprovalByToolCall(input: {
+  toolCallId: string;
   userWorkosId: string;
   workspaceId: string;
   chatSessionId: string;
@@ -265,16 +386,14 @@ export async function consumeGoatCapabilityApproval(input: {
 }) {
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
-  await expireGoatCapabilityApproval({ ...input, now }, db);
+  const current = await getGoatCapabilityApprovalByToolCall({ ...input, now, db });
+  if (!current) return null;
   const [row] = await db
     .update(goatCapabilityRuns)
     .set({ status: "executing", consumedAt: now, updatedAt: now })
     .where(
       and(
-        eq(goatCapabilityRuns.id, input.id),
-        eq(goatCapabilityRuns.userWorkosId, input.userWorkosId),
-        eq(goatCapabilityRuns.workspaceId, input.workspaceId),
-        eq(goatCapabilityRuns.chatSessionId, input.chatSessionId),
+        eq(goatCapabilityRuns.id, current.id),
         eq(goatCapabilityRuns.action, input.action),
         eq(goatCapabilityRuns.inputHash, input.inputHash),
         eq(goatCapabilityRuns.status, "approved"),
@@ -326,6 +445,31 @@ export async function markGoatCapabilityRunStopping(input: {
       and(
         eq(goatCapabilityRuns.id, input.id),
         inArray(goatCapabilityRuns.status, ["executing", "running"]),
+      ),
+    );
+}
+
+export async function markGoatCapabilityRunSettlementFailure(input: {
+  id: string;
+  errorCode: string;
+  errorMessage: string;
+  now?: Date;
+  db?: DbLike;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  await db
+    .update(goatCapabilityRuns)
+    .set({
+      errorCode: input.errorCode,
+      errorMessage: input.errorMessage,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(goatCapabilityRuns.id, input.id),
+        inArray(goatCapabilityRuns.status, ["executing", "running", "stopping"]),
+        sql`${goatCapabilityRuns.settledAt} IS NULL`,
       ),
     );
 }

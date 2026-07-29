@@ -6,11 +6,13 @@ import {
   Blocks,
   CircleDollarSign,
   CreditCard,
+  FolderGit2,
   MessageSquare,
   PanelLeft,
   PlugZap,
   SearchCheck,
   SlidersHorizontal,
+  Sparkles,
   UserRound,
   Users,
 } from "lucide-react";
@@ -72,6 +74,19 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         icon: SearchCheck,
         label: "Capabilities",
         isActive: (pathname) => pathname === "/settings/workspace/capabilities",
+      },
+      {
+        href: "/settings/skills",
+        icon: Sparkles,
+        label: "Skills",
+        isActive: (pathname) =>
+          pathname === "/settings/skills" || pathname.startsWith("/settings/skills/"),
+      },
+      {
+        href: "/settings/repositories",
+        icon: FolderGit2,
+        label: "Repositories",
+        isActive: (pathname) => pathname === "/settings/repositories",
       },
       {
         href: "/settings/workspace/usage",

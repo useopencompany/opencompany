@@ -3,7 +3,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatBrainView } from "@/components/GoatBrainView";
-import { GoatBrainRoute, GoatMcpSettingsRoute, GoatPreferencesSettingsRoute } from "./GoatRoutes";
+import {
+  GoatBrainRoute,
+  GoatMcpSettingsRoute,
+  GoatPreferencesSettingsRoute,
+  GoatSkillEditorRoute,
+  GoatWorkflowEditorRoute,
+} from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -20,15 +26,27 @@ const appDataMock = vi.hoisted(() => ({
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
     workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
-    featureFlags: { taskSpawning: false, localCodexBridge: false },
+    featureFlags: { taskSpawning: false, autoModelRouting: false },
     integrations: {},
     mcpSetup: { preferredClient: null, completedAt: null },
   },
 }));
 
 const userPreferencesMock = vi.hoisted(() => ({
-  updateGoatLocalCodexBetaAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateGoatTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateGoatAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+}));
+
+const workflowActionsMock = vi.hoisted(() => ({
+  updateGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
+  archiveGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
+  createGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
+}));
+
+const skillActionsMock = vi.hoisted(() => ({
+  updateGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
+  archiveGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
+  createGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
 }));
 
 const themeMock = vi.hoisted(() => ({
@@ -38,17 +56,8 @@ const themeMock = vi.hoisted(() => ({
   }),
 }));
 
-const toastMock = vi.hoisted(() => ({
-  success: vi.fn(),
-  error: vi.fn(),
-}));
-
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
-}));
-
-vi.mock("@opencompany/ui/components/sonner", () => ({
-  toast: toastMock,
 }));
 
 vi.mock("@/components/GoatBrainView", () => ({
@@ -104,8 +113,20 @@ vi.mock("@/components/SettingsIntegrationsPanel", () => ({
 }));
 
 vi.mock("@/lib/user-preferences", () => ({
-  updateGoatLocalCodexBetaAction: userPreferencesMock.updateGoatLocalCodexBetaAction,
   updateGoatTaskSpawningAction: userPreferencesMock.updateGoatTaskSpawningAction,
+  updateGoatAutoModelRoutingAction: userPreferencesMock.updateGoatAutoModelRoutingAction,
+}));
+
+vi.mock("@/lib/workflow-actions", () => ({
+  updateGoatWorkflowAction: workflowActionsMock.updateGoatWorkflowAction,
+  archiveGoatWorkflowAction: workflowActionsMock.archiveGoatWorkflowAction,
+  createGoatWorkflowAction: workflowActionsMock.createGoatWorkflowAction,
+}));
+
+vi.mock("@/lib/skill-actions", () => ({
+  updateGoatSkillAction: skillActionsMock.updateGoatSkillAction,
+  archiveGoatSkillAction: skillActionsMock.archiveGoatSkillAction,
+  createGoatSkillAction: skillActionsMock.createGoatSkillAction,
 }));
 
 vi.mock("@/components/ThemeProvider", () => ({
@@ -117,28 +138,14 @@ vi.mock("@/components/ThemeProvider", () => ({
 }));
 
 describe("GoatSettingsRoute", () => {
-  const fetchMock = vi.fn();
-  const createObjectUrlMock = vi.fn(() => "blob:bridge-launcher");
-  const revokeObjectUrlMock = vi.fn();
-
   beforeEach(() => {
-    appDataMock.value.featureFlags.localCodexBridge = false;
     themeMock.value = "system";
     themeMock.setTheme.mockClear();
     routerMock.refresh.mockReset();
-    userPreferencesMock.updateGoatLocalCodexBetaAction.mockClear();
     userPreferencesMock.updateGoatTaskSpawningAction.mockClear();
-    toastMock.success.mockClear();
-    toastMock.error.mockClear();
-    fetchMock.mockReset();
-    createObjectUrlMock.mockClear();
-    revokeObjectUrlMock.mockClear();
-    vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("URL", {
-      ...URL,
-      createObjectURL: createObjectUrlMock,
-      revokeObjectURL: revokeObjectUrlMock,
-    });
+    userPreferencesMock.updateGoatAutoModelRoutingAction.mockClear();
+    appDataMock.value.featureFlags.taskSpawning = false;
+    appDataMock.value.featureFlags.autoModelRouting = false;
   });
 
   it("shows the appearance theme selector and updates the selected theme", async () => {
@@ -169,31 +176,17 @@ describe("GoatSettingsRoute", () => {
     expect(view.container).not.toHaveTextContent("Goat");
   });
 
-  it("shows the Local Codex bridge beta switch and persists changes", async () => {
+  it("shows the Tasks & Workflows switch off by default and persists opt-in", async () => {
     const user = userEvent.setup();
     render(<GoatPreferencesSettingsRoute />);
 
-    const toggle = screen.getByRole("switch", { name: "Local Codex bridge" });
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-
-    await user.click(toggle);
-
-    expect(userPreferencesMock.updateGoatLocalCodexBetaAction).toHaveBeenCalledWith(true);
-    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
-  });
-
-  it("shows the background tasks switch off by default and persists opt-in", async () => {
-    const user = userEvent.setup();
-    render(<GoatPreferencesSettingsRoute />);
-
-    const toggle = screen.getByRole("switch", { name: "Background tasks" });
+    const toggle = screen.getByRole("switch", { name: "Tasks & Workflows" });
     expect(toggle).toHaveAttribute("aria-checked", "false");
 
     await user.click(toggle);
 
     expect(userPreferencesMock.updateGoatTaskSpawningAction).toHaveBeenCalledWith(true);
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
-    expect(screen.queryByRole("button", { name: "Download Mac launcher" })).not.toBeInTheDocument();
   });
 
   it("shows an error when a preference update is rejected", async () => {
@@ -203,33 +196,29 @@ describe("GoatSettingsRoute", () => {
     const user = userEvent.setup();
     render(<GoatPreferencesSettingsRoute />);
 
-    await user.click(screen.getByRole("switch", { name: "Background tasks" }));
+    await user.click(screen.getByRole("switch", { name: "Tasks & Workflows" }));
 
     expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
-  it("downloads a paired Local Codex bridge launcher when beta is enabled", async () => {
-    appDataMock.value.featureFlags.localCodexBridge = true;
-    fetchMock.mockResolvedValueOnce(new Response("#!/bin/zsh\necho bridge\n"));
-    const clickMock = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-
+  it("enables and disables automatic model routing", async () => {
     const user = userEvent.setup();
-    render(<GoatPreferencesSettingsRoute />);
+    const { rerender } = render(<GoatPreferencesSettingsRoute />);
 
-    await user.click(screen.getByRole("button", { name: "Download Mac launcher" }));
+    const toggle = screen.getByRole("switch", { name: "Automatic model routing" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/local-codex/bridges/launcher", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: expect.stringContaining("Local Codex"),
-    });
-    await waitFor(() => expect(createObjectUrlMock).toHaveBeenCalled());
-    expect(clickMock).toHaveBeenCalled();
-    expect(revokeObjectUrlMock).toHaveBeenCalledWith("blob:bridge-launcher");
-    expect(toastMock.success).toHaveBeenCalledWith("Bridge launcher downloaded.");
+    await user.click(toggle);
+    expect(userPreferencesMock.updateGoatAutoModelRoutingAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
 
-    clickMock.mockRestore();
+    appDataMock.value.featureFlags.autoModelRouting = true;
+    rerender(<GoatPreferencesSettingsRoute />);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await user.click(toggle);
+    expect(userPreferencesMock.updateGoatAutoModelRoutingAction).toHaveBeenLastCalledWith(false);
   });
 });
 
@@ -291,6 +280,7 @@ describe("GoatBrainRoute", () => {
   ])("uses Overview for $label", ({ path }) => {
     const overviewStats = {
       windowStartedAt: "2026-07-08T09:00:00.000Z",
+      itemsAddedLast7Days: 5,
       retrievalsLast7Days: 12,
       activeSources: 3,
     };
@@ -299,7 +289,7 @@ describe("GoatBrainRoute", () => {
         path={path}
         routeBrainId="goat_brain_team"
         selectedBrain={teamBrain}
-        initialBrainSnapshot={brainSnapshot}
+        initialBrainSnapshot={null}
         initialOverviewStats={overviewStats}
       />,
     );
@@ -310,8 +300,114 @@ describe("GoatBrainRoute", () => {
         initialFolderPath: null,
         initialBrainId: null,
         overviewStats,
+        initialDataLoaded: false,
       }),
       undefined,
+    );
+  });
+});
+
+describe("GoatWorkflowEditorRoute", () => {
+  beforeEach(() => {
+    workflowActionsMock.updateGoatWorkflowAction.mockClear();
+    routerMock.refresh.mockReset();
+  });
+
+  it("edits instructions with a rich text editor instead of a plain textarea", async () => {
+    const workflow = {
+      id: "test-workflow",
+      name: "Test workflow",
+      description: "Does a thing",
+      instructions: "Step one.\n\nStep two.",
+      model: "",
+    };
+
+    const { container } = render(
+      <GoatWorkflowEditorRoute
+        workflow={workflow}
+        initialStatus="draft"
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(await screen.findByText("Step one.")).toBeInTheDocument();
+    expect(screen.getByText("Step two.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(workflowActionsMock.updateGoatWorkflowAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: "test-workflow",
+          instructions: "Step one.\n\nStep two.",
+        }),
+      ),
+    );
+  });
+
+  it("hints at @-mentioning a skill only when the workspace has one to mention", () => {
+    const workflow = {
+      id: "test-workflow",
+      name: "Test workflow",
+      description: "Does a thing",
+      instructions: "Step one.",
+      model: "",
+    };
+
+    const { rerender } = render(
+      <GoatWorkflowEditorRoute
+        workflow={workflow}
+        initialStatus="draft"
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+    expect(screen.queryByText(/mention a skill/i)).not.toBeInTheDocument();
+
+    rerender(
+      <GoatWorkflowEditorRoute
+        workflow={workflow}
+        initialStatus="draft"
+        canEdit
+        skillCatalog={[{ id: "standup-notes", name: "Standup notes", description: "" }]}
+      />,
+    );
+    expect(screen.getByText(/mention a skill/i)).toBeInTheDocument();
+  });
+});
+
+describe("GoatSkillEditorRoute", () => {
+  beforeEach(() => {
+    skillActionsMock.updateGoatSkillAction.mockClear();
+    routerMock.refresh.mockReset();
+  });
+
+  it("edits instructions with a rich text editor instead of a plain textarea", async () => {
+    const skill = {
+      id: "test-skill",
+      name: "Test skill",
+      description: "Does a thing",
+      instructions: "Use this when asked.",
+    };
+
+    const { container } = render(
+      <GoatSkillEditorRoute skill={skill} initialStatus="draft" canEdit />,
+    );
+
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(await screen.findByText("Use this when asked.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(skillActionsMock.updateGoatSkillAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: "test-skill",
+          instructions: "Use this when asked.",
+        }),
+      ),
     );
   });
 });

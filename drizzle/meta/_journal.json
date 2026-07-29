@@ -1097,8 +1097,120 @@
     {
       "idx": 156,
       "version": "7",
-      "when": 1785155888264,
-      "tag": "0156_goat_stripe_oauth",
+      "when": 1785141003000,
+      "tag": "0156_goat_onboarding_emails",
+      "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1785141004000,
+      "tag": "0157_goat_chat_sandbox_usage",
+      "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "7",
+      "when": 1785174319867,
+      "tag": "0158_goat_brain_srt_assets",
+      "breakpoints": true
+    },
+    {
+      "idx": 159,
+      "version": "7",
+      "when": 1785230000000,
+      "tag": "0159_goat_codex_read_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "7",
+      "when": 1785239118176,
+      "tag": "0160_goat_codex_engine_recovery_boundary",
+      "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "7",
+      "when": 1785239118177,
+      "tag": "0161_goat_latitude_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 162,
+      "version": "7",
+      "when": 1785240000000,
+      "tag": "0162_goat_claude_code_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 163,
+      "version": "7",
+      "when": 1785240000001,
+      "tag": "0163_goat_workflow_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 164,
+      "version": "7",
+      "when": 1785240000002,
+      "tag": "0164_goat_workflows_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 165,
+      "version": "7",
+      "when": 1785240000003,
+      "tag": "0165_goat_subagent_event_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 1785240000004,
+      "tag": "0166_goat_capability_session_budget",
+      "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "7",
+      "when": 1785270615449,
+      "tag": "0167_goat_remove_browser_listing_experiment",
+      "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "7",
+      "when": 1785326400000,
+      "tag": "0168_remove_goat_local_codex_bridge",
+      "breakpoints": true
+    },
+    {
+      "idx": 169,
+      "version": "7",
+      "when": 1785333600000,
+      "tag": "0169_drop_converted_local_codex_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 170,
+      "version": "7",
+      "when": 1785333600001,
+      "tag": "0170_goat_repo_configs",
+      "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "7",
+      "when": 1785336039727,
+      "tag": "0171_goat_auto_model_routing_flag",
+      "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 1785336039728,
+      "tag": "0172_goat_stripe_oauth",
       "breakpoints": true
     }
   ]

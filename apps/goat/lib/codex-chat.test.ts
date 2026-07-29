@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeGoatCodexChatSessionForChat,
-  createGoatCodexChatMessage,
+  createGoatCodexChatMessage as createGoatCodexChatMessageImpl,
   getGoatCodexChatSandboxStatus,
   interruptGoatCodexChatSession,
 } from "@/lib/codex-chat";
+
+const createGoatCodexChatMessage = (
+  input: Omit<Parameters<typeof createGoatCodexChatMessageImpl>[0], "workspaceId">,
+) => createGoatCodexChatMessageImpl({ ...input, workspaceId: "workspace_1" });
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -13,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   updateResults: [] as unknown[][],
   codexConnected: vi.fn(),
+  claudeConnected: vi.fn(),
   getSandboxStatus: vi.fn(),
   killSandbox: vi.fn(),
   wake: vi.fn(),
@@ -28,6 +33,11 @@ vi.mock("@opencompany/db/client", () => ({
 
 vi.mock("@/lib/codex-auth", () => ({
   isGoatCodexConnectedForUser: mocks.codexConnected,
+}));
+
+// Pulls in @/lib/auth (authkit), which vitest cannot resolve.
+vi.mock("@/lib/claude-code-auth", () => ({
+  isGoatClaudeCodeConnectedForUser: mocks.claudeConnected,
 }));
 
 vi.mock("@/lib/task-runner", () => ({
@@ -73,6 +83,7 @@ describe("createGoatCodexChatMessage", () => {
     mocks.selectResults.length = 0;
     mocks.execute.mockResolvedValue({ rows: [] });
     mocks.codexConnected.mockResolvedValue(true);
+    mocks.claudeConnected.mockResolvedValue(true);
     mocks.wake.mockResolvedValue(undefined);
     mocks.select.mockImplementation(() => createSelectBuilder(mocks.selectResults.shift() ?? []));
   });
@@ -119,6 +130,22 @@ describe("createGoatCodexChatMessage", () => {
     expect(mocks.wake).not.toHaveBeenCalled();
   });
 
+  it("rejects invalid Claude settings before writing", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "hello",
+      engine: "claude_code",
+      settings: { reasoningEffort: "max" },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 400,
+      error: "Invalid Claude reasoning effort.",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it("rejects sends while Codex is disconnected", async () => {
     mocks.codexConnected.mockResolvedValue(false);
     const result = await createGoatCodexChatMessage({ userWorkosId: "user_1", prompt: "hello" });
@@ -144,9 +171,10 @@ describe("createGoatCodexChatMessage", () => {
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
     expect(sqlText(statement)).toContain("'queued'");
-    expect(sqlText(statement)).toContain("brain_ref, host_tool_contract_version");
+    expect(sqlText(statement)).toContain("brain_ref, workspace_id");
     expect(statement.queryChunks).toContain("brain_1");
-    expect(statement.queryChunks).toContain("goat-codex-brain.v1");
+    expect(statement.queryChunks).toContain("workspace_1");
+    expect(statement.queryChunks).toContain("goat-codex-host-tools.v3");
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
 
@@ -190,7 +218,15 @@ describe("createGoatCodexChatMessage", () => {
       ],
     });
 
-    expect(result).toMatchObject({ ok: true, mode: "started" });
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "started",
+      analytics: {
+        isFirstMessage: true,
+        engine: "codex",
+        model: "openai/gpt-5.6-sol",
+      },
+    });
     const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
     expect(JSON.stringify(statement.queryChunks)).toContain("screenshot.png");
   });
@@ -202,10 +238,42 @@ describe("createGoatCodexChatMessage", () => {
       model: "openai/gpt-5.6-terra",
     });
 
-    expect(result).toMatchObject({ ok: true, mode: "started" });
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "started",
+      analytics: {
+        isFirstMessage: true,
+        engine: "codex",
+        model: "openai/gpt-5.6-terra",
+      },
+    });
     const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
     expect(statement.queryChunks).toContain("openai/gpt-5.6-terra");
     expect(statement.queryChunks).toContain("gpt-5.6-terra");
+  });
+
+  it("persists the selected Claude model and effort on a new chat", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "clone my repo",
+      engine: "claude_code",
+      model: "anthropic/claude-opus-4.8",
+      settings: { reasoningEffort: "xhigh" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "started",
+      analytics: {
+        isFirstMessage: true,
+        engine: "claude_code",
+        model: "anthropic/claude-opus-4.8",
+      },
+    });
+    const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
+    expect(statement.queryChunks).toContain("anthropic/claude-opus-4.8");
+    expect(statement.queryChunks).toContain("claude-opus-4-8");
+    expect(statement.queryChunks).toContain('{"reasoningEffort":"xhigh"}');
   });
 
   it("returns 404 for an unknown or foreign session", async () => {
@@ -225,7 +293,12 @@ describe("createGoatCodexChatMessage", () => {
         codex_chat_sessions: {
           id: "goat_codex_chat_1",
           chatSessionId: "goat_chat_1",
+          engine: "codex",
+          model: "gpt-5.6-terra",
           status: "running",
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-terra",
         },
       },
     ]);
@@ -234,7 +307,16 @@ describe("createGoatCodexChatMessage", () => {
       sessionId: "goat_chat_1",
       prompt: "also do this",
     });
-    expect(result).toMatchObject({ ok: true, mode: "queued", sessionId: "goat_chat_1" });
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "queued",
+      sessionId: "goat_chat_1",
+      analytics: {
+        isFirstMessage: false,
+        engine: "codex",
+        model: "openai/gpt-5.6-terra",
+      },
+    });
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
@@ -245,7 +327,12 @@ describe("createGoatCodexChatMessage", () => {
         codex_chat_sessions: {
           id: "goat_codex_chat_1",
           chatSessionId: "goat_chat_1",
+          engine: "codex",
+          model: "gpt-5.6-sol",
           status: "running",
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
         },
       },
     ]);
@@ -281,8 +368,13 @@ describe("createGoatCodexChatMessage", () => {
         codex_chat_sessions: {
           id: "goat_codex_chat_1",
           chatSessionId: "goat_chat_1",
+          engine: "codex",
+          model: "gpt-5.6-sol",
           status,
           error: "Previous turn failed.",
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
         },
       },
     ]);
@@ -334,6 +426,9 @@ describe("interruptGoatCodexChatSession", () => {
           chatSessionId: "goat_chat_1",
           status: "running",
         },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
+        },
       },
     ]);
     const result = await interruptGoatCodexChatSession({
@@ -356,6 +451,9 @@ describe("interruptGoatCodexChatSession", () => {
           id: "goat_codex_chat_1",
           chatSessionId: "goat_chat_1",
           status,
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
         },
       },
     ]);
@@ -438,6 +536,9 @@ describe("getGoatCodexChatSandboxStatus", () => {
           sandboxId: null,
           status: "queued",
         },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
+        },
       },
     ]);
 
@@ -458,6 +559,9 @@ describe("getGoatCodexChatSandboxStatus", () => {
           chatSessionId: "goat_chat_1",
           sandboxId: "sbx_123",
           status: "idle",
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
         },
       },
     ]);

@@ -17,6 +17,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 // Postgres full-text search vector, written only by the database (a STORED generated column over
@@ -37,6 +38,12 @@ const vector = customType<{ data: string }>({
 });
 
 export type GoatTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+
+// Workflows and skills share a simple draft/active lifecycle: `draft` is
+// editable-but-not-yet-usable, `active` is available to fire (workflows) or
+// attach (skills). Mirrors the frontmatter `status` the Brain docs carried.
+export type GoatWorkflowStatus = "draft" | "active";
+export type GoatSkillStatus = "draft" | "active";
 
 export type GoatHarnessEngine = "opencompany" | "codex";
 
@@ -63,7 +70,8 @@ export type GoatIntegrationProvider =
   | "granola"
   | "fathom"
   | "attio"
-  | "stripe";
+  | "stripe"
+  | "latitude";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear) are always personal. Installation-bound
@@ -226,12 +234,25 @@ export type GoatTaskToolName =
   | "calendar_get_freebusy"
   | "linear_search_tools"
   | "linear_use_tool"
+  | "latitude_search_tools"
+  | "latitude_use_tool"
   | "github_clone_repository"
   | "github_shell"
   | "github_status"
-  | "github_open_pull_request";
+  | "github_open_pull_request"
+  // Shared main-chat tools, used by opencompany-engine task runs (tasks are a
+  // hidden main-chat run). Persisted to goat.task_messages.tool_name (text).
+  | "goat_brain"
+  | "save_to_brain"
+  | "web_search"
+  | "web_fetch"
+  | "list_actions"
+  | "use_action"
+  | "update_task_status";
 
 export type GoatTaskSkillId = "first-principles" | "yc-office-hours";
+
+export type GoatTaskReportedOutcome = "done" | "needs_attention";
 
 export type GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1";
@@ -243,6 +264,16 @@ export type GoatHarnessSpec = {
   skills: GoatTaskSkillId[];
   maxModelSteps: number;
   resultMode: "assistant_final" | "brain_markdown_report";
+  // Extra system-prompt blocks appended after the shared chat system prompt for
+  // opencompany-engine task runs (e.g. compiled workflow instructions + skills).
+  // The runner's chat loop feeds these as extraSystemBlocks.
+  systemBlocks?: string[];
+  workflow?: {
+    // The workspace-scoped workflow slug that spawned this task.
+    id: string;
+    workspaceId: string;
+    skillIds: string[];
+  };
   codex?: {
     repository?: string | null;
     createPullRequest?: boolean;
@@ -324,7 +355,7 @@ export type GoatBrainSource = {
   title?: string;
   capturedAt?: string;
 };
-export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx" | "xlsx" | "image";
+export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx" | "xlsx" | "srt" | "image";
 export type GoatBrainStatus = "draft" | "active" | "archived" | "merged";
 export type GoatBrainFrontmatterProjection = Record<string, unknown>;
 export type GoatBrainTimelineEntry = {
@@ -388,9 +419,11 @@ export type GoatTaskDebugTrace = {
 };
 
 export type GoatChatRole = "user" | "assistant";
-export type GoatChatEngine = "opencompany" | "local_codex" | "codex";
+export type GoatChatEngine = "opencompany" | "codex" | "claude_code";
+// Engines whose turns run through the sandboxed coding-CLI queue (goat.codex_chat_*).
+export type GoatCodexChatEngine = "codex" | "claude_code";
 
-export type GoatChatAttachmentKind = "image" | "pdf" | "docx" | "xlsx";
+export type GoatChatAttachmentKind = "image" | "pdf" | "docx" | "xlsx" | "srt";
 export type GoatChatMessageAttachment = {
   id: string;
   kind: GoatChatAttachmentKind;
@@ -401,22 +434,16 @@ export type GoatChatMessageAttachment = {
   blobUrl: string;
 };
 
-export type GoatLocalCodexSessionStatus =
+export type GoatCodexChatSessionStatus =
+  | "queued"
   | "starting"
   | "idle"
   | "running"
   | "failed"
   | "interrupted"
   | "closed";
-export type GoatLocalCodexTurnStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed"
-  | "interrupted";
-export type GoatLocalCodexCommandKind = "start_turn" | "steer" | "interrupt" | "close";
-export type GoatLocalCodexCommandStatus = "queued" | "claimed" | "succeeded" | "failed";
-export const GOAT_LOCAL_CODEX_EVENT_TYPES = [
+export type GoatCodexChatTurnStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
+export const GOAT_CODEX_APP_SERVER_EVENT_TYPES = [
   "assistant.delta",
   "assistant.completed",
   "reasoning.completed",
@@ -428,6 +455,8 @@ export const GOAT_LOCAL_CODEX_EVENT_TYPES = [
   "file_change.completed",
   "mcp_tool.started",
   "mcp_tool.completed",
+  "subagent.started",
+  "subagent.completed",
   "dynamic_tool.started",
   "dynamic_tool.completed",
   "web_search.started",
@@ -442,16 +471,13 @@ export const GOAT_LOCAL_CODEX_EVENT_TYPES = [
   "error",
   "unknown",
 ] as const;
-export type GoatLocalCodexEventType = (typeof GOAT_LOCAL_CODEX_EVENT_TYPES)[number];
-
-export type GoatCodexChatSessionStatus = GoatLocalCodexSessionStatus | "queued";
-export type GoatCodexChatTurnStatus = GoatLocalCodexTurnStatus;
+export type GoatCodexAppServerEventType = (typeof GOAT_CODEX_APP_SERVER_EVENT_TYPES)[number];
 export type GoatCodexChatEventType = Exclude<
-  GoatLocalCodexEventType,
+  GoatCodexAppServerEventType,
   "assistant.delta" | "command.output"
 >;
 export const GOAT_CODEX_CHAT_EVENT_TYPES: readonly GoatCodexChatEventType[] =
-  GOAT_LOCAL_CODEX_EVENT_TYPES.filter(
+  GOAT_CODEX_APP_SERVER_EVENT_TYPES.filter(
     (eventType): eventType is GoatCodexChatEventType =>
       eventType !== "assistant.delta" && eventType !== "command.output",
   );
@@ -468,12 +494,7 @@ export type GoatCodexChatTurnSettings = {
 export type GoatCodexChatInteractionStatus = "pending" | "resolved" | "canceled";
 
 export type GoatChatMessageDebugTrace = {
-  schemaVersion?:
-    | "opencompany.chat.debug.v1"
-    | "goat.chat.debug.v1"
-    | "goat.local_codex.debug.v1"
-    | "goat.local_codex.debug.v2"
-    | "goat.codex_chat.debug.v1";
+  schemaVersion?: "opencompany.chat.debug.v1" | "goat.chat.debug.v1" | "goat.codex_chat.debug.v1";
   model?: string;
   aborted?: boolean;
   finishReason?: string;
@@ -507,7 +528,7 @@ export const goatUsers = goat.table(
     avatarUrl: text("avatar_url"),
     timezone: text("timezone").notNull().default("UTC"),
     taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
-    localCodexBetaEnabled: boolean("local_codex_beta_enabled").notNull().default(false),
+    autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     preferredMcpClient: text("preferred_mcp_client").$type<GoatMcpClient>(),
     // Set exactly once, when this user first completes a successful Brain query over MCP.
@@ -537,6 +558,9 @@ export const goatWorkspaces = goat.table(
     createdByWorkosId: text("created_by_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "restrict" }),
+    capabilitySessionBudgetUsdMicros: bigint("capability_session_budget_usd_micros", {
+      mode: "number",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -570,6 +594,51 @@ export const goatOnboarding = goat.table("onboarding", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export type GoatOnboardingEmailStep = "welcome" | "checkin" | "feedback_call";
+export type GoatOnboardingEmailStatus = "pending" | "sending" | "sent" | "failed" | "skipped";
+
+// One row per (owner, step) of the founder onboarding drip. Enrollment inserts
+// three rows at first-workspace creation; a cron sweep claims due `pending` rows
+// (status flips to `sending` under a soft lease), sends via Resend, then marks
+// `sent`. The unique (user, step) index makes enrollment idempotent and gives
+// each send a stable Resend idempotency key. Only owners are enrolled — invited
+// members never reach the create-workspace branch that triggers it.
+export const goatOnboardingEmails = goat.table(
+  "onboarding_emails",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workosUserId: text("workos_user_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    step: text("step").$type<GoatOnboardingEmailStep>().notNull(),
+    status: text("status").$type<GoatOnboardingEmailStatus>().notNull().default("pending"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userStepIdx: uniqueIndex("goat_onboarding_emails_user_step_idx").on(
+      table.workosUserId,
+      table.step,
+    ),
+    statusScheduledIdx: index("goat_onboarding_emails_status_scheduled_idx").on(
+      table.status,
+      table.scheduledAt,
+    ),
+    stepCheck: check(
+      "goat_onboarding_emails_step_check",
+      sql`${table.step} IN ('welcome', 'checkin', 'feedback_call')`,
+    ),
+    statusCheck: check(
+      "goat_onboarding_emails_status_check",
+      sql`${table.status} IN ('pending', 'sending', 'sent', 'failed', 'skipped')`,
+    ),
+  }),
+);
 
 export const goatWorkspaceMembers = goat.table(
   "workspace_members",
@@ -1054,7 +1123,7 @@ export const goatBrainDocuments = goat.table(
     ),
     formatCheck: check(
       "goat_brain_documents_format_check",
-      sql`${table.format} IN ('markdown', 'pdf', 'docx', 'xlsx', 'image')`,
+      sql`${table.format} IN ('markdown', 'pdf', 'docx', 'xlsx', 'srt', 'image')`,
     ),
     statusCheck: check(
       "goat_brain_documents_status_check",
@@ -1323,7 +1392,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1372,7 +1441,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1426,7 +1495,7 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -2380,6 +2449,119 @@ export const goatTaskSchedules = goat.table(
   }),
 );
 
+// Workspace-scoped automations. Formerly stored as markdown documents in a
+// reserved `workflows/` Brain folder; extracted here so "how work happens" is a
+// first-class, company-level primitive rather than Brain (knowledge) content.
+// `slug` is the stable handle used by the `#` composer mention and persisted as
+// `tasks.workflow_id` when a workflow fires.
+export const goatWorkflows = goat.table(
+  "workflows",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    instructions: text("instructions").notNull().default(""),
+    // Engine/model token from the editor's Model dropdown (e.g. "kimi-k2.6",
+    // "codex"); empty when the workflow has not picked one explicitly.
+    model: text("model").notNull().default(""),
+    status: text("status").$type<GoatWorkflowStatus>().notNull().default("draft"),
+    createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => ({
+    // Slug is the mention handle; unique per workspace among live rows so an
+    // archived workflow's slug can be reused.
+    workspaceSlugIdx: uniqueIndex("goat_workflows_workspace_slug_idx")
+      .on(table.workspaceId, table.slug)
+      .where(sql`${table.archivedAt} IS NULL`),
+    workspaceUpdatedIdx: index("goat_workflows_workspace_updated_idx").on(
+      table.workspaceId,
+      table.archivedAt,
+      table.updatedAt,
+    ),
+    statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
+  }),
+);
+
+// Workspace-scoped, reusable agent capabilities. Formerly stored in a reserved
+// `skills/` Brain folder; extracted alongside workflows. `slug` is the handle
+// used by the `@skill/<slug>` composer mention. Attaching a skill to a chat
+// still snapshots its content immutably into `goatChatSessionSkills`.
+export const goatSkills = goat.table(
+  "skills",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    instructions: text("instructions").notNull().default(""),
+    status: text("status").$type<GoatSkillStatus>().notNull().default("draft"),
+    createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => ({
+    workspaceSlugIdx: uniqueIndex("goat_skills_workspace_slug_idx")
+      .on(table.workspaceId, table.slug)
+      .where(sql`${table.archivedAt} IS NULL`),
+    workspaceUpdatedIdx: index("goat_skills_workspace_updated_idx").on(
+      table.workspaceId,
+      table.archivedAt,
+      table.updatedAt,
+    ),
+    statusCheck: check("goat_skills_status_check", sql`${table.status} IN ('draft', 'active')`),
+  }),
+);
+
+// Workspace-shared bootstrap material for repositories used by the repo-agnostic
+// Codex and Claude Code chat sandboxes. Environment contents are encrypted at
+// rest; envKeys is intentionally limited to plaintext key names for settings UI.
+export const goatRepoConfigs = goat.table(
+  "repo_configs",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    repositoryExternalId: text("repository_external_id").notNull(),
+    repositoryFullName: text("repository_full_name").notNull(),
+    encryptedEnvPayload: jsonb("encrypted_env_payload").$type<EncryptedPayload>(),
+    encryptionKeyVersion: integer("encryption_key_version"),
+    envKeys: jsonb("env_keys").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    setupInstructions: text("setup_instructions").notNull().default(""),
+    createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceRepositoryIdx: uniqueIndex("goat_repo_configs_workspace_repository_idx").on(
+      table.workspaceId,
+      table.repositoryExternalId,
+    ),
+    envEncryptionCheck: check(
+      "goat_repo_configs_env_encryption_check",
+      sql`(${table.encryptedEnvPayload} IS NULL AND ${table.encryptionKeyVersion} IS NULL)
+        OR (${table.encryptedEnvPayload} IS NOT NULL AND ${table.encryptionKeyVersion} IS NOT NULL)`,
+    ),
+  }),
+);
+
 export const goatTasks = goat.table(
   "tasks",
   {
@@ -2401,6 +2583,10 @@ export const goatTasks = goat.table(
     stage: text("stage").$type<GoatTaskStage>().notNull().default("queued"),
     result: text("result"),
     error: text("error"),
+    workflowId: text("workflow_id"),
+    workflowBrainRef: text("workflow_brain_ref"),
+    reportedOutcome: text("reported_outcome").$type<GoatTaskReportedOutcome>(),
+    outcomeComment: text("outcome_comment"),
     harnessSpec: jsonb("harness_spec").$type<GoatHarnessSpec>().notNull().default(sql`'{}'::jsonb`),
     debugTrace: jsonb("debug_trace")
       .$type<GoatTaskDebugTrace>()
@@ -2441,6 +2627,10 @@ export const goatTasks = goat.table(
     stageCheck: check(
       "goat_tasks_stage_check",
       sql`${table.stage} IN ('queued', 'planning', 'sandboxing', 'running', 'completed', 'failed', 'canceled')`,
+    ),
+    reportedOutcomeCheck: check(
+      "goat_tasks_reported_outcome_check",
+      sql`${table.reportedOutcome} IS NULL OR ${table.reportedOutcome} IN ('done', 'needs_attention')`,
     ),
   }),
 );
@@ -2753,7 +2943,7 @@ export const goatChatSessions = goat.table(
     ),
     engineCheck: check(
       "goat_chat_sessions_engine_check",
-      sql`${table.engine} IN ('opencompany', 'local_codex', 'codex')`,
+      sql`${table.engine} IN ('opencompany', 'codex', 'claude_code')`,
     ),
   }),
 );
@@ -2832,6 +3022,7 @@ export const goatCapabilityRuns = goat.table(
       table.workspaceId,
       table.createdAt,
     ),
+    chatSessionIdx: index("goat_capability_runs_chat_session_idx").on(table.chatSessionId),
     reconciliationIdx: index("goat_capability_runs_reconciliation_idx")
       .on(table.updatedAt, table.id)
       .where(
@@ -2895,7 +3086,7 @@ export const goatChatMessages = goat.table(
     }),
     debugTrace: jsonb("debug_trace").$type<GoatChatMessageDebugTrace | null>(),
     attachments: jsonb("attachments").$type<GoatChatMessageAttachment[] | null>(),
-    // docx/xlsx extracted text keyed by attachment id; server-side model context
+    // docx/xlsx/srt extracted text keyed by attachment id; server-side model context
     // only — excluded from the Electric shape.
     attachmentTexts: jsonb("attachment_texts").$type<Record<string, string> | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2908,6 +3099,57 @@ export const goatChatMessages = goat.table(
     ),
     taskIdx: index("goat_chat_messages_task_idx").on(table.taskId),
     roleCheck: check("goat_chat_messages_role_check", sql`${table.role} IN ('user', 'assistant')`),
+  }),
+);
+
+export const goatChatSandboxUsage = goat.table(
+  "chat_sandbox_usage",
+  {
+    id: serial("id").primaryKey(),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    userMessageId: text("user_message_id").references(() => goatChatMessages.id, {
+      onDelete: "set null",
+    }),
+    sandboxId: text("sandbox_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    activeMs: integer("active_ms").notNull().default(0),
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", {
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" }).notNull().default(0),
+    rawMetrics: jsonb("raw_metrics")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    costBasis: jsonb("cost_basis")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userSessionCreatedAtIdx: index("goat_chat_sandbox_usage_user_session_created_at_idx").on(
+      table.userWorkosId,
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    sessionCreatedAtIdx: index("goat_chat_sandbox_usage_session_created_at_idx").on(
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    userMessageIdx: index("goat_chat_sandbox_usage_user_message_idx").on(table.userMessageId),
+    sandboxIdx: index("goat_chat_sandbox_usage_sandbox_idx").on(table.sandboxId),
   }),
 );
 
@@ -2940,208 +3182,6 @@ export const goatChatSessionSkills = goat.table(
   }),
 );
 
-export const goatLocalBridges = goat.table(
-  "local_bridges",
-  {
-    id: text("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    tokenHash: text("token_hash").notNull(),
-    tokenPrefix: text("token_prefix").notNull(),
-    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
-    revokedAt: timestamp("revoked_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    userLastSeenIdx: index("goat_local_bridges_user_last_seen_idx").on(
-      table.userWorkosId,
-      table.lastSeenAt,
-    ),
-    tokenHashIdx: uniqueIndex("goat_local_bridges_token_hash_idx").on(table.tokenHash),
-  }),
-);
-
-export const goatLocalCodexSessions = goat.table(
-  "local_codex_sessions",
-  {
-    id: text("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    chatSessionId: text("chat_session_id")
-      .notNull()
-      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
-    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, {
-      onDelete: "set null",
-    }),
-    repositoryPath: text("repository_path"),
-    worktreePath: text("worktree_path"),
-    model: text("model").notNull().default("gpt-5.5"),
-    codexThreadId: text("codex_thread_id"),
-    activeTurnId: text("active_turn_id"),
-    status: text("status").$type<GoatLocalCodexSessionStatus>().notNull().default("starting"),
-    error: text("error"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    chatSessionIdx: uniqueIndex("goat_local_codex_sessions_chat_session_idx").on(
-      table.chatSessionId,
-    ),
-    userUpdatedIdx: index("goat_local_codex_sessions_user_updated_idx").on(
-      table.userWorkosId,
-      table.updatedAt,
-    ),
-    bridgeIdx: index("goat_local_codex_sessions_bridge_idx").on(table.bridgeId),
-    statusCheck: check(
-      "goat_local_codex_sessions_status_check",
-      sql`${table.status} IN ('starting', 'idle', 'running', 'failed', 'interrupted', 'closed')`,
-    ),
-  }),
-);
-
-export const goatLocalCodexTurns = goat.table(
-  "local_codex_turns",
-  {
-    id: text("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    localCodexSessionId: text("local_codex_session_id")
-      .notNull()
-      .references(() => goatLocalCodexSessions.id, { onDelete: "cascade" }),
-    userMessageId: text("user_message_id")
-      .notNull()
-      .references(() => goatChatMessages.id, { onDelete: "cascade" }),
-    assistantMessageId: text("assistant_message_id")
-      .notNull()
-      .references(() => goatChatMessages.id, { onDelete: "cascade" }),
-    codexTurnId: text("codex_turn_id"),
-    status: text("status").$type<GoatLocalCodexTurnStatus>().notNull().default("queued"),
-    prompt: text("prompt").notNull(),
-    settings: jsonb("settings")
-      .$type<GoatCodexChatTurnSettings>()
-      .notNull()
-      .default(sql`'{}'::jsonb`),
-    error: text("error"),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    sessionCreatedIdx: index("goat_local_codex_turns_session_created_idx").on(
-      table.localCodexSessionId,
-      table.createdAt,
-    ),
-    userCreatedIdx: index("goat_local_codex_turns_user_created_idx").on(
-      table.userWorkosId,
-      table.createdAt,
-    ),
-    assistantMessageIdx: uniqueIndex("goat_local_codex_turns_assistant_message_idx").on(
-      table.assistantMessageId,
-    ),
-    statusCheck: check(
-      "goat_local_codex_turns_status_check",
-      sql`${table.status} IN ('queued', 'running', 'completed', 'failed', 'interrupted')`,
-    ),
-  }),
-);
-
-export const goatLocalCodexCommands = goat.table(
-  "local_codex_commands",
-  {
-    id: text("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    localCodexSessionId: text("local_codex_session_id")
-      .notNull()
-      .references(() => goatLocalCodexSessions.id, { onDelete: "cascade" }),
-    localCodexTurnId: text("local_codex_turn_id").references(() => goatLocalCodexTurns.id, {
-      onDelete: "set null",
-    }),
-    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, {
-      onDelete: "set null",
-    }),
-    claimedByBridgeId: text("claimed_by_bridge_id").references(() => goatLocalBridges.id, {
-      onDelete: "set null",
-    }),
-    kind: text("kind").$type<GoatLocalCodexCommandKind>().notNull(),
-    status: text("status").$type<GoatLocalCodexCommandStatus>().notNull().default("queued"),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
-    error: text("error"),
-    claimedAt: timestamp("claimed_at", { withTimezone: true }),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    bridgeQueuedIdx: index("goat_local_codex_commands_bridge_queued_idx").on(
-      table.bridgeId,
-      table.status,
-      table.createdAt,
-    ),
-    sessionCreatedIdx: index("goat_local_codex_commands_session_created_idx").on(
-      table.localCodexSessionId,
-      table.createdAt,
-    ),
-    statusCheck: check(
-      "goat_local_codex_commands_status_check",
-      sql`${table.status} IN ('queued', 'claimed', 'succeeded', 'failed')`,
-    ),
-    kindCheck: check(
-      "goat_local_codex_commands_kind_check",
-      sql`${table.kind} IN ('start_turn', 'steer', 'interrupt', 'close')`,
-    ),
-  }),
-);
-
-export const goatLocalCodexEvents = goat.table(
-  "local_codex_events",
-  {
-    id: serial("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
-    localCodexSessionId: text("local_codex_session_id")
-      .notNull()
-      .references(() => goatLocalCodexSessions.id, { onDelete: "cascade" }),
-    localCodexTurnId: text("local_codex_turn_id").references(() => goatLocalCodexTurns.id, {
-      onDelete: "set null",
-    }),
-    bridgeId: text("bridge_id").references(() => goatLocalBridges.id, {
-      onDelete: "set null",
-    }),
-    commandId: text("command_id").references(() => goatLocalCodexCommands.id, {
-      onDelete: "set null",
-    }),
-    type: text("type").$type<GoatLocalCodexEventType>().notNull(),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
-    rawEvent: jsonb("raw_event").$type<Record<string, unknown>>(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    sessionCreatedIdx: index("goat_local_codex_events_session_created_idx").on(
-      table.localCodexSessionId,
-      table.createdAt,
-    ),
-    turnCreatedIdx: index("goat_local_codex_events_turn_created_idx").on(
-      table.localCodexTurnId,
-      table.createdAt,
-    ),
-    typeCheck: check(
-      "goat_local_codex_events_type_check",
-      sql`${table.type} IN (${sql.join(
-        GOAT_LOCAL_CODEX_EVENT_TYPES.map((eventType) => sql`${eventType}`),
-        sql`, `,
-      )})`,
-    ),
-  }),
-);
-
 export const goatCodexChatSessions = goat.table(
   "codex_chat_sessions",
   {
@@ -3152,8 +3192,12 @@ export const goatCodexChatSessions = goat.table(
     chatSessionId: text("chat_session_id")
       .notNull()
       .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    engine: text("engine").$type<GoatCodexChatEngine>().notNull().default("codex"),
     model: text("model").notNull().default("gpt-5.5"),
     brainRef: text("brain_ref").references(() => goatBrains.id, {
+      onDelete: "set null",
+    }),
+    workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
       onDelete: "set null",
     }),
     hostToolContractVersion: text("host_tool_contract_version"),
@@ -3187,6 +3231,10 @@ export const goatCodexChatSessions = goat.table(
     statusCheck: check(
       "goat_codex_chat_sessions_status_check",
       sql`${table.status} IN ('queued', 'starting', 'idle', 'running', 'failed', 'interrupted', 'closed')`,
+    ),
+    engineCheck: check(
+      "goat_codex_chat_sessions_engine_check",
+      sql`${table.engine} IN ('codex', 'claude_code')`,
     ),
   }),
 );
@@ -3223,6 +3271,8 @@ export const goatCodexChatTurns = goat.table(
     }),
     attempts: integer("attempts").notNull().default(0),
     recoveryAttempts: integer("recovery_attempts").notNull().default(0),
+    engineRecoveryRequired: boolean("engine_recovery_required").notNull().default(false),
+    engineTurnBaselineIds: jsonb("engine_turn_baseline_ids").$type<string[]>(),
     leaseId: text("lease_id"),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
@@ -3435,6 +3485,35 @@ export const goatCodexDeviceAuthFlows = goat.table(
   }),
 );
 
+// Claude Code subscription auth: one long-lived setup-token per user, pasted in
+// settings (no device flow exists for Claude Code). Strictly per-user — sharing a
+// subscription credential across users is prohibited by Anthropic's terms.
+export const goatClaudeCodeCredentials = goat.table(
+  "claude_code_credentials",
+  {
+    userWorkosId: text("user_workos_id")
+      .primaryKey()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    encryptedAuthJson: jsonb("encrypted_auth_json")
+      .$type<GoatIntegrationCredentialEncryptedPayload>()
+      .notNull(),
+    encryptionKeyVersion: integer("encryption_key_version").notNull(),
+    status: text("status").$type<GoatCodexCredentialStatus>().notNull().default("connected"),
+    statusReason: text("status_reason"),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    statusIdx: index("goat_claude_code_credentials_status_idx").on(table.status),
+    statusCheck: check(
+      "goat_claude_code_credentials_status_check",
+      sql`${table.status} IN ('connected', 'needs_reauth')`,
+    ),
+  }),
+);
+
 export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   workspaceMemberships: many(goatWorkspaceMembers),
   brainMemberships: many(goatBrainMembers),
@@ -3453,16 +3532,13 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   taskToolUsage: many(goatTaskToolUsage),
   taskSandboxUsage: many(goatTaskSandboxUsage),
   chatSessions: many(goatChatSessions),
+  chatSandboxUsage: many(goatChatSandboxUsage),
   capabilityRuns: many(goatCapabilityRuns),
   capabilityOverrides: many(goatWorkspaceCapabilities),
-  localBridges: many(goatLocalBridges),
-  localCodexSessions: many(goatLocalCodexSessions),
-  localCodexTurns: many(goatLocalCodexTurns),
-  localCodexCommands: many(goatLocalCodexCommands),
-  localCodexEvents: many(goatLocalCodexEvents),
   integrations: many(goatIntegrations),
   integrationCredentials: many(goatIntegrationCredentials),
   integrationResources: many(goatIntegrationResources),
+  repoConfigs: many(goatRepoConfigs),
   brainSourceItems: many(goatBrainSourceItems),
   brainIngestJobs: many(goatBrainIngestJobs),
   codexDeviceAuthFlows: many(goatCodexDeviceAuthFlows),
@@ -3479,6 +3555,7 @@ export const goatWorkspacesRelations = relations(goatWorkspaces, ({ one, many })
   billing: one(goatWorkspaceBilling),
   ingestionReservations: many(goatWorkspaceIngestionReservations),
   brains: many(goatBrains),
+  repoConfigs: many(goatRepoConfigs),
 }));
 
 export const goatWorkspaceBillingRelations = relations(goatWorkspaceBilling, ({ one }) => ({
@@ -3620,107 +3697,6 @@ export const goatBrainToolRunsRelations = relations(goatBrainToolRuns, ({ one })
   }),
 }));
 
-export const goatLocalBridgesRelations = relations(goatLocalBridges, ({ one, many }) => ({
-  user: one(goatUsers, {
-    fields: [goatLocalBridges.userWorkosId],
-    references: [goatUsers.workosUserId],
-  }),
-  sessions: many(goatLocalCodexSessions),
-  events: many(goatLocalCodexEvents),
-}));
-
-export const goatLocalCodexSessionsRelations = relations(
-  goatLocalCodexSessions,
-  ({ one, many }) => ({
-    user: one(goatUsers, {
-      fields: [goatLocalCodexSessions.userWorkosId],
-      references: [goatUsers.workosUserId],
-    }),
-    chatSession: one(goatChatSessions, {
-      fields: [goatLocalCodexSessions.chatSessionId],
-      references: [goatChatSessions.id],
-    }),
-    bridge: one(goatLocalBridges, {
-      fields: [goatLocalCodexSessions.bridgeId],
-      references: [goatLocalBridges.id],
-    }),
-    turns: many(goatLocalCodexTurns),
-    commands: many(goatLocalCodexCommands),
-    events: many(goatLocalCodexEvents),
-  }),
-);
-
-export const goatLocalCodexTurnsRelations = relations(goatLocalCodexTurns, ({ one, many }) => ({
-  user: one(goatUsers, {
-    fields: [goatLocalCodexTurns.userWorkosId],
-    references: [goatUsers.workosUserId],
-  }),
-  localCodexSession: one(goatLocalCodexSessions, {
-    fields: [goatLocalCodexTurns.localCodexSessionId],
-    references: [goatLocalCodexSessions.id],
-  }),
-  userMessage: one(goatChatMessages, {
-    fields: [goatLocalCodexTurns.userMessageId],
-    references: [goatChatMessages.id],
-    relationName: "goat_local_codex_turns_user_message",
-  }),
-  assistantMessage: one(goatChatMessages, {
-    fields: [goatLocalCodexTurns.assistantMessageId],
-    references: [goatChatMessages.id],
-    relationName: "goat_local_codex_turns_assistant_message",
-  }),
-  commands: many(goatLocalCodexCommands),
-  events: many(goatLocalCodexEvents),
-}));
-
-export const goatLocalCodexCommandsRelations = relations(goatLocalCodexCommands, ({ one }) => ({
-  user: one(goatUsers, {
-    fields: [goatLocalCodexCommands.userWorkosId],
-    references: [goatUsers.workosUserId],
-  }),
-  localCodexSession: one(goatLocalCodexSessions, {
-    fields: [goatLocalCodexCommands.localCodexSessionId],
-    references: [goatLocalCodexSessions.id],
-  }),
-  localCodexTurn: one(goatLocalCodexTurns, {
-    fields: [goatLocalCodexCommands.localCodexTurnId],
-    references: [goatLocalCodexTurns.id],
-  }),
-  bridge: one(goatLocalBridges, {
-    fields: [goatLocalCodexCommands.bridgeId],
-    references: [goatLocalBridges.id],
-    relationName: "goat_local_codex_commands_bridge",
-  }),
-  claimedByBridge: one(goatLocalBridges, {
-    fields: [goatLocalCodexCommands.claimedByBridgeId],
-    references: [goatLocalBridges.id],
-    relationName: "goat_local_codex_commands_claimed_bridge",
-  }),
-}));
-
-export const goatLocalCodexEventsRelations = relations(goatLocalCodexEvents, ({ one }) => ({
-  user: one(goatUsers, {
-    fields: [goatLocalCodexEvents.userWorkosId],
-    references: [goatUsers.workosUserId],
-  }),
-  localCodexSession: one(goatLocalCodexSessions, {
-    fields: [goatLocalCodexEvents.localCodexSessionId],
-    references: [goatLocalCodexSessions.id],
-  }),
-  localCodexTurn: one(goatLocalCodexTurns, {
-    fields: [goatLocalCodexEvents.localCodexTurnId],
-    references: [goatLocalCodexTurns.id],
-  }),
-  bridge: one(goatLocalBridges, {
-    fields: [goatLocalCodexEvents.bridgeId],
-    references: [goatLocalBridges.id],
-  }),
-  command: one(goatLocalCodexCommands, {
-    fields: [goatLocalCodexEvents.commandId],
-    references: [goatLocalCodexCommands.id],
-  }),
-}));
-
 export const goatCodexChatSessionsRelations = relations(goatCodexChatSessions, ({ one, many }) => ({
   user: one(goatUsers, {
     fields: [goatCodexChatSessions.userWorkosId],
@@ -3809,6 +3785,16 @@ export const goatCodexDeviceAuthFlowsRelations = relations(goatCodexDeviceAuthFl
   }),
 }));
 
+export const goatClaudeCodeCredentialsRelations = relations(
+  goatClaudeCodeCredentials,
+  ({ one }) => ({
+    user: one(goatUsers, {
+      fields: [goatClaudeCodeCredentials.userWorkosId],
+      references: [goatUsers.workosUserId],
+    }),
+  }),
+);
+
 export const goatIntegrationsRelations = relations(goatIntegrations, ({ one, many }) => ({
   user: one(goatUsers, {
     fields: [goatIntegrations.userWorkosId],
@@ -3841,6 +3827,17 @@ export const goatIntegrationResourcesRelations = relations(goatIntegrationResour
   integration: one(goatIntegrations, {
     fields: [goatIntegrationResources.integrationId],
     references: [goatIntegrations.id],
+  }),
+}));
+
+export const goatRepoConfigsRelations = relations(goatRepoConfigs, ({ one }) => ({
+  workspace: one(goatWorkspaces, {
+    fields: [goatRepoConfigs.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
+  createdBy: one(goatUsers, {
+    fields: [goatRepoConfigs.createdByWorkosId],
+    references: [goatUsers.workosUserId],
   }),
 }));
 
@@ -4005,9 +4002,9 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
     references: [goatUsers.workosUserId],
   }),
   messages: many(goatChatMessages),
+  sandboxUsage: many(goatChatSandboxUsage),
   skills: many(goatChatSessionSkills),
   brainToolRuns: many(goatBrainToolRuns),
-  localCodexSessions: many(goatLocalCodexSessions),
   capabilityRuns: many(goatCapabilityRuns),
 }));
 
@@ -4043,11 +4040,21 @@ export const goatChatMessagesRelations = relations(goatChatMessages, ({ one, man
     references: [goatTasks.id],
   }),
   activatedSkills: many(goatChatSessionSkills),
-  localCodexUserTurns: many(goatLocalCodexTurns, {
-    relationName: "goat_local_codex_turns_user_message",
+  sandboxUsage: many(goatChatSandboxUsage),
+}));
+
+export const goatChatSandboxUsageRelations = relations(goatChatSandboxUsage, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatChatSandboxUsage.userWorkosId],
+    references: [goatUsers.workosUserId],
   }),
-  localCodexAssistantTurns: many(goatLocalCodexTurns, {
-    relationName: "goat_local_codex_turns_assistant_message",
+  session: one(goatChatSessions, {
+    fields: [goatChatSandboxUsage.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+  userMessage: one(goatChatMessages, {
+    fields: [goatChatSandboxUsage.userMessageId],
+    references: [goatChatMessages.id],
   }),
 }));
 
@@ -4069,6 +4076,7 @@ export const goatChatSessionSkillsRelations = relations(goatChatSessionSkills, (
 export type GoatUser = typeof goatUsers.$inferSelect;
 export type GoatWorkspace = typeof goatWorkspaces.$inferSelect;
 export type GoatOnboarding = typeof goatOnboarding.$inferSelect;
+export type GoatOnboardingEmail = typeof goatOnboardingEmails.$inferSelect;
 export type GoatWorkspaceMember = typeof goatWorkspaceMembers.$inferSelect;
 export type GoatWorkspaceCapability = typeof goatWorkspaceCapabilities.$inferSelect;
 export type GoatWorkspaceBilling = typeof goatWorkspaceBilling.$inferSelect;
@@ -4083,11 +4091,6 @@ export type GoatBrainEdge = typeof goatBrainEdges.$inferSelect;
 export type GoatBrainDocumentEmbedding = typeof goatBrainDocumentEmbeddings.$inferSelect;
 export type GoatBrainDocumentVersion = typeof goatBrainDocumentVersions.$inferSelect;
 export type GoatBrainToolRun = typeof goatBrainToolRuns.$inferSelect;
-export type GoatLocalBridge = typeof goatLocalBridges.$inferSelect;
-export type GoatLocalCodexSession = typeof goatLocalCodexSessions.$inferSelect;
-export type GoatLocalCodexTurn = typeof goatLocalCodexTurns.$inferSelect;
-export type GoatLocalCodexCommand = typeof goatLocalCodexCommands.$inferSelect;
-export type GoatLocalCodexEvent = typeof goatLocalCodexEvents.$inferSelect;
 export type GoatCodexChatSession = typeof goatCodexChatSessions.$inferSelect;
 export type GoatCodexChatTurn = typeof goatCodexChatTurns.$inferSelect;
 export type GoatCodexChatInteraction = typeof goatCodexChatInteractions.$inferSelect;
@@ -4097,6 +4100,7 @@ export type GoatIntegrationCredential = typeof goatIntegrationCredentials.$infer
 export type GoatBrainSourceItem = typeof goatBrainSourceItems.$inferSelect;
 export type GoatBrainIngestJob = typeof goatBrainIngestJobs.$inferSelect;
 export type GoatCodexCredential = typeof goatCodexCredentials.$inferSelect;
+export type GoatClaudeCodeCredential = typeof goatClaudeCodeCredentials.$inferSelect;
 export type GoatCodexDeviceAuthFlow = typeof goatCodexDeviceAuthFlows.$inferSelect;
 export type GoatTaskSchedule = typeof goatTaskSchedules.$inferSelect;
 export type GoatTaskScheduleRun = typeof goatTaskScheduleRuns.$inferSelect;
@@ -4110,4 +4114,8 @@ export type GoatChatSession = typeof goatChatSessions.$inferSelect;
 export type GoatChatShare = typeof goatChatShares.$inferSelect;
 export type GoatCapabilityRun = typeof goatCapabilityRuns.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
+export type GoatChatSandboxUsage = typeof goatChatSandboxUsage.$inferSelect;
 export type GoatChatSessionSkill = typeof goatChatSessionSkills.$inferSelect;
+export type GoatWorkflow = typeof goatWorkflows.$inferSelect;
+export type GoatSkill = typeof goatSkills.$inferSelect;
+export type GoatRepoConfig = typeof goatRepoConfigs.$inferSelect;

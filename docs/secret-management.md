@@ -126,6 +126,8 @@ For Infisical `dev`, `/web` should include:
   credential encryption key)
 - runner connection vars
 - optional Linear, analytics, and observability vars
+- the dedicated Goat project's `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` and
+  `NEXT_PUBLIC_GOAT_POSTHOG_HOST` when testing Goat analytics locally
 
 For Infisical `dev`, `/runner` should include:
 
@@ -138,6 +140,8 @@ For Infisical `dev`, `/runner` should include:
 - GitHub workspace app vars
 - GitHub integration app vars: `GITHUB_INTEGRATION_APP_ID` and
   `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
+- the dedicated Goat project's `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` and
+  `NEXT_PUBLIC_GOAT_POSTHOG_HOST` for completed Brain ingestion events
 - optional hosted tool and observability vars
 
 Hosted Inngest keys belong in `staging`/`prod`, not local `dev`.

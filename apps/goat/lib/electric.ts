@@ -75,7 +75,7 @@ const BRAIN_DOCUMENT_COLUMNS = [
   "updated_at",
 ] as const;
 
-// Chat messages sync everything except attachment_texts: docx/xlsx extracted
+// Chat messages sync everything except attachment_texts: docx/xlsx/srt extracted
 // text (up to 64KB per attachment) only the chat model needs, never the UI.
 const CHAT_MESSAGE_COLUMNS = [
   "id",
@@ -165,14 +165,6 @@ const SHAPE_SCOPES = {
   "goat.chat_sessions": {
     table: "goat.chat_sessions",
     where: scopedOpenChatSessionWhere,
-  },
-  local_codex_sessions: {
-    table: "goat.local_codex_sessions",
-    where: scopedLocalCodexSessionWhere,
-  },
-  "goat.local_codex_sessions": {
-    table: "goat.local_codex_sessions",
-    where: scopedLocalCodexSessionWhere,
   },
   codex_chat_sessions: {
     table: "goat.codex_chat_sessions",
@@ -336,14 +328,6 @@ export function goatElectricChatMessagesSessionId(requestUrl: URL) {
   return sessionId || null;
 }
 
-export function goatElectricLocalCodexChatSessionId(requestUrl: URL) {
-  const table = requestUrl.searchParams.get("table");
-  if (table !== "local_codex_sessions" && table !== "goat.local_codex_sessions") return null;
-
-  const sessionId = requestUrl.searchParams.get("chat_session_id")?.trim();
-  return sessionId || null;
-}
-
 function scopedChatMessageWhere(
   _userWorkosId: string,
   requestUrl: URL,
@@ -354,20 +338,6 @@ function scopedChatMessageWhere(
 
   return {
     clause: `"session_id" = $1`,
-    params: [sessionId],
-  };
-}
-
-function scopedLocalCodexSessionWhere(
-  _userWorkosId: string,
-  requestUrl: URL,
-  context: ShapeWhereContext,
-): ShapeWhere | null {
-  const sessionId = goatElectricLocalCodexChatSessionId(requestUrl);
-  if (!sessionId || context.authorizedChatSessionId !== sessionId) return null;
-
-  return {
-    clause: `"chat_session_id" = $1`,
     params: [sessionId],
   };
 }

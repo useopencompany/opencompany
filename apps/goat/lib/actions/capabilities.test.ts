@@ -2,11 +2,27 @@ import { describe, expect, it } from "vitest";
 import {
   effectiveCapabilityMode,
   GOAT_PROVIDER_CAPABILITIES,
+  isGoatCapabilityId,
   isGoatCapabilityMode,
   providerCapability,
 } from "@/lib/actions/capabilities";
 
 describe("GOAT_PROVIDER_CAPABILITIES", () => {
+  it("registers Gmail reads and drafts on by default and sends behind ask", () => {
+    expect(GOAT_PROVIDER_CAPABILITIES.gmail).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "draft", defaultMode: "on" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
+  it("registers Drive reads on by default and document writes behind ask", () => {
+    expect(GOAT_PROVIDER_CAPABILITIES.google_drive).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
   it("registers Google Calendar with read on by default and write behind ask", () => {
     expect(GOAT_PROVIDER_CAPABILITIES.google_calendar).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
@@ -18,6 +34,12 @@ describe("GOAT_PROVIDER_CAPABILITIES", () => {
     expect(GOAT_PROVIDER_CAPABILITIES.linear).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
+    ]);
+  });
+
+  it("registers Slack as one broad read permission", () => {
+    expect(GOAT_PROVIDER_CAPABILITIES.slack).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
     ]);
   });
 
@@ -54,9 +76,9 @@ describe("effectiveCapabilityMode", () => {
   });
 
   it("treats unregistered providers as read on", () => {
-    expect(effectiveCapabilityMode("slack", "read", {})).toBe("on");
-    expect(effectiveCapabilityMode("slack", "write", {})).toBe("on");
-    expect(effectiveCapabilityMode("slack", "read", { read: "off" })).toBe("off");
+    expect(effectiveCapabilityMode("github", "read", {})).toBe("on");
+    expect(effectiveCapabilityMode("github", "write", {})).toBe("on");
+    expect(effectiveCapabilityMode("github", "read", { read: "off" })).toBe("off");
   });
 });
 
@@ -69,10 +91,22 @@ describe("mode helpers", () => {
     expect(isGoatCapabilityMode(undefined)).toBe(false);
   });
 
+  it("recognizes provider-specific capability ids", () => {
+    expect(isGoatCapabilityId("read")).toBe(true);
+    expect(isGoatCapabilityId("draft")).toBe(true);
+    expect(isGoatCapabilityId("write")).toBe(true);
+    expect(isGoatCapabilityId("send")).toBe(false);
+  });
+
   it("looks up registered capabilities", () => {
+    expect(providerCapability("gmail", "draft")?.label).toBe("Create drafts");
+    expect(providerCapability("gmail", "write")?.label).toBe("Send emails");
+    expect(providerCapability("google_drive", "read")?.label).toBe("Find & read files");
+    expect(providerCapability("google_drive", "write")?.label).toBe("Create & edit Docs");
     expect(providerCapability("google_calendar", "write")?.label).toBe("Add events");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
+    expect(providerCapability("slack", "read")?.label).toBe("Read Slack");
     expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
-    expect(providerCapability("gmail", "write")).toBeUndefined();
+    expect(providerCapability("slack", "write")).toBeUndefined();
   });
 });

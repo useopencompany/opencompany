@@ -11,6 +11,7 @@ import type { GoatHarnessSpec, GoatTaskScheduleRunStatus } from "@opencompany/db
 import { goatTaskScheduleRuns, goatTaskSchedules, goatUsers } from "@opencompany/db/goat-schema";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
+import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { planGoatTaskHarness } from "@/lib/task-runner";
 import { createGoatTaskForUser } from "@/lib/tasks";
 
@@ -66,7 +67,7 @@ export async function createGoatTaskScheduleForUser(input: {
     throw new Error(parsed.error);
   }
   if (!(await taskSpawningEnabledForUser(input.userWorkosId))) {
-    throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
+    throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
   }
   const now = input.now ?? new Date();
   const plannedHarnessSpec =
@@ -122,7 +123,7 @@ export async function createGoatTaskScheduleForUser(input: {
 
   const [schedule] = rowsFromExecute<{ id: string }>(result);
   if (!schedule) {
-    throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
+    throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
   }
   return {
     id: schedule.id,
@@ -145,7 +146,7 @@ export async function createGoatTaskScheduleForUser(input: {
 export async function setGoatTaskScheduleEnabledAction(scheduleId: string, enabled: boolean) {
   const { user } = await currentGoatUser();
   if (!user.taskSpawningEnabled) {
-    return { ok: false, error: "Background tasks are disabled." } as const;
+    return { ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const;
   }
   const now = new Date();
   const [schedule] = await getDb()
@@ -180,7 +181,7 @@ export async function setGoatTaskScheduleEnabledAction(scheduleId: string, enabl
 
   return updated
     ? ({ ok: true } as const)
-    : ({ ok: false, error: "Background tasks are disabled." } as const);
+    : ({ ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const);
 }
 
 export async function updateGoatTaskScheduleAction(
@@ -209,7 +210,7 @@ export async function updateGoatTaskScheduleForUser(
   },
 ) {
   if (!(await taskSpawningEnabledForUser(userWorkosId))) {
-    return { ok: false, error: "Background tasks are disabled." } as const;
+    return { ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const;
   }
   const parsed = parseTaskScheduleInput(input);
   if (!parsed.ok) return { ok: false, error: parsed.error } as const;
@@ -277,7 +278,7 @@ export async function deleteGoatTaskScheduleAction(scheduleId: string) {
 
 export async function deleteGoatTaskScheduleForUser(userWorkosId: string, scheduleId: string) {
   if (!(await taskSpawningEnabledForUser(userWorkosId))) {
-    return { ok: false, error: "Background tasks are disabled." } as const;
+    return { ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const;
   }
   const [updated] = await getDb()
     .update(goatTaskSchedules)
@@ -300,7 +301,7 @@ export async function deleteGoatTaskScheduleForUser(userWorkosId: string, schedu
 export async function runGoatTaskScheduleNowAction(scheduleId: string) {
   const { user } = await currentGoatUser();
   if (!user.taskSpawningEnabled) {
-    return { ok: false, error: "Background tasks are disabled." } as const;
+    return { ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const;
   }
   const [schedule] = await getDb()
     .select()

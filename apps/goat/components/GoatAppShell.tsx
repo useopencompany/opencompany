@@ -1,14 +1,19 @@
+import { GoatAnalyticsProvider } from "@opencompany/analytics/goat/client";
 import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
-import { StatsigAnalyticsProvider } from "@opencompany/statsig/client";
 import type { ReactNode } from "react";
 import { GoatAppDataProvider, type GoatAppInitialData } from "@/components/GoatAppDataProvider";
 import { currentGoatUser } from "@/lib/auth";
 import { listCurrentUserRecentGoatChats } from "@/lib/chat";
 import { isGoatChatResumeEnabled } from "@/lib/chat-streams";
+import { loadCurrentGoatClaudeCodeAuthSettings } from "@/lib/claude-code-auth";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
-import { type GoatCodexProviderState, type GoatIntegrationState } from "@/lib/integration-state";
+import {
+  type GoatClaudeCodeProviderState,
+  type GoatCodexProviderState,
+  type GoatIntegrationState,
+} from "@/lib/integration-state";
 import { getGoatAttioIntegrationState } from "@/lib/integrations/attio";
 import { getGoatFathomIntegrationState } from "@/lib/integrations/fathom";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
@@ -40,10 +45,11 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     attio,
     stripe,
     codex,
+    claudeCode,
     workspaceMembers,
     personalAccounts,
   ] = await Promise.all([
-    featureFlags.taskSpawning ? listCurrentUserGoatTasks() : Promise.resolve([]),
+    listCurrentUserGoatTasks(),
     featureFlags.taskSpawning ? listCurrentUserGoatTaskSchedules() : Promise.resolve([]),
     listCurrentUserRecentGoatChats(),
     getGoatGoogleIntegrationState(user.workosUserId),
@@ -56,6 +62,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatAttioIntegrationState(user.workosUserId),
     getGoatStripeIntegrationState(workspace.id),
     loadCurrentGoatCodexAuthSettings(),
+    loadCurrentGoatClaudeCodeAuthSettings(),
     listGoatWorkspaceMembers(workspace.id),
     getGoatPersonalAccounts(user.workosUserId),
   ]);
@@ -95,10 +102,13 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       model: task.model,
       scheduleId: task.scheduleId,
       scheduledFor: task.scheduledFor?.toISOString() ?? null,
+      workflowId: task.workflowId,
       status: task.status as GoatTaskStatus,
       stage: task.stage as GoatTaskStage,
       result: task.result,
       error: task.error,
+      reportedOutcome: task.reportedOutcome,
+      outcomeComment: task.outcomeComment,
       archivedAt: task.archivedAt?.toISOString() ?? null,
       createdAt: task.createdAt.toISOString(),
       updatedAt: task.updatedAt.toISOString(),
@@ -123,9 +133,17 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
         statusReason: codex.statusReason,
         lastValidatedAt: codex.lastValidatedAt,
       },
+      claudeCode: {
+        provider: "claude_code",
+        connected: claudeCode.status === "connected",
+        status: claudeCode.status ?? "not_connected",
+        statusReason: claudeCode.statusReason,
+        lastValidatedAt: claudeCode.lastValidatedAt,
+      },
     }),
     featureFlags,
     codexConnected: codex.status === "connected",
+    claudeCodeConnected: claudeCode.status === "connected",
     chatResumeEnabled: isGoatChatResumeEnabled(),
     mcpSetup: {
       preferredClient: user.preferredMcpClient,
@@ -134,17 +152,17 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <StatsigAnalyticsProvider
+    <GoatAnalyticsProvider
       identity={{
         userId: user.workosUserId,
         workspaceId: workspace.id,
-        email: authUser.email,
-        firstName: authUser.firstName,
-        lastName: authUser.lastName,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
       }}
     >
       <GoatAppDataProvider initialData={initialData}>{children}</GoatAppDataProvider>
-    </StatsigAnalyticsProvider>
+    </GoatAnalyticsProvider>
   );
 }
 
@@ -176,6 +194,7 @@ function buildIntegrationState(input: {
   stripe: GoatIntegrationState["stripe"];
   personalAccounts: GoatIntegrationState["personalAccounts"];
   codex: GoatCodexProviderState;
+  claudeCode: GoatClaudeCodeProviderState;
 }): GoatIntegrationState {
   return {
     gmail: input.googleIntegrations.gmail,
@@ -190,6 +209,7 @@ function buildIntegrationState(input: {
     attio: input.attio,
     stripe: input.stripe,
     codex: input.codex,
+    claude_code: input.claudeCode,
     personalAccounts: input.personalAccounts,
   };
 }

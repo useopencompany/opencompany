@@ -15,6 +15,14 @@ import {
 } from "./goat-brain-ingest-worker";
 import { buildJamieMeetingBrainWrites } from "./goat-brain-jamie-writes";
 
+const analytics = vi.hoisted(() => ({
+  captureGoatServerEvent: vi.fn(async () => undefined),
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatServerEvent: analytics.captureGoatServerEvent,
+}));
+
 const telemetry = vi.hoisted(() => ({
   recordGoatBrainIngestRun: vi.fn(),
   recordGoatModelCost: vi.fn(),
@@ -31,10 +39,6 @@ const telemetry = vi.hoisted(() => ({
 
 const billing = vi.hoisted(() => ({
   releasePendingGoatIngestionReservations: vi.fn(async () => ({ released: 0, failed: 0 })),
-}));
-
-const statsig = vi.hoisted(() => ({
-  captureStatsigServerEvent: vi.fn(async () => {}),
 }));
 
 vi.mock("@opencompany/db/goat-billing", async (importOriginal) => {
@@ -55,10 +59,6 @@ vi.mock("@opencompany/goat-observability", async (importOriginal) => {
     withGoatSpan: telemetry.withGoatSpan,
   };
 });
-
-vi.mock("@opencompany/statsig/server", () => ({
-  captureStatsigServerEvent: statsig.captureStatsigServerEvent,
-}));
 
 function jamieItem(segmentCount = 2) {
   return normalizeJamieMeetingCompletedWebhook(
@@ -270,16 +270,16 @@ describe("Goat Brain ingest worker", () => {
         result: expect.objectContaining({ handled: true, durationMs: expect.any(Number) }),
       }),
     );
-    expect(statsig.captureStatsigServerEvent).toHaveBeenCalledOnce();
-    expect(statsig.captureStatsigServerEvent).toHaveBeenCalledWith(
-      "brain_ingestion_run",
+    expect(analytics.captureGoatServerEvent).toHaveBeenCalledWith(
+      "brain_ingestion_completed",
       "user_123",
       {
-        source: "jamie",
-        run_id: "gbjob_123",
         workspace_id: "goat_ws_user_123",
         brain_id: "gbrain_123",
+        provider: "jamie",
+        source_type: "meeting",
       },
+      { workspaceId: "goat_ws_user_123" },
     );
     expect(telemetry.recordGoatBrainIngestRun).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -607,6 +607,7 @@ describe("Goat Brain ingest worker", () => {
       expect(complete).not.toHaveBeenCalled();
       expect(fail).not.toHaveBeenCalled();
     }
+    expect(analytics.captureGoatServerEvent).not.toHaveBeenCalled();
   });
 
   it("records failed brain ingest attempts with investigation ids", async () => {

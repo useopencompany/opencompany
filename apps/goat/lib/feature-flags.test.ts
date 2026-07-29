@@ -12,13 +12,11 @@ describe("goatFeatureFlagsFromUser", () => {
     expect(goatFeatureFlagsFromUser({ taskSpawningEnabled: false }).taskSpawning).toBe(false);
   });
 
-  it("defaults Local Codex bridge beta to off", () => {
-    expect(goatFeatureFlagsFromUser({}).localCodexBridge).toBe(false);
-    expect(goatFeatureFlagsFromUser({ localCodexBetaEnabled: null }).localCodexBridge).toBe(false);
-  });
-
-  it("enables Local Codex bridge beta only for an explicit true value", () => {
-    expect(goatFeatureFlagsFromUser({ localCodexBetaEnabled: true }).localCodexBridge).toBe(true);
-    expect(goatFeatureFlagsFromUser({ localCodexBetaEnabled: false }).localCodexBridge).toBe(false);
+  it("keeps automatic model routing off unless explicitly enabled", () => {
+    expect(goatFeatureFlagsFromUser({}).autoModelRouting).toBe(false);
+    expect(goatFeatureFlagsFromUser({ autoModelRoutingEnabled: true }).autoModelRouting).toBe(true);
+    expect(goatFeatureFlagsFromUser({ autoModelRoutingEnabled: false }).autoModelRouting).toBe(
+      false,
+    );
   });
 });

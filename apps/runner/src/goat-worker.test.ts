@@ -110,6 +110,16 @@ describe("runClaimedGoatTask", () => {
       executor,
     });
 
+    expect(store.listConversationMessages).toHaveBeenCalledWith({
+      id: "goat_task_1",
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+    });
+    expect(executor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationMessages: [{ role: "user", content: "Research Marseille" }],
+      }),
+    );
     expect(store.updateStage).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "goat_task_1",
@@ -392,6 +402,9 @@ function createStore(): GoatTaskStore {
     updateStage: vi.fn(async () => true),
     updateCodexEngineSessionId: vi.fn(async () => true),
     ensureUserMessage: vi.fn(async () => "goat_task_msg_user"),
+    listConversationMessages: vi.fn(async () => [
+      { role: "user" as const, content: "Research Marseille" },
+    ]),
     createMessage: vi.fn(async () => true),
     updateMessageContent: vi.fn(async () => true),
     completeMessage: vi.fn(async () => true),
@@ -416,10 +429,14 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     model: "openai/gpt-5.4-mini",
     scheduleId: null,
     scheduledFor: null,
+    workflowId: null,
+    workflowBrainRef: null,
     status: "running",
     stage: "planning",
     result: null,
     error: null,
+    reportedOutcome: null,
+    outcomeComment: null,
     harnessSpec,
     debugTrace: {},
     codexEngineSessionId: null,

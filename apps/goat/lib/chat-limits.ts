@@ -1,2 +1,2 @@
-export const MAX_WEB_FETCH_CALLS_PER_TURN = 4;
-export const MAX_WEB_SEARCH_CALLS_PER_TURN = 4;
+// Re-export shim: source moved to @opencompany/goat-agent (shared with the runner).
+export * from "@opencompany/goat-agent/chat-limits";
