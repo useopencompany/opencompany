@@ -119,6 +119,7 @@ async function acceptRuntimeWebSocket(
 ) {
   const origin = request.headers.origin;
   if (!isGoatCodingWorkspaceOriginAllowed(origin, env.allowedOrigins)) {
+    logRuntimeReject("origin_denied", { origin: origin ?? null });
     rejectUpgrade(socket, 403, "Forbidden");
     return;
   }
@@ -131,6 +132,7 @@ async function acceptRuntimeWebSocket(
     ? verifyGoatCodingWorkspaceTicket({ ticket: encodedTicket, secret: env.streamTokenSecret })
     : null;
   if (!ticket || !protocols.includes(RUNTIME_PROTOCOL)) {
+    logRuntimeReject("ticket_invalid", { has_ticket: Boolean(encodedTicket) });
     rejectUpgrade(socket, 401, "Unauthorized");
     return;
   }
@@ -138,27 +140,70 @@ async function acceptRuntimeWebSocket(
   const session = await loadGoatCodingWorkspaceSession({
     codingSessionId: ticket.codingSessionId,
     userWorkosId: ticket.userWorkosId,
-  }).catch(() => null);
+  }).catch((error) => {
+    logRuntimeReject("session_load_failed", { coding_session_id: ticket.codingSessionId, error });
+    return null;
+  });
   if (!session) {
-    rejectUpgrade(socket, 404, "Workspace unavailable");
+    logRuntimeReject("session_unavailable", { coding_session_id: ticket.codingSessionId });
+    closeUpgradeWithError(webSocketServer, request, socket, head, 4404, "Workspace unavailable.");
     return;
   }
 
-  const sandbox = await connectSandbox({ sandboxId: session.sandboxId }).catch(() => null);
+  const sandbox = await connectSandbox({ sandboxId: session.sandboxId }).catch((error) => {
+    logRuntimeReject("sandbox_connect_failed", { sandbox_id: session.sandboxId, error });
+    return null;
+  });
   if (!sandbox) {
-    rejectUpgrade(socket, 410, "Workspace deleted");
+    logRuntimeReject("sandbox_unavailable", { sandbox_id: session.sandboxId });
+    closeUpgradeWithError(webSocketServer, request, socket, head, 4410, "Workspace was deleted.");
     return;
   }
   try {
     await ensureRuntimeTools(sandbox);
-  } catch {
-    rejectUpgrade(socket, 503, "Workspace tools unavailable");
+  } catch (error) {
+    logRuntimeReject("runtime_tools_unavailable", { sandbox_id: session.sandboxId, error });
+    closeUpgradeWithError(
+      webSocketServer,
+      request,
+      socket,
+      head,
+      4503,
+      "Workspace tools are unavailable.",
+    );
     return;
   }
 
   webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
     webSocketServer.emit("connection", webSocket, request);
     attachRuntimeConnection(webSocket, sandbox, session, env);
+  });
+}
+
+function logRuntimeReject(reason: string, context: Record<string, unknown>) {
+  logger.warn("Rejected coding workspace runtime connection", {
+    event: "opencompany.goat_coding_workspace_runtime_rejected",
+    reject_reason: reason,
+    ...context,
+  });
+}
+
+// Bun's node:http never flushes raw bytes written to the upgrade socket, so a plain HTTP
+// rejection (rejectUpgrade) reaches browsers as an empty close and surfaces as an opaque
+// proxy 500. Once the client is known to speak the runtime protocol, complete the
+// handshake and close with an application code + reason the browser can read. Raw
+// rejection stays only for pre-handshake failures (bad origin/ticket), where completing
+// a handshake would be wrong.
+function closeUpgradeWithError(
+  webSocketServer: WebSocketServer,
+  request: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  code: number,
+  reason: string,
+) {
+  webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
+    webSocket.close(code, reason);
   });
 }
 
@@ -350,9 +395,7 @@ async function proxyPreviewHttp(
         path: request.url,
         headers: {
           ...requestHeaders,
-          ...(target.sandbox.trafficAccessToken
-            ? { "x-access-token": target.sandbox.trafficAccessToken }
-            : {}),
+          ...trafficAccessHeaders(target.sandbox.trafficAccessToken),
         },
       },
       (upstreamResponse) => {
@@ -409,9 +452,7 @@ async function proxyPreviewWebSocket(
       {
         headers: {
           ...upstreamRequestHeaders(request.headers, request.headers.host ?? ""),
-          ...(target.sandbox.trafficAccessToken
-            ? { "x-access-token": target.sandbox.trafficAccessToken }
-            : {}),
+          ...trafficAccessHeaders(target.sandbox.trafficAccessToken),
         },
       },
     );
@@ -736,6 +777,17 @@ export function isGoatCodingWorkspaceOriginAllowed(
   return Boolean(origin && allowedOrigins.includes(origin));
 }
 
+// E2B's edge proxy authenticates restricted public traffic (allowPublicTraffic: false)
+// via the `e2b-traffic-access-token` header; `x-access-token` is envd's header and is
+// kept only in case older edges accept it.
+function trafficAccessHeaders(trafficAccessToken: string | undefined) {
+  if (!trafficAccessToken) return {};
+  return {
+    "e2b-traffic-access-token": trafficAccessToken,
+    "x-access-token": trafficAccessToken,
+  };
+}
+
 function sendPlainResponse(response: ServerResponse, statusCode: number, message: string) {
   response.writeHead(statusCode, {
     "content-type": "text/plain; charset=utf-8",
@@ -758,6 +810,10 @@ function closeWebSocketServer(server: WebSocketServer) {
   });
 }
 
+// Fallback for sandboxes created from templates without tmux/ss baked in (the stock
+// `codex` template ships neither). The opencompany-codex-toolbox template preinstalls
+// both, making this a no-op check. apt-get requires root — the E2B SDK default command
+// user is the unprivileged `user`, under which the install always fails.
 async function ensureRuntimeTools(sandbox: SandboxHandle) {
   const existing = runtimeToolInstalls.get(sandbox.sandboxId);
   if (existing) return existing;
@@ -771,7 +827,7 @@ async function ensureRuntimeTools(sandbox: SandboxHandle) {
         "fi",
         "command -v tmux >/dev/null && command -v ss >/dev/null",
       ].join(" "),
-      { timeoutMs: 120_000 },
+      { user: "root", timeoutMs: 120_000 },
     )
     .then(() => undefined);
   runtimeToolInstalls.set(sandbox.sandboxId, install);

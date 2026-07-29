@@ -212,12 +212,18 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
             setConnectionState("disconnected");
           }
         });
-        nextSocket.addEventListener("close", () => {
+        nextSocket.addEventListener("close", (event) => {
           clearAttemptTimeout();
-          if (connectAttemptRef.current === attempt) {
-            setSocket(null);
-            setConnectionState((current) => (current === "waking" ? "error" : "disconnected"));
+          if (connectAttemptRef.current !== attempt) return;
+          setSocket(null);
+          // The runner completes the handshake and closes with a 4xxx code + reason when
+          // the workspace itself is unavailable (deleted sandbox, missing tools, …).
+          if (event.code >= 4000 && event.reason) {
+            setConnectionState("error");
+            setError(event.reason);
+            return;
           }
+          setConnectionState((current) => (current === "waking" ? "error" : "disconnected"));
         });
         nextSocket.addEventListener("error", () => {
           if (connectAttemptRef.current === attempt) {
