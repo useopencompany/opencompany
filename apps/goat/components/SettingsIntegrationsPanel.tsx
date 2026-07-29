@@ -570,7 +570,9 @@ function IntegrationCardRow({
                 </span>
               ) : null}
             </div>
-            {integration.provider === "stripe" && canConnect ? (
+            {integration.provider === "github" && canConnect ? (
+              <ConnectLink href="/settings/repositories" label="Configure repositories" />
+            ) : integration.provider === "stripe" && canConnect ? (
               <ConnectLink href={connectHref} label="Manage" />
             ) : null}
           </div>

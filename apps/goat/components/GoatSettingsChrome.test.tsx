@@ -29,6 +29,9 @@ describe("GoatSettingsSidebar", () => {
     expect(
       within(workspaceGroup as HTMLElement).getByRole("link", { name: "Billing" }),
     ).toHaveAttribute("href", "/settings/workspace/billing");
+    expect(
+      within(workspaceGroup as HTMLElement).getByRole("link", { name: "Repositories" }),
+    ).toHaveAttribute("href", "/settings/repositories");
   });
 
   it("marks workspace usage active without also marking members active", () => {

@@ -6,6 +6,7 @@ import {
   Blocks,
   CircleDollarSign,
   CreditCard,
+  FolderGit2,
   MessageSquare,
   PanelLeft,
   PlugZap,
@@ -80,6 +81,12 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         label: "Skills",
         isActive: (pathname) =>
           pathname === "/settings/skills" || pathname.startsWith("/settings/skills/"),
+      },
+      {
+        href: "/settings/repositories",
+        icon: FolderGit2,
+        label: "Repositories",
+        isActive: (pathname) => pathname === "/settings/repositories",
       },
       {
         href: "/settings/workspace/usage",
