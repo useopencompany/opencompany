@@ -91,7 +91,7 @@ describe("createGoatTaskScheduleForUser", () => {
     expect(mocks.planGoatTaskHarness).not.toHaveBeenCalled();
   });
 
-  it("rejects schedule creation when background tasks are disabled", async () => {
+  it("rejects schedule creation when Tasks & Workflows is disabled", async () => {
     mocks.select.mockReset();
     mocks.select.mockReturnValue({
       from: vi.fn(() => ({
@@ -109,7 +109,7 @@ describe("createGoatTaskScheduleForUser", () => {
         timezone: "UTC",
         prompt: "Send a daily briefing.",
       }),
-    ).rejects.toThrow("Background tasks are disabled");
+    ).rejects.toThrow("Tasks & Workflows is disabled");
     expect(mocks.planGoatTaskHarness).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(mocks.transaction).not.toHaveBeenCalled();
@@ -126,7 +126,7 @@ describe("createGoatTaskScheduleForUser", () => {
         timezone: "UTC",
         prompt: "Send a daily briefing.",
       }),
-    ).rejects.toThrow("Background tasks are disabled");
+    ).rejects.toThrow("Tasks & Workflows is disabled");
     expect(mocks.planGoatTaskHarness).toHaveBeenCalledOnce();
     expect(mocks.execute).toHaveBeenCalledOnce();
     expect(mocks.transaction).not.toHaveBeenCalled();

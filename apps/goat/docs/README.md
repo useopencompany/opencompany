@@ -44,7 +44,7 @@ Browser
         OR call goat_brain
         OR survey connected integrations with list_actions/use_action
            and capture focused findings with save_to_brain
-        OR, when Background tasks is enabled in Preferences, call start_task
+        OR, when Tasks & Workflows is enabled in Preferences, call start_task
           insert goat.tasks row
           POST /internal/goat/tasks/:taskId/run
   GoatSurface #workflow submit
@@ -253,12 +253,12 @@ When connected integrations and an active brain are present, a conditional `brai
 teaches the agent to survey breadth before depth, page promising sources, save focused findings
 with canonical provenance, summarize the pass, and ask what to deepen. This fill workflow stays in
 main chat even though ordinary deeper or multi-source work routes to a background task.
-`start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
-rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
-Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The
-database flag defaults off, so the standard Goat experience is chat plus Brain without background
-task spawning. Explicitly starting a `#workflow` opts the user into background tasks so its durable
-run can be claimed. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
+`start_task`, workflow mentions and routes, and the recurring schedule tools, prompt guidance,
+schedule context, background-task rows, routines, and runner claims are enabled only when the user
+opts into **Tasks & Workflows** in Preferences. When disabled, Tasks and Workflows stay out of the
+primary navigation and direct routes show the beta opt-in prompt. The database flag defaults off,
+so the standard Goat experience is chat plus Brain without workflows or background task spawning.
+Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
 
 The default chat model is `anthropic/claude-sonnet-5`. New tasks store the chat-selected model at
 creation time, then the runner planner chooses the task execution model from its allowed model

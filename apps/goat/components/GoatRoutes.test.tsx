@@ -212,11 +212,11 @@ describe("GoatSettingsRoute", () => {
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
   });
 
-  it("shows the background tasks switch off by default and persists opt-in", async () => {
+  it("shows the Tasks & Workflows switch off by default and persists opt-in", async () => {
     const user = userEvent.setup();
     render(<GoatPreferencesSettingsRoute />);
 
-    const toggle = screen.getByRole("switch", { name: "Background tasks" });
+    const toggle = screen.getByRole("switch", { name: "Tasks & Workflows" });
     expect(toggle).toHaveAttribute("aria-checked", "false");
 
     await user.click(toggle);
@@ -233,7 +233,7 @@ describe("GoatSettingsRoute", () => {
     const user = userEvent.setup();
     render(<GoatPreferencesSettingsRoute />);
 
-    await user.click(screen.getByRole("switch", { name: "Background tasks" }));
+    await user.click(screen.getByRole("switch", { name: "Tasks & Workflows" }));
 
     expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
     expect(routerMock.refresh).not.toHaveBeenCalled();
