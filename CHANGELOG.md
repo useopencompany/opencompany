@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- New Tasks & Workflows board: a Kanban view of every chat and workflow run, with a time-range filter and a Linear-style detail panel where you can reply to a task like a normal chat (#957, #963, #964, #973, #947) — @louis and @opencompany-bot.
+- Workflows now run as sequential multi-step tasks with a model and skill per step, and can be started directly from main chat just by asking (#967, #953, #948) — @louis and @opencompany-bot.
+- Codex and Claude Code chats get a persistent Preview and Terminal workspace, tucked behind a single toggle in the chat header until you need it (#962, #972, #976) — @louis and @opencompany-bot.
+- Configure per-repository environment and setup for Codex and Claude Code sandboxes, stored encrypted (#956) — @louis.
+- Codex sessions can now save findings to the Brain, same as main chat (#965) — @opencompany-bot.
+- Ask Goat to create a Google Doc, optionally pre-filled with text (#950) — @opencompany-bot.
+- Connect PostHog to ask about dashboards, saved insights, and analytics queries from chat (#969) — @opencompany-bot.
+- Claude Fable 5 and DeepSeek V4 Pro are now available as chat models (#975, #946) — @opencompany-bot.
+- Shared chat links now show the chat's title and a branded preview card when unfurled elsewhere (#961) — @opencompany-bot.
+- Automatic model routing (beta): turn it on under Preferences > Beta features to have Goat pick the model for your first message (#966, #968, #970) — @opencompany-bot.
+
+### Changed
+- Cmd+K now opens the full composer — attachments, @mentions, and the model picker included — instead of a bare text box, and always starts a new chat in the background (#949) — @opencompany-bot.
+
+### Fixed
+- Claude Code sandboxes no longer race two agents on the same chat after a runner restart, which could revert files or duplicate commits (#974) — @louis.
+- Scheduled Claude Code wakeups now reliably fire even across restarts (#971) — @louis.
+- Removing a Linear issue's project from chat now actually clears it instead of being silently ignored (#958) — @louis.
+- The onboarding message that kicks off Brain building now always sends on the first try, and new chats default to Kimi K3 (#955) — @opencompany-bot.
+
+### Removed
+- Removed the retired Local Codex bridge, including its beta preference and composer option; leftover Local Codex chat sessions were cleaned up (#959, #960) — @opencompany-bot.
+
 ## [1.3.0] - 2026-07-28
 
 ### Added
