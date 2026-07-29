@@ -243,6 +243,8 @@ describe("GoatTasksBoardRoute", () => {
   });
 
   it("defaults to the last 7 days and hides older terminal tasks until widened", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
     const user = userEvent.setup();
     appDataMock.taskRows = [
       taskRow({
@@ -265,16 +267,20 @@ describe("GoatTasksBoardRoute", () => {
       }),
     ];
 
-    render(<GoatTasksBoardRoute workflowNames={{}} />);
+    try {
+      render(<GoatTasksBoardRoute workflowNames={{}} />);
 
-    expect(screen.getByText("Recently completed task")).toBeInTheDocument();
-    expect(screen.queryByText("Old completed task")).not.toBeInTheDocument();
-    expect(screen.getByText("Stalled in-progress task")).toBeInTheDocument();
+      expect(screen.getByText("Recently completed task")).toBeInTheDocument();
+      expect(screen.queryByText("Old completed task")).not.toBeInTheDocument();
+      expect(screen.getByText("Stalled in-progress task")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("combobox", { name: "Filter tasks by time range" }));
-    await user.click(await screen.findByRole("option", { name: "All time" }));
+      await user.click(screen.getByRole("combobox", { name: "Filter tasks by time range" }));
+      await user.click(await screen.findByRole("option", { name: "All time" }));
 
-    expect(await screen.findByText("Old completed task")).toBeInTheDocument();
+      expect(await screen.findByText("Old completed task")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the Tasks & Workflows beta gate when disabled", () => {
