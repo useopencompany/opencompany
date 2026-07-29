@@ -1,14 +1,15 @@
 "use client";
 
-import { toast } from "@opencompany/ui/components/sonner";
+import type {
+  GoatRepoConfigView,
+  GoatWorkspaceRepository,
+} from "@opencompany/db/goat-repo-configs";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   ArrowLeft,
   Check,
   CircleUserRound,
-  Code2,
-  Download,
   ListTodo,
   Loader2,
   Mail,
@@ -36,11 +37,12 @@ import { type GoatBrainSummaryView, useGoatAppData } from "@/components/GoatAppD
 import { GoatBrainSettings } from "@/components/GoatBrainSettings";
 import { GoatBrainView } from "@/components/GoatBrainView";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
-import { GoatSurface, type GoatTaskView } from "@/components/GoatSurface";
+import { GoatSurface } from "@/components/GoatSurface";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
+import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { StripeIntegrationSetup } from "@/components/StripeIntegrationSetup";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
@@ -57,17 +59,8 @@ import {
   updateGoatSkillAction,
 } from "@/lib/skill-actions";
 import type { GoatSkillCatalogItem, GoatSkillListItem, GoatWorkspaceSkill } from "@/lib/skills";
-import {
-  GOAT_WORKFLOW_TASK_STATUS_COPY,
-  type GoatWorkflowTaskDisplayStatus,
-  goatWorkflowTaskDisplayStatus,
-  toGoatTaskTitle,
-} from "@/lib/task-display";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
-import {
-  updateGoatLocalCodexBetaAction,
-  updateGoatTaskSpawningAction,
-} from "@/lib/user-preferences";
+import { updateGoatTaskSpawningAction } from "@/lib/user-preferences";
 import {
   archiveGoatWorkflowAction,
   createGoatWorkflowAction,
@@ -115,7 +108,6 @@ export function GoatHomeRoute({
         archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
         claudeCodeConnected={data.claudeCodeConnected}
-        localCodexBetaEnabled={data.featureFlags.localCodexBridge}
         taskSpawningEnabled={data.featureFlags.taskSpawning}
         chatResumeEnabled={data.chatResumeEnabled}
         userName={userName}
@@ -227,20 +219,35 @@ export function GoatPreferencesSettingsRoute() {
         </h2>
         <BetaFeatureSwitch
           icon={ListTodo}
-          label="Background tasks"
-          description="Spawn tracked tasks and recurring routines from chat"
+          label="Tasks & Workflows"
+          description="Fire workflows, run tracked background tasks, and schedule recurring routines."
           checked={featureFlags.taskSpawning}
           update={updateGoatTaskSpawningAction}
         />
-        <BetaFeatureSwitch
-          icon={Code2}
-          label="Local Codex bridge"
-          description="Local Codex engine mode"
-          checked={featureFlags.localCodexBridge}
-          update={updateGoatLocalCodexBetaAction}
-          showLocalBridgePairing
-        />
       </section>
+    </GoatSettingsContent>
+  );
+}
+
+export function GoatRepositoriesSettingsRoute({
+  repositories,
+  configs,
+  canEdit,
+}: {
+  repositories: GoatWorkspaceRepository[];
+  configs: GoatRepoConfigView[];
+  canEdit: boolean;
+}) {
+  return (
+    <GoatSettingsContent
+      title="Repositories"
+      description="Give coding agents the environment and setup steps they need for each repository."
+    >
+      <RepositorySettings
+        initialRepositories={repositories}
+        initialConfigs={configs}
+        canEdit={canEdit}
+      />
     </GoatSettingsContent>
   );
 }
@@ -483,7 +490,7 @@ export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
   const { featureFlags } = useGoatAppData();
 
-  if (!featureFlags.taskSpawning) return <TasksDisabledRoute />;
+  if (!featureFlags.taskSpawning) return <TasksWorkflowsDisabledRoute />;
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -497,7 +504,7 @@ export function GoatTaskRunRoute({ taskId }: { taskId: string }) {
   const { featureFlags } = useGoatAppData();
   const detailHref = run ? `/tasks/${encodeURIComponent(run.task.displayId)}` : "/";
 
-  if (!featureFlags.taskSpawning) return <TasksDisabledRoute />;
+  if (!featureFlags.taskSpawning) return <TasksWorkflowsDisabledRoute />;
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
@@ -587,17 +594,18 @@ function useTaskRun(taskId: string) {
   return placeholderRun;
 }
 
-function TasksDisabledRoute() {
+export function TasksWorkflowsDisabledRoute() {
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
         <div className="flex w-full max-w-[720px] flex-col gap-4 pb-24 pt-16 sm:pt-24">
           <BackLink href="/" label="Chat" />
           <h1 className="text-[24px] font-semibold leading-tight text-ink">
-            Background tasks are disabled
+            Tasks &amp; Workflows is a beta feature
           </h1>
           <p className="text-[13px] leading-5 text-ink-subtle">
-            Enable Background tasks in Preferences to use background tasks and recurring routines.
+            Enable Tasks &amp; Workflows in Preferences to fire workflows, run background tasks, and
+            set up recurring routines.
           </p>
           <Link
             href="/settings/preferences"
@@ -650,14 +658,12 @@ function BetaFeatureSwitch({
   description,
   checked,
   update,
-  showLocalBridgePairing = false,
 }: {
   icon: LucideIcon;
   label: string;
   description: string;
   checked: boolean;
   update: (enabled: boolean) => Promise<{ ok: boolean }>;
-  showLocalBridgePairing?: boolean;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -715,72 +721,9 @@ function BetaFeatureSwitch({
           </button>
         </div>
         {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
-        {checked && showLocalBridgePairing ? <LocalCodexBridgePairButton /> : null}
       </div>
     </div>
   );
-}
-
-function LocalCodexBridgePairButton() {
-  const [isPairing, setIsPairing] = useState(false);
-
-  const downloadBridge = async () => {
-    if (isPairing) return;
-    setIsPairing(true);
-
-    try {
-      await downloadLocalBridgeLauncher();
-      toast.success("Bridge launcher downloaded.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not pair Local Codex.");
-    } finally {
-      setIsPairing(false);
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={downloadBridge}
-      disabled={isPairing}
-      className="mt-1 inline-flex h-7 w-fit items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[12px] font-medium leading-none text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
-    >
-      {isPairing ? (
-        <Loader2 size={13} strokeWidth={2} className="shrink-0 animate-spin" />
-      ) : (
-        <Download size={13} strokeWidth={2} className="shrink-0" />
-      )}
-      {isPairing ? "Preparing" : "Download Mac launcher"}
-    </button>
-  );
-}
-
-async function downloadLocalBridgeLauncher() {
-  const response = await fetch("/api/local-codex/bridges/launcher", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: localBridgeName() }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(error || "Could not pair Local Codex.");
-  }
-
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "opencompany-goat-codex-bridge.terminal";
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function localBridgeName() {
-  const platform = navigator.platform?.trim();
-  return platform ? `Local Codex (${platform})` : "Local Codex bridge";
 }
 
 function IntegrationRows({
@@ -1103,106 +1046,6 @@ export function GoatWorkflowEditorRoute({
         </div>
       </div>
     </main>
-  );
-}
-
-// --- Tasks board -------------------------------------------------------------
-
-const WORKFLOW_TASK_STATUS_DOT_CLASS: Record<GoatWorkflowTaskDisplayStatus, string> = {
-  running: "bg-ink/40 animate-pulse",
-  failed: "bg-danger",
-  done: "bg-success",
-  "needs-attention": "bg-warning",
-};
-
-export function GoatTasksBoardRoute() {
-  const { tasks, featureFlags } = useGoatAppData();
-
-  if (!featureFlags.taskSpawning) return <TasksDisabledRoute />;
-
-  const activeTasks = tasks.filter((task) => !task.archivedAt);
-  const inProgress = activeTasks.filter(
-    (task) => task.status === "queued" || task.status === "running",
-  );
-  const finished = activeTasks.filter(
-    (task) => task.status !== "queued" && task.status !== "running",
-  );
-
-  return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[760px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
-          <header className="flex flex-col gap-1.5">
-            <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
-              Tasks
-            </h1>
-            <p className="text-[13px] leading-5 text-ink-subtle">
-              Runs produced by firing workflows (<span className="font-medium text-ink">#</span> in
-              chat) or scheduled routines.
-            </p>
-          </header>
-
-          {activeTasks.length === 0 ? (
-            <GoatEmptyState
-              icon={ListTodo}
-              title="No tasks yet"
-              description="Fire a workflow with # in chat or set up a scheduled run — each run shows up here as a Task."
-            />
-          ) : (
-            <div className="flex flex-col gap-8">
-              {inProgress.length > 0 ? (
-                <TaskBoardSection label="In progress" tasks={inProgress} />
-              ) : null}
-              {finished.length > 0 ? <TaskBoardSection label="Recent" tasks={finished} /> : null}
-            </div>
-          )}
-        </div>
-      </div>
-    </main>
-  );
-}
-
-function TaskBoardSection({ label, tasks }: { label: string; tasks: GoatTaskView[] }) {
-  return (
-    <section className="flex flex-col gap-2">
-      <h2 className="px-1 text-[12px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
-        {label}
-      </h2>
-      <ul className="flex flex-col gap-2">
-        {tasks.map((task) => (
-          <li key={task.id}>
-            <GoatTaskBoardRow task={task} />
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function GoatTaskBoardRow({ task }: { task: GoatTaskView }) {
-  const displayStatus = goatWorkflowTaskDisplayStatus(task);
-  return (
-    <Link
-      href={`/tasks/${encodeURIComponent(task.displayId)}`}
-      prefetch
-      className="group flex items-start gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-    >
-      <span
-        aria-hidden="true"
-        className={`mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full ${WORKFLOW_TASK_STATUS_DOT_CLASS[displayStatus]}`}
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[14px] font-medium leading-tight text-ink">
-          {toGoatTaskTitle(task.name)}
-        </span>
-        <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
-          {task.outcomeComment?.trim() || GOAT_WORKFLOW_TASK_STATUS_COPY[displayStatus]}
-        </span>
-      </span>
-      <span className="shrink-0 pt-0.5 text-[11.5px] leading-4 text-ink-subtle">
-        {formatGoatRelativeTime(task.updatedAt)}
-      </span>
-    </Link>
   );
 }
 
@@ -1557,7 +1400,7 @@ function ItemStatusBadge({ status }: { status: "draft" | "active" }) {
   );
 }
 
-function GoatEmptyState({
+export function GoatEmptyState({
   icon: Icon,
   title,
   description,
@@ -1712,7 +1555,7 @@ function NewItemDialog({
   );
 }
 
-function formatGoatRelativeTime(value: Date | string) {
+export function formatGoatRelativeTime(value: Date | string) {
   const timestamp = typeof value === "string" ? new Date(value).getTime() : value.getTime();
   if (!Number.isFinite(timestamp)) return "";
   const elapsedMs = Date.now() - timestamp;

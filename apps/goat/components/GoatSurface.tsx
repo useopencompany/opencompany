@@ -15,7 +15,6 @@ import type {
 } from "@opencompany/db/goat-schema";
 import {
   Command,
-  CommandDialog,
   CommandEmpty,
   CommandGroup,
   CommandInput,
@@ -23,6 +22,13 @@ import {
   CommandList,
   CommandShortcut,
 } from "@opencompany/ui/components/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@opencompany/ui/components/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
@@ -44,7 +50,6 @@ import {
   FileText,
   LoaderCircle,
   MessageSquare,
-  MessageSquarePlus,
   Pause,
   Play,
   Plus,
@@ -123,13 +128,10 @@ import {
 } from "@/lib/codex-chat-constants";
 import {
   DEFAULT_CODEX_CHAT_REASONING_EFFORT,
-  DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT,
   type GoatCodexComposerSettingsView,
 } from "@/lib/codex-chat-settings";
-import { LOCAL_CODEX_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { alwaysAllowGoatChatActionAction } from "@/lib/integration-account-actions";
-import { LOCAL_CODEX_PICKER_VALUE } from "@/lib/local-codex-constants";
 import {
   CLAUDE_CODE_MODELS,
   CODEX_MODELS,
@@ -144,7 +146,6 @@ import {
   createGoatCollections,
   type GoatChatMessageRow,
   type GoatCodexChatSessionRow,
-  type GoatLocalCodexSessionRow,
   type GoatTaskRow,
 } from "@/lib/task-collections";
 import { GOAT_STAGE_COPY, GOAT_STATUS_COPY } from "@/lib/task-display";
@@ -194,9 +195,9 @@ type MentionOption =
       mention: GoatChatMention;
     };
 
-// Engine chats (Local Codex bridge, cloud Codex sandbox) bypass useChat entirely: sends go to an
-// engine endpoint, streaming arrives as Electric row updates, and stop is an interrupt call.
-type GoatEngineChatKind = "local_codex" | "codex" | "claude_code";
+// Coding-engine chats bypass useChat entirely: sends go to an engine endpoint,
+// streaming arrives as Electric row updates, and stop is an interrupt call.
+type GoatEngineChatKind = "codex" | "claude_code";
 type CodexComposerSettings = GoatCodexComposerSettingsView;
 type EngineComposerSettings = {
   reasoningEffort: CodexReasoningEffort;
@@ -219,12 +220,6 @@ const ENGINE_CHAT_CONFIG: Record<
     interruptEndpoint: (chatSessionId: string) => string;
   }
 > = {
-  local_codex: {
-    label: "Local Codex",
-    messagesEndpoint: "/api/local-codex/messages",
-    interruptEndpoint: (chatSessionId) =>
-      `/api/local-codex/sessions/${encodeURIComponent(chatSessionId)}/interrupt`,
-  },
   codex: {
     label: CLOUD_CODING_ENGINE_CONFIG.codex.label,
     messagesEndpoint: "/api/codex-chat/messages",
@@ -243,12 +238,10 @@ const ENGINE_CHAT_CONFIG: Record<
 
 function engineChatKindFromChat(
   chat: { engine?: GoatChatEngine } | null | undefined,
-  localCodexBetaEnabled: boolean,
 ): GoatEngineChatKind | null {
   if (!chat) return null;
   if (chat.engine === "codex") return "codex";
   if (chat.engine === "claude_code") return "claude_code";
-  if (chat.engine === "local_codex" && localCodexBetaEnabled) return "local_codex";
   return null;
 }
 
@@ -300,7 +293,6 @@ export function GoatSurface({
   archivedChats = [],
   codexConnected = false,
   claudeCodeConnected = false,
-  localCodexBetaEnabled = false,
   taskSpawningEnabled = false,
   chatResumeEnabled = false,
   userName = "there",
@@ -315,7 +307,6 @@ export function GoatSurface({
   archivedChats?: readonly GoatChatSummaryView[];
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
-  localCodexBetaEnabled?: boolean;
   taskSpawningEnabled?: boolean;
   chatResumeEnabled?: boolean;
   userName?: string;
@@ -339,7 +330,9 @@ export function GoatSurface({
   const routedChatSessionIdRef = useRef(initialChat?.id ?? null);
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
+  const pendingProgrammaticPromptRef = useRef<string | null>(null);
   const onboardingKickoffReadRef = useRef(false);
+  const onboardingKickoffPromptRef = useRef<string | null>(null);
   const activeTurnStartedAtRef = useRef<number | null>(null);
   const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
   const wasAgentWorkingRef = useRef(false);
@@ -371,16 +364,14 @@ export function GoatSurface({
       readLastGoatChatSelection(userWorkosId, {
         codexConnected,
         claudeCodeConnected,
-        localCodexBetaEnabled,
       }),
     () => normalizeGoatModel(defaultModel),
   );
   const [chatModelOverride, setChatModelOverride] = useState<GoatChatModelSelection | null>(() => {
     if (!initialChat) return null;
-    const engine = engineChatKindFromChat(initialChat, localCodexBetaEnabled);
+    const engine = engineChatKindFromChat(initialChat);
     if (engine === "codex") return CODEX_PICKER_VALUE;
     if (engine === "claude_code") return CLAUDE_PICKER_VALUE;
-    if (engine === "local_codex") return LOCAL_CODEX_PICKER_VALUE;
     return normalizeGoatModel(initialChat.model);
   });
   // The remembered selection is a Home default. Opening or reserving a session sets the override
@@ -391,9 +382,7 @@ export function GoatSurface({
     : defaultCodexComposerUiState(
         chatModel === CLAUDE_PICKER_VALUE
           ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT
-          : chatModel === LOCAL_CODEX_PICKER_VALUE
-            ? DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT
-            : DEFAULT_CODEX_CHAT_REASONING_EFFORT,
+          : DEFAULT_CODEX_CHAT_REASONING_EFFORT,
       );
   const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
     normalizeCodexChatModelId(initialChat?.model),
@@ -405,7 +394,7 @@ export function GoatSurface({
     engine: GoatEngineChatKind;
     chatSessionId: string;
   } | null>(() => {
-    const engine = engineChatKindFromChat(initialChat, localCodexBetaEnabled);
+    const engine = engineChatKindFromChat(initialChat);
     return engine && initialChat ? { engine, chatSessionId: initialChat.id } : null;
   });
   const [codexComposerStateByChatId, setCodexComposerStateByChatId] = useState<
@@ -438,9 +427,8 @@ export function GoatSurface({
   const [workflowTaskSubmitting, setWorkflowTaskSubmitting] = useState(false);
   const [taskMessageSubmitting, setTaskMessageSubmitting] = useState(false);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
-  const [newChatPrompt, setNewChatPrompt] = useState("");
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [restoringChatId, setRestoringChatId] = useState<string | null>(null);
-  const [backgroundChatCount, setBackgroundChatCount] = useState(0);
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -649,23 +637,20 @@ export function GoatSurface({
   const isGenerating = status === "submitted" || status === "streaming";
   const activeInitialChatEngine =
     initialChat && mode === "chat" && chatSessionId === initialChat.id
-      ? engineChatKindFromChat(initialChat, localCodexBetaEnabled)
+      ? engineChatKindFromChat(initialChat)
       : null;
   const activeEngineChat = useMemo(() => {
     if (!chatSessionId) return null;
     if (activeInitialChatEngine) return { engine: activeInitialChatEngine, chatSessionId };
     return engineChatSession?.chatSessionId === chatSessionId ? engineChatSession : null;
   }, [activeInitialChatEngine, chatSessionId, engineChatSession]);
-  const isLocalCodexMode = localCodexBetaEnabled && chatModel === LOCAL_CODEX_PICKER_VALUE;
   const isCodexMode = chatModel === CODEX_PICKER_VALUE;
   const isClaudeMode = chatModel === CLAUDE_PICKER_VALUE;
-  const selectedEngine: GoatEngineChatKind | null = isLocalCodexMode
-    ? "local_codex"
-    : isCodexMode
-      ? "codex"
-      : isClaudeMode
-        ? "claude_code"
-        : null;
+  const selectedEngine: GoatEngineChatKind | null = isCodexMode
+    ? "codex"
+    : isClaudeMode
+      ? "claude_code"
+      : null;
   const activeEngine = activeEngineChat?.engine ?? selectedEngine;
   const isEngineChat = activeEngine !== null;
   // Hard stop: with enforcement on and an empty balance, block new sends
@@ -679,16 +664,14 @@ export function GoatSurface({
       creditBalance.balanceUsdMicros > 0 &&
       creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
   );
-  // Workflows are not gated on the task-spawning setting: firing one opts the
-  // user into background tasks server-side.
-  const workflowMentionsEnabled = !activeEngine && !activeTaskConversation;
+  const workflowMentionsEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
       return mention.id === "claude" ? claudeCodeConnected : codexConnected;
     }
     if (mention.kind === "workflow") return workflowMentionsEnabled;
-    return activeEngine !== "local_codex" && !activeTaskConversation;
+    return !activeTaskConversation;
   });
   const mentionOptions = buildMentionOptions({
     token: mentionToken,
@@ -697,7 +680,7 @@ export function GoatSurface({
     selectedMentions: activeSelectedMentions,
     codexConnected,
     claudeCodeConnected,
-    skillsEnabled: activeEngine !== "local_codex" && !activeTaskConversation,
+    skillsEnabled: !activeTaskConversation,
     workflowsEnabled: workflowMentionsEnabled,
   });
   const selectedWorkflowMention = activeSelectedMentions.find(isWorkflowMention) ?? null;
@@ -705,22 +688,14 @@ export function GoatSurface({
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
     : null;
-  const localCodexFeatureDisabledForChat = Boolean(
-    initialChat &&
-      !localCodexBetaEnabled &&
-      mode === "chat" &&
-      chatSessionId === initialChat.id &&
-      initialChat.engine === "local_codex",
-  );
-  const attachmentsEnabled =
-    Boolean(userWorkosId) &&
-    !activeTaskConversation &&
-    activeEngine !== "local_codex" &&
-    !localCodexFeatureDisabledForChat;
+  const attachmentsEnabled = Boolean(userWorkosId) && !activeTaskConversation;
   const composerAttachments = useGoatChatAttachments({
     userWorkosId,
     modelName: String(chatModel),
-    enabled: attachmentsEnabled && !engineSubmitting,
+    // Cmd+K mounts a second composer with its own window-level drop listener.
+    // Keep the main composer visible behind the modal, but let only the quick
+    // composer consume dropped files while the palette is open.
+    enabled: attachmentsEnabled && !engineSubmitting && !newChatCommandOpen,
     ...(activeEngine === "codex" || activeEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
       : {}),
@@ -731,9 +706,7 @@ export function GoatSurface({
   // created or edited since the last open must appear, and a transient fetch failure
   // must not blank the menu for the rest of the session — keep the previous catalog
   // and let the next open retry.
-  const skillMentionMenuOpen = Boolean(
-    userWorkosId && mentionToken && activeEngine !== "local_codex" && !activeTaskConversation,
-  );
+  const skillMentionMenuOpen = Boolean(userWorkosId && mentionToken && !activeTaskConversation);
   useEffect(() => {
     if (!skillMentionMenuOpen) return;
     const controller = new AbortController();
@@ -813,8 +786,7 @@ export function GoatSurface({
     () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
     [optimisticallyArchivedChatIds, recentChats],
   );
-  const trimmedNewChatPrompt = newChatPrompt.trim();
-  const showEngineComposerControls = isEngineChat && !localCodexFeatureDisabledForChat;
+  const showEngineComposerControls = isEngineChat;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -885,13 +857,22 @@ export function GoatSurface({
   }, [chatMessages]);
   const contextMaxTokens = goatModelContextWindowTokens(activeChatModel);
 
-  const applyCodexComposerUiState = useCallback((state: CodexComposerUiState) => {
-    setCodexReasoningEffort(state.reasoningEffort);
-    setCodexPlanModeEnabled(state.planModeEnabled);
-    setCodexGoalModeEnabled(state.goalModeEnabled);
-    setCodexGoalObjective(state.goalObjective);
-    setCodexGoalTokenBudget(state.goalTokenBudget);
-  }, []);
+  const applyCodexComposerUiState = useCallback(
+    (state: CodexComposerUiState) => {
+      setCodexReasoningEffort(state.reasoningEffort);
+      setCodexPlanModeEnabled(state.planModeEnabled);
+      setCodexGoalModeEnabled(state.goalModeEnabled);
+      setCodexGoalObjective(state.goalObjective);
+      setCodexGoalTokenBudget(state.goalTokenBudget);
+    },
+    [
+      setCodexGoalModeEnabled,
+      setCodexGoalObjective,
+      setCodexGoalTokenBudget,
+      setCodexPlanModeEnabled,
+      setCodexReasoningEffort,
+    ],
+  );
 
   const openChat = useCallback(
     (
@@ -903,7 +884,7 @@ export function GoatSurface({
         codexRuntime?: GoatCodexRuntimeView | null;
       } | null,
     ) => {
-      if (chatSessionId && isEngineChat && !localCodexFeatureDisabledForChat) {
+      if (chatSessionId && isEngineChat) {
         const currentComposerState = currentCodexComposerUiState({
           reasoningEffort: codexReasoningEffort,
           planModeEnabled: codexPlanModeEnabled,
@@ -918,7 +899,7 @@ export function GoatSurface({
         });
       }
 
-      const engineTarget = engineChatKindFromChat(chat, localCodexBetaEnabled);
+      const engineTarget = engineChatKindFromChat(chat);
       const nextCodexComposerState = codexComposerUiStateForChat(chat, codexComposerStateByChatId);
       releaseAllOptimisticAttachmentPreviews();
       routedChatSessionIdRef.current = chat?.id ?? null;
@@ -927,15 +908,13 @@ export function GoatSurface({
       setPersistedChatSessionId(chat?.id ?? null);
       setChatInstanceKey(chat?.id ?? `goat-chat-main-${crypto.randomUUID()}`);
       setChatModelOverride(
-        engineTarget === "local_codex"
-          ? LOCAL_CODEX_PICKER_VALUE
-          : engineTarget === "codex"
-            ? CODEX_PICKER_VALUE
-            : engineTarget === "claude_code"
-              ? CLAUDE_PICKER_VALUE
-              : chat
-                ? normalizeGoatModel(chat.model)
-                : null,
+        engineTarget === "codex"
+          ? CODEX_PICKER_VALUE
+          : engineTarget === "claude_code"
+            ? CLAUDE_PICKER_VALUE
+            : chat
+              ? normalizeGoatModel(chat.model)
+              : null,
       );
       setCodexModel(normalizeCodexChatModelId(chat?.model));
       setClaudeModel(normalizeClaudeChatModelId(chat?.model));
@@ -969,9 +948,10 @@ export function GoatSurface({
       codexPlanModeEnabled,
       codexReasoningEffort,
       isEngineChat,
-      localCodexBetaEnabled,
-      localCodexFeatureDisabledForChat,
       releaseAllOptimisticAttachmentPreviews,
+      setChatModelOverride,
+      setClaudeModel,
+      setCodexModel,
       setMessages,
     ],
   );
@@ -1127,7 +1107,7 @@ export function GoatSurface({
 
   const closeCommandPalette = useCallback(() => {
     setNewChatCommandOpen(false);
-    setNewChatPrompt("");
+    setChatSearchQuery("");
   }, []);
 
   const jumpToChat = useCallback(
@@ -1160,43 +1140,6 @@ export function GoatSurface({
     [closeCommandPalette, restoringChatId, router, startArchiveTransition],
   );
 
-  const startBackgroundChat = useCallback(
-    (prompt: string) => {
-      const trimmedPrompt = prompt.trim();
-      if (!trimmedPrompt) return;
-      if (trimmedPrompt.length > BACKGROUND_CHAT_PROMPT_MAX_LENGTH) {
-        toast.error(
-          `Messages can be at most ${BACKGROUND_CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
-        );
-        return;
-      }
-
-      setNewChatCommandOpen(false);
-      setNewChatPrompt("");
-      setBackgroundChatCount((count) => count + 1);
-      toast("Started a new chat in the background.");
-
-      void runBackgroundChatTurn({
-        prompt: trimmedPrompt,
-        model: defaultModel,
-      })
-        .then(() => {
-          if (!mountedRef.current) return;
-          router.refresh();
-          toast.success("Background chat is ready.");
-        })
-        .catch((error) => {
-          if (!mountedRef.current) return;
-          toast.error(error instanceof Error ? error.message : "Could not start that chat.");
-        })
-        .finally(() => {
-          if (!mountedRef.current) return;
-          setBackgroundChatCount((count) => Math.max(0, count - 1));
-        });
-    },
-    [defaultModel, router],
-  );
-
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isAgentWorking || workflowTaskSubmitting) return;
@@ -1210,20 +1153,13 @@ export function GoatSurface({
       return;
     }
 
-    const prompt = input.trim();
+    const prompt = (pendingProgrammaticPromptRef.current ?? input).trim();
+    pendingProgrammaticPromptRef.current = null;
     const pendingAttachments = composerAttachments.attachments;
     const readyAttachments = pendingAttachments.filter(
       (attachment) => attachment.status === "ready",
     );
     if (!prompt && readyAttachments.length === 0) return;
-    if (localCodexFeatureDisabledForChat) {
-      toast.error(LOCAL_CODEX_BETA_DISABLED_MESSAGE);
-      return;
-    }
-    if (pendingAttachments.length > 0 && activeEngine === "local_codex") {
-      toast.error("Attachments are not supported in Local Codex chats yet.");
-      return;
-    }
     if (composerAttachments.isUploading) {
       toast.error("Wait for attachments to finish uploading.");
       return;
@@ -1382,7 +1318,7 @@ export function GoatSurface({
         settings: settings.settings,
         userMessageId,
         attachments: attachmentsMetadata,
-        mentions: engine === "local_codex" ? [] : mentions.filter(isSkillMention),
+        mentions: mentions.filter(isSkillMention),
         ...(!existingEngineSessionId && engine === "codex"
           ? { model: codexModel }
           : !existingEngineSessionId && engine === "claude_code"
@@ -1478,21 +1414,26 @@ export function GoatSurface({
   };
 
   useEffect(() => {
-    if (onboardingKickoffReadRef.current) return;
-    onboardingKickoffReadRef.current = true;
-    const prompt = consumeGoatOnboardingKickoffPrompt();
+    if (!onboardingKickoffReadRef.current) {
+      onboardingKickoffReadRef.current = true;
+      onboardingKickoffPromptRef.current = consumeGoatOnboardingKickoffPrompt();
+    }
+    const prompt = onboardingKickoffPromptRef.current;
     if (!prompt) return;
 
-    // This synchronizes one-time browser storage with the normal form submit
-    // path. Defer the state update so React can finish the mount (including the
-    // development Strict Mode setup/cleanup cycle) before the automatic send.
+    // Synchronize one-time browser storage with the normal form submit path.
+    // The prompt ref lets the submit handler read the kickoff immediately,
+    // without waiting for a render or an animation frame that may be throttled.
+    // Keep the consumed kickoff until this component is mounted so React Strict
+    // Mode's development setup/cleanup replay cannot drop it.
     queueMicrotask(() => {
       if (!mountedRef.current) return;
+      if (onboardingKickoffPromptRef.current !== prompt) return;
+      onboardingKickoffPromptRef.current = null;
       setChatModelOverride(normalizeGoatModel(defaultModel));
+      pendingProgrammaticPromptRef.current = prompt;
       setInput(prompt);
-      requestAnimationFrame(() => {
-        if (mountedRef.current) formRef.current?.requestSubmit();
-      });
+      formRef.current?.requestSubmit();
     });
   }, [defaultModel]);
 
@@ -1706,6 +1647,7 @@ export function GoatSurface({
 
   const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextInput = event.target.value;
+    pendingProgrammaticPromptRef.current = null;
     setInput(nextInput);
     setSelectedMentions((current) =>
       current.filter((mention) => goatChatMentionIsVisible(nextInput, mention)),
@@ -1715,7 +1657,7 @@ export function GoatSurface({
 
   const onInputPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     if (composerAttachments.handlePasteFiles(event)) return;
-    if (!userWorkosId || activeEngine === "local_codex") return;
+    if (!userWorkosId) return;
 
     const pastedText = event.clipboardData.getData("text/plain");
     const pastedSkillIds = skillMentionIdsFromText(pastedText);
@@ -1838,96 +1780,95 @@ export function GoatSurface({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col items-center overflow-hidden">
-      <CommandDialog
+      <Dialog
         open={newChatCommandOpen}
         onOpenChange={(open) => (open ? setNewChatCommandOpen(true) : closeCommandPalette())}
-        title="Search Goat chats"
-        description="Search chats, reopen archived ones, or start a new chat."
-        className="top-[22%] max-w-xl translate-y-0 border-border bg-surface p-0 text-ink shadow-[0_18px_60px_rgba(15,15,15,0.18)]"
       >
-        <CommandInput
-          value={newChatPrompt}
-          onValueChange={setNewChatPrompt}
-          placeholder="Search chats or describe a new one..."
-        />
-        <CommandList>
-          <CommandEmpty>No matching chats. Press Enter to start a new one.</CommandEmpty>
-          <CommandGroup heading="Actions">
-            <CommandItem
-              value={`Create new chat ${newChatPrompt}`}
-              onSelect={() => startBackgroundChat(newChatPrompt)}
-              className="gap-3"
-            >
-              {backgroundChatCount > 0 ? (
-                <LoaderCircle
-                  size={16}
-                  strokeWidth={2}
-                  className="shrink-0 animate-spin text-ink-subtle"
-                />
-              ) : (
-                <MessageSquarePlus size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-medium text-ink">
-                  Create new background chat
-                </p>
-                <p className="truncate text-[12px] text-ink-subtle">
-                  {trimmedNewChatPrompt || "Start another chat with Goat"}
-                </p>
-              </div>
-              <CommandShortcut>Enter</CommandShortcut>
-            </CommandItem>
-          </CommandGroup>
-          {paletteRecentChats.length > 0 ? (
-            <CommandGroup heading="Chats">
-              {paletteRecentChats.map((chat) => (
-                <CommandItem
-                  key={chat.id}
-                  value={`chat ${chat.title} ${chat.id}`}
-                  onSelect={() => jumpToChat(chat)}
-                  className="gap-3"
-                >
-                  <MessageSquare size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-medium text-ink">{chat.title}</p>
-                    <p className="truncate text-[12px] text-ink-subtle">{chat.preview}</p>
-                  </div>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          ) : null}
-          {archivedChats.length > 0 ? (
-            <CommandGroup heading="Archived">
-              {archivedChats.map((chat) => (
-                <CommandItem
-                  key={chat.id}
-                  value={`archived ${chat.title} ${chat.id}`}
-                  onSelect={() => restoreAndOpenChat(chat)}
-                  className="gap-3"
-                >
-                  {restoringChatId === chat.id ? (
-                    <LoaderCircle
-                      size={16}
-                      strokeWidth={2}
-                      className="shrink-0 animate-spin text-ink-subtle"
-                    />
-                  ) : (
-                    <Archive size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-medium text-ink">{chat.title}</p>
-                    <p className="truncate text-[12px] text-ink-subtle">Archived chat</p>
-                  </div>
-                  <CommandShortcut className="flex items-center gap-1">
-                    <RotateCcw size={12} strokeWidth={2} />
-                    Restore
-                  </CommandShortcut>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          ) : null}
-        </CommandList>
-      </CommandDialog>
+        <DialogHeader className="sr-only">
+          <DialogTitle>New chat</DialogTitle>
+          <DialogDescription>
+            Start a new chat that runs in the background, or search chats to reopen.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogContent
+          showCloseButton={false}
+          className="top-[18%] max-w-xl translate-y-0 gap-0 overflow-hidden border-border bg-surface p-0 text-ink shadow-[0_18px_60px_rgba(15,15,15,0.18)]"
+        >
+          <QuickChatComposer
+            open={newChatCommandOpen}
+            userWorkosId={userWorkosId}
+            defaultModel={defaultModel}
+            codexConnected={codexConnected}
+            claudeCodeConnected={claudeCodeConnected}
+            creditBalance={creditBalance}
+            onSubmitted={closeCommandPalette}
+          />
+          <div className="border-t border-border">
+            <Command className="bg-surface text-ink">
+              <CommandInput
+                value={chatSearchQuery}
+                onValueChange={setChatSearchQuery}
+                placeholder="Search chats..."
+              />
+              <CommandList>
+                <CommandEmpty>No matching chats.</CommandEmpty>
+                {paletteRecentChats.length > 0 ? (
+                  <CommandGroup heading="Chats">
+                    {paletteRecentChats.map((chat) => (
+                      <CommandItem
+                        key={chat.id}
+                        value={`chat ${chat.title} ${chat.id}`}
+                        onSelect={() => jumpToChat(chat)}
+                        className="gap-3"
+                      >
+                        <MessageSquare
+                          size={16}
+                          strokeWidth={2}
+                          className="shrink-0 text-ink-subtle"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-medium text-ink">{chat.title}</p>
+                          <p className="truncate text-[12px] text-ink-subtle">{chat.preview}</p>
+                        </div>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                ) : null}
+                {archivedChats.length > 0 ? (
+                  <CommandGroup heading="Archived">
+                    {archivedChats.map((chat) => (
+                      <CommandItem
+                        key={chat.id}
+                        value={`archived ${chat.title} ${chat.id}`}
+                        onSelect={() => restoreAndOpenChat(chat)}
+                        className="gap-3"
+                      >
+                        {restoringChatId === chat.id ? (
+                          <LoaderCircle
+                            size={16}
+                            strokeWidth={2}
+                            className="shrink-0 animate-spin text-ink-subtle"
+                          />
+                        ) : (
+                          <Archive size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-medium text-ink">{chat.title}</p>
+                          <p className="truncate text-[12px] text-ink-subtle">Archived chat</p>
+                        </div>
+                        <CommandShortcut className="flex items-center gap-1">
+                          <RotateCcw size={12} strokeWidth={2} />
+                          Restore
+                        </CommandShortcut>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                ) : null}
+              </CommandList>
+            </Command>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <div className="relative flex min-h-0 w-full flex-1">
         <div className="relative flex min-w-0 flex-1 flex-col items-center overflow-hidden">
@@ -2062,12 +2003,6 @@ export function GoatSurface({
           persistedChatSessionId === chatSessionId ? (
             <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
           ) : null}
-          {mode === "chat" && activeEngineChat?.engine === "local_codex" ? (
-            <LiveLocalCodexSessionStatus
-              chatSessionId={activeEngineChat.chatSessionId}
-              setRunning={setEngineRunning}
-            />
-          ) : null}
           {mode === "chat" &&
           (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
             <LiveCodexChatSessionStatus
@@ -2123,14 +2058,6 @@ export function GoatSurface({
                   role="alert"
                 >
                   {chatError.message || "Goat could not answer that right now."}
-                </p>
-              ) : null}
-              {localCodexFeatureDisabledForChat ? (
-                <p
-                  className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-                  role="status"
-                >
-                  {LOCAL_CODEX_BETA_DISABLED_MESSAGE}
                 </p>
               ) : null}
               {mentionToken && mentionOptions.length > 0 ? (
@@ -2266,7 +2193,7 @@ export function GoatSurface({
                           event.currentTarget.selectionStart,
                         )
                       }
-                      disabled={localCodexFeatureDisabledForChat || workflowTaskSubmitting}
+                      disabled={workflowTaskSubmitting}
                       className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
                       style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                       maxLength={10_000}
@@ -2288,7 +2215,6 @@ export function GoatSurface({
                       engineSubmitting ||
                       engineRunning ||
                       workflowTaskSubmitting ||
-                      localCodexFeatureDisabledForChat ||
                       chatSendBlocked
                     }
                     isGenerating={isGenerating || isTaskConversationWorking}
@@ -2329,19 +2255,13 @@ export function GoatSurface({
                       persistLastGoatChatSelection(userWorkosId, model);
                       if (model === CODEX_PICKER_VALUE && model !== chatModel) {
                         setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
-                      } else if (model === LOCAL_CODEX_PICKER_VALUE && model !== chatModel) {
-                        setCodexReasoningEffort(DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT);
                       } else if (model === CLAUDE_PICKER_VALUE && model !== chatModel) {
                         setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
                         setCodexPlanModeEnabled(false);
                         setCodexGoalModeEnabled(false);
                         setCodexGoalObjective("");
                         setCodexGoalTokenBudget("");
-                      } else if (
-                        model !== CODEX_PICKER_VALUE &&
-                        model !== LOCAL_CODEX_PICKER_VALUE &&
-                        model !== CLAUDE_PICKER_VALUE
-                      ) {
+                      } else if (model !== CODEX_PICKER_VALUE && model !== CLAUDE_PICKER_VALUE) {
                         setCodexPlanModeEnabled(false);
                         setCodexGoalModeEnabled(false);
                         setCodexGoalObjective("");
@@ -2349,7 +2269,6 @@ export function GoatSurface({
                       }
                     }}
                     disabled={isGenerating || Boolean(chatSessionId)}
-                    localCodexBetaEnabled={localCodexBetaEnabled}
                     codexConnected={codexConnected}
                     claudeCodeConnected={claudeCodeConnected}
                   />
@@ -2403,6 +2322,756 @@ export function GoatSurface({
           />
         ) : null}
       </div>
+    </div>
+  );
+}
+
+// The Cmd+K quick-compose surface. Same controls as the main composer (attachments,
+// model/engine picker, mentions), but it always starts a brand-new chat that runs in
+// the background — it never adopts the result into view or navigates to it.
+function QuickChatComposer({
+  open,
+  userWorkosId,
+  defaultModel,
+  codexConnected,
+  claudeCodeConnected,
+  creditBalance,
+  onSubmitted,
+}: {
+  open: boolean;
+  userWorkosId: string;
+  defaultModel: string;
+  codexConnected: boolean;
+  claudeCodeConnected: boolean;
+  creditBalance: ReturnType<typeof useGoatCreditBalance>["balance"];
+  onSubmitted: () => void;
+}) {
+  const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputOverlayRef = useRef<HTMLDivElement>(null);
+  const attachmentFileInputRef = useRef<HTMLInputElement>(null);
+  const pendingInputCaretRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const [input, setInput] = useState("");
+  const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
+  const [mentionOptionIndex, setMentionOptionIndex] = useState(0);
+  const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
+  const [skillCatalog, setSkillCatalog] = useState<GoatSkillCatalogItem[]>([]);
+  const [workflowCatalog, setWorkflowCatalog] = useState<GoatWorkflowCatalogItem[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const rememberedChatModel = useSyncExternalStore(
+    subscribeLastGoatChatSelection,
+    () =>
+      readLastGoatChatSelection(userWorkosId, {
+        codexConnected,
+        claudeCodeConnected,
+      }),
+    () => normalizeGoatModel(defaultModel),
+  );
+  const [chatModelOverride, setChatModelOverride] = useState<GoatChatModelSelection | null>(null);
+  const chatModel = chatModelOverride ?? rememberedChatModel;
+  const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
+    normalizeCodexChatModelId(undefined),
+  );
+  const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
+    normalizeClaudeChatModelId(undefined),
+  );
+  const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
+    DEFAULT_CODEX_CHAT_REASONING_EFFORT,
+  );
+  const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(false);
+  const [codexGoalModeEnabled, setCodexGoalModeEnabled] = useState(false);
+  const [codexGoalObjective, setCodexGoalObjective] = useState("");
+  const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState("");
+
+  const isCodexMode = chatModel === CODEX_PICKER_VALUE;
+  const isClaudeMode = chatModel === CLAUDE_PICKER_VALUE;
+  const selectedEngine: GoatEngineChatKind | null = isCodexMode
+    ? "codex"
+    : isClaudeMode
+      ? "claude_code"
+      : null;
+  const isEngineChat = selectedEngine !== null;
+  const workflowMentionsEnabled = !selectedEngine;
+  const outOfCredits = Boolean(
+    creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
+  );
+  const chatSendBlocked = outOfCredits && !isEngineChat;
+
+  const activeSelectedMentions = selectedMentions.filter((mention) => {
+    if (!goatChatMentionIsVisible(input, mention)) return false;
+    if (mention.kind === "engine") {
+      return mention.id === "claude" ? claudeCodeConnected : codexConnected;
+    }
+    if (mention.kind === "workflow") return workflowMentionsEnabled;
+    return true;
+  });
+  const mentionOptions = buildMentionOptions({
+    token: mentionToken,
+    skills: skillCatalog,
+    workflows: workflowCatalog,
+    selectedMentions: activeSelectedMentions,
+    codexConnected,
+    claudeCodeConnected,
+    skillsEnabled: true,
+    workflowsEnabled: workflowMentionsEnabled,
+  });
+  const selectedWorkflowMention = activeSelectedMentions.find(isWorkflowMention) ?? null;
+  const selectedWorkflowName = selectedWorkflowMention
+    ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
+      selectedWorkflowMention.id)
+    : null;
+
+  const attachmentsEnabled = Boolean(userWorkosId);
+  const composerAttachments = useGoatChatAttachments({
+    userWorkosId,
+    modelName: String(chatModel),
+    enabled: attachmentsEnabled && !isSubmitting,
+    ...(selectedEngine === "codex" || selectedEngine === "claude_code"
+      ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
+      : {}),
+  });
+
+  // The dialog stays mounted across opens; reset to a pristine draft each time it closes
+  // so a stale prompt, attachment, or engine choice never leaks into the next invocation.
+  const clearAttachments = composerAttachments.clearAttachments;
+  useEffect(() => {
+    if (open) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- one-shot reset on close, not a render loop */
+    setInput("");
+    setMentionToken(null);
+    setSelectedMentions([]);
+    clearAttachments();
+    setChatModelOverride(null);
+    setCodexPlanModeEnabled(false);
+    setCodexGoalModeEnabled(false);
+    setCodexGoalObjective("");
+    setCodexGoalTokenBudget("");
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [open, clearAttachments]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    inputRef.current?.focus();
+  }, [open]);
+
+  // Mirrors the main composer: refetch the skill/workflow catalog on every mention-menu
+  // open so recently created skills/workflows show up.
+  const skillMentionMenuOpen = Boolean(userWorkosId && mentionToken);
+  useEffect(() => {
+    if (!skillMentionMenuOpen) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void fetchGoatBrainSkillCatalog(controller.signal)
+        .then(setSkillCatalog)
+        .catch(() => {});
+      if (workflowMentionsEnabled) {
+        void fetchGoatBrainWorkflowCatalog(controller.signal)
+          .then(setWorkflowCatalog)
+          .catch(() => {});
+      }
+    }, 80);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [skillMentionMenuOpen, workflowMentionsEnabled]);
+
+  const syncInputOverlayScroll = useCallback(() => {
+    const overlay = inputOverlayRef.current;
+    const el = inputRef.current;
+    if (!overlay || !el) return;
+    overlay.scrollTop = el.scrollTop;
+  }, []);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    if (input.length === 0) {
+      el.style.height = "";
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+    syncInputOverlayScroll();
+  }, [input, syncInputOverlayScroll]);
+
+  useLayoutEffect(() => {
+    const caret = pendingInputCaretRef.current;
+    if (caret === null) return;
+    pendingInputCaretRef.current = null;
+    inputRef.current?.focus();
+    inputRef.current?.setSelectionRange(caret, caret);
+  }, [input]);
+
+  const updateMentionToken = (value: string, selectionStart: number | null) => {
+    setMentionOptionIndex(0);
+    if (selectionStart === null) {
+      setMentionToken(null);
+      return;
+    }
+    setMentionToken(findActiveMentionToken(value, selectionStart));
+  };
+
+  const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const nextInput = event.target.value;
+    setInput(nextInput);
+    setSelectedMentions((current) =>
+      current.filter((mention) => goatChatMentionIsVisible(nextInput, mention)),
+    );
+    updateMentionToken(nextInput, event.target.selectionStart);
+  };
+
+  const selectMention = (option: MentionOption) => {
+    if (!mentionToken) return;
+    const before = input.slice(0, mentionToken.start);
+    const after = input.slice(mentionToken.end);
+    const nextInput = `${before}${option.token} ${after}`;
+    const nextCaret = before.length + option.token.length + 1;
+    pendingInputCaretRef.current = nextCaret;
+    setInput(nextInput);
+    setSelectedMentions((current) => {
+      if (option.mention.kind === "engine") {
+        return [...current.filter((mention) => mention.kind !== "engine"), option.mention];
+      }
+      if (option.mention.kind === "workflow") {
+        return [...current.filter((mention) => mention.kind !== "workflow"), option.mention];
+      }
+      return current.some((mention) => mention.kind === "skill" && mention.id === option.mention.id)
+        ? current
+        : [...current, option.mention];
+    });
+    setMentionToken(null);
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionToken) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setMentionToken(null);
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        event.stopPropagation();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        setMentionOptionIndex((current) =>
+          mentionOptions.length === 0
+            ? 0
+            : (current + direction + mentionOptions.length) % mentionOptions.length,
+        );
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        event.stopPropagation();
+        const option = mentionOptions[mentionOptionIndex];
+        if (option) selectMention(option);
+        return;
+      }
+    }
+
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (!isSubmitting) formRef.current?.requestSubmit();
+    }
+  };
+
+  const onInputPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (composerAttachments.handlePasteFiles(event)) return;
+    if (!userWorkosId) return;
+
+    const pastedText = event.clipboardData.getData("text/plain");
+    const pastedSkillIds = skillMentionIdsFromText(pastedText);
+    const pastedWorkflowIds = workflowMentionsEnabled
+      ? workflowMentionIdsFromText(pastedText)
+      : new Set<string>();
+    if (pastedSkillIds.size === 0 && pastedWorkflowIds.size === 0) return;
+
+    event.preventDefault();
+    const textareaValue = event.currentTarget.value;
+    const selectionStart = event.currentTarget.selectionStart ?? textareaValue.length;
+    const selectionEnd = event.currentTarget.selectionEnd ?? selectionStart;
+    const availableLength = Math.max(
+      0,
+      event.currentTarget.maxLength - (textareaValue.length - (selectionEnd - selectionStart)),
+    );
+    const insertedText = pastedText.slice(0, availableLength);
+    const nextInput = `${textareaValue.slice(0, selectionStart)}${insertedText}${textareaValue.slice(selectionEnd)}`;
+    const nextCaret = selectionStart + insertedText.length;
+    const pastedMentions = [
+      ...skillMentionsFromPastedText({
+        pastedText: insertedText,
+        fullInput: nextInput,
+        skillIds: pastedSkillIds,
+        skills: skillCatalog,
+      }),
+      ...workflowMentionsFromPastedText({
+        pastedText: insertedText,
+        fullInput: nextInput,
+        workflowIds: pastedWorkflowIds,
+        workflows: workflowCatalog,
+      }),
+    ];
+
+    pendingInputCaretRef.current = nextCaret;
+    setInput(nextInput);
+    setMentionToken(null);
+    setSelectedMentions((current) =>
+      mergeVisibleGoatChatMentions(nextInput, current, pastedMentions),
+    );
+
+    const knownSkillIds = new Set(
+      skillCatalog.flatMap((skill) => (pastedSkillIds.has(skill.id) ? [skill.id] : [])),
+    );
+    const knownWorkflowIds = new Set(
+      workflowCatalog.flatMap((workflow) =>
+        pastedWorkflowIds.has(workflow.id) ? [workflow.id] : [],
+      ),
+    );
+    if (
+      knownSkillIds.size === pastedSkillIds.size &&
+      knownWorkflowIds.size === pastedWorkflowIds.size
+    ) {
+      return;
+    }
+
+    void Promise.all([
+      fetchGoatBrainSkillCatalog(),
+      workflowMentionsEnabled ? fetchGoatBrainWorkflowCatalog() : Promise.resolve([]),
+    ])
+      .then(([skills, workflows]) => {
+        if (!mountedRef.current) return;
+        setSkillCatalog(skills);
+        if (workflowMentionsEnabled) setWorkflowCatalog(workflows);
+        const currentInput = inputRef.current?.value ?? nextInput;
+        const resolvedMentions = [
+          ...skillMentionsFromPastedText({
+            pastedText: insertedText,
+            fullInput: currentInput,
+            skillIds: pastedSkillIds,
+            skills,
+          }),
+          ...workflowMentionsFromPastedText({
+            pastedText: insertedText,
+            fullInput: currentInput,
+            workflowIds: pastedWorkflowIds,
+            workflows,
+          }),
+        ];
+        setSelectedMentions((current) =>
+          mergeVisibleGoatChatMentions(currentInput, current, resolvedMentions),
+        );
+      })
+      .catch(() => {});
+  };
+
+  const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSubmitting) return;
+    if (chatSendBlocked) {
+      toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
+        action: {
+          label: "Add credits",
+          onClick: () => router.push("/settings/workspace/billing"),
+        },
+      });
+      return;
+    }
+
+    const prompt = input.trim();
+    const pendingAttachments = composerAttachments.attachments;
+    const readyAttachments = pendingAttachments.filter(
+      (attachment) => attachment.status === "ready",
+    );
+    if (!prompt && readyAttachments.length === 0) return;
+    if (prompt.length > BACKGROUND_CHAT_PROMPT_MAX_LENGTH) {
+      toast.error(
+        `Messages can be at most ${BACKGROUND_CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+      );
+      return;
+    }
+    if (composerAttachments.isUploading) {
+      toast.error("Wait for attachments to finish uploading.");
+      return;
+    }
+    if (composerAttachments.hasFailed) {
+      toast.error("Remove failed attachments before sending.");
+      return;
+    }
+
+    const mentions = activeSelectedMentions.filter((mention) =>
+      goatChatMentionIsVisible(prompt, mention),
+    );
+    const attachmentsMetadata = readyAttachments.map((attachment) => ({
+      id: attachment.id,
+      kind: attachment.kind,
+      mediaType: attachment.mediaType,
+      filename: attachment.filename,
+      sizeBytes: attachment.sizeBytes,
+      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
+      blobUrl: attachment.blobUrl!,
+      // biome-ignore lint/style/noNonNullAssertion: filtered to ready attachments with blob fields
+      blobPathname: attachment.blobPathname!,
+      ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
+    }));
+
+    const workflowMention = mentions.find(isWorkflowMention);
+    if (workflowMention) {
+      if (pendingAttachments.length > 0) {
+        toast.error("Attachments are not supported when starting a workflow task yet.");
+        return;
+      }
+
+      setIsSubmitting(true);
+      setInput("");
+      setMentionToken(null);
+      setSelectedMentions([]);
+      onSubmitted();
+      void startGoatWorkflowTask({ workflow: workflowMention, description: prompt })
+        .then(({ task }) => {
+          // Not gated on mountedRef: the dialog (and this component) has already
+          // closed by the time this resolves — router.refresh()/toast are global.
+          router.refresh();
+          toast.success(`Started ${task.name} in the background.`);
+        })
+        .catch((error) => {
+          toast.error(
+            error instanceof Error ? error.message : "Could not start that workflow task.",
+          );
+        })
+        .finally(() => {
+          if (mountedRef.current) setIsSubmitting(false);
+        });
+      return;
+    }
+
+    setInput("");
+    setMentionToken(null);
+    setSelectedMentions([]);
+
+    if (selectedEngine) {
+      // Validate before clearing attachments / closing the dialog: once onSubmitted()
+      // unmounts this component, there's no visible composer left to restore a draft into.
+      const settings =
+        selectedEngine === "claude_code"
+          ? ({ ok: true, settings: { reasoningEffort: codexReasoningEffort } } as const)
+          : buildCodexComposerSettings({
+              prompt,
+              reasoningEffort: codexReasoningEffort,
+              planModeEnabled: codexPlanModeEnabled,
+              goalModeEnabled: codexGoalModeEnabled,
+              goalObjective: codexGoalObjective,
+              goalTokenBudget: codexGoalTokenBudget,
+            });
+      if (!settings.ok) {
+        setInput(prompt);
+        setSelectedMentions(mentions);
+        toast.error(settings.error);
+        return;
+      }
+
+      setIsSubmitting(true);
+      composerAttachments.clearAttachments();
+      onSubmitted();
+      toast("Started a new chat in the background.");
+
+      const engine = selectedEngine;
+      const config = ENGINE_CHAT_CONFIG[engine];
+      const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
+      void sendEngineChatMessage({
+        endpoint: config.messagesEndpoint,
+        errorLabel: config.label,
+        prompt,
+        sessionId: null,
+        newSessionId: newOptimisticGoatChatSessionId(),
+        settings: settings.settings,
+        userMessageId,
+        attachments: attachmentsMetadata,
+        mentions: mentions.filter(isSkillMention),
+        ...(engine === "codex"
+          ? { model: codexModel }
+          : engine === "claude_code"
+            ? { model: claudeModel }
+            : {}),
+      })
+        .then(() => {
+          // Not gated on mountedRef: see the workflow branch above.
+          router.refresh();
+          toast.success(`${config.label} is ready.`);
+        })
+        .catch((error) => {
+          toast.error(
+            error instanceof Error ? error.message : `${config.label} could not start that turn.`,
+          );
+        })
+        .finally(() => {
+          if (mountedRef.current) setIsSubmitting(false);
+        });
+      return;
+    }
+
+    setIsSubmitting(true);
+    composerAttachments.clearAttachments();
+    onSubmitted();
+    toast("Started a new chat in the background.");
+
+    const metadata: GoatChatMessageMetadata = {
+      ...(mentions.length > 0 ? { mentions } : {}),
+      ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
+    };
+    void runBackgroundChatTurn({
+      prompt,
+      model: String(chatModel),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+    })
+      .then(() => {
+        // Not gated on mountedRef: see the workflow branch above.
+        router.refresh();
+        toast.success("Background chat is ready.");
+      })
+      .catch((error) => {
+        toast.error(error instanceof Error ? error.message : "Could not start that chat.");
+      })
+      .finally(() => {
+        if (mountedRef.current) setIsSubmitting(false);
+      });
+  };
+
+  const showEngineComposerControls = isEngineChat;
+
+  return (
+    <div className="flex flex-col gap-2 p-3">
+      {mentionToken && mentionOptions.length > 0 ? (
+        <div
+          role="listbox"
+          aria-label="Mention menu"
+          className="max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
+        >
+          {mentionOptions.map((option, index) => (
+            <button
+              key={option.token}
+              type="button"
+              role="option"
+              aria-selected={index === mentionOptionIndex}
+              onMouseEnter={() => setMentionOptionIndex(index)}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                selectMention(option);
+              }}
+              onClick={() => selectMention(option)}
+              className={cn(
+                "flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-surface-hover focus:bg-surface-hover focus:outline-none",
+                index === mentionOptionIndex && "bg-surface-hover",
+              )}
+            >
+              {option.kind === "engine" ? (
+                <Code2 size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
+              ) : option.kind === "workflow" ? (
+                <WorkflowIcon
+                  size={14}
+                  strokeWidth={2}
+                  className="mt-0.5 shrink-0 text-ink-subtle"
+                />
+              ) : (
+                <Sparkles size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-medium leading-4 text-ink">
+                  {option.token}
+                </span>
+                {option.kind === "skill" || option.kind === "workflow" ? (
+                  <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
+                    {option.label}
+                    {option.description ? ` · ${option.description}` : ""}
+                  </span>
+                ) : null}
+              </span>
+              {option.kind === "engine" ? (
+                <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
+              ) : null}
+              {option.kind === "workflow" ? (
+                <span className="text-[12px] leading-4 text-ink-subtle">Task</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {selectedWorkflowMention ? (
+        <div
+          role="status"
+          data-testid="workflow-task-hint"
+          className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+        >
+          <WorkflowIcon size={13} strokeWidth={2} className="shrink-0" />
+          <span>
+            Sending runs workflow{" "}
+            <span className="font-medium text-ink">{selectedWorkflowName}</span> as a background
+            task.
+          </span>
+        </div>
+      ) : null}
+      <form ref={formRef} onSubmit={onSubmit}>
+        <div
+          {...composerAttachments.dragHandlers}
+          className="relative flex flex-col rounded-2xl border border-border bg-surface transition-colors duration-150 focus-within:border-border-strong"
+        >
+          {composerAttachments.isDragActive && attachmentsEnabled ? (
+            <GoatComposerDropOverlay />
+          ) : null}
+          {composerAttachments.attachments.length > 0 ? (
+            <div className="px-3.5 pt-3">
+              <GoatComposerAttachments
+                attachments={composerAttachments.attachments}
+                onRemove={composerAttachments.removeAttachment}
+              />
+            </div>
+          ) : null}
+          <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
+            <div className="relative min-w-0 flex-1 self-center">
+              {input ? (
+                <div
+                  ref={inputOverlayRef}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
+                >
+                  {renderComposerInputOverlay(input, activeSelectedMentions)}
+                </div>
+              ) : null}
+              <textarea
+                ref={inputRef}
+                rows={1}
+                id="quick-chat-prompt"
+                name="prompt"
+                value={input}
+                placeholder="Ask Goat anything, or describe a task..."
+                onChange={onInputChange}
+                onBlur={() => setMentionToken(null)}
+                onClick={(event) =>
+                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
+                }
+                onKeyDown={onKeyDown}
+                onScroll={syncInputOverlayScroll}
+                onPaste={onInputPaste}
+                onSelect={(event) =>
+                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
+                }
+                disabled={isSubmitting}
+                className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+                maxLength={10_000}
+              />
+            </div>
+            <SubmitButton
+              disabled={
+                (!input.trim() &&
+                  !composerAttachments.attachments.some(
+                    (attachment) => attachment.status === "ready",
+                  )) ||
+                composerAttachments.isUploading ||
+                isSubmitting ||
+                chatSendBlocked
+              }
+              isGenerating={false}
+              startsWorkflowTask={Boolean(selectedWorkflowMention)}
+              onStop={() => {}}
+            />
+          </div>
+          <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+            {attachmentsEnabled ? (
+              <>
+                <input
+                  ref={attachmentFileInputRef}
+                  type="file"
+                  multiple
+                  accept={GOAT_CHAT_ATTACHMENT_ACCEPT}
+                  className="hidden"
+                  onChange={(event) => {
+                    const files = Array.from(event.currentTarget.files ?? []);
+                    event.currentTarget.value = "";
+                    if (files.length > 0) composerAttachments.acceptFiles(files);
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label="Attach files"
+                  disabled={isSubmitting}
+                  onClick={() => attachmentFileInputRef.current?.click()}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                >
+                  <Plus size={16} strokeWidth={1.9} />
+                </button>
+              </>
+            ) : null}
+            <GoatModelPicker
+              value={chatModel}
+              onChange={(model) => {
+                // Deliberately not persisted via persistLastGoatChatSelection: this picker
+                // only applies to this one quick-compose chat, not the app-wide "last used
+                // model" default the main composer reads on its next fresh session.
+                setChatModelOverride(model);
+                if (model === CODEX_PICKER_VALUE && model !== chatModel) {
+                  setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+                } else if (model === CLAUDE_PICKER_VALUE && model !== chatModel) {
+                  setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+                  setCodexPlanModeEnabled(false);
+                  setCodexGoalModeEnabled(false);
+                  setCodexGoalObjective("");
+                  setCodexGoalTokenBudget("");
+                } else if (model !== CODEX_PICKER_VALUE && model !== CLAUDE_PICKER_VALUE) {
+                  setCodexPlanModeEnabled(false);
+                  setCodexGoalModeEnabled(false);
+                  setCodexGoalObjective("");
+                  setCodexGoalTokenBudget("");
+                }
+              }}
+              disabled={isSubmitting}
+              codexConnected={codexConnected}
+              claudeCodeConnected={claudeCodeConnected}
+            />
+            {showEngineComposerControls ? (
+              <EngineComposerControls
+                model={
+                  selectedEngine === "codex"
+                    ? { engine: "codex", value: codexModel, onChange: setCodexModel }
+                    : selectedEngine === "claude_code"
+                      ? { engine: "claude_code", value: claudeModel, onChange: setClaudeModel }
+                      : null
+                }
+                engineLabel={selectedEngine === "claude_code" ? "Claude" : "Codex"}
+                reasoningEffortAvailable={
+                  selectedEngine !== "claude_code" ||
+                  claudeCodeModelSupportsReasoningEffort(claudeModel)
+                }
+                reasoningEffort={codexReasoningEffort}
+                planModeEnabled={codexPlanModeEnabled}
+                planModeAvailable={selectedEngine === "codex"}
+                goalModeAvailable={selectedEngine !== "claude_code"}
+                goalModeEnabled={codexGoalModeEnabled}
+                goalObjective={codexGoalObjective}
+                goalTokenBudget={codexGoalTokenBudget}
+                disabled={isSubmitting}
+                modelDisabled={isSubmitting}
+                onReasoningEffortChange={setCodexReasoningEffort}
+                onPlanModeEnabledChange={setCodexPlanModeEnabled}
+                onGoalModeEnabledChange={setCodexGoalModeEnabled}
+                onGoalObjectiveChange={setCodexGoalObjective}
+                onGoalTokenBudgetChange={setCodexGoalTokenBudget}
+              />
+            ) : null}
+          </div>
+        </div>
+      </form>
     </div>
   );
 }
@@ -2645,11 +3314,7 @@ function codexComposerUiStateForChat(
   }
   return codexComposerUiStateFromSettings(
     chat?.codexComposerSettings ?? null,
-    chat?.engine === "local_codex"
-      ? DEFAULT_LOCAL_CODEX_CHAT_REASONING_EFFORT
-      : chat?.engine === "claude_code"
-        ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT
-        : undefined,
+    chat?.engine === "claude_code" ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT : undefined,
   );
 }
 
@@ -3334,9 +3999,7 @@ function ChatTitleHeader({
 }) {
   return (
     <div className="flex min-w-0 items-center gap-2 text-ink">
-      {engine === "local_codex" ? (
-        <Code2 size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
-      ) : engine === "codex" ? (
+      {engine === "codex" ? (
         <OpenAIIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
       ) : engine === "claude_code" ? (
         <AnthropicIcon size={14} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
@@ -3595,45 +4258,6 @@ function LiveChatMessageSubscriber({
   return null;
 }
 
-function LiveLocalCodexSessionStatus({
-  chatSessionId,
-  setRunning,
-}: {
-  chatSessionId: string;
-  setRunning: Dispatch<SetStateAction<boolean>>;
-}) {
-  const hydrated = useHydrated();
-  if (!hydrated) return null;
-  return (
-    <LiveLocalCodexSessionStatusSubscriber chatSessionId={chatSessionId} setRunning={setRunning} />
-  );
-}
-
-function LiveLocalCodexSessionStatusSubscriber({
-  chatSessionId,
-  setRunning,
-}: {
-  chatSessionId: string;
-  setRunning: Dispatch<SetStateAction<boolean>>;
-}) {
-  const collections = useMemo(() => createGoatCollections(), []);
-  const localCodexSessionCollection = useMemo(
-    () => collections.localCodexSessions(chatSessionId),
-    [chatSessionId, collections],
-  );
-  const { data: rows } = useLiveQuery((q) =>
-    q.from({ localCodexSession: localCodexSessionCollection }),
-  );
-  const status = ((rows ?? []) as GoatLocalCodexSessionRow[])[0]?.status ?? null;
-
-  useEffect(() => {
-    if (!status) return;
-    setRunning(status === "starting" || status === "running");
-  }, [setRunning, status]);
-
-  return null;
-}
-
 function LiveCodexChatSessionStatus({
   chatSessionId,
   setRunning,
@@ -3677,6 +4301,7 @@ function LiveCodexChatSessionStatusSubscriber({
       (candidate) => candidate.chat_session_id === chatSessionId,
     ) ?? null;
   const status = row?.status ?? null;
+
   useEffect(() => {
     if (isLoading) return;
     setRuntime(
@@ -3696,6 +4321,7 @@ function LiveCodexChatSessionStatusSubscriber({
       setSandboxStatus(null);
       return;
     }
+
     const controller = new AbortController();
     let active = true;
 
@@ -4222,22 +4848,19 @@ function GoatModelPicker({
   value,
   onChange,
   disabled,
-  localCodexBetaEnabled,
   codexConnected = false,
   claudeCodeConnected = false,
 }: {
   value: GoatChatModelSelection;
   onChange: (modelId: GoatChatModelSelection) => void;
   disabled: boolean;
-  localCodexBetaEnabled: boolean;
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const isLocalCodexSelected = localCodexBetaEnabled && value === LOCAL_CODEX_PICKER_VALUE;
   const isCodexSelected = value === CODEX_PICKER_VALUE;
   const isClaudeSelected = value === CLAUDE_PICKER_VALUE;
-  const isEngineSelected = isLocalCodexSelected || isCodexSelected || isClaudeSelected;
+  const isEngineSelected = isCodexSelected || isClaudeSelected;
   const selectedModel = !isEngineSelected
     ? (findGoatModel(value) ?? findGoatModel(DEFAULT_GOAT_MODEL))
     : null;
@@ -4250,9 +4873,7 @@ function GoatModelPicker({
         disabled={disabled}
         className="mb-px flex h-7 max-w-[170px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
       >
-        {isLocalCodexSelected ? (
-          <Code2 size={13} strokeWidth={1.9} className="shrink-0" />
-        ) : isCodexSelected ? (
+        {isCodexSelected ? (
           <OpenAIIcon size={13} strokeWidth={1.9} className="shrink-0" />
         ) : isClaudeSelected ? (
           <AnthropicIcon size={13} strokeWidth={1.9} className="shrink-0" />
@@ -4265,13 +4886,11 @@ function GoatModelPicker({
           />
         )}
         <span className="truncate">
-          {isLocalCodexSelected
-            ? "Local Codex"
-            : isCodexSelected
-              ? "Codex"
-              : isClaudeSelected
-                ? "Claude Code"
-                : (selectedModel?.label ?? "Model")}
+          {isCodexSelected
+            ? "Codex"
+            : isClaudeSelected
+              ? "Claude Code"
+              : (selectedModel?.label ?? "Model")}
         </span>
         <ChevronDown size={12} strokeWidth={2} className="shrink-0" />
       </PopoverTrigger>
@@ -4284,7 +4903,7 @@ function GoatModelPicker({
           <CommandInput placeholder="Search models..." />
           <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
             <CommandEmpty>No models found.</CommandEmpty>
-            {codexConnected || claudeCodeConnected || localCodexBetaEnabled ? (
+            {codexConnected || claudeCodeConnected ? (
               <CommandGroup heading="Engines">
                 {codexConnected ? (
                   <CommandItem
@@ -4346,39 +4965,11 @@ function GoatModelPicker({
                     </div>
                   </CommandItem>
                 ) : null}
-                {localCodexBetaEnabled ? (
-                  <CommandItem
-                    value={LOCAL_CODEX_PICKER_VALUE}
-                    keywords={["Local Codex", "Codex", "local repo", "worktree"]}
-                    onSelect={() => {
-                      onChange(LOCAL_CODEX_PICKER_VALUE);
-                      setOpen(false);
-                    }}
-                    title="Run Codex locally in a clean session folder."
-                    className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-                  >
-                    <Check
-                      size={13}
-                      strokeWidth={2}
-                      className={cn(
-                        "shrink-0 text-ink",
-                        isLocalCodexSelected ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                    <Code2 size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium leading-4">Local Codex</div>
-                      <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                        Local session bridge
-                      </div>
-                    </div>
-                  </CommandItem>
-                ) : null}
               </CommandGroup>
             ) : null}
             <CommandGroup heading="Models">
               {GOAT_MODELS.map((model) => {
-                const isSelected = !isLocalCodexSelected && model.id === selectedModel?.id;
+                const isSelected = !isEngineSelected && model.id === selectedModel?.id;
                 return (
                   <CommandItem
                     key={model.id}
@@ -4515,7 +5106,11 @@ function EngineStopButton({ label, onStop }: { label: string; onStop: () => void
   );
 }
 
-async function runBackgroundChatTurn(input: { prompt: string; model: string }) {
+async function runBackgroundChatTurn(input: {
+  prompt: string;
+  model: string;
+  metadata?: GoatChatMessageMetadata;
+}) {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -4526,6 +5121,7 @@ async function runBackgroundChatTurn(input: { prompt: string; model: string }) {
         id: newBackgroundChatMessageId(),
         role: "user",
         parts: [{ type: "text", text: input.prompt }],
+        ...(input.metadata ? { metadata: input.metadata } : {}),
       },
     }),
   });

@@ -1,10 +1,9 @@
 import type { CodexAppServerNormalizedEvent } from "./codex-app-server-events";
 
 // Shared projection of normalized Codex app-server events into AI SDK UIMessage parts.
-// Both the Goat local-codex bridge route and the cloud codex chat runner fold events
-// through this reducer so every engine persists the same normalized assistant-turn
-// shape (reasoning parts, codex_command tool parts, text parts) in
-// chat_messages.debug_trace.uiMessageParts.
+// The cloud Codex chat runner folds events through this reducer so every coding
+// engine persists the same normalized assistant-turn shape (reasoning parts,
+// codex_command tool parts, text parts) in chat_messages.debug_trace.uiMessageParts.
 
 export const CODEX_COMMAND_TOOL_NAME = "codex_command";
 export const CODEX_COMMAND_TOOL_PART_TYPE = `tool-${CODEX_COMMAND_TOOL_NAME}` as const;

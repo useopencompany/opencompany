@@ -37,6 +37,8 @@ export {
 
 export const START_TASK_TOOL_NAME = "start_task";
 export const START_TASK_TOOL_PART_TYPE = `tool-${START_TASK_TOOL_NAME}` as const;
+export const START_WORKFLOW_TOOL_NAME = "start_workflow";
+export const START_WORKFLOW_TOOL_PART_TYPE = `tool-${START_WORKFLOW_TOOL_NAME}` as const;
 export const SCHEDULE_TASK_TOOL_NAME = "schedule_task";
 export const SCHEDULE_TASK_TOOL_PART_TYPE = `tool-${SCHEDULE_TASK_TOOL_NAME}` as const;
 export const EDIT_TASK_SCHEDULE_TOOL_NAME = "edit_task_schedule";
@@ -158,6 +160,19 @@ export type StartTaskToolOutput = {
   status: "queued" | "already_started";
   prompt: string;
 };
+
+export type GoatChatWorkflowCatalogItem = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+export type StartWorkflowToolInput = {
+  workflowId: string;
+  prompt: string;
+};
+
+export type StartWorkflowToolOutput = StartTaskToolOutput;
 
 export type ScheduleTaskToolInput = {
   prompt: string;
@@ -442,6 +457,10 @@ export type GoatChatTools = {
   start_task: {
     input: StartTaskToolInput;
     output: StartTaskToolOutput;
+  };
+  start_workflow: {
+    input: StartWorkflowToolInput;
+    output: StartWorkflowToolOutput;
   };
   schedule_task: {
     input: ScheduleTaskToolInput;

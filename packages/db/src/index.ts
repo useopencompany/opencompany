@@ -8,5 +8,6 @@ export * from "./goat-capabilities";
 export * from "./goat-claude-code-auth";
 export * from "./goat-codex-auth";
 export * from "./goat-integrations";
+export * from "./goat-repo-configs";
 export * from "./goat-schema";
 export * from "./schema";

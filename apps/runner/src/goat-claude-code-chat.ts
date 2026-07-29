@@ -45,6 +45,7 @@ import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
+import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
   armSandboxIdleTimeout,
@@ -148,6 +149,12 @@ export async function runGoatClaudeCodeChatTurn(input: {
     return "settled";
   }
 
+  const repositoryBootstrapPromise = loadGoatRepositoryBootstrap(
+    session.workspaceId,
+    turn.userWorkosId,
+  );
+  void repositoryBootstrapPromise.catch(() => undefined);
+
   let sandbox;
   try {
     sandbox = await createOrConnectSandbox({
@@ -178,12 +185,14 @@ export async function runGoatClaudeCodeChatTurn(input: {
     });
   }
 
+  const repositoryBootstrap = await repositoryBootstrapPromise;
   const github = await loadGoatGitHubAuthForUser(turn.userWorkosId);
   const redact = createKnownSecretRedactor([
     auth.token,
     github?.githubToken ?? null,
     github?.githubAuthHeader ?? null,
     env.internalToken,
+    ...repositoryBootstrap.secretValues,
   ]);
   const normalizer = createClaudeCodeEventNormalizer();
   const projector = createGoatCodexChatProjector({
@@ -220,6 +229,9 @@ export async function runGoatClaudeCodeChatTurn(input: {
       `mkdir -p ${shellQuote(CLAUDE_CHAT_WORKDIR)} ${shellQuote(CLAUDE_CHAT_PROMPTS_ROOT)}`,
       { timeoutMs: 30_000 },
     );
+    checkExternalAbort();
+    executionStage = "stage_repository_configs";
+    await stageGoatRepositoryBootstrap({ sandbox, bootstrap: repositoryBootstrap });
     checkExternalAbort();
     executionStage = "ensure_claude";
     await ensureClaudeInstalled(sandbox);
@@ -264,6 +276,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
       ? buildClaudeChatRecoveryTask({
           prompt: turn.prompt,
           githubAvailable: Boolean(github),
+          repositoryBootstrapPrompt: repositoryBootstrap.promptFragment,
           previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
           attachmentPaths: materializedAttachments.paths,
           skillPaths: invokedSkillPaths,
@@ -271,6 +284,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
       : buildClaudeChatTask({
           prompt: turn.prompt,
           githubAvailable: Boolean(github),
+          repositoryBootstrapPrompt: repositoryBootstrap.promptFragment,
           attachmentPaths: materializedAttachments.paths,
           skillPaths: invokedSkillPaths,
         });
@@ -516,6 +530,7 @@ function isUnresumableSessionFailure(
 function buildClaudeChatTask(input: {
   prompt: string;
   githubAvailable: boolean;
+  repositoryBootstrapPrompt: string;
   attachmentPaths: string[];
   skillPaths: string[];
 }) {
@@ -525,6 +540,7 @@ function buildClaudeChatTask(input: {
     input.githubAvailable
       ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Clone repositories into the working directory only when the user asks you to work on one."
       : null,
+    input.repositoryBootstrapPrompt || null,
     "Answer conversationally. Run commands or edit files only when the message calls for it, and keep replies concise unless the user asks for detail.",
     ...claudeChatSkillPromptLines(input.skillPaths),
     "",
@@ -540,6 +556,7 @@ function buildClaudeChatTask(input: {
 function buildClaudeChatRecoveryTask(input: {
   prompt: string;
   githubAvailable: boolean;
+  repositoryBootstrapPrompt: string;
   previousProgress: string;
   attachmentPaths: string[];
   skillPaths: string[];
@@ -551,6 +568,7 @@ function buildClaudeChatRecoveryTask(input: {
     input.githubAvailable
       ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Before pushing, opening a PR, or mutating GitHub, inspect the current remote/PR state so recovery is idempotent."
       : null,
+    input.repositoryBootstrapPrompt || null,
     "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",
     ...claudeChatSkillPromptLines(input.skillPaths),
     "",

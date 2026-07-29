@@ -2,7 +2,7 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
 import type { GoatHarnessEngine, GoatTask, GoatTaskToolName } from "@opencompany/db/goat-schema";
-import { goatTasks, goatUsers } from "@opencompany/db/goat-schema";
+import { goatTasks } from "@opencompany/db/goat-schema";
 import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
 import { and, eq } from "drizzle-orm";
 import { generateGoatChatTitle } from "@/lib/chat-title";
@@ -194,17 +194,6 @@ export async function createGoatTaskFromWorkflow(input: {
     selection,
     description,
   });
-
-  // Workflow tasks run on the background-task pipeline, which is gated on the
-  // per-user task-spawning setting (task creation AND the runner claim query
-  // both require it). Explicitly firing a workflow is opting in, so flip the
-  // setting on instead of dead-ending behind a hidden toggle.
-  await getDb()
-    .update(goatUsers)
-    .set({ taskSpawningEnabled: true, updatedAt: new Date() })
-    .where(
-      and(eq(goatUsers.workosUserId, input.userWorkosId), eq(goatUsers.taskSpawningEnabled, false)),
-    );
 
   return createGoatTaskForUser({
     userWorkosId: input.userWorkosId,

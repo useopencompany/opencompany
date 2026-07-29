@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
-import { cancelGoatTaskAction, continueGoatTaskAction, createGoatTaskForUser } from "@/lib/tasks";
+import {
+  cancelGoatTaskAction,
+  continueGoatTaskAction,
+  createGoatTaskForUser,
+  getCurrentUserGoatTaskSummary,
+} from "@/lib/tasks";
 
 const mocks = vi.hoisted(() => {
   return {
@@ -119,7 +124,7 @@ describe("createGoatTaskForUser", () => {
     expect(sqlTextFromExecuteCall(0)).toContain("task_spawning_enabled = true");
   });
 
-  it("does not create or dispatch a task when background tasks are disabled", async () => {
+  it("does not create or dispatch a task when Tasks & Workflows is disabled", async () => {
     mocks.select.mockReturnValue({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
@@ -134,7 +139,7 @@ describe("createGoatTaskForUser", () => {
         prompt: "Research x",
         model: DEFAULT_GOAT_MODEL,
       }),
-    ).rejects.toThrow("Background tasks are disabled");
+    ).rejects.toThrow("Tasks & Workflows is disabled");
 
     expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
@@ -160,7 +165,7 @@ describe("createGoatTaskForUser", () => {
         prompt: "Research x",
         model: DEFAULT_GOAT_MODEL,
       }),
-    ).rejects.toThrow("Background tasks are disabled");
+    ).rejects.toThrow("Tasks & Workflows is disabled");
     expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
   });
 
@@ -182,6 +187,45 @@ describe("createGoatTaskForUser", () => {
   });
 });
 
+describe("getCurrentUserGoatTaskSummary", () => {
+  it("returns aggregate cost and active run duration without loading the full transcript", async () => {
+    vi.clearAllMocks();
+    mocks.select.mockReturnValue({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => [
+            {
+              id: "task_1",
+              displayId: "TASK-1",
+              userWorkosId: "user_1",
+              status: "succeeded",
+            },
+          ]),
+        })),
+      })),
+    });
+    mocks.execute.mockResolvedValue([
+      {
+        runStartedAt: "2026-01-01T00:00:10.000Z",
+        runCompletedAt: "2026-01-01T00:03:22.000Z",
+        usageRowCount: "3",
+        totalCostUsdMicros: "123400",
+      },
+    ]);
+
+    await expect(getCurrentUserGoatTaskSummary("TASK-1")).resolves.toEqual({
+      cost: {
+        hasRecordedCosts: true,
+        totalCostUsdMicros: 123_400,
+      },
+      durationMs: 192_000,
+    });
+    expect(mocks.execute).toHaveBeenCalledOnce();
+    expect(sqlTextFromExecuteCall(0)).toContain("SELECT MIN");
+    expect(sqlTextFromExecuteCall(0)).toContain("SELECT COUNT(*)");
+  });
+});
+
 describe("cancelGoatTaskAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -198,7 +242,6 @@ describe("cancelGoatTaskAction", () => {
         avatarUrl: null,
         timezone: "UTC",
         taskSpawningEnabled: true,
-        localCodexBetaEnabled: false,
         chatCapabilitiesBetaEnabled: false,
         preferredMcpClient: null,
         mcpSetupCompletedAt: null,

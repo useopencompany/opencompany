@@ -57,6 +57,11 @@ export type CodexChatMessageResult =
       userMessageId: string;
       assistantMessageId: string;
       mode: "started" | "queued";
+      analytics: {
+        isFirstMessage: boolean;
+        engine: GoatCodexChatEngine;
+        model: string;
+      };
     }
   | { ok: false; status: number; error: string };
 
@@ -336,7 +341,12 @@ async function loadCodexChatSessionForChat(input: { userWorkosId: string; chatSe
       ),
     )
     .limit(1);
-  return row?.codex_chat_sessions ?? null;
+  return row
+    ? {
+        ...row.codex_chat_sessions,
+        chatModel: row.chat_sessions.model,
+      }
+    : null;
 }
 
 async function createFirstCodexChatTurn(input: {
@@ -470,7 +480,18 @@ async function createFirstCodexChatTurn(input: {
     )
   `);
 
-  return { ok: true, sessionId: chatSessionId, userMessageId, assistantMessageId, mode: "started" };
+  return {
+    ok: true,
+    sessionId: chatSessionId,
+    userMessageId,
+    assistantMessageId,
+    mode: "started",
+    analytics: {
+      isFirstMessage: true,
+      engine: input.engine,
+      model: input.modelId,
+    },
+  };
 }
 
 async function enqueueExistingCodexChatMessage(input: {
@@ -480,7 +501,14 @@ async function enqueueExistingCodexChatMessage(input: {
   clientMessageId: string | null;
   attachments: GoatChatMessageAttachment[];
   settings: GoatCodexChatTurnSettings;
-  session: { id: string; chatSessionId: string; status: string; model: string };
+  session: {
+    id: string;
+    chatSessionId: string;
+    status: string;
+    engine: GoatCodexChatEngine;
+    model: string;
+    chatModel: string;
+  };
 }): Promise<CodexChatMessageResult> {
   const turnId = `goat_codex_chat_turn_${randomUUID()}`;
   const userMessageId = safeClientMessageId(input.clientMessageId) ?? newGoatChatMessageId();
@@ -587,6 +615,11 @@ async function enqueueExistingCodexChatMessage(input: {
     userMessageId,
     assistantMessageId,
     mode: active ? "queued" : "started",
+    analytics: {
+      isFirstMessage: false,
+      engine: input.session.engine,
+      model: input.session.chatModel,
+    },
   };
 }
 

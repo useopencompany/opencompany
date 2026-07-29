@@ -47,6 +47,7 @@
     "ai": "^6.0.189",
     "cron-parser": "^5.6.1",
     "drizzle-orm": "^0.45.2",
+    "dotenv": "^17.4.2",
     "fumadocs-core": "^16.9.0",
     "fumadocs-mdx": "^15.0.7",
     "jose": "^5.10.0",

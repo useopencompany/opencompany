@@ -5,6 +5,14 @@ import { createGoatCodexChatMessage } from "@/lib/codex-chat";
 import { GoatSkillMentionError, resolveGoatSkillMentions } from "@/lib/skills";
 import { POST } from "./route";
 
+const analyticsMocks = vi.hoisted(() => ({
+  captureGoatServerEvent: vi.fn(async () => undefined),
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+}));
+
 vi.mock("@/lib/auth", () => ({
   currentGoatUser: vi.fn(),
 }));
@@ -45,7 +53,6 @@ describe("POST /api/claude-chat/messages", () => {
         avatarUrl: null,
         timezone: "UTC",
         taskSpawningEnabled: false,
-        localCodexBetaEnabled: false,
         createdAt: new Date("2026-07-10T00:00:00.000Z"),
         updatedAt: new Date("2026-07-10T00:00:00.000Z"),
       },
@@ -58,6 +65,11 @@ describe("POST /api/claude-chat/messages", () => {
       userMessageId: "goat_chat_msg_user",
       assistantMessageId: "goat_chat_msg_assistant",
       mode: "started",
+      analytics: {
+        isFirstMessage: true,
+        engine: "claude_code",
+        model: "anthropic/claude-opus-4.8",
+      },
     });
     vi.mocked(resolveGoatSkillMentions).mockResolvedValue([]);
   });
@@ -88,6 +100,13 @@ describe("POST /api/claude-chat/messages", () => {
     );
 
     expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "goat_chat_1",
+      userMessageId: "goat_chat_msg_user",
+      assistantMessageId: "goat_chat_msg_assistant",
+      mode: "started",
+    });
     expect(resolveGoatSkillMentions).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       mentions: [{ id: "coding-work" }],
@@ -110,6 +129,24 @@ describe("POST /api/claude-chat/messages", () => {
           },
         ],
       }),
+    );
+    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+      "chat_message_sent",
+      "user_1",
+      {
+        workspace_id: "workspace_1",
+        session_id: "goat_chat_1",
+        is_first_message: true,
+        engine: "claude_code",
+        model: "anthropic/claude-opus-4.8",
+        message_length: 14,
+      },
+      {
+        workspaceId: "workspace_1",
+        email: "ada@example.com",
+        firstName: "Ada",
+        lastName: "Lovelace",
+      },
     );
   });
 
@@ -134,6 +171,7 @@ describe("POST /api/claude-chat/messages", () => {
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toBe("Skill is unavailable.");
     expect(createGoatCodexChatMessage).not.toHaveBeenCalled();
+    expect(analyticsMocks.captureGoatServerEvent).not.toHaveBeenCalled();
   });
 });
 

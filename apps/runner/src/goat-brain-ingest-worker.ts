@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost, calculatePlatformFeeUsdMicros } from "@opencompany/billing";
 import { releasePendingGoatIngestionReservations } from "@opencompany/db/goat-billing";
 import {
@@ -883,6 +884,19 @@ export async function runClaimedGoatBrainIngestJob(input: {
         "goat.failure_category": "lease_lost",
       });
       return;
+    }
+    if (input.job.kind !== "brain_pointer_hydrate" && input.job.workspaceId && input.job.brainRef) {
+      await captureGoatServerEvent(
+        "brain_ingestion_completed",
+        input.job.userWorkosId,
+        {
+          workspace_id: input.job.workspaceId,
+          brain_id: input.job.brainRef,
+          provider: input.job.sourceProvider,
+          source_type: input.job.sourceType,
+        },
+        { workspaceId: input.job.workspaceId },
+      );
     }
     finishTelemetry("success", {
       "goat.status": "succeeded",

@@ -25,7 +25,6 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
     claudeCodeConnected: false,
     chatResumeEnabled: true,
     featureFlags: {
-      localCodexBridge: false,
       taskSpawning: true,
     },
   }),

@@ -45,6 +45,11 @@ const sandboxMocks = vi.hoisted(() => ({
   isRetryableSandboxAcquisitionError: vi.fn(),
 }));
 
+const repoBootstrapMocks = vi.hoisted(() => ({
+  loadGoatRepositoryBootstrap: vi.fn(),
+  stageGoatRepositoryBootstrap: vi.fn(),
+}));
+
 vi.mock("./codex-app-server", () => ({
   runCodexAppServerTurn: appServerMocks.runCodexAppServerTurn,
 }));
@@ -96,6 +101,11 @@ vi.mock("./sandbox", () => ({
   ),
 }));
 
+vi.mock("./repo-bootstrap", () => ({
+  loadGoatRepositoryBootstrap: repoBootstrapMocks.loadGoatRepositoryBootstrap,
+  stageGoatRepositoryBootstrap: repoBootstrapMocks.stageGoatRepositoryBootstrap,
+}));
+
 describe("runGoatCodexChatTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -122,6 +132,12 @@ describe("runGoatCodexChatTurn", () => {
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
+    repoBootstrapMocks.loadGoatRepositoryBootstrap.mockResolvedValue({
+      configs: [],
+      promptFragment: "",
+      secretValues: [],
+    });
+    repoBootstrapMocks.stageGoatRepositoryBootstrap.mockResolvedValue(undefined);
     appServerMocks.runCodexAppServerTurn.mockImplementation(
       async (input: { onBeforeEngineTurnStart?: (turnIds: string[]) => Promise<void> }) => {
         await input.onBeforeEngineTurnStart?.(["turn_before"]);
@@ -195,6 +211,69 @@ describe("runGoatCodexChatTurn", () => {
         ],
       }),
     );
+  });
+
+  it("stages workspace repository config and includes only its prompt fragment", async () => {
+    let resolveBootstrap:
+      | ((bootstrap: { configs: []; promptFragment: string; secretValues: string[] }) => void)
+      | undefined;
+    repoBootstrapMocks.loadGoatRepositoryBootstrap.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveBootstrap = resolve;
+        }),
+    );
+    dbMocks.selectRows.push([]);
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockImplementationOnce(async () => {
+      expect(resolveBootstrap).toBeTypeOf("function");
+      resolveBootstrap?.({
+        configs: [],
+        promptFragment:
+          '<repository_bootstrap>\nWhen working on "opencompany/app": its environment file is staged at "/opt/oc/repos/123/.env".\n</repository_bootstrap>',
+        secretValues: ["never-project-this-secret"],
+      });
+      return sandbox;
+    });
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: { ...codexSession(), workspaceId: "goat_ws_1" },
+      env: env(),
+    });
+
+    expect(repoBootstrapMocks.loadGoatRepositoryBootstrap).toHaveBeenCalledWith(
+      "goat_ws_1",
+      "user_1",
+    );
+    expect(repoBootstrapMocks.stageGoatRepositoryBootstrap).toHaveBeenCalledWith({
+      sandbox,
+      bootstrap: expect.objectContaining({
+        secretValues: ["never-project-this-secret"],
+      }),
+    });
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.stringContaining("/opt/oc/repos/123/.env"),
+      }),
+    );
+  });
+
+  it("propagates repository bootstrap load failures so the worker can retry the turn", async () => {
+    const loadError = new Error("database unavailable");
+    repoBootstrapMocks.loadGoatRepositoryBootstrap.mockRejectedValueOnce(loadError);
+    dbMocks.selectRows.push([]);
+
+    await expect(
+      runGoatCodexChatTurn({
+        turn: codexTurn(),
+        session: { ...codexSession(), workspaceId: "goat_ws_1" },
+        env: env(),
+      }),
+    ).rejects.toBe(loadError);
+
+    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalled();
+    expect(appServerMocks.runCodexAppServerTurn).not.toHaveBeenCalled();
   });
 
   it("materializes every active session skill and only invokes skills activated by this message", async () => {

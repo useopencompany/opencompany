@@ -42,6 +42,7 @@ describe("PostHog server analytics", () => {
         workspace_id: "workspace_123",
         session_id: "session_123",
         is_first_message: true,
+        engine: "opencompany",
         model: "openai/gpt-5.5",
         message_length: 42,
       },
@@ -68,6 +69,7 @@ describe("PostHog server analytics", () => {
         workspace_id: "workspace_123",
         session_id: "session_123",
         is_first_message: true,
+        engine: "opencompany",
         model: "openai/gpt-5.5",
         message_length: 42,
         $set: {
@@ -90,6 +92,7 @@ describe("PostHog server analytics", () => {
           workspace_id: "workspace_123",
           session_id: "session_123",
           is_first_message: true,
+          engine: "opencompany",
           model: "openai/gpt-5.5",
           message_length: 42,
           $set: ["workspace_id", "email", "first_name", "last_name", "name"],

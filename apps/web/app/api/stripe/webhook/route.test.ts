@@ -1,3 +1,4 @@
+import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
   releasePendingForWorkspace,
@@ -18,6 +19,10 @@ vi.mock("@opencompany/analytics/server", () => ({
   captureServerEvent: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatServerEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@opencompany/db/goat-billing", () => ({
   releasePendingForWorkspace: vi.fn().mockResolvedValue(0),
   setGoatAutoRefillPaymentMethod: vi.fn().mockResolvedValue(undefined),
@@ -26,8 +31,13 @@ vi.mock("@opencompany/db/goat-billing", () => ({
 
 vi.mock("@opencompany/db/goat-credits", () => ({
   fulfillGoatTopUpCheckoutSession: vi.fn(),
+  goatUsdMicrosToCents: (micros: number) => Math.round(micros / 10_000),
   markGoatCheckoutRecordFailed: vi.fn(),
-  recordGoatAutoRefillCredit: vi.fn().mockResolvedValue({ ok: true }),
+  recordGoatAutoRefillCredit: vi.fn().mockResolvedValue({
+    ok: true,
+    ledgerId: 1,
+    balanceUsdMicros: 25_000_000,
+  }),
 }));
 
 vi.mock("@/lib/billing/service", () => ({
@@ -49,6 +59,7 @@ vi.mock("next/server", async (importOriginal) => {
   };
 });
 
+const captureGoatServerEventMock = vi.mocked(captureGoatServerEvent);
 const captureServerEventMock = vi.mocked(captureServerEvent);
 const fulfillCheckoutSessionMock = vi.mocked(fulfillCheckoutSession);
 const fulfillGoatTopUpCheckoutSessionMock = vi.mocked(fulfillGoatTopUpCheckoutSession);
@@ -211,6 +222,12 @@ describe("Stripe webhook route", () => {
         "goat_ws_1",
         expect.objectContaining({ checkout_record_id: "gcs_123", amount_cents: 1_000 }),
       );
+      expect(captureGoatServerEventMock).toHaveBeenCalledWith("billing_topup_completed", "user_1", {
+        workspace_id: "goat_ws_1",
+        topup_type: "manual",
+        amount_cents: 1_000,
+        balance_cents: 1_500,
+      });
     });
   });
 
@@ -298,7 +315,45 @@ describe("Stripe webhook route", () => {
       amountCents: 2_000,
       paymentIntentId: "pi_goat_1",
     });
+    expect(captureGoatServerEventMock).toHaveBeenCalledWith(
+      "billing_topup_completed",
+      "goat_ws_1",
+      {
+        workspace_id: "goat_ws_1",
+        topup_type: "auto_refill",
+        amount_cents: 2_000,
+        balance_cents: 2_500,
+      },
+    );
     expect(releasePendingForWorkspaceMock).toHaveBeenCalledWith("goat_ws_1");
+  });
+
+  it("does not capture a duplicate auto-refill credit", async () => {
+    recordGoatAutoRefillCreditMock.mockResolvedValueOnce({
+      ok: false,
+      reason: "duplicate",
+    });
+    getStripeMock.mockReturnValue(
+      stripeWithEvent({
+        id: "evt_pi_goat_replay",
+        type: "payment_intent.succeeded",
+        data: {
+          object: {
+            id: "pi_goat_1",
+            metadata: {
+              billingProduct: "goat_auto_refill",
+              goatWorkspaceId: "goat_ws_1",
+              amountCents: "2000",
+            },
+          },
+        },
+      }),
+    );
+
+    const response = await POST(request("sig_ok"));
+
+    expect(response.status).toBe(200);
+    expect(captureGoatServerEventMock).not.toHaveBeenCalled();
   });
 
   it("disables Goat auto-refill after a failed off-session charge", async () => {

@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createOpenCompanyChatToolContext,
   OPENCOMPANY_CHAT_MAX_STEPS,
   prepareOpenCompanyChatStep,
   UPDATE_TASK_STATUS_TOOL_NAME,
 } from "./chat-agent";
+import { START_TASK_TOOL_NAME, START_WORKFLOW_TOOL_NAME } from "./chat-ui";
 
 const model = "moonshotai/kimi-k2.6" as never;
 
@@ -37,6 +38,160 @@ describe("update_task_status tool gating", () => {
       comment: "Blocked on auth.",
     });
     expect(calls).toEqual([{ status: "needs_attention", comment: "Blocked on auth." }]);
+  });
+});
+
+describe("start_workflow tool", () => {
+  const workflowCatalog = [
+    {
+      id: "customer-interview-synthesis",
+      name: "Customer interview synthesis",
+      description: "Synthesize confirmed interview findings.",
+    },
+  ];
+
+  it("is available only when an active workflow dispatcher is injected", () => {
+    const absent = createOpenCompanyChatToolContext({ model });
+    const empty = createOpenCompanyChatToolContext({
+      model,
+      workflows: {
+        catalog: [],
+        execute: async () => {
+          throw new Error("should not run");
+        },
+      },
+    });
+    const available = createOpenCompanyChatToolContext({
+      model,
+      workflows: {
+        catalog: workflowCatalog,
+        execute: async () => ({
+          id: "task_1",
+          displayId: "TASK-1",
+          name: "Customer interview synthesis",
+          prompt: "Synthesize the Acme interview.",
+        }),
+      },
+    });
+
+    expect(START_WORKFLOW_TOOL_NAME in absent.tools).toBe(false);
+    expect(START_WORKFLOW_TOOL_NAME in empty.tools).toBe(false);
+    expect(START_WORKFLOW_TOOL_NAME in available.tools).toBe(true);
+  });
+
+  it("starts an exact active workflow and returns the standard task-card output", async () => {
+    const calls: unknown[] = [];
+    const context = createOpenCompanyChatToolContext({
+      model,
+      workflows: {
+        catalog: workflowCatalog,
+        execute: async (input) => {
+          calls.push(input);
+          return {
+            id: "task_1",
+            displayId: "TASK-1",
+            name: "Customer interview synthesis",
+            prompt: input.prompt,
+          };
+        },
+      },
+    });
+    const workflowTool = context.tools[START_WORKFLOW_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await expect(
+      workflowTool.execute({
+        workflowId: "customer-interview-synthesis",
+        prompt: "  Synthesize the Acme interview using the confirmed pricing concern.  ",
+      }),
+    ).resolves.toEqual({
+      taskId: "task_1",
+      taskDisplayId: "TASK-1",
+      taskName: "Customer interview synthesis",
+      status: "queued",
+      prompt: "Synthesize the Acme interview using the confirmed pricing concern.",
+    });
+    expect(calls).toEqual([
+      {
+        workflowId: "customer-interview-synthesis",
+        prompt: "Synthesize the Acme interview using the confirmed pricing concern.",
+      },
+    ]);
+    expect(context.getStartedTask()?.id).toBe("task_1");
+  });
+
+  it("rejects workflow ids outside the injected workspace catalog", async () => {
+    const execute = vi.fn();
+    const context = createOpenCompanyChatToolContext({
+      model,
+      workflows: {
+        catalog: workflowCatalog,
+        execute,
+      },
+    });
+    const workflowTool = context.tools[START_WORKFLOW_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await expect(
+      workflowTool.execute({
+        workflowId: "other-workspace-workflow",
+        prompt: "Run it.",
+      }),
+    ).rejects.toThrow("not an active workflow in this workspace");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("shares the one-task-per-turn guard with start_task", async () => {
+    let releaseTask!: (task: {
+      id: string;
+      displayId: string;
+      name: string;
+      prompt: string;
+    }) => void;
+    const taskInFlight = new Promise<{
+      id: string;
+      displayId: string;
+      name: string;
+      prompt: string;
+    }>((resolve) => {
+      releaseTask = resolve;
+    });
+    const workflowExecute = vi.fn();
+    const context = createOpenCompanyChatToolContext({
+      model,
+      startTask: async () => taskInFlight,
+      workflows: {
+        catalog: workflowCatalog,
+        execute: workflowExecute,
+      },
+    });
+    const startTask = context.tools[START_TASK_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+    const startWorkflow = context.tools[START_WORKFLOW_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    const taskResult = startTask.execute({ name: "Research market", prompt: "Research market." });
+    const workflowResult = startWorkflow.execute({
+      workflowId: "customer-interview-synthesis",
+      prompt: "Synthesize the interview.",
+    });
+    releaseTask({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: "Research market",
+      prompt: "Research market.",
+    });
+
+    await expect(taskResult).resolves.toMatchObject({ taskId: "task_1", status: "queued" });
+    await expect(workflowResult).resolves.toMatchObject({
+      taskId: "task_1",
+      status: "already_started",
+    });
+    expect(workflowExecute).not.toHaveBeenCalled();
   });
 });
 

@@ -146,7 +146,7 @@ function initialData(): GoatAppInitialData {
     schedules: [],
     recentChats: [],
     integrations: {} as GoatAppInitialData["integrations"],
-    featureFlags: { taskSpawning: false, localCodexBridge: false },
+    featureFlags: { taskSpawning: false },
     codexConnected: false,
     claudeCodeConnected: false,
     chatResumeEnabled: false,

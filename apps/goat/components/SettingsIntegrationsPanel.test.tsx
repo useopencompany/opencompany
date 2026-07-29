@@ -148,6 +148,24 @@ describe("SettingsIntegrationsPanel", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("links a connected GitHub workspace to repository configuration", () => {
+    const integrations = goatIntegrationStateFromRows([]) as GoatIntegrationState;
+    integrations.github = {
+      provider: "github",
+      connected: true,
+      status: "connected",
+      accountName: "OpenCompany",
+      statusReason: null,
+    };
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    expect(screen.getByRole("link", { name: "Configure repositories" })).toHaveAttribute(
+      "href",
+      "/settings/repositories",
+    );
+  });
+
   it("renders the Linear MCP connection instead of the separate brain-source accounts", () => {
     const integrations = goatIntegrationStateFromRows([
       {

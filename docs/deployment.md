@@ -124,6 +124,8 @@ Set these in Infisical `prod` + `/web` and sync them into Vercel:
 - `RUNNER_INTERNAL_TOKEN`
 - `DURABLE_STREAMS_URL`
 - `DURABLE_STREAMS_TOKEN`
+- `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN`
+- `NEXT_PUBLIC_GOAT_POSTHOG_HOST`
 - optional analytics, feedback, and observability env vars
 
 Forward production web logs to the Better Stack source `opencompany-web-production` using the
@@ -205,6 +207,8 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
+- `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN`
+- `NEXT_PUBLIC_GOAT_POSTHOG_HOST`
 - `EXA_API_KEY` (required when Goat tasks are enabled)
 - `RUNNER_GOAT_BROWSER_ENABLED` (optional; set `true` to allow Goat rendered-browser tasks)
 - `BROWSERLESS_API_KEY` (required when Goat Browser is enabled with the production Browserless default)

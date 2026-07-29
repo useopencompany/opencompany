@@ -12,6 +12,7 @@ import {
   type GoatChatShareStore,
   isGoatChatShareId,
   loadPublicGoatChat,
+  loadPublicGoatChatMetadata,
   newGoatChatShareId,
   revokeGoatChatShareForUser,
 } from "@/lib/chat-sharing";
@@ -136,9 +137,22 @@ describe("Goat chat sharing", () => {
     const store = createStore();
 
     await expect(loadPublicGoatChat("../chat_1", store)).resolves.toBeNull();
+    await expect(loadPublicGoatChatMetadata("../chat_1", store)).resolves.toBeNull();
 
     expect(store.findShare).not.toHaveBeenCalled();
     expect(isGoatChatShareId(newGoatChatShareId())).toBe(true);
+  });
+
+  it("loads public share metadata without loading transcript messages", async () => {
+    const store = createStore();
+
+    await expect(loadPublicGoatChatMetadata(`  ${SHARE_ID}  `, store)).resolves.toEqual({
+      shareId: SHARE_ID,
+      title: "Architecture review",
+    });
+
+    expect(store.findShare).toHaveBeenCalledWith(SHARE_ID);
+    expect(store.listMessages).not.toHaveBeenCalled();
   });
 
   it("loads a shared transcript without leaking its private session id or blob URL", async () => {

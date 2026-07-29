@@ -32,6 +32,10 @@
       "types": "./src/goat-integrations.ts",
       "default": "./src/goat-integrations.ts"
     },
+    "./goat-repo-configs": {
+      "types": "./src/goat-repo-configs.ts",
+      "default": "./src/goat-repo-configs.ts"
+    },
     "./goat-brain-files": {
       "types": "./src/goat-brain-files.ts",
       "default": "./src/goat-brain-files.ts"
@@ -161,6 +165,7 @@
     "@opencompany/goat-brain": "workspace:*",
     "@neondatabase/serverless": "^1.1.0",
     "@vercel/blob": "^2.4.0",
+    "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.13.1"
   },
