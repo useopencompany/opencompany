@@ -101,6 +101,13 @@ describe("POST /api/claude-chat/messages", () => {
     );
 
     expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "goat_chat_1",
+      userMessageId: "goat_chat_msg_user",
+      assistantMessageId: "goat_chat_msg_assistant",
+      mode: "started",
+    });
     expect(resolveGoatSkillMentions).toHaveBeenCalledWith({
       workspaceId: "workspace_1",
       mentions: [{ id: "coding-work" }],

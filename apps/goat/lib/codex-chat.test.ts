@@ -218,7 +218,15 @@ describe("createGoatCodexChatMessage", () => {
       ],
     });
 
-    expect(result).toMatchObject({ ok: true, mode: "started" });
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "started",
+      analytics: {
+        isFirstMessage: true,
+        engine: "codex",
+        model: "openai/gpt-5.6-sol",
+      },
+    });
     const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
     expect(JSON.stringify(statement.queryChunks)).toContain("screenshot.png");
   });
@@ -230,7 +238,15 @@ describe("createGoatCodexChatMessage", () => {
       model: "openai/gpt-5.6-terra",
     });
 
-    expect(result).toMatchObject({ ok: true, mode: "started" });
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "started",
+      analytics: {
+        isFirstMessage: true,
+        engine: "codex",
+        model: "openai/gpt-5.6-terra",
+      },
+    });
     const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
     expect(statement.queryChunks).toContain("openai/gpt-5.6-terra");
     expect(statement.queryChunks).toContain("gpt-5.6-terra");
@@ -245,7 +261,15 @@ describe("createGoatCodexChatMessage", () => {
       settings: { reasoningEffort: "xhigh" },
     });
 
-    expect(result).toMatchObject({ ok: true, mode: "started" });
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "started",
+      analytics: {
+        isFirstMessage: true,
+        engine: "claude_code",
+        model: "anthropic/claude-opus-4.8",
+      },
+    });
     const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
     expect(statement.queryChunks).toContain("anthropic/claude-opus-4.8");
     expect(statement.queryChunks).toContain("claude-opus-4-8");

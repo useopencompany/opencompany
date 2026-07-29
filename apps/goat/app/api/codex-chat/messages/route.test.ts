@@ -110,6 +110,13 @@ describe("POST /api/codex-chat/messages", () => {
     );
 
     expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      sessionId: "goat_chat_1",
+      userMessageId: "goat_chat_msg_user",
+      assistantMessageId: "goat_chat_msg_assistant",
+      mode: "started",
+    });
     expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith({
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
