@@ -25,7 +25,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
-import { AnthropicIcon, MoonshotIcon, OpenAIIcon } from "@opencompany/ui/icons";
+import { AnthropicIcon, DeepSeekIcon, MoonshotIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
@@ -4339,6 +4339,9 @@ function GoatModelProviderIcon({
   if (provider === "anthropic") {
     return <AnthropicIcon size={size} strokeWidth={strokeWidth} className={className} />;
   }
+  if (provider === "deepseek") {
+    return <DeepSeekIcon size={size} strokeWidth={strokeWidth} className={className} />;
+  }
   if (provider === "moonshotai") {
     return <MoonshotIcon size={size} strokeWidth={strokeWidth} className={className} />;
   }
@@ -4351,6 +4354,7 @@ function GoatModelProviderIcon({
 function modelProviderLabel(id: string) {
   const provider = id.split("/")[0] ?? "";
   if (provider === "anthropic") return "Anthropic";
+  if (provider === "deepseek") return "DeepSeek";
   if (provider === "moonshotai") return "Moonshot";
   if (provider === "openai") return "OpenAI";
   return provider;

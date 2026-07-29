@@ -56,6 +56,7 @@ describe("calculateModelUsageCost", () => {
     ["anthropic/claude-fable-5", 73_500],
     ["google/gemini-3-flash", 4_050],
     ["google/gemini-3.1-flash-lite-preview", 2_030],
+    ["deepseek/deepseek-v4-pro", 1_744],
     ["deepseek/deepseek-v4-flash", 563],
     ["mistral/mistral-medium-3.5", 10_500],
     ["minimax/minimax-m3", 3_720],
@@ -229,7 +230,7 @@ describe("fees and hosted tools", () => {
       providerCostUsdMicros: 11_565,
       costBasis: {
         costSource: "platform_model_pricing",
-        pricingVersion: "2026-05-22.standard",
+        pricingVersion: "2026-07-29.standard",
       },
     });
   });
@@ -250,7 +251,7 @@ describe("fees and hosted tools", () => {
       totalCostUsdMicros: 1_200_000,
       costBasis: {
         costSource: "broker_metered",
-        pricingVersion: "2026-05-22.standard",
+        pricingVersion: "2026-07-29.standard",
       },
     });
   });

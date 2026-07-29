@@ -46,6 +46,7 @@ describe("agent editor mention tools", () => {
       "anthropic/claude-fable-5",
       "google/gemini-3-flash",
       "google/gemini-3.1-flash-lite-preview",
+      "deepseek/deepseek-v4-pro",
       "deepseek/deepseek-v4-flash",
       "mistral/mistral-medium-3.5",
       "minimax/minimax-m3",
