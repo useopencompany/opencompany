@@ -11,6 +11,8 @@ import type { RunnerEnv } from "./env";
 import { wakeGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { wakeGoatCodexChatWorker } from "./goat-codex-chat-worker";
+import { GoatCodexRuntimeAccessError, mintGoatCodexRuntimeAccess } from "./goat-codex-runtime";
+import { createGoatCodexRuntimeTransport } from "./goat-codex-runtime-transport";
 import { wakeGoatGoogleDriveSyncWorker } from "./goat-google-drive-sync-worker";
 import { executeGoatGoogleTool, isGoatGoogleToolName } from "./goat-google-tools";
 import { planGoatHarnessForTask } from "./goat-harness";
@@ -33,7 +35,12 @@ export function createServer(
     llmBroker?: Pick<LlmBrokerOptions, "store" | "fetchImpl">;
   } = {},
 ) {
-  const app = Fastify({ logger: false });
+  const runtimeTransport = createGoatCodexRuntimeTransport(env);
+  const app = Fastify({
+    logger: false,
+    serverFactory: runtimeTransport.serverFactory,
+  });
+  app.addHook("preClose", () => runtimeTransport.close());
 
   // LLM broker (llm-broker.ts): authenticated reverse proxy for sandboxed CLIs. Lives
   // in its own encapsulated plugin scope so its raw-buffer content-type parser cannot
@@ -134,6 +141,34 @@ export function createServer(
     const status = await getSandboxLifecycleStatus(sandboxId);
     reply.send({ ok: true, status });
   });
+
+  app.post(
+    "/internal/goat/codex-chat/sessions/:codexChatSessionId/runtime-access",
+    async (request, reply) => {
+      requireInternalAuth(request.headers.authorization, env.internalToken);
+      const { codexChatSessionId } = request.params as { codexChatSessionId: string };
+      const { userWorkosId } = request.body as { userWorkosId?: string };
+      if (!codexChatSessionId.trim() || !userWorkosId?.trim()) {
+        reply.status(400).send({ error: "codexChatSessionId and userWorkosId are required." });
+        return;
+      }
+
+      try {
+        const access = await mintGoatCodexRuntimeAccess({
+          codexChatSessionId,
+          userWorkosId,
+          env,
+        });
+        reply.send({ ok: true, ...access });
+      } catch (error) {
+        if (error instanceof GoatCodexRuntimeAccessError) {
+          reply.status(error.statusCode).send({ error: error.message });
+          return;
+        }
+        throw error;
+      }
+    },
+  );
 
   app.delete("/internal/goat/codex-chat/sandboxes/:sandboxId", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
@@ -508,7 +543,9 @@ export function createServer(
 
 function requireInternalAuth(header: string | undefined, token: string) {
   if (header !== `Bearer ${token}`) {
-    throw new Error("Unauthorized runner request.");
+    const error = new Error("Unauthorized runner request.") as Error & { statusCode: number };
+    error.statusCode = 401;
+    throw error;
   }
 }
 

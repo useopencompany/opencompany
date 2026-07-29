@@ -22,6 +22,8 @@ import {
 import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
 import { toGoatTaskTitle } from "@/lib/task-display";
 import {
+  createGoatCodexRuntimeAccess,
+  GoatCodexRuntimeRequestError,
   type GoatCodexSandboxStatus,
   getGoatCodexSandboxStatus,
   killGoatCodexSandbox,
@@ -209,6 +211,38 @@ export async function getGoatCodexChatSandboxStatus(input: {
       ok: false,
       statusCode: 502,
       error: error instanceof Error ? error.message : "Unable to load Codex sandbox status.",
+    };
+  }
+}
+
+export async function createGoatCodexChatRuntimeAccess(input: {
+  userWorkosId: string;
+  chatSessionId: string;
+}) {
+  const session = await loadCodexChatSessionForChat(input);
+  if (!session)
+    return { ok: false as const, statusCode: 404, error: "Codex chat session not found." };
+  if (!session.sandboxId) {
+    return {
+      ok: false as const,
+      statusCode: 409,
+      error: "The Codex workspace is not ready yet. Send a message first.",
+    };
+  }
+
+  try {
+    return {
+      ok: true as const,
+      access: await createGoatCodexRuntimeAccess({
+        codexChatSessionId: session.id,
+        userWorkosId: input.userWorkosId,
+      }),
+    };
+  } catch (error) {
+    return {
+      ok: false as const,
+      statusCode: error instanceof GoatCodexRuntimeRequestError ? error.statusCode : 502,
+      error: error instanceof Error ? error.message : "Unable to connect to the Codex workspace.",
     };
   }
 }

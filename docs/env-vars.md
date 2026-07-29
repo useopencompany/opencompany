@@ -323,6 +323,8 @@ Set these in the Render `opencompany-runner` service.
 | `RUNNER_INTERNAL_TOKEN` | Yes | Must match Vercel. |
 | `RUNNER_STREAM_TOKEN_SECRET` | Yes | Runner signing secret used for hosted-tool polling job ids. |
 | `RUNNER_ALLOWED_ORIGINS` | Yes | Comma-separated browser origins allowed for runner requests. |
+| `RUNNER_PREVIEW_BASE_DOMAIN` | Goat Codex workspace only | Wildcard preview base hostname routed to the runner, without a scheme (for example `preview.goat.example.com`). Configure both the base and `*.preview.goat.example.com` on Render. Local development can use `preview.localhost:3040`. |
+| `RUNNER_PREVIEW_PROTOCOL` | No | Preview URL scheme, `http` or `https`. Hosted previews default to `https`; `bun run dev:goat` injects the correct local value. |
 | `DURABLE_STREAMS_URL` | Yes | Durable Streams base URL for model/tool transcript appends. Must match Vercel. |
 | `DURABLE_STREAMS_TOKEN` | Yes | Bearer token for the Durable Streams service. Must match Vercel. |
 | `BLOB_READ_WRITE_TOKEN` | Yes | Private `opencompany-attachments` Blob store token. Downloads attachment bytes (images/PDFs) to inline into model calls. Must match Vercel. |

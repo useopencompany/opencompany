@@ -5,7 +5,7 @@ import { createServer, request as httpRequest } from "node:http";
 import { connect } from "node:net";
 
 const LOCAL_HOST = "127.0.0.1";
-const RUNNER_PATH_PREFIXES = ["/broker/", "/goat/tools/"];
+const RUNNER_PATH_PREFIXES = ["/broker/", "/goat/runtime", "/goat/tools/"];
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "keep-alive",
@@ -22,12 +22,12 @@ export async function startGoatDevProxy({ appPort, runnerPort }) {
   const runnerTarget = { label: "runner", port: String(runnerPort) };
 
   const server = createServer((request, response) => {
-    const target = targetForPath(request.url, { appTarget, runnerTarget });
+    const target = targetForRequest(request, { appTarget, runnerTarget });
     proxyHttpRequest({ request, response, target });
   });
 
   server.on("upgrade", (request, socket, head) => {
-    const target = targetForPath(request.url, { appTarget, runnerTarget });
+    const target = targetForRequest(request, { appTarget, runnerTarget });
     proxyUpgradeRequest({ request, socket, head, target });
   });
 
@@ -57,9 +57,11 @@ export async function startGoatDevProxy({ appPort, runnerPort }) {
   };
 }
 
-function targetForPath(rawUrl, { appTarget, runnerTarget }) {
-  const pathname = safePathname(rawUrl);
-  return RUNNER_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+function targetForRequest(request, { appTarget, runnerTarget }) {
+  const pathname = safePathname(request.url);
+  const hostname = safeHostname(request.headers.host);
+  return hostname.endsWith(".preview.localhost") ||
+    RUNNER_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
     ? runnerTarget
     : appTarget;
 }
@@ -167,5 +169,13 @@ function safePathname(rawUrl) {
     return new URL(rawUrl ?? "/", "http://localhost").pathname;
   } catch {
     return "/";
+  }
+}
+
+function safeHostname(authority) {
+  try {
+    return new URL(`http://${authority ?? ""}`).hostname.toLowerCase();
+  } catch {
+    return "";
   }
 }

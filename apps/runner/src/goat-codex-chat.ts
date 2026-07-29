@@ -40,8 +40,8 @@ import {
 import { materializeCodexSkillSnapshotsForSession } from "./skills";
 import { rowsFromExecute } from "./sql-exec";
 
-const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
-const CODEX_CHAT_WORKDIR = "/home/user/opencompany-goat/codex-chat";
+export const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
+export const CODEX_CHAT_WORKDIR = "/home/user/opencompany-goat/codex-chat";
 const CODEX_CHAT_ATTACHMENTS_ROOT = "/home/user/.opencompany-goat/codex-chat-attachments";
 const INTERRUPT_POLL_INTERVAL_MS = 2_000;
 const INTERACTION_POLL_INTERVAL_MS = 500;
@@ -107,6 +107,10 @@ export async function runGoatCodexChatTurn(input: {
       envs: {},
       metadata: {
         user_id: turn.userWorkosId,
+      },
+      network: {
+        allowPublicTraffic: false,
+        maskRequestHost: "localhost:${PORT}",
       },
       idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
     });

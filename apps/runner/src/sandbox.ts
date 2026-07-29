@@ -5,7 +5,7 @@ import {
   resolveWorkspacePath,
   shellQuote,
 } from "@opencompany/agent-runtime";
-import { Sandbox } from "e2b";
+import { Sandbox, type SandboxNetworkOpts } from "e2b";
 import { gitHubPermissionErrorHint } from "./github";
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
@@ -103,6 +103,7 @@ export async function createOrConnectSandbox(input: {
   template?: string | undefined;
   envs: Record<string, string>;
   metadata?: Record<string, string> | undefined;
+  network?: SandboxNetworkOpts | undefined;
   idleTimeoutMs: number;
   onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
@@ -162,12 +163,14 @@ async function createSandbox(input: {
   template?: string | undefined;
   envs: Record<string, string>;
   metadata?: Record<string, string> | undefined;
+  network?: SandboxNetworkOpts | undefined;
   idleTimeoutMs: number;
   onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
   const options = {
     envs: input.envs,
     ...(input.metadata ? { metadata: input.metadata } : {}),
+    ...(input.network ? { network: input.network } : {}),
     timeoutMs: input.idleTimeoutMs,
     lifecycle: {
       onTimeout: "pause" as const,
@@ -250,6 +253,12 @@ export async function armSandboxIdleTimeout(sandbox: SandboxHandle, idleTimeoutM
     }
     throw error;
   }
+}
+
+export async function keepSandboxActive(sandbox: SandboxHandle) {
+  await sandbox.setTimeout(ACTIVE_SANDBOX_TIMEOUT_MS, {
+    requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+  });
 }
 
 export async function killSandbox(sandboxId: string) {

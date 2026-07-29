@@ -40,6 +40,10 @@ services:
         sync: false
       - key: RUNNER_ALLOWED_ORIGINS
         sync: false
+      # Base hostname for signed Codex workspace previews. Configure both this hostname and its
+      # wildcard (*.hostname) as Render custom domains, then point wildcard DNS at Render.
+      - key: RUNNER_PREVIEW_BASE_DOMAIN
+        sync: false
       - key: E2B_API_KEY
         sync: false
       - key: VERCEL_AI_GATEWAY_API_KEY

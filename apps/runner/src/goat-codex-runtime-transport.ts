@@ -1,0 +1,709 @@
+import http, {
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
+import https from "node:https";
+import type { Duplex } from "node:stream";
+import { createLogger } from "@opencompany/observability";
+import WebSocket, { WebSocketServer } from "ws";
+import type { RunnerEnv } from "./env";
+import { CODEX_CHAT_WORKDIR } from "./goat-codex-chat";
+import {
+  discoverGoatCodexPreviewPorts,
+  type GoatCodexRuntimeSession,
+  isAllowedPreviewPort,
+  loadGoatCodexRuntimeSession,
+} from "./goat-codex-runtime";
+import {
+  createGoatCodexPreviewCapability,
+  verifyGoatCodexPreviewCapability,
+  verifyGoatCodexRuntimeTicket,
+} from "./goat-codex-runtime-auth";
+import {
+  armSandboxIdleTimeout,
+  connectSandbox,
+  keepSandboxActive,
+  type SandboxHandle,
+} from "./sandbox";
+
+const logger = createLogger({
+  service: "opencompany-runner",
+  runtime: "goat-codex-runtime",
+});
+const RUNTIME_PATH = "/goat/runtime";
+const RUNTIME_PROTOCOL = "goat-codex-runtime-v1";
+const TICKET_PROTOCOL_PREFIX = "goat-ticket.";
+const TMUX_SESSION = "goat-codex";
+const HEARTBEAT_INTERVAL_MS = 60_000;
+const ACTIVE_VIEW_TIMEOUT_MS = 2 * 60_000;
+const PREVIEW_SESSION_CACHE_MS = 5_000;
+const runtimeToolInstalls = new Map<string, Promise<void>>();
+
+type PreviewTarget = {
+  session: GoatCodexRuntimeSession;
+  sandbox: SandboxHandle;
+  upstreamHost: string;
+  port: number;
+};
+
+type RunnerServerFactory = (
+  handler: (request: IncomingMessage, response: ServerResponse) => void,
+  options: Record<string, unknown>,
+) => http.Server;
+
+export function createGoatCodexRuntimeTransport(env: RunnerEnv) {
+  const runtimeWebSockets = new WebSocketServer({
+    noServer: true,
+    maxPayload: 64 * 1_024,
+    handleProtocols(protocols) {
+      return protocols.has(RUNTIME_PROTOCOL) ? RUNTIME_PROTOCOL : false;
+    },
+  });
+  const previewWebSockets = new WebSocketServer({ noServer: true });
+  const previewCache = new Map<string, { expiresAt: number; target: Promise<PreviewTarget> }>();
+  let closePromise: Promise<void> | null = null;
+
+  const close = () => {
+    closePromise ??= (async () => {
+      for (const webSocket of runtimeWebSockets.clients) webSocket.terminate();
+      for (const webSocket of previewWebSockets.clients) webSocket.terminate();
+      await Promise.all([
+        closeWebSocketServer(runtimeWebSockets),
+        closeWebSocketServer(previewWebSockets),
+      ]);
+    })();
+    return closePromise;
+  };
+
+  const serverFactory: RunnerServerFactory = (handler) => {
+    const server = http.createServer((request, response) => {
+      if (isPreviewRequest(request, env.previewBaseDomain)) {
+        void proxyPreviewHttp(request, response, env, previewCache);
+        return;
+      }
+      handler(request, response);
+    });
+
+    server.on("upgrade", (request, socket, head) => {
+      if (isPreviewRequest(request, env.previewBaseDomain)) {
+        void proxyPreviewWebSocket(request, socket, head, env, previewWebSockets, previewCache);
+        return;
+      }
+
+      if (request.url?.split("?", 1)[0] !== RUNTIME_PATH) {
+        rejectUpgrade(socket, 404, "Not Found");
+        return;
+      }
+      void acceptRuntimeWebSocket(request, socket, head, env, runtimeWebSockets);
+    });
+
+    server.on("close", () => {
+      void close();
+    });
+    return server;
+  };
+
+  return { serverFactory, close };
+}
+
+async function acceptRuntimeWebSocket(
+  request: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  env: RunnerEnv,
+  webSocketServer: WebSocketServer,
+) {
+  const origin = request.headers.origin;
+  if (!isGoatCodexRuntimeOriginAllowed(origin, env.allowedOrigins)) {
+    rejectUpgrade(socket, 403, "Forbidden");
+    return;
+  }
+
+  const protocols = readProtocols(request.headers["sec-websocket-protocol"]);
+  const encodedTicket = protocols
+    .find((protocol) => protocol.startsWith(TICKET_PROTOCOL_PREFIX))
+    ?.slice(TICKET_PROTOCOL_PREFIX.length);
+  const ticket = encodedTicket
+    ? verifyGoatCodexRuntimeTicket({ ticket: encodedTicket, secret: env.streamTokenSecret })
+    : null;
+  if (!ticket || !protocols.includes(RUNTIME_PROTOCOL)) {
+    rejectUpgrade(socket, 401, "Unauthorized");
+    return;
+  }
+
+  const session = await loadGoatCodexRuntimeSession({
+    codexChatSessionId: ticket.codexChatSessionId,
+    userWorkosId: ticket.userWorkosId,
+  }).catch(() => null);
+  if (!session) {
+    rejectUpgrade(socket, 404, "Workspace unavailable");
+    return;
+  }
+
+  const sandbox = await connectSandbox({ sandboxId: session.sandboxId }).catch(() => null);
+  if (!sandbox) {
+    rejectUpgrade(socket, 410, "Workspace deleted");
+    return;
+  }
+  try {
+    await ensureRuntimeTools(sandbox);
+  } catch {
+    rejectUpgrade(socket, 503, "Workspace tools unavailable");
+    return;
+  }
+
+  webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
+    webSocketServer.emit("connection", webSocket, request);
+    attachRuntimeConnection(webSocket, sandbox, session, env);
+  });
+}
+
+export function attachRuntimeConnection(
+  webSocket: WebSocket,
+  sandbox: SandboxHandle,
+  session: GoatCodexRuntimeSession,
+  env: RunnerEnv,
+  restoreTimeout: typeof restoreSandboxTimeout = restoreSandboxTimeout,
+) {
+  let terminalPid: number | null = null;
+  let terminalHandle: Awaited<ReturnType<SandboxHandle["pty"]["create"]>> | null = null;
+  let disposed = false;
+  let operation = Promise.resolve();
+
+  const sendControl = (message: Record<string, unknown>) => {
+    if (webSocket.readyState === WebSocket.OPEN) webSocket.send(JSON.stringify(message));
+  };
+  const sendTerminal = (data: Uint8Array | string) => {
+    if (webSocket.readyState !== WebSocket.OPEN) return;
+    webSocket.send(typeof data === "string" ? Buffer.from(data) : data, { binary: true });
+  };
+
+  sendControl({ type: "status", status: "ready" });
+  let heartbeatReceived = true;
+  webSocket.on("pong", () => {
+    heartbeatReceived = true;
+  });
+  const heartbeat = setInterval(() => {
+    if (!heartbeatReceived) {
+      webSocket.terminate();
+      return;
+    }
+    heartbeatReceived = false;
+    webSocket.ping();
+    void sandbox.setTimeout(ACTIVE_VIEW_TIMEOUT_MS).catch(() => {
+      sendControl({ type: "status", status: "disconnected" });
+    });
+  }, HEARTBEAT_INTERVAL_MS);
+
+  const attachTerminal = async (cols: number, rows: number) => {
+    const scrollback = await sandbox.commands
+      .run(`tmux capture-pane -p -S -1000 -t ${TMUX_SESSION} 2>/dev/null || true`, {
+        user: "user",
+        timeoutMs: 10_000,
+      })
+      .then((result) => result.stdout)
+      .catch(() => "");
+    if (scrollback) sendTerminal(`${scrollback.replace(/\n?$/, "\n")}\r\n`);
+
+    if (terminalPid !== null) {
+      await sandbox.pty.resize(terminalPid, { cols, rows });
+      sendControl({ type: "terminal.attached" });
+      return;
+    }
+
+    terminalHandle = await sandbox.pty.create({
+      cols,
+      rows,
+      cwd: CODEX_CHAT_WORKDIR,
+      user: "user",
+      timeoutMs: 24 * 60 * 60_000,
+      onData: sendTerminal,
+    });
+    terminalPid = terminalHandle.pid;
+    await sandbox.pty.sendInput(
+      terminalPid,
+      Buffer.from(`exec tmux new-session -A -s ${TMUX_SESSION}\r`),
+    );
+    sendControl({ type: "terminal.attached" });
+  };
+
+  const refreshPorts = async () => {
+    const ports = await discoverGoatCodexPreviewPorts(sandbox);
+    sendControl({ type: "ports", ports });
+  };
+
+  const openPreview = async (port: number) => {
+    if (!env.previewBaseDomain) {
+      throw new Error("Preview is not configured on this runner.");
+    }
+    if (!isAllowedPreviewPort(port)) throw new Error("That preview port is reserved or invalid.");
+    const ports = await discoverGoatCodexPreviewPorts(sandbox);
+    if (!ports.some((candidate) => candidate.port === port)) {
+      throw new Error(`Nothing is listening on port ${port}.`);
+    }
+    const signed = createGoatCodexPreviewCapability({
+      codexChatSessionId: session.id,
+      port,
+      secret: env.streamTokenSecret,
+    });
+    sendControl({
+      type: "preview",
+      port,
+      url: previewUrl(signed.capability, env.previewBaseDomain, env.previewProtocol),
+      expiresAt: signed.expiresAt,
+    });
+  };
+
+  webSocket.on("message", (raw, isBinary) => {
+    if (isBinary) {
+      if (terminalPid !== null) {
+        void sandbox.pty.sendInput(terminalPid, new Uint8Array(raw as Buffer)).catch(() => {
+          sendControl({ type: "error", scope: "terminal", message: "Terminal input failed." });
+        });
+      }
+      return;
+    }
+
+    let message: RuntimeControlMessage;
+    try {
+      message = JSON.parse(raw.toString()) as RuntimeControlMessage;
+    } catch {
+      sendControl({ type: "error", message: "Invalid runtime control message." });
+      return;
+    }
+
+    operation = operation
+      .then(async () => {
+        if (disposed) return;
+        if (message.type === "terminal.attach") {
+          await attachTerminal(clampDimension(message.cols, 80), clampDimension(message.rows, 24));
+        } else if (message.type === "terminal.resize" && terminalPid !== null) {
+          await sandbox.pty.resize(terminalPid, {
+            cols: clampDimension(message.cols, 80),
+            rows: clampDimension(message.rows, 24),
+          });
+        } else if (message.type === "ports.refresh") {
+          await refreshPorts();
+        } else if (message.type === "preview.open") {
+          await openPreview(Number(message.port));
+        } else if (message.type === "ping") {
+          sendControl({ type: "pong" });
+        }
+      })
+      .catch((error) => {
+        sendControl({
+          type: "error",
+          message: error instanceof Error ? error.message : "Runtime request failed.",
+        });
+      });
+  });
+
+  webSocket.on("close", () => {
+    disposed = true;
+    clearInterval(heartbeat);
+    void terminalHandle?.kill().catch(() => {});
+    void restoreTimeout(session.id, sandbox, env.goatCodexChatIdleTimeoutMs).catch((error) => {
+      logger.warn("Failed to restore Codex workspace idle timeout", {
+        event: "opencompany.goat_codex_runtime_idle_restore_failed",
+        error,
+      });
+    });
+  });
+}
+
+type RuntimeControlMessage =
+  | { type: "terminal.attach" | "terminal.resize"; cols?: number; rows?: number }
+  | { type: "ports.refresh" | "ping" }
+  | { type: "preview.open"; port?: number };
+
+async function proxyPreviewHttp(
+  request: IncomingMessage,
+  response: ServerResponse,
+  env: RunnerEnv,
+  cache: Map<string, { expiresAt: number; target: Promise<PreviewTarget> }>,
+) {
+  try {
+    const capability = previewCapabilityFromRequest(request, env.previewBaseDomain);
+    if (!capability) {
+      sendPlainResponse(response, 404, "Preview not found.");
+      return;
+    }
+    const target = await resolvePreviewTarget(capability, env, cache);
+    const requestHeaders = upstreamRequestHeaders(request.headers, request.headers.host ?? "");
+    const upstream = https.request(
+      {
+        hostname: target.upstreamHost,
+        method: request.method,
+        path: request.url,
+        headers: {
+          ...requestHeaders,
+          ...(target.sandbox.trafficAccessToken
+            ? { "x-access-token": target.sandbox.trafficAccessToken }
+            : {}),
+        },
+      },
+      (upstreamResponse) => {
+        response.writeHead(
+          upstreamResponse.statusCode ?? 502,
+          rewritePreviewResponseHeaders(
+            upstreamResponse.headers,
+            target.upstreamHost,
+            request.headers.host ?? "",
+            env.allowedOrigins,
+            forwardedProtocol(request),
+            target.port,
+          ),
+        );
+        upstreamResponse.pipe(response);
+      },
+    );
+    upstream.on("error", () => {
+      if (!response.headersSent)
+        sendPlainResponse(response, 502, "The preview server is unavailable.");
+      else response.destroy();
+    });
+    request.pipe(upstream);
+  } catch (error) {
+    logger.warn("Preview proxy request failed", {
+      event: "opencompany.goat_codex_preview_proxy_failed",
+      error,
+    });
+    if (!response.headersSent)
+      sendPlainResponse(response, 502, "The preview server is unavailable.");
+    else response.destroy();
+  }
+}
+
+async function proxyPreviewWebSocket(
+  request: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  env: RunnerEnv,
+  webSocketServer: WebSocketServer,
+  cache: Map<string, { expiresAt: number; target: Promise<PreviewTarget> }>,
+) {
+  try {
+    const capability = previewCapabilityFromRequest(request, env.previewBaseDomain);
+    if (!capability) {
+      rejectUpgrade(socket, 404, "Preview not found");
+      return;
+    }
+    const target = await resolvePreviewTarget(capability, env, cache);
+    const protocols = readProtocols(request.headers["sec-websocket-protocol"]);
+    const upstream = new WebSocket(
+      `wss://${target.upstreamHost}${request.url ?? "/"}`,
+      protocols.length > 0 ? protocols : undefined,
+      {
+        headers: {
+          ...upstreamRequestHeaders(request.headers, request.headers.host ?? ""),
+          ...(target.sandbox.trafficAccessToken
+            ? { "x-access-token": target.sandbox.trafficAccessToken }
+            : {}),
+        },
+      },
+    );
+
+    webSocketServer.handleUpgrade(request, socket, head, (downstream) => {
+      let heartbeatReceived = true;
+      downstream.on("pong", () => {
+        heartbeatReceived = true;
+      });
+      const heartbeat = setInterval(() => {
+        if (!heartbeatReceived) {
+          downstream.terminate();
+          return;
+        }
+        heartbeatReceived = false;
+        downstream.ping();
+        void target.sandbox.setTimeout(ACTIVE_VIEW_TIMEOUT_MS).catch(() => downstream.close());
+      }, HEARTBEAT_INTERVAL_MS);
+      const close = () => {
+        clearInterval(heartbeat);
+        if (
+          upstream.readyState === WebSocket.OPEN ||
+          upstream.readyState === WebSocket.CONNECTING
+        ) {
+          upstream.close();
+        }
+        if (downstream.readyState === WebSocket.OPEN) downstream.close();
+        void restoreSandboxTimeout(
+          target.session.id,
+          target.sandbox,
+          env.goatCodexChatIdleTimeoutMs,
+        ).catch(() => {});
+      };
+
+      upstream.on("open", () => {
+        downstream.on("message", (data, binary) => upstream.send(data, { binary }));
+      });
+      upstream.on("message", (data, binary) => {
+        if (downstream.readyState === WebSocket.OPEN) downstream.send(data, { binary });
+      });
+      upstream.on("close", close);
+      upstream.on("error", close);
+      downstream.on("close", close);
+      downstream.on("error", close);
+    });
+  } catch {
+    rejectUpgrade(socket, 502, "Preview unavailable");
+  }
+}
+
+async function resolvePreviewTarget(
+  capability: string,
+  env: RunnerEnv,
+  cache: Map<string, { expiresAt: number; target: Promise<PreviewTarget> }>,
+) {
+  const verified = verifyGoatCodexPreviewCapability({
+    capability,
+    secret: env.streamTokenSecret,
+  });
+  if (!verified || !isAllowedPreviewPort(verified.port))
+    throw new Error("Invalid preview capability.");
+
+  const cached = cache.get(capability);
+  if (cached && cached.expiresAt > Date.now()) return cached.target;
+
+  const target = (async () => {
+    const session = await loadGoatCodexRuntimeSession({
+      codexChatSessionId: verified.codexChatSessionId,
+    });
+    if (!session) throw new Error("Preview session is closed.");
+    const sandbox = await connectSandbox({ sandboxId: session.sandboxId });
+    if (!sandbox) throw new Error("Preview sandbox was deleted.");
+    return { session, sandbox, upstreamHost: sandbox.getHost(verified.port), port: verified.port };
+  })();
+  cache.set(capability, { expiresAt: Date.now() + PREVIEW_SESSION_CACHE_MS, target });
+  target.catch(() => cache.delete(capability));
+  return target;
+}
+
+function previewCapabilityFromRequest(request: IncomingMessage, baseDomain: string | undefined) {
+  if (!baseDomain || !request.headers.host) return null;
+  const host = hostnameFromAuthority(request.headers.host);
+  const base = hostnameFromAuthority(baseDomain);
+  const suffix = `.${base}`;
+  if (!host.endsWith(suffix)) return null;
+  const capability = host.slice(0, -suffix.length);
+  return capability && !capability.includes(".") ? capability : null;
+}
+
+function isPreviewRequest(request: IncomingMessage, baseDomain: string | undefined) {
+  return previewCapabilityFromRequest(request, baseDomain) !== null;
+}
+
+function previewUrl(
+  capability: string,
+  baseDomain: string,
+  configuredProtocol: "http" | "https" | undefined,
+) {
+  const protocol = configuredProtocol ?? (baseDomain.includes("localhost") ? "http" : "https");
+  return `${protocol}://${capability}.${baseDomain}`;
+}
+
+function hostnameFromAuthority(authority: string) {
+  try {
+    return new URL(`http://${authority}`).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function readProtocols(header: string | string[] | undefined) {
+  const value = Array.isArray(header) ? header.join(",") : (header ?? "");
+  return value
+    .split(",")
+    .map((protocol) => protocol.trim())
+    .filter(Boolean);
+}
+
+function clampDimension(value: number | undefined, fallback: number) {
+  return Number.isInteger(value) ? Math.min(500, Math.max(2, Number(value))) : fallback;
+}
+
+function upstreamRequestHeaders(headers: IncomingHttpHeaders, forwardedHost: string) {
+  const result: Record<string, string | string[]> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const lowerName = name.toLowerCase();
+    if (
+      value === undefined ||
+      [
+        "host",
+        "connection",
+        "upgrade",
+        "keep-alive",
+        "proxy-connection",
+        "te",
+        "trailer",
+        "transfer-encoding",
+      ].includes(lowerName) ||
+      lowerName.startsWith("sec-websocket-")
+    ) {
+      continue;
+    }
+    result[name] = value;
+  }
+  result["x-forwarded-host"] = forwardedHost;
+  result["x-forwarded-proto"] = forwardedHost.includes("localhost") ? "http" : "https";
+  return result;
+}
+
+export function rewritePreviewResponseHeaders(
+  headers: IncomingHttpHeaders,
+  upstreamHost: string,
+  previewHost: string,
+  allowedOrigins: string[],
+  requestProtocol: "http" | "https" = previewHost.includes("localhost") ? "http" : "https",
+  upstreamPort?: number,
+) {
+  const result: Record<string, string | string[]> = {};
+  const previewProtocol = requestProtocol;
+  for (const [name, value] of Object.entries(headers)) {
+    if (
+      value === undefined ||
+      [
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "x-frame-options",
+        "content-security-policy",
+      ].includes(name)
+    )
+      continue;
+    if (name === "location" && typeof value === "string") {
+      result[name] = rewritePreviewLocation(
+        value,
+        upstreamHost,
+        upstreamPort,
+        previewHost,
+        previewProtocol,
+      );
+    } else if (name === "set-cookie") {
+      const cookies = Array.isArray(value) ? value : [value];
+      result[name] = cookies.map((cookie) => cookie.replace(/;\s*Domain=[^;]*/gi, ""));
+    } else {
+      result[name] = value;
+    }
+  }
+
+  const frameAncestors = allowedOrigins.length > 0 ? allowedOrigins.join(" ") : "'none'";
+  const existingPolicy = headers["content-security-policy"];
+  const preservedDirectives = (
+    Array.isArray(existingPolicy) ? existingPolicy.join("; ") : (existingPolicy ?? "")
+  )
+    .split(";")
+    .map((directive) => directive.trim())
+    .filter((directive) => directive && !directive.toLowerCase().startsWith("frame-ancestors "));
+  result["content-security-policy"] = [
+    ...preservedDirectives,
+    `frame-ancestors ${frameAncestors}`,
+  ].join("; ");
+  result["referrer-policy"] = "no-referrer";
+  return result;
+}
+
+function rewritePreviewLocation(
+  value: string,
+  upstreamHost: string,
+  upstreamPort: number | undefined,
+  previewHost: string,
+  previewProtocol: "http" | "https",
+) {
+  try {
+    const location = new URL(value);
+    const isUpstream = location.hostname === upstreamHost;
+    const isSelectedLoopback =
+      upstreamPort !== undefined &&
+      ["localhost", "127.0.0.1", "::1"].includes(location.hostname) &&
+      Number(location.port || defaultPort(location.protocol)) === upstreamPort;
+    if (!isUpstream && !isSelectedLoopback) return value;
+    const previewAuthority = new URL(`${previewProtocol}://${previewHost}`);
+    location.protocol = `${previewProtocol}:`;
+    location.hostname = previewAuthority.hostname;
+    location.port = previewAuthority.port;
+    return location.toString();
+  } catch {
+    return value;
+  }
+}
+
+function defaultPort(protocol: string) {
+  if (protocol === "http:" || protocol === "ws:") return 80;
+  if (protocol === "https:" || protocol === "wss:") return 443;
+  return 0;
+}
+
+function forwardedProtocol(request: IncomingMessage): "http" | "https" {
+  const value = request.headers["x-forwarded-proto"];
+  const first = (Array.isArray(value) ? value[0] : value)?.split(",", 1)[0]?.trim();
+  return first === "https" ? "https" : "http";
+}
+
+export function isGoatCodexRuntimeOriginAllowed(
+  origin: string | undefined,
+  allowedOrigins: string[],
+) {
+  return Boolean(origin && allowedOrigins.includes(origin));
+}
+
+function sendPlainResponse(response: ServerResponse, statusCode: number, message: string) {
+  response.writeHead(statusCode, {
+    "content-type": "text/plain; charset=utf-8",
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+  });
+  response.end(message);
+}
+
+function rejectUpgrade(socket: Duplex, statusCode: number, message: string) {
+  if (socket.destroyed) return;
+  socket.end(
+    `HTTP/1.1 ${statusCode} ${message}\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n`,
+  );
+}
+
+function closeWebSocketServer(server: WebSocketServer) {
+  return new Promise<void>((resolve) => {
+    server.close(() => resolve());
+  });
+}
+
+async function ensureRuntimeTools(sandbox: SandboxHandle) {
+  const existing = runtimeToolInstalls.get(sandbox.sandboxId);
+  if (existing) return existing;
+
+  const install = sandbox.commands
+    .run(
+      [
+        "if ! command -v tmux >/dev/null 2>&1 || ! command -v ss >/dev/null 2>&1; then",
+        "export DEBIAN_FRONTEND=noninteractive;",
+        "apt-get update -qq && apt-get install -y -qq --no-install-recommends tmux iproute2;",
+        "fi",
+        "command -v tmux >/dev/null && command -v ss >/dev/null",
+      ].join(" "),
+      { timeoutMs: 120_000 },
+    )
+    .then(() => undefined);
+  runtimeToolInstalls.set(sandbox.sandboxId, install);
+  install.catch(() => runtimeToolInstalls.delete(sandbox.sandboxId));
+  return install;
+}
+
+async function restoreSandboxTimeout(
+  codexChatSessionId: string,
+  sandbox: SandboxHandle,
+  idleTimeoutMs: number,
+) {
+  const current = await loadGoatCodexRuntimeSession({ codexChatSessionId });
+  if (current && ["queued", "starting", "running"].includes(current.status)) {
+    await keepSandboxActive(sandbox);
+    return;
+  }
+  await armSandboxIdleTimeout(sandbox, idleTimeoutMs);
+}

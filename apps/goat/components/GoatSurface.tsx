@@ -62,6 +62,7 @@ import {
   useState,
   useTransition,
 } from "react";
+import { CodexWorkspacePanel } from "@/components/CodexWorkspacePanel";
 import { buildChatTaskLookup } from "@/components/chat/assistant-items";
 import {
   GoatComposerAttachments,
@@ -1519,392 +1520,408 @@ export function GoatSurface({
         </CommandList>
       </CommandDialog>
 
-      {mode === "home" ? (
-        <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-          <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
-            {hasHomeActivity ? (
-              <>
-                {homeTasks.length > 0 ? (
-                  <section className="flex flex-col gap-1">
-                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                      Tasks
-                    </h2>
-                    <HomeTaskRows
-                      items={homeTasks}
-                      onArchiveTask={archiveTask}
-                      onArchiveChat={archiveChat}
-                      onSelectChat={openChat}
-                    />
-                  </section>
-                ) : null}
-
-                {homeChats.length > 0 ? (
-                  <section className="flex flex-col gap-1">
-                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                      Chats
-                    </h2>
-                    <ChatHistoryList
-                      chats={homeChats}
-                      onSelect={openChat}
-                      onArchive={archiveChat}
-                    />
-                  </section>
-                ) : null}
-
-                {homeSchedules.length > 0 ? (
-                  <section className="flex flex-col gap-1">
-                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                      Routines
-                    </h2>
-                    <ScheduleRows schedules={homeSchedules} />
-                  </section>
-                ) : null}
-              </>
-            ) : (
-              <p className="px-2 text-[15px] leading-6 text-ink-muted">
-                welcome back, {homeGreetingName}
-              </p>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="flex min-h-0 w-full flex-1 flex-col items-center">
-          <div className="w-full px-6 pb-2 pt-5">
-            <div className="flex w-full items-center justify-between gap-3">
-              <ChatTitleHeader
-                title={activeChatTitle}
-                model={activeChatModel}
-                engine={activeChatEngine}
-              />
-              <div className="flex shrink-0 items-center gap-2">
-                {activeEngineChat?.engine === "codex" ? (
-                  <CodexSessionStatusIndicator
-                    runtime={codexRuntime}
-                    optimisticStatus={
-                      engineSubmitting ? "starting" : engineRunning ? "running" : null
-                    }
-                    sandboxStatus={codexSandboxStatus}
-                  />
-                ) : null}
-                {currentContextTokens > 0 ? (
-                  <ChatContextMeter used={currentContextTokens} max={contextMaxTokens} />
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          <div
-            ref={threadRef}
-            className="min-h-0 w-full flex-1 justify-center overflow-y-auto px-6"
-            onWheel={markUserScrollIntent}
-            onTouchMove={markUserScrollIntent}
-            onScroll={(event) => {
-              if (!userScrollIntentRef.current) return;
-              const el = event.currentTarget;
-              const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-              isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
-            }}
-          >
-            <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pb-40 pt-2">
-              {chatMessages.map((message) => (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  taskLookup={chatTaskLookup}
-                  stopped={locallyStoppedAssistantMessageIds.has(message.id)}
-                  durationMs={chatMessageDurationMs(message, optimisticTurnDurations)}
-                  onCodexAction={handleCodexToolAction}
-                  allowCodexPlanActions={message.id === latestAssistantMessageId}
-                />
-              ))}
-              {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
-                <ThinkingIndicator
-                  startedAtMs={activeTurnTimerStartedAtMs}
-                  label={
-                    isEngineChat
-                      ? codexRuntime?.status === "queued"
-                        ? "Codex is queued"
-                        : "Codex is working"
-                      : "Goat is working"
-                  }
-                />
-              ) : null}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {mode === "chat" && chatSessionId && persistedChatSessionId === chatSessionId ? (
-        <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
-      ) : null}
-      {mode === "chat" && activeEngineChat?.engine === "local_codex" ? (
-        <LiveLocalCodexSessionStatus
-          chatSessionId={activeEngineChat.chatSessionId}
-          setRunning={setEngineRunning}
-        />
-      ) : null}
-      {mode === "chat" && activeEngineChat?.engine === "codex" ? (
-        <LiveCodexChatSessionStatus
-          chatSessionId={activeEngineChat.chatSessionId}
-          setRunning={setEngineRunning}
-          setSandboxStatus={setCodexSandboxStatus}
-          setRuntime={setCodexRuntime}
-        />
-      ) : null}
-      {mode === "chat" && taskSpawningEnabled ? (
-        <LiveChatTasks setTasks={setLiveChatTasks} />
-      ) : null}
-
-      <form
-        ref={formRef}
-        onSubmit={onSubmit}
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
-      >
-        <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
-          {chatSendBlocked ? (
-            <p
-              className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-4 text-ink shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-              role="alert"
-            >
-              Your workspace is out of credits — chat is paused.{" "}
-              <button
-                type="button"
-                onClick={() => router.push("/settings/workspace/billing")}
-                className="font-medium underline"
-              >
-                Top up to continue
-              </button>
-            </p>
-          ) : lowCreditBalance && creditBalance ? (
-            <p
-              className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-              role="status"
-            >
-              {formatCreditBalance(creditBalance.balanceUsdMicros)} in credits left.{" "}
-              <button
-                type="button"
-                onClick={() => router.push("/settings/workspace/billing")}
-                className="font-medium text-ink underline"
-              >
-                Add credits
-              </button>{" "}
-              to keep chat and ingestion running.
-            </p>
-          ) : null}
-          {chatError ? (
-            <p
-              className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-              role="alert"
-            >
-              {chatError.message || "Goat could not answer that right now."}
-            </p>
-          ) : null}
-          {localCodexFeatureDisabledForChat ? (
-            <p
-              className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-              role="status"
-            >
-              {LOCAL_CODEX_BETA_DISABLED_MESSAGE}
-            </p>
-          ) : null}
-          {mentionToken && mentionOptions.length > 0 ? (
-            <div
-              role="listbox"
-              aria-label="Mention menu"
-              className="absolute bottom-full left-3 z-20 mb-2 max-h-72 w-80 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
-            >
-              {mentionOptions.map((option, index) => (
-                <button
-                  key={option.token}
-                  type="button"
-                  role="option"
-                  aria-selected={index === mentionOptionIndex}
-                  onMouseEnter={() => setMentionOptionIndex(index)}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    selectMention(option);
-                  }}
-                  onClick={() => selectMention(option)}
-                  className={cn(
-                    "flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-surface-hover focus:bg-surface-hover focus:outline-none",
-                    index === mentionOptionIndex && "bg-surface-hover",
-                  )}
-                >
-                  {option.kind === "engine" ? (
-                    <Code2 size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
-                  ) : (
-                    <Sparkles
-                      size={14}
-                      strokeWidth={2}
-                      className="mt-0.5 shrink-0 text-ink-subtle"
-                    />
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-medium leading-4 text-ink">
-                      {option.token}
-                    </span>
-                    {option.kind === "skill" ? (
-                      <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
-                        {option.label} · {option.description}
-                      </span>
+      <div className="relative flex min-h-0 w-full flex-1">
+        <div className="relative flex min-w-0 flex-1 flex-col items-center overflow-hidden">
+          {mode === "home" ? (
+            <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
+              <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
+                {hasHomeActivity ? (
+                  <>
+                    {homeTasks.length > 0 ? (
+                      <section className="flex flex-col gap-1">
+                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                          Tasks
+                        </h2>
+                        <HomeTaskRows
+                          items={homeTasks}
+                          onArchiveTask={archiveTask}
+                          onArchiveChat={archiveChat}
+                          onSelectChat={openChat}
+                        />
+                      </section>
                     ) : null}
-                  </span>
-                  {option.kind === "engine" ? (
-                    <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
-                  ) : null}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <div
-            {...composerAttachments.dragHandlers}
-            className="relative flex flex-col rounded-2xl border border-border bg-surface shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong"
-          >
-            {composerAttachments.isDragActive && attachmentsEnabled ? (
-              <GoatComposerDropOverlay />
-            ) : null}
-            {composerAttachments.attachments.length > 0 ? (
-              <div className="px-3.5 pt-3">
-                <GoatComposerAttachments
-                  attachments={composerAttachments.attachments}
-                  onRemove={composerAttachments.removeAttachment}
-                />
+
+                    {homeChats.length > 0 ? (
+                      <section className="flex flex-col gap-1">
+                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                          Chats
+                        </h2>
+                        <ChatHistoryList
+                          chats={homeChats}
+                          onSelect={openChat}
+                          onArchive={archiveChat}
+                        />
+                      </section>
+                    ) : null}
+
+                    {homeSchedules.length > 0 ? (
+                      <section className="flex flex-col gap-1">
+                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                          Routines
+                        </h2>
+                        <ScheduleRows schedules={homeSchedules} />
+                      </section>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="px-2 text-[15px] leading-6 text-ink-muted">
+                    welcome back, {homeGreetingName}
+                  </p>
+                )}
               </div>
-            ) : null}
-            <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
-              <div className="relative min-w-0 flex-1 self-center">
-                {input ? (
-                  <div
-                    ref={inputOverlayRef}
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
-                  >
-                    {renderComposerInputOverlay(input, activeSelectedMentions)}
-                  </div>
-                ) : null}
-                <textarea
-                  ref={inputRef}
-                  rows={1}
-                  id="prompt"
-                  name="prompt"
-                  value={input}
-                  placeholder={
-                    mode === "chat"
-                      ? "Reply..."
-                      : taskSpawningEnabled
-                        ? "Ask a question or describe a task..."
-                        : "Ask Goat anything..."
-                  }
-                  onChange={onInputChange}
-                  onBlur={() => setMentionToken(null)}
-                  onClick={(event) =>
-                    updateMentionToken(
-                      event.currentTarget.value,
-                      event.currentTarget.selectionStart,
-                    )
-                  }
-                  onKeyDown={onKeyDown}
-                  onScroll={syncInputOverlayScroll}
-                  onPaste={(event) => {
-                    composerAttachments.handlePasteFiles(event);
-                  }}
-                  onSelect={(event) =>
-                    updateMentionToken(
-                      event.currentTarget.value,
-                      event.currentTarget.selectionStart,
-                    )
-                  }
-                  disabled={isGenerating || localCodexFeatureDisabledForChat}
-                  className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
-                  style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-                  maxLength={10_000}
-                />
-              </div>
-              {isEngineChat && engineRunning ? (
-                <EngineStopButton
-                  label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
-                  onStop={stopGeneration}
-                />
-              ) : null}
-              <SubmitButton
-                disabled={
-                  (!input.trim() &&
-                    !composerAttachments.attachments.some(
-                      (attachment) => attachment.status === "ready",
-                    )) ||
-                  composerAttachments.isUploading ||
-                  engineSubmitting ||
-                  localCodexFeatureDisabledForChat ||
-                  chatSendBlocked
-                }
-                isGenerating={isGenerating}
-                onStop={stopGeneration}
-              />
             </div>
-            <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
-              {attachmentsEnabled ? (
-                <>
-                  <input
-                    ref={attachmentFileInputRef}
-                    type="file"
-                    multiple
-                    accept={GOAT_CHAT_ATTACHMENT_ACCEPT}
-                    className="hidden"
-                    onChange={(event) => {
-                      const files = Array.from(event.currentTarget.files ?? []);
-                      event.currentTarget.value = "";
-                      if (files.length > 0) composerAttachments.acceptFiles(files);
-                    }}
+          ) : (
+            <div className="flex min-h-0 w-full flex-1 flex-col items-center">
+              <div className="w-full px-6 pb-2 pt-5">
+                <div className="flex w-full items-center justify-between gap-3">
+                  <ChatTitleHeader
+                    title={activeChatTitle}
+                    model={activeChatModel}
+                    engine={activeChatEngine}
                   />
+                  <div className="flex shrink-0 items-center gap-2">
+                    {activeEngineChat?.engine === "codex" ? (
+                      <CodexSessionStatusIndicator
+                        runtime={codexRuntime}
+                        optimisticStatus={
+                          engineSubmitting ? "starting" : engineRunning ? "running" : null
+                        }
+                        sandboxStatus={codexSandboxStatus}
+                      />
+                    ) : null}
+                    {currentContextTokens > 0 ? (
+                      <ChatContextMeter used={currentContextTokens} max={contextMaxTokens} />
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                ref={threadRef}
+                className="min-h-0 w-full flex-1 justify-center overflow-y-auto px-6"
+                onWheel={markUserScrollIntent}
+                onTouchMove={markUserScrollIntent}
+                onScroll={(event) => {
+                  if (!userScrollIntentRef.current) return;
+                  const el = event.currentTarget;
+                  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+                  isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+                }}
+              >
+                <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pb-40 pt-2">
+                  {chatMessages.map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      taskLookup={chatTaskLookup}
+                      stopped={locallyStoppedAssistantMessageIds.has(message.id)}
+                      durationMs={chatMessageDurationMs(message, optimisticTurnDurations)}
+                      onCodexAction={handleCodexToolAction}
+                      allowCodexPlanActions={message.id === latestAssistantMessageId}
+                    />
+                  ))}
+                  {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
+                    <ThinkingIndicator
+                      startedAtMs={activeTurnTimerStartedAtMs}
+                      label={
+                        isEngineChat
+                          ? codexRuntime?.status === "queued"
+                            ? "Codex is queued"
+                            : "Codex is working"
+                          : "Goat is working"
+                      }
+                    />
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mode === "chat" && chatSessionId && persistedChatSessionId === chatSessionId ? (
+            <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
+          ) : null}
+          {mode === "chat" && activeEngineChat?.engine === "local_codex" ? (
+            <LiveLocalCodexSessionStatus
+              chatSessionId={activeEngineChat.chatSessionId}
+              setRunning={setEngineRunning}
+            />
+          ) : null}
+          {mode === "chat" && activeEngineChat?.engine === "codex" ? (
+            <LiveCodexChatSessionStatus
+              chatSessionId={activeEngineChat.chatSessionId}
+              setRunning={setEngineRunning}
+              setSandboxStatus={setCodexSandboxStatus}
+              setRuntime={setCodexRuntime}
+            />
+          ) : null}
+          {mode === "chat" && taskSpawningEnabled ? (
+            <LiveChatTasks setTasks={setLiveChatTasks} />
+          ) : null}
+
+          <form
+            ref={formRef}
+            onSubmit={onSubmit}
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
+          >
+            <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
+              {chatSendBlocked ? (
+                <p
+                  className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-4 text-ink shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                  role="alert"
+                >
+                  Your workspace is out of credits — chat is paused.{" "}
                   <button
                     type="button"
-                    aria-label="Attach files"
-                    disabled={isGenerating || engineSubmitting}
-                    onClick={() => attachmentFileInputRef.current?.click()}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                    onClick={() => router.push("/settings/workspace/billing")}
+                    className="font-medium underline"
                   >
-                    <Plus size={16} strokeWidth={1.9} />
+                    Top up to continue
                   </button>
-                </>
+                </p>
+              ) : lowCreditBalance && creditBalance ? (
+                <p
+                  className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                  role="status"
+                >
+                  {formatCreditBalance(creditBalance.balanceUsdMicros)} in credits left.{" "}
+                  <button
+                    type="button"
+                    onClick={() => router.push("/settings/workspace/billing")}
+                    className="font-medium text-ink underline"
+                  >
+                    Add credits
+                  </button>{" "}
+                  to keep chat and ingestion running.
+                </p>
               ) : null}
-              <GoatModelPicker
-                value={chatModel}
-                onChange={(model) => {
-                  setChatModel(model);
-                  if (model !== CODEX_PICKER_VALUE && model !== LOCAL_CODEX_PICKER_VALUE) {
-                    setCodexPlanModeEnabled(false);
-                    setCodexGoalModeEnabled(false);
-                    setCodexGoalObjective("");
-                    setCodexGoalTokenBudget("");
-                  }
-                }}
-                disabled={isGenerating || Boolean(activeEngineChat)}
-                localCodexBetaEnabled={localCodexBetaEnabled}
-                codexConnected={codexConnected}
-              />
-              {showCodexComposerControls ? (
-                <CodexComposerControls
-                  model={activeEngine === "codex" ? codexModel : null}
-                  reasoningEffort={codexReasoningEffort}
-                  planModeEnabled={codexPlanModeEnabled}
-                  planModeAvailable={activeEngine === "codex"}
-                  goalModeEnabled={codexGoalModeEnabled}
-                  goalObjective={codexGoalObjective}
-                  goalTokenBudget={codexGoalTokenBudget}
-                  disabled={engineSubmitting}
-                  modelDisabled={engineSubmitting || Boolean(activeEngineChat)}
-                  onModelChange={setCodexModel}
-                  onReasoningEffortChange={setCodexReasoningEffort}
-                  onPlanModeEnabledChange={setCodexPlanModeEnabled}
-                  onGoalModeEnabledChange={setCodexGoalModeEnabled}
-                  onGoalObjectiveChange={setCodexGoalObjective}
-                  onGoalTokenBudgetChange={setCodexGoalTokenBudget}
-                />
+              {chatError ? (
+                <p
+                  className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                  role="alert"
+                >
+                  {chatError.message || "Goat could not answer that right now."}
+                </p>
               ) : null}
+              {localCodexFeatureDisabledForChat ? (
+                <p
+                  className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                  role="status"
+                >
+                  {LOCAL_CODEX_BETA_DISABLED_MESSAGE}
+                </p>
+              ) : null}
+              {mentionToken && mentionOptions.length > 0 ? (
+                <div
+                  role="listbox"
+                  aria-label="Mention menu"
+                  className="absolute bottom-full left-3 z-20 mb-2 max-h-72 w-80 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
+                >
+                  {mentionOptions.map((option, index) => (
+                    <button
+                      key={option.token}
+                      type="button"
+                      role="option"
+                      aria-selected={index === mentionOptionIndex}
+                      onMouseEnter={() => setMentionOptionIndex(index)}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        selectMention(option);
+                      }}
+                      onClick={() => selectMention(option)}
+                      className={cn(
+                        "flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-surface-hover focus:bg-surface-hover focus:outline-none",
+                        index === mentionOptionIndex && "bg-surface-hover",
+                      )}
+                    >
+                      {option.kind === "engine" ? (
+                        <Code2
+                          size={14}
+                          strokeWidth={2}
+                          className="mt-0.5 shrink-0 text-ink-subtle"
+                        />
+                      ) : (
+                        <Sparkles
+                          size={14}
+                          strokeWidth={2}
+                          className="mt-0.5 shrink-0 text-ink-subtle"
+                        />
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-medium leading-4 text-ink">
+                          {option.token}
+                        </span>
+                        {option.kind === "skill" ? (
+                          <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
+                            {option.label} · {option.description}
+                          </span>
+                        ) : null}
+                      </span>
+                      {option.kind === "engine" ? (
+                        <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <div
+                {...composerAttachments.dragHandlers}
+                className="relative flex flex-col rounded-2xl border border-border bg-surface shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong"
+              >
+                {composerAttachments.isDragActive && attachmentsEnabled ? (
+                  <GoatComposerDropOverlay />
+                ) : null}
+                {composerAttachments.attachments.length > 0 ? (
+                  <div className="px-3.5 pt-3">
+                    <GoatComposerAttachments
+                      attachments={composerAttachments.attachments}
+                      onRemove={composerAttachments.removeAttachment}
+                    />
+                  </div>
+                ) : null}
+                <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
+                  <div className="relative min-w-0 flex-1 self-center">
+                    {input ? (
+                      <div
+                        ref={inputOverlayRef}
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
+                      >
+                        {renderComposerInputOverlay(input, activeSelectedMentions)}
+                      </div>
+                    ) : null}
+                    <textarea
+                      ref={inputRef}
+                      rows={1}
+                      id="prompt"
+                      name="prompt"
+                      value={input}
+                      placeholder={
+                        mode === "chat"
+                          ? "Reply..."
+                          : taskSpawningEnabled
+                            ? "Ask a question or describe a task..."
+                            : "Ask Goat anything..."
+                      }
+                      onChange={onInputChange}
+                      onBlur={() => setMentionToken(null)}
+                      onClick={(event) =>
+                        updateMentionToken(
+                          event.currentTarget.value,
+                          event.currentTarget.selectionStart,
+                        )
+                      }
+                      onKeyDown={onKeyDown}
+                      onScroll={syncInputOverlayScroll}
+                      onPaste={(event) => {
+                        composerAttachments.handlePasteFiles(event);
+                      }}
+                      onSelect={(event) =>
+                        updateMentionToken(
+                          event.currentTarget.value,
+                          event.currentTarget.selectionStart,
+                        )
+                      }
+                      disabled={isGenerating || localCodexFeatureDisabledForChat}
+                      className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                      style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+                      maxLength={10_000}
+                    />
+                  </div>
+                  {isEngineChat && engineRunning ? (
+                    <EngineStopButton
+                      label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
+                      onStop={stopGeneration}
+                    />
+                  ) : null}
+                  <SubmitButton
+                    disabled={
+                      (!input.trim() &&
+                        !composerAttachments.attachments.some(
+                          (attachment) => attachment.status === "ready",
+                        )) ||
+                      composerAttachments.isUploading ||
+                      engineSubmitting ||
+                      localCodexFeatureDisabledForChat ||
+                      chatSendBlocked
+                    }
+                    isGenerating={isGenerating}
+                    onStop={stopGeneration}
+                  />
+                </div>
+                <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+                  {attachmentsEnabled ? (
+                    <>
+                      <input
+                        ref={attachmentFileInputRef}
+                        type="file"
+                        multiple
+                        accept={GOAT_CHAT_ATTACHMENT_ACCEPT}
+                        className="hidden"
+                        onChange={(event) => {
+                          const files = Array.from(event.currentTarget.files ?? []);
+                          event.currentTarget.value = "";
+                          if (files.length > 0) composerAttachments.acceptFiles(files);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        aria-label="Attach files"
+                        disabled={isGenerating || engineSubmitting}
+                        onClick={() => attachmentFileInputRef.current?.click()}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                      >
+                        <Plus size={16} strokeWidth={1.9} />
+                      </button>
+                    </>
+                  ) : null}
+                  <GoatModelPicker
+                    value={chatModel}
+                    onChange={(model) => {
+                      setChatModel(model);
+                      if (model !== CODEX_PICKER_VALUE && model !== LOCAL_CODEX_PICKER_VALUE) {
+                        setCodexPlanModeEnabled(false);
+                        setCodexGoalModeEnabled(false);
+                        setCodexGoalObjective("");
+                        setCodexGoalTokenBudget("");
+                      }
+                    }}
+                    disabled={isGenerating || Boolean(activeEngineChat)}
+                    localCodexBetaEnabled={localCodexBetaEnabled}
+                    codexConnected={codexConnected}
+                  />
+                  {showCodexComposerControls ? (
+                    <CodexComposerControls
+                      model={activeEngine === "codex" ? codexModel : null}
+                      reasoningEffort={codexReasoningEffort}
+                      planModeEnabled={codexPlanModeEnabled}
+                      planModeAvailable={activeEngine === "codex"}
+                      goalModeEnabled={codexGoalModeEnabled}
+                      goalObjective={codexGoalObjective}
+                      goalTokenBudget={codexGoalTokenBudget}
+                      disabled={engineSubmitting}
+                      modelDisabled={engineSubmitting || Boolean(activeEngineChat)}
+                      onModelChange={setCodexModel}
+                      onReasoningEffortChange={setCodexReasoningEffort}
+                      onPlanModeEnabledChange={setCodexPlanModeEnabled}
+                      onGoalModeEnabledChange={setCodexGoalModeEnabled}
+                      onGoalObjectiveChange={setCodexGoalObjective}
+                      onGoalTokenBudgetChange={setCodexGoalTokenBudget}
+                    />
+                  ) : null}
+                </div>
+              </div>
             </div>
-          </div>
+          </form>
         </div>
-      </form>
+        {mode === "chat" && activeEngineChat?.engine === "codex" ? (
+          <CodexWorkspacePanel
+            key={activeEngineChat.chatSessionId}
+            chatSessionId={activeEngineChat.chatSessionId}
+            sandboxStatus={codexSandboxStatus}
+            codexIsRunning={engineRunning || engineSubmitting}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -2916,7 +2933,6 @@ function LiveCodexChatSessionStatusSubscriber({
       (candidate) => candidate.chat_session_id === chatSessionId,
     ) ?? null;
   const status = row?.status ?? null;
-  const sandboxId = row?.sandbox_id ?? null;
 
   useEffect(() => {
     if (isLoading) return;
@@ -2937,11 +2953,6 @@ function LiveCodexChatSessionStatusSubscriber({
       setSandboxStatus(null);
       return;
     }
-    if (!sandboxId) {
-      setSandboxStatus(status === "starting" || status === "running" ? "running" : null);
-      return;
-    }
-
     const controller = new AbortController();
     let active = true;
 
@@ -2956,6 +2967,8 @@ function LiveCodexChatSessionStatusSubscriber({
         if (!active) return;
         if (body.status === "running" || body.status === "sleeping" || body.status === "deleted") {
           setSandboxStatus(body.status);
+        } else if (body.status === null) {
+          setSandboxStatus(null);
         }
       } catch {
         // The session status still tells us when a turn is actively starting/running.
@@ -2974,7 +2987,7 @@ function LiveCodexChatSessionStatusSubscriber({
       controller.abort();
       clearInterval(interval);
     };
-  }, [chatSessionId, sandboxId, setSandboxStatus, status]);
+  }, [chatSessionId, setSandboxStatus, status]);
 
   return null;
 }

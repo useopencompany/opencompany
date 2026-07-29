@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeGoatCodexChatSessionForChat,
   createGoatCodexChatMessage,
+  createGoatCodexChatRuntimeAccess,
   getGoatCodexChatSandboxStatus,
   interruptGoatCodexChatSession,
 } from "@/lib/codex-chat";
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   codexConnected: vi.fn(),
   getSandboxStatus: vi.fn(),
   killSandbox: vi.fn(),
+  runtimeAccess: vi.fn(),
   wake: vi.fn(),
 }));
 
@@ -31,6 +33,15 @@ vi.mock("@/lib/codex-auth", () => ({
 }));
 
 vi.mock("@/lib/task-runner", () => ({
+  createGoatCodexRuntimeAccess: mocks.runtimeAccess,
+  GoatCodexRuntimeRequestError: class GoatCodexRuntimeRequestError extends Error {
+    constructor(
+      message: string,
+      readonly statusCode: number,
+    ) {
+      super(message);
+    }
+  },
   getGoatCodexSandboxStatus: mocks.getSandboxStatus,
   killGoatCodexSandbox: mocks.killSandbox,
   triggerGoatCodexChatWake: mocks.wake,
@@ -465,5 +476,60 @@ describe("getGoatCodexChatSandboxStatus", () => {
       }),
     ).resolves.toEqual({ ok: true, status: "sleeping" });
     expect(mocks.getSandboxStatus).toHaveBeenCalledWith("sbx_123");
+  });
+});
+
+describe("createGoatCodexChatRuntimeAccess", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.selectResults.length = 0;
+    mocks.select.mockImplementation(() => createSelectBuilder(mocks.selectResults.shift() ?? []));
+  });
+
+  it("resolves the owner-bound Codex session without exposing its sandbox id", async () => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          userWorkosId: "user_1",
+          sandboxId: "sbx_secret",
+          status: "idle",
+        },
+      },
+    ]);
+    mocks.runtimeAccess.mockResolvedValue({
+      websocketUrl: "wss://runner.example.com/goat/runtime",
+      ticket: "ticket_1",
+      expiresAt: 60_000,
+      sandboxStatus: "sleeping",
+    });
+
+    const result = await createGoatCodexChatRuntimeAccess({
+      userWorkosId: "user_1",
+      chatSessionId: "goat_chat_1",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      access: { ticket: "ticket_1", sandboxStatus: "sleeping" },
+    });
+    expect(result).not.toHaveProperty("access.sandboxId");
+    expect(mocks.runtimeAccess).toHaveBeenCalledWith({
+      codexChatSessionId: "goat_codex_chat_1",
+      userWorkosId: "user_1",
+    });
+  });
+
+  it("rejects foreign sessions before asking the runner for a ticket", async () => {
+    mocks.selectResults.push([]);
+
+    await expect(
+      createGoatCodexChatRuntimeAccess({
+        userWorkosId: "user_other",
+        chatSessionId: "goat_chat_1",
+      }),
+    ).resolves.toMatchObject({ ok: false, statusCode: 404 });
+    expect(mocks.runtimeAccess).not.toHaveBeenCalled();
   });
 });

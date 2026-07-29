@@ -253,6 +253,8 @@ Required environment variables:
 - `RUNNER_INTERNAL_TOKEN`
 - `RUNNER_STREAM_TOKEN_SECRET` (hosted-tool polling job id signing)
 - `RUNNER_ALLOWED_ORIGINS` (`http://localhost:3000` locally)
+- `RUNNER_PREVIEW_BASE_DOMAIN` (optional; `preview.localhost:3040` locally, or a wildcard domain
+  routed to the runner in hosted environments)
 - `DURABLE_STREAMS_URL`
 - `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`

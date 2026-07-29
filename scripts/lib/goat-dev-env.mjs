@@ -39,7 +39,46 @@ export function resolveGoatDevEnv({
         Boolean,
       ),
     ),
+    RUNNER_PREVIEW_BASE_DOMAIN:
+      trimmed(processEnv.RUNNER_PREVIEW_BASE_DOMAIN) ||
+      localPreviewBaseDomain(goatAppUrl, processEnv.RUNNER_PUBLIC_URL),
+    RUNNER_PREVIEW_PROTOCOL:
+      trimmed(processEnv.RUNNER_PREVIEW_PROTOCOL) ||
+      previewProtocol(goatAppUrl, processEnv.RUNNER_PUBLIC_URL),
   };
+}
+
+function previewProtocol(goatAppUrl, runnerPublicUrl) {
+  try {
+    const appUrl = new URL(goatAppUrl);
+    if (appUrl.hostname === "localhost") return appUrl.protocol === "https:" ? "https" : "http";
+  } catch {
+    // Fall through to the runner origin.
+  }
+  try {
+    return new URL(runnerPublicUrl || "http://localhost:3040").protocol === "https:"
+      ? "https"
+      : "http";
+  } catch {
+    // Use the local HTTP default below.
+  }
+  return "http";
+}
+
+function localPreviewBaseDomain(goatAppUrl, runnerPublicUrl) {
+  try {
+    const appUrl = new URL(goatAppUrl);
+    if (appUrl.protocol === "https:" && appUrl.hostname === "localhost") {
+      return `preview.localhost:${appUrl.port || "443"}`;
+    }
+  } catch {}
+
+  try {
+    const runnerUrl = new URL(runnerPublicUrl || "http://localhost:3040");
+    return `preview.localhost:${runnerUrl.port || (runnerUrl.protocol === "https:" ? "443" : "80")}`;
+  } catch {
+    return "preview.localhost:3040";
+  }
 }
 
 function configuredGoatAppUrl(env, goatHttpsEnv) {

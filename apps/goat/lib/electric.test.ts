@@ -115,6 +115,8 @@ describe("buildGoatElectricOriginUrl", () => {
     expect(url?.searchParams.get("table")).toBe("goat.codex_chat_sessions");
     expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1');
     expect(url?.searchParams.get("params[1]")).toBe("user_123");
+    expect(url?.searchParams.get("columns")).not.toContain("sandbox_id");
+    expect(url?.searchParams.get("columns")).not.toContain("codex_thread_id");
   });
 
   it("keeps detail-scoped Codex session feeds bound to an authorized chat", () => {
