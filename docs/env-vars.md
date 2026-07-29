@@ -228,7 +228,7 @@ Set these in the separate Vercel project for Goat:
 | `LATITUDE_API_KEY` / `LATITUDE_PROJECT_SLUG` | No; both required to enable | Enables full-content Latitude tracing for Goat chat and Slack bot model calls. Store both in Infisical `prod` + `/goat` before enabling. |
 | `LATITUDE_SERVICE_NAME` | No | Latitude service name. Defaults to `opencompany-goat`. |
 | `LATITUDE_TELEMETRY_DISABLED` | No | Emergency kill switch for Latitude export. |
-| `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` / `NEXT_PUBLIC_GOAT_POSTHOG_HOST` | Yes | Enables product analytics in the dedicated Goat PostHog project. Store the values in Infisical `prod` + `/goat`; do not reuse the legacy web project token. |
+| `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` / `NEXT_PUBLIC_GOAT_POSTHOG_HOST` | Yes | Enables product analytics in the dedicated Goat PostHog project. Store the same Goat-project values in Infisical `prod` + `/goat`, `/web` (shared Stripe webhook), and `/runner` (Brain ingestion worker); do not reuse the legacy web project token. |
 
 Goat main chat uses `EXA_API_KEY` for optional lightweight public-web search. The runner also needs
 `EXA_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `E2B_API_KEY`,
