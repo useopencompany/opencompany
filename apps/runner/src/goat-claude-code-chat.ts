@@ -67,11 +67,11 @@ const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
 
-// Claude Code recovery re-runs `claude --resume` against the persisted sandbox; that is only
-// idempotent because any CLI process left over from the prior attempt is killed before the
-// re-run (see killLeftoverClaudeTurnProcesses). Unlike Codex there is no engine-turn to
-// durably adopt, so nothing rearms the recovery guard between handoffs — a single-attempt cap would
-// strand any turn caught by two deploys. Allow several recoveries (each real infra churn, not model
+// Claude Code recovery re-runs `claude --resume` against the persisted sandbox. Fence off any CLI
+// process left over from the prior attempt before touching the checkout so recovery runs are
+// serialized (see killLeftoverClaudeTurnProcesses). Unlike Codex there is no engine-turn to durably
+// adopt, so nothing rearms the recovery guard between handoffs — a single-attempt cap would strand
+// any turn caught by two deploys. Allow several recoveries (each real infra churn, not model
 // misbehaviour, since a held lease is never reclaimed) while still bounding a genuine poison loop.
 const CLAUDE_CHAT_MAX_RECOVERY_ATTEMPTS = 10;
 const CLAUDE_CHAT_RECOVERY_EXHAUSTED_MESSAGE =
@@ -229,6 +229,13 @@ export async function runGoatClaudeCodeChatTurn(input: {
   let executionStage = "load_attachments";
   try {
     checkExternalAbort();
+    if (!sandboxReplaced) {
+      // Fence the reused checkout before any preparation writes. After a hard runner death,
+      // the prior CLI can still be editing files until this process is explicitly killed.
+      executionStage = "kill_leftover_turn_processes";
+      await killLeftoverClaudeTurnProcesses(sandbox);
+      checkExternalAbort();
+    }
     if (input.recovery) {
       executionStage = "claim_recovery";
       await claimCodexChatRecovery({
@@ -330,12 +337,6 @@ export async function runGoatClaudeCodeChatTurn(input: {
       });
     };
 
-    if (!sandboxReplaced) {
-      // Only a live runner can kill its background CLI; after a hard runner death the prior
-      // attempt's process is still running in this sandbox and would race the new run.
-      executionStage = "kill_leftover_turn_processes";
-      await killLeftoverClaudeTurnProcesses(sandbox);
-    }
     executionStage = "run_turn";
     const resumeSessionId = sandboxReplaced ? null : session.codexThreadId;
     const runOnce = (resume: string | null) =>
