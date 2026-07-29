@@ -48,6 +48,7 @@ import {
   type GoatBrainToolOutput,
   type GoatChatActionCatalog,
   type GoatChatSkillCatalogItem,
+  type GoatChatWorkflowCatalogItem,
   LIST_ACTIONS_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
   type ListActionsToolInput,
@@ -61,8 +62,11 @@ import {
   type ScheduleTaskToolInput,
   type ScheduleTaskToolOutput,
   START_TASK_TOOL_NAME,
+  START_WORKFLOW_TOOL_NAME,
   type StartTaskToolInput,
   type StartTaskToolOutput,
+  type StartWorkflowToolInput,
+  type StartWorkflowToolOutput,
   USE_ACTION_TOOL_NAME,
   USE_SKILL_TOOL_NAME,
   type UseActionToolInput,
@@ -107,6 +111,9 @@ import {
   START_TASK_PROMPT_DESCRIPTION,
   START_TASK_REASON_DESCRIPTION,
   START_TASK_TOOL_DESCRIPTION,
+  START_WORKFLOW_ID_DESCRIPTION,
+  START_WORKFLOW_PROMPT_DESCRIPTION,
+  START_WORKFLOW_TOOL_DESCRIPTION,
   TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
   TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
   USE_ACTION_ACTION_DESCRIPTION,
@@ -213,6 +220,11 @@ export type SkillDispatcher = {
   execute: (input: { skill: string }) => Promise<UseSkillToolOutput>;
 };
 
+export type WorkflowDispatcher = {
+  catalog: readonly GoatChatWorkflowCatalogItem[];
+  execute: (input: StartWorkflowToolInput) => Promise<StartedTask>;
+};
+
 // Main chat (and the MCP connector) get a read-only brain surface: recall and
 // inspect only. Every write path — new content and edits to existing records —
 // goes through save_to_brain, which enqueues the durable ingestion/curation
@@ -275,6 +287,7 @@ export async function runOpenCompanyChatAgent(input: {
   browserTools?: BrowserToolRunner;
   actions?: ActionDispatcher;
   skills?: SkillDispatcher;
+  workflows?: WorkflowDispatcher;
   goatBrainMultiBrain?: { targets: readonly GoatBrainMultiBrainTarget[] };
   currentDate?: Date | string;
   userContext?: OpenCompanyChatSystemPromptInput["userContext"];
@@ -327,6 +340,7 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.browserTools ? { browserTools: input.browserTools } : {}),
     ...(input.actions ? { actions: input.actions } : {}),
     ...(input.skills ? { skills: input.skills } : {}),
+    ...(input.workflows ? { workflows: input.workflows } : {}),
     ...(input.goatBrainMultiBrain ? { goatBrainMultiBrain: input.goatBrainMultiBrain } : {}),
   });
 
@@ -346,6 +360,7 @@ export async function runOpenCompanyChatAgent(input: {
       ? { connectedIntegrations: input.connectedIntegrations }
       : {}),
     skillsAvailable: Boolean(input.skills?.catalog.length),
+    workflows: input.workflows?.catalog ?? [],
   };
   const system = [
     createOpenCompanyChatSystemPrompt(systemPromptInput),
@@ -419,6 +434,7 @@ export function createOpenCompanyChatToolContext(input: {
   browserTools?: BrowserToolRunner;
   actions?: ActionDispatcher;
   skills?: SkillDispatcher;
+  workflows?: WorkflowDispatcher;
   // Task-only: injected by the runner's background task executor so the run can
   // report its own outcome. Absent in interactive chat and the Slack bot, so
   // the update_task_status tool never appears there.
@@ -439,7 +455,7 @@ export function createOpenCompanyChatToolContext(input: {
   const webFetchCap = input.limits?.webFetchCallsPerTurn ?? MAX_WEB_FETCH_CALLS_PER_TURN;
   const actionCap = input.limits?.actionCallsPerTurn ?? MAX_ACTION_CALLS_PER_TURN;
   let startedTask: StartedTask | null = null;
-  let startTaskInFlight: Promise<StartedTask> | null = null;
+  let startedTaskInFlight: Promise<StartedTask> | null = null;
   let scheduledTask: ScheduleTaskToolOutput | null = null;
   let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
   let visibleToolActivity = false;
@@ -481,6 +497,24 @@ export function createOpenCompanyChatToolContext(input: {
     }),
   };
 
+  const startTrackedTask = async (
+    create: () => Promise<StartedTask>,
+  ): Promise<StartTaskToolOutput> => {
+    if (startedTask) return toStartTaskToolOutput(startedTask, "already_started");
+    if (startedTaskInFlight) {
+      startedTask = await startedTaskInFlight;
+      return toStartTaskToolOutput(startedTask, "already_started");
+    }
+
+    try {
+      startedTaskInFlight = create();
+      startedTask = await startedTaskInFlight;
+    } finally {
+      startedTaskInFlight = null;
+    }
+    return toStartTaskToolOutput(startedTask, "queued");
+  };
+
   const startTask = input.startTask;
   if (startTask) {
     tools[START_TASK_TOOL_NAME] = tool<StartTaskToolInput, StartTaskToolOutput>({
@@ -511,12 +545,6 @@ export function createOpenCompanyChatToolContext(input: {
       }),
       execute: async (args) => {
         visibleToolActivity = true;
-        if (startedTask) return toStartTaskToolOutput(startedTask, "already_started");
-        if (startTaskInFlight) {
-          startedTask = await startTaskInFlight;
-          return toStartTaskToolOutput(startedTask, "already_started");
-        }
-
         const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
         if (!prompt) {
           throw new Error("start_task prompt is required.");
@@ -529,18 +557,52 @@ export function createOpenCompanyChatToolContext(input: {
           inferStartTaskEngine(input.latestUserMessage) ??
           inferStartTaskEngine([name, prompt, reason].join("\n"));
 
-        try {
-          startTaskInFlight = startTask({
+        return startTrackedTask(() =>
+          startTask({
             prompt,
             ...(name ? { name } : {}),
             model: input.model,
             ...(engine ? { engine } : {}),
-          });
-          startedTask = await startTaskInFlight;
-        } finally {
-          startTaskInFlight = null;
+          }),
+        );
+      },
+    });
+  }
+
+  const workflows = input.workflows;
+  if (workflows && workflows.catalog.length > 0) {
+    const workflowIds = workflows.catalog.map((workflow) => workflow.id);
+    tools[START_WORKFLOW_TOOL_NAME] = tool<StartWorkflowToolInput, StartWorkflowToolOutput>({
+      description: START_WORKFLOW_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<StartWorkflowToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          workflowId: {
+            type: "string",
+            enum: workflowIds,
+            description: START_WORKFLOW_ID_DESCRIPTION,
+          },
+          prompt: {
+            type: "string",
+            description: START_WORKFLOW_PROMPT_DESCRIPTION,
+          },
+        },
+        required: ["workflowId", "prompt"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        const workflowId = typeof args.workflowId === "string" ? args.workflowId.trim() : "";
+        if (!workflows.catalog.some((workflow) => workflow.id === workflowId)) {
+          throw new Error(
+            `"${workflowId}" is not an active workflow in this workspace. Use an exact id from <workflow_source>.`,
+          );
         }
-        return toStartTaskToolOutput(startedTask, "queued");
+        const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+        if (!prompt) {
+          throw new Error("start_workflow prompt is required.");
+        }
+        return startTrackedTask(() => workflows.execute({ workflowId, prompt }));
       },
     });
   }

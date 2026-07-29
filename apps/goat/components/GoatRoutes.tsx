@@ -487,12 +487,7 @@ export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[720px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
-          <BackLink href="/" label="Tasks" />
-          {run ? <TaskDetailPanel initialRun={run} /> : <TaskRouteSkeleton label="Loading task" />}
-        </div>
-      </div>
+      {run ? <TaskDetailPanel initialRun={run} /> : <TaskRouteSkeleton label="Loading task" />}
     </main>
   );
 }

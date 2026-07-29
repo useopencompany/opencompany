@@ -1,11 +1,7 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
-import type {
-  GoatHarnessEngine,
-  GoatHarnessSpec,
-  GoatTask,
-  GoatTaskToolName,
-} from "@opencompany/db/goat-schema";
+import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
+import type { GoatHarnessEngine, GoatTask, GoatTaskToolName } from "@opencompany/db/goat-schema";
 import { goatTasks, goatUsers } from "@opencompany/db/goat-schema";
 import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
 import { and, eq } from "drizzle-orm";
@@ -103,8 +99,14 @@ export function compileGoatWorkflowHarnessSpec(input: {
   tools: GoatTaskToolName[];
   selection: GoatWorkflowEngineSelection;
   description: string;
-}): GoatHarnessSpec {
-  const skillBlocks = input.skills.map((skill) => serializeGoatBrainSkillMarkdown(skill));
+}): GoatWorkflowHarnessSpec {
+  // OpenCompany task runs receive workflow skills as prompt blocks. Codex gets
+  // the immutable snapshots below as native skill inputs instead, avoiding a
+  // second copy of the full instructions in the text prompt.
+  const skillBlocks =
+    input.selection.engine === "opencompany"
+      ? input.skills.map((skill) => serializeGoatBrainSkillMarkdown(skill))
+      : [];
   const systemPrompt = [
     `You are executing the user-authored workflow "${input.workflow.name}" as a background task.`,
     ...(input.workflow.description ? [`Workflow description: ${input.workflow.description}`] : []),
@@ -143,6 +145,16 @@ export function compileGoatWorkflowHarnessSpec(input: {
       id: input.workflow.id,
       workspaceId: input.workspaceId,
       skillIds: input.skills.map((skill) => skill.id),
+      ...(input.selection.engine === "codex"
+        ? {
+            skillSnapshots: input.skills.map((skill) => ({
+              id: skill.id,
+              name: skill.name,
+              description: skill.description,
+              instructions: skill.instructions,
+            })),
+          }
+        : {}),
     },
   };
 }

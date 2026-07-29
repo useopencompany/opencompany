@@ -12,7 +12,7 @@ Goat has four LLM paths:
 
 1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
    This agent answers directly, reads connected integrations, calls `goat_brain`, captures with
-   `save_to_brain`, or calls `start_task`.
+   `save_to_brain`, calls `start_task`, or explicitly starts an active workspace workflow.
 2. **Background task:** a durable row in `goat.tasks` claimed by `apps/runner`, planned into a
    `goat.harness.v1` config, then executed by an AI SDK model loop in the runner process.
 3. **Local Codex chat:** a Goat chat engine mode that queues commands for a user-run local bridge.
@@ -46,6 +46,9 @@ Browser
            and capture focused findings with save_to_brain
         OR, when Background tasks is enabled in Preferences, call start_task
           insert goat.tasks row
+          POST /internal/goat/tasks/:taskId/run
+        OR, when the user explicitly asks to run an active workflow, call start_workflow
+          compile the workflow and insert its goat.tasks row
           POST /internal/goat/tasks/:taskId/run
   GoatSurface #workflow submit
     POST /api/workflows
@@ -106,6 +109,16 @@ Selecting a workflow with `#<id>` changes the composer action from **Send messag
 task**. Submission posts directly to `/api/workflows`, starts the durable task in the
 background, and leaves the current Home or chat surface in place. It does not call the foreground
 chat model or persist user/assistant chat messages for the workflow launch.
+Skills mentioned by the workflow are resolved and snapshotted when the task is created. OpenCompany
+task runs receive those snapshots as workflow prompt blocks; Codex task runs materialize them under
+`.agents/skills` and invoke them as native app-server skill inputs, matching explicit skill mentions
+in main Codex chat.
+
+Workflow runs remain grouped under **Tasks**, but task detail renders the same `GoatSurface` as a
+normal chat. The task's `goat.task_messages` rows are projected into chat bubbles, and the standard
+reply composer appends a new user turn, moves a terminal task back to `queued`, and resumes its
+runner with the prior user/assistant conversation. The normal chat stop control cancels an active
+task turn.
 
 Normal main chat can also discover workspace skills progressively. When the catalog is non-empty, the
 system prompt advertises only that a skill source exists; `list_skills` searches safe id, name, and
@@ -152,10 +165,10 @@ any other session data.
 3. Requires `VERCEL_AI_GATEWAY_API_KEY`.
 4. Finds or creates an open `goat.chat_sessions` row.
 5. Persists the user message in `goat.chat_messages`.
-6. Resolves active-Brain skills, connected-integration actions, and the workspace's managed
-   social/lead capabilities, then creates the chat tool context for `goat_brain`, `save_to_brain`,
-   `list_skills`/`use_skill`, `list_actions`/`use_action`, optional `start_task`, and optional
-   `web_fetch`/`web_search`.
+6. Resolves active-Brain skills, active workspace workflows, connected-integration actions, and the
+   workspace's managed social/lead capabilities, then creates the chat tool context for `goat_brain`,
+   `save_to_brain`, `list_skills`/`use_skill`, `list_actions`/`use_action`, optional `start_task`,
+   `start_workflow`, and optional `web_fetch`/`web_search`.
 7. Calls `streamText` through Vercel AI Gateway with the session's model.
 8. Streams the UI message response back to the browser.
 9. Persists the assistant message, debug trace, and optional task link on finish.
@@ -187,16 +200,17 @@ creation, and explicitly requested sends, with an explicit account required when
 connected. Draft creation and sending have separate per-account permissions: creating drafts defaults
 to **On** because it leaves the email for manual review and sending, while sending defaults to
 confirmation-gated **Ask**. Google Calendar exposes a bounded event-list read, while Google Drive
-exposes file search, live Google Doc reads, and exact text replacement in Google Docs. Linear exposes
+exposes file search, live Google Doc reads, new Doc creation with optional initial text, and exact
+text replacement in Google Docs. Linear exposes
 a curated catalog for reading issues and workspace context, creating and updating issues, and adding
 comments. Attio exposes bounded fuzzy search across standard people, companies, and deals; list,
 field, and membership discovery; and bounded list reads with saved-view filters, explicit filters,
-sorting, and pagination. Explicitly requested Gmail sends, Google Doc edits, Attio record and
-list-entry updates, Linear writes, and Google Calendar event creation require confirmation by default
-and can be configured under Integrations. Latitude's live MCP catalog is mapped into the same action
-surface: tools annotated read-only default to On, while mutations and tools without that annotation
-default to Ask. An explicit account or workspace is required when several are connected. Stripe
-exposes read-only workspace
+sorting, and pagination. Explicitly requested Gmail sends, Google Doc creation or edits, Attio record
+and list-entry updates, Linear writes, and Google Calendar event creation require confirmation by
+default and can be configured under Integrations. Latitude's live MCP catalog is mapped into the same
+action surface: tools annotated read-only default to On, while mutations and tools without that
+annotation default to Ask. An explicit account or workspace is required when several are connected.
+Stripe exposes read-only workspace
 metrics for balance activity by period, current balances, subscription health with estimated MRR,
 and open receivables. Stripe uses an encrypted restricted API key and is excluded from automatic
 Brain-fill surveying because those financial metrics are live operational state. Disconnected or
@@ -247,10 +261,13 @@ main chat even though ordinary deeper or multi-source work routes to a backgroun
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The
 database flag defaults off, so the standard Goat experience is chat plus Brain without background
-task spawning. Explicitly starting a `#workflow` opts the user into background tasks so its durable
-run can be claimed. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
+task spawning. Explicitly starting a workflow through `#workflow` or the main chat's
+`start_workflow` tool opts the user into background tasks so its durable run can be claimed.
+`start_workflow` is advertised only when active workflows exist and is reserved for explicit
+requests; name and description matches alone do not authorize a run. Tool descriptions live in
+`packages/goat-agent/src/prompts/tool-descriptions.ts`.
 
-The default chat model is `anthropic/claude-sonnet-5`. New tasks store the chat-selected model at
+The default chat model is `moonshotai/kimi-k3`. New tasks store the chat-selected model at
 creation time, then the runner planner chooses the task execution model from its allowed model
 catalog and writes that planned model back to the task row.
 
@@ -261,7 +278,7 @@ Important runtime settings:
 - `abortSignal: request.signal`
 
 The chat path is a normal request/response stream. It has no runner lease or durable retry. The
-durable boundary starts only when `start_task` creates a task row.
+durable boundary starts when `start_task` or `start_workflow` creates a task row.
 
 Brain skills are user-authored, session-scoped context. Normal chat replays each immutable skill
 snapshot on the historical user message that activated it, so the full instructions remain in model
@@ -681,10 +698,11 @@ Task state is deliberately simple:
 queued -> running/planning -> running/running
   -> succeeded/completed
   -> failed/failed
+terminal task + user reply -> queued
 ```
 
-The UI maps this to Tasks rows and task detail pages. Goat task pages subscribe to TanStack DB
-collections backed by Electric shapes for `goat.tasks`, `goat.task_messages`, and
+The UI maps this to Tasks rows and chat-style task detail pages. Goat task pages subscribe to
+TanStack DB collections backed by Electric shapes for `goat.tasks`, `goat.task_messages`, and
 `goat.task_events`, scoped by `user_workos_id`. The active chat also subscribes to scoped
 `goat.chat_messages` rows so persisted task completion notifications appear without a manual
 refresh.

@@ -31,6 +31,7 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import {
   executeGoatTask,
+  type GoatTaskConversationMessage,
   type GoatTaskExecutorInput,
   type GoatTaskExecutorResult,
 } from "./goat-harness";
@@ -90,6 +91,11 @@ export type GoatTaskStore = {
     now: Date;
     messageId: string;
   }): Promise<string | null>;
+  listConversationMessages(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+  }): Promise<GoatTaskConversationMessage[]>;
   createMessage(input: {
     id: string;
     leaseId: string;
@@ -342,6 +348,22 @@ export function createDbGoatTaskStore(): GoatTaskStore {
         LIMIT 1
       `);
       return rowsFromExecute<{ id: string }>(result)[0]?.id ?? null;
+    },
+
+    async listConversationMessages(input) {
+      const result = await getDb().execute(sql`
+        SELECT message.role, message.content
+        FROM goat.task_messages AS message
+        INNER JOIN goat.tasks AS task ON task.id = message.task_id
+        WHERE task.id = ${input.id}
+          AND task.lease_id = ${input.leaseId}
+          AND task.lease_owner = ${input.leaseOwner}
+          AND task.status = 'running'
+          AND message.status = 'completed'
+          AND message.role IN ('user', 'assistant')
+        ORDER BY message.created_at ASC, message.id ASC
+      `);
+      return rowsFromExecute<GoatTaskConversationMessage>(result);
     },
 
     async createMessage(input) {
@@ -1032,6 +1054,12 @@ export async function runClaimedGoatTask(input: {
       return;
     }
 
+    const conversationMessages = await store.listConversationMessages({
+      id: input.task.id,
+      leaseId,
+      leaseOwner,
+    });
+
     const githubRepositories = input.task.harnessSpec.tools.some((tool) =>
       tool.startsWith("github_"),
     )
@@ -1042,6 +1070,7 @@ export async function runClaimedGoatTask(input: {
       executor({
         task: input.task,
         env: input.env,
+        conversationMessages,
         plannerContext: { githubRepositories },
         signal: abortController.signal,
         sink: {

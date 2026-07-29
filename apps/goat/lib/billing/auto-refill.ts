@@ -1,3 +1,4 @@
+import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
   claimGoatAutoRefill,
@@ -8,6 +9,7 @@ import {
 } from "@opencompany/db/goat-billing";
 import {
   getGoatCreditBalanceUsdMicros,
+  goatUsdMicrosToCents,
   recordGoatAutoRefillCredit,
 } from "@opencompany/db/goat-credits";
 import Stripe from "stripe";
@@ -63,11 +65,19 @@ export async function runGoatAutoRefill(workspaceId: string) {
       });
       return { charged: false as const, reason: "not_succeeded" as const };
     }
-    await recordGoatAutoRefillCredit({
+    const credit = await recordGoatAutoRefillCredit({
       workspaceId,
       amountCents: claim.amountCents,
       paymentIntentId: intent.id,
     });
+    if (credit.ok) {
+      await captureGoatServerEvent("billing_topup_completed", workspaceId, {
+        workspace_id: workspaceId,
+        topup_type: "auto_refill",
+        amount_cents: claim.amountCents,
+        balance_cents: goatUsdMicrosToCents(credit.balanceUsdMicros),
+      });
+    }
     await settleGoatAutoRefill({ workspaceId });
     // Resume any balance-paused ingestion immediately instead of waiting for
     // the hourly reconcile sweep.

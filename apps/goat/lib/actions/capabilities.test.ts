@@ -16,7 +16,7 @@ describe("GOAT_PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
-  it("registers Drive reads on by default and document edits behind ask", () => {
+  it("registers Drive reads on by default and document writes behind ask", () => {
     expect(GOAT_PROVIDER_CAPABILITIES.google_drive).toEqual([
       expect.objectContaining({ id: "read", defaultMode: "on" }),
       expect.objectContaining({ id: "write", defaultMode: "ask" }),
@@ -102,7 +102,7 @@ describe("mode helpers", () => {
     expect(providerCapability("gmail", "draft")?.label).toBe("Create drafts");
     expect(providerCapability("gmail", "write")?.label).toBe("Send emails");
     expect(providerCapability("google_drive", "read")?.label).toBe("Find & read files");
-    expect(providerCapability("google_drive", "write")?.label).toBe("Edit Google Docs");
+    expect(providerCapability("google_drive", "write")?.label).toBe("Create & edit Docs");
     expect(providerCapability("google_calendar", "write")?.label).toBe("Add events");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
     expect(providerCapability("slack", "read")?.label).toBe("Read Slack");

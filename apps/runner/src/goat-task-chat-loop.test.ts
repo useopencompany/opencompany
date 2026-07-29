@@ -191,6 +191,43 @@ describe("runGoatTaskChatLoop", () => {
     expect(result.outcomeComment).toBe("Needs review.");
   });
 
+  it("replays prior task turns and treats the latest reply as the active user message", async () => {
+    aiMock.streamText.mockReturnValueOnce({
+      fullStream: streamParts({
+        type: "finish-step",
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      }),
+      text: Promise.resolve("Afternoon is clear too."),
+    });
+
+    await runGoatTaskChatLoop({
+      env: env(),
+      task: task(),
+      harnessSpec,
+      conversationMessages: [
+        { role: "user", content: "Original stored task prompt." },
+        { role: "assistant", content: "Morning is clear." },
+        { role: "user", content: "Check the afternoon too." },
+      ],
+      signal: new AbortController().signal,
+      sink: createSink(),
+      assistantMessageId: "assistant_msg_2",
+    });
+
+    expect(aiMock.streamText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          { role: "user", content: "Do the thing." },
+          { role: "assistant", content: "Morning is clear." },
+          { role: "user", content: "Check the afternoon too." },
+        ],
+      }),
+    );
+    expect(toolContextMock.createOpenCompanyChatToolContext).toHaveBeenCalledWith(
+      expect.objectContaining({ latestUserMessage: "Check the afternoon too." }),
+    );
+  });
+
   it("binds workflow tools to the workspace persisted in the harness spec", async () => {
     workspaceMock.getGoatWorkspaceRole.mockResolvedValue("member");
     workspaceMock.listAccessibleGoatBrains.mockResolvedValue([

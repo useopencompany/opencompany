@@ -20,6 +20,8 @@ import {
   SCHEDULE_TASK_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
+  START_WORKFLOW_TOOL_NAME,
+  START_WORKFLOW_TOOL_PART_TYPE,
   type StartTaskToolOutput,
   USE_ACTION_TOOL_NAME,
   USE_SKILL_TOOL_NAME,
@@ -159,7 +161,7 @@ function collectRenderItems(
       continue;
     }
     if (
-      part.type === START_TASK_TOOL_PART_TYPE &&
+      (part.type === START_TASK_TOOL_PART_TYPE || part.type === START_WORKFLOW_TOOL_PART_TYPE) &&
       part.state === "output-available" &&
       isStartTaskToolOutput(part.output)
     ) {
@@ -179,7 +181,17 @@ function collectRenderItems(
 
   flushText(`${keyPrefix}text-end`);
 
-  return items;
+  return deduplicateTaskItems(items);
+}
+
+function deduplicateTaskItems(items: AssistantRenderItem[]) {
+  const seenTaskIds = new Set<string>();
+  return items.filter((item) => {
+    if (item.type !== "task") return true;
+    if (seenTaskIds.has(item.task.id)) return false;
+    seenTaskIds.add(item.task.id);
+    return true;
+  });
 }
 
 export function metadataTaskCard(
@@ -338,6 +350,7 @@ export function toolLabel(name: string) {
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) return "Web search";
   if (name === CODEX_SUBAGENT_TOOL_NAME) return "Subagent";
   if (name === START_TASK_TOOL_NAME) return "Task";
+  if (name === START_WORKFLOW_TOOL_NAME) return "Workflow";
   if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
   if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
@@ -390,7 +403,7 @@ export function toolDetail(
     return goatBrainToolDetail(part, status);
   }
 
-  if (name === START_TASK_TOOL_NAME) {
+  if (name === START_TASK_TOOL_NAME || name === START_WORKFLOW_TOOL_NAME) {
     return startTaskToolDetail(part);
   }
 
@@ -596,8 +609,9 @@ function goatBrainToolDetail(
 function startTaskToolDetail(part: Record<string, unknown>) {
   if (isRecord(part.input)) {
     const name = typeof part.input.name === "string" ? part.input.name : null;
+    const workflowId = typeof part.input.workflowId === "string" ? part.input.workflowId : null;
     const prompt = typeof part.input.prompt === "string" ? part.input.prompt : null;
-    return truncateToolPreview(name ?? prompt);
+    return truncateToolPreview(name ?? workflowId ?? prompt);
   }
   return formatToolInput(part.input);
 }

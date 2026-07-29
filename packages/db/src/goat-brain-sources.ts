@@ -129,7 +129,7 @@ export async function upsertGoatBrainSource(input: {
   config?: Record<string, unknown>;
   now?: Date;
   db?: DbLike;
-}): Promise<{ id: string }> {
+}): Promise<{ id: string; created: boolean }> {
   if (!input.db) {
     const db = getDb();
     return await runAtomically(db, (tx) => upsertGoatBrainSource({ ...input, db: tx }));
@@ -137,28 +137,41 @@ export async function upsertGoatBrainSource(input: {
   const db = input.db;
   const now = input.now ?? new Date();
 
-  const [row] = await db
+  const values = {
+    id: newGoatBrainSourceId(),
+    brainId: input.brainRef,
+    provider: input.provider,
+    integrationId: input.integrationId,
+    userWorkosId: input.userWorkosId,
+    createdByWorkosId: input.createdByWorkosId,
+    enabled: input.enabled,
+    ...(input.config !== undefined ? { config: input.config } : {}),
+    updatedAt: now,
+  };
+  const [inserted] = await db
     .insert(goatBrainSources)
-    .values({
-      id: newGoatBrainSourceId(),
-      brainId: input.brainRef,
-      provider: input.provider,
-      integrationId: input.integrationId,
-      userWorkosId: input.userWorkosId,
-      createdByWorkosId: input.createdByWorkosId,
-      enabled: input.enabled,
-      ...(input.config !== undefined ? { config: input.config } : {}),
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
+    .values(values)
+    .onConflictDoNothing({
       target: [goatBrainSources.brainId, goatBrainSources.integrationId],
-      set: {
-        enabled: input.enabled,
-        ...(input.config !== undefined ? { config: input.config } : {}),
-        updatedAt: now,
-      },
     })
     .returning({ id: goatBrainSources.id });
+
+  const [row] = inserted
+    ? [inserted]
+    : await db
+        .update(goatBrainSources)
+        .set({
+          enabled: input.enabled,
+          ...(input.config !== undefined ? { config: input.config } : {}),
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(goatBrainSources.brainId, input.brainRef),
+            eq(goatBrainSources.integrationId, input.integrationId),
+          ),
+        )
+        .returning({ id: goatBrainSources.id });
 
   if (!row) throw new Error("Could not persist Goat Brain source.");
   if (!input.enabled) {
@@ -169,7 +182,7 @@ export async function upsertGoatBrainSource(input: {
       db,
     });
   }
-  return { id: row.id };
+  return { id: row.id, created: Boolean(inserted) };
 }
 
 export async function setGoatBrainSourceEnabled(input: {

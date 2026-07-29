@@ -6,6 +6,7 @@ import {
   rotateGoatCodexCredential,
 } from "@opencompany/db/goat-codex-auth";
 import { goatIntegrationResources, goatIntegrations } from "@opencompany/db/goat-schema";
+import { type GoatBrainSkill, serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
 import type { LanguageModelUsage } from "ai";
 import { and, eq, ne, sql } from "drizzle-orm";
 import {
@@ -39,9 +40,11 @@ import {
   killSandbox,
   type SandboxHandle,
 } from "./sandbox";
+import { materializeCodexSkillSnapshotsForSession } from "./skills";
 
 const CODEX_HOME = "/home/user/.opencompany-goat/codex-home";
 const CODEX_WORKDIR = "/home/user/opencompany-goat/codex";
+const CODEX_SKILLS_WORK_ROOT = "/home/user/.opencompany-goat/codex-task-skills";
 const GOAT_CODEX_SKILL_FINGERPRINT = "goat-codex-v1";
 const CODEX_DIRECT_BASE_URL = "https://api.openai.com/v1";
 const CODEX_DIRECT_API_KEY_ENV_VAR = "CODEX_API_KEY";
@@ -70,6 +73,7 @@ export async function runGoatCodexTask(input: {
   messageId: string;
   prompt: string;
   systemPrompt: string;
+  skills?: GoatBrainSkill[];
   model: string;
   existingEngineSessionId?: string | null;
   repository?: string | null;
@@ -126,6 +130,7 @@ async function runGoatCodexWithAuth(input: {
   messageId: string;
   prompt: string;
   systemPrompt: string;
+  skills?: GoatBrainSkill[];
   model: string;
   existingEngineSessionId?: string | null;
   repository: GoatCodexRepositoryAccess | null;
@@ -192,6 +197,7 @@ async function runGoatCodexCommand(input: {
   messageId: string;
   prompt: string;
   systemPrompt: string;
+  skills?: GoatBrainSkill[];
   model: string;
   existingEngineSessionId?: string | null;
   repository: GoatCodexRepositoryAccess | null;
@@ -251,6 +257,28 @@ async function runGoatCodexCommand(input: {
     );
   }
 
+  const skillSnapshots = (input.skills ?? []).map((skill) => ({
+    id: skill.id,
+    files: [
+      {
+        path: "SKILL.md",
+        content: serializeGoatBrainSkillMarkdown(skill),
+      },
+    ],
+  }));
+  const materializedSkills =
+    skillSnapshots.length > 0
+      ? await materializeCodexSkillSnapshotsForSession({
+          sandbox: input.sandbox,
+          codexWorkRoot: CODEX_SKILLS_WORK_ROOT,
+          skills: skillSnapshots,
+        })
+      : null;
+  const invokedSkills = skillSnapshots.map((skill) => ({
+    name: skill.id,
+    path: `${CODEX_SKILLS_WORK_ROOT}/.agents/skills/${skill.id}/SKILL.md`,
+  }));
+
   const redact = createKnownSecretRedactor([
     input.auth.kind === "api" ? input.auth.apiKeyValue : null,
     serializedAuthJson,
@@ -276,7 +304,8 @@ async function runGoatCodexCommand(input: {
     sandbox: input.sandbox,
     codexWorkRoot: CODEX_WORKDIR,
     codexHome: CODEX_HOME,
-    skillFingerprint: GOAT_CODEX_SKILL_FINGERPRINT,
+    skillFingerprint: materializedSkills?.fingerprint ?? GOAT_CODEX_SKILL_FINGERPRINT,
+    skills: invokedSkills,
     task,
     model: input.model,
     reasoningEffort: input.reasoningEffort ?? "high",

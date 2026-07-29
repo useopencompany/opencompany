@@ -11,12 +11,30 @@ export type GoatAnalyticsEventPropertiesByName = {
     workspace_id: string;
     session_id: string;
     is_first_message: boolean;
+    engine: "opencompany" | "local_codex" | "codex" | "claude_code";
     model: string;
     message_length: number;
   };
   integration_added: {
     workspace_id?: string;
     provider: string;
+  };
+  brain_source_added: {
+    workspace_id: string;
+    brain_id: string;
+    provider: string;
+  };
+  brain_ingestion_completed: {
+    workspace_id: string;
+    brain_id: string;
+    provider: string;
+    source_type: string;
+  };
+  billing_topup_completed: {
+    workspace_id: string;
+    topup_type: "manual" | "auto_refill";
+    amount_cents: number;
+    balance_cents: number;
   };
 };
 
@@ -45,12 +63,34 @@ export const goatAnalyticsEvents = {
   chat_message_sent: {
     name: "chat_message_sent",
     description: "A user sent a message in Goat main chat.",
-    safeProperties: ["workspace_id", "session_id", "is_first_message", "model", "message_length"],
+    safeProperties: [
+      "workspace_id",
+      "session_id",
+      "is_first_message",
+      "engine",
+      "model",
+      "message_length",
+    ],
   },
   integration_added: {
     name: "integration_added",
     description: "A user connected an integration.",
     safeProperties: ["workspace_id", "provider"],
+  },
+  brain_source_added: {
+    name: "brain_source_added",
+    description: "A user added an enabled integration source to a Brain.",
+    safeProperties: ["workspace_id", "brain_id", "provider"],
+  },
+  brain_ingestion_completed: {
+    name: "brain_ingestion_completed",
+    description: "A full Brain ingestion job completed successfully.",
+    safeProperties: ["workspace_id", "brain_id", "provider", "source_type"],
+  },
+  billing_topup_completed: {
+    name: "billing_topup_completed",
+    description: "A manual or automatic billing top-up credited a Goat workspace.",
+    safeProperties: ["workspace_id", "topup_type", "amount_cents", "balance_cents"],
   },
 } as const satisfies {
   [EventName in GoatAnalyticsEventName]: GoatAnalyticsEventDefinition<EventName>;
