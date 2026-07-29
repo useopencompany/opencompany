@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@opencompany/ui/components/select";
 import { toast } from "@opencompany/ui/components/sonner";
-import { Archive, ListTodo, Loader2 } from "lucide-react";
+import { Archive, ArrowUpRight, ListTodo, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useMemo, useState, useTransition } from "react";
 import { taskRowToView, useGoatAppData } from "@/components/GoatAppDataProvider";
@@ -341,9 +341,19 @@ function TaskBoardSheet({
     : null;
   const terminal = TERMINAL_TASK_STATUSES.has(task.status);
   const { summary, error: summaryError } = useGoatTaskSummary(task.id, terminal);
-  const workflowName = task.workflowId
-    ? (workflowNames[task.workflowId] ?? `#${task.workflowId}`)
-    : null;
+  const durationLabel = !terminal
+    ? null
+    : summary?.durationMs !== null && summary?.durationMs !== undefined
+      ? formatGoatTaskDurationMs(summary.durationMs)
+      : summary
+        ? formatGoatTaskDuration(task.createdAt, task.updatedAt)
+        : null;
+  const activityEntries = buildTaskActivityEntries({
+    task,
+    terminal,
+    sourceLabel: taskSourceLabel(task, workflowNames),
+    durationLabel,
+  });
 
   const archiveTask = () => {
     if (!terminal) return;
@@ -359,7 +369,7 @@ function TaskBoardSheet({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="left-auto right-0 top-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-y-auto rounded-none border-y-0 border-r-0 bg-surface p-0 text-ink data-[ending-style]:translate-x-full data-[ending-style]:scale-100 data-[ending-style]:opacity-100 data-[starting-style]:translate-x-full data-[starting-style]:scale-100 data-[starting-style]:opacity-100 sm:w-[420px]">
+      <DialogContent className="left-auto right-0 top-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-y-auto rounded-none border-y-0 border-r-0 bg-surface p-0 text-ink data-[ending-style]:translate-x-full data-[ending-style]:scale-100 data-[ending-style]:opacity-100 data-[starting-style]:translate-x-full data-[starting-style]:scale-100 data-[starting-style]:opacity-100 sm:w-[720px] sm:max-w-[calc(100vw-2rem)]">
         <header className="border-b border-border px-5 pb-4 pt-5 pr-12">
           <DialogTitle className="text-[17px] font-semibold leading-6 text-ink">
             {toGoatTaskTitle(task.name)}
@@ -369,83 +379,127 @@ function TaskBoardSheet({
           </DialogDescription>
         </header>
 
-        <div className="flex flex-col gap-6 px-5 py-5">
-          <section className="flex flex-col gap-3">
-            <DetailLabel>Status</DetailLabel>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-muted px-2 py-1 text-[11.5px] font-medium text-ink">
-                <TaskStatusDot task={task} />
-                {GOAT_STATUS_COPY[task.status]}
-              </span>
-              {task.reportedOutcome ? (
-                <span className="rounded-full bg-surface-muted px-2 py-1 text-[11.5px] font-medium text-ink-muted">
-                  Outcome: {task.reportedOutcome === "needs_attention" ? "Needs attention" : "Done"}
-                </span>
-              ) : null}
-            </div>
-            {task.outcomeComment?.trim() ? (
-              <p className="text-[12.5px] leading-5 text-ink-subtle">
-                {task.outcomeComment.trim()}
-              </p>
-            ) : null}
-          </section>
+        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+          <div className="min-w-0 flex-1 overflow-y-auto px-5 py-5">
+            <p className="whitespace-pre-wrap break-words text-[13px] leading-6 text-ink-muted">
+              {task.prompt}
+            </p>
 
-          {workflowName ? (
-            <DetailRow label="Workflow">
-              <span className="break-words text-ink">{workflowName}</span>
-            </DetailRow>
-          ) : null}
-
-          {task.scheduleId ? (
-            <section className="flex flex-col gap-2">
-              <DetailLabel>Schedule</DetailLabel>
-              <div className="rounded-lg border border-border bg-canvas px-3 py-2.5">
-                <div className="text-[12.5px] font-medium leading-5 text-ink">
-                  {schedule?.name ?? "Scheduled routine"}
+            {task.scheduleId ? (
+              <section className="mt-4 flex flex-col gap-2">
+                <DetailLabel>Schedule</DetailLabel>
+                <div className="rounded-lg border border-border bg-canvas px-3 py-2.5">
+                  <div className="text-[12.5px] font-medium leading-5 text-ink">
+                    {schedule?.name ?? "Scheduled routine"}
+                  </div>
+                  {schedule ? (
+                    <div className="mt-0.5 font-mono text-[10.5px] leading-4 text-ink-subtle">
+                      {schedule.cron} · {schedule.timezone}
+                    </div>
+                  ) : null}
+                  {task.scheduledFor ? (
+                    <div className="mt-1 text-[11.5px] leading-4 text-ink-subtle">
+                      Scheduled for {formatGoatStartedAt(task.scheduledFor)}
+                    </div>
+                  ) : null}
                 </div>
-                {schedule ? (
-                  <div className="mt-0.5 font-mono text-[10.5px] leading-4 text-ink-subtle">
-                    {schedule.cron} · {schedule.timezone}
-                  </div>
-                ) : null}
-                {task.scheduledFor ? (
-                  <div className="mt-1 text-[11.5px] leading-4 text-ink-subtle">
-                    Scheduled for {formatGoatStartedAt(task.scheduledFor)}
-                  </div>
-                ) : null}
-              </div>
+              </section>
+            ) : null}
+
+            <section className="mt-6 flex flex-col gap-3">
+              <DetailLabel>Activity</DetailLabel>
+              <ol className="flex flex-col">
+                {activityEntries.map((entry, index) => (
+                  <li key={entry.id} className="relative flex gap-3 pb-5 last:pb-0">
+                    {index < activityEntries.length - 1 ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute bottom-0 left-[2.5px] top-3 w-px bg-border"
+                      />
+                    ) : null}
+                    <span
+                      aria-hidden="true"
+                      className={`relative z-10 mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
+                        entry.tone === "danger" ? "bg-danger" : "bg-ink/30"
+                      }`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-x-1.5 text-[12.5px] leading-5">
+                        <span
+                          className={`font-medium ${entry.tone === "danger" ? "text-danger" : "text-ink"}`}
+                        >
+                          {entry.label}
+                        </span>
+                        {entry.meta ? (
+                          <>
+                            <span aria-hidden="true" className="text-ink-subtle">
+                              ·
+                            </span>
+                            <span className="text-ink-subtle">{entry.meta}</span>
+                          </>
+                        ) : null}
+                        <span aria-hidden="true" className="text-ink-subtle">
+                          ·
+                        </span>
+                        <span className="text-ink-subtle">
+                          {formatGoatStartedAt(entry.timestamp)}
+                        </span>
+                      </div>
+                      {entry.body ? (
+                        <div
+                          className={`mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border px-3 py-2 text-[12px] leading-5 ${
+                            entry.tone === "danger"
+                              ? "border-danger-border bg-danger-bg text-danger"
+                              : "border-border bg-canvas text-ink-muted"
+                          }`}
+                        >
+                          {entry.body}
+                        </div>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ol>
             </section>
-          ) : null}
+          </div>
 
-          <TaskTextBlock label="Prompt" text={task.prompt} />
-          {task.result?.trim() ? <TaskTextBlock label="Result" text={task.result} /> : null}
-          {task.error?.trim() ? (
-            <TaskTextBlock label="Error" text={task.error} tone="danger" />
-          ) : null}
+          <aside className="w-full shrink-0 overflow-y-auto border-t border-border px-5 py-4 sm:w-[220px] sm:border-l sm:border-t-0 sm:px-4 sm:py-5">
+            <DetailLabel>Properties</DetailLabel>
+            <div className="mt-3 flex flex-col gap-4">
+              <PropertyRow label="Status">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-muted px-2 py-1 text-[11.5px] font-medium text-ink">
+                  <TaskStatusDot task={task} />
+                  {GOAT_STATUS_COPY[task.status]}
+                </span>
+                {task.reportedOutcome === "needs_attention" ? (
+                  <span className="mt-1.5 inline-flex w-fit rounded-full bg-warning-bg px-2 py-0.5 text-[10.5px] font-medium text-warning">
+                    Needs attention
+                  </span>
+                ) : null}
+              </PropertyRow>
 
-          <section className="grid grid-cols-2 gap-3">
-            <Metric label="Cost">
-              {summaryError
-                ? "Failed to load"
-                : summary?.cost.hasRecordedCosts
-                  ? formatUsdMicros(summary.cost.totalCostUsdMicros)
-                  : "—"}
-            </Metric>
-            <Metric label="Duration">
-              {!terminal
-                ? "—"
-                : summary?.durationMs !== null && summary?.durationMs !== undefined
-                  ? formatGoatTaskDurationMs(summary.durationMs)
-                  : summary
-                    ? formatGoatTaskDuration(task.createdAt, task.updatedAt)
-                    : "—"}
-            </Metric>
-          </section>
+              <PropertyRow label="Task run">
+                <Link
+                  href={`/tasks/${encodeURIComponent(task.displayId)}/run`}
+                  prefetch
+                  className="inline-flex items-center gap-1 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:text-ink-muted"
+                >
+                  View run
+                  <ArrowUpRight size={12} strokeWidth={1.75} />
+                </Link>
+              </PropertyRow>
 
-          <section className="flex flex-col gap-2">
-            <DetailRow label="Created">{formatGoatStartedAt(task.createdAt)}</DetailRow>
-            <DetailRow label="Updated">{formatGoatStartedAt(task.updatedAt)}</DetailRow>
-          </section>
+              <PropertyRow label="Cost">
+                <span className="text-[12.5px] font-medium tabular-nums text-ink">
+                  {summaryError
+                    ? "Failed to load"
+                    : summary?.cost.hasRecordedCosts
+                      ? formatUsdMicros(summary.cost.totalCostUsdMicros)
+                      : "—"}
+                </span>
+              </PropertyRow>
+            </div>
+          </aside>
         </div>
 
         <footer className="mt-auto flex items-center justify-between gap-3 border-t border-border px-5 py-4">
@@ -475,31 +529,6 @@ function TaskBoardSheet({
   );
 }
 
-function TaskTextBlock({
-  label,
-  text,
-  tone = "default",
-}: {
-  label: string;
-  text: string;
-  tone?: "default" | "danger";
-}) {
-  return (
-    <section className="flex flex-col gap-2">
-      <DetailLabel>{label}</DetailLabel>
-      <div
-        className={`max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border px-3 py-2.5 text-[12px] leading-5 ${
-          tone === "danger"
-            ? "border-danger-border bg-danger-bg text-danger"
-            : "border-border bg-canvas text-ink-muted"
-        }`}
-      >
-        {text}
-      </div>
-    </section>
-  );
-}
-
 function DetailLabel({ children }: { children: string }) {
   return (
     <h3 className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
@@ -508,24 +537,88 @@ function DetailLabel({ children }: { children: string }) {
   );
 }
 
-function DetailRow({ label, children }: { label: string; children: ReactNode }) {
+function PropertyRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 text-[12px] leading-5">
-      <span className="shrink-0 text-ink-subtle">{label}</span>
-      <span className="min-w-0 text-right text-ink-muted">{children}</span>
+    <div className="flex flex-col items-start gap-1.5">
+      <span className="text-[11px] text-ink-subtle">{label}</span>
+      {children}
     </div>
   );
 }
 
-function Metric({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="rounded-lg border border-border bg-canvas px-3 py-2.5">
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.05em] text-ink-subtle">
-        {label}
-      </div>
-      <div className="mt-1 text-[13px] font-medium tabular-nums text-ink">{children}</div>
-    </div>
-  );
+type TaskActivityEntry = {
+  id: string;
+  label: string;
+  tone?: "default" | "danger";
+  timestamp: string;
+  meta?: string | undefined;
+  body?: string | undefined;
+};
+
+function buildTaskActivityEntries({
+  task,
+  terminal,
+  sourceLabel,
+  durationLabel,
+}: {
+  task: GoatTaskView;
+  terminal: boolean;
+  sourceLabel: string;
+  durationLabel: string | null;
+}): TaskActivityEntry[] {
+  const entries: TaskActivityEntry[] = [
+    { id: "created", label: "Created", meta: sourceLabel, timestamp: task.createdAt },
+  ];
+
+  if (!terminal) {
+    if (task.updatedAt !== task.createdAt) {
+      entries.push({
+        id: "status",
+        label: GOAT_STATUS_COPY[task.status],
+        timestamp: task.updatedAt,
+      });
+    }
+    return entries;
+  }
+
+  if (task.status === "succeeded") {
+    entries.push({
+      id: "completed",
+      label:
+        task.reportedOutcome === "needs_attention" ? "Completed — needs attention" : "Completed",
+      timestamp: task.updatedAt,
+      meta: durationLabel ?? undefined,
+      body: task.result?.trim() || undefined,
+    });
+  } else if (task.status === "failed") {
+    entries.push({
+      id: "failed",
+      label: "Failed",
+      tone: "danger",
+      timestamp: task.updatedAt,
+      meta: durationLabel ?? undefined,
+      body: task.error?.trim() || undefined,
+    });
+  } else if (task.status === "canceled") {
+    entries.push({
+      id: "canceled",
+      label: "Canceled",
+      timestamp: task.updatedAt,
+      meta: durationLabel ?? undefined,
+      body: task.error?.trim() || undefined,
+    });
+  }
+
+  if (task.outcomeComment?.trim()) {
+    entries.push({
+      id: "note",
+      label: "Note",
+      timestamp: task.updatedAt,
+      body: task.outcomeComment.trim(),
+    });
+  }
+
+  return entries;
 }
 
 function TaskStatusDot({ task, className = "" }: { task: GoatTaskView; className?: string }) {
