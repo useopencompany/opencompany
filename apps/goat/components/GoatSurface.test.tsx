@@ -30,6 +30,7 @@ const chatMock = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   stop: vi.fn(),
   finishSessionId: null as string | null,
+  startWithSessionId: null as ((sessionId: string, model: string) => void) | null,
   finishWithSessionId: null as ((sessionId: string, model?: string) => void) | null,
   sendError: null as Error | null,
   preparedRequestBodies: [] as unknown[],
@@ -127,6 +128,17 @@ vi.mock("@ai-sdk/react", async () => {
       );
       chatMock.lastResume = options.resume ?? false;
       const transportRef = React.useRef(options.transport);
+      chatMock.startWithSessionId = (sessionId: string, model: string) => {
+        setMessages((current) => [
+          ...current,
+          {
+            id: "assistant_1",
+            role: "assistant",
+            metadata: { sessionId, model },
+            parts: [],
+          },
+        ]);
+      };
       chatMock.finishWithSessionId = (sessionId: string, model?: string) => {
         options.onFinish?.({
           message: {
@@ -208,6 +220,7 @@ describe("GoatSurface chat streaming UI", () => {
     pathnameMock.value = "/";
     chatMock.status = "ready";
     chatMock.finishSessionId = null;
+    chatMock.startWithSessionId = null;
     chatMock.finishWithSessionId = null;
     chatMock.sendError = null;
     chatMock.sendMessage.mockReset();
@@ -298,6 +311,7 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     expect(screen.getByText("Morning workflow")).toBeInTheDocument();
+    expect(screen.getByText("Task")).toBeInTheDocument();
     expect(screen.getByText("The workflow is complete.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /share/i })).not.toBeInTheDocument();
 
@@ -440,6 +454,9 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
+    expect(screen.getByText("Chat")).toBeInTheDocument();
+    expect(screen.queryByText("Task")).not.toBeInTheDocument();
+
     await user.type(screen.getByPlaceholderText("Reply..."), "Unsent draft");
     act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
 
@@ -510,7 +527,7 @@ describe("GoatSurface chat streaming UI", () => {
     });
   });
 
-  it("shows Auto only behind its flag and adopts the routed model after the first turn", async () => {
+  it("shows Auto only behind its flag and adopts the routed model when the first turn starts", async () => {
     const user = userEvent.setup();
 
     const { rerender } = render(
@@ -535,9 +552,11 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({ model: "auto" });
     const sessionId = (chatMock.preparedRequestBodies[0] as { newSessionId: string }).newSessionId;
-    act(() => chatMock.finishWithSessionId?.(sessionId, "moonshotai/kimi-k2.6"));
+    act(() => chatMock.startWithSessionId?.(sessionId, "moonshotai/kimi-k2.6"));
 
-    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K2.6");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K2.6"),
+    );
     expect(screen.getByRole("button", { name: "Model" })).toBeDisabled();
   });
 

@@ -332,6 +332,38 @@ describe("createGoatCodexChatMessage", () => {
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
 
+  it("supersedes every queued scheduled wakeup when a real user message arrives", async () => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          engine: "claude_code",
+          model: "claude-opus-4-8",
+          status: "idle",
+        },
+        chat_sessions: {
+          model: "anthropic/claude-opus-4.8",
+        },
+      },
+    ]);
+
+    await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      sessionId: "goat_chat_1",
+      prompt: "I have an update",
+      engine: "claude_code",
+    });
+
+    const statement = sqlText(mocks.execute.mock.calls[0]?.[0]);
+    expect(statement).toContain("cancelled_wakeups AS");
+    expect(statement).toContain("status = 'interrupted'");
+    expect(statement).toContain("run_after IS NOT NULL");
+    expect(statement).toContain("'aborted'");
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    expect(sqlText(mocks.execute.mock.calls[1]?.[0])).toContain("run_after IS NOT NULL");
+  });
+
   it("persists newly activated native skill snapshots with queued turns", async () => {
     mocks.selectResults.push([
       {
@@ -485,6 +517,7 @@ describe("closeGoatCodexChatSessionForChat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateResults.length = 0;
+    mocks.execute.mockResolvedValue({ rows: [] });
     mocks.update.mockImplementation(() => createUpdateBuilder(mocks.updateResults.shift() ?? []));
     mocks.killSandbox.mockResolvedValue(true);
   });
@@ -498,6 +531,8 @@ describe("closeGoatCodexChatSessionForChat", () => {
     });
 
     expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(sqlText(mocks.execute.mock.calls[0]?.[0])).toContain("cancelled_wakeups AS");
+    expect(sqlText(mocks.execute.mock.calls[0]?.[0])).toContain("run_after IS NOT NULL");
     expect(mocks.killSandbox).toHaveBeenCalledWith("sbx_123");
   });
 

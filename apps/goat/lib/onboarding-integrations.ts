@@ -32,6 +32,7 @@ export function goatIntegrationConnectionError(provider: string | null, reason: 
     case "linear_denied":
     case "hubspot_denied":
     case "latitude_denied":
+    case "posthog_denied":
       return `${name} authorization was cancelled.`;
     case "missing_code":
     case "missing_installation_id":
@@ -77,6 +78,8 @@ function providerName(provider: string | null) {
       return "Stripe";
     case "latitude":
       return "Latitude";
+    case "posthog":
+      return "PostHog";
     default:
       return "This source";
   }

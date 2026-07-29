@@ -87,6 +87,20 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  posthog: [
+    {
+      id: "read",
+      label: "Read analytics",
+      description: "Explore dashboards, saved insights, events, properties, and query results.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Create insights",
+      description: "Save new product insights, optionally adding them to a dashboard.",
+      defaultMode: "ask",
+    },
+  ],
   slack: [
     {
       id: "read",

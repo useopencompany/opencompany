@@ -82,6 +82,26 @@ describe("claimNextGoatCodexChatTurn", () => {
     expect(statement).toContain("UPDATE goat.codex_chat_sessions AS session");
     expect(statement).toContain("SET status = 'starting'");
   });
+
+  it("only lets due delayed turns participate in claiming and per-session FIFO", async () => {
+    await expect(
+      claimNextGoatCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
+    ).resolves.toMatchObject({
+      id: "goat_codex_chat_turn_1",
+      runAfter: new Date("2026-07-10T08:59:00.000Z"),
+    });
+
+    const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
+    expect(statement.match(/run_after IS NULL OR (?:turn|earlier)\.run_after <=/g)).toHaveLength(2);
+  });
+
+  it("returns no work when the database skips a not-yet-due turn", async () => {
+    dbMock.execute.mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      claimNextGoatCodexChatTurn({ leaseOwner: "runner_1", leaseTtlMs: 300_000 }),
+    ).resolves.toBeNull();
+  });
 });
 
 describe("resolveGoatCodexChatWorkerConcurrency", () => {
@@ -242,6 +262,29 @@ describe("runClaimedTurn", () => {
     );
   });
 
+  it("does not count a scheduled delay as queue wait", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T09:00:05.000Z"));
+    try {
+      await runClaimedTurn(
+        turn({
+          attempts: 1,
+          createdAt: new Date("2026-07-10T08:00:00.000Z"),
+          runAfter: new Date("2026-07-10T09:00:00.000Z"),
+        }),
+        env(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(telemetry.recordGoatHistogram).toHaveBeenCalledWith(
+      "goat.codex_chat.queue_wait_ms",
+      5_000,
+      expect.any(Object),
+    );
+  });
+
   it("recovers a persisted engine turn across the migration rollout", async () => {
     await runClaimedTurn(turn({ attempts: 2, engineRecoveryRequired: false }), env());
 
@@ -360,6 +403,7 @@ function claimedTurnRow() {
     lease_id: "lease_1",
     lease_owner: "runner_1",
     lease_expires_at: "2026-07-10T09:05:00.000Z",
+    run_after: "2026-07-10T08:59:00.000Z",
     completed_at: null,
     created_at: "2026-07-10T09:00:00.000Z",
     updated_at: "2026-07-10T09:00:00.000Z",
@@ -406,6 +450,7 @@ function turn(overrides: Partial<GoatCodexChatTurn> = {}): GoatCodexChatTurn {
     leaseId: "lease_1",
     leaseOwner: "runner_1",
     leaseExpiresAt: new Date("2026-07-10T09:05:00.000Z"),
+    runAfter: null,
     completedAt: null,
     createdAt: now,
     updatedAt: now,

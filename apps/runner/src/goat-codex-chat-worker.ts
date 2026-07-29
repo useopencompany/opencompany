@@ -54,6 +54,7 @@ type ClaimedTurnRow = {
   lease_id: string | null;
   lease_owner: string | null;
   lease_expires_at: Date | string | null;
+  run_after: Date | string | null;
   completed_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
@@ -78,6 +79,7 @@ export async function claimNextGoatCodexChatTurn(input: {
           turn.status = 'queued'
           OR (turn.status = 'running' AND turn.lease_expires_at < ${now})
         )
+        AND (turn.run_after IS NULL OR turn.run_after <= ${now})
         AND NOT EXISTS (
           SELECT 1 FROM goat.codex_chat_turns AS sibling
           WHERE sibling.codex_chat_session_id = turn.codex_chat_session_id
@@ -90,6 +92,7 @@ export async function claimNextGoatCodexChatTurn(input: {
           WHERE earlier.codex_chat_session_id = turn.codex_chat_session_id
             AND earlier.id <> turn.id
             AND earlier.status = 'queued'
+            AND (earlier.run_after IS NULL OR earlier.run_after <= ${now})
             AND (
               earlier.created_at < turn.created_at
               OR (earlier.created_at = turn.created_at AND earlier.id < turn.id)
@@ -172,9 +175,11 @@ export async function runClaimedTurn(
   if (!session) throw new Error(`Codex chat session ${turn.codexChatSessionId} not found.`);
 
   if (turn.attempts === 1) {
+    const queueStartedAt =
+      turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt;
     recordGoatHistogram(
       GOAT_METRICS.codexChatQueueWaitMs,
-      Math.max(0, Date.now() - turn.createdAt.getTime()),
+      Math.max(0, Date.now() - queueStartedAt.getTime()),
       {
         "goat.engine": session.engine,
         "goat.model": session.model,
@@ -642,6 +647,7 @@ function turnFromRow(row: ClaimedTurnRow): GoatCodexChatTurn {
     leaseId: row.lease_id,
     leaseOwner: row.lease_owner,
     leaseExpiresAt: dateFromRow(row.lease_expires_at),
+    runAfter: dateFromRow(row.run_after),
     completedAt: dateFromRow(row.completed_at),
     createdAt: dateFromRow(row.created_at) ?? new Date(),
     updatedAt: dateFromRow(row.updated_at) ?? new Date(),

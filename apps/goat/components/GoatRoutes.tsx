@@ -46,7 +46,6 @@ import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { StripeIntegrationSetup } from "@/components/StripeIntegrationSetup";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
-import { TaskRunPanel } from "@/components/TaskRunPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import type { GoatBrainSnapshot } from "@/lib/brain";
 import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
@@ -498,50 +497,6 @@ export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       {run ? <TaskDetailPanel initialRun={run} /> : <TaskRouteSkeleton label="Loading task" />}
-    </main>
-  );
-}
-
-export function GoatTaskRunRoute({ taskId }: { taskId: string }) {
-  const run = useTaskRun(taskId);
-  const { featureFlags } = useGoatAppData();
-  const detailHref = run ? `/tasks/${encodeURIComponent(run.task.displayId)}` : "/";
-
-  if (!featureFlags.taskSpawning) return <TasksWorkflowsDisabledRoute />;
-
-  return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-5">
-        <div className="flex w-full max-w-[880px] flex-col gap-8 pb-24 pt-14 sm:pt-20">
-          <nav className="flex flex-wrap items-center gap-2">
-            <BackLink href={detailHref} label="Task detail" />
-            <Link
-              href="/"
-              prefetch
-              className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-            >
-              Tasks
-            </Link>
-          </nav>
-
-          {run ? (
-            <>
-              <header className="flex flex-col gap-3">
-                <div className="flex flex-col gap-2">
-                  <h1 className="text-[34px] font-semibold leading-tight tracking-normal text-ink">
-                    {run.task.name}
-                  </h1>
-                  <div className="text-[12.5px] leading-5 text-ink-muted">Task run</div>
-                </div>
-              </header>
-
-              <TaskRunPanel initialRun={run} />
-            </>
-          ) : (
-            <TaskRouteSkeleton label="Loading run" />
-          )}
-        </div>
-      </div>
     </main>
   );
 }
