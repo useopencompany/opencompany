@@ -76,12 +76,13 @@ export function GoatTasksBoardRoute({ workflowNames }: { workflowNames: Record<s
   const { featureFlags, taskRows, tasksReady } = useGoatAppData();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<GoatTaskTimeRange>("7d");
+  const [nowMs] = useState(() => Date.now());
   const { activeTasks, columns } = useMemo(() => {
     const liveTasks = taskRows.map(taskRowToView);
     const nonArchived = liveTasks
       .filter((task) => !task.archivedAt)
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    const cutoffMs = timeRange === "all" ? null : Date.now() - TASK_TIME_RANGE_MS[timeRange];
+    const cutoffMs = timeRange === "all" ? null : nowMs - TASK_TIME_RANGE_MS[timeRange];
     const grouped: Record<GoatTaskBoardColumn, GoatTaskView[]> = {
       in_progress: [],
       in_review: [],
@@ -100,7 +101,7 @@ export function GoatTasksBoardRoute({ workflowNames }: { workflowNames: Record<s
       grouped[column].push(task);
     }
     return { activeTasks: nonArchived, columns: grouped };
-  }, [taskRows, timeRange]);
+  }, [taskRows, timeRange, nowMs]);
   const selectedTask = selectedTaskId
     ? (activeTasks.find((task) => task.id === selectedTaskId) ?? null)
     : null;
