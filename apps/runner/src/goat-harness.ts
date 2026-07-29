@@ -224,8 +224,7 @@ export async function executeGoatWorkflowStepsTask(
     });
   }
   const conversation = [...(input.conversationMessages ?? [])];
-  const lastCompletedStepOutcome =
-    input.task.harnessSpec.workflow?.lastCompletedStepOutcome;
+  const lastCompletedStepOutcome = input.task.harnessSpec.workflow?.lastCompletedStepOutcome;
   if (
     requestedCompletedStepCount === steps.length ||
     (requestedCompletedStepCount > 0 &&
