@@ -106,6 +106,17 @@ describe("resolveGoogleDriveActions", () => {
       permissionMode: "on",
       params: { required: ["query"] },
     });
+    expect(findAction(catalog, "google_drive.create_document")).toMatchObject({
+      capability: "write",
+      permissionMode: "ask",
+      permission: {
+        provider: "google_drive",
+        capabilityId: "write",
+        label: "Create & edit Docs",
+        integrationIds: ["gint_drive_louis@example.com"],
+      },
+      params: { required: ["title"] },
+    });
     expect(findAction(catalog, "google_drive.replace_document_text")).toMatchObject({
       capability: "write",
       permissionMode: "ask",
@@ -589,6 +600,34 @@ describe("google_drive.create_document", () => {
       GoatActionPermissionError,
     );
     expect(mocks.googleApiCall).not.toHaveBeenCalled();
+  });
+
+  it("requires and routes an explicit account when several can create Docs", async () => {
+    mocks.dbRows = [connectedRow("a@example.com"), connectedRow("b@example.com")];
+    mocks.googleApiCall.mockResolvedValue({
+      documentId: "doc_b",
+      title: "Plan",
+    });
+    const action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.create_document",
+    );
+
+    expect(action.params.required).toEqual(["title", "account"]);
+    await expect(action.execute({ title: "Plan" }, CONTEXT)).rejects.toThrow(
+      "Multiple Google Drive accounts",
+    );
+    await action.execute({ title: "Plan", account: "b@example.com" }, CONTEXT);
+
+    expect(mocks.googleApiCall).toHaveBeenCalledWith(
+      expect.objectContaining({ integrationId: "gint_drive_b@example.com" }),
+      "POST",
+      new URL("https://docs.googleapis.com/v1/documents"),
+      {
+        signal: CONTEXT.signal,
+        body: { title: "Plan" },
+      },
+    );
   });
 });
 
