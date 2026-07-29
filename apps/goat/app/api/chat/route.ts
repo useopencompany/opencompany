@@ -315,7 +315,7 @@ export async function POST(request: Request): Promise<Response> {
           return [];
         })
       : Promise.resolve([]),
-    !requestedEngine
+    !requestedEngine && context.user.taskSpawningEnabled
       ? listGoatWorkflowCatalog(context.workspace.id).catch((error) => {
           logger.warn("Goat chat workflow catalog resolution failed", {
             event: "goat.chat_workflow_catalog_resolution_failed",

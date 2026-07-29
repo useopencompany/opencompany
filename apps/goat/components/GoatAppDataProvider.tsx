@@ -91,6 +91,7 @@ export type GoatAppInitialData = {
 
 type GoatAppData = GoatAppInitialData & {
   taskRows: GoatTaskRow[];
+  tasksReady: boolean;
   // Closed (archived) chats, surfaced in the command palette so the user can
   // search and restore them. Derived from the same live query as recentChats —
   // closed rows already stream to the client, they're just hidden elsewhere.
@@ -157,8 +158,8 @@ function GoatAppLiveDataSubscriptions({
   onData: (value: GoatAppData) => void;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
-  // Tasks are not gated on the task-spawning flag: firing a workflow enables
-  // the flag server-side, and its task must appear in the sidebar immediately.
+  // Keep task rows live even while the feature is disabled so every surface has
+  // current data as soon as the user enables it. The UI gates on the feature flag.
   const { data: taskRows, isLoading: tasksLoading } = useLiveQuery(
     (q) => q.from({ task: collections.tasks }),
     [collections],
@@ -327,9 +328,19 @@ function GoatAppLiveDataSubscriptions({
       recentChats,
       archivedChats,
       integrations,
-      taskRows: initialData.featureFlags.taskSpawning ? ((taskRows ?? []) as GoatTaskRow[]) : [],
+      taskRows: (taskRows ?? []) as GoatTaskRow[],
+      tasksReady: !tasksLoading || (taskRows?.length ?? 0) > 0,
     }),
-    [archivedChats, initialData, integrations, recentChats, schedules, taskRows, tasks],
+    [
+      archivedChats,
+      initialData,
+      integrations,
+      recentChats,
+      schedules,
+      taskRows,
+      tasks,
+      tasksLoading,
+    ],
   );
 
   // TanStack DB currently has no server snapshot for useLiveQuery. Keep its
@@ -355,11 +366,12 @@ function initialGoatAppData(initialData: GoatAppInitialData): GoatAppData {
   return {
     ...initialData,
     taskRows: [],
+    tasksReady: false,
     archivedChats: [],
   };
 }
 
-function taskRowToView(row: GoatTaskRow): GoatTaskView {
+export function taskRowToView(row: GoatTaskRow): GoatTaskView {
   return {
     id: row.id,
     displayId: row.display_id,
