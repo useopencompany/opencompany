@@ -235,6 +235,12 @@ its leftmost label. Keep the preview hostname on the runner service; it must not
 directly at E2B. `RUNNER_PREVIEW_PROTOCOL` defaults to `https`; override it only for an HTTP preview
 environment such as local development.
 
+Use a separate registrable domain (or eTLD+1) for the preview hostname than the one Goat's own
+cookies are scoped to. Preview content runs in a `sandbox="allow-same-origin allow-scripts"` iframe,
+so if the preview domain shares a registrable domain with Goat and Goat sets broadly-scoped
+(`Domain=.example.com`) cookies, the untrusted preview could read the user's Goat session cookies.
+Hosting previews on an unrelated domain keeps that boundary intact.
+
 ### Neon
 
 Use a dedicated production branch/database and set the pooled connection string as `DATABASE_URL` in
