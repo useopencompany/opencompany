@@ -242,6 +242,41 @@ describe("GoatTasksBoardRoute", () => {
     expect(within(doneColumn).getAllByRole("link")).toHaveLength(GOAT_TASK_BOARD_COLUMN_CAP + 2);
   });
 
+  it("defaults to the last 7 days and hides older terminal tasks until widened", async () => {
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({
+        id: "recent-done",
+        name: "Recently completed task",
+        status: "succeeded",
+        updated_at: "2026-07-28T09:00:00.000Z",
+      }),
+      taskRow({
+        id: "old-done",
+        name: "Old completed task",
+        status: "succeeded",
+        updated_at: "2026-06-01T09:00:00.000Z",
+      }),
+      taskRow({
+        id: "old-running",
+        name: "Stalled in-progress task",
+        status: "running",
+        updated_at: "2026-06-01T09:00:00.000Z",
+      }),
+    ];
+
+    render(<GoatTasksBoardRoute workflowNames={{}} />);
+
+    expect(screen.getByText("Recently completed task")).toBeInTheDocument();
+    expect(screen.queryByText("Old completed task")).not.toBeInTheDocument();
+    expect(screen.getByText("Stalled in-progress task")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: "Filter tasks by time range" }));
+    await user.click(await screen.findByRole("option", { name: "All time" }));
+
+    expect(await screen.findByText("Old completed task")).toBeInTheDocument();
+  });
+
   it("shows the Tasks & Workflows beta gate when disabled", () => {
     appDataMock.featureFlags.taskSpawning = false;
 
