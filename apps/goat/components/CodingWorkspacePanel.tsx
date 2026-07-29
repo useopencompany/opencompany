@@ -35,6 +35,7 @@ const MAX_PANEL_WIDTH = 760;
 const DEFAULT_PANEL_WIDTH = 440;
 const PANEL_WIDTH_KEY = "goat-coding-workspace-panel-width-v1";
 const PANEL_WIDTH_EVENT = "goat-coding-workspace-panel-width";
+const WORKSPACE_CONNECTION_TIMEOUT_MS = 150_000;
 
 type WorkspaceTab = "preview" | "terminal";
 type ConnectionState = "dormant" | "waking" | "ready" | "disconnected" | "error";
@@ -79,28 +80,39 @@ export function CodingWorkspacePanel({
   const [previewRevision, setPreviewRevision] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const connectAttemptRef = useRef(0);
+  const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectedPortRef = useRef<number | null>(null);
   const panelRef = useRef<HTMLElement>(null);
   const collapsedOpenButtonRef = useRef<HTMLButtonElement>(null);
   const restoreFocusOnCollapseRef = useRef(false);
 
+  const clearConnectionTimeout = useCallback(() => {
+    if (connectionTimeoutRef.current === null) return;
+    clearTimeout(connectionTimeoutRef.current);
+    connectionTimeoutRef.current = null;
+  }, []);
+
   const disconnect = useCallback(() => {
     connectAttemptRef.current += 1;
+    clearConnectionTimeout();
     socketRef.current?.close();
     socketRef.current = null;
     setSocket(null);
-  }, []);
+  }, [clearConnectionTimeout]);
 
   useEffect(
     () => () => {
       connectAttemptRef.current += 1;
+      clearConnectionTimeout();
       socketRef.current?.close();
       socketRef.current = null;
     },
-    [],
+    [clearConnectionTimeout],
   );
 
   const requestPreview = useCallback((port: number, targetSocket = socketRef.current) => {
     if (targetSocket?.readyState !== WebSocket.OPEN) return;
+    selectedPortRef.current = port;
     setSelectedPort(port);
     setPreviewUrl(null);
     targetSocket.send(JSON.stringify({ type: "preview.open", port }));
@@ -110,6 +122,7 @@ export function CodingWorkspacePanel({
     async (tab: WorkspaceTab) => {
       const attempt = connectAttemptRef.current + 1;
       connectAttemptRef.current = attempt;
+      clearConnectionTimeout();
       socketRef.current?.close();
       socketRef.current = null;
       setSocket(null);
@@ -135,8 +148,30 @@ export function CodingWorkspacePanel({
         ]);
         nextSocket.binaryType = "arraybuffer";
         socketRef.current = nextSocket;
+        const connectionTimeout = setTimeout(() => {
+          if (connectAttemptRef.current !== attempt || nextSocket.readyState === WebSocket.OPEN) {
+            return;
+          }
+          if (connectionTimeoutRef.current === connectionTimeout) {
+            connectionTimeoutRef.current = null;
+          }
+          connectAttemptRef.current += 1;
+          socketRef.current = null;
+          nextSocket.close();
+          setSocket(null);
+          setConnectionState("error");
+          setError("The workspace took too long to connect. Try again.");
+        }, WORKSPACE_CONNECTION_TIMEOUT_MS);
+        connectionTimeoutRef.current = connectionTimeout;
+        const clearAttemptTimeout = () => {
+          clearTimeout(connectionTimeout);
+          if (connectionTimeoutRef.current === connectionTimeout) {
+            connectionTimeoutRef.current = null;
+          }
+        };
         nextSocket.addEventListener("open", () => {
           if (connectAttemptRef.current !== attempt) return nextSocket.close();
+          clearAttemptTimeout();
           setSocket(nextSocket);
           setConnectionState("ready");
           if (tab === "preview") nextSocket.send(JSON.stringify({ type: "ports.refresh" }));
@@ -150,8 +185,11 @@ export function CodingWorkspacePanel({
             setPortsLoaded(true);
             setError(null);
             const strongest = message.ports.find((port) => port.isHttp);
-            if (strongest) requestPreview(strongest.port, nextSocket);
+            if (strongest && selectedPortRef.current === null) {
+              requestPreview(strongest.port, nextSocket);
+            }
           } else if (message.type === "preview") {
+            selectedPortRef.current = message.port;
             setSelectedPort(message.port);
             setPreviewUrl(message.url);
             setPreviewRevision(0);
@@ -164,6 +202,7 @@ export function CodingWorkspacePanel({
           }
         });
         nextSocket.addEventListener("close", () => {
+          clearAttemptTimeout();
           if (connectAttemptRef.current === attempt) {
             setSocket(null);
             setConnectionState((current) => (current === "waking" ? "error" : "disconnected"));
@@ -176,13 +215,14 @@ export function CodingWorkspacePanel({
         });
       } catch (connectError) {
         if (connectAttemptRef.current !== attempt) return;
+        clearConnectionTimeout();
         setConnectionState("error");
         setError(
           connectError instanceof Error ? connectError.message : "Unable to open this workspace.",
         );
       }
     },
-    [chatSessionId, requestPreview],
+    [chatSessionId, clearConnectionTimeout, requestPreview],
   );
 
   const selectTab = (tab: WorkspaceTab) => {
@@ -656,7 +696,8 @@ function parseControlMessage(raw: string): RuntimeMessage | null {
     if (
       value.type === "preview" &&
       typeof value.port === "number" &&
-      typeof value.url === "string"
+      typeof value.url === "string" &&
+      isHttpUrl(value.url)
     ) {
       return { type: "preview", port: value.port, url: value.url };
     }
@@ -669,6 +710,15 @@ function parseControlMessage(raw: string): RuntimeMessage | null {
     return null;
   } catch {
     return null;
+  }
+}
+
+function isHttpUrl(value: string) {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
   }
 }
 

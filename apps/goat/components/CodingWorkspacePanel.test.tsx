@@ -60,6 +60,7 @@ describe("CodingWorkspacePanel", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -189,6 +190,7 @@ describe("CodingWorkspacePanel", () => {
         type: "ports",
         ports: [
           { port: 5_173, isHttp: true, score: 1_099 },
+          { port: 8_080, isHttp: true, score: 1_000 },
           { port: 3_000, isHttp: false, score: 100 },
         ],
       }),
@@ -203,8 +205,85 @@ describe("CodingWorkspacePanel", () => {
     await user.click(go);
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "preview.open", port: 8_080 }));
 
+    act(() =>
+      socket.receive({
+        type: "preview",
+        port: 8_080,
+        url: "https://preview.example.com",
+      }),
+    );
+    socket.send.mockClear();
+    await user.click(screen.getByRole("button", { name: "Refresh ports" }));
+    act(() =>
+      socket.receive({
+        type: "ports",
+        ports: [
+          { port: 5_173, isHttp: true, score: 1_099 },
+          { port: 8_080, isHttp: true, score: 1_000 },
+        ],
+      }),
+    );
+    expect(screen.getByRole("combobox", { name: "Preview port" })).toHaveValue("8080");
+    expect(socket.send).not.toHaveBeenCalledWith(
+      JSON.stringify({ type: "preview.open", port: 5_173 }),
+    );
+
     act(() => socket.close());
     expect(screen.getByText("Connection lost")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("rejects preview URLs with non-HTTP schemes", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodingWorkspacePanel
+        chatSessionId="chat_1"
+        sandboxStatus="running"
+        engineLabel="Codex"
+        engineIsRunning={false}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Open preview" }));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    const socket = MockWebSocket.instances[0]!;
+
+    act(() => socket.open());
+    act(() =>
+      socket.receive({
+        type: "preview",
+        port: 5_173,
+        url: "javascript:alert(document.domain)",
+      }),
+    );
+
+    expect(screen.queryByTitle("Codex preview on port 5173")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open preview in new tab" })).toBeDisabled();
+  });
+
+  it("offers a retry when the workspace WebSocket handshake stalls", async () => {
+    vi.useFakeTimers();
+    render(
+      <CodingWorkspacePanel
+        chatSessionId="chat_1"
+        sandboxStatus="sleeping"
+        engineLabel="Codex"
+        engineIsRunning={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open preview" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150_000);
+    });
+
+    expect(screen.getByText("Workspace unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByText("The workspace took too long to connect. Try again."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 });

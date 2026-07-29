@@ -52,6 +52,9 @@ services:
       # wildcard (*.hostname) as Render custom domains, then point wildcard DNS at Render.
       - key: RUNNER_PREVIEW_BASE_DOMAIN
         sync: false
+      # Optional preview URL scheme override. Hosted previews default to HTTPS.
+      - key: RUNNER_PREVIEW_PROTOCOL
+        sync: false
       - key: E2B_API_KEY
         sync: false
       - key: VERCEL_AI_GATEWAY_API_KEY

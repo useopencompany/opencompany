@@ -202,7 +202,8 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `RUNNER_INTERNAL_TOKEN`
 - `RUNNER_STREAM_TOKEN_SECRET`
 - `RUNNER_ALLOWED_ORIGINS`
-- `RUNNER_PREVIEW_BASE_DOMAIN`
+- `RUNNER_PREVIEW_BASE_DOMAIN` (optional; required for Goat cloud coding workspace previews)
+- `RUNNER_PREVIEW_PROTOCOL` (optional; defaults to `https`)
 - `DURABLE_STREAMS_URL`
 - `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`
@@ -231,7 +232,8 @@ For Goat persistent cloud coding workspace previews (Codex and Claude Code), set
 `*.preview.goat.example.com` to the Render runner's custom domains and configure the corresponding
 DNS records. The wildcard is required because each preview uses a short-lived signed capability as
 its leftmost label. Keep the preview hostname on the runner service; it must not point at Goat or
-directly at E2B.
+directly at E2B. `RUNNER_PREVIEW_PROTOCOL` defaults to `https`; override it only for an HTTP preview
+environment such as local development.
 
 ### Neon
 

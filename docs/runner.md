@@ -269,6 +269,7 @@ Required environment variables:
 - `RUNNER_ALLOWED_ORIGINS` (`http://localhost:3000` locally)
 - `RUNNER_PREVIEW_BASE_DOMAIN` (optional; `preview.localhost:3040` locally, or a wildcard domain
   routed to the runner in hosted environments)
+- `RUNNER_PREVIEW_PROTOCOL` (optional; `http` or `https`, defaults to `https`)
 - `DURABLE_STREAMS_URL`
 - `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`
