@@ -28,6 +28,7 @@ const MAX_FILE_ID_CHARS = 512;
 const MAX_FILE_NAME_CHARS = 300;
 const MAX_ACCOUNT_CHARS = 400;
 const MAX_DOCUMENT_TEXT_CHARS = 40_000;
+const MAX_INITIAL_DOCUMENT_TEXT_CHARS = 100_000;
 const MAX_FIND_TEXT_CHARS = 20_000;
 const MAX_REPLACEMENT_TEXT_CHARS = 100_000;
 
@@ -56,7 +57,10 @@ export async function resolveGoogleDriveActions(
     actions.push(searchFilesAction(readConnections), getDocumentAction(readConnections));
   }
   if (writeConnections.length > 0) {
-    actions.push(replaceDocumentTextAction(writeConnections));
+    actions.push(
+      createDocumentAction(writeConnections),
+      replaceDocumentTextAction(writeConnections),
+    );
   }
 
   const labelConnections = readConnections.length > 0 ? readConnections : writeConnections;
@@ -68,10 +72,10 @@ export async function resolveGoogleDriveActions(
         : `Google Drive (${labelConnections.length} accounts)`,
     description:
       readConnections.length > 0 && writeConnections.length > 0
-        ? "Find Drive files, read Google Docs, and replace text in Google Docs."
+        ? "Find Drive files, read Google Docs, and create or edit Google Docs."
         : readConnections.length > 0
           ? "Find Drive files and read Google Docs."
-          : "Replace text in Google Docs.",
+          : "Create new Google Docs and replace text in Google Docs.",
     actions,
   };
 }
@@ -258,6 +262,116 @@ function getDocumentAction(connections: readonly GoogleDriveConnection[]): Resol
   };
 }
 
+function createDocumentAction(connections: readonly GoogleDriveConnection[]): ResolvedGoatAction {
+  const accountParam = accountParamSchema(connections);
+  const required = ["title"];
+  if (connections.length > 1) required.push("account");
+
+  return {
+    id: "google_drive.create_document",
+    provider: "google_drive",
+    capability: "write",
+    ...permissionAnnotation("write", connections),
+    description:
+      "Create a new Google Doc in the connected account's My Drive, optionally with initial plain text. Use only when the user explicitly asked to create a document. Returns the document id and link.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      required,
+      properties: {
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_FILE_NAME_CHARS,
+          description: "Title for the new Google Doc.",
+        },
+        text: {
+          type: "string",
+          maxLength: MAX_INITIAL_DOCUMENT_TEXT_CHARS,
+          description: "Optional initial plain text for the document.",
+        },
+        ...accountParam,
+      },
+    },
+    execute: async (params, context) => {
+      const hasMultipleAccounts = connections.length > 1;
+      assertOnlyKnownParams(params, ["title", "text"], hasMultipleAccounts);
+      const account = hasMultipleAccounts
+        ? boundedOptionalString(params, "account", MAX_ACCOUNT_CHARS)
+        : undefined;
+      const connection = resolveConnection(connections, account);
+      const title = requiredBoundedString(params, "title", MAX_FILE_NAME_CHARS);
+      const text = boundedOptionalExactText(params, "text", MAX_INITIAL_DOCUMENT_TEXT_CHARS);
+
+      await assertWriteStillEnabled(context.userWorkosId, connection);
+
+      const created = asRecord(
+        await googleDriveApiCall(context, connection, "POST", new URL(GOOGLE_DOCS_URL), { title }),
+      );
+      const documentId = readString(created.documentId, MAX_FILE_ID_CHARS);
+      if (!documentId)
+        throw new Error("Google Docs did not return an id for the created document.");
+      const document = {
+        id: documentId,
+        title:
+          truncateText(readString(created.title, 32_768) ?? title, MAX_FILE_NAME_CHARS) ?? title,
+        mimeType: GOOGLE_DOC_MIME_TYPE,
+        sourceRef: driveFileSourceRef(documentId),
+        url: googleDocUrl(documentId),
+      };
+
+      if (text === undefined) {
+        return {
+          account: connectionLabel(connection),
+          integrationId: connection.integrationId,
+          document,
+        };
+      }
+
+      try {
+        const updated = asRecord(
+          await googleDriveApiCall(
+            context,
+            connection,
+            "POST",
+            new URL(`${GOOGLE_DOCS_URL}/${encodeURIComponent(documentId)}:batchUpdate`),
+            {
+              requests: [
+                {
+                  insertText: {
+                    endOfSegmentLocation: {},
+                    text,
+                  },
+                },
+              ],
+            },
+          ),
+        );
+        if (readString(updated.documentId, MAX_FILE_ID_CHARS) !== documentId) {
+          throw new Error("Google Docs did not confirm the initial text update.");
+        }
+        const revisionId = readString(asRecord(updated.writeControl).requiredRevisionId, 2_048);
+        return {
+          account: connectionLabel(connection),
+          integrationId: connection.integrationId,
+          document: {
+            ...document,
+            initialTextAdded: true,
+            ...(revisionId ? { revisionId } : {}),
+          },
+        };
+      } catch (error) {
+        return {
+          account: connectionLabel(connection),
+          integrationId: connection.integrationId,
+          document: { ...document, initialTextAdded: false },
+          warning: `The document was created, but its initial text could not be added. The blank document remains at ${document.url}. ${boundedErrorMessage(error)}`,
+        };
+      }
+    },
+  };
+}
+
 function replaceDocumentTextAction(
   connections: readonly GoogleDriveConnection[],
 ): ResolvedGoatAction {
@@ -405,13 +519,13 @@ async function assertWriteStillEnabled(userWorkosId: string, connection: GoogleD
     throw new GoatActionAuthError(
       "auth_expired",
       "google_drive",
-      `Reconnect Google Drive for ${connectionLabel(connection)} in Settings → Integrations to enable Google Docs editing, then retry.`,
+      `Reconnect Google Drive for ${connectionLabel(connection)} in Settings → Integrations to enable creating and editing Google Docs, then retry.`,
     );
   }
   if (effectiveCapabilityMode("google_drive", "write", row.capabilityModes) === "off") {
     throw new GoatActionPermissionError(
       "google_drive",
-      `Editing Google Docs is turned off for ${connectionLabel(connection)}. It can be changed under Settings → Integrations.`,
+      `Creating and editing Google Docs is turned off for ${connectionLabel(connection)}. It can be changed under Settings → Integrations.`,
     );
   }
 }
@@ -567,6 +681,18 @@ function requiredExactText(params: Record<string, unknown>, key: string, maxChar
   return value;
 }
 
+function boundedOptionalExactText(params: Record<string, unknown>, key: string, maxChars: number) {
+  const value = params[key];
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string") {
+    throw new GoatActionInvalidParamsError(`"${key}" must be a string.`);
+  }
+  if (value.length > maxChars) {
+    throw new GoatActionInvalidParamsError(`"${key}" must be at most ${maxChars} characters.`);
+  }
+  return value;
+}
+
 function replacementText(params: Record<string, unknown>, maxChars: number) {
   const value = params.replace;
   if (typeof value !== "string") {
@@ -688,4 +814,10 @@ function readGoogleUrl(value: unknown) {
   } catch {
     return null;
   }
+}
+
+function boundedErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "Unknown Google Docs error.";
+  const normalized = message.replace(/\s+/g, " ").trim();
+  return truncateText(normalized || "Unknown Google Docs error.", 300);
 }

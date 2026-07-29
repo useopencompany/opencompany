@@ -197,16 +197,17 @@ creation, and explicitly requested sends, with an explicit account required when
 connected. Draft creation and sending have separate per-account permissions: creating drafts defaults
 to **On** because it leaves the email for manual review and sending, while sending defaults to
 confirmation-gated **Ask**. Google Calendar exposes a bounded event-list read, while Google Drive
-exposes file search, live Google Doc reads, and exact text replacement in Google Docs. Linear exposes
+exposes file search, live Google Doc reads, new Doc creation with optional initial text, and exact
+text replacement in Google Docs. Linear exposes
 a curated catalog for reading issues and workspace context, creating and updating issues, and adding
 comments. Attio exposes bounded fuzzy search across standard people, companies, and deals; list,
 field, and membership discovery; and bounded list reads with saved-view filters, explicit filters,
-sorting, and pagination. Explicitly requested Gmail sends, Google Doc edits, Attio record and
-list-entry updates, Linear writes, and Google Calendar event creation require confirmation by default
-and can be configured under Integrations. Latitude's live MCP catalog is mapped into the same action
-surface: tools annotated read-only default to On, while mutations and tools without that annotation
-default to Ask. An explicit account or workspace is required when several are connected. Stripe
-exposes read-only workspace
+sorting, and pagination. Explicitly requested Gmail sends, Google Doc creation or edits, Attio record
+and list-entry updates, Linear writes, and Google Calendar event creation require confirmation by
+default and can be configured under Integrations. Latitude's live MCP catalog is mapped into the same
+action surface: tools annotated read-only default to On, while mutations and tools without that
+annotation default to Ask. An explicit account or workspace is required when several are connected.
+Stripe exposes read-only workspace
 metrics for balance activity by period, current balances, subscription health with estimated MRR,
 and open receivables. Stripe uses an encrypted restricted API key and is excluded from automatic
 Brain-fill surveying because those financial metrics are live operational state. Disconnected or
