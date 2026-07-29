@@ -106,7 +106,8 @@ export async function runGoatCodexChatTurn(input: {
         leaseId,
         leaseOwner,
         planMode,
-        turnCreatedAt: turn.createdAt,
+        turnCreatedAt:
+          turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt,
       },
       redact: (value) => value,
       initialParts,
@@ -187,7 +188,8 @@ export async function runGoatCodexChatTurn(input: {
       leaseId,
       leaseOwner,
       planMode,
-      turnCreatedAt: turn.createdAt,
+      turnCreatedAt:
+        turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt,
     },
     redact,
     // Resumes the parts already persisted for this message (normally empty; non-empty only if a
