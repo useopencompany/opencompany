@@ -50,6 +50,8 @@ import {
   FileText,
   LoaderCircle,
   MessageSquare,
+  PanelRightClose,
+  PanelRightOpen,
   Pause,
   Play,
   Plus,
@@ -77,7 +79,10 @@ import {
   useSyncExternalStore,
   useTransition,
 } from "react";
-import { CodingWorkspacePanel } from "@/components/CodingWorkspacePanel";
+import {
+  CodingWorkspacePanel,
+  type CodingWorkspacePanelHandle,
+} from "@/components/CodingWorkspacePanel";
 import { buildChatTaskLookup } from "@/components/chat/assistant-items";
 import {
   GoatComposerAttachments,
@@ -328,6 +333,8 @@ export function GoatSurface({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const inputOverlayRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  const workspacePanelRef = useRef<CodingWorkspacePanelHandle>(null);
+  const workspaceToggleButtonRef = useRef<HTMLButtonElement>(null);
   const lastError = useRef<string | null>(null);
   const isPinnedAtBottomRef = useRef(true);
   const userScrollIntentRef = useRef(false);
@@ -344,6 +351,8 @@ export function GoatSurface({
   const wasAgentWorkingRef = useRef(false);
   const optimisticAttachmentPreviewUrlsRef = useRef<ReadonlyMap<string, string[]>>(new Map());
   const persistedMessageIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const [workspacePanelExpanded, setWorkspacePanelExpanded] = useState(false);
+  const [workspacePanelSessionId, setWorkspacePanelSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
@@ -668,6 +677,13 @@ export function GoatSurface({
     if (activeInitialChatEngine) return { engine: activeInitialChatEngine, chatSessionId };
     return engineChatSession?.chatSessionId === chatSessionId ? engineChatSession : null;
   }, [activeInitialChatEngine, chatSessionId, engineChatSession]);
+  // The workspace panel remounts (via its `key`) on every session switch, so its own
+  // expanded state always resets — mirror that here during render so the header
+  // toggle icon never flashes "collapse" for a session that just mounted collapsed.
+  if (workspacePanelSessionId !== (activeEngineChat?.chatSessionId ?? null)) {
+    setWorkspacePanelSessionId(activeEngineChat?.chatSessionId ?? null);
+    setWorkspacePanelExpanded(false);
+  }
   const isCodexMode = chatModel === CODEX_PICKER_VALUE;
   const isClaudeMode = chatModel === CLAUDE_PICKER_VALUE;
   const selectedEngine: GoatEngineChatKind | null = isCodexMode
@@ -1975,14 +1991,37 @@ export function GoatSurface({
                     ) : null}
                     {activeEngineChat?.engine === "codex" ||
                     activeEngineChat?.engine === "claude_code" ? (
-                      <CodexSessionStatusIndicator
-                        engine={activeEngineChat.engine}
-                        runtime={codexRuntime}
-                        optimisticStatus={
-                          engineSubmitting ? "starting" : engineRunning ? "running" : null
-                        }
-                        sandboxStatus={codexSandboxStatus}
-                      />
+                      <>
+                        <CodexSessionStatusIndicator
+                          engine={activeEngineChat.engine}
+                          runtime={codexRuntime}
+                          optimisticStatus={
+                            engineSubmitting ? "starting" : engineRunning ? "running" : null
+                          }
+                          sandboxStatus={codexSandboxStatus}
+                        />
+                        <Tooltip>
+                          <TooltipTrigger
+                            ref={workspaceToggleButtonRef}
+                            type="button"
+                            aria-label={
+                              workspacePanelExpanded ? "Collapse workspace" : "Open workspace"
+                            }
+                            aria-pressed={workspacePanelExpanded}
+                            onClick={() => workspacePanelRef.current?.toggle()}
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                          >
+                            {workspacePanelExpanded ? (
+                              <PanelRightClose size={14} strokeWidth={1.9} />
+                            ) : (
+                              <PanelRightOpen size={14} strokeWidth={1.9} />
+                            )}
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {workspacePanelExpanded ? "Collapse workspace" : "Open workspace"}
+                          </TooltipContent>
+                        </Tooltip>
+                      </>
                     ) : null}
                     {currentContextTokens > 0 ? (
                       <ChatContextMeter used={currentContextTokens} max={contextMaxTokens} />
@@ -2353,10 +2392,13 @@ export function GoatSurface({
         (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
           <CodingWorkspacePanel
             key={activeEngineChat.chatSessionId}
+            ref={workspacePanelRef}
             chatSessionId={activeEngineChat.chatSessionId}
             sandboxStatus={codexSandboxStatus}
             engineLabel={CLOUD_CODING_ENGINE_CONFIG[activeEngineChat.engine].label}
             engineIsRunning={engineRunning || engineSubmitting}
+            onExpandedChange={setWorkspacePanelExpanded}
+            onRequestFocusReturn={() => workspaceToggleButtonRef.current?.focus()}
           />
         ) : null}
       </div>
