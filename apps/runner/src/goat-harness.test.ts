@@ -1,4 +1,5 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
 import type { GoatHarnessSpec, goatTasks } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
@@ -810,6 +811,48 @@ describe("executeGoatTask", () => {
     });
     expect(sink.recordSandboxUsage).toHaveBeenCalledWith(
       expect.objectContaining({ sandboxId: "sbx_codex", activeMs: 60_000 }),
+    );
+  });
+
+  it("forwards preplanned workflow skill snapshots to the Codex executor", async () => {
+    const codexHarnessSpec: GoatWorkflowHarnessSpec = {
+      ...harnessSpec,
+      engine: "codex",
+      model: gptModel,
+      systemPrompt: "Run the coding workflow.",
+      initialUserMessage: "Fix octo/repo.",
+      workflow: {
+        id: "fix-repository",
+        workspaceId: "workspace_1",
+        skillIds: ["coding-work"],
+        skillSnapshots: [
+          {
+            id: "coding-work",
+            name: "Coding work",
+            description: "How coding work should happen.",
+            instructions: "Inspect, implement, and verify.",
+          },
+        ],
+      },
+    };
+    const sink = createSink();
+
+    await executeGoatTask({
+      task: task({
+        workflowId: "fix-repository",
+        harnessSpec: codexHarnessSpec,
+      }),
+      env: env(),
+      signal: new AbortController().signal,
+      sink,
+      reportStage: vi.fn(async () => {}),
+    });
+
+    expect(aiMock.generateObject).not.toHaveBeenCalled();
+    expect(goatCodexMock.runGoatCodexTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skills: codexHarnessSpec.workflow?.skillSnapshots,
+      }),
     );
   });
 

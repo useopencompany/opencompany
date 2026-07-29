@@ -64,6 +64,10 @@
       "types": "./src/goat-github.ts",
       "default": "./src/goat-github.ts"
     },
+    "./goat-harness": {
+      "types": "./src/goat-harness.ts",
+      "default": "./src/goat-harness.ts"
+    },
     "./goat-schema": {
       "types": "./src/goat-schema.ts",
       "default": "./src/goat-schema.ts"
