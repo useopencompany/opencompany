@@ -82,6 +82,7 @@ export const CLAUDE_CODE_DEFAULT_MODEL_ID: AgentModelId = "anthropic/claude-sonn
 export const CLAUDE_CODE_AGENT_MODEL_IDS = [
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-4.8",
+  "anthropic/claude-fable-5",
   "anthropic/claude-haiku-4.5",
 ] as const satisfies readonly AgentModelId[];
 
