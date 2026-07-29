@@ -624,7 +624,7 @@ Goat-specific tables live in `packages/db/src/goat-schema.ts`.
 Important tables:
 
 - `goat.users`: WorkOS-backed Goat user profile, including the off-by-default
-  `task_spawning_enabled` feature flag.
+  `task_spawning_enabled` and `auto_model_routing_enabled` feature flags.
 - `goat.chat_sessions`: one open or closed chat thread per user.
 - `goat.chat_messages`: persisted user and assistant chat messages. Assistant messages can point
   at a `taskId` so the UI can render a task card. Task completion notifications are also persisted

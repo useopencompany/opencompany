@@ -1198,6 +1198,13 @@
       "when": 1785333600001,
       "tag": "0170_goat_repo_configs",
       "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "7",
+      "when": 1785336039727,
+      "tag": "0171_goat_auto_model_routing_flag",
+      "breakpoints": true
     }
   ]
 }

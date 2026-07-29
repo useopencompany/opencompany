@@ -22,7 +22,10 @@ const workspacesMock = vi.hoisted(() => ({
   }>,
 }));
 const mcpSetupMock = vi.hoisted(() => ({ completedAt: null as string | null }));
-const featureFlagsMock = vi.hoisted(() => ({ taskSpawning: false }));
+const featureFlagsMock = vi.hoisted(() => ({
+  taskSpawning: false,
+  autoModelRouting: false,
+}));
 const recentChatsMock = vi.hoisted(() => ({
   value: [] as Array<{
     id: string;
@@ -102,6 +105,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
     recentChats: recentChatsMock.value,
     featureFlags: {
       taskSpawning: featureFlagsMock.taskSpawning,
+      autoModelRouting: featureFlagsMock.autoModelRouting,
     },
     mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
   }),
