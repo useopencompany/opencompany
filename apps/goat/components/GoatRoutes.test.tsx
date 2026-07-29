@@ -210,9 +210,12 @@ describe("GoatSettingsRoute", () => {
 
     appDataMock.value.featureFlags.autoModelRouting = true;
     rerender(<GoatPreferencesSettingsRoute />);
-    expect(toggle).toHaveAttribute("aria-checked", "true");
+    const enabledToggle = await screen.findByRole("switch", {
+      name: "Automatic model routing",
+    });
+    await waitFor(() => expect(enabledToggle).toHaveAttribute("aria-checked", "true"));
 
-    await user.click(toggle);
+    await user.click(enabledToggle);
     expect(userPreferencesMock.updateGoatAutoModelRoutingAction).toHaveBeenLastCalledWith(false);
   });
 });
