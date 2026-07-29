@@ -36,7 +36,6 @@ export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunView
             archivedChats={data.archivedChats}
             codexConnected={data.codexConnected}
             claudeCodeConnected={data.claudeCodeConnected}
-            localCodexBetaEnabled={data.featureFlags.localCodexBridge}
             taskSpawningEnabled={data.featureFlags.taskSpawning}
             chatResumeEnabled={false}
             userName={userName}

@@ -28,7 +28,7 @@ export function useGoatChatAttachments(opts: {
   // Drives the per-file image/PDF capability gate; read at call time so a model
   // switch applies without re-creating callbacks.
   modelName: string;
-  // Disabled surfaces (currently Local Codex) ignore picker, paste, and drop input.
+  // Disabled surfaces ignore picker, paste, and drop input.
   enabled?: boolean;
   // Cloud engines can make uploaded files available through their own filesystem even when
   // the gateway model catalog does not advertise native PDF/image message parts.

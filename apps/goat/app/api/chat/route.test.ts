@@ -2367,7 +2367,6 @@ function mockAuth(
         avatarUrl: null,
         timezone: user.timezone,
         taskSpawningEnabled: overrides.taskSpawningEnabled ?? true,
-        localCodexBetaEnabled: false,
         chatCapabilitiesBetaEnabled: false,
         onboardedAt: new Date(),
         createdAt: new Date(),

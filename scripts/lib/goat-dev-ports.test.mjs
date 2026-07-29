@@ -60,7 +60,6 @@ test("Conductor allocation provides isolated ports for every Goat service", () =
     GOAT_HTTPS_PORT: "55012",
     GOAT_NEXT_PUBLIC_APP_URL: "https://localhost:55012",
     GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI: "https://localhost:55012/auth/callback",
-    GOAT_LOCAL_BRIDGE_BASE_URL: "http://127.0.0.1:55010",
     PORT: "55011",
     RUNNER_INTERNAL_URL: "http://localhost:55011",
     RUNNER_PUBLIC_URL: "http://localhost:55011",

@@ -11,7 +11,7 @@ export type GoatAnalyticsEventPropertiesByName = {
     workspace_id: string;
     session_id: string;
     is_first_message: boolean;
-    engine: "opencompany" | "local_codex" | "codex" | "claude_code";
+    engine: "opencompany" | "codex" | "claude_code";
     model: string;
     message_length: number;
   };

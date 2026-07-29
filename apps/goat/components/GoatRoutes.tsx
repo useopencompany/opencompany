@@ -1,14 +1,11 @@
 "use client";
 
-import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   ArrowLeft,
   Check,
   CircleUserRound,
-  Code2,
-  Download,
   ListTodo,
   Loader2,
   Mail,
@@ -64,10 +61,7 @@ import {
   toGoatTaskTitle,
 } from "@/lib/task-display";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
-import {
-  updateGoatLocalCodexBetaAction,
-  updateGoatTaskSpawningAction,
-} from "@/lib/user-preferences";
+import { updateGoatTaskSpawningAction } from "@/lib/user-preferences";
 import {
   archiveGoatWorkflowAction,
   createGoatWorkflowAction,
@@ -115,7 +109,6 @@ export function GoatHomeRoute({
         archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
         claudeCodeConnected={data.claudeCodeConnected}
-        localCodexBetaEnabled={data.featureFlags.localCodexBridge}
         taskSpawningEnabled={data.featureFlags.taskSpawning}
         chatResumeEnabled={data.chatResumeEnabled}
         userName={userName}
@@ -231,14 +224,6 @@ export function GoatPreferencesSettingsRoute() {
           description="Spawn tracked tasks and recurring routines from chat"
           checked={featureFlags.taskSpawning}
           update={updateGoatTaskSpawningAction}
-        />
-        <BetaFeatureSwitch
-          icon={Code2}
-          label="Local Codex bridge"
-          description="Local Codex engine mode"
-          checked={featureFlags.localCodexBridge}
-          update={updateGoatLocalCodexBetaAction}
-          showLocalBridgePairing
         />
       </section>
     </GoatSettingsContent>
@@ -650,14 +635,12 @@ function BetaFeatureSwitch({
   description,
   checked,
   update,
-  showLocalBridgePairing = false,
 }: {
   icon: LucideIcon;
   label: string;
   description: string;
   checked: boolean;
   update: (enabled: boolean) => Promise<{ ok: boolean }>;
-  showLocalBridgePairing?: boolean;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -715,72 +698,9 @@ function BetaFeatureSwitch({
           </button>
         </div>
         {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
-        {checked && showLocalBridgePairing ? <LocalCodexBridgePairButton /> : null}
       </div>
     </div>
   );
-}
-
-function LocalCodexBridgePairButton() {
-  const [isPairing, setIsPairing] = useState(false);
-
-  const downloadBridge = async () => {
-    if (isPairing) return;
-    setIsPairing(true);
-
-    try {
-      await downloadLocalBridgeLauncher();
-      toast.success("Bridge launcher downloaded.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not pair Local Codex.");
-    } finally {
-      setIsPairing(false);
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={downloadBridge}
-      disabled={isPairing}
-      className="mt-1 inline-flex h-7 w-fit items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[12px] font-medium leading-none text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-60"
-    >
-      {isPairing ? (
-        <Loader2 size={13} strokeWidth={2} className="shrink-0 animate-spin" />
-      ) : (
-        <Download size={13} strokeWidth={2} className="shrink-0" />
-      )}
-      {isPairing ? "Preparing" : "Download Mac launcher"}
-    </button>
-  );
-}
-
-async function downloadLocalBridgeLauncher() {
-  const response = await fetch("/api/local-codex/bridges/launcher", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: localBridgeName() }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(error || "Could not pair Local Codex.");
-  }
-
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "opencompany-goat-codex-bridge.terminal";
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function localBridgeName() {
-  const platform = navigator.platform?.trim();
-  return platform ? `Local Codex (${platform})` : "Local Codex bridge";
 }
 
 function IntegrationRows({
