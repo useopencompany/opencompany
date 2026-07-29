@@ -22,6 +22,7 @@ import { getGoatGranolaIntegrationState } from "@/lib/integrations/granola";
 import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 import { getGoatPersonalAccounts } from "@/lib/integrations/personal-accounts";
+import { getGoatPostHogIntegrationState } from "@/lib/integrations/posthog-mcp";
 import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
 import { getGoatStripeIntegrationState } from "@/lib/integrations/stripe";
 import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
@@ -37,6 +38,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     recentChats,
     googleIntegrations,
     linear,
+    posthog,
     github,
     jamie,
     slack,
@@ -54,6 +56,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     listCurrentUserRecentGoatChats(),
     getGoatGoogleIntegrationState(user.workosUserId),
     getGoatLinearIntegrationState(user.workosUserId),
+    getGoatPostHogIntegrationState(user.workosUserId),
     getGoatGitHubIntegrationState(workspace.id),
     getGoatJamieIntegrationState(workspace.id),
     getGoatSlackIntegrationState(user.workosUserId),
@@ -118,6 +121,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     integrations: buildIntegrationState({
       googleIntegrations,
       linear,
+      posthog,
       github,
       jamie,
       slack,
@@ -185,6 +189,7 @@ function brainSummaryView(brain: {
 function buildIntegrationState(input: {
   googleIntegrations: Pick<GoatIntegrationState, "gmail" | "google_calendar" | "google_drive">;
   linear: GoatIntegrationState["linear"];
+  posthog: GoatIntegrationState["posthog"];
   github: GoatIntegrationState["github"];
   jamie: GoatIntegrationState["jamie"];
   slack: GoatIntegrationState["slack"];
@@ -201,6 +206,7 @@ function buildIntegrationState(input: {
     google_calendar: input.googleIntegrations.google_calendar,
     google_drive: input.googleIntegrations.google_drive,
     linear: input.linear,
+    posthog: input.posthog,
     github: input.github,
     jamie: input.jamie,
     slack: input.slack,

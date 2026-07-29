@@ -8,6 +8,10 @@ import {
   verifyGoatLatitudeMcpState,
 } from "@/lib/integrations/latitude-mcp";
 import { startGoatLinearMcpOAuth, verifyGoatLinearMcpState } from "@/lib/integrations/linear-mcp";
+import {
+  startGoatPostHogMcpOAuth,
+  verifyGoatPostHogMcpState,
+} from "@/lib/integrations/posthog-mcp";
 
 const observed = vi.hoisted(() => ({
   callbackUrl: "",
@@ -121,6 +125,34 @@ describe("Goat remote MCP OAuth", () => {
     );
     expect(vi.mocked(auth).mock.calls[0]?.[1]).not.toHaveProperty("scope");
     expect(observed.clientMetadata).toMatchObject({ scope: "read write" });
+  });
+
+  it("connects PostHog with only the analytics scopes and tools Goat exposes", async () => {
+    await startGoatPostHogMcpOAuth({
+      userWorkosId: "user_1",
+      returnTo: "/settings/integrations",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        serverUrl: expect.stringMatching(/^https:\/\/mcp\.posthog\.com\/mcp\?mode=tools&tools=/),
+      }),
+    );
+    const serverUrl = String(vi.mocked(auth).mock.calls[0]?.[1]?.serverUrl);
+    expect(serverUrl).toContain("dashboards-get-all");
+    expect(serverUrl).toContain("insight-create");
+    expect(serverUrl).not.toContain("feature-flag");
+    expect(observed.callbackUrl).toBe("https://goat.example/api/integrations/posthog/callback");
+    expect(observed.clientMetadata).toMatchObject({
+      scope:
+        "dashboard:read insight:read query:read event_definition:read property_definition:read insight:write",
+    });
+    expect(verifyGoatPostHogMcpState(observed.state)).toMatchObject({
+      provider: "posthog",
+      userWorkosId: "user_1",
+      returnTo: "/settings/integrations",
+    });
   });
 
   it("accepts provider-less legacy state only for Linear", async () => {

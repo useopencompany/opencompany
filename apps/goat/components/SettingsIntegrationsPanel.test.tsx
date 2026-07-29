@@ -213,6 +213,41 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
+  it("shows PostHog with read-on and create-insights-ask permissions", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_posthog_mcp",
+        provider: "posthog",
+        externalId: "posthog_mcp",
+        accountName: "PostHog",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    const posthogCard = screen
+      .getByText("Explore product analytics and create focused insights from Goat.")
+      .closest("div.rounded-2xl");
+    expect(posthogCard).not.toBeNull();
+    expect(within(posthogCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    const readPermission = within(posthogCard as HTMLElement).getByRole("group", {
+      name: "Read analytics permission",
+    });
+    const writePermission = within(posthogCard as HTMLElement).getByRole("group", {
+      name: "Create insights permission",
+    });
+    expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(writePermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
   it("shows separate Gmail read, draft, and send controls with one scope-upgrade prompt", () => {
     const integrations = goatIntegrationStateFromRows([
       {

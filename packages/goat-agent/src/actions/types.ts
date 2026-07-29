@@ -8,6 +8,7 @@ export type GoatActionProviderId =
   | "google_calendar"
   | "google_drive"
   | "linear"
+  | "posthog"
   | "attio"
   | "github"
   | "stripe"
