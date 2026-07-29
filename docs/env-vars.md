@@ -337,8 +337,10 @@ Set these in the Render `opencompany-runner` service.
 | `DATABASE_URL` | Hosted only | Same hosted Neon database used by web. Do not store this in Infisical `dev`; local setup writes branch DB URLs to `.env.local`. |
 | `RUNNER_INTERNAL_TOKEN` | Yes | Must match Vercel. |
 | `GOAT_NEXT_PUBLIC_APP_URL` | Yes for Cloud Codex actions | Canonical Goat origin. The runner calls its private integration-action gateway with `RUNNER_INTERNAL_TOKEN`; neither value enters the Codex sandbox. |
-| `RUNNER_STREAM_TOKEN_SECRET` | Yes | Runner signing secret used for hosted-tool polling job ids. |
+| `RUNNER_STREAM_TOKEN_SECRET` | Yes | Runner signing secret used for hosted-tool polling ids plus coding workspace tickets and preview capabilities. |
 | `RUNNER_ALLOWED_ORIGINS` | Yes | Comma-separated browser origins allowed for runner requests. |
+| `RUNNER_PREVIEW_BASE_DOMAIN` | Goat cloud coding workspaces | Wildcard preview base hostname routed to the runner for persistent Codex and Claude Code chats, without a scheme (for example `preview.goat.example.com`). Configure both the base and `*.preview.goat.example.com` on Render. Local development can use `preview.localhost:3040`. |
+| `RUNNER_PREVIEW_PROTOCOL` | No | Preview URL scheme, `http` or `https`. Hosted previews default to `https`; `bun run dev:goat` injects the correct local value. |
 | `DURABLE_STREAMS_URL` | Yes | Durable Streams base URL for model/tool transcript appends. Must match Vercel. |
 | `DURABLE_STREAMS_TOKEN` | Yes | Bearer token for the Durable Streams service. Must match Vercel. |
 | `BLOB_READ_WRITE_TOKEN` | Yes | Private `opencompany-attachments` Blob store token. Downloads attachment bytes (images/PDFs) to inline into model calls. Must match Vercel. |
@@ -368,7 +370,7 @@ Set these in the Render `opencompany-runner` service.
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Must match Vercel. |
 | `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Must match Vercel. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |
-| `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` | Goat Codex chat only | Idle timeout for persistent Goat Codex chat sandboxes, defaults to `300000` (5 minutes). Sandboxes pause on idle and auto-resume on the next message. |
+| `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` | Goat cloud coding chats | Legacy-named idle timeout for persistent Goat Codex and Claude Code chat sandboxes, defaults to `300000` (5 minutes). Sandboxes pause on idle and auto-resume on the next message. |
 | `RUNNER_GOAT_TASK_WORKER_ENABLED` | Goat only | Enables the experimental Goat task worker and `/goat/tools/*` runner callbacks. Defaults to `false` so normal runner deployments do not poll Goat tables or expose Goat tool execution. |
 | `RUNNER_TOOL_ARG_REPAIR_ENABLED` | No | Kill switch for the model-based deferred-tool argument repair fallback (Layer 3). Deterministic validation + coercion always run; this only gates the small-model repair. Defaults to `true`. |
 | `RUNNER_WORKER_CONCURRENCY` | No | Max parallel sessions per instance, defaults to `8` (prod 40). Bounded by the event loop + E2B sandbox quota + gateway rate limits, not CPU/RAM. |

@@ -21,6 +21,10 @@ export type RunnerEnv = {
   // RUNNER_PUBLIC_URL: the runner loads the repo-root .env, where that var points at
   // localhost in local dev and would wrongly activate sandbox callbacks.
   publicUrl: string | undefined;
+  // Wildcard preview hostname routed to this runner, for example preview.goat.example.com.
+  // Capability labels are prepended to this domain. A port may be included for local development.
+  previewBaseDomain?: string | undefined;
+  previewProtocol?: "http" | "https" | undefined;
   // Public Goat origin used only by the runner host to call private, bearer-protected
   // endpoints. Integration credentials and this bearer token never enter Codex sandboxes.
   goatAppUrl?: string | undefined;
@@ -96,6 +100,8 @@ export function loadEnv(): RunnerEnv {
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
     openaiCodexApiKey: optionalEnv("OPENAI_CODEX_API_KEY"),
     publicUrl: optionalEnv("RUNNER_LLM_BROKER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
+    previewBaseDomain: optionalPreviewBaseDomainEnv(),
+    previewProtocol: optionalPreviewProtocolEnv(),
     goatAppUrl: optionalEnv("GOAT_NEXT_PUBLIC_APP_URL"),
     llmBrokerEnabled: optionalBooleanEnv("RUNNER_LLM_BROKER_ENABLED", true),
     integrationCredentialEncryptionKey: requiredEncryptionKey(),
@@ -170,6 +176,28 @@ function optionalBooleanEnv(name: string, fallback: boolean) {
   if (raw === "true" || raw === "1") return true;
   if (raw === "false" || raw === "0") return false;
   throw new Error(`${name} must be a boolean (true/false/1/0).`);
+}
+
+function optionalPreviewProtocolEnv() {
+  const value = optionalEnv("RUNNER_PREVIEW_PROTOCOL");
+  if (!value) return undefined;
+  if (value === "http" || value === "https") return value;
+  throw new Error("RUNNER_PREVIEW_PROTOCOL must be http or https.");
+}
+
+function optionalPreviewBaseDomainEnv() {
+  const value = optionalEnv("RUNNER_PREVIEW_BASE_DOMAIN");
+  if (!value) return undefined;
+  if (value.includes("://") || value.includes("/")) {
+    throw new Error("RUNNER_PREVIEW_BASE_DOMAIN must be a hostname without a scheme or path.");
+  }
+  try {
+    const url = new URL(`http://${value}`);
+    if (!url.hostname || url.username || url.password) throw new Error("invalid hostname");
+  } catch {
+    throw new Error("RUNNER_PREVIEW_BASE_DOMAIN must be a valid hostname with an optional port.");
+  }
+  return value.toLowerCase();
 }
 
 function optionalPositiveIntegerEnv(name: string, fallback: number) {

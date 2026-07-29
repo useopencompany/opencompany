@@ -20,7 +20,12 @@ test("Goat dev proxy routes app traffic and runner callback traffic", async (t) 
   assert.equal((await getJson(proxy.port, "/tasks/TASK-15")).target, "app");
   assert.equal((await getJson(proxy.port, "/api/integrations/gmail/callback")).target, "app");
   assert.equal((await getJson(proxy.port, "/goat/tools/goat_task_123")).target, "runner");
+  assert.equal((await getJson(proxy.port, "/goat/runtime")).target, "runner");
   assert.equal((await getJson(proxy.port, "/broker/openai/v1/responses")).target, "runner");
+  assert.equal(
+    (await getJson(proxy.port, "/", { host: "signed.preview.localhost" })).target,
+    "runner",
+  );
 });
 
 test("Goat dev proxy survives an HTTP client disconnect", async (t) => {
@@ -159,8 +164,24 @@ function requestStream(port) {
   });
 }
 
-async function getJson(port, path) {
-  const response = await fetch(`http://127.0.0.1:${port}${path}`);
-  assert.equal(response.status, 200);
-  return response.json();
+async function getJson(port, path, headers) {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({ hostname: "127.0.0.1", port, path, headers }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        try {
+          assert.equal(response.statusCode, 200);
+          resolve(JSON.parse(body));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.once("error", reject);
+    request.end();
+  });
 }

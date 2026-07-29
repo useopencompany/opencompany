@@ -125,6 +125,19 @@ Important details:
   `/home/user/.opencompany-codex/session` directory, including the session `CODEX_HOME` files and
   file-backed Codex auth cache.
 
+Persistent Goat cloud coding chats are a separate runtime surface shared by Codex and Claude Code.
+The canonical engine descriptor in `@opencompany/agent-runtime` assigns
+`/home/user/opencompany-goat/codex-chat` to Codex and
+`/home/user/opencompany-goat/claude-chat` to Claude Code; both engine runners and the interactive
+terminal consume that descriptor. The browser obtains owner-bound runtime access through
+`POST /api/coding-workspaces/sessions/:chatSessionId/runtime-access`, which calls the runner's
+`POST /internal/goat/coding-workspaces/sessions/:codingSessionId/runtime-access`. The resulting
+short-lived ticket opens `/goat/runtime` with the `goat-coding-workspace-v1` protocol. The runner
+revalidates ownership, the open parent chat, the configured engine, and sandbox lifecycle before
+connecting. It creates the trusted engine directory before PTY startup and never accepts a working
+directory from the client. The same transport discovers preview ports and proxies signed,
+session-bound preview capabilities.
+
 V1 tools:
 
 - `shell`
@@ -251,8 +264,12 @@ Required environment variables:
 - `RUNNER_PUBLIC_URL` (`http://localhost:3040` locally)
 - `RUNNER_INTERNAL_URL` (`http://localhost:3040` locally; optional when it matches `RUNNER_PUBLIC_URL`)
 - `RUNNER_INTERNAL_TOKEN`
-- `RUNNER_STREAM_TOKEN_SECRET` (hosted-tool polling job id signing)
+- `RUNNER_STREAM_TOKEN_SECRET` (hosted-tool polling ids plus coding workspace ticket and preview
+  capability signing)
 - `RUNNER_ALLOWED_ORIGINS` (`http://localhost:3000` locally)
+- `RUNNER_PREVIEW_BASE_DOMAIN` (optional; `preview.localhost:3040` locally, or a wildcard domain
+  routed to the runner in hosted environments)
+- `RUNNER_PREVIEW_PROTOCOL` (optional; `http` or `https`, defaults to `https`)
 - `DURABLE_STREAMS_URL`
 - `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`
@@ -263,10 +280,11 @@ Required environment variables:
 - `SUPADATA_API_KEY` (optional; required only for agents that enable YouTube or Instagram/TikTok direct-media transcript/metadata tools)
 - `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
-- `OPENCOMPANY_CODEX_E2B_TEMPLATE` (optional; Codex sessions default to E2B's `codex` template)
+- `OPENCOMPANY_CODEX_E2B_TEMPLATE` (optional legacy name; persistent Goat Codex and Claude Code
+  sessions default to E2B's `codex` template)
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required; validated at boot — the runner refuses to start if it is missing or not a base64-encoded 32-byte key)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
-- `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` (optional, defaults to `300000`; persistent Goat Codex chat sandboxes pause on idle and auto-resume on the next message)
+- `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` (optional legacy name, defaults to `300000`; persistent Goat Codex and Claude Code chat sandboxes pause on idle and auto-resume on the next message)
 - `RUNNER_LLM_BROKER_PUBLIC_URL` (optional; defaults to Render's `RENDER_EXTERNAL_URL`. Public runner URL for E2B sandbox callbacks: the LLM broker (`/broker/*`) and Goat Google tools (`/goat/tools/*`). Unset locally unless the local runner port is exposed through a public tunnel.)
 - `RUNNER_LLM_BROKER_ENABLED` (optional, defaults to `true`; no-deploy kill switch back to direct key injection)
 - `RUNNER_GOAT_TASK_WORKER_ENABLED` (optional, defaults to `false`; set `true` only for runner deployments meant to execute Goat tasks. `bun run dev:goat` injects it locally.)
@@ -298,11 +316,12 @@ URL while the stack still exists.
 New E2B sandboxes are created with lifecycle auto-pause and auto-resume enabled. The runner keeps
 the sandbox on a one-hour timeout while it is actively preparing or executing work, then resets it to
 `RUNNER_E2B_IDLE_TIMEOUT_MS` so unused sandboxes pause shortly after the runner stops touching them.
-Persistent Goat Codex chat sandboxes use `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` instead, defaulting
-to 5 minutes, so completed chat turns pause quickly while preserving the session sandbox for resume.
-During a rolling runner shutdown, active Cloud Codex proxies detach after a short drain window and
-the sandbox keeps a ten-minute handoff timeout. The next worker reclaims the lease and reconnects to
-the same app-server turn rather than submitting the user message again.
+Persistent Goat Codex and Claude Code chat sandboxes use the legacy-named
+`RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` instead, defaulting to 5 minutes, so completed turns pause
+quickly while preserving the session sandbox for resume. During a rolling runner shutdown, active
+cloud coding proxies detach after a short drain window and the sandbox keeps a ten-minute handoff
+timeout. The next worker reclaims the lease and reconnects to the same engine turn/session rather
+than submitting the user message again.
 If the stored E2B sandbox id has already disappeared, the runner creates a fresh sandbox instead of
 retrying the stale id.
 
