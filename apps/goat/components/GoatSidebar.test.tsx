@@ -22,6 +22,7 @@ const workspacesMock = vi.hoisted(() => ({
   }>,
 }));
 const mcpSetupMock = vi.hoisted(() => ({ completedAt: null as string | null }));
+const featureFlagsMock = vi.hoisted(() => ({ taskSpawning: false }));
 const recentChatsMock = vi.hoisted(() => ({
   value: [] as Array<{
     id: string;
@@ -99,6 +100,10 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
     },
     tasks: tasksMock.value,
     recentChats: recentChatsMock.value,
+    featureFlags: {
+      taskSpawning: featureFlagsMock.taskSpawning,
+      localCodexBridge: false,
+    },
     mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
   }),
 }));
@@ -110,6 +115,7 @@ describe("GoatSidebar", () => {
     workspaceRoleMock.value = "admin";
     workspacesMock.value = [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }];
     mcpSetupMock.completedAt = null;
+    featureFlagsMock.taskSpawning = false;
     recentChatsMock.value = [];
     tasksMock.value = [];
   });
@@ -126,6 +132,8 @@ describe("GoatSidebar", () => {
     const home = within(nav).getByRole("link", { name: "Home" });
     expect(home).toHaveAttribute("href", "/");
     expect(home).toHaveAttribute("aria-current", "page");
+    expect(within(nav).queryByRole("link", { name: "Tasks" })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole("link", { name: "Workflows" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "Brain" })).not.toBeInTheDocument();
     expect(screen.getByText("Brains")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "General" })).not.toHaveAttribute("aria-current");
@@ -276,6 +284,18 @@ describe("GoatSidebar", () => {
     expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
   });
 
+  it("shows the Tasks and Workflows nav when the beta feature is enabled", () => {
+    featureFlagsMock.taskSpawning = true;
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const nav = screen.getByRole("navigation", { name: "Goat primary" });
+    expect(within(nav).getByRole("link", { name: "Tasks" })).toHaveAttribute("href", "/tasks");
+    expect(within(nav).getByRole("link", { name: "Workflows" })).toHaveAttribute(
+      "href",
+      "/workflows",
+    );
+  });
+
   it("exposes the active brain as a prefetchable route", () => {
     pathnameMock.value = "/";
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
@@ -286,8 +306,9 @@ describe("GoatSidebar", () => {
     );
   });
 
-  it("shows live workflow tasks without surfacing ad-hoc tasks", () => {
+  it("shows the Tasks nav on nested task routes without inline task rows", () => {
     pathnameMock.value = "/tasks/TASK-7";
+    featureFlagsMock.taskSpawning = true;
     tasksMock.value = [
       {
         id: "goat_task_workflow",
@@ -313,12 +334,17 @@ describe("GoatSidebar", () => {
 
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const taskNav = screen.getByRole("navigation", { name: "Workflow tasks" });
-    const workflowTask = within(taskNav).getByRole("link", { name: /Prepare launch brief/ });
-    expect(workflowTask).toHaveAttribute("href", "/tasks/TASK-7");
-    expect(workflowTask).toHaveAttribute("aria-current", "page");
-    expect(within(workflowTask).getByText("Needs legal review")).toBeInTheDocument();
-    expect(within(taskNav).queryByText("Research competitors")).not.toBeInTheDocument();
+    const primaryNav = screen.getByRole("navigation", { name: "Goat primary" });
+    const home = within(primaryNav).getByRole("link", { name: "Home" });
+    const tasks = within(primaryNav).getByRole("link", { name: "Tasks" });
+    const workflows = within(primaryNav).getByRole("link", { name: "Workflows" });
+    expect(tasks).toHaveAttribute("href", "/tasks");
+    expect(tasks).toHaveAttribute("aria-current", "page");
+    expect(home.nextElementSibling).toBe(tasks);
+    expect(tasks.nextElementSibling).toBe(workflows);
+    expect(screen.queryByRole("navigation", { name: "Workflow tasks" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Prepare launch brief")).not.toBeInTheDocument();
+    expect(screen.queryByText("Research competitors")).not.toBeInTheDocument();
   });
 
   it("does not show brain creation to workspace members", () => {

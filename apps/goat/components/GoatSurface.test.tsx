@@ -1501,6 +1501,7 @@ describe("GoatSurface chat streaming UI", () => {
           messages: [],
         }}
         userWorkosId="user_1"
+        taskSpawningEnabled
       />,
     );
 
@@ -1530,6 +1531,40 @@ describe("GoatSurface chat streaming UI", () => {
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not load or offer workflow mentions when Tasks & Workflows is disabled", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/skills") return Response.json({ skills: [] });
+      return Response.json({
+        workflows: [
+          {
+            id: "morning-test",
+            name: "Morning Test",
+            description: "Run the morning checks.",
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "#morning");
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/skills")).toBe(true),
+    );
+
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/workflows")).toBe(false);
+    expect(screen.queryByRole("option", { name: /Morning Test/i })).not.toBeInTheDocument();
   });
 
   it("does not show Codex mention options when Codex is not connected", async () => {

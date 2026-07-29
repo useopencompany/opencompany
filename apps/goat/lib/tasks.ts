@@ -15,6 +15,7 @@ import {
 } from "@opencompany/db/goat-schema";
 import { and, asc, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
+import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { goatHomeActivityCutoff } from "@/lib/home-activity";
 import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
 import { normalizeGoatTaskName } from "@/lib/task-display";
@@ -71,6 +72,91 @@ export async function getCurrentUserGoatTask(taskId: string) {
     .limit(1);
 
   return task ?? null;
+}
+
+export async function getCurrentUserGoatTaskSummary(taskId: string) {
+  const task = await getCurrentUserGoatTask(taskId);
+  if (!task) return null;
+
+  const [aggregate] = rowsFromExecute<{
+    runStartedAt: Date | string | null;
+    runCompletedAt: Date | string | null;
+    usageRowCount: number | string;
+    totalCostUsdMicros: number | string;
+  }>(
+    await getDb().execute(sql`
+      SELECT
+        (
+          SELECT MIN(${goatTaskMessages.createdAt})
+          FROM ${goatTaskMessages}
+          WHERE ${goatTaskMessages.taskId} = ${task.id}
+            AND ${goatTaskMessages.userWorkosId} = ${task.userWorkosId}
+            AND ${goatTaskMessages.role} <> 'user'
+        ) AS "runStartedAt",
+        (
+          SELECT MAX(${goatTaskMessages.completedAt})
+          FROM ${goatTaskMessages}
+          WHERE ${goatTaskMessages.taskId} = ${task.id}
+            AND ${goatTaskMessages.userWorkosId} = ${task.userWorkosId}
+        ) AS "runCompletedAt",
+        (
+          SELECT COUNT(*) FROM ${goatTaskModelUsage}
+          WHERE ${goatTaskModelUsage.taskId} = ${task.id}
+            AND ${goatTaskModelUsage.userWorkosId} = ${task.userWorkosId}
+        ) + (
+          SELECT COUNT(*) FROM ${goatTaskToolUsage}
+          WHERE ${goatTaskToolUsage.taskId} = ${task.id}
+            AND ${goatTaskToolUsage.userWorkosId} = ${task.userWorkosId}
+        ) + (
+          SELECT COUNT(*) FROM ${goatTaskSandboxUsage}
+          WHERE ${goatTaskSandboxUsage.taskId} = ${task.id}
+            AND ${goatTaskSandboxUsage.userWorkosId} = ${task.userWorkosId}
+        ) AS "usageRowCount",
+        (
+          SELECT COALESCE(SUM(${goatTaskModelUsage.totalCostUsdMicros}), 0)
+          FROM ${goatTaskModelUsage}
+          WHERE ${goatTaskModelUsage.taskId} = ${task.id}
+            AND ${goatTaskModelUsage.userWorkosId} = ${task.userWorkosId}
+        ) + (
+          SELECT COALESCE(SUM(${goatTaskToolUsage.totalCostUsdMicros}), 0)
+          FROM ${goatTaskToolUsage}
+          WHERE ${goatTaskToolUsage.taskId} = ${task.id}
+            AND ${goatTaskToolUsage.userWorkosId} = ${task.userWorkosId}
+        ) + (
+          SELECT COALESCE(SUM(${goatTaskSandboxUsage.totalCostUsdMicros}), 0)
+          FROM ${goatTaskSandboxUsage}
+          WHERE ${goatTaskSandboxUsage.taskId} = ${task.id}
+            AND ${goatTaskSandboxUsage.userWorkosId} = ${task.userWorkosId}
+        ) AS "totalCostUsdMicros"
+    `),
+  );
+
+  if (!aggregate) {
+    throw new Error("Could not load Goat task summary.");
+  }
+
+  const terminal =
+    task.status === "succeeded" || task.status === "failed" || task.status === "canceled";
+  const startedAt = aggregate.runStartedAt
+    ? new Date(aggregate.runStartedAt).getTime()
+    : Number.NaN;
+  const completedAt = aggregate.runCompletedAt
+    ? new Date(aggregate.runCompletedAt).getTime()
+    : Number.NaN;
+  const durationMs =
+    terminal && Number.isFinite(startedAt) && Number.isFinite(completedAt)
+      ? Math.max(0, completedAt - startedAt)
+      : null;
+  const usageRowCount = Number(aggregate.usageRowCount);
+  const totalCostUsdMicros = Number(aggregate.totalCostUsdMicros);
+
+  return {
+    cost: {
+      hasRecordedCosts: Number.isFinite(usageRowCount) && usageRowCount > 0,
+      totalCostUsdMicros: Number.isFinite(totalCostUsdMicros) ? Math.max(0, totalCostUsdMicros) : 0,
+    },
+    durationMs,
+  };
 }
 
 export async function getCurrentUserGoatTaskRun(taskId: string) {
@@ -408,7 +494,7 @@ export async function createGoatTaskForUser(input: {
     throw new Error("Unable to create a Goat task for an unknown user.");
   }
   if (!initialTaskSpawningState) {
-    throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
+    throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
   }
 
   const id = `goat_task_${randomUUID()}`;
@@ -536,7 +622,7 @@ export async function createGoatTaskForUser(input: {
       throw new Error("Unable to create a Goat task for an unknown user.");
     }
     if (!currentTaskSpawningState) {
-      throw new Error("Background tasks are disabled. Enable them in Goat Settings first.");
+      throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
     }
     throw new Error("Unable to create Goat task.");
   }

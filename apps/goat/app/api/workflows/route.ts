@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
+import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { GoatSkillMentionError } from "@/lib/skills";
 import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
 import {
@@ -12,6 +13,9 @@ import {
 export async function GET() {
   const context = await currentGoatUser({ optional: true });
   if (!context) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!context.user.taskSpawningEnabled) {
+    return NextResponse.json({ error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   const workflows = await listGoatWorkflowCatalog(context.workspace.id);
   return NextResponse.json({ workflows });
@@ -20,6 +24,9 @@ export async function GET() {
 export async function POST(request: Request) {
   const context = await currentGoatUser({ optional: true });
   if (!context) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!context.user.taskSpawningEnabled) {
+    return NextResponse.json({ error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE }, { status: 403 });
+  }
 
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object" || Array.isArray(body)) {
