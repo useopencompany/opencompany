@@ -526,6 +526,22 @@ export function GoatSurface({
     optimisticAttachmentPreviewUrlsRef.current = new Map();
   }, []);
 
+  const adoptResolvedAutoModel = useCallback(
+    (message: GoatChatUiMessage) => {
+      if (chatModel !== AUTO_GOAT_MODEL_SELECTION) return;
+      const metadata = message.metadata;
+      if (
+        !metadata?.model ||
+        !metadata.sessionId ||
+        metadata.sessionId !== routedChatSessionIdRef.current
+      ) {
+        return;
+      }
+      setChatModelOverride(normalizeGoatModel(metadata.model));
+    },
+    [chatModel, setChatModelOverride],
+  );
+
   const trackOptimisticAttachmentPreviews = useCallback(
     (messageId: string, attachments: readonly GoatChatUiAttachment[]) => {
       const urls = attachments.flatMap((attachment) =>
@@ -626,9 +642,7 @@ export function GoatSurface({
           pendingNewSessionIdRef.current = null;
         }
       }
-      if (chatModel === AUTO_GOAT_MODEL_SELECTION && message.metadata?.model) {
-        setChatModelOverride(normalizeGoatModel(message.metadata.model));
-      }
+      adoptResolvedAutoModel(message);
     },
     onError: (error) => {
       if (error.message?.includes(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE)) {
@@ -770,6 +784,15 @@ export function GoatSurface({
       : persistedMessages;
     return overlay.length > 0 ? [...base, ...overlay] : base;
   }, [messages, persistedMessages, status]);
+  useEffect(() => {
+    if (chatModel !== AUTO_GOAT_MODEL_SELECTION) return;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role !== "assistant") continue;
+      adoptResolvedAutoModel(message);
+      break;
+    }
+  }, [adoptResolvedAutoModel, chatModel, messages]);
   const latestAssistantMessageId = useMemo(() => {
     for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
       if (chatMessages[index]?.role === "assistant") return chatMessages[index]?.id ?? null;
