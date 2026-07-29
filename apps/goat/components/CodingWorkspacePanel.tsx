@@ -8,17 +8,18 @@ import {
   Maximize2,
   Minimize2,
   PanelRightClose,
-  PanelRightOpen,
   RefreshCw,
   TerminalSquare,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import {
+  forwardRef,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type Ref,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useRef,
   useState,
   useSyncExternalStore,
@@ -41,17 +42,28 @@ type WorkspaceTab = "preview" | "terminal";
 type ConnectionState = "dormant" | "waking" | "ready" | "disconnected" | "error";
 type PreviewPort = { port: number; isHttp: boolean; score: number };
 
-export function CodingWorkspacePanel({
-  chatSessionId,
-  sandboxStatus,
-  engineLabel,
-  engineIsRunning,
-}: {
-  chatSessionId: string;
-  sandboxStatus: GoatCodexSandboxStatus | null;
-  engineLabel: string;
-  engineIsRunning: boolean;
-}) {
+export type CodingWorkspacePanelHandle = {
+  toggle: () => void;
+};
+
+export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
+  {
+    chatSessionId,
+    sandboxStatus,
+    engineLabel,
+    engineIsRunning,
+    onExpandedChange,
+    onRequestFocusReturn,
+  }: {
+    chatSessionId: string;
+    sandboxStatus: GoatCodexSandboxStatus | null;
+    engineLabel: string;
+    engineIsRunning: boolean;
+    onExpandedChange?: (expanded: boolean) => void;
+    onRequestFocusReturn?: () => void;
+  },
+  ref: Ref<CodingWorkspacePanelHandle>,
+) {
   const [expanded, setExpanded] = useState(false);
   const [mobilePanelOpened, setMobilePanelOpened] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -83,7 +95,6 @@ export function CodingWorkspacePanel({
   const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedPortRef = useRef<number | null>(null);
   const panelRef = useRef<HTMLElement>(null);
-  const collapsedOpenButtonRef = useRef<HTMLButtonElement>(null);
   const restoreFocusOnCollapseRef = useRef(false);
 
   const clearConnectionTimeout = useCallback(() => {
@@ -225,20 +236,23 @@ export function CodingWorkspacePanel({
     [chatSessionId, clearConnectionTimeout, requestPreview],
   );
 
-  const selectTab = (tab: WorkspaceTab) => {
-    setExpanded(true);
-    setMobilePanelOpened(true);
-    setActiveTab(tab);
-    setError(null);
-    if (connectionState === "ready" && socketRef.current?.readyState === WebSocket.OPEN) {
-      if (tab === "preview") {
-        setPortsLoaded(false);
-        socketRef.current.send(JSON.stringify({ type: "ports.refresh" }));
+  const selectTab = useCallback(
+    (tab: WorkspaceTab) => {
+      setExpanded(true);
+      setMobilePanelOpened(true);
+      setActiveTab(tab);
+      setError(null);
+      if (connectionState === "ready" && socketRef.current?.readyState === WebSocket.OPEN) {
+        if (tab === "preview") {
+          setPortsLoaded(false);
+          socketRef.current.send(JSON.stringify({ type: "ports.refresh" }));
+        }
+        return;
       }
-      return;
-    }
-    void connect(tab);
-  };
+      void connect(tab);
+    },
+    [connect, connectionState],
+  );
 
   const collapse = useCallback(() => {
     restoreFocusOnCollapseRef.current = true;
@@ -253,8 +267,31 @@ export function CodingWorkspacePanel({
   useEffect(() => {
     if (panelExpanded || !restoreFocusOnCollapseRef.current) return;
     restoreFocusOnCollapseRef.current = false;
-    collapsedOpenButtonRef.current?.focus();
-  }, [panelExpanded]);
+    onRequestFocusReturn?.();
+  }, [panelExpanded, onRequestFocusReturn]);
+
+  useEffect(() => {
+    onExpandedChange?.(panelExpanded);
+  }, [panelExpanded, onExpandedChange]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      toggle: () => {
+        if (panelExpanded) {
+          collapse();
+          return;
+        }
+        if (activeTab) {
+          setExpanded(true);
+          setMobilePanelOpened(true);
+          return;
+        }
+        selectTab("terminal");
+      },
+    }),
+    [activeTab, collapse, panelExpanded, selectTab],
+  );
 
   useEffect(() => {
     if (!panelExpanded || (!isNarrow && !fullscreen)) return;
@@ -278,26 +315,7 @@ export function CodingWorkspacePanel({
   }, [collapse, fullscreen, isNarrow, panelExpanded]);
 
   if (!panelExpanded) {
-    return (
-      <aside className="flex h-full w-11 shrink-0 flex-col items-center gap-1 border-l border-border bg-surface py-3 max-lg:absolute max-lg:right-0 max-lg:top-0 max-lg:z-40">
-        <PanelButton
-          label="Open workspace"
-          buttonRef={collapsedOpenButtonRef}
-          onClick={() => {
-            setExpanded(true);
-            setMobilePanelOpened(true);
-          }}
-        >
-          <PanelRightOpen size={16} />
-        </PanelButton>
-        <PanelButton label="Open preview" onClick={() => selectTab("preview")}>
-          <AppWindow size={16} />
-        </PanelButton>
-        <PanelButton label="Open terminal" onClick={() => selectTab("terminal")}>
-          <TerminalSquare size={16} />
-        </PanelButton>
-      </aside>
-    );
+    return null;
   }
 
   return (
@@ -529,7 +547,7 @@ export function CodingWorkspacePanel({
       </div>
     </aside>
   );
-}
+});
 
 function subscribePanelWidth(onChange: () => void) {
   window.addEventListener("storage", onChange);
@@ -613,18 +631,15 @@ function PanelButton({
   label,
   children,
   disabled = false,
-  buttonRef,
   onClick,
 }: {
   label: string;
   children: ReactNode;
   disabled?: boolean;
-  buttonRef?: Ref<HTMLButtonElement>;
   onClick: () => void;
 }) {
   return (
     <button
-      ref={buttonRef}
       type="button"
       aria-label={label}
       title={label}
