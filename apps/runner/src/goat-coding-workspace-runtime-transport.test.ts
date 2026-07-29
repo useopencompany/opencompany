@@ -212,6 +212,78 @@ describe("Goat coding workspace terminal transport", () => {
   });
 });
 
+describe("Goat coding workspace terminal input latency", () => {
+  it("coalesces keystrokes and never queues input behind control operations", async () => {
+    const kill = vi.fn(async () => true);
+    const inputCalls: Buffer[] = [];
+    let releaseFirstKeystroke: () => void = () => {};
+    const sendInput = vi.fn((_pid: number, data: Uint8Array) => {
+      inputCalls.push(Buffer.from(data));
+      // Hold the first real keystroke RPC open so later keystrokes must coalesce.
+      if (inputCalls.length === 2) {
+        return new Promise<void>((resolve) => {
+          releaseFirstKeystroke = resolve;
+        });
+      }
+      return Promise.resolve();
+    });
+    const create = vi.fn(async () => ({ pid: 42, kill }));
+    const run = vi.fn((command: string) => {
+      // The ports.refresh scan hangs forever; typing must not wait behind it.
+      if (command.startsWith("ss ")) return new Promise(() => {});
+      return Promise.resolve({ stdout: "" });
+    });
+    const sandbox = {
+      sandboxId: "sandbox_1",
+      commands: { run },
+      pty: { create, sendInput, resize: vi.fn(async () => undefined) },
+      setTimeout: vi.fn(async () => undefined),
+    } as unknown as SandboxHandle;
+    const server = new WebSocketServer({ port: 0 });
+    openServers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    server.on("connection", (webSocket) => {
+      attachRuntimeConnection(
+        webSocket,
+        sandbox,
+        {
+          id: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
+          chatSessionId: "chat_1",
+          userWorkosId: "user_1",
+          sandboxId: "sandbox_1",
+          status: "idle",
+          engine: "codex",
+        } satisfies GoatCodingWorkspaceSession,
+        { goatCodexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
+        vi.fn(async () => undefined),
+      );
+    });
+
+    const address = server.address() as AddressInfo;
+    const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
+    await new Promise<void>((resolve) => client.once("open", resolve));
+    client.send(JSON.stringify({ type: "terminal.attach", cols: 80, rows: 24 }));
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+
+    client.send(JSON.stringify({ type: "ports.refresh" }));
+    client.send(Buffer.from("a"));
+    // Delivered while the port scan is still hanging (call 1 is the tmux bootstrap).
+    await vi.waitFor(() => expect(inputCalls).toHaveLength(2));
+    expect(inputCalls[1]?.toString()).toBe("a");
+
+    client.send(Buffer.from("b"));
+    client.send(Buffer.from("c"));
+    // Let both frames reach the server while the "a" RPC is still held open.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sendInput).toHaveBeenCalledTimes(2);
+    releaseFirstKeystroke();
+    await vi.waitFor(() => expect(inputCalls).toHaveLength(3));
+    expect(inputCalls[2]?.toString()).toBe("bc");
+
+    client.close();
+  });
+});
+
 describe("Goat coding workspace runtime tools install command", () => {
   // Regression: a missing `;` after `fi` made this command a bash syntax error, so every
   // runtime connection failed before the install could run (issue behind the prod
