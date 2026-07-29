@@ -24,6 +24,7 @@ import {
   SAVE_TO_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
   START_TASK_TOOL_NAME,
+  START_WORKFLOW_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
   USE_SKILL_TOOL_NAME,
 } from "@/lib/chat-ui";
@@ -41,6 +42,8 @@ import {
   updateGoatTaskScheduleForUser,
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
+import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
+import { listGoatWorkflowCatalog } from "@/lib/workflows";
 import { POST } from "./route";
 
 const browserMocks = vi.hoisted(() => ({
@@ -154,6 +157,19 @@ vi.mock("@/lib/tasks", () => ({
   createGoatTaskForUser: vi.fn(),
 }));
 
+vi.mock("@/lib/workflow-tasks", () => ({
+  createGoatTaskFromWorkflow: vi.fn(),
+  generateGoatWorkflowTaskTitle: vi.fn(),
+}));
+
+vi.mock("@/lib/workflows", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/workflows")>();
+  return {
+    ...actual,
+    listGoatWorkflowCatalog: vi.fn(),
+  };
+});
+
 vi.mock("@/lib/task-schedules", () => ({
   createGoatTaskScheduleForUser: vi.fn(),
   deleteGoatTaskScheduleForUser: vi.fn(),
@@ -202,8 +218,10 @@ describe("POST /api/chat", () => {
     mockIsGoatChatActionsKilled().mockReturnValue(false);
     mockResolveGoatActionCatalog().mockResolvedValue({ providers: [], actions: [] });
     vi.mocked(listGoatSkillCatalog).mockResolvedValue([]);
+    vi.mocked(listGoatWorkflowCatalog).mockResolvedValue([]);
     vi.mocked(resolveGoatSkillMentions).mockResolvedValue([]);
     vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([]);
+    vi.mocked(generateGoatWorkflowTaskTitle).mockResolvedValue(undefined);
   });
 
   it("rejects unauthenticated requests", async () => {
@@ -307,6 +325,7 @@ describe("POST /api/chat", () => {
         workspace_id: "goat_ws_user_1",
         session_id: "session_1",
         is_first_message: true,
+        engine: "opencompany",
         model: "openai/gpt-5.5",
       }),
       {
@@ -379,6 +398,75 @@ describe("POST /api/chat", () => {
         description: "Build and verify product changes.",
         instructions: "Inspect the product flow, implement the change, and verify it.",
       },
+    });
+  });
+
+  it("starts an active workflow for an opted-in member without ad-hoc task tools", async () => {
+    mockAuth({ role: "member", taskSpawningEnabled: true });
+    mockCreateTurn();
+    vi.mocked(listGoatWorkflowCatalog).mockResolvedValue([
+      {
+        id: "customer-interview-synthesis",
+        name: "Customer interview synthesis",
+        description: "Synthesize confirmed interview findings.",
+      },
+    ]);
+    vi.mocked(createGoatTaskFromWorkflow).mockResolvedValue({
+      id: "goat_task_workflow_1",
+      displayId: "TASK-42",
+      name: "Customer interview synthesis",
+      prompt: "Synthesize the Acme interview using the confirmed pricing concern.",
+    } as never);
+    let workflowOutput: unknown;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const typed = options as {
+        system?: string;
+        tools?: Record<string, { execute?: unknown }>;
+      };
+      expect(typed.system).toContain("<workflow_source>");
+      expect(typed.system).toContain("customer-interview-synthesis");
+      expect(typed.tools?.[START_TASK_TOOL_NAME]).toBeUndefined();
+      const startWorkflow = typed.tools?.[START_WORKFLOW_TOOL_NAME]?.execute;
+      if (typeof startWorkflow !== "function") {
+        throw new Error("start_workflow execute function was not configured.");
+      }
+      const execution = startWorkflow({
+        workflowId: "customer-interview-synthesis",
+        prompt: "Synthesize the Acme interview using the confirmed pricing concern.",
+      });
+      return {
+        toUIMessageStreamResponse: vi.fn(async () => {
+          workflowOutput = await execution;
+          return new Response(null, { status: 200 });
+        }),
+      } as never;
+    });
+
+    const response = await POST(
+      validChatRequest("Run our customer interview synthesis workflow for Acme."),
+    );
+
+    expect(response.status).toBe(200);
+    expect(listGoatWorkflowCatalog).toHaveBeenCalledWith("goat_ws_user_1");
+    expect(createGoatTaskFromWorkflow).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceId: "goat_ws_user_1",
+      mention: { id: "customer-interview-synthesis" },
+      description: "Synthesize the Acme interview using the confirmed pricing concern.",
+    });
+    expect(generateGoatWorkflowTaskTitle).toHaveBeenCalledWith({
+      taskId: "goat_task_workflow_1",
+      userWorkosId: "user_1",
+      workflowName: "Customer interview synthesis",
+      description: "Synthesize the Acme interview using the confirmed pricing concern.",
+      apiKey: "test-key",
+    });
+    expect(workflowOutput).toEqual({
+      taskId: "goat_task_workflow_1",
+      taskDisplayId: "TASK-42",
+      taskName: "Customer interview synthesis",
+      status: "queued",
+      prompt: "Synthesize the Acme interview using the confirmed pricing concern.",
     });
   });
 
@@ -1310,6 +1398,7 @@ describe("POST /api/chat", () => {
       const saveTool = typedOptions.tools?.[SAVE_TO_BRAIN_TOOL_NAME];
       expect(saveTool).toBeDefined();
       expect(typedOptions.tools?.[START_TASK_TOOL_NAME]).toBeUndefined();
+      expect(typedOptions.tools?.[START_WORKFLOW_TOOL_NAME]).toBeUndefined();
       expect(typedOptions.tools?.[SCHEDULE_TASK_TOOL_NAME]).toBeUndefined();
       expect(typedOptions.tools?.[EDIT_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
       expect(typedOptions.tools?.[DELETE_TASK_SCHEDULE_TOOL_NAME]).toBeUndefined();
@@ -1416,6 +1505,7 @@ describe("POST /api/chat", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(listGoatWorkflowCatalog).not.toHaveBeenCalled();
     expect(listGoatTaskSchedulesForUser).not.toHaveBeenCalled();
     expect(createGoatTaskForUser).not.toHaveBeenCalled();
   });

@@ -14,14 +14,17 @@ transport and privacy conventions; each product has its own event registry and p
 Each registry defines every event name, its allowed property shape, a description, and the safe
 property keys reviewers should expect.
 
-Goat starts with four product events:
+Goat's product events are:
 
 | Event | Purpose |
 | --- | --- |
 | `app_opened` | Signed-in active users |
 | `signup_completed` | New-user conversion |
-| `chat_message_sent` | Chat engagement and conversation depth; `is_first_message` also measures new chats |
+| `chat_message_sent` | Main-chat engagement across OpenCompany, Codex, and Claude Code engines; `is_first_message` also measures new chats |
 | `integration_added` | Integration activation |
+| `brain_source_added` | A new enabled integration source was attached to a Brain |
+| `brain_ingestion_completed` | A full Brain ingestion job completed successfully |
+| `billing_topup_completed` | Credits were added manually or by auto-refill; `topup_type` distinguishes the path |
 
 There is no separate `chat_started` event because it would double-count the first message. Goat
 does not capture pageviews, page leaves, clicks, dead clicks, heatmaps, exceptions, performance,
@@ -52,7 +55,10 @@ Do not reuse the legacy project's token.
 Store the Goat project's API host and project token in:
 
 - Infisical `prod` + `/goat`, synced to the Goat Vercel project
+- Infisical `prod` + `/web`, synced to the legacy Vercel project for the shared Stripe webhook
+- Infisical `prod` + `/runner`, synced to Render for completed Brain ingestion events
 - Infisical `dev` + `/web` when local Goat analytics are needed
+- Infisical `dev` + `/runner` when local Brain ingestion analytics are needed
 
 Analytics is optional in ordinary local development. Missing values make the package a no-op.
 
@@ -79,6 +85,5 @@ confirm the app has no analytics-related errors.
 With debug enabled, confirm analytics logs contain only the event properties registered in
 `goat-events.ts`. Person-property updates should log their property names, never their values.
 
-With the real Goat project values, confirm one `app_opened` client event and one
-`chat_message_sent` server event appear in the Goat project, and that neither appears in the legacy
-web project.
+With the real Goat project values, confirm the explicit events exercised by the app, shared Stripe
+webhook, and runner appear in the Goat project, and that none appear in the legacy web project.

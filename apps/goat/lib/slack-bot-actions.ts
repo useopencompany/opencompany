@@ -1,7 +1,6 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import { upsertGoatBrainSource } from "@opencompany/db/goat-brain-sources";
 import {
   loadGoatIntegrationCredential,
   markGoatIntegrationStatus,
@@ -14,6 +13,7 @@ import { getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
+import { upsertGoatBrainSourceWithAnalytics } from "@/lib/brain-source-analytics";
 import { slackApiRequest } from "@/lib/integrations/slack";
 import type { GoatWorkspaceActionResult } from "@/lib/workspace-actions";
 
@@ -188,7 +188,8 @@ export async function setGoatBrainSlackBotDestinationAction(input: {
   }
 
   try {
-    await upsertGoatBrainSource({
+    await upsertGoatBrainSourceWithAnalytics({
+      workspaceId: context.workspace.id,
       brainRef: input.brainRef,
       provider: "slack_bot",
       integrationId: integration.id,

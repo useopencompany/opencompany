@@ -2,7 +2,6 @@ import {
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
 } from "@opencompany/agent-runtime";
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
@@ -62,6 +61,7 @@ import {
   type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
+import { captureGoatChatMessageSent } from "@/lib/chat-analytics";
 import { saveChatAttachmentsToGoatBrain } from "@/lib/chat-attachment-capture";
 import {
   extractGoatChatAttachmentTexts,
@@ -96,7 +96,11 @@ import {
   type WebSearchToolInput,
   type WebSearchToolOutput,
 } from "@/lib/chat-ui";
-import { GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, validateGoatChatInput } from "@/lib/chat-validation";
+import {
+  GOAT_CHAT_OUT_OF_CREDITS_MESSAGE,
+  GOAT_CHAT_PROMPT_MAX_LENGTH,
+  validateGoatChatInput,
+} from "@/lib/chat-validation";
 import { executeGoatChatExaFetch } from "@/lib/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
@@ -121,7 +125,8 @@ import {
   updateGoatTaskScheduleForUser,
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
-import { readGoatWorkflowMentionRef } from "@/lib/workflows";
+import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
+import { listGoatWorkflowCatalog, readGoatWorkflowMentionRef } from "@/lib/workflows";
 
 export const maxDuration = 800;
 export const runtime = "nodejs";
@@ -288,7 +293,7 @@ export async function POST(request: Request): Promise<Response> {
   // delegated work.
   const actionsEnabled = !requestedEngine && !isGoatChatActionsKilled();
   const emptyCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
-  const [actionCatalog, skillCatalog] = await Promise.all([
+  const [actionCatalog, skillCatalog, workflowCatalog] = await Promise.all([
     actionsEnabled
       ? resolveGoatActionCatalog({
           userWorkosId: context.user.workosUserId,
@@ -305,6 +310,15 @@ export async function POST(request: Request): Promise<Response> {
       ? listGoatSkillCatalog(context.workspace.id).catch((error) => {
           logger.warn("Goat chat skill catalog resolution failed", {
             event: "goat.chat_skill_catalog_resolution_failed",
+            error,
+          });
+          return [];
+        })
+      : Promise.resolve([]),
+    !requestedEngine && context.user.taskSpawningEnabled
+      ? listGoatWorkflowCatalog(context.workspace.id).catch((error) => {
+          logger.warn("Goat chat workflow catalog resolution failed", {
+            event: "goat.chat_workflow_catalog_resolution_failed",
             error,
           });
           return [];
@@ -526,23 +540,15 @@ export async function POST(request: Request): Promise<Response> {
     // One event covers both new and continued chats. `is_first_message` keeps the new-chat
     // funnel queryable without double-capturing the first user action.
     after(
-      captureGoatServerEvent(
-        "chat_message_sent",
-        context.user.workosUserId,
-        {
-          workspace_id: context.workspace.id,
-          session_id: turn.session.id,
-          is_first_message: turn.sessionCreated,
-          model: turn.session.model,
-          message_length: userInput.prompt.length,
-        },
-        {
-          workspaceId: context.workspace.id,
-          email: context.user.email,
-          firstName: context.user.firstName,
-          lastName: context.user.lastName,
-        },
-      ),
+      captureGoatChatMessageSent({
+        user: context.user,
+        workspaceId: context.workspace.id,
+        sessionId: turn.session.id,
+        isFirstMessage: turn.sessionCreated,
+        engine: turn.session.engine,
+        model: turn.session.model,
+        messageLength: userInput.prompt.length,
+      }),
     );
   }
 
@@ -833,6 +839,55 @@ export async function POST(request: Request): Promise<Response> {
           },
         }
       : {}),
+    ...(workflowCatalog.length > 0
+      ? {
+          workflows: {
+            catalog: workflowCatalog,
+            execute: async ({ workflowId, prompt }: { workflowId: string; prompt: string }) => {
+              const description = prompt.trim();
+              if (description.length > GOAT_CHAT_PROMPT_MAX_LENGTH) {
+                throw new Error(
+                  `Workflow task descriptions can be at most ${GOAT_CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+                );
+              }
+              const created = await createGoatTaskFromWorkflow({
+                userWorkosId: context.user.workosUserId,
+                workspaceId: context.workspace.id,
+                mention: { id: workflowId },
+                description,
+              });
+              after(
+                generateGoatWorkflowTaskTitle({
+                  taskId: created.id,
+                  userWorkosId: context.user.workosUserId,
+                  workflowName: created.name,
+                  description,
+                  apiKey: gatewayApiKey,
+                }).catch(() => undefined),
+              );
+              const attributes = {
+                ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
+                "goat.chat_session_id": turn.session.id,
+                "goat.chat_message_id": turn.userMessageId,
+                "goat.model": turn.session.model,
+                "goat.task_id": created.id,
+                "goat.workflow_id": workflowId,
+              };
+              chatSpan.setAttributes({
+                ...attributes,
+                "goat.task_started": true,
+              });
+              recordGoatCounter(GOAT_METRICS.chatTasksStartedTotal, 1, attributes);
+              return {
+                id: created.id,
+                displayId: created.displayId,
+                name: created.name,
+                prompt: created.prompt,
+              };
+            },
+          },
+        }
+      : {}),
     ...(actionCatalog.actions.length > 0
       ? {
           actions: {
@@ -1097,6 +1152,7 @@ export async function POST(request: Request): Promise<Response> {
       brainCaptureEnabled,
       browserToolsEnabled: Boolean(browserToolSession),
       skillsAvailable: skillCatalog.length > 0,
+      workflows: workflowCatalog,
       taskToolsEnabled,
       scheduleToolsEnabled: taskToolsEnabled,
       recurringSchedules,

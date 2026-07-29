@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import { GridBackdrop } from "./GridBackdrop";
 
 const ROWS = [
   {
@@ -23,20 +24,7 @@ export function WhySwitch() {
   return (
     <section className="relative overflow-hidden border-border border-t">
       <div className="relative mx-auto max-w-5xl px-6 py-24">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 top-12 bg-[linear-gradient(to_right,rgba(17,17,17,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(17,17,17,0.06)_1px,transparent_1px)] bg-[size:56px_56px] [-webkit-mask-image:linear-gradient(to_bottom_right,black,transparent_65%)] [mask-image:linear-gradient(to_bottom_right,black,transparent_65%)]"
-        />
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 22 22"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1"
-          className="-translate-x-1/2 -translate-y-1/2 absolute top-12 left-0 size-[22px] text-ink/60"
-        >
-          <path d="M11 0v22M0 11h22" />
-        </svg>
+        <GridBackdrop />
 
         <div className="relative max-w-2xl">
           <span className="font-medium font-mono text-[13px] text-violet-600"># Why switch</span>

@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/agent-runtime";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
@@ -12,6 +13,7 @@ import {
   type GoatChatUiMessage,
   type GoatCodexRuntimeView,
   START_TASK_TOOL_PART_TYPE,
+  START_WORKFLOW_TOOL_PART_TYPE,
   WEB_FETCH_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
@@ -348,16 +350,29 @@ describe("GoatSurface chat streaming UI", () => {
   it("consumes the onboarding kickoff and sends it once through main chat", async () => {
     const companyUrl = "https://opencompany.ai/";
     expect(queueGoatOnboardingKickoff(companyUrl)).toBe(true);
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 0),
+    );
 
     const { rerender } = render(
-      <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />,
+      <StrictMode>
+        <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />
+      </StrictMode>,
     );
 
     const prompt = buildGoatOnboardingKickoffPrompt(companyUrl);
     await waitFor(() => expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: prompt }));
     expect(chatMock.sendMessage).toHaveBeenCalledTimes(1);
+    expect(chatMock.preparedRequestBodies[0]).toMatchObject({
+      model: "moonshotai/kimi-k3",
+    });
 
-    rerender(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+    rerender(
+      <StrictMode>
+        <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />
+      </StrictMode>,
+    );
     expect(chatMock.sendMessage).toHaveBeenCalledTimes(1);
   });
 
@@ -471,23 +486,25 @@ describe("GoatSurface chat streaming UI", () => {
 
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
-    await user.click(screen.getByRole("button", { name: "Model" }));
+    const modelPicker = screen.getByRole("button", { name: "Model" });
+    expect(modelPicker).toHaveTextContent("Kimi K3");
+    await user.click(modelPicker);
 
     expect(screen.queryByText("Capability / Speed / Cost")).not.toBeInTheDocument();
     expect(screen.getAllByText("Claude Sonnet 5").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Claude Opus 4.8")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.5")).toBeInTheDocument();
-    expect(screen.getByText("Kimi K3")).toBeInTheDocument();
+    expect(screen.getAllByText("Kimi K3").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Kimi K2.6")).toBeInTheDocument();
     expect(screen.queryByText("GPT 5.4 Mini")).not.toBeInTheDocument();
     expect(screen.queryByText("Local Codex")).not.toBeInTheDocument();
 
-    await user.click(screen.getByText("Kimi K3"));
+    await user.click(screen.getByText("Claude Opus 4.8"));
     await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Compare");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
-      model: "moonshotai/kimi-k3",
+      model: "anthropic/claude-opus-4.8",
     });
   });
 
@@ -502,18 +519,18 @@ describe("GoatSurface chat streaming UI", () => {
     const { unmount } = render(<GoatSurface {...props} />);
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Kimi K3"));
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Use Kimi");
+    await user.click(screen.getByText("Claude Sonnet 5"));
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Use Sonnet");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
 
-    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude Sonnet 5");
 
     unmount();
     render(<GoatSurface {...props} />);
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3"),
+      expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude Sonnet 5"),
     );
   });
 
@@ -528,30 +545,30 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start with Claude");
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start with Kimi");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     const modelPicker = screen.getByRole("button", { name: "Model" });
-    expect(modelPicker).toHaveTextContent("Claude Sonnet 5");
+    expect(modelPicker).toHaveTextContent("Kimi K3");
     expect(modelPicker).toBeDisabled();
 
     const storageKey = "opencompany-goat-main-chat-selection:user_1";
-    window.localStorage.setItem(storageKey, "moonshotai/kimi-k3");
+    window.localStorage.setItem(storageKey, "anthropic/claude-sonnet-5");
     act(() => {
       window.dispatchEvent(
         new StorageEvent("storage", {
           key: storageKey,
-          newValue: "moonshotai/kimi-k3",
+          newValue: "anthropic/claude-sonnet-5",
           storageArea: window.localStorage,
         }),
       );
     });
 
-    expect(modelPicker).toHaveTextContent("Claude Sonnet 5");
+    expect(modelPicker).toHaveTextContent("Kimi K3");
 
     act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3"),
+      expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude Sonnet 5"),
     );
     expect(screen.getByRole("button", { name: "Model" })).toBeEnabled();
   });
@@ -1249,10 +1266,10 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    const contextMeter = screen.getByLabelText("Context window usage: 14k / 1M context · 1%");
+    const contextMeter = screen.getByLabelText("Context window usage: 14k / 1.0M context · 1%");
     await user.hover(contextMeter);
 
-    expect(await screen.findByText("14k / 1M context · 1%")).toBeVisible();
+    expect(await screen.findByText("14k / 1.0M context · 1%")).toBeVisible();
   });
 
   it("shows when a Codex chat is waiting for runner capacity", () => {
@@ -2591,6 +2608,67 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Research market")).toBeInTheDocument();
     expect(screen.getByText("TASK-42")).toBeInTheDocument();
     expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
+  });
+
+  it("renders a task card from start_workflow tool output", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [
+                { type: "text", text: "Started that workflow as a Task." },
+                {
+                  type: START_WORKFLOW_TOOL_PART_TYPE,
+                  toolCallId: "tool_1",
+                  state: "output-available",
+                  input: {
+                    workflowId: "customer-interview-synthesis",
+                    prompt: "Synthesize the Acme interview.",
+                  },
+                  output: {
+                    taskId: "task_1",
+                    taskDisplayId: "TASK-42",
+                    taskName: "Customer interview synthesis",
+                    status: "queued",
+                    prompt: "Synthesize the Acme interview.",
+                  },
+                },
+                {
+                  type: START_TASK_TOOL_PART_TYPE,
+                  toolCallId: "tool_2",
+                  state: "output-available",
+                  input: {
+                    name: "Fallback task",
+                    prompt: "Synthesize the Acme interview.",
+                  },
+                  output: {
+                    taskId: "task_1",
+                    taskDisplayId: "TASK-42",
+                    taskName: "Customer interview synthesis",
+                    status: "already_started",
+                    prompt: "Synthesize the Acme interview.",
+                  },
+                },
+              ],
+            } as unknown as GoatChatUiMessage,
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Started that workflow as a Task.")).toBeInTheDocument();
+    expect(screen.getAllByText("Customer interview synthesis")).toHaveLength(1);
+    expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
+    expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
   });
 
   it("renders current task status from task state instead of start_task output", () => {

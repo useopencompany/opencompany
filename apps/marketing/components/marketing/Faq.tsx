@@ -1,4 +1,16 @@
-const FAQS = [
+type FaqItem = {
+  q: string;
+  a: string;
+};
+
+type FaqProps = {
+  eyebrow?: string;
+  title?: string;
+  description?: string;
+  items?: FaqItem[];
+};
+
+const DEFAULT_FAQS: FaqItem[] = [
   {
     q: "Do I have to organize anything myself?",
     a: "No. Ingested activity is auto-classified, filed, and cross-linked. You only write when you want to save a thought or decision directly.",
@@ -21,22 +33,27 @@ const FAQS = [
   },
 ];
 
-export function Faq() {
+export function Faq({
+  eyebrow = "# FAQ",
+  title = "Questions, answered.",
+  description = "The practical details about setup, sources, models, pricing, and your data.",
+  items = DEFAULT_FAQS,
+}: FaqProps) {
   return (
     <section className="border-border border-t">
       <div className="mx-auto grid max-w-5xl gap-12 px-6 py-24 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] lg:gap-20">
         <div>
-          <span className="font-medium font-mono text-[13px] text-violet-600"># FAQ</span>
+          <span className="font-medium font-mono text-[13px] text-violet-600">{eyebrow}</span>
           <h2 className="mt-4 text-balance font-medium font-mono text-3xl text-ink leading-[1.1] tracking-tight sm:text-4xl">
-            Questions, answered.
+            {title}
           </h2>
           <p className="mt-6 max-w-sm font-medium font-mono text-[15px] text-ink-subtle leading-7 opacity-60">
-            The practical details about setup, sources, models, pricing, and your data.
+            {description}
           </p>
         </div>
 
         <div className="border-border border-t">
-          {FAQS.map((item, index) => (
+          {items.map((item, index) => (
             <details key={item.q} className="group border-border border-b font-mono">
               <summary className="grid cursor-pointer list-none grid-cols-[2rem_1fr_auto] items-center gap-3 py-5 text-[15px] text-ink leading-6 [&::-webkit-details-marker]:hidden">
                 <span className="text-[12px] text-violet-600">0{index + 1}</span>

@@ -306,7 +306,7 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
-  it("shows Drive read and edit controls plus an OAuth upgrade when editing is unavailable", () => {
+  it("shows Drive read and write controls plus an OAuth upgrade when writes are unavailable", () => {
     const integrations = goatIntegrationStateFromRows([
       {
         id: "gint_drive",
@@ -330,7 +330,7 @@ describe("SettingsIntegrationsPanel", () => {
       name: "Find & read files permission",
     });
     const writePermission = within(driveCard as HTMLElement).getByRole("group", {
-      name: "Edit Google Docs permission",
+      name: "Create & edit Docs permission",
     });
     expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
       "aria-pressed",
@@ -341,7 +341,7 @@ describe("SettingsIntegrationsPanel", () => {
       "true",
     );
     expect(
-      within(driveCard as HTMLElement).getByRole("link", { name: "Enable editing" }),
+      within(driveCard as HTMLElement).getByRole("link", { name: "Enable creating & editing" }),
     ).toHaveAttribute(
       "href",
       "/api/integrations/google-drive/start?returnTo=/settings/integrations",
