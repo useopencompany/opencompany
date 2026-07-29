@@ -7,7 +7,7 @@ vi.mock("./client", () => ({ getDb: getDbMock }));
 const { setGoatBrainSourceEnabled, upsertGoatBrainSource } = await import("./goat-brain-sources");
 
 describe("upsertGoatBrainSource", () => {
-  it("does not open a transaction on the neon-http web client", async () => {
+  it("reports a new source without opening a transaction on the neon-http web client", async () => {
     const returning = vi.fn(async () => [{ id: "gbscfg_1" }]);
     const transaction = vi.fn(() => {
       throw new Error("No transactions support in neon-http driver");
@@ -15,7 +15,7 @@ describe("upsertGoatBrainSource", () => {
     const db = {
       insert: vi.fn(() => ({
         values: vi.fn(() => ({
-          onConflictDoUpdate: vi.fn(() => ({ returning })),
+          onConflictDoNothing: vi.fn(() => ({ returning })),
         })),
       })),
       transaction,
@@ -34,10 +34,44 @@ describe("upsertGoatBrainSource", () => {
         config: { repos: [{ owner: "acme", repo: "api" }] },
         now: new Date("2026-07-22T13:30:00.000Z"),
       }),
-    ).resolves.toEqual({ id: "gbscfg_1" });
+    ).resolves.toEqual({ id: "gbscfg_1", created: true });
 
     expect(transaction).not.toHaveBeenCalled();
     expect(returning).toHaveBeenCalledOnce();
+  });
+
+  it("updates and reports an existing source", async () => {
+    const insertReturning = vi.fn(async () => []);
+    const updateReturning = vi.fn(async () => [{ id: "gbscfg_1" }]);
+    const db = {
+      insert: vi.fn(() => ({
+        values: vi.fn(() => ({
+          onConflictDoNothing: vi.fn(() => ({ returning: insertReturning })),
+        })),
+      })),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(() => ({ returning: updateReturning })),
+        })),
+      })),
+    };
+
+    await expect(
+      upsertGoatBrainSource({
+        brainRef: "gbrain_1",
+        provider: "github",
+        integrationId: "gint_1",
+        userWorkosId: "user_1",
+        createdByWorkosId: "user_1",
+        enabled: true,
+        config: { repos: [{ owner: "acme", repo: "api" }] },
+        now: new Date("2026-07-22T13:30:00.000Z"),
+        db,
+      }),
+    ).resolves.toEqual({ id: "gbscfg_1", created: false });
+
+    expect(insertReturning).toHaveBeenCalledOnce();
+    expect(updateReturning).toHaveBeenCalledOnce();
   });
 });
 
