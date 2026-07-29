@@ -267,7 +267,7 @@ task spawning. Explicitly starting a workflow through `#workflow` or the main ch
 requests; name and description matches alone do not authorize a run. Tool descriptions live in
 `packages/goat-agent/src/prompts/tool-descriptions.ts`.
 
-The default chat model is `anthropic/claude-sonnet-5`. New tasks store the chat-selected model at
+The default chat model is `moonshotai/kimi-k3`. New tasks store the chat-selected model at
 creation time, then the runner planner chooses the task execution model from its allowed model
 catalog and writes that planned model back to the task row.
 

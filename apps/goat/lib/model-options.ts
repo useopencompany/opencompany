@@ -31,7 +31,7 @@ export const CLAUDE_CODE_MODELS = CLAUDE_CODE_AGENT_MODEL_IDS.map((id) =>
 
 export type GoatModelOption = (typeof GOAT_MODELS)[number];
 
-export const DEFAULT_GOAT_MODEL: AgentModelId = "anthropic/claude-sonnet-5";
+export const DEFAULT_GOAT_MODEL: AgentModelId = "moonshotai/kimi-k3";
 
 export function normalizeGoatModel(value: unknown): AgentModelId {
   if (typeof value === "string" && GOAT_MODEL_ID_SET.has(value)) {

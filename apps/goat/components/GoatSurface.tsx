@@ -337,7 +337,9 @@ export function GoatSurface({
   const routedChatSessionIdRef = useRef(initialChat?.id ?? null);
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
+  const pendingProgrammaticPromptRef = useRef<string | null>(null);
   const onboardingKickoffReadRef = useRef(false);
+  const onboardingKickoffPromptRef = useRef<string | null>(null);
   const activeTurnStartedAtRef = useRef<number | null>(null);
   const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
   const wasAgentWorkingRef = useRef(false);
@@ -883,13 +885,22 @@ export function GoatSurface({
   }, [chatMessages]);
   const contextMaxTokens = goatModelContextWindowTokens(activeChatModel);
 
-  const applyCodexComposerUiState = useCallback((state: CodexComposerUiState) => {
-    setCodexReasoningEffort(state.reasoningEffort);
-    setCodexPlanModeEnabled(state.planModeEnabled);
-    setCodexGoalModeEnabled(state.goalModeEnabled);
-    setCodexGoalObjective(state.goalObjective);
-    setCodexGoalTokenBudget(state.goalTokenBudget);
-  }, []);
+  const applyCodexComposerUiState = useCallback(
+    (state: CodexComposerUiState) => {
+      setCodexReasoningEffort(state.reasoningEffort);
+      setCodexPlanModeEnabled(state.planModeEnabled);
+      setCodexGoalModeEnabled(state.goalModeEnabled);
+      setCodexGoalObjective(state.goalObjective);
+      setCodexGoalTokenBudget(state.goalTokenBudget);
+    },
+    [
+      setCodexGoalModeEnabled,
+      setCodexGoalObjective,
+      setCodexGoalTokenBudget,
+      setCodexPlanModeEnabled,
+      setCodexReasoningEffort,
+    ],
+  );
 
   const openChat = useCallback(
     (
@@ -970,6 +981,9 @@ export function GoatSurface({
       localCodexBetaEnabled,
       localCodexFeatureDisabledForChat,
       releaseAllOptimisticAttachmentPreviews,
+      setChatModelOverride,
+      setClaudeModel,
+      setCodexModel,
       setMessages,
     ],
   );
@@ -1208,7 +1222,8 @@ export function GoatSurface({
       return;
     }
 
-    const prompt = input.trim();
+    const prompt = (pendingProgrammaticPromptRef.current ?? input).trim();
+    pendingProgrammaticPromptRef.current = null;
     const pendingAttachments = composerAttachments.attachments;
     const readyAttachments = pendingAttachments.filter(
       (attachment) => attachment.status === "ready",
@@ -1476,21 +1491,26 @@ export function GoatSurface({
   };
 
   useEffect(() => {
-    if (onboardingKickoffReadRef.current) return;
-    onboardingKickoffReadRef.current = true;
-    const prompt = consumeGoatOnboardingKickoffPrompt();
+    if (!onboardingKickoffReadRef.current) {
+      onboardingKickoffReadRef.current = true;
+      onboardingKickoffPromptRef.current = consumeGoatOnboardingKickoffPrompt();
+    }
+    const prompt = onboardingKickoffPromptRef.current;
     if (!prompt) return;
 
-    // This synchronizes one-time browser storage with the normal form submit
-    // path. Defer the state update so React can finish the mount (including the
-    // development Strict Mode setup/cleanup cycle) before the automatic send.
+    // Synchronize one-time browser storage with the normal form submit path.
+    // The prompt ref lets the submit handler read the kickoff immediately,
+    // without waiting for a render or an animation frame that may be throttled.
+    // Keep the consumed kickoff until this component is mounted so React Strict
+    // Mode's development setup/cleanup replay cannot drop it.
     queueMicrotask(() => {
       if (!mountedRef.current) return;
+      if (onboardingKickoffPromptRef.current !== prompt) return;
+      onboardingKickoffPromptRef.current = null;
       setChatModelOverride(normalizeGoatModel(defaultModel));
+      pendingProgrammaticPromptRef.current = prompt;
       setInput(prompt);
-      requestAnimationFrame(() => {
-        if (mountedRef.current) formRef.current?.requestSubmit();
-      });
+      formRef.current?.requestSubmit();
     });
   }, [defaultModel]);
 
@@ -1704,6 +1724,7 @@ export function GoatSurface({
 
   const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextInput = event.target.value;
+    pendingProgrammaticPromptRef.current = null;
     setInput(nextInput);
     setSelectedMentions((current) =>
       current.filter((mention) => goatChatMentionIsVisible(nextInput, mention)),
