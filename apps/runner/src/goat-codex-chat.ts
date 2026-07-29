@@ -1,4 +1,5 @@
 import {
+  CLOUD_CODING_ENGINE_CONFIG,
   CODEX_COMMAND_TOOL_PART_TYPE,
   CODEX_DYNAMIC_TOOL_NAME,
   CODEX_SUBAGENT_TOOL_PART_TYPE,
@@ -45,6 +46,7 @@ import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
+import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./goat-coding-workspace-runtime";
 import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
@@ -57,8 +59,8 @@ import {
 import { materializeCodexSkillSnapshotsForSession } from "./skills";
 import { rowsFromExecute } from "./sql-exec";
 
-const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
-const CODEX_CHAT_WORKDIR = "/home/user/opencompany-goat/codex-chat";
+export const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
+const CODEX_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.codex.workDirectory;
 const CODEX_CHAT_ATTACHMENTS_ROOT = "/home/user/.opencompany-goat/codex-chat-attachments";
 const INTERRUPT_POLL_INTERVAL_MS = 2_000;
 const INTERACTION_POLL_INTERVAL_MS = 500;
@@ -136,6 +138,7 @@ export async function runGoatCodexChatTurn(input: {
       metadata: {
         user_id: turn.userWorkosId,
       },
+      network: GOAT_CODING_WORKSPACE_SANDBOX_NETWORK,
       idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
     });
   } catch (error) {

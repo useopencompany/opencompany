@@ -305,7 +305,9 @@ async function prepareGoatProxyTarget(appPort) {
   goatDevProxy = await startGoatDevProxy({ appPort, runnerPort });
   console.log(`\nGoat dev proxy ready: http://127.0.0.1:${goatDevProxy.port}`);
   console.log(`  app routes    -> ${goatDevProxy.routes.app}`);
-  console.log(`  runner routes -> ${goatDevProxy.routes.runner} (/broker/*, /goat/tools/*)\n`);
+  console.log(
+    `  runner routes -> ${goatDevProxy.routes.runner} (/broker/*, /goat/runtime, /goat/tools/*, *.preview.localhost)\n`,
+  );
   return { port: goatDevProxy.port, exposesRunnerCallbacks: true };
 }
 

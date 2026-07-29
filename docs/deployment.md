@@ -202,6 +202,8 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `RUNNER_INTERNAL_TOKEN`
 - `RUNNER_STREAM_TOKEN_SECRET`
 - `RUNNER_ALLOWED_ORIGINS`
+- `RUNNER_PREVIEW_BASE_DOMAIN` (optional; required for Goat cloud coding workspace previews)
+- `RUNNER_PREVIEW_PROTOCOL` (optional; defaults to `https`)
 - `DURABLE_STREAMS_URL`
 - `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`
@@ -223,6 +225,21 @@ Stream. Keep the source token in Render/Infisical, not in git.
 `RUNNER_ALLOWED_ORIGINS` must include the exact production web origin, for example
 `https://app.example.com`. Add preview origins only if you intentionally allow previews to connect
 to the production runner.
+
+For Goat persistent cloud coding workspace previews (Codex and Claude Code), set
+`RUNNER_PREVIEW_BASE_DOMAIN` to a dedicated hostname such as `preview.goat.example.com`. Add both
+`preview.goat.example.com` and
+`*.preview.goat.example.com` to the Render runner's custom domains and configure the corresponding
+DNS records. The wildcard is required because each preview uses a short-lived signed capability as
+its leftmost label. Keep the preview hostname on the runner service; it must not point at Goat or
+directly at E2B. `RUNNER_PREVIEW_PROTOCOL` defaults to `https`; override it only for an HTTP preview
+environment such as local development.
+
+Use a separate registrable domain (or eTLD+1) for the preview hostname than the one Goat's own
+cookies are scoped to. Preview content runs in a `sandbox="allow-same-origin allow-scripts"` iframe,
+so if the preview domain shares a registrable domain with Goat and Goat sets broadly-scoped
+(`Domain=.example.com`) cookies, the untrusted preview could read the user's Goat session cookies.
+Hosting previews on an unrelated domain keeps that boundary intact.
 
 ### Neon
 

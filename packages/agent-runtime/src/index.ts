@@ -3,6 +3,7 @@ export * from "./agent-file";
 export * from "./attachments";
 export * from "./brain";
 export * from "./claude-code-events";
+export * from "./cloud-coding-engines";
 export * from "./codex-app-server-events";
 export * from "./codex-ui-message-parts";
 export * from "./config";

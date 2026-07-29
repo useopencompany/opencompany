@@ -1,4 +1,5 @@
 import {
+  CLOUD_CODING_ENGINE_CONFIG,
   type ClaudeCodeTurnSummary,
   claudeCodeModelSupportsReasoningEffort,
   createClaudeCodeEventNormalizer,
@@ -44,6 +45,7 @@ import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
+import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./goat-coding-workspace-runtime";
 import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
@@ -52,7 +54,7 @@ import {
 } from "./sandbox";
 import { materializeCodexSkillSnapshotsForSession } from "./skills";
 
-const CLAUDE_CHAT_WORKDIR = "/home/user/opencompany-goat/claude-chat";
+const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory;
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -163,6 +165,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
       metadata: {
         user_id: turn.userWorkosId,
       },
+      network: GOAT_CODING_WORKSPACE_SANDBOX_NETWORK,
       idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
     });
   } catch (error) {
