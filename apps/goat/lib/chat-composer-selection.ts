@@ -1,13 +1,19 @@
 import type { AgentModelId } from "@opencompany/agent-runtime";
+import { AUTO_GOAT_MODEL_SELECTION, type AutoGoatModelSelection } from "@/lib/chat-auto-model";
 import { CLAUDE_PICKER_VALUE, type ClaudePickerValue } from "@/lib/claude-chat-constants";
 import { CODEX_PICKER_VALUE, type CodexPickerValue } from "@/lib/codex-chat-constants";
 import { DEFAULT_GOAT_MODEL, normalizeGoatModel } from "@/lib/model-options";
 
-export type GoatChatModelSelection = AgentModelId | CodexPickerValue | ClaudePickerValue;
+export type GoatChatModelSelection =
+  | AgentModelId
+  | AutoGoatModelSelection
+  | CodexPickerValue
+  | ClaudePickerValue;
 
 type GoatChatEngineAvailability = {
   codexConnected: boolean;
   claudeCodeConnected?: boolean;
+  autoModelRoutingEnabled?: boolean;
 };
 
 const GOAT_CHAT_SELECTION_STORAGE_KEY = "opencompany-goat-main-chat-selection";
@@ -17,6 +23,9 @@ export function normalizeStoredGoatChatSelection(
   value: unknown,
   availability: GoatChatEngineAvailability,
 ): GoatChatModelSelection {
+  if (value === AUTO_GOAT_MODEL_SELECTION) {
+    return availability.autoModelRoutingEnabled ? AUTO_GOAT_MODEL_SELECTION : DEFAULT_GOAT_MODEL;
+  }
   if (value === CODEX_PICKER_VALUE) {
     return availability.codexConnected ? CODEX_PICKER_VALUE : DEFAULT_GOAT_MODEL;
   }

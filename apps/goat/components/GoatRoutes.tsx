@@ -109,6 +109,7 @@ export function GoatHomeRoute({
         codexConnected={data.codexConnected}
         claudeCodeConnected={data.claudeCodeConnected}
         taskSpawningEnabled={data.featureFlags.taskSpawning}
+        autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
         chatResumeEnabled={data.chatResumeEnabled}
         userName={userName}
         userWorkosId={data.user.workosUserId}

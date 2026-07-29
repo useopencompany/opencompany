@@ -11,4 +11,12 @@ describe("goatFeatureFlagsFromUser", () => {
     expect(goatFeatureFlagsFromUser({ taskSpawningEnabled: true }).taskSpawning).toBe(true);
     expect(goatFeatureFlagsFromUser({ taskSpawningEnabled: false }).taskSpawning).toBe(false);
   });
+
+  it("keeps automatic model routing off unless explicitly enabled", () => {
+    expect(goatFeatureFlagsFromUser({}).autoModelRouting).toBe(false);
+    expect(goatFeatureFlagsFromUser({ autoModelRoutingEnabled: true }).autoModelRouting).toBe(true);
+    expect(goatFeatureFlagsFromUser({ autoModelRoutingEnabled: false }).autoModelRouting).toBe(
+      false,
+    );
+  });
 });
