@@ -1978,6 +1978,58 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.queryByText(/Codex · /)).not.toBeInTheDocument();
   });
 
+  it("renders coding workspaces only for persistent Codex and Claude Code chats", () => {
+    const renderChat = (
+      engine: "codex" | "claude_code" | "local_codex" | "opencompany",
+      taskConversation?: {
+        taskId: string;
+        status: "succeeded";
+        startedAtMs: number;
+      },
+    ) =>
+      render(
+        <GoatSurface
+          tasks={[]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={{
+            id: `goat_chat_${engine}`,
+            title: `${engine} chat`,
+            model: DEFAULT_GOAT_MODEL,
+            engine,
+            messages: [],
+          }}
+          {...(taskConversation ? { taskConversation } : {})}
+          localCodexBetaEnabled
+        />,
+      );
+
+    const codex = renderChat("codex");
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+    expect(screen.getByLabelText("Codex workspace")).toBeInTheDocument();
+    codex.unmount();
+
+    const claude = renderChat("claude_code");
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+    expect(screen.getByLabelText("Claude Code workspace")).toBeInTheDocument();
+    claude.unmount();
+
+    const local = renderChat("local_codex");
+    expect(screen.queryByRole("button", { name: "Open workspace" })).not.toBeInTheDocument();
+    local.unmount();
+
+    const openCompany = renderChat("opencompany");
+    expect(screen.queryByRole("button", { name: "Open workspace" })).not.toBeInTheDocument();
+    openCompany.unmount();
+
+    const backgroundTask = renderChat("opencompany", {
+      taskId: "goat_task_1",
+      status: "succeeded",
+      startedAtMs: Date.now(),
+    });
+    expect(screen.queryByRole("button", { name: "Open workspace" })).not.toBeInTheDocument();
+    backgroundTask.unmount();
+  });
+
   it("keeps active and pinned Codex tasks visible and sorts active work first", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));

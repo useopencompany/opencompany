@@ -3,10 +3,10 @@ import { GOAT_SPANS, recordGoatTaskDispatch, startGoatSpan } from "@opencompany/
 
 const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
 const CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS = 5_000;
-const CODEX_CHAT_RUNTIME_ACCESS_TIMEOUT_MS = 10_000;
+const CODING_WORKSPACE_RUNTIME_ACCESS_TIMEOUT_MS = 10_000;
 
 export type GoatCodexSandboxStatus = "running" | "sleeping" | "deleted";
-export type GoatCodexRuntimeAccess = {
+export type GoatCodingWorkspaceRuntimeAccess = {
   websocketUrl: string;
   ticket: string;
   expiresAt: number;
@@ -233,10 +233,10 @@ export async function getGoatCodexSandboxStatus(
   return body.status;
 }
 
-export async function createGoatCodexRuntimeAccess(input: {
-  codexChatSessionId: string;
+export async function requestGoatCodingWorkspaceRuntimeAccess(input: {
+  codingSessionId: string;
   userWorkosId: string;
-}): Promise<GoatCodexRuntimeAccess> {
+}): Promise<GoatCodingWorkspaceRuntimeAccess> {
   const internalBaseUrl = runnerInternalBaseUrl();
   const publicBaseUrl = runnerPublicBaseUrl();
   const token = runnerToken();
@@ -245,11 +245,11 @@ export async function createGoatCodexRuntimeAccess(input: {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CODEX_CHAT_RUNTIME_ACCESS_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), CODING_WORKSPACE_RUNTIME_ACCESS_TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetch(
-      `${internalBaseUrl}/internal/goat/codex-chat/sessions/${encodeURIComponent(input.codexChatSessionId)}/runtime-access`,
+      `${internalBaseUrl}/internal/goat/coding-workspaces/sessions/${encodeURIComponent(input.codingSessionId)}/runtime-access`,
       {
         method: "POST",
         headers: {
@@ -267,7 +267,7 @@ export async function createGoatCodexRuntimeAccess(input: {
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
     const message = typeof body?.error === "string" ? body.error : "Runtime access is unavailable.";
-    throw new GoatCodexRuntimeRequestError(message, response.status);
+    throw new GoatCodingWorkspaceRequestError(message, response.status);
   }
 
   const body = (await response.json()) as Record<string, unknown>;
@@ -289,13 +289,13 @@ export async function createGoatCodexRuntimeAccess(input: {
   };
 }
 
-export class GoatCodexRuntimeRequestError extends Error {
+export class GoatCodingWorkspaceRequestError extends Error {
   constructor(
     message: string,
     readonly statusCode: number,
   ) {
     super(message);
-    this.name = "GoatCodexRuntimeRequestError";
+    this.name = "GoatCodingWorkspaceRequestError";
   }
 }
 

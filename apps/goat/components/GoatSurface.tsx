@@ -2,6 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import {
+  CLOUD_CODING_ENGINE_CONFIG,
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
 } from "@opencompany/agent-runtime";
@@ -71,7 +72,7 @@ import {
   useSyncExternalStore,
   useTransition,
 } from "react";
-import { CodexWorkspacePanel } from "@/components/CodexWorkspacePanel";
+import { CodingWorkspacePanel } from "@/components/CodingWorkspacePanel";
 import { buildChatTaskLookup } from "@/components/chat/assistant-items";
 import {
   GoatComposerAttachments,
@@ -225,13 +226,13 @@ const ENGINE_CHAT_CONFIG: Record<
       `/api/local-codex/sessions/${encodeURIComponent(chatSessionId)}/interrupt`,
   },
   codex: {
-    label: "Codex",
+    label: CLOUD_CODING_ENGINE_CONFIG.codex.label,
     messagesEndpoint: "/api/codex-chat/messages",
     interruptEndpoint: (chatSessionId) =>
       `/api/codex-chat/sessions/${encodeURIComponent(chatSessionId)}/interrupt`,
   },
   claude_code: {
-    label: "Claude Code",
+    label: CLOUD_CODING_ENGINE_CONFIG.claude_code.label,
     messagesEndpoint: "/api/claude-chat/messages",
     // Claude chats share the codex_chat session/turn rows, so the codex interrupt
     // and sandbox-status routes are engine-agnostic.
@@ -2391,12 +2392,14 @@ export function GoatSurface({
             </div>
           </form>
         </div>
-        {mode === "chat" && activeEngineChat?.engine === "codex" ? (
-          <CodexWorkspacePanel
+        {mode === "chat" &&
+        (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
+          <CodingWorkspacePanel
             key={activeEngineChat.chatSessionId}
             chatSessionId={activeEngineChat.chatSessionId}
             sandboxStatus={codexSandboxStatus}
-            codexIsRunning={engineRunning || engineSubmitting}
+            engineLabel={CLOUD_CODING_ENGINE_CONFIG[activeEngineChat.engine].label}
+            engineIsRunning={engineRunning || engineSubmitting}
           />
         ) : null}
       </div>

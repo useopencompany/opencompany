@@ -18,10 +18,11 @@ Goat has four LLM paths:
 3. **Local Codex chat:** a Goat chat engine mode that queues commands for a user-run local bridge.
    The bridge creates a clean session folder under `~/.opencompany/goat/sessions`, runs
    `codex app-server`, and posts normalized Codex events back into the Goat chat.
-4. **Cloud Codex chat:** a Goat chat engine mode backed by a persistent E2B sandbox and Codex
-   app-server thread. Uploaded images, PDFs, Word files, Excel files, and SRT subtitles are
-   materialized into that sandbox; images are also sent to Codex as native local-image inputs. New
-   chats pin the active Brain and expose its read plane through a runner-hosted Codex dynamic tool.
+4. **Persistent cloud coding chat:** Goat chat engine modes for Codex and Claude Code backed by a
+   persistent E2B sandbox. Uploaded images, PDFs, Word files, Excel files, and SRT subtitles are
+   materialized into that sandbox. Each engine keeps its own resumable thread/session state and
+   trusted working directory; Codex additionally receives images as native local-image inputs and
+   exposes the active Brain through runner-hosted dynamic tools.
 
 The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
@@ -53,10 +54,10 @@ Browser
   GoatSurface Local Codex mode
     POST /api/local-codex/messages
       enqueue local Codex bridge command
-  GoatSurface Cloud Codex mode
-    POST /api/codex-chat/messages
+  GoatSurface cloud coding modes
+    POST /api/codex-chat/messages or /api/claude-chat/messages
       persist the message and attachment metadata
-      enqueue a turn for the cloud Codex chat worker
+      enqueue a turn for the shared cloud coding chat worker
 
 Runner
   Goat task worker wakes/polls
@@ -69,7 +70,7 @@ Runner
     mark task succeeded, failed, or canceled
 
 Goat UI
-  subscribes to Electric task, chat, Cloud Codex, and local Codex shapes
+  subscribes to Electric task, chat, cloud coding, and local Codex shapes
 ```
 
 ## Foreground Chat Loop
@@ -126,7 +127,8 @@ and model-selected skills share the same per-turn limit of 16 skills / 256 KiB o
 
 The composer also accepts PDF, DOCX, XLSX, SRT, PNG, JPEG, and WebP files. SRT MIME values are
 normalized because browsers report them inconsistently. Foreground chat stores bounded extracted
-SRT text for the initial and follow-up turns; Cloud Codex receives the original file in its sandbox.
+SRT text for the initial and follow-up turns; persistent cloud coding chats receive the original
+file in their sandbox.
 
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
 matching `/chat/<id>` URL immediately with the native History API, without starting a server
@@ -256,7 +258,8 @@ with canonical provenance, summarize the pass, and ask what to deepen. This fill
 main chat even though ordinary deeper or multi-source work routes to a background task.
 `start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
-Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The
+Preferences. The unified Tasks section itself remains available for persistent cloud coding
+sessions. The
 database flag defaults off, so the standard Goat experience is chat plus Brain without background
 task spawning. Explicitly starting a `#workflow` opts the user into background tasks so its durable
 run can be claimed. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
@@ -276,10 +279,11 @@ durable boundary starts only when `start_task` creates a task row.
 
 Brain skills are user-authored, session-scoped context. Normal chat replays each immutable skill
 snapshot on the historical user message that activated it, so the full instructions remain in model
-history on later turns while visible chat content stays unchanged. Cloud Codex materializes every
-snapshot under `.agents/skills/<id>/SKILL.md` and sends newly activated skills to app-server as
-native `skill` inputs; Codex then keeps invoked instructions in its persistent thread. Skills are
-unavailable in Local Codex and are not copied into background, delegated, or recurring tasks.
+history on later turns while visible chat content stays unchanged. Persistent cloud coding chats
+materialize every snapshot under `.agents/skills/<id>/SKILL.md`. Codex sends newly activated skills
+to app-server as native `skill` inputs and keeps invoked instructions in its persistent thread;
+Claude Code receives the materialized skill paths in its turn prompt. Skills are unavailable in
+Local Codex and are not copied into background, delegated, or recurring tasks.
 
 ## Local Codex Chat
 
@@ -335,15 +339,46 @@ app-server requests and returns an explicit unsupported-request error instead of
 them as client responses, but its command-polling transport does not yet have a durable path for a
 browser answer to reach the blocked local process.
 
-## Cloud Codex Chat
+## Persistent Cloud Coding Chats
 
 Entry points:
 
 - `apps/goat/components/GoatSurface.tsx`
-- `apps/goat/app/api/codex-chat/*`
+- `apps/goat/components/CodingWorkspacePanel.tsx`
+- `apps/goat/app/api/codex-chat/*` and `apps/goat/app/api/claude-chat/*`
+- `apps/goat/app/api/coding-workspaces/*`
 - `apps/goat/lib/codex-chat.ts`
 - `apps/runner/src/goat-codex-chat.ts`
+- `apps/runner/src/goat-claude-code-chat.ts`
+- `apps/runner/src/goat-coding-workspace-runtime*.ts`
 - `apps/runner/src/codex-app-server.ts`
+
+Codex and Claude Code use the same durable `goat.codex_chat_*` tables and worker queue; those legacy
+database names remain the storage contract for both engines. Every open coding chat owns a
+persistent sandbox, while the shared engine descriptor selects the trusted working directory:
+`/home/user/opencompany-goat/codex-chat` for Codex and
+`/home/user/opencompany-goat/claude-chat` for Claude Code.
+
+Both engines expose the same Preview and Terminal workspace sidebar. The browser requests an
+owner-bound, short-lived ticket from
+`POST /api/coding-workspaces/sessions/:chatSessionId/runtime-access`, then connects to
+`/goat/runtime` with the `goat-coding-workspace-v1` WebSocket protocol. The runner revalidates the
+open session and sandbox before connecting, chooses the working directory from its trusted engine
+descriptor, and never accepts a directory from the browser. Preview URLs use signed,
+session-and-port-bound capabilities and the runner proxy; Goat does not expose raw sandbox ids or
+E2B hosts.
+
+The sidebar is opt-in for persistent Codex and Claude Code chats only. Local Codex, foreground
+OpenCompany chat, background tasks, scheduled runs, and tool sandboxes do not receive it. Opening
+the panel alone does not wake a sleeping sandbox; selecting Preview or Terminal does. The terminal
+uses an engine-neutral tmux session, and the UI warns with the active engine's name when a turn may
+edit the same directory concurrently.
+
+Claude Code turns run the Claude CLI in the Claude-specific working directory and resume its saved
+session id after runner handoffs. Codex execution has additional app-server, Plan mode, interaction,
+Brain, and dynamic-action behavior described below.
+
+### Codex execution
 
 Cloud Codex uses a persistent sandbox per Goat chat and resumes the same Codex app-server thread on
 follow-up turns. New turns remain `queued` until the runner claims them, then move through
@@ -423,11 +458,11 @@ clear stored answer bodies after settling the UI, including answers to questions
 Pending dynamic host-tool calls also force a guarded recovery, since their result belongs to the
 runner proxy connection that received the original request.
 
-On the Goat home, open Cloud Codex sessions are projected into the unified Tasks section alongside
-background `goat.tasks`. This is a live UI projection of the chat-backed session and its
-`goat.codex_chat_sessions` runtime state, not a copied task row: selecting it still opens
-`/chat/<session-id>`, pinning and archiving keep their chat semantics, and the sidebar continues to
-show it in conversation history. Local Codex remains a chat-only surface.
+On the Goat home, open persistent Codex and Claude Code sessions are projected into the unified
+Tasks section alongside background `goat.tasks`. This is a live UI projection of the chat-backed
+session and its `goat.codex_chat_sessions` runtime state, not a copied task row: selecting it still
+opens `/chat/<session-id>`, pinning and archiving keep their chat semantics, and the sidebar
+continues to show it in conversation history. Local Codex remains a chat-only surface.
 
 ## Task Creation
 
@@ -673,11 +708,11 @@ Important tables:
 - `goat.local_codex_turns`: local Codex user and assistant message linkage plus Codex turn status.
 - `goat.local_codex_commands`: queued bridge commands for start, steer, interrupt, and close.
 - `goat.local_codex_events`: raw app-server notifications plus normalized event type and payload.
-- `goat.codex_chat_sessions`: persistent cloud sandbox, app-server thread, active turn, status,
-  pinned Brain, and host-tool contract version.
-- `goat.codex_chat_turns`: leased Cloud Codex turn queue and message linkage.
+- `goat.codex_chat_sessions`: persistent Codex/Claude Code sandbox, engine thread/session, active
+  turn, status, pinned Brain, and host-tool contract version.
+- `goat.codex_chat_turns`: leased persistent cloud coding turn queue and message linkage.
 - `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
-- `goat.codex_chat_events`: normalized Cloud Codex event audit rows.
+- `goat.codex_chat_events`: normalized persistent cloud coding event audit rows.
 - `goat.tasks`: durable background task queue, status, stage, result, error, lease, harness spec,
   debug trace, and sandbox id.
 - `goat.task_messages`: durable task transcript rows for user, assistant, and tool messages.

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   closeGoatCodexChatSessionForChat,
   createGoatCodexChatMessage as createGoatCodexChatMessageImpl,
-  createGoatCodexChatRuntimeAccess,
+  createGoatCodingWorkspaceRuntimeAccess,
   getGoatCodexChatSandboxStatus,
   interruptGoatCodexChatSession,
 } from "@/lib/codex-chat";
@@ -43,8 +43,8 @@ vi.mock("@/lib/claude-code-auth", () => ({
 }));
 
 vi.mock("@/lib/task-runner", () => ({
-  createGoatCodexRuntimeAccess: mocks.runtimeAccess,
-  GoatCodexRuntimeRequestError: class GoatCodexRuntimeRequestError extends Error {
+  requestGoatCodingWorkspaceRuntimeAccess: mocks.runtimeAccess,
+  GoatCodingWorkspaceRequestError: class GoatCodingWorkspaceRequestError extends Error {
     constructor(
       message: string,
       readonly statusCode: number,
@@ -528,7 +528,7 @@ describe("getGoatCodexChatSandboxStatus", () => {
   });
 });
 
-describe("createGoatCodexChatRuntimeAccess", () => {
+describe("createGoatCodingWorkspaceRuntimeAccess", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.selectResults.length = 0;
@@ -555,7 +555,7 @@ describe("createGoatCodexChatRuntimeAccess", () => {
       sandboxStatus: "sleeping",
     });
 
-    const result = await createGoatCodexChatRuntimeAccess({
+    const result = await createGoatCodingWorkspaceRuntimeAccess({
       userWorkosId: "user_1",
       chatSessionId: "goat_chat_1",
     });
@@ -566,7 +566,7 @@ describe("createGoatCodexChatRuntimeAccess", () => {
     });
     expect(result).not.toHaveProperty("access.sandboxId");
     expect(mocks.runtimeAccess).toHaveBeenCalledWith({
-      codexChatSessionId: "goat_codex_chat_1",
+      codingSessionId: "goat_codex_chat_1",
       userWorkosId: "user_1",
     });
   });
@@ -575,7 +575,7 @@ describe("createGoatCodexChatRuntimeAccess", () => {
     mocks.selectResults.push([]);
 
     await expect(
-      createGoatCodexChatRuntimeAccess({
+      createGoatCodingWorkspaceRuntimeAccess({
         userWorkosId: "user_other",
         chatSessionId: "goat_chat_1",
       }),
@@ -583,7 +583,7 @@ describe("createGoatCodexChatRuntimeAccess", () => {
     expect(mocks.runtimeAccess).not.toHaveBeenCalled();
   });
 
-  it("does not expose Claude Code sessions through the Codex workspace runtime", async () => {
+  it("resolves owner-bound Claude Code sessions through the shared workspace runtime", async () => {
     mocks.selectResults.push([
       {
         codex_chat_sessions: {
@@ -597,12 +597,52 @@ describe("createGoatCodexChatRuntimeAccess", () => {
       },
     ]);
 
+    mocks.runtimeAccess.mockResolvedValue({
+      websocketUrl: "wss://runner.example.com/goat/runtime",
+      ticket: "ticket_claude",
+      expiresAt: 60_000,
+      sandboxStatus: "running",
+    });
+
     await expect(
-      createGoatCodexChatRuntimeAccess({
+      createGoatCodingWorkspaceRuntimeAccess({
         userWorkosId: "user_1",
         chatSessionId: "goat_chat_1",
       }),
-    ).resolves.toMatchObject({ ok: false, statusCode: 404 });
+    ).resolves.toMatchObject({
+      ok: true,
+      access: { ticket: "ticket_claude", sandboxStatus: "running" },
+    });
+    expect(mocks.runtimeAccess).toHaveBeenCalledWith({
+      codingSessionId: "goat_codex_chat_1",
+      userWorkosId: "user_1",
+    });
+  });
+
+  it.each([
+    ["closed", "codex", "sbx_secret", "closed", 404],
+    ["unsupported", "opencompany", "sbx_secret", "idle", 404],
+    ["missing sandbox", "codex", null, "idle", 409],
+  ])("rejects %s sessions before asking the runner for a ticket", async (_case, engine, sandboxId, status, statusCode) => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          userWorkosId: "user_1",
+          engine,
+          sandboxId,
+          status,
+        },
+      },
+    ]);
+
+    await expect(
+      createGoatCodingWorkspaceRuntimeAccess({
+        userWorkosId: "user_1",
+        chatSessionId: "goat_chat_1",
+      }),
+    ).resolves.toMatchObject({ ok: false, statusCode });
     expect(mocks.runtimeAccess).not.toHaveBeenCalled();
   });
 });

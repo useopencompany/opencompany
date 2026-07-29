@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mintGoatCodexRuntimeAccess } from "./goat-codex-runtime";
+import { mintGoatCodingWorkspaceAccess } from "./goat-coding-workspace-runtime";
 import { executeGoatGoogleTool } from "./goat-google-tools";
 import { createGoatToolToken } from "./goat-tool-auth";
 import { wakeGoatTaskWorker } from "./goat-worker";
@@ -23,11 +23,11 @@ vi.mock("./goat-worker", () => ({
   wakeGoatTaskWorker: vi.fn(),
 }));
 
-vi.mock("./goat-codex-runtime", async (importOriginal) => {
-  const original = await importOriginal<typeof import("./goat-codex-runtime")>();
+vi.mock("./goat-coding-workspace-runtime", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./goat-coding-workspace-runtime")>();
   return {
     ...original,
-    mintGoatCodexRuntimeAccess: vi.fn(async () => ({
+    mintGoatCodingWorkspaceAccess: vi.fn(async () => ({
       ticket: "ticket_1",
       expiresAt: 60_000,
       sandboxStatus: "sleeping",
@@ -126,33 +126,46 @@ describe("runner server CORS", () => {
   });
 });
 
-describe("Goat Codex runtime access", () => {
+describe("Goat coding workspace access", () => {
+  it("rejects missing owner claims", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(mintGoatCodingWorkspaceAccess).not.toHaveBeenCalled();
+  });
+
   it("requires internal auth and passes the claimed owner to ticket minting", async () => {
     const server = createServer(env);
     servers.push(server);
 
     const unauthorized = await server.inject({
       method: "POST",
-      url: "/internal/goat/codex-chat/sessions/goat_codex_chat_1/runtime-access",
+      url: "/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
       payload: { userWorkosId: "user_1" },
     });
     expect(unauthorized.statusCode).toBe(401);
 
     const response = await server.inject({
       method: "POST",
-      url: "/internal/goat/codex-chat/sessions/goat_codex_chat_1/runtime-access",
+      url: "/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
       headers: { authorization: `Bearer ${env.internalToken}` },
       payload: { userWorkosId: "user_1" },
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      ok: true,
       ticket: "ticket_1",
       sandboxStatus: "sleeping",
     });
-    expect(mintGoatCodexRuntimeAccess).toHaveBeenCalledWith({
-      codexChatSessionId: "goat_codex_chat_1",
+    expect(mintGoatCodingWorkspaceAccess).toHaveBeenCalledWith({
+      codingSessionId: "goat_codex_chat_1",
       userWorkosId: "user_1",
       env,
     });

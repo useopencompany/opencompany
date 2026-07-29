@@ -14,7 +14,9 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import {
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type Ref,
   useCallback,
   useEffect,
   useRef,
@@ -23,7 +25,7 @@ import {
 } from "react";
 import type { GoatCodexSandboxStatus } from "@/lib/task-runner";
 
-const CodexTerminal = dynamic(() => import("./CodexTerminal"), {
+const CodingWorkspaceTerminal = dynamic(() => import("./CodingWorkspaceTerminal"), {
   ssr: false,
   loading: () => <WorkspaceNotice title="Loading terminal…" busy />,
 });
@@ -31,23 +33,25 @@ const CodexTerminal = dynamic(() => import("./CodexTerminal"), {
 const MIN_PANEL_WIDTH = 340;
 const MAX_PANEL_WIDTH = 760;
 const DEFAULT_PANEL_WIDTH = 440;
-const PANEL_WIDTH_KEY = "goat-codex-workspace-panel-width-v1";
-const PANEL_WIDTH_EVENT = "goat-codex-workspace-panel-width";
+const PANEL_WIDTH_KEY = "goat-coding-workspace-panel-width-v1";
+const PANEL_WIDTH_EVENT = "goat-coding-workspace-panel-width";
 
 type WorkspaceTab = "preview" | "terminal";
 type ConnectionState = "dormant" | "waking" | "ready" | "disconnected" | "error";
 type PreviewPort = { port: number; isHttp: boolean; score: number };
 
-export function CodexWorkspacePanel({
+export function CodingWorkspacePanel({
   chatSessionId,
   sandboxStatus,
-  codexIsRunning,
+  engineLabel,
+  engineIsRunning,
 }: {
   chatSessionId: string;
   sandboxStatus: GoatCodexSandboxStatus | null;
-  codexIsRunning: boolean;
+  engineLabel: string;
+  engineIsRunning: boolean;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [mobilePanelOpened, setMobilePanelOpened] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const persistedWidth = useSyncExternalStore(
@@ -75,6 +79,9 @@ export function CodexWorkspacePanel({
   const [previewRevision, setPreviewRevision] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const connectAttemptRef = useRef(0);
+  const panelRef = useRef<HTMLElement>(null);
+  const collapsedOpenButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusOnCollapseRef = useRef(false);
 
   const disconnect = useCallback(() => {
     connectAttemptRef.current += 1;
@@ -112,7 +119,7 @@ export function CodexWorkspacePanel({
 
       try {
         const response = await fetch(
-          `/api/codex-chat/sessions/${encodeURIComponent(chatSessionId)}/runtime-access`,
+          `/api/coding-workspaces/sessions/${encodeURIComponent(chatSessionId)}/runtime-access`,
           { method: "POST" },
         );
         if (!response.ok) throw new Error((await response.text()) || "Workspace access failed.");
@@ -123,7 +130,7 @@ export function CodexWorkspacePanel({
         if (connectAttemptRef.current !== attempt) return;
 
         const nextSocket = new WebSocket(access.websocketUrl, [
-          "goat-codex-runtime-v1",
+          "goat-coding-workspace-v1",
           `goat-ticket.${access.ticket}`,
         ]);
         nextSocket.binaryType = "arraybuffer";
@@ -193,20 +200,49 @@ export function CodexWorkspacePanel({
     void connect(tab);
   };
 
-  const collapse = () => {
+  const collapse = useCallback(() => {
+    restoreFocusOnCollapseRef.current = true;
     disconnect();
     setExpanded(false);
     setMobilePanelOpened(false);
     setFullscreen(false);
     setConnectionState("dormant");
     setActiveTab(null);
-  };
+  }, [disconnect]);
+
+  useEffect(() => {
+    if (panelExpanded || !restoreFocusOnCollapseRef.current) return;
+    restoreFocusOnCollapseRef.current = false;
+    collapsedOpenButtonRef.current?.focus();
+  }, [panelExpanded]);
+
+  useEffect(() => {
+    if (!panelExpanded || (!isNarrow && !fullscreen)) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      focusableElements(panel)[0]?.focus();
+    });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        collapse();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [collapse, fullscreen, isNarrow, panelExpanded]);
 
   if (!panelExpanded) {
     return (
       <aside className="flex h-full w-11 shrink-0 flex-col items-center gap-1 border-l border-border bg-surface py-3 max-lg:absolute max-lg:right-0 max-lg:top-0 max-lg:z-40">
         <PanelButton
           label="Open workspace"
+          buttonRef={collapsedOpenButtonRef}
           onClick={() => {
             setExpanded(true);
             setMobilePanelOpened(true);
@@ -226,16 +262,23 @@ export function CodexWorkspacePanel({
 
   return (
     <aside
+      ref={panelRef}
       className={cn(
         "relative flex h-full shrink-0 flex-col overflow-hidden border-l border-border bg-surface shadow-[-8px_0_24px_rgba(15,15,15,0.03)]",
         "max-lg:fixed max-lg:inset-0 max-lg:z-50 max-lg:h-auto max-lg:w-auto max-lg:border-0 max-lg:shadow-xl",
         fullscreen &&
           "fixed inset-0 z-50 h-dvh w-screen border-0 max-lg:inset-0 max-lg:rounded-none",
       )}
-      style={fullscreen ? undefined : { width }}
-      aria-label="Codex workspace"
+      style={fullscreen || isNarrow ? undefined : { width }}
+      role={fullscreen || isNarrow ? "dialog" : undefined}
+      aria-modal={fullscreen || isNarrow ? true : undefined}
+      aria-label={`${engineLabel} workspace`}
+      onKeyDown={(event) => {
+        if ((!isNarrow && !fullscreen) || event.key !== "Tab") return;
+        trapFocus(panelRef.current, event);
+      }}
     >
-      {!fullscreen ? (
+      {!fullscreen && !isNarrow ? (
         <div
           role="separator"
           tabIndex={0}
@@ -281,6 +324,7 @@ export function CodexWorkspacePanel({
         <button
           type="button"
           onClick={() => selectTab("preview")}
+          aria-pressed={activeTab === "preview"}
           className={tabClass(activeTab === "preview")}
         >
           <AppWindow size={14} /> Preview
@@ -288,6 +332,7 @@ export function CodexWorkspacePanel({
         <button
           type="button"
           onClick={() => selectTab("terminal")}
+          aria-pressed={activeTab === "terminal"}
           className={tabClass(activeTab === "terminal")}
         >
           <TerminalSquare size={14} /> Terminal
@@ -304,6 +349,15 @@ export function CodexWorkspacePanel({
           </PanelButton>
         </div>
       </header>
+
+      {connectionState === "ready" && error ? (
+        <p
+          className="border-b border-danger-border bg-danger-bg px-3 py-2 text-[12px] text-danger"
+          role="alert"
+        >
+          {error}
+        </p>
+      ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col">
         {activeTab === null ? (
@@ -327,14 +381,14 @@ export function CodexWorkspacePanel({
         ) : connectionState === "ready" && socket ? (
           activeTab === "terminal" ? (
             <div className="flex min-h-0 flex-1 flex-col bg-[#11130f]">
-              {codexIsRunning ? (
+              {engineIsRunning ? (
                 <p className="border-b border-white/10 bg-amber-300/10 px-3 py-2 text-[11px] leading-4 text-amber-100">
-                  Codex is working in this directory. Terminal changes apply immediately and may
-                  overlap with its edits.
+                  {engineLabel} is working in this directory. Terminal changes apply immediately and
+                  may overlap with its edits.
                 </p>
               ) : null}
               <div className="min-h-0 flex-1">
-                <CodexTerminal socket={socket} />
+                <CodingWorkspaceTerminal socket={socket} />
               </div>
             </div>
           ) : (
@@ -399,16 +453,11 @@ export function CodexWorkspacePanel({
                   <ExternalLink size={14} />
                 </PanelButton>
               </div>
-              {error ? (
-                <p className="border-b border-danger-border bg-danger-bg px-3 py-2 text-[12px] text-danger">
-                  {error}
-                </p>
-              ) : null}
               {previewUrl ? (
                 <iframe
                   key={`${previewUrl}:${previewRevision}`}
                   src={previewUrl}
-                  title={`Codex preview on port ${selectedPort ?? "unknown"}`}
+                  title={`${engineLabel} preview on port ${selectedPort ?? "unknown"}`}
                   sandbox="allow-downloads allow-forms allow-modals allow-popups allow-same-origin allow-scripts"
                   referrerPolicy="no-referrer"
                   className="min-h-0 flex-1 bg-white"
@@ -424,9 +473,9 @@ export function CodexWorkspacePanel({
                   }
                   detail={
                     !portsLoaded
-                      ? "Checking listening ports in the Codex workspace."
+                      ? `Checking listening ports in the ${engineLabel} workspace.`
                       : !ports.some((port) => port.isHttp)
-                        ? "Start a server from Codex or Terminal, then refresh ports. Goat never runs package scripts automatically."
+                        ? `Start a server from ${engineLabel} or Terminal, then refresh ports. Goat never runs package scripts automatically.`
                         : "Connecting through the secure preview gateway."
                   }
                   busy={!portsLoaded}
@@ -457,7 +506,9 @@ function persistPanelWidth(width: number) {
 }
 
 function readPersistedPanelWidth() {
-  const value = Number(window.localStorage.getItem(PANEL_WIDTH_KEY));
+  const storedValue = window.localStorage.getItem(PANEL_WIDTH_KEY);
+  if (storedValue === null || storedValue.trim() === "") return DEFAULT_PANEL_WIDTH;
+  const value = Number(storedValue);
   return Number.isFinite(value)
     ? Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, value))
     : DEFAULT_PANEL_WIDTH;
@@ -522,15 +573,18 @@ function PanelButton({
   label,
   children,
   disabled = false,
+  buttonRef,
   onClick,
 }: {
   label: string;
   children: ReactNode;
   disabled?: boolean;
+  buttonRef?: Ref<HTMLButtonElement>;
   onClick: () => void;
 }) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       aria-label={label}
       title={label}
@@ -541,6 +595,30 @@ function PanelButton({
       {children}
     </button>
   );
+}
+
+function focusableElements(container: HTMLElement) {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), select:not([disabled]), textarea:not([disabled]), input:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => !element.hasAttribute("hidden"));
+}
+
+function trapFocus(container: HTMLElement | null, event: ReactKeyboardEvent<HTMLElement>) {
+  if (!container) return;
+  const elements = focusableElements(container);
+  const first = elements[0];
+  const last = elements.at(-1);
+  if (!first || !last) return;
+
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 function tabClass(active: boolean) {

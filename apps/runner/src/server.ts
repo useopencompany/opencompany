@@ -11,8 +11,11 @@ import type { RunnerEnv } from "./env";
 import { wakeGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { wakeGoatCodexChatWorker } from "./goat-codex-chat-worker";
-import { GoatCodexRuntimeAccessError, mintGoatCodexRuntimeAccess } from "./goat-codex-runtime";
-import { createGoatCodexRuntimeTransport } from "./goat-codex-runtime-transport";
+import {
+  GoatCodingWorkspaceAccessError,
+  mintGoatCodingWorkspaceAccess,
+} from "./goat-coding-workspace-runtime";
+import { createGoatCodingWorkspaceTransport } from "./goat-coding-workspace-runtime-transport";
 import { wakeGoatGoogleDriveSyncWorker } from "./goat-google-drive-sync-worker";
 import { executeGoatGoogleTool, isGoatGoogleToolName } from "./goat-google-tools";
 import { planGoatHarnessForTask } from "./goat-harness";
@@ -35,7 +38,7 @@ export function createServer(
     llmBroker?: Pick<LlmBrokerOptions, "store" | "fetchImpl">;
   } = {},
 ) {
-  const runtimeTransport = createGoatCodexRuntimeTransport(env);
+  const runtimeTransport = createGoatCodingWorkspaceTransport(env);
   const app = Fastify({
     logger: false,
     serverFactory: runtimeTransport.serverFactory,
@@ -143,25 +146,26 @@ export function createServer(
   });
 
   app.post(
-    "/internal/goat/codex-chat/sessions/:codexChatSessionId/runtime-access",
+    "/internal/goat/coding-workspaces/sessions/:codingSessionId/runtime-access",
     async (request, reply) => {
       requireInternalAuth(request.headers.authorization, env.internalToken);
-      const { codexChatSessionId } = request.params as { codexChatSessionId: string };
-      const { userWorkosId } = request.body as { userWorkosId?: string };
-      if (!codexChatSessionId.trim() || !userWorkosId?.trim()) {
-        reply.status(400).send({ error: "codexChatSessionId and userWorkosId are required." });
+      const { codingSessionId } = request.params as { codingSessionId: string };
+      const body = request.body as { userWorkosId?: unknown } | undefined;
+      const userWorkosId = typeof body?.userWorkosId === "string" ? body.userWorkosId.trim() : "";
+      if (!codingSessionId.trim() || !userWorkosId) {
+        reply.status(400).send({ error: "codingSessionId and userWorkosId are required." });
         return;
       }
 
       try {
-        const access = await mintGoatCodexRuntimeAccess({
-          codexChatSessionId,
+        const access = await mintGoatCodingWorkspaceAccess({
+          codingSessionId,
           userWorkosId,
           env,
         });
-        reply.send({ ok: true, ...access });
+        reply.send(access);
       } catch (error) {
-        if (error instanceof GoatCodexRuntimeAccessError) {
+        if (error instanceof GoatCodingWorkspaceAccessError) {
           reply.status(error.statusCode).send({ error: error.message });
           return;
         }

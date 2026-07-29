@@ -1,4 +1,5 @@
 import {
+  CLOUD_CODING_ENGINE_CONFIG,
   type ClaudeCodeTurnSummary,
   claudeCodeModelSupportsReasoningEffort,
   createClaudeCodeEventNormalizer,
@@ -51,7 +52,7 @@ import {
 } from "./sandbox";
 import { materializeCodexSkillSnapshotsForSession } from "./skills";
 
-const CLAUDE_CHAT_WORKDIR = "/home/user/opencompany-goat/claude-chat";
+const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory;
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
 

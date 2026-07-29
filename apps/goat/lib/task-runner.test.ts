@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  createGoatCodexRuntimeAccess,
   getGoatCodexSandboxStatus,
   goatRunnerConfigured,
+  requestGoatCodingWorkspaceRuntimeAccess,
   triggerGoatCodexChatWake,
   triggerGoatTaskRun,
 } from "@/lib/task-runner";
@@ -184,7 +184,7 @@ describe("getGoatCodexSandboxStatus", () => {
   });
 });
 
-describe("createGoatCodexRuntimeAccess", () => {
+describe("requestGoatCodingWorkspaceRuntimeAccess", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
@@ -208,14 +208,18 @@ describe("createGoatCodexRuntimeAccess", () => {
     );
 
     await expect(
-      createGoatCodexRuntimeAccess({
-        codexChatSessionId: "goat_codex_chat_1",
+      requestGoatCodingWorkspaceRuntimeAccess({
+        codingSessionId: "goat_codex_chat_1",
         userWorkosId: "user_1",
       }),
     ).resolves.toMatchObject({
       websocketUrl: "wss://localhost:3443/goat/runtime",
       ticket: "ticket_1",
     });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:3040/internal/goat/coding-workspaces/sessions/goat_codex_chat_1/runtime-access",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("uses the hosted runner URL in production-style environments", async () => {
@@ -231,8 +235,8 @@ describe("createGoatCodexRuntimeAccess", () => {
     );
 
     await expect(
-      createGoatCodexRuntimeAccess({
-        codexChatSessionId: "goat_codex_chat_1",
+      requestGoatCodingWorkspaceRuntimeAccess({
+        codingSessionId: "goat_codex_chat_1",
         userWorkosId: "user_1",
       }),
     ).resolves.toMatchObject({ websocketUrl: "wss://runner.example.com/goat/runtime" });

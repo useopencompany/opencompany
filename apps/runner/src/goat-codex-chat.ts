@@ -1,4 +1,5 @@
 import {
+  CLOUD_CODING_ENGINE_CONFIG,
   CODEX_COMMAND_TOOL_PART_TYPE,
   CODEX_DYNAMIC_TOOL_NAME,
   CODEX_SUBAGENT_TOOL_PART_TYPE,
@@ -55,7 +56,7 @@ import { materializeCodexSkillSnapshotsForSession } from "./skills";
 import { rowsFromExecute } from "./sql-exec";
 
 export const CODEX_CHAT_HOME = "/home/user/.opencompany-goat/codex-chat-home";
-export const CODEX_CHAT_WORKDIR = "/home/user/opencompany-goat/codex-chat";
+const CODEX_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.codex.workDirectory;
 const CODEX_CHAT_ATTACHMENTS_ROOT = "/home/user/.opencompany-goat/codex-chat-attachments";
 const INTERRUPT_POLL_INTERVAL_MS = 2_000;
 const INTERACTION_POLL_INTERVAL_MS = 500;

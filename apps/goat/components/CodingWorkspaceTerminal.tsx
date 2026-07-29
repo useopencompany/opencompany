@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 
-export default function CodexTerminal({ socket }: { socket: WebSocket }) {
+export default function CodingWorkspaceTerminal({ socket }: { socket: WebSocket }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -44,11 +44,6 @@ export default function CodexTerminal({ socket }: { socket: WebSocket }) {
     const resizeObserver = new ResizeObserver(fit);
     resizeObserver.observe(container);
     fitAddon.fit();
-    sendSize("terminal.attach");
-
-    const input = terminal.onData((data) => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(new TextEncoder().encode(data));
-    });
     const onMessage = (event: MessageEvent) => {
       if (event.data instanceof ArrayBuffer) {
         terminal.write(new Uint8Array(event.data));
@@ -57,6 +52,11 @@ export default function CodexTerminal({ socket }: { socket: WebSocket }) {
       }
     };
     socket.addEventListener("message", onMessage);
+    const encoder = new TextEncoder();
+    const input = terminal.onData((data) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(encoder.encode(data));
+    });
+    sendSize("terminal.attach");
 
     return () => {
       socket.removeEventListener("message", onMessage);

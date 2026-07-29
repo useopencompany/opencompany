@@ -3,6 +3,7 @@ import {
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
   GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
+  isCloudCodingEngine,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -29,11 +30,11 @@ import {
 import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
 import { toGoatTaskTitle } from "@/lib/task-display";
 import {
-  createGoatCodexRuntimeAccess,
-  GoatCodexRuntimeRequestError,
   type GoatCodexSandboxStatus,
+  GoatCodingWorkspaceRequestError,
   getGoatCodexSandboxStatus,
   killGoatCodexSandbox,
+  requestGoatCodingWorkspaceRuntimeAccess,
   triggerGoatCodexChatWake,
 } from "@/lib/task-runner";
 
@@ -256,37 +257,37 @@ export async function getGoatCodexChatSandboxStatus(input: {
   }
 }
 
-export async function createGoatCodexChatRuntimeAccess(input: {
+export async function createGoatCodingWorkspaceRuntimeAccess(input: {
   userWorkosId: string;
   chatSessionId: string;
 }) {
   const session = await loadCodexChatSessionForChat(input);
   if (!session)
-    return { ok: false as const, statusCode: 404, error: "Codex chat session not found." };
-  if (session.engine !== "codex") {
-    return { ok: false as const, statusCode: 404, error: "Codex chat session not found." };
+    return { ok: false as const, statusCode: 404, error: "Coding workspace session not found." };
+  if (session.status === "closed" || !isCloudCodingEngine(session.engine)) {
+    return { ok: false as const, statusCode: 404, error: "Coding workspace session not found." };
   }
   if (!session.sandboxId) {
     return {
       ok: false as const,
       statusCode: 409,
-      error: "The Codex workspace is not ready yet. Send a message first.",
+      error: "The coding workspace is not ready yet. Send a message first.",
     };
   }
 
   try {
     return {
       ok: true as const,
-      access: await createGoatCodexRuntimeAccess({
-        codexChatSessionId: session.id,
+      access: await requestGoatCodingWorkspaceRuntimeAccess({
+        codingSessionId: session.id,
         userWorkosId: input.userWorkosId,
       }),
     };
   } catch (error) {
     return {
       ok: false as const,
-      statusCode: error instanceof GoatCodexRuntimeRequestError ? error.statusCode : 502,
-      error: error instanceof Error ? error.message : "Unable to connect to the Codex workspace.",
+      statusCode: error instanceof GoatCodingWorkspaceRequestError ? error.statusCode : 502,
+      error: error instanceof Error ? error.message : "Unable to connect to the coding workspace.",
     };
   }
 }

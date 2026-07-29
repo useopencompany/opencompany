@@ -1,3 +1,4 @@
+import { type CloudCodingEngine, isCloudCodingEngine } from "@opencompany/agent-runtime";
 import {
   type GoatCodexChatSessionStatus,
   goatChatSessions,
@@ -6,34 +7,51 @@ import {
 import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
-import { createGoatCodexRuntimeTicket } from "./goat-codex-runtime-auth";
+import { createGoatCodingWorkspaceTicket } from "./goat-coding-workspace-runtime-auth";
 import { getSandboxLifecycleStatus, type SandboxHandle } from "./sandbox";
 
 const RESERVED_PREVIEW_PORTS = new Set([22, 4_998, 4_999, 49_983, 50_005]);
 const MAX_DISCOVERED_PORTS = 24;
 
-export type GoatCodexRuntimeSession = {
+export type GoatCodingWorkspaceSession = {
   id: string;
   chatSessionId: string;
   userWorkosId: string;
   sandboxId: string;
   status: GoatCodexChatSessionStatus;
+  engine: CloudCodingEngine;
 };
 
-export class GoatCodexRuntimeAccessError extends Error {
+type StoredCodingWorkspaceSession = Omit<GoatCodingWorkspaceSession, "engine" | "sandboxId"> & {
+  engine: unknown;
+  sandboxId: string | null;
+};
+
+export class GoatCodingWorkspaceAccessError extends Error {
   constructor(
     message: string,
     readonly statusCode: 404 | 409 | 503,
   ) {
     super(message);
-    this.name = "GoatCodexRuntimeAccessError";
+    this.name = "GoatCodingWorkspaceAccessError";
   }
 }
 
-export async function loadGoatCodexRuntimeSession(input: {
-  codexChatSessionId: string;
+export async function loadGoatCodingWorkspaceSession(input: {
+  codingSessionId: string;
   userWorkosId?: string;
-}): Promise<GoatCodexRuntimeSession | null> {
+}): Promise<GoatCodingWorkspaceSession | null> {
+  const row = await loadStoredCodingWorkspaceSession(input);
+  if (!row || !row.sandboxId || row.status === "closed" || !isCloudCodingEngine(row.engine)) {
+    return null;
+  }
+  return { ...row, sandboxId: row.sandboxId, engine: row.engine };
+}
+
+async function loadStoredCodingWorkspaceSession(input: {
+  codingSessionId: string;
+  userWorkosId?: string;
+}): Promise<StoredCodingWorkspaceSession | null> {
   const ownership = input.userWorkosId
     ? eq(goatCodexChatSessions.userWorkosId, input.userWorkosId)
     : undefined;
@@ -44,6 +62,7 @@ export async function loadGoatCodexRuntimeSession(input: {
       userWorkosId: goatCodexChatSessions.userWorkosId,
       sandboxId: goatCodexChatSessions.sandboxId,
       status: goatCodexChatSessions.status,
+      engine: goatCodexChatSessions.engine,
     })
     .from(goatCodexChatSessions)
     .innerJoin(
@@ -54,56 +73,57 @@ export async function loadGoatCodexRuntimeSession(input: {
       ),
     )
     .where(
-      and(
-        eq(goatCodexChatSessions.id, input.codexChatSessionId),
-        eq(goatCodexChatSessions.engine, "codex"),
-        ...(ownership ? [ownership] : []),
-      ),
+      and(eq(goatCodexChatSessions.id, input.codingSessionId), ...(ownership ? [ownership] : [])),
     )
     .limit(1);
 
-  if (!row?.sandboxId || row.status === "closed") return null;
-  return { ...row, sandboxId: row.sandboxId };
+  return row ?? null;
 }
 
-export async function mintGoatCodexRuntimeAccess(input: {
-  codexChatSessionId: string;
+export async function mintGoatCodingWorkspaceAccess(input: {
+  codingSessionId: string;
   userWorkosId: string;
   env: Pick<RunnerEnv, "streamTokenSecret">;
 }) {
-  const session = await loadGoatCodexRuntimeSession(input);
-  if (!session) {
-    throw new GoatCodexRuntimeAccessError(
-      "This Codex workspace is not available yet or no longer exists.",
+  const session = await loadStoredCodingWorkspaceSession(input);
+  if (!session || session.status === "closed" || !isCloudCodingEngine(session.engine)) {
+    throw new GoatCodingWorkspaceAccessError(
+      "This coding workspace is not available or no longer exists.",
       404,
+    );
+  }
+  if (!session.sandboxId) {
+    throw new GoatCodingWorkspaceAccessError(
+      "This coding workspace is not ready yet. Send a message first.",
+      409,
     );
   }
 
   const sandboxStatus = await getSandboxLifecycleStatus(session.sandboxId);
   if (sandboxStatus === "deleted") {
-    throw new GoatCodexRuntimeAccessError(
-      "This Codex workspace has been deleted. Send another message to create a new workspace.",
+    throw new GoatCodingWorkspaceAccessError(
+      "This coding workspace has been deleted. Send another message to create a new workspace.",
       409,
     );
   }
 
-  const signed = createGoatCodexRuntimeTicket({
-    codexChatSessionId: session.id,
+  const signed = createGoatCodingWorkspaceTicket({
+    codingSessionId: session.id,
     userWorkosId: session.userWorkosId,
     secret: input.env.streamTokenSecret,
   });
   return { ...signed, sandboxStatus };
 }
 
-export type GoatCodexPreviewPort = {
+export type GoatCodingWorkspacePreviewPort = {
   port: number;
   isHttp: boolean;
   score: number;
 };
 
-export async function discoverGoatCodexPreviewPorts(
+export async function discoverGoatCodingWorkspacePreviewPorts(
   sandbox: SandboxHandle,
-): Promise<GoatCodexPreviewPort[]> {
+): Promise<GoatCodingWorkspacePreviewPort[]> {
   const result = await sandbox.commands.run(
     "ss -H -ltn 2>/dev/null | awk '{print $4}' | sed 's/.*://' | sort -nu",
     { user: "user", timeoutMs: 10_000 },

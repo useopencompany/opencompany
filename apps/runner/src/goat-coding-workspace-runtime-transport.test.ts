@@ -1,35 +1,38 @@
+import { EventEmitter } from "node:events";
 import { type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 import type { RunnerEnv } from "./env";
-import type { GoatCodexRuntimeSession } from "./goat-codex-runtime";
+import type { GoatCodingWorkspaceSession } from "./goat-coding-workspace-runtime";
 import {
   attachRuntimeConnection,
-  isGoatCodexRuntimeOriginAllowed,
+  forwardPreviewWebSocketMessages,
+  isGoatCodingWorkspaceOriginAllowed,
   rewritePreviewResponseHeaders,
-} from "./goat-codex-runtime-transport";
+} from "./goat-coding-workspace-runtime-transport";
 import type { SandboxHandle } from "./sandbox";
 
 const openServers: WebSocketServer[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    openServers
-      .splice(0)
-      .map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
+    openServers.splice(0).map((server) => {
+      for (const client of server.clients) client.terminate();
+      return new Promise<void>((resolve) => server.close(() => resolve()));
+    }),
   );
 });
 
-describe("Goat Codex runtime origin validation", () => {
+describe("Goat coding workspace origin validation", () => {
   it("requires an exact configured browser origin", () => {
     const allowed = ["https://goat.example.com"];
-    expect(isGoatCodexRuntimeOriginAllowed("https://goat.example.com", allowed)).toBe(true);
-    expect(isGoatCodexRuntimeOriginAllowed("https://evil.example.com", allowed)).toBe(false);
-    expect(isGoatCodexRuntimeOriginAllowed(undefined, allowed)).toBe(false);
+    expect(isGoatCodingWorkspaceOriginAllowed("https://goat.example.com", allowed)).toBe(true);
+    expect(isGoatCodingWorkspaceOriginAllowed("https://evil.example.com", allowed)).toBe(false);
+    expect(isGoatCodingWorkspaceOriginAllowed(undefined, allowed)).toBe(false);
   });
 });
 
-describe("Goat Codex preview response headers", () => {
+describe("Goat coding workspace preview response headers", () => {
   it("rewrites upstream authority, cookie domains, and framing policy", () => {
     const headers = rewritePreviewResponseHeaders(
       {
@@ -77,8 +80,50 @@ describe("Goat Codex preview response headers", () => {
   });
 });
 
-describe("Goat Codex terminal transport", () => {
-  it("restores tmux scrollback and forwards binary input, output, and resize", async () => {
+describe("Goat coding workspace preview WebSocket transport", () => {
+  it("buffers downstream messages until the upstream connection opens", () => {
+    const downstream = new EventEmitter() as unknown as WebSocket & EventEmitter;
+    const upstream = new EventEmitter() as unknown as WebSocket & EventEmitter;
+    Object.defineProperty(upstream, "readyState", {
+      configurable: true,
+      value: WebSocket.CONNECTING,
+    });
+    upstream.send = vi.fn();
+    const onOverflow = vi.fn();
+    const stop = forwardPreviewWebSocketMessages(downstream, upstream, onOverflow);
+
+    downstream.emit("message", Buffer.from("subscribe"), false);
+    expect(upstream.send).not.toHaveBeenCalled();
+
+    Object.defineProperty(upstream, "readyState", { value: WebSocket.OPEN });
+    upstream.emit("open");
+    expect(upstream.send).toHaveBeenCalledWith(Buffer.from("subscribe"), { binary: false });
+    expect(onOverflow).not.toHaveBeenCalled();
+
+    stop();
+  });
+
+  it("closes the bridge when buffered messages exceed the safety limit", () => {
+    const downstream = new EventEmitter() as unknown as WebSocket & EventEmitter;
+    const upstream = new EventEmitter() as unknown as WebSocket & EventEmitter;
+    Object.defineProperty(upstream, "readyState", { value: WebSocket.CONNECTING });
+    upstream.send = vi.fn();
+    const onOverflow = vi.fn();
+    const stop = forwardPreviewWebSocketMessages(downstream, upstream, onOverflow, 4);
+
+    downstream.emit("message", Buffer.from("12345"), true);
+    expect(onOverflow).toHaveBeenCalledOnce();
+    expect(upstream.send).not.toHaveBeenCalled();
+
+    stop();
+  });
+});
+
+describe("Goat coding workspace terminal transport", () => {
+  it.each([
+    ["codex", "/home/user/opencompany-goat/codex-chat"],
+    ["claude_code", "/home/user/opencompany-goat/claude-chat"],
+  ] as const)("opens %s terminals in the trusted engine directory", async (engine, expectedWorkDirectory) => {
     const kill = vi.fn(async () => true);
     const sendInput = vi.fn(async () => undefined);
     const resize = vi.fn(async () => undefined);
@@ -108,7 +153,8 @@ describe("Goat Codex terminal transport", () => {
           userWorkosId: "user_1",
           sandboxId: "sandbox_1",
           status: "idle",
-        } satisfies GoatCodexRuntimeSession,
+          engine,
+        } satisfies GoatCodingWorkspaceSession,
         { goatCodexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
         restoreTimeout,
       );
@@ -123,26 +169,35 @@ describe("Goat Codex terminal transport", () => {
     await new Promise<void>((resolve) => client.once("open", resolve));
 
     client.send(JSON.stringify({ type: "terminal.attach", cols: 100, rows: 30 }));
+    client.send(Buffer.from("pwd\r"));
     await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ cols: 100, rows: 30, user: "user" }),
+      expect.objectContaining({
+        cols: 100,
+        rows: 30,
+        cwd: expectedWorkDirectory,
+        user: "user",
+      }),
     );
+    expect(sandbox.commands.run).toHaveBeenCalledWith(`mkdir -p '${expectedWorkDirectory}'`, {
+      user: "user",
+      timeoutMs: 10_000,
+    });
     expect(binaryOutput.join("")).toContain("persisted output");
     expect(binaryOutput.join("")).toContain("live output");
     expect(sendInput).toHaveBeenCalledWith(
       42,
-      Buffer.from("exec tmux new-session -A -s goat-codex\r"),
+      Buffer.from("exec tmux new-session -A -s goat-coding-workspace\r"),
     );
+    expect(sendInput).toHaveBeenCalledWith(42, Buffer.from("pwd\r"));
 
     client.send(JSON.stringify({ type: "terminal.attach", cols: 110, rows: 35 }));
-    await vi.waitFor(() => expect(sandbox.commands.run).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(sandbox.commands.run).toHaveBeenCalledTimes(3));
     expect(create).toHaveBeenCalledOnce();
     expect(resize).toHaveBeenCalledWith(42, { cols: 110, rows: 35 });
 
-    client.send(Buffer.from("pwd\r"));
     client.send(JSON.stringify({ type: "terminal.resize", cols: 120, rows: 40 }));
     await vi.waitFor(() => expect(resize).toHaveBeenCalledWith(42, { cols: 120, rows: 40 }));
-    expect(sendInput).toHaveBeenCalledWith(42, new Uint8Array(Buffer.from("pwd\r")));
 
     client.close();
     await new Promise<void>((resolve) => client.once("close", resolve));

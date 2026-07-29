@@ -3,18 +3,18 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 const TICKET_VERSION = 1;
 const PREVIEW_CAPABILITY_VERSION = 1;
 const PREVIEW_SIGNATURE_BYTES = 16;
-const CODEX_SESSION_PREFIX = "goat_codex_chat_";
+const CODING_SESSION_PREFIX = "goat_codex_chat_";
 const BASE32_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
 
-type RuntimeTicketPayload = {
+type CodingWorkspaceTicketPayload = {
   v: 1;
-  codexChatSessionId: string;
+  codingSessionId: string;
   userWorkosId: string;
   expiresAt: number;
 };
 
-export function createGoatCodexRuntimeTicket(input: {
-  codexChatSessionId: string;
+export function createGoatCodingWorkspaceTicket(input: {
+  codingSessionId: string;
   userWorkosId: string;
   secret: string;
   now?: number;
@@ -24,28 +24,31 @@ export function createGoatCodexRuntimeTicket(input: {
   const encodedPayload = Buffer.from(
     JSON.stringify({
       v: TICKET_VERSION,
-      codexChatSessionId: input.codexChatSessionId,
+      codingSessionId: input.codingSessionId,
       userWorkosId: input.userWorkosId,
       expiresAt,
-    } satisfies RuntimeTicketPayload),
+    } satisfies CodingWorkspaceTicketPayload),
   ).toString("base64url");
-  const signature = sign("goat-codex-runtime-ticket", encodedPayload, input.secret);
+  const signature = sign("goat-coding-workspace-ticket", encodedPayload, input.secret);
 
   return { ticket: `${encodedPayload}.${signature}`, expiresAt };
 }
 
-export function verifyGoatCodexRuntimeTicket(input: {
+export function verifyGoatCodingWorkspaceTicket(input: {
   ticket: string;
   secret: string;
   now?: number;
-}): RuntimeTicketPayload | null {
+}): CodingWorkspaceTicketPayload | null {
   const separator = input.ticket.lastIndexOf(".");
   if (separator <= 0) return null;
 
   const encodedPayload = input.ticket.slice(0, separator);
   const suppliedSignature = input.ticket.slice(separator + 1);
   if (
-    !safeEqual(sign("goat-codex-runtime-ticket", encodedPayload, input.secret), suppliedSignature)
+    !safeEqual(
+      sign("goat-coding-workspace-ticket", encodedPayload, input.secret),
+      suppliedSignature,
+    )
   ) {
     return null;
   }
@@ -53,11 +56,11 @@ export function verifyGoatCodexRuntimeTicket(input: {
   try {
     const value = JSON.parse(
       Buffer.from(encodedPayload, "base64url").toString("utf8"),
-    ) as Partial<RuntimeTicketPayload>;
+    ) as Partial<CodingWorkspaceTicketPayload>;
     if (
       value.v !== TICKET_VERSION ||
-      typeof value.codexChatSessionId !== "string" ||
-      !value.codexChatSessionId.startsWith(CODEX_SESSION_PREFIX) ||
+      typeof value.codingSessionId !== "string" ||
+      !value.codingSessionId.startsWith(CODING_SESSION_PREFIX) ||
       typeof value.userWorkosId !== "string" ||
       !value.userWorkosId ||
       typeof value.expiresAt !== "number" ||
@@ -66,21 +69,21 @@ export function verifyGoatCodexRuntimeTicket(input: {
     ) {
       return null;
     }
-    return value as RuntimeTicketPayload;
+    return value as CodingWorkspaceTicketPayload;
   } catch {
     return null;
   }
 }
 
-export function createGoatCodexPreviewCapability(input: {
-  codexChatSessionId: string;
+export function createGoatCodingWorkspacePreviewCapability(input: {
+  codingSessionId: string;
   port: number;
   secret: string;
   now?: number;
   ttlMs?: number;
 }) {
   assertPreviewPort(input.port);
-  const uuidBytes = parseCodexSessionUuid(input.codexChatSessionId);
+  const uuidBytes = parseCodingSessionUuid(input.codingSessionId);
   const expiresAtSeconds = Math.floor(
     ((input.now ?? Date.now()) + (input.ttlMs ?? 8 * 60 * 60_000)) / 1_000,
   );
@@ -89,10 +92,11 @@ export function createGoatCodexPreviewCapability(input: {
   uuidBytes.copy(body, 1);
   body.writeUInt16BE(input.port, 17);
   body.writeUInt32BE(expiresAtSeconds, 19);
-  const signature = signBytes("goat-codex-preview-capability", body, input.secret).subarray(
-    0,
-    PREVIEW_SIGNATURE_BYTES,
-  );
+  const signature = signBytes(
+    "goat-coding-workspace-preview-capability",
+    body,
+    input.secret,
+  ).subarray(0, PREVIEW_SIGNATURE_BYTES);
 
   return {
     capability: encodeBase32(Buffer.concat([body, signature])),
@@ -100,7 +104,7 @@ export function createGoatCodexPreviewCapability(input: {
   };
 }
 
-export function verifyGoatCodexPreviewCapability(input: {
+export function verifyGoatCodingWorkspacePreviewCapability(input: {
   capability: string;
   secret: string;
   now?: number;
@@ -115,10 +119,11 @@ export function verifyGoatCodexPreviewCapability(input: {
 
   const body = bytes.subarray(0, 23);
   const suppliedSignature = bytes.subarray(23);
-  const expectedSignature = signBytes("goat-codex-preview-capability", body, input.secret).subarray(
-    0,
-    PREVIEW_SIGNATURE_BYTES,
-  );
+  const expectedSignature = signBytes(
+    "goat-coding-workspace-preview-capability",
+    body,
+    input.secret,
+  ).subarray(0, PREVIEW_SIGNATURE_BYTES);
   if (!timingSafeEqual(expectedSignature, suppliedSignature)) return null;
   if (body.readUInt8(0) !== PREVIEW_CAPABILITY_VERSION) return null;
 
@@ -127,7 +132,7 @@ export function verifyGoatCodexPreviewCapability(input: {
   if (!isPreviewPort(port) || expiresAt <= (input.now ?? Date.now())) return null;
 
   return {
-    codexChatSessionId: `${CODEX_SESSION_PREFIX}${formatUuid(body.subarray(1, 17))}`,
+    codingSessionId: `${CODING_SESSION_PREFIX}${formatUuid(body.subarray(1, 17))}`,
     port,
     expiresAt,
   };
@@ -169,13 +174,13 @@ function decodeBase32(encoded: string) {
   return Buffer.from(bytes);
 }
 
-function parseCodexSessionUuid(sessionId: string) {
-  const uuid = sessionId.startsWith(CODEX_SESSION_PREFIX)
-    ? sessionId.slice(CODEX_SESSION_PREFIX.length)
+function parseCodingSessionUuid(sessionId: string) {
+  const uuid = sessionId.startsWith(CODING_SESSION_PREFIX)
+    ? sessionId.slice(CODING_SESSION_PREFIX.length)
     : "";
   const hex = uuid.replaceAll("-", "");
   if (!/^[0-9a-f]{32}$/i.test(hex)) {
-    throw new Error("Codex chat session id does not contain a valid UUID.");
+    throw new Error("Coding workspace session id does not contain a valid UUID.");
   }
   return Buffer.from(hex, "hex");
 }

@@ -221,8 +221,9 @@ Stream. Keep the source token in Render/Infisical, not in git.
 `https://app.example.com`. Add preview origins only if you intentionally allow previews to connect
 to the production runner.
 
-For Goat Cloud Codex workspace previews, set `RUNNER_PREVIEW_BASE_DOMAIN` to a dedicated hostname
-such as `preview.goat.example.com`. Add both `preview.goat.example.com` and
+For Goat persistent cloud coding workspace previews (Codex and Claude Code), set
+`RUNNER_PREVIEW_BASE_DOMAIN` to a dedicated hostname such as `preview.goat.example.com`. Add both
+`preview.goat.example.com` and
 `*.preview.goat.example.com` to the Render runner's custom domains and configure the corresponding
 DNS records. The wildcard is required because each preview uses a short-lived signed capability as
 its leftmost label. Keep the preview hostname on the runner service; it must not point at Goat or

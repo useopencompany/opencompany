@@ -5,21 +5,21 @@ import http, {
 } from "node:http";
 import https from "node:https";
 import type { Duplex } from "node:stream";
+import { CLOUD_CODING_ENGINE_CONFIG, shellQuote } from "@opencompany/agent-runtime";
 import { createLogger } from "@opencompany/observability";
-import WebSocket, { WebSocketServer } from "ws";
+import WebSocket, { type RawData, WebSocketServer } from "ws";
 import type { RunnerEnv } from "./env";
-import { CODEX_CHAT_WORKDIR } from "./goat-codex-chat";
 import {
-  discoverGoatCodexPreviewPorts,
-  type GoatCodexRuntimeSession,
+  discoverGoatCodingWorkspacePreviewPorts,
+  type GoatCodingWorkspaceSession,
   isAllowedPreviewPort,
-  loadGoatCodexRuntimeSession,
-} from "./goat-codex-runtime";
+  loadGoatCodingWorkspaceSession,
+} from "./goat-coding-workspace-runtime";
 import {
-  createGoatCodexPreviewCapability,
-  verifyGoatCodexPreviewCapability,
-  verifyGoatCodexRuntimeTicket,
-} from "./goat-codex-runtime-auth";
+  createGoatCodingWorkspacePreviewCapability,
+  verifyGoatCodingWorkspacePreviewCapability,
+  verifyGoatCodingWorkspaceTicket,
+} from "./goat-coding-workspace-runtime-auth";
 import {
   armSandboxIdleTimeout,
   connectSandbox,
@@ -29,18 +29,21 @@ import {
 
 const logger = createLogger({
   service: "opencompany-runner",
-  runtime: "goat-codex-runtime",
+  runtime: "goat-coding-workspace",
 });
 const RUNTIME_PATH = "/goat/runtime";
-const RUNTIME_PROTOCOL = "goat-codex-runtime-v1";
+const RUNTIME_PROTOCOL = "goat-coding-workspace-v1";
 const TICKET_PROTOCOL_PREFIX = "goat-ticket.";
-const TMUX_SESSION = "goat-codex";
+const TMUX_SESSION = "goat-coding-workspace";
 const HEARTBEAT_INTERVAL_MS = 60_000;
+const PREVIEW_UPSTREAM_CONNECT_TIMEOUT_MS = 15_000;
 const PREVIEW_SESSION_CACHE_MS = 5_000;
+const MAX_PREVIEW_SESSION_CACHE_ENTRIES = 256;
+const MAX_PENDING_PREVIEW_WEBSOCKET_BYTES = 256 * 1_024;
 const runtimeToolInstalls = new Map<string, Promise<void>>();
 
 type PreviewTarget = {
-  session: GoatCodexRuntimeSession;
+  session: GoatCodingWorkspaceSession;
   sandbox: SandboxHandle;
   upstreamHost: string;
   port: number;
@@ -51,7 +54,7 @@ type RunnerServerFactory = (
   options: Record<string, unknown>,
 ) => http.Server;
 
-export function createGoatCodexRuntimeTransport(env: RunnerEnv) {
+export function createGoatCodingWorkspaceTransport(env: RunnerEnv) {
   const runtimeWebSockets = new WebSocketServer({
     noServer: true,
     maxPayload: 64 * 1_024,
@@ -65,6 +68,7 @@ export function createGoatCodexRuntimeTransport(env: RunnerEnv) {
 
   const close = () => {
     closePromise ??= (async () => {
+      previewCache.clear();
       for (const webSocket of runtimeWebSockets.clients) webSocket.terminate();
       for (const webSocket of previewWebSockets.clients) webSocket.terminate();
       await Promise.all([
@@ -114,7 +118,7 @@ async function acceptRuntimeWebSocket(
   webSocketServer: WebSocketServer,
 ) {
   const origin = request.headers.origin;
-  if (!isGoatCodexRuntimeOriginAllowed(origin, env.allowedOrigins)) {
+  if (!isGoatCodingWorkspaceOriginAllowed(origin, env.allowedOrigins)) {
     rejectUpgrade(socket, 403, "Forbidden");
     return;
   }
@@ -124,15 +128,15 @@ async function acceptRuntimeWebSocket(
     .find((protocol) => protocol.startsWith(TICKET_PROTOCOL_PREFIX))
     ?.slice(TICKET_PROTOCOL_PREFIX.length);
   const ticket = encodedTicket
-    ? verifyGoatCodexRuntimeTicket({ ticket: encodedTicket, secret: env.streamTokenSecret })
+    ? verifyGoatCodingWorkspaceTicket({ ticket: encodedTicket, secret: env.streamTokenSecret })
     : null;
   if (!ticket || !protocols.includes(RUNTIME_PROTOCOL)) {
     rejectUpgrade(socket, 401, "Unauthorized");
     return;
   }
 
-  const session = await loadGoatCodexRuntimeSession({
-    codexChatSessionId: ticket.codexChatSessionId,
+  const session = await loadGoatCodingWorkspaceSession({
+    codingSessionId: ticket.codingSessionId,
     userWorkosId: ticket.userWorkosId,
   }).catch(() => null);
   if (!session) {
@@ -161,10 +165,11 @@ async function acceptRuntimeWebSocket(
 export function attachRuntimeConnection(
   webSocket: WebSocket,
   sandbox: SandboxHandle,
-  session: GoatCodexRuntimeSession,
+  session: GoatCodingWorkspaceSession,
   env: RunnerEnv,
   restoreTimeout: typeof restoreSandboxTimeout = restoreSandboxTimeout,
 ) {
+  const workDirectory = CLOUD_CODING_ENGINE_CONFIG[session.engine].workDirectory;
   let terminalPid: number | null = null;
   let terminalHandle: Awaited<ReturnType<SandboxHandle["pty"]["create"]>> | null = null;
   let disposed = false;
@@ -211,10 +216,14 @@ export function attachRuntimeConnection(
       return;
     }
 
+    await sandbox.commands.run(`mkdir -p ${shellQuote(workDirectory)}`, {
+      user: "user",
+      timeoutMs: 10_000,
+    });
     terminalHandle = await sandbox.pty.create({
       cols,
       rows,
-      cwd: CODEX_CHAT_WORKDIR,
+      cwd: workDirectory,
       user: "user",
       timeoutMs: 24 * 60 * 60_000,
       onData: sendTerminal,
@@ -228,7 +237,7 @@ export function attachRuntimeConnection(
   };
 
   const refreshPorts = async () => {
-    const ports = await discoverGoatCodexPreviewPorts(sandbox);
+    const ports = await discoverGoatCodingWorkspacePreviewPorts(sandbox);
     sendControl({ type: "ports", ports });
   };
 
@@ -237,12 +246,12 @@ export function attachRuntimeConnection(
       throw new Error("Preview is not configured on this runner.");
     }
     if (!isAllowedPreviewPort(port)) throw new Error("That preview port is reserved or invalid.");
-    const ports = await discoverGoatCodexPreviewPorts(sandbox);
+    const ports = await discoverGoatCodingWorkspacePreviewPorts(sandbox);
     if (!ports.some((candidate) => candidate.port === port)) {
       throw new Error(`Nothing is listening on port ${port}.`);
     }
-    const signed = createGoatCodexPreviewCapability({
-      codexChatSessionId: session.id,
+    const signed = createGoatCodingWorkspacePreviewCapability({
+      codingSessionId: session.id,
       port,
       secret: env.streamTokenSecret,
     });
@@ -256,11 +265,15 @@ export function attachRuntimeConnection(
 
   webSocket.on("message", (raw, isBinary) => {
     if (isBinary) {
-      if (terminalPid !== null) {
-        void sandbox.pty.sendInput(terminalPid, new Uint8Array(raw as Buffer)).catch(() => {
+      const data = copyWebSocketData(raw);
+      operation = operation
+        .then(async () => {
+          if (disposed || terminalPid === null) return;
+          await sandbox.pty.sendInput(terminalPid, data);
+        })
+        .catch(() => {
           sendControl({ type: "error", scope: "terminal", message: "Terminal input failed." });
         });
-      }
       return;
     }
 
@@ -303,8 +316,8 @@ export function attachRuntimeConnection(
     clearInterval(heartbeat);
     void terminalHandle?.kill().catch(() => {});
     void restoreTimeout(session.id, sandbox, env.goatCodexChatIdleTimeoutMs).catch((error) => {
-      logger.warn("Failed to restore Codex workspace idle timeout", {
-        event: "opencompany.goat_codex_runtime_idle_restore_failed",
+      logger.warn("Failed to restore coding workspace idle timeout", {
+        event: "opencompany.goat_coding_workspace_idle_restore_failed",
         error,
       });
     });
@@ -365,7 +378,7 @@ async function proxyPreviewHttp(
     request.pipe(upstream);
   } catch (error) {
     logger.warn("Preview proxy request failed", {
-      event: "opencompany.goat_codex_preview_proxy_failed",
+      event: "opencompany.goat_coding_workspace_preview_proxy_failed",
       error,
     });
     if (!response.headersSent)
@@ -405,6 +418,9 @@ async function proxyPreviewWebSocket(
 
     webSocketServer.handleUpgrade(request, socket, head, (downstream) => {
       let heartbeatReceived = true;
+      let closed = false;
+      let stopForwarding = () => {};
+      let upstreamConnectTimeout: ReturnType<typeof setTimeout> | null = null;
       downstream.on("pong", () => {
         heartbeatReceived = true;
       });
@@ -418,6 +434,9 @@ async function proxyPreviewWebSocket(
         void keepSandboxActive(target.sandbox).catch(() => downstream.close());
       }, HEARTBEAT_INTERVAL_MS);
       const close = () => {
+        if (closed) return;
+        closed = true;
+        if (upstreamConnectTimeout) clearTimeout(upstreamConnectTimeout);
         clearInterval(heartbeat);
         if (
           upstream.readyState === WebSocket.OPEN ||
@@ -426,6 +445,7 @@ async function proxyPreviewWebSocket(
           upstream.close();
         }
         if (downstream.readyState === WebSocket.OPEN) downstream.close();
+        stopForwarding();
         void restoreSandboxTimeout(
           target.session.id,
           target.sandbox,
@@ -433,9 +453,12 @@ async function proxyPreviewWebSocket(
         ).catch(() => {});
       };
 
-      upstream.on("open", () => {
-        downstream.on("message", (data, binary) => upstream.send(data, { binary }));
+      upstreamConnectTimeout = setTimeout(close, PREVIEW_UPSTREAM_CONNECT_TIMEOUT_MS);
+      upstream.once("open", () => {
+        if (upstreamConnectTimeout) clearTimeout(upstreamConnectTimeout);
+        upstreamConnectTimeout = null;
       });
+      stopForwarding = forwardPreviewWebSocketMessages(downstream, upstream, close);
       upstream.on("message", (data, binary) => {
         if (downstream.readyState === WebSocket.OPEN) downstream.send(data, { binary });
       });
@@ -454,7 +477,7 @@ async function resolvePreviewTarget(
   env: RunnerEnv,
   cache: Map<string, { expiresAt: number; target: Promise<PreviewTarget> }>,
 ) {
-  const verified = verifyGoatCodexPreviewCapability({
+  const verified = verifyGoatCodingWorkspacePreviewCapability({
     capability,
     secret: env.streamTokenSecret,
   });
@@ -463,19 +486,75 @@ async function resolvePreviewTarget(
 
   const cached = cache.get(capability);
   if (cached && cached.expiresAt > Date.now()) return cached.target;
+  if (cached) cache.delete(capability);
+
+  const now = Date.now();
+  for (const [key, entry] of cache) {
+    if (entry.expiresAt <= now) cache.delete(key);
+  }
+  while (cache.size >= MAX_PREVIEW_SESSION_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
 
   const target = (async () => {
-    const session = await loadGoatCodexRuntimeSession({
-      codexChatSessionId: verified.codexChatSessionId,
+    const session = await loadGoatCodingWorkspaceSession({
+      codingSessionId: verified.codingSessionId,
     });
     if (!session) throw new Error("Preview session is closed.");
     const sandbox = await connectSandbox({ sandboxId: session.sandboxId });
     if (!sandbox) throw new Error("Preview sandbox was deleted.");
     return { session, sandbox, upstreamHost: sandbox.getHost(verified.port), port: verified.port };
   })();
-  cache.set(capability, { expiresAt: Date.now() + PREVIEW_SESSION_CACHE_MS, target });
-  target.catch(() => cache.delete(capability));
+  const entry = { expiresAt: Date.now() + PREVIEW_SESSION_CACHE_MS, target };
+  cache.set(capability, entry);
+  target.catch(() => {
+    if (cache.get(capability) === entry) cache.delete(capability);
+  });
   return target;
+}
+
+export function forwardPreviewWebSocketMessages(
+  downstream: WebSocket,
+  upstream: WebSocket,
+  onOverflow: () => void,
+  maxPendingBytes = MAX_PENDING_PREVIEW_WEBSOCKET_BYTES,
+) {
+  const pending: Array<{ data: Buffer; binary: boolean }> = [];
+  let pendingBytes = 0;
+
+  const onMessage = (data: RawData, binary: boolean) => {
+    const copied = copyWebSocketData(data);
+    if (upstream.readyState === WebSocket.OPEN) {
+      upstream.send(copied, { binary });
+      return;
+    }
+    if (upstream.readyState !== WebSocket.CONNECTING) return;
+    if (pendingBytes + copied.byteLength > maxPendingBytes) {
+      onOverflow();
+      return;
+    }
+    pending.push({ data: copied, binary });
+    pendingBytes += copied.byteLength;
+  };
+  const flush = () => {
+    if (upstream.readyState !== WebSocket.OPEN) return;
+    for (const message of pending) {
+      upstream.send(message.data, { binary: message.binary });
+    }
+    pending.length = 0;
+    pendingBytes = 0;
+  };
+
+  downstream.on("message", onMessage);
+  upstream.on("open", flush);
+  return () => {
+    downstream.off("message", onMessage);
+    upstream.off("open", flush);
+    pending.length = 0;
+    pendingBytes = 0;
+  };
 }
 
 function previewCapabilityFromRequest(request: IncomingMessage, baseDomain: string | undefined) {
@@ -515,6 +594,12 @@ function readProtocols(header: string | string[] | undefined) {
     .split(",")
     .map((protocol) => protocol.trim())
     .filter(Boolean);
+}
+
+function copyWebSocketData(data: RawData) {
+  if (Array.isArray(data)) return Buffer.concat(data);
+  if (data instanceof ArrayBuffer) return Buffer.from(new Uint8Array(data));
+  return Buffer.from(data);
 }
 
 function clampDimension(value: number | undefined, fallback: number) {
@@ -644,7 +729,7 @@ function forwardedProtocol(request: IncomingMessage): "http" | "https" {
   return first === "https" ? "https" : "http";
 }
 
-export function isGoatCodexRuntimeOriginAllowed(
+export function isGoatCodingWorkspaceOriginAllowed(
   origin: string | undefined,
   allowedOrigins: string[],
 ) {
@@ -695,11 +780,11 @@ async function ensureRuntimeTools(sandbox: SandboxHandle) {
 }
 
 async function restoreSandboxTimeout(
-  codexChatSessionId: string,
+  codingSessionId: string,
   sandbox: SandboxHandle,
   idleTimeoutMs: number,
 ) {
-  const current = await loadGoatCodexRuntimeSession({ codexChatSessionId });
+  const current = await loadGoatCodingWorkspaceSession({ codingSessionId });
   if (current && ["queued", "starting", "running"].includes(current.status)) {
     await keepSandboxActive(sandbox);
     return;
