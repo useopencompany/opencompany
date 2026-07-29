@@ -814,21 +814,20 @@ function closeWebSocketServer(server: WebSocketServer) {
 // `codex` template ships neither). The opencompany-codex-toolbox template preinstalls
 // both, making this a no-op check. apt-get requires root — the E2B SDK default command
 // user is the unprivileged `user`, under which the install always fails.
+export const RUNTIME_TOOLS_INSTALL_COMMAND = [
+  "if ! command -v tmux >/dev/null 2>&1 || ! command -v ss >/dev/null 2>&1; then",
+  "export DEBIAN_FRONTEND=noninteractive;",
+  "apt-get update -qq && apt-get install -y -qq --no-install-recommends tmux iproute2;",
+  "fi;",
+  "command -v tmux >/dev/null && command -v ss >/dev/null",
+].join(" ");
+
 async function ensureRuntimeTools(sandbox: SandboxHandle) {
   const existing = runtimeToolInstalls.get(sandbox.sandboxId);
   if (existing) return existing;
 
   const install = sandbox.commands
-    .run(
-      [
-        "if ! command -v tmux >/dev/null 2>&1 || ! command -v ss >/dev/null 2>&1; then",
-        "export DEBIAN_FRONTEND=noninteractive;",
-        "apt-get update -qq && apt-get install -y -qq --no-install-recommends tmux iproute2;",
-        "fi",
-        "command -v tmux >/dev/null && command -v ss >/dev/null",
-      ].join(" "),
-      { user: "root", timeoutMs: 120_000 },
-    )
+    .run(RUNTIME_TOOLS_INSTALL_COMMAND, { user: "root", timeoutMs: 120_000 })
     .then(() => undefined);
   runtimeToolInstalls.set(sandbox.sandboxId, install);
   void install.then(
