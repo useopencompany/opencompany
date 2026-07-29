@@ -2526,6 +2526,41 @@ export const goatSkills = goat.table(
   }),
 );
 
+// Workspace-shared bootstrap material for repositories used by the repo-agnostic
+// Codex and Claude Code chat sandboxes. Environment contents are encrypted at
+// rest; envKeys is intentionally limited to plaintext key names for settings UI.
+export const goatRepoConfigs = goat.table(
+  "repo_configs",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    repositoryExternalId: text("repository_external_id").notNull(),
+    repositoryFullName: text("repository_full_name").notNull(),
+    encryptedEnvPayload: jsonb("encrypted_env_payload").$type<EncryptedPayload>(),
+    encryptionKeyVersion: integer("encryption_key_version"),
+    envKeys: jsonb("env_keys").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    setupInstructions: text("setup_instructions").notNull().default(""),
+    createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceRepositoryIdx: uniqueIndex("goat_repo_configs_workspace_repository_idx").on(
+      table.workspaceId,
+      table.repositoryExternalId,
+    ),
+    envEncryptionCheck: check(
+      "goat_repo_configs_env_encryption_check",
+      sql`(${table.encryptedEnvPayload} IS NULL AND ${table.encryptionKeyVersion} IS NULL)
+        OR (${table.encryptedEnvPayload} IS NOT NULL AND ${table.encryptionKeyVersion} IS NOT NULL)`,
+    ),
+  }),
+);
+
 export const goatTasks = goat.table(
   "tasks",
   {
@@ -3502,6 +3537,7 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   integrations: many(goatIntegrations),
   integrationCredentials: many(goatIntegrationCredentials),
   integrationResources: many(goatIntegrationResources),
+  repoConfigs: many(goatRepoConfigs),
   brainSourceItems: many(goatBrainSourceItems),
   brainIngestJobs: many(goatBrainIngestJobs),
   codexDeviceAuthFlows: many(goatCodexDeviceAuthFlows),
@@ -3518,6 +3554,7 @@ export const goatWorkspacesRelations = relations(goatWorkspaces, ({ one, many })
   billing: one(goatWorkspaceBilling),
   ingestionReservations: many(goatWorkspaceIngestionReservations),
   brains: many(goatBrains),
+  repoConfigs: many(goatRepoConfigs),
 }));
 
 export const goatWorkspaceBillingRelations = relations(goatWorkspaceBilling, ({ one }) => ({
@@ -3789,6 +3826,17 @@ export const goatIntegrationResourcesRelations = relations(goatIntegrationResour
   integration: one(goatIntegrations, {
     fields: [goatIntegrationResources.integrationId],
     references: [goatIntegrations.id],
+  }),
+}));
+
+export const goatRepoConfigsRelations = relations(goatRepoConfigs, ({ one }) => ({
+  workspace: one(goatWorkspaces, {
+    fields: [goatRepoConfigs.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
+  createdBy: one(goatUsers, {
+    fields: [goatRepoConfigs.createdByWorkosId],
+    references: [goatUsers.workosUserId],
   }),
 }));
 
@@ -4069,3 +4117,4 @@ export type GoatChatSandboxUsage = typeof goatChatSandboxUsage.$inferSelect;
 export type GoatChatSessionSkill = typeof goatChatSessionSkills.$inferSelect;
 export type GoatWorkflow = typeof goatWorkflows.$inferSelect;
 export type GoatSkill = typeof goatSkills.$inferSelect;
+export type GoatRepoConfig = typeof goatRepoConfigs.$inferSelect;

@@ -1,5 +1,9 @@
 "use client";
 
+import type {
+  GoatRepoConfigView,
+  GoatWorkspaceRepository,
+} from "@opencompany/db/goat-repo-configs";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
@@ -38,6 +42,7 @@ import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
+import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { StripeIntegrationSetup } from "@/components/StripeIntegrationSetup";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
@@ -220,6 +225,29 @@ export function GoatPreferencesSettingsRoute() {
           update={updateGoatTaskSpawningAction}
         />
       </section>
+    </GoatSettingsContent>
+  );
+}
+
+export function GoatRepositoriesSettingsRoute({
+  repositories,
+  configs,
+  canEdit,
+}: {
+  repositories: GoatWorkspaceRepository[];
+  configs: GoatRepoConfigView[];
+  canEdit: boolean;
+}) {
+  return (
+    <GoatSettingsContent
+      title="Repositories"
+      description="Give coding agents the environment and setup steps they need for each repository."
+    >
+      <RepositorySettings
+        initialRepositories={repositories}
+        initialConfigs={configs}
+        canEdit={canEdit}
+      />
     </GoatSettingsContent>
   );
 }

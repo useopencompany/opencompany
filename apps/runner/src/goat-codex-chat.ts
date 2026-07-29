@@ -43,6 +43,7 @@ import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
+import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
   armSandboxIdleTimeout,
@@ -118,6 +119,12 @@ export async function runGoatCodexChatTurn(input: {
     return "settled";
   }
 
+  const repositoryBootstrapPromise = loadGoatRepositoryBootstrap(
+    session.workspaceId,
+    turn.userWorkosId,
+  );
+  void repositoryBootstrapPromise.catch(() => undefined);
+
   let sandbox;
   try {
     sandbox = await createOrConnectSandbox({
@@ -153,6 +160,7 @@ export async function runGoatCodexChatTurn(input: {
     });
   }
 
+  const repositoryBootstrap = await repositoryBootstrapPromise;
   const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
   const github = await loadGoatGitHubAuthForUser(turn.userWorkosId);
   const redact = createKnownSecretRedactor([
@@ -161,6 +169,7 @@ export async function runGoatCodexChatTurn(input: {
     github?.githubToken ?? null,
     github?.githubAuthHeader ?? null,
     env.internalToken,
+    ...repositoryBootstrap.secretValues,
   ]);
   const projector = createGoatCodexChatProjector({
     target: {
@@ -214,6 +223,9 @@ export async function runGoatCodexChatTurn(input: {
       `mkdir -p ${shellQuote(CODEX_CHAT_WORKDIR)} ${shellQuote(CODEX_CHAT_HOME)}`,
       { timeoutMs: 30_000 },
     );
+    checkExternalAbort();
+    executionStage = "stage_repository_configs";
+    await stageGoatRepositoryBootstrap({ sandbox, bootstrap: repositoryBootstrap });
     checkExternalAbort();
     if (serializedAuthJson) {
       executionStage = "write_auth";
@@ -308,6 +320,7 @@ export async function runGoatCodexChatTurn(input: {
             githubAvailable: Boolean(github),
             brainAvailable: brainToolEnabled,
             actionsAvailable: actionToolsEnabled,
+            repositoryBootstrapPrompt: repositoryBootstrap.promptFragment,
             previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
             attachmentPaths: materializedAttachments.paths,
           })
@@ -316,6 +329,7 @@ export async function runGoatCodexChatTurn(input: {
             githubAvailable: Boolean(github),
             brainAvailable: brainToolEnabled,
             actionsAvailable: actionToolsEnabled,
+            repositoryBootstrapPrompt: repositoryBootstrap.promptFragment,
             attachmentPaths: materializedAttachments.paths,
           }),
       localImages: materializedAttachments.localImages,
@@ -859,6 +873,7 @@ function buildCodexChatTask(input: {
   githubAvailable: boolean;
   brainAvailable: boolean;
   actionsAvailable: boolean;
+  repositoryBootstrapPrompt: string;
   attachmentPaths: string[];
 }) {
   return [
@@ -867,6 +882,7 @@ function buildCodexChatTask(input: {
     input.githubAvailable
       ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Clone repositories into the working directory only when the user asks you to work on one."
       : null,
+    input.repositoryBootstrapPrompt || null,
     input.brainAvailable
       ? "A read-only goat_brain tool is available for the Brain pinned to this chat. Use it when durable company or user context would help; it cannot modify the Brain."
       : null,
@@ -889,6 +905,7 @@ function buildCodexChatRecoveryTask(input: {
   githubAvailable: boolean;
   brainAvailable: boolean;
   actionsAvailable: boolean;
+  repositoryBootstrapPrompt: string;
   previousProgress: string;
   attachmentPaths: string[];
 }) {
@@ -899,6 +916,7 @@ function buildCodexChatRecoveryTask(input: {
     input.githubAvailable
       ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Before pushing, opening a PR, or mutating GitHub, inspect the current remote/PR state so recovery is idempotent."
       : null,
+    input.repositoryBootstrapPrompt || null,
     input.brainAvailable
       ? "A read-only goat_brain tool is available for the Brain pinned to this chat. Use it when durable company or user context would help; it cannot modify the Brain."
       : null,

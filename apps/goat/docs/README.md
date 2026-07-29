@@ -288,6 +288,8 @@ Entry points:
 - `apps/goat/app/api/codex-chat/*`
 - `apps/goat/lib/codex-chat.ts`
 - `apps/runner/src/goat-codex-chat.ts`
+- `apps/runner/src/goat-claude-code-chat.ts`
+- `apps/runner/src/repo-bootstrap.ts`
 - `apps/runner/src/codex-app-server.ts`
 
 Cloud Codex uses a persistent sandbox per Goat chat and resumes the same Codex app-server thread on
@@ -327,6 +329,17 @@ OpenCompany-managed ids and preserves any unrelated native skills. A content fin
 the app-server daemon when the installed set changes, while the persistent Codex thread is resumed.
 Only skills whose first activation belongs to the current turn are included as native `skill`
 inputs; previously activated skills remain installed and in thread history.
+
+Workspace admins can configure per-repository environments and setup instructions under
+`/settings/repositories`, and can remove a repository's saved configuration from the same page.
+Before every Codex or Claude Code turn, the runner verifies that the turn owner is still a workspace
+member and only loads configs for repositories currently available through a connected GitHub
+installation. It decrypts those environment payloads host-side, reconciles changed files under
+`/opt/oc/repos/<github-repository-id>/.env`, and adds only the staged path plus the plaintext setup
+instructions to the engine prompt. Decrypted secret-like values also join the runner's known-secret
+redactor so accidental command output cannot persist them in the chat transcript. Fingerprinted
+reconciliation still checks warm sandboxes on every turn, while unchanged configurations skip file
+uploads.
 
 New Cloud Codex chats pin the user's active Brain and workspace on `goat.codex_chat_sessions`
 together with the host-tool contract version used to start the Codex thread. On `thread/start`, the
@@ -617,6 +630,8 @@ Important tables:
 - `goat.codex_chat_turns`: leased Cloud Codex turn queue and message linkage.
 - `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
 - `goat.codex_chat_events`: normalized Cloud Codex event audit rows.
+- `goat.repo_configs`: workspace-scoped repository setup instructions, masked env key names, and
+  encrypted environment-file payloads used by Codex and Claude Code chat sandboxes.
 - `goat.tasks`: durable background task queue, status, stage, result, error, lease, harness spec,
   debug trace, and sandbox id.
 - `goat.task_messages`: durable task transcript rows for user, assistant, and tool messages.
