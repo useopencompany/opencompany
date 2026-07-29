@@ -18,6 +18,29 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("MessageBubble scheduled wakeups", () => {
+  it("renders the synthetic trigger as a centered muted check-in instead of a user bubble", () => {
+    const message: GoatChatUiMessage = {
+      id: "scheduled_wakeup_1",
+      role: "user",
+      metadata: {
+        scheduledWakeup: {
+          reason: "Wait for CI",
+          dueAt: "2026-07-10T09:02:00.000Z",
+        },
+      },
+      parts: [{ type: "text", text: "Scheduled check-in: Wait for CI" }],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByTestId("scheduled-wakeup")).toHaveTextContent(
+      "⏱ Scheduled check-in · Wait for CI",
+    );
+    expect(screen.queryByText("Scheduled check-in: Wait for CI")).not.toBeInTheDocument();
+  });
+});
+
 describe("MessageBubble assistant errors", () => {
   it("renders the turn error even when the assistant produced no parts", () => {
     const message: GoatChatUiMessage = {

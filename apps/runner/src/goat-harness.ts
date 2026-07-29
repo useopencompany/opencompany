@@ -1,6 +1,7 @@
 import { getGoatWorkflowHarnessSkillSnapshots } from "@opencompany/db/goat-harness";
 import type {
   GoatHarnessSpec,
+  GoatHarnessWorkflowStep,
   GoatTaskDebugTrace,
   GoatTaskEventType,
   GoatTaskReportedOutcome,
@@ -59,6 +60,7 @@ export type GoatTaskConversationMessage = {
 };
 
 export type GoatTaskRunSink = {
+  createUserMessage(input: { content: string }): Promise<{ id: string }>;
   createAssistantMessage(input: {
     content: string;
     modelMessage?: unknown;
@@ -130,7 +132,7 @@ export type GoatTaskRunSink = {
     activeMs: number;
     rawMetrics?: Record<string, unknown>;
   }): Promise<void>;
-  updateCodexEngineSessionId(codexEngineSessionId: string): Promise<void>;
+  updateCodexEngineSessionId(codexEngineSessionId: string | null): Promise<void>;
 };
 
 export type GoatTaskExecutorInput = {
@@ -183,9 +185,275 @@ export async function executeGoatTask(
 }
 
 async function executeGoatTaskInner(input: GoatTaskExecutorInput): Promise<GoatTaskExecutorResult> {
+  if (input.task.harnessSpec.workflow?.steps?.length) {
+    return executeGoatWorkflowStepsTask(input);
+  }
+  return executeGoatWorkflowStepTask(input);
+}
+
+export type GoatWorkflowStepRunner = (
+  input: GoatTaskExecutorInput,
+) => Promise<GoatTaskExecutorResult>;
+
+export async function executeGoatWorkflowStepsTask(
+  input: GoatTaskExecutorInput,
+  runStep: GoatWorkflowStepRunner = executeGoatWorkflowStepTask,
+): Promise<GoatTaskExecutorResult> {
+  const steps = input.task.harnessSpec.workflow?.steps;
+  if (!steps?.length) return runStep(input);
+
+  const requestedStartIndex = input.task.harnessSpec.workflow?.currentStepIndex ?? 0;
+  const requestedCompletedStepCount =
+    input.task.harnessSpec.workflow?.completedStepCount ?? requestedStartIndex;
+  if (
+    !Number.isInteger(requestedStartIndex) ||
+    requestedStartIndex < 0 ||
+    requestedStartIndex >= steps.length
+  ) {
+    throw new GoatHarnessRunError("Goat workflow has an invalid step checkpoint.", {
+      schemaVersion: "goat.debug.v1",
+    });
+  }
+  if (
+    !Number.isInteger(requestedCompletedStepCount) ||
+    requestedCompletedStepCount < 0 ||
+    requestedCompletedStepCount > steps.length
+  ) {
+    throw new GoatHarnessRunError("Goat workflow has an invalid completion checkpoint.", {
+      schemaVersion: "goat.debug.v1",
+    });
+  }
+  const conversation = [...(input.conversationMessages ?? [])];
+  const lastCompletedStepOutcome = input.task.harnessSpec.workflow?.lastCompletedStepOutcome;
+  if (
+    requestedCompletedStepCount === steps.length ||
+    (requestedCompletedStepCount > 0 &&
+      lastCompletedStepOutcome?.reportedOutcome === "needs_attention")
+  ) {
+    return checkpointedGoatWorkflowResult(input, conversation);
+  }
+
+  const startIndex = Math.max(requestedStartIndex, requestedCompletedStepCount);
+  let codexEngineSessionId = input.task.codexEngineSessionId;
+  let workflowHarnessSpec = input.task.harnessSpec;
+  let finalResult: GoatTaskExecutorResult | null = null;
+
+  for (let stepIndex = startIndex; stepIndex < steps.length; stepIndex += 1) {
+    const step = steps[stepIndex]!;
+    const isResumingCurrentStep =
+      stepIndex === requestedStartIndex && requestedCompletedStepCount === requestedStartIndex;
+    // Goat task Codex sandboxes are terminal per completed turn, so a later workflow step cannot
+    // resume the prior step's engine thread. Keep the id only when recovering this same step; new
+    // steps start a fresh thread and receive the prior result through the durable handoff message.
+    const keepsCodexSession = step.engine === "codex" && isResumingCurrentStep;
+
+    if (!keepsCodexSession && codexEngineSessionId !== null) {
+      codexEngineSessionId = null;
+      await input.sink.updateCodexEngineSessionId(null);
+    }
+
+    const stepSpec: GoatHarnessSpec = {
+      ...workflowHarnessSpec,
+      engine: step.engine,
+      model: step.model,
+      systemPrompt: step.systemPrompt,
+      systemBlocks: step.systemBlocks,
+      workflow: {
+        ...workflowHarnessSpec.workflow!,
+        currentStepIndex: stepIndex,
+        completedStepCount: stepIndex,
+      },
+    };
+    // Checkpoint before persisting the handoff so a lease loss between steps
+    // cannot rerun a step that already completed.
+    await input.reportStage("running", { harnessSpec: stepSpec });
+
+    if (stepIndex > 0) {
+      const handoffPrefix = goatWorkflowStepHandoffPrefix(stepIndex, steps.length);
+      const existingHandoff = hasPersistedGoatWorkflowStepHandoff(conversation, handoffPrefix);
+      if (!existingHandoff) {
+        const handoffContent = goatWorkflowStepHandoffContent({
+          step,
+          stepIndex,
+          stepCount: steps.length,
+          previousResult: latestGoatAssistantResult(conversation),
+        });
+        await input.sink.createUserMessage({ content: handoffContent });
+        conversation.push({ role: "user", content: handoffContent });
+      }
+    }
+
+    await input.sink.appendEvent({
+      type: "task.status",
+      payload: {
+        status: "running",
+        stage: "running",
+        stepIndex,
+        stepCount: steps.length,
+        stepTitle: step.title,
+      },
+    });
+
+    const isFinalStep = stepIndex === steps.length - 1;
+    const stepSink: GoatTaskRunSink = {
+      ...input.sink,
+      appendEvent: async (eventInput) => {
+        if (
+          !isFinalStep &&
+          eventInput.type === "task.status" &&
+          eventInput.payload?.reportedOutcome === "done"
+        ) {
+          return;
+        }
+        await input.sink.appendEvent(eventInput);
+      },
+      updateCodexEngineSessionId: async (sessionId) => {
+        codexEngineSessionId = sessionId;
+        await input.sink.updateCodexEngineSessionId(sessionId);
+      },
+    };
+    const result = await runStep({
+      ...input,
+      task: {
+        ...input.task,
+        model: step.model,
+        harnessSpec: stepSpec,
+        codexEngineSessionId,
+      },
+      conversationMessages: [...conversation],
+      sink: stepSink,
+    });
+    conversation.push({ role: "assistant", content: result.result });
+
+    const workflowOutcomeComment =
+      result.reportedOutcome === "needs_attention" && !isFinalStep
+        ? prefixGoatWorkflowStepOutcome(stepIndex, step.title, result.outcomeComment)
+        : result.outcomeComment;
+    const workflowResult = {
+      ...result,
+      ...(workflowOutcomeComment ? { outcomeComment: workflowOutcomeComment } : {}),
+    };
+
+    const completedHarnessSpec: GoatHarnessSpec = {
+      ...workflowResult.harnessSpec,
+      workflow: {
+        ...stepSpec.workflow!,
+        completedStepCount: stepIndex + 1,
+        lastCompletedStepOutcome: {
+          reportedOutcome: workflowResult.reportedOutcome ?? null,
+          outcomeComment: workflowOutcomeComment ?? null,
+        },
+      },
+    };
+    // Persist every terminal step result, including needs_attention and the final
+    // step. If the worker loses its lease before task finalization, recovery can
+    // finish from the durable transcript instead of repeating external side effects.
+    await input.reportStage("running", {
+      harnessSpec: completedHarnessSpec,
+      debugTrace: workflowResult.debugTrace,
+    });
+    workflowHarnessSpec = completedHarnessSpec;
+    finalResult = { ...workflowResult, harnessSpec: completedHarnessSpec };
+
+    if (workflowResult.reportedOutcome === "needs_attention") {
+      return finalResult;
+    }
+  }
+
+  if (!finalResult) {
+    throw new GoatHarnessRunError("Goat workflow has no executable steps.", {
+      schemaVersion: "goat.debug.v1",
+    });
+  }
+  return finalResult;
+}
+
+function checkpointedGoatWorkflowResult(
+  input: GoatTaskExecutorInput,
+  conversation: readonly GoatTaskConversationMessage[],
+): GoatTaskExecutorResult {
+  const result = latestGoatAssistantResult(conversation);
+  if (!result) {
+    throw new GoatHarnessRunError("Completed Goat workflow is missing its final result.", {
+      schemaVersion: "goat.debug.v1",
+    });
+  }
+  const outcome = input.task.harnessSpec.workflow?.lastCompletedStepOutcome;
+  const debugTrace: GoatTaskDebugTrace =
+    Object.keys(input.task.debugTrace).length > 0
+      ? input.task.debugTrace
+      : { schemaVersion: "goat.debug.v1" };
+  return {
+    result,
+    harnessSpec: input.task.harnessSpec,
+    debugTrace,
+    ...(outcome?.reportedOutcome ? { reportedOutcome: outcome.reportedOutcome } : {}),
+    ...(outcome?.outcomeComment ? { outcomeComment: outcome.outcomeComment } : {}),
+  };
+}
+
+function executeGoatWorkflowStepTask(
+  input: GoatTaskExecutorInput,
+): Promise<GoatTaskExecutorResult> {
   return input.task.harnessSpec.engine === "codex"
     ? executeGoatCodexTaskInner(input)
     : executeGoatOpenCompanyTaskInner(input);
+}
+
+function goatWorkflowStepHandoffPrefix(stepIndex: number, stepCount: number) {
+  return `Step ${stepIndex + 1}/${stepCount} —`;
+}
+
+function hasPersistedGoatWorkflowStepHandoff(
+  messages: readonly GoatTaskConversationMessage[],
+  prefix: string,
+) {
+  const firstAssistantIndex = messages.findIndex((message) => message.role === "assistant");
+  if (firstAssistantIndex < 0) return false;
+  return messages
+    .slice(firstAssistantIndex + 1)
+    .some((message) => message.role === "user" && message.content.startsWith(prefix));
+}
+
+function goatWorkflowStepHandoffContent(input: {
+  step: GoatHarnessWorkflowStep;
+  stepIndex: number;
+  stepCount: number;
+  previousResult: string;
+}) {
+  const title = input.step.title.trim() || "Untitled step";
+  const heading = `${goatWorkflowStepHandoffPrefix(input.stepIndex, input.stepCount)} ${title}`;
+  if (input.step.engine !== "codex" || !input.previousResult) return heading;
+  return [
+    heading,
+    "",
+    "Continue the workflow using the previous step's result:",
+    "",
+    "<previous_step_result>",
+    input.previousResult,
+    "</previous_step_result>",
+  ].join("\n");
+}
+
+function latestGoatAssistantResult(messages: readonly GoatTaskConversationMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "assistant" && message.content.trim()) {
+      return message.content.trim();
+    }
+  }
+  return "";
+}
+
+function prefixGoatWorkflowStepOutcome(
+  stepIndex: number,
+  title: string,
+  comment: string | undefined,
+) {
+  const stepLabel = title.trim()
+    ? `Step ${stepIndex + 1} (${title.trim()})`
+    : `Step ${stepIndex + 1}`;
+  return `${stepLabel}: ${comment?.trim() || "Needs attention before the workflow can continue."}`;
 }
 
 // Opencompany-engine task = a hidden main-chat run. No planner: the task's
@@ -440,6 +708,12 @@ async function runGoatWorkflowTaskCloser(input: {
   signal: AbortSignal;
 }): Promise<GoatWorkflowTaskOutcome | null> {
   try {
+    const workflow = input.task.harnessSpec.workflow;
+    const currentStepIndex = workflow?.currentStepIndex ?? 0;
+    const currentStep = workflow?.steps?.[currentStepIndex];
+    const currentStepLabel = currentStep
+      ? `Step ${currentStepIndex + 1}/${workflow?.steps?.length ?? 1} — ${currentStep.title.trim() || "Untitled step"}`
+      : null;
     const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
     const { generateText } = getBraintrustAISDK(ai);
     const attribution = createGoatGatewayAttribution({
@@ -456,18 +730,28 @@ async function runGoatWorkflowTaskCloser(input: {
       () =>
         generateText({
           model: gateway(GOAT_WORKFLOW_CLOSER_MODEL),
-          system:
-            'You close out finished background workflow tasks. Decide whether the result is complete (status "done") or whether the user should look at it (status "needs_attention": partial results, blockers, errors, questions, or anything the task explicitly wants reviewed). Always call update_task_status exactly once.',
+          system: currentStep
+            ? 'You close out one finished step in a sequential background workflow. Judge whether the current step\'s own instructions were completed (status "done") or whether the user should look at it (status "needs_attention": blockers, errors, questions, or an incomplete current step). Do not mark it needs_attention merely because later workflow steps remain. Always call update_task_status exactly once.'
+            : 'You close out finished background workflow tasks. Decide whether the result is complete (status "done") or whether the user should look at it (status "needs_attention": partial results, blockers, errors, questions, or anything the task explicitly wants reviewed). Always call update_task_status exactly once.',
           prompt: [
             `Task: ${input.task.name}`,
             "",
-            "Task request:",
+            "Overall task request:",
             input.task.prompt,
             "",
-            "Final result:",
+            ...(currentStep
+              ? [
+                  `Current workflow step: ${currentStepLabel}`,
+                  "",
+                  "Current step instructions:",
+                  currentStep.systemPrompt.slice(0, 12_000),
+                  "",
+                  "Current step result:",
+                ]
+              : ["Final result:"]),
             input.finalContent.slice(0, 12_000),
             "",
-            "Call update_task_status now with the status and a short comment (one sentence, plain text) summarizing what happened. The comment is shown on the task card.",
+            `Call update_task_status now with the status and a short comment (one sentence, plain text) summarizing what happened${currentStep ? " in this step" : ""}. The comment is shown on the task card.`,
           ].join("\n"),
           tools: {
             update_task_status: ai.tool({

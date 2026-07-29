@@ -12,7 +12,10 @@ import StarterKit from "@tiptap/starter-kit";
 import { Bold, Code, Heading1, Heading2, Italic } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { createSkillMentionPlugin } from "@/components/SkillMentionSuggestion";
+import {
+  createSkillMentionDecorationPlugin,
+  createSkillMentionPlugin,
+} from "@/components/SkillMentionSuggestion";
 import { isExternalHref, sourceChipDisplay, sourceHrefForRef } from "@/lib/brain-source-links";
 import type { GoatSkillCatalogItem } from "@/lib/skills";
 
@@ -80,12 +83,18 @@ export function MarkdownGoatBrainEditor({
           editingEnabled: !readOnly,
           onNavigateInternal: navigateInternal,
         }),
-        ...(skillMentions && !readOnly
+        ...(skillMentions
           ? [
               Extension.create({
                 name: "skillMention",
                 addProseMirrorPlugins() {
-                  return [createSkillMentionPlugin(this.editor, skillMentions)];
+                  // Always paint mention chips; only wire the "@" typeahead when
+                  // the field is editable.
+                  const plugins = [createSkillMentionDecorationPlugin()];
+                  if (!readOnly) {
+                    plugins.unshift(createSkillMentionPlugin(this.editor, skillMentions));
+                  }
+                  return plugins;
                 },
               }),
             ]

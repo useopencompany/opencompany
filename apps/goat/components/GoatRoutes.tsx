@@ -46,7 +46,6 @@ import { RepositorySettings } from "@/components/RepositorySettings";
 import { SettingsIntegrationsPanel } from "@/components/SettingsIntegrationsPanel";
 import { StripeIntegrationSetup } from "@/components/StripeIntegrationSetup";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
-import { TaskRunPanel } from "@/components/TaskRunPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import type { GoatBrainSnapshot } from "@/lib/brain";
 import type { GoatBrainOverviewStats } from "@/lib/brain-overview";
@@ -58,22 +57,14 @@ import {
   createGoatSkillAction,
   updateGoatSkillAction,
 } from "@/lib/skill-actions";
-import type { GoatSkillCatalogItem, GoatSkillListItem, GoatWorkspaceSkill } from "@/lib/skills";
+import type { GoatSkillListItem, GoatWorkspaceSkill } from "@/lib/skills";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import {
   updateGoatAutoModelRoutingAction,
   updateGoatTaskSpawningAction,
 } from "@/lib/user-preferences";
-import {
-  archiveGoatWorkflowAction,
-  createGoatWorkflowAction,
-  updateGoatWorkflowAction,
-} from "@/lib/workflow-actions";
-import {
-  DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
-  GOAT_WORKFLOW_MODEL_OPTIONS,
-} from "@/lib/workflow-model-options";
-import type { GoatWorkflowListItem, GoatWorkspaceWorkflow } from "@/lib/workflows";
+import { createGoatWorkflowAction } from "@/lib/workflow-actions";
+import type { GoatWorkflowListItem } from "@/lib/workflows";
 
 export function GoatHomeRoute({
   chatId,
@@ -510,50 +501,6 @@ export function GoatTaskDetailRoute({ taskId }: { taskId: string }) {
   );
 }
 
-export function GoatTaskRunRoute({ taskId }: { taskId: string }) {
-  const run = useTaskRun(taskId);
-  const { featureFlags } = useGoatAppData();
-  const detailHref = run ? `/tasks/${encodeURIComponent(run.task.displayId)}` : "/";
-
-  if (!featureFlags.taskSpawning) return <TasksWorkflowsDisabledRoute />;
-
-  return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-5">
-        <div className="flex w-full max-w-[880px] flex-col gap-8 pb-24 pt-14 sm:pt-20">
-          <nav className="flex flex-wrap items-center gap-2">
-            <BackLink href={detailHref} label="Task detail" />
-            <Link
-              href="/"
-              prefetch
-              className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-            >
-              Tasks
-            </Link>
-          </nav>
-
-          {run ? (
-            <>
-              <header className="flex flex-col gap-3">
-                <div className="flex flex-col gap-2">
-                  <h1 className="text-[34px] font-semibold leading-tight tracking-normal text-ink">
-                    {run.task.name}
-                  </h1>
-                  <div className="text-[12.5px] leading-5 text-ink-muted">Task run</div>
-                </div>
-              </header>
-
-              <TaskRunPanel initialRun={run} />
-            </>
-          ) : (
-            <TaskRouteSkeleton label="Loading run" />
-          )}
-        </div>
-      </div>
-    </main>
-  );
-}
-
 function useTaskRun(taskId: string) {
   const { featureFlags, tasks, taskRows } = useGoatAppData();
   const [serverState, setServerState] = useState<{
@@ -776,10 +723,6 @@ function getInitials(firstName: string | null, lastName: string | null, email: s
 
 // --- Workflows ---------------------------------------------------------------
 
-const WORKFLOW_DEFAULT_MODEL_LABEL =
-  GOAT_WORKFLOW_MODEL_OPTIONS.find((option) => option.token === DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN)
-    ?.label ?? "Default";
-
 export function GoatWorkflowsRoute({
   workflows,
   canEdit,
@@ -877,186 +820,6 @@ function WorkflowListRow({ workflow }: { workflow: GoatWorkflowListItem }) {
         {formatGoatRelativeTime(workflow.updatedAt)}
       </span>
     </Link>
-  );
-}
-
-export function GoatWorkflowEditorRoute({
-  workflow,
-  initialStatus,
-  canEdit,
-  skillCatalog,
-}: {
-  workflow: GoatWorkspaceWorkflow;
-  initialStatus: "draft" | "active";
-  canEdit: boolean;
-  skillCatalog: GoatSkillCatalogItem[];
-}) {
-  const router = useRouter();
-  const [name, setName] = useState(workflow.name);
-  const [description, setDescription] = useState(workflow.description);
-  const [instructions, setInstructions] = useState(workflow.instructions);
-  const [model, setModel] = useState(workflow.model);
-  const [status, setStatus] = useState<"draft" | "active">(initialStatus);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [isSaving, startSaving] = useTransition();
-  const [isArchiving, startArchiving] = useTransition();
-
-  const markDirty = () => {
-    if (saved) setSaved(false);
-    if (error) setError(null);
-  };
-
-  const save = () => {
-    setError(null);
-    startSaving(async () => {
-      const result = await updateGoatWorkflowAction({
-        slug: workflow.id,
-        name,
-        description,
-        instructions,
-        model,
-        status,
-      });
-      if (result.ok) {
-        setSaved(true);
-        router.refresh();
-        return;
-      }
-      setError(result.message);
-    });
-  };
-
-  const archive = () => {
-    setError(null);
-    startArchiving(async () => {
-      const result = await archiveGoatWorkflowAction({ slug: workflow.id });
-      if (result.ok) {
-        router.push("/workflows");
-        return;
-      }
-      setError(result.message);
-    });
-  };
-
-  return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[760px] flex-col gap-6 pb-24 pt-16 sm:pt-24">
-          <BackLink href="/workflows" label="Workflows" />
-
-          <header className="flex flex-col gap-1.5">
-            <h1 className="text-[24px] font-semibold leading-tight tracking-tight text-ink">
-              {name.trim() || "Untitled workflow"}
-            </h1>
-            <p className="text-[12.5px] leading-5 text-ink-subtle">
-              Fire this workflow with <span className="font-medium text-ink">#{workflow.id}</span>{" "}
-              in chat.
-            </p>
-          </header>
-
-          {canEdit ? null : (
-            <p className="text-[13px] leading-5 text-ink-subtle">
-              Only workspace admins can edit workflows.
-            </p>
-          )}
-
-          <div className="flex flex-col gap-5">
-            <EditorField label="Name">
-              <input
-                value={name}
-                disabled={!canEdit}
-                onChange={(event) => {
-                  setName(event.target.value);
-                  markDirty();
-                }}
-                className={EDITOR_INPUT_CLASS}
-              />
-            </EditorField>
-
-            <EditorField label="Description">
-              <input
-                value={description}
-                disabled={!canEdit}
-                onChange={(event) => {
-                  setDescription(event.target.value);
-                  markDirty();
-                }}
-                placeholder="What this workflow does"
-                className={EDITOR_INPUT_CLASS}
-              />
-            </EditorField>
-
-            <EditorField label="Model">
-              <select
-                value={model}
-                disabled={!canEdit}
-                onChange={(event) => {
-                  setModel(event.target.value);
-                  markDirty();
-                }}
-                className={EDITOR_INPUT_CLASS}
-              >
-                <option value="">Default ({WORKFLOW_DEFAULT_MODEL_LABEL})</option>
-                {GOAT_WORKFLOW_MODEL_OPTIONS.map((option) => (
-                  <option key={option.token} value={option.token}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </EditorField>
-
-            <EditorField label="Status">
-              <WorkflowSkillStatusToggle
-                value={status}
-                disabled={!canEdit}
-                onChange={(next) => {
-                  setStatus(next);
-                  markDirty();
-                }}
-              />
-            </EditorField>
-
-            <EditorField label="Instructions">
-              <div
-                className={`rounded-lg border border-border bg-surface px-3 py-2.5 transition-colors focus-within:ring-1 focus-within:ring-ink/20 ${!canEdit ? "opacity-70" : ""}`}
-              >
-                <MarkdownGoatBrainEditor
-                  content={instructions}
-                  onChange={(value) => {
-                    setInstructions(value);
-                    markDirty();
-                  }}
-                  readOnly={!canEdit}
-                  compact
-                  placeholder="Describe step by step what this workflow should do when fired."
-                  skillMentions={skillCatalog}
-                />
-              </div>
-            </EditorField>
-          </div>
-
-          {error ? <div className="text-[12.5px] leading-5 text-warning">{error}</div> : null}
-
-          {canEdit ? (
-            <EditorActions
-              onSave={save}
-              onArchive={archive}
-              isSaving={isSaving}
-              isArchiving={isArchiving}
-              saved={saved}
-            />
-          ) : null}
-
-          {canEdit && skillCatalog.length > 0 ? (
-            <p className="text-[12px] leading-5 text-ink-subtle">
-              Type <span className="font-medium text-ink">@</span> in the instructions to mention a
-              skill — it&apos;s resolved and included whenever this workflow runs.
-            </p>
-          ) : null}
-        </div>
-      </div>
-    </main>
   );
 }
 

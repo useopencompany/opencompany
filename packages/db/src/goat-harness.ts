@@ -15,5 +15,10 @@ export type GoatWorkflowHarnessSpec = Omit<GoatHarnessSpec, "workflow"> & {
 export function getGoatWorkflowHarnessSkillSnapshots(
   harnessSpec: GoatHarnessSpec,
 ): GoatBrainSkill[] | undefined {
-  return (harnessSpec.workflow as GoatWorkflowHarnessMetadata | undefined)?.skillSnapshots;
+  const workflow = harnessSpec.workflow as GoatWorkflowHarnessMetadata | undefined;
+  const snapshots = workflow?.skillSnapshots;
+  const currentStep = workflow?.steps?.[workflow.currentStepIndex ?? 0];
+  if (!snapshots || !currentStep) return snapshots;
+  const skillIds = new Set(currentStep.skillIds);
+  return snapshots.filter((skill) => skillIds.has(skill.id));
 }

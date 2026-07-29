@@ -306,6 +306,7 @@ async function* streamParts(...parts: Array<Record<string, unknown>>) {
 
 function createSink(): GoatTaskRunSink {
   return {
+    createUserMessage: vi.fn(async () => ({ id: "user_msg_2" })),
     createAssistantMessage: vi.fn(async () => ({ id: "assistant_msg_1" })),
     updateMessageContent: vi.fn(async () => {}),
     completeMessage: vi.fn(async () => {}),
