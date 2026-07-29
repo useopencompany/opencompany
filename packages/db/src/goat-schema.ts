@@ -43,6 +43,13 @@ export type GoatTaskStatus = "queued" | "running" | "succeeded" | "failed" | "ca
 // editable-but-not-yet-usable, `active` is available to fire (workflows) or
 // attach (skills). Mirrors the frontmatter `status` the Brain docs carried.
 export type GoatWorkflowStatus = "draft" | "active";
+export type GoatWorkflowTrigger = "manual" | "slack" | "linear" | "schedule";
+export type GoatWorkflowStep = {
+  id: string;
+  title: string;
+  model: string;
+  instructions: string;
+};
 export type GoatSkillStatus = "draft" | "active";
 
 export type GoatHarnessEngine = "opencompany" | "codex";
@@ -255,6 +262,16 @@ export type GoatTaskSkillId = "first-principles" | "yc-office-hours";
 
 export type GoatTaskReportedOutcome = "done" | "needs_attention";
 
+export type GoatHarnessWorkflowStep = {
+  index: number;
+  title: string;
+  engine: GoatHarnessEngine;
+  model: AgentModelId;
+  systemPrompt: string;
+  systemBlocks: string[];
+  skillIds: string[];
+};
+
 export type GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1";
   engine: GoatHarnessEngine;
@@ -274,6 +291,13 @@ export type GoatHarnessSpec = {
     id: string;
     workspaceId: string;
     skillIds: string[];
+    steps?: GoatHarnessWorkflowStep[];
+    currentStepIndex?: number;
+    completedStepCount?: number;
+    lastCompletedStepOutcome?: {
+      reportedOutcome: GoatTaskReportedOutcome | null;
+      outcomeComment: string | null;
+    };
   };
   codex?: {
     repository?: string | null;
@@ -486,6 +510,12 @@ export const GOAT_CODEX_CHAT_EVENT_TYPES: readonly GoatCodexChatEventType[] =
 export type GoatCodexChatTurnSettings = {
   reasoningEffort?: CodexReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
+  wakeupChain?: number;
+  scheduledWakeup?: {
+    delaySeconds: number;
+    reason: string;
+    prompt: string;
+  };
   goalMode?: {
     objective: string;
     tokenBudget?: number | null;
@@ -511,6 +541,10 @@ export type GoatChatMessageDebugTrace = {
   // Worker-side transcripts of use_capability calls (steps, tool previews),
   // keyed by toolCallId; never part of the model-visible tool output.
   capabilityCalls?: unknown[];
+  scheduledWakeup?: {
+    reason: string;
+    dueAt: string;
+  };
   error?: string;
 };
 
@@ -2469,6 +2503,8 @@ export const goatWorkflows = goat.table(
     // Engine/model token from the editor's Model dropdown (e.g. "kimi-k2.6",
     // "codex"); empty when the workflow has not picked one explicitly.
     model: text("model").notNull().default(""),
+    steps: jsonb("steps").$type<GoatWorkflowStep[]>().notNull().default(sql`'[]'::jsonb`),
+    trigger: text("trigger").$type<GoatWorkflowTrigger>().notNull().default("manual"),
     status: text("status").$type<GoatWorkflowStatus>().notNull().default("draft"),
     createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
       onDelete: "set null",
@@ -2489,6 +2525,10 @@ export const goatWorkflows = goat.table(
       table.updatedAt,
     ),
     statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
+    triggerCheck: check(
+      "goat_workflows_trigger_check",
+      sql`${table.trigger} IN ('manual', 'slack', 'linear', 'schedule')`,
+    ),
   }),
 );
 
@@ -3277,6 +3317,7 @@ export const goatCodexChatTurns = goat.table(
     leaseId: text("lease_id"),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    runAfter: timestamp("run_after", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

@@ -131,6 +131,10 @@ export type GoatChatUiAttachment = {
 export type GoatChatMessageMetadata = {
   sessionId?: string;
   model?: string;
+  scheduledWakeup?: {
+    reason: string;
+    dueAt: string;
+  };
   mentions?: GoatChatMention[];
   attachments?: GoatChatUiAttachment[];
   taskId?: string;
@@ -642,6 +646,14 @@ export function nextGoatChatMessageCreatedAt(createdAt: Date) {
   return new Date(createdAt.getTime() + 1);
 }
 
+export function emptyAssistantDebugTrace(model: string) {
+  return {
+    schemaVersion: "goat.codex_chat.debug.v1" as const,
+    model,
+    uiMessageParts: [],
+  };
+}
+
 export function textFromGoatChatUiMessage(message: Pick<GoatChatUiMessage, "parts">) {
   return message.parts
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
@@ -701,6 +713,7 @@ export function toGoatChatMessageMetadata(
       : null;
   const error = message.debugTrace?.error;
   const model = message.debugTrace?.model;
+  const scheduledWakeup = message.debugTrace?.scheduledWakeup;
   const aborted = message.debugTrace?.aborted === true;
   const timing = toGoatChatMessageTiming(message);
   const attachments = toGoatChatUiAttachments(message.attachments);
@@ -709,6 +722,7 @@ export function toGoatChatMessageMetadata(
   if (
     !message.sessionId &&
     !model &&
+    !scheduledWakeup &&
     !message.taskId &&
     !task &&
     !timing &&
@@ -722,6 +736,7 @@ export function toGoatChatMessageMetadata(
   return {
     sessionId: message.sessionId,
     ...(model ? { model } : {}),
+    ...(scheduledWakeup ? { scheduledWakeup } : {}),
     ...(attachments ? { attachments } : {}),
     ...(message.taskId ? { taskId: message.taskId } : {}),
     ...(task ? { task } : {}),

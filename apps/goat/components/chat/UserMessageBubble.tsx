@@ -16,6 +16,18 @@ export function UserMessageBubble({
 }) {
   const text = textFromGoatChatUiMessage(message);
   const attachments = message.metadata?.attachments ?? [];
+  const scheduledWakeup = message.metadata?.scheduledWakeup;
+
+  if (scheduledWakeup) {
+    return (
+      <div
+        className="flex w-full items-center justify-center py-1 text-center text-[12px] font-medium leading-5 text-ink-muted"
+        data-testid="scheduled-wakeup"
+      >
+        <span>⏱ Scheduled check-in · {scheduledWakeup.reason}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-end gap-1.5">

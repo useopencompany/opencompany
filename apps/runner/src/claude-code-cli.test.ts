@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildClaudeCommandEnv, buildClaudeTurnCommand } from "./claude-code-cli";
+import {
+  buildClaudeCommandEnv,
+  buildClaudeTurnCommand,
+  KILL_LEFTOVER_CLAUDE_TURN_COMMAND,
+} from "./claude-code-cli";
 
 const auth = {
   kind: "oauth" as const,
@@ -71,5 +75,28 @@ describe("buildClaudeTurnCommand", () => {
     expect(command).not.toContain("--resume");
     expect(command).not.toContain("--model");
     expect(command).not.toContain("--effort");
+  });
+});
+
+describe("KILL_LEFTOVER_CLAUDE_TURN_COMMAND", () => {
+  it("matches a real turn invocation but not its own command line", () => {
+    const pattern = /'(.+)'/.exec(KILL_LEFTOVER_CLAUDE_TURN_COMMAND)?.[1];
+    expect(pattern).toBeTruthy();
+    const regex = new RegExp(pattern as string);
+    const turnCommand = buildClaudeTurnCommand({
+      workdir: "/home/user/opencompany-goat/claude-chat",
+      promptPath: "/home/user/.opencompany-goat/claude-chat-prompts/prompt-t1.txt",
+      model: "claude-sonnet-5",
+      reasoningEffort: null,
+      resumeSessionId: "sess-1",
+    });
+    // pkill -f matches the leftover wrapper shell and claude process by this signature...
+    expect(regex.test(turnCommand)).toBe(true);
+    // ...but must not match the shell running the cleanup itself, or pkill kills its own parent.
+    expect(regex.test(KILL_LEFTOVER_CLAUDE_TURN_COMMAND)).toBe(false);
+  });
+
+  it("tolerates no matching process", () => {
+    expect(KILL_LEFTOVER_CLAUDE_TURN_COMMAND).toMatch(/\|\| true$/);
   });
 });

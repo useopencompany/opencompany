@@ -1,5 +1,6 @@
 "use server";
 
+import type { GoatWorkflowStep, GoatWorkflowTrigger } from "@opencompany/db/goat-schema";
 import { isValidGoatBrainId } from "@opencompany/goat-brain";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
@@ -50,8 +51,8 @@ export async function updateGoatWorkflowAction(input: {
   slug: string;
   name: string;
   description: string;
-  instructions: string;
-  model?: string;
+  trigger: GoatWorkflowTrigger;
+  steps: GoatWorkflowStep[];
   status: "draft" | "active";
 }): Promise<GoatWorkflowMutationResult> {
   if (
@@ -59,11 +60,15 @@ export async function updateGoatWorkflowAction(input: {
     !isValidGoatBrainId(input.slug) ||
     typeof input.name !== "string" ||
     typeof input.description !== "string" ||
-    typeof input.instructions !== "string" ||
-    (input.model !== undefined && typeof input.model !== "string") ||
+    !isGoatWorkflowTrigger(input.trigger) ||
+    !Array.isArray(input.steps) ||
+    !input.steps.every(isGoatWorkflowStep) ||
     (input.status !== "draft" && input.status !== "active")
   ) {
     return { ok: false, message: "Invalid workflow details." };
+  }
+  if (input.trigger !== "manual") {
+    return { ok: false, message: "That trigger isn't available yet." };
   }
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
@@ -73,6 +78,21 @@ export async function updateGoatWorkflowAction(input: {
     revalidatePath(`/workflows/${input.slug}`);
   }
   return result;
+}
+
+function isGoatWorkflowTrigger(value: unknown): value is GoatWorkflowTrigger {
+  return value === "manual" || value === "slack" || value === "linear" || value === "schedule";
+}
+
+function isGoatWorkflowStep(value: unknown): value is GoatWorkflowStep {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const step = value as Record<string, unknown>;
+  return (
+    typeof step.id === "string" &&
+    typeof step.title === "string" &&
+    typeof step.model === "string" &&
+    typeof step.instructions === "string"
+  );
 }
 
 export async function archiveGoatWorkflowAction(input: {

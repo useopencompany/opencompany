@@ -1,5 +1,7 @@
 "use client";
 
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { ReactRenderer } from "@tiptap/react";
 import { Suggestion, type SuggestionOptions } from "@tiptap/suggestion";
 import { Sparkles } from "lucide-react";
@@ -177,4 +179,56 @@ export function createSkillMentionPlugin(
   skills: GoatSkillCatalogItem[],
 ) {
   return Suggestion({ editor, ...createSkillMentionSuggestion(skills) });
+}
+
+// Paints each literal `@skill/<id>` token as a subtle chip so mentions read as
+// distinct atoms, mirroring the main chat composer's selected-mention styling
+// (see renderComposerInputOverlay in GoatSurface). This is a view-only
+// decoration: the underlying text stays plain `@skill/<id>` and round-trips
+// through Markdown untouched. The shadow spread (not padding) creates the chip
+// gutter so caret metrics and line height are unaffected.
+const SKILL_MENTION_CHIP_CLASS =
+  "rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]";
+
+const SKILL_MENTION_TOKEN_REGEX = /@skill\/[a-zA-Z0-9][a-zA-Z0-9._-]*/g;
+
+const SKILL_MENTION_DECORATION_KEY = new PluginKey("skillMentionDecoration");
+
+export function createSkillMentionDecorationPlugin() {
+  return new Plugin({
+    key: SKILL_MENTION_DECORATION_KEY,
+    props: {
+      decorations(state) {
+        const decorations: Decoration[] = [];
+        state.doc.descendants((node, pos) => {
+          if (!node.isTextblock) return;
+          if (node.type.spec.code) return false;
+          let offset = pos + 1;
+          node.forEach((child) => {
+            if (
+              child.isText &&
+              child.text &&
+              !child.marks.some((mark) => mark.type.name === "code")
+            ) {
+              const text = child.text;
+              SKILL_MENTION_TOKEN_REGEX.lastIndex = 0;
+              let match = SKILL_MENTION_TOKEN_REGEX.exec(text);
+              while (match !== null) {
+                const start = offset + match.index;
+                decorations.push(
+                  Decoration.inline(start, start + match[0].length, {
+                    class: SKILL_MENTION_CHIP_CLASS,
+                  }),
+                );
+                match = SKILL_MENTION_TOKEN_REGEX.exec(text);
+              }
+            }
+            offset += child.nodeSize;
+          });
+          return false;
+        });
+        return DecorationSet.create(state.doc, decorations);
+      },
+    },
+  });
 }
