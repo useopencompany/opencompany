@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-07-29
+
 ### Added
 - New Tasks & Workflows board: a Kanban view of every chat and workflow run, with a time-range filter and a Linear-style detail panel where you can reply to a task like a normal chat (#957, #963, #964, #973, #947) — @louis and @opencompany-bot.
 - Workflows now run as sequential multi-step tasks with a model and skill per step, and can be started directly from main chat just by asking (#967, #953, #948) — @louis and @opencompany-bot.
