@@ -19,6 +19,7 @@ import { goatHomeActivityCutoff } from "@/lib/home-activity";
 import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
 import { normalizeGoatTaskName } from "@/lib/task-display";
 import { triggerGoatTaskRun } from "@/lib/task-runner";
+import { GOAT_TASK_PROMPT_MAX_LENGTH } from "@/lib/task-validation";
 
 export type ArchiveTaskResult = {
   ok: boolean;
@@ -28,6 +29,12 @@ export type ArchiveTaskResult = {
 export type CancelTaskResult = {
   ok: boolean;
   error: string | null;
+};
+
+export type ContinueTaskResult = {
+  ok: boolean;
+  error: string | null;
+  messageId: string | null;
 };
 
 export async function listCurrentUserGoatTasks() {
@@ -245,6 +252,145 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
   return { ok: true, error: null };
 }
 
+// Tasks are durable conversations. A reply appends a completed user turn and
+// atomically moves a terminal task back to the queue; the runner then answers
+// with the same instructions and prior conversation context.
+export async function continueGoatTaskAction(
+  taskId: string,
+  prompt: string,
+  clientMessageId?: string,
+): Promise<ContinueTaskResult> {
+  const normalizedTaskId = taskId.trim();
+  const content = prompt.trim();
+  if (!normalizedTaskId || !content) {
+    return { ok: false, error: "Write a message to continue this task.", messageId: null };
+  }
+  if (content.length > GOAT_TASK_PROMPT_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: `Messages can be at most ${GOAT_TASK_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+      messageId: null,
+    };
+  }
+
+  const { user } = await currentGoatUser();
+  const messageId = safeGoatTaskMessageId(clientMessageId) ?? `goat_task_msg_${randomUUID()}`;
+  const now = new Date();
+  const result = await getDb().execute(sql`
+    WITH continued_task AS (
+      UPDATE goat.tasks AS task
+      SET status = 'queued',
+          stage = 'queued',
+          result = NULL,
+          error = NULL,
+          reported_outcome = NULL,
+          outcome_comment = NULL,
+          next_run_at = ${now},
+          lease_id = NULL,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          updated_at = ${now}
+      WHERE task.id = ${normalizedTaskId}
+        AND task.user_workos_id = ${user.workosUserId}
+        AND task.archived_at IS NULL
+        AND task.status IN ('succeeded', 'failed', 'canceled')
+      RETURNING task.id, task.user_workos_id
+    ),
+    inserted_message AS (
+      INSERT INTO goat.task_messages (
+        id,
+        task_id,
+        user_workos_id,
+        role,
+        status,
+        content,
+        model_message,
+        created_at,
+        updated_at,
+        completed_at
+      )
+      SELECT
+        ${messageId},
+        task.id,
+        task.user_workos_id,
+        'user',
+        'completed',
+        ${content},
+        ${JSON.stringify({ role: "user", content })}::jsonb,
+        ${now},
+        ${now},
+        ${now}
+      FROM continued_task AS task
+      RETURNING id, task_id, user_workos_id
+    ),
+    inserted_message_event AS (
+      INSERT INTO goat.task_events (
+        task_id,
+        user_workos_id,
+        message_id,
+        type,
+        payload,
+        created_at
+      )
+      SELECT
+        message.task_id,
+        message.user_workos_id,
+        message.id,
+        'message.created',
+        ${JSON.stringify({ role: "user", status: "completed" })}::jsonb,
+        ${now}
+      FROM inserted_message AS message
+      RETURNING id
+    ),
+    inserted_status_event AS (
+      INSERT INTO goat.task_events (
+        task_id,
+        user_workos_id,
+        message_id,
+        type,
+        payload,
+        created_at
+      )
+      SELECT
+        message.task_id,
+        message.user_workos_id,
+        message.id,
+        'task.status',
+        ${JSON.stringify({ status: "queued", stage: "queued" })}::jsonb,
+        ${now}
+      FROM inserted_message AS message
+      RETURNING id
+    )
+    SELECT message.id, message.task_id
+    FROM inserted_message AS message
+    WHERE EXISTS (SELECT 1 FROM inserted_message_event)
+      AND EXISTS (SELECT 1 FROM inserted_status_event)
+  `);
+  const continued = rowsFromExecute<{ id: string; task_id: string }>(result)[0];
+  if (!continued) {
+    return {
+      ok: false,
+      error: "Wait for this task to finish before sending another message.",
+      messageId: null,
+    };
+  }
+
+  try {
+    await triggerGoatTaskRun(continued.task_id, {
+      task_id: continued.task_id,
+      event: "goat.runner_task_continued_dispatch",
+    });
+  } catch (error) {
+    console.warn("Goat runner dispatch failed; the continued task remains queued for polling.", {
+      event: "goat.runner_task_continued_dispatch_failed",
+      task_id: continued.task_id,
+      error,
+    });
+  }
+
+  return { ok: true, error: null, messageId: continued.id };
+}
+
 export async function createGoatTaskForUser(input: {
   userWorkosId: string;
   prompt: string;
@@ -409,6 +555,11 @@ export async function createGoatTaskForUser(input: {
   }
 
   return task;
+}
+
+function safeGoatTaskMessageId(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed && /^goat_task_msg_[0-9a-f-]{36}$/i.test(trimmed) ? trimmed : null;
 }
 
 async function loadGoatTaskSpawningState(userWorkosId: string): Promise<boolean | null> {

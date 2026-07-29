@@ -69,6 +69,54 @@ describe("goatHarnessRunToChatMessages", () => {
     });
   });
 
+  it("keeps the stored result when only the initial user row is durable", () => {
+    const run = buildGoatHarnessRun({
+      task: task({ result: "Legacy result." }),
+      messages: [message({ id: "user_msg", role: "user", content: "Run the morning test" })],
+      events: [],
+    });
+
+    expect(goatHarnessRunToChatMessages(run).at(-1)).toMatchObject({
+      role: "assistant",
+      parts: [{ type: "text", text: "Legacy result." }],
+    });
+  });
+
+  it("preserves every user and assistant turn in a continued task", () => {
+    const run = buildGoatHarnessRun({
+      task: task(),
+      messages: [
+        message({ id: "user_1", role: "user", content: "Run the morning test" }),
+        message({
+          id: "assistant_1",
+          role: "assistant",
+          content: "Morning is clear.",
+          created_at: "2026-01-01T00:00:01.000Z",
+        }),
+        message({
+          id: "user_2",
+          role: "user",
+          content: "Check the afternoon too.",
+          created_at: "2026-01-01T00:00:02.000Z",
+        }),
+        message({
+          id: "assistant_2",
+          role: "assistant",
+          content: "Afternoon is clear too.",
+          created_at: "2026-01-01T00:00:03.000Z",
+        }),
+      ],
+      events: [],
+    });
+
+    expect(goatHarnessRunToChatMessages(run).map((entry) => entry.parts[0])).toEqual([
+      { type: "text", text: "Run the morning test" },
+      { type: "text", text: "Morning is clear." },
+      { type: "text", text: "Check the afternoon too." },
+      { type: "text", text: "Afternoon is clear too." },
+    ]);
+  });
+
   it("marks a failed tool call as an output error", () => {
     const run = buildGoatHarnessRun({
       task: task(),

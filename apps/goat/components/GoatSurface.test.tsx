@@ -20,6 +20,7 @@ import {
   buildGoatOnboardingKickoffPrompt,
   queueGoatOnboardingKickoff,
 } from "@/lib/onboarding-kickoff";
+import { cancelGoatTaskAction, continueGoatTaskAction } from "@/lib/tasks";
 import { GoatSurface, type GoatTaskView } from "./GoatSurface";
 
 const chatMock = vi.hoisted(() => ({
@@ -71,6 +72,12 @@ vi.mock("@/lib/chat-attachment-upload", () => ({
 
 vi.mock("@/lib/tasks", () => ({
   archiveGoatTaskAction: vi.fn(async () => ({ ok: true, error: null })),
+  cancelGoatTaskAction: vi.fn(async () => ({ ok: true, error: null })),
+  continueGoatTaskAction: vi.fn(async (_taskId: string, _prompt: string, messageId: string) => ({
+    ok: true,
+    error: null,
+    messageId,
+  })),
 }));
 
 vi.mock("@/lib/task-schedules", () => ({
@@ -209,6 +216,8 @@ describe("GoatSurface chat streaming UI", () => {
     historyMock.replaceState.mockReset();
     vi.spyOn(window.history, "replaceState").mockImplementation(historyMock.replaceState);
     vi.mocked(closeGoatChatSessionAction).mockClear();
+    vi.mocked(cancelGoatTaskAction).mockClear();
+    vi.mocked(continueGoatTaskAction).mockClear();
     attachmentUploadMock.upload.mockReset();
     attachmentUploadMock.upload.mockResolvedValue({
       blobUrl: "https://blob.test/goat-chat/user_1/brief.pdf",
@@ -249,6 +258,91 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
     expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
+  });
+
+  it("continues a workflow task through the same chat composer", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_task_1",
+          title: "Morning workflow",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "opencompany",
+          messages: [
+            {
+              id: "task_user_1",
+              role: "user",
+              parts: [{ type: "text", text: "Run the morning workflow" }],
+            },
+            {
+              id: "task_assistant_1",
+              role: "assistant",
+              parts: [{ type: "text", text: "The workflow is complete." }],
+            },
+          ],
+        }}
+        taskConversation={{
+          taskId: "goat_task_1",
+          status: "succeeded",
+          startedAtMs: Date.now(),
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Morning workflow")).toBeInTheDocument();
+    expect(screen.getByText("The workflow is complete.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /share/i })).not.toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Please check the afternoon too");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(continueGoatTaskAction).toHaveBeenCalledWith(
+        "goat_task_1",
+        "Please check the afternoon too",
+        expect.stringMatching(/^goat_task_msg_[0-9a-f-]{36}$/),
+      ),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(screen.getByText("Please check the afternoon too")).toBeInTheDocument();
+  });
+
+  it("uses the chat stop control for an active workflow task", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_task_1",
+          title: "Morning workflow",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "opencompany",
+          messages: [
+            {
+              id: "task_user_1",
+              role: "user",
+              parts: [{ type: "text", text: "Run the morning workflow" }],
+            },
+          ],
+        }}
+        taskConversation={{
+          taskId: "goat_task_1",
+          status: "running",
+          startedAtMs: Date.now(),
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Stop response" }));
+
+    expect(cancelGoatTaskAction).toHaveBeenCalledWith("goat_task_1");
+    expect(chatMock.stop).not.toHaveBeenCalled();
   });
 
   it("consumes the onboarding kickoff and sends it once through main chat", async () => {
