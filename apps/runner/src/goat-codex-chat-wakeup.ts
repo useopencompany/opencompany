@@ -7,6 +7,7 @@ import {
 import { createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
+import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
 import { rowsFromExecute } from "./sql-exec";
 
 export const GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS = 60;
@@ -60,6 +61,7 @@ export async function enqueueGoatCodexChatWakeup(input: {
     ...input.parentTurn.settings,
     wakeupChain,
   };
+  delete settings.scheduledWakeup;
   const reason = input.wakeup.reason.trim();
   const prompt = buildScheduledWakeupPrompt({
     reason,
@@ -160,6 +162,61 @@ export async function enqueueGoatCodexChatWakeup(input: {
   `);
 
   return rowsFromExecute<{ id: string }>(result).length > 0 ? "enqueued" : "superseded";
+}
+
+export async function persistGoatCodexChatScheduledWakeup(input: {
+  turnId: string;
+  userWorkosId: string;
+  codexChatSessionId: string;
+  leaseId: string;
+  leaseOwner: string;
+  wakeup: GoatCodexChatScheduledWakeup;
+  now?: Date;
+}) {
+  const now = input.now ?? new Date();
+  const result = await getDb().execute(sql`
+    UPDATE goat.codex_chat_turns
+    SET settings = jsonb_set(
+          settings,
+          '{scheduledWakeup}',
+          ${JSON.stringify(input.wakeup)}::jsonb,
+          true
+        ),
+        updated_at = ${now}
+    WHERE id = ${input.turnId}
+      AND user_workos_id = ${input.userWorkosId}
+      AND codex_chat_session_id = ${input.codexChatSessionId}
+      AND lease_id = ${input.leaseId}
+      AND lease_owner = ${input.leaseOwner}
+      AND status = 'running'
+    RETURNING id
+  `);
+  if (rowsFromExecute(result).length === 0) throw new GoatCodexChatLeaseLostError();
+}
+
+export function scheduledWakeupFromTurnSettings(
+  settings: GoatCodexChatTurnSettings,
+): GoatCodexChatScheduledWakeup | null {
+  const wakeup = settings.scheduledWakeup;
+  if (
+    !wakeup ||
+    typeof wakeup.delaySeconds !== "number" ||
+    !Number.isFinite(wakeup.delaySeconds) ||
+    wakeup.delaySeconds <= 0 ||
+    typeof wakeup.reason !== "string" ||
+    !wakeup.reason.trim() ||
+    typeof wakeup.prompt !== "string"
+  ) {
+    return null;
+  }
+  return {
+    delaySeconds: Math.min(
+      GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
+      Math.max(GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS, Math.round(wakeup.delaySeconds)),
+    ),
+    reason: wakeup.reason.trim().slice(0, 500),
+    prompt: wakeup.prompt.trim().slice(0, 10_000),
+  };
 }
 
 function validWakeupChain(settings: GoatCodexChatTurnSettings) {

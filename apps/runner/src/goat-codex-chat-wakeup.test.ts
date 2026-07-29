@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   enqueueGoatCodexChatWakeup,
   GOAT_CODEX_CHAT_WAKEUP_MAX_CHAIN,
+  persistGoatCodexChatScheduledWakeup,
+  scheduledWakeupFromTurnSettings,
 } from "./goat-codex-chat-wakeup";
 
 const mocks = vi.hoisted(() => ({
@@ -50,6 +52,31 @@ describe("enqueueGoatCodexChatWakeup", () => {
     expect(serialized).toContain("2026-07-10T09:02:00.000Z");
   });
 
+  it("does not carry the parent's persisted wakeup request into the child turn", async () => {
+    await enqueueGoatCodexChatWakeup({
+      parentTurn: parentTurn({
+        settings: {
+          reasoningEffort: "high",
+          wakeupChain: 1,
+          scheduledWakeup: {
+            delaySeconds: 60,
+            reason: "Old request",
+            prompt: "Do not replay this.",
+          },
+        },
+      }),
+      model: "claude-opus-4-8",
+      wakeup: { delaySeconds: 60, reason: "Current request", prompt: "" },
+    });
+
+    const queryChunks = (mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] })
+      .queryChunks;
+    expect(queryChunks).toContain('{"reasoningEffort":"high","wakeupChain":2}');
+    expect(queryChunks).not.toContain(
+      '{"reasoningEffort":"high","wakeupChain":1,"scheduledWakeup":{"delaySeconds":60,"reason":"Old request","prompt":"Do not replay this."}}',
+    );
+  });
+
   it("refuses to create a wakeup when a newer queued or running turn supersedes it", async () => {
     mocks.execute.mockResolvedValueOnce({ rows: [] });
 
@@ -78,6 +105,65 @@ describe("enqueueGoatCodexChatWakeup", () => {
     ).resolves.toBe("chain_capped");
 
     expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("persists a scheduled wakeup only while the worker still owns the running turn", async () => {
+    await persistGoatCodexChatScheduledWakeup({
+      turnId: "goat_codex_chat_turn_1",
+      userWorkosId: "user_1",
+      codexChatSessionId: "goat_codex_chat_1",
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+      wakeup: { delaySeconds: 120, reason: "Wait for CI", prompt: "Inspect PR #42." },
+      now: new Date("2026-07-10T09:00:00.000Z"),
+    });
+
+    const statement = sqlText(mocks.execute.mock.calls[0]?.[0]);
+    expect(statement).toContain("jsonb_set");
+    expect(statement).toContain("lease_id =");
+    expect(statement).toContain("lease_owner =");
+    expect(statement).toContain("status = 'running'");
+    const queryChunks = (mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] })
+      .queryChunks;
+    expect(queryChunks).toContain(
+      '{"delaySeconds":120,"reason":"Wait for CI","prompt":"Inspect PR #42."}',
+    );
+  });
+
+  it("fails persistence after the turn lease is lost", async () => {
+    mocks.execute.mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      persistGoatCodexChatScheduledWakeup({
+        turnId: "goat_codex_chat_turn_1",
+        userWorkosId: "user_1",
+        codexChatSessionId: "goat_codex_chat_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        wakeup: { delaySeconds: 120, reason: "Wait for CI", prompt: "" },
+      }),
+    ).rejects.toMatchObject({ name: "GoatCodexChatLeaseLostError" });
+  });
+
+  it("restores and validates the last persisted wakeup during recovery", () => {
+    expect(
+      scheduledWakeupFromTurnSettings({
+        scheduledWakeup: {
+          delaySeconds: 5,
+          reason: "  Wait for CI  ",
+          prompt: "  Inspect the run.  ",
+        },
+      }),
+    ).toEqual({
+      delaySeconds: 60,
+      reason: "Wait for CI",
+      prompt: "Inspect the run.",
+    });
+    expect(
+      scheduledWakeupFromTurnSettings({
+        scheduledWakeup: { delaySeconds: Number.NaN, reason: "Wait", prompt: "" },
+      }),
+    ).toBeNull();
   });
 });
 

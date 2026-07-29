@@ -487,6 +487,11 @@ export type GoatCodexChatTurnSettings = {
   reasoningEffort?: CodexReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
   wakeupChain?: number;
+  scheduledWakeup?: {
+    delaySeconds: number;
+    reason: string;
+    prompt: string;
+  };
   goalMode?: {
     objective: string;
     tokenBudget?: number | null;

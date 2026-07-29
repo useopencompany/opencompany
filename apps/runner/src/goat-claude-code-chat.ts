@@ -50,6 +50,8 @@ import {
   GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
   GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS,
   type GoatCodexChatScheduledWakeup,
+  persistGoatCodexChatScheduledWakeup,
+  scheduledWakeupFromTurnSettings,
 } from "./goat-codex-chat-wakeup";
 import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./goat-coding-workspace-runtime";
 import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
@@ -219,9 +221,9 @@ export async function runGoatClaudeCodeChatTurn(input: {
 
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
-  // Detection is intentionally process-local. A handoff after this tool call but before finalize
-  // can lose the wakeup because the recovery run does not necessarily replay the raw event.
-  let scheduledWakeup: GoatCodexChatScheduledWakeup | null = null;
+  // A recovery run may not replay the raw assistant event that requested this wakeup, so restore
+  // the request persisted by the previous worker before resuming the Claude session.
+  let scheduledWakeup = scheduledWakeupFromTurnSettings(turn.settings);
   let executionStage = "load_attachments";
   try {
     checkExternalAbort();
@@ -359,7 +361,18 @@ export async function runGoatClaudeCodeChatTurn(input: {
         redact,
         checkAbort,
         onEvent: async (event) => {
-          scheduledWakeup = extractClaudeScheduleWakeup(event) ?? scheduledWakeup;
+          const nextScheduledWakeup = extractClaudeScheduleWakeup(event);
+          if (nextScheduledWakeup) {
+            await persistGoatCodexChatScheduledWakeup({
+              turnId: turn.id,
+              userWorkosId: turn.userWorkosId,
+              codexChatSessionId: turn.codexChatSessionId,
+              leaseId,
+              leaseOwner,
+              wakeup: nextScheduledWakeup,
+            });
+            scheduledWakeup = nextScheduledWakeup;
+          }
           await projector.push([event]);
           await persistEngineSessionId();
         },
