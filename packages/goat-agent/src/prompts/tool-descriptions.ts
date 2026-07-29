@@ -50,6 +50,15 @@ export const START_TASK_NAME_DESCRIPTION = "A short 2-7 word task name for the T
 export const START_TASK_REASON_DESCRIPTION =
   "Short reason this should run as a task instead of a chat answer.";
 
+export const START_WORKFLOW_TOOL_DESCRIPTION =
+  "Start one active workspace workflow as a tracked background task. Use only when the user's latest message explicitly asks to run, start, fire, or execute an existing workflow, or clearly confirms your immediately preceding question to start one; never call this merely because a workflow seems relevant or helpful. Match the request against the workflow catalog in <workflow_source>. If the target is ambiguous, ask which workflow they mean instead of guessing.";
+
+export const START_WORKFLOW_ID_DESCRIPTION =
+  "The exact active workflow id from <workflow_source> that the user explicitly asked to run.";
+
+export const START_WORKFLOW_PROMPT_DESCRIPTION =
+  "The run-specific request for this workflow task. Keep the user's latest request as the backbone and include only relevant, confirmed context from earlier in the conversation. Do not copy the whole transcript, invent requirements, or propagate loaded skill instructions.";
+
 export const SCHEDULE_TASK_TOOL_DESCRIPTION =
   "Create a recurring Goat task schedule from the user's request. Use only when the user clearly asks for repeated, recurring, scheduled, or cron-like work. Convert the recurrence to a valid 5-field cron expression and save directly; if the recurrence is ambiguous or not cron-expressible, ask a short follow-up instead of calling this tool.";
 

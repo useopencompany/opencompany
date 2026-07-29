@@ -12,7 +12,7 @@ Goat has four LLM paths:
 
 1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
    This agent answers directly, reads connected integrations, calls `goat_brain`, captures with
-   `save_to_brain`, or calls `start_task`.
+   `save_to_brain`, calls `start_task`, or explicitly starts an active workspace workflow.
 2. **Background task:** a durable row in `goat.tasks` claimed by `apps/runner`, planned into a
    `goat.harness.v1` config, then executed by an AI SDK model loop in the runner process.
 3. **Local Codex chat:** a Goat chat engine mode that queues commands for a user-run local bridge.
@@ -46,6 +46,9 @@ Browser
            and capture focused findings with save_to_brain
         OR, when Background tasks is enabled in Preferences, call start_task
           insert goat.tasks row
+          POST /internal/goat/tasks/:taskId/run
+        OR, when the user explicitly asks to run an active workflow, call start_workflow
+          compile the workflow and insert its goat.tasks row
           POST /internal/goat/tasks/:taskId/run
   GoatSurface #workflow submit
     POST /api/workflows
@@ -162,10 +165,10 @@ any other session data.
 3. Requires `VERCEL_AI_GATEWAY_API_KEY`.
 4. Finds or creates an open `goat.chat_sessions` row.
 5. Persists the user message in `goat.chat_messages`.
-6. Resolves active-Brain skills, connected-integration actions, and the workspace's managed
-   social/lead capabilities, then creates the chat tool context for `goat_brain`, `save_to_brain`,
-   `list_skills`/`use_skill`, `list_actions`/`use_action`, optional `start_task`, and optional
-   `web_fetch`/`web_search`.
+6. Resolves active-Brain skills, active workspace workflows, connected-integration actions, and the
+   workspace's managed social/lead capabilities, then creates the chat tool context for `goat_brain`,
+   `save_to_brain`, `list_skills`/`use_skill`, `list_actions`/`use_action`, optional `start_task`,
+   `start_workflow`, and optional `web_fetch`/`web_search`.
 7. Calls `streamText` through Vercel AI Gateway with the session's model.
 8. Streams the UI message response back to the browser.
 9. Persists the assistant message, debug trace, and optional task link on finish.
@@ -258,8 +261,11 @@ main chat even though ordinary deeper or multi-source work routes to a backgroun
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The
 database flag defaults off, so the standard Goat experience is chat plus Brain without background
-task spawning. Explicitly starting a `#workflow` opts the user into background tasks so its durable
-run can be claimed. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
+task spawning. Explicitly starting a workflow through `#workflow` or the main chat's
+`start_workflow` tool opts the user into background tasks so its durable run can be claimed.
+`start_workflow` is advertised only when active workflows exist and is reserved for explicit
+requests; name and description matches alone do not authorize a run. Tool descriptions live in
+`packages/goat-agent/src/prompts/tool-descriptions.ts`.
 
 The default chat model is `anthropic/claude-sonnet-5`. New tasks store the chat-selected model at
 creation time, then the runner planner chooses the task execution model from its allowed model
@@ -272,7 +278,7 @@ Important runtime settings:
 - `abortSignal: request.signal`
 
 The chat path is a normal request/response stream. It has no runner lease or durable retry. The
-durable boundary starts only when `start_task` creates a task row.
+durable boundary starts when `start_task` or `start_workflow` creates a task row.
 
 Brain skills are user-authored, session-scoped context. Normal chat replays each immutable skill
 snapshot on the historical user message that activated it, so the full instructions remain in model
