@@ -45,6 +45,12 @@ import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
+import {
+  enqueueGoatCodexChatWakeup,
+  GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
+  GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS,
+  type GoatCodexChatScheduledWakeup,
+} from "./goat-codex-chat-wakeup";
 import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./goat-coding-workspace-runtime";
 import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
 import {
@@ -66,6 +72,8 @@ const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
 const CLAUDE_CHAT_MAX_RECOVERY_ATTEMPTS = 10;
 const CLAUDE_CHAT_RECOVERY_EXHAUSTED_MESSAGE =
   "This turn was interrupted by too many runner restarts to resume safely. Send your message again to continue.";
+const CLAUDE_CHAT_SCHEDULE_WAKEUP_CONTRACT =
+  "Background processes will NOT re-invoke you after your turn ends. If you need to check on something later, such as CI or a deploy, call ScheduleWakeup; the platform will wake you in a new turn then.";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-claude-code-chat" });
 
@@ -135,7 +143,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
     leaseId,
     leaseOwner,
     planMode: false,
-    turnCreatedAt: turn.createdAt,
+    turnCreatedAt: turn.runAfter && turn.runAfter > turn.createdAt ? turn.runAfter : turn.createdAt,
   };
   const bareProjector = () =>
     createGoatCodexChatProjector({
@@ -211,6 +219,9 @@ export async function runGoatClaudeCodeChatTurn(input: {
 
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
+  // Detection is intentionally process-local. A handoff after this tool call but before finalize
+  // can lose the wakeup because the recovery run does not necessarily replay the raw event.
+  let scheduledWakeup: GoatCodexChatScheduledWakeup | null = null;
   let executionStage = "load_attachments";
   try {
     checkExternalAbort();
@@ -348,6 +359,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
         redact,
         checkAbort,
         onEvent: async (event) => {
+          scheduledWakeup = extractClaudeScheduleWakeup(event) ?? scheduledWakeup;
           await projector.push([event]);
           await persistEngineSessionId();
         },
@@ -430,6 +442,27 @@ export async function runGoatClaudeCodeChatTurn(input: {
     }
     executionStage = "finalize";
     await projector.finalize(toCodexAppServerSummary(summary));
+    if (summary.status === "success" && outcome === "settled" && scheduledWakeup) {
+      try {
+        await enqueueGoatCodexChatWakeup({
+          parentTurn: turn,
+          model: session.model,
+          wakeup: scheduledWakeup,
+        });
+      } catch (error) {
+        captureException(error, {
+          event: "opencompany.goat_claude_chat_wakeup_enqueue_failed",
+          turn_id: turn.id,
+          codex_chat_session_id: session.id,
+        });
+        logger.warn("Failed to enqueue Claude Code scheduled wakeup", {
+          event: "opencompany.goat_claude_chat_wakeup_enqueue_failed",
+          turn_id: turn.id,
+          codex_chat_session_id: session.id,
+          error,
+        });
+      }
+    }
   } catch (error) {
     const effectiveError =
       error instanceof GoatCodexChatHandoffError ||
@@ -529,6 +562,36 @@ function isUnresumableSessionFailure(
   );
 }
 
+export function extractClaudeScheduleWakeup(
+  event: Record<string, unknown>,
+): GoatCodexChatScheduledWakeup | null {
+  if (event.type !== "assistant") return null;
+  const message = recordFromUnknown(event.message);
+  if (!message || !Array.isArray(message.content)) return null;
+
+  let wakeup: GoatCodexChatScheduledWakeup | null = null;
+  for (const block of message.content) {
+    const toolUse = recordFromUnknown(block);
+    if (toolUse?.type !== "tool_use" || toolUse.name !== "ScheduleWakeup") continue;
+    const toolInput = recordFromUnknown(toolUse.input);
+    if (!toolInput) continue;
+    const rawDelay = toolInput.delaySeconds ?? toolInput.delay_seconds;
+    const reason = typeof toolInput.reason === "string" ? toolInput.reason.trim() : "";
+    if (typeof rawDelay !== "number" || !Number.isFinite(rawDelay) || rawDelay <= 0 || !reason) {
+      continue;
+    }
+    wakeup = {
+      delaySeconds: Math.min(
+        GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
+        Math.max(GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS, Math.round(rawDelay)),
+      ),
+      reason: reason.slice(0, 500),
+      prompt: typeof toolInput.prompt === "string" ? toolInput.prompt.trim().slice(0, 10_000) : "",
+    };
+  }
+  return wakeup;
+}
+
 function buildClaudeChatTask(input: {
   prompt: string;
   githubAvailable: boolean;
@@ -544,6 +607,7 @@ function buildClaudeChatTask(input: {
       : null,
     input.repositoryBootstrapPrompt || null,
     "Answer conversationally. Run commands or edit files only when the message calls for it, and keep replies concise unless the user asks for detail.",
+    CLAUDE_CHAT_SCHEDULE_WAKEUP_CONTRACT,
     ...claudeChatSkillPromptLines(input.skillPaths),
     "",
     "<user_message>",
@@ -572,6 +636,7 @@ function buildClaudeChatRecoveryTask(input: {
       : null,
     input.repositoryBootstrapPrompt || null,
     "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",
+    CLAUDE_CHAT_SCHEDULE_WAKEUP_CONTRACT,
     ...claudeChatSkillPromptLines(input.skillPaths),
     "",
     "<original_user_message>",
@@ -608,4 +673,10 @@ function lastLine(value: string) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }

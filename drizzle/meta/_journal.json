@@ -1212,6 +1212,13 @@
       "when": 1785339080652,
       "tag": "0172_goat_posthog_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 173,
+      "version": "7",
+      "when": 1785339919000,
+      "tag": "0173_goat_codex_chat_turn_run_after",
+      "breakpoints": true
     }
   ]
 }

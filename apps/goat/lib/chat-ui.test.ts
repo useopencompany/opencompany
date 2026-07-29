@@ -17,6 +17,24 @@ import {
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
 describe("toGoatChatUiMessage", () => {
+  it("surfaces scheduled wakeup debug metadata on its synthetic user message", () => {
+    const message = storedAssistantMessage({
+      role: "user",
+      content: "Scheduled check-in: Wait for CI",
+      debugTrace: {
+        scheduledWakeup: {
+          reason: "Wait for CI",
+          dueAt: "2026-07-10T09:02:00.000Z",
+        },
+      },
+    });
+
+    expect(toGoatChatUiMessage(message).metadata?.scheduledWakeup).toEqual({
+      reason: "Wait for CI",
+      dueAt: "2026-07-10T09:02:00.000Z",
+    });
+  });
+
   it("replays persisted UI message parts in their original order", () => {
     const message = storedAssistantMessage({
       content: "Before.After",

@@ -135,6 +135,7 @@ describe("createGoatCodexChatProjector", () => {
     expect(sessionUpdate).toContain("WITH settled_turn AS");
     expect(sessionUpdate).toContain("UPDATE goat.codex_chat_turns AS turn");
     expect(sessionUpdate).toContain("queued.status = 'queued'");
+    expect(sessionUpdate).toContain("queued.run_after IS NULL OR queued.run_after <=");
     expect(sessionUpdate).toContain("ORDER BY queued.created_at ASC, queued.id ASC");
     expect(sessionUpdate).toContain("THEN 'queued'");
     expect(sessionUpdate).toContain("ELSE idle");

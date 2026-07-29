@@ -486,6 +486,7 @@ export const GOAT_CODEX_CHAT_EVENT_TYPES: readonly GoatCodexChatEventType[] =
 export type GoatCodexChatTurnSettings = {
   reasoningEffort?: CodexReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
+  wakeupChain?: number;
   goalMode?: {
     objective: string;
     tokenBudget?: number | null;
@@ -511,6 +512,10 @@ export type GoatChatMessageDebugTrace = {
   // Worker-side transcripts of use_capability calls (steps, tool previews),
   // keyed by toolCallId; never part of the model-visible tool output.
   capabilityCalls?: unknown[];
+  scheduledWakeup?: {
+    reason: string;
+    dueAt: string;
+  };
   error?: string;
 };
 
@@ -3277,6 +3282,7 @@ export const goatCodexChatTurns = goat.table(
     leaseId: text("lease_id"),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    runAfter: timestamp("run_after", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
