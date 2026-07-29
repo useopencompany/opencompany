@@ -379,7 +379,7 @@ function TaskBoardSheet({
           </DialogDescription>
         </header>
 
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
           <div className="min-w-0 flex-1 overflow-y-auto px-5 py-5">
             <p className="whitespace-pre-wrap break-words text-[13px] leading-6 text-ink-muted">
               {task.prompt}
@@ -463,7 +463,7 @@ function TaskBoardSheet({
             </section>
           </div>
 
-          <aside className="w-[220px] shrink-0 overflow-y-auto border-l border-border px-4 py-5">
+          <aside className="w-full shrink-0 overflow-y-auto border-t border-border px-5 py-4 sm:w-[220px] sm:border-l sm:border-t-0 sm:px-4 sm:py-5">
             <DetailLabel>Properties</DetailLabel>
             <div className="mt-3 flex flex-col gap-4">
               <PropertyRow label="Status">
