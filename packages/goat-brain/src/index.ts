@@ -17,6 +17,8 @@ export * from "./source-resolvers";
 export * from "./store";
 export { nowIso } from "./time";
 export * from "./timeline";
+export * from "./tool-surface";
 export * from "./usage";
 export * from "./validate";
 export * from "./wiki-links";
+export * from "./workflows";

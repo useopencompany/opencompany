@@ -1,8 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { codexCliModelNameForModelId } from "@opencompany/agent-runtime";
+import {
+  claudeCodeCliModelNameForModelId,
+  codexCliModelNameForModelId,
+  GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
+} from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
   type GoatChatMessageAttachment,
+  type GoatCodexChatEngine,
   type GoatCodexChatTurnSettings,
   goatChatSessions,
   goatCodexChatSessions,
@@ -11,12 +16,14 @@ import type { GoatBrainSkill } from "@opencompany/goat-brain";
 import { and, eq, isNull, notInArray, sql } from "drizzle-orm";
 import { newGoatChatMessageId } from "@/lib/chat";
 import { nextGoatChatMessageCreatedAt } from "@/lib/chat-ui";
+import { CLAUDE_CHAT_DEFAULT_MODEL_ID, parseClaudeChatModelId } from "@/lib/claude-chat-constants";
+import { parseClaudeChatSettings } from "@/lib/claude-chat-settings";
+import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
   CODEX_CHAT_DEFAULT_MODEL,
   CODEX_CHAT_DEFAULT_MODEL_ID,
   CODEX_CHAT_PROMPT_MAX_LENGTH,
-  type CodexChatModelId,
   parseCodexChatModelId,
 } from "@/lib/codex-chat-constants";
 import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
@@ -39,6 +46,9 @@ const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1";
 export const CODEX_CHAT_DISCONNECTED_MESSAGE =
   "Connect Codex in Goat settings before chatting with the Codex engine.";
 
+export const CLAUDE_CHAT_DISCONNECTED_MESSAGE =
+  "Connect Claude Code in Goat settings before chatting with the Claude engine.";
+
 export type CodexChatMessageResult =
   | {
       ok: true;
@@ -53,6 +63,8 @@ export type GoatCodexChatSkillSnapshot = GoatBrainSkill & { brainRef: string };
 
 export async function createGoatCodexChatMessage(input: {
   userWorkosId: string;
+  workspaceId: string;
+  brainRef?: string | null;
   sessionId?: string | null;
   newSessionId?: string | null;
   prompt: string;
@@ -61,7 +73,9 @@ export async function createGoatCodexChatMessage(input: {
   clientMessageId?: string | null;
   settings?: unknown;
   model?: unknown;
+  engine?: GoatCodexChatEngine;
 }): Promise<CodexChatMessageResult> {
+  const engine = input.engine ?? "codex";
   const prompt = input.prompt.trim();
   const attachments = input.attachments ?? [];
   const skills = input.skills ?? [];
@@ -72,17 +86,38 @@ export async function createGoatCodexChatMessage(input: {
     return { ok: false, status: 400, error: "Messages can be at most 10,000 characters." };
   }
 
-  if (!(await isGoatCodexConnectedForUser(input.userWorkosId))) {
+  if (engine === "claude_code") {
+    if (!(await isGoatClaudeCodeConnectedForUser(input.userWorkosId))) {
+      return { ok: false, status: 409, error: CLAUDE_CHAT_DISCONNECTED_MESSAGE };
+    }
+  } else if (!(await isGoatCodexConnectedForUser(input.userWorkosId))) {
     return { ok: false, status: 409, error: CODEX_CHAT_DISCONNECTED_MESSAGE };
   }
 
-  const parsedSettings = parseCodexChatSettings(input.settings);
+  let settings: GoatCodexChatTurnSettings = {};
+  const parsedSettings =
+    engine === "claude_code"
+      ? parseClaudeChatSettings(input.settings)
+      : parseCodexChatSettings(input.settings);
   if (!parsedSettings.ok) return { ok: false, status: 400, error: parsedSettings.error };
-  const settings = parsedSettings.settings;
+  settings = parsedSettings.settings;
   const requestedModelId =
-    input.model === undefined ? CODEX_CHAT_DEFAULT_MODEL_ID : parseCodexChatModelId(input.model);
+    engine === "claude_code"
+      ? input.model === undefined
+        ? CLAUDE_CHAT_DEFAULT_MODEL_ID
+        : parseClaudeChatModelId(input.model)
+      : input.model === undefined
+        ? CODEX_CHAT_DEFAULT_MODEL_ID
+        : parseCodexChatModelId(input.model);
   if (!requestedModelId) {
-    return { ok: false, status: 400, error: "Select a supported Codex model." };
+    return {
+      ok: false,
+      status: 400,
+      error:
+        engine === "claude_code"
+          ? "Select a supported Claude model."
+          : "Select a supported Codex model.",
+    };
   }
   let result: CodexChatMessageResult;
   if (input.sessionId) {
@@ -91,6 +126,9 @@ export async function createGoatCodexChatMessage(input: {
       chatSessionId: input.sessionId,
     });
     if (!session) return { ok: false, status: 404, error: "Codex chat session not found." };
+    if ((session.engine ?? "codex") !== engine) {
+      return { ok: false, status: 409, error: "This chat runs on a different coding engine." };
+    }
     result = await enqueueExistingCodexChatMessage({
       userWorkosId: input.userWorkosId,
       prompt,
@@ -104,12 +142,15 @@ export async function createGoatCodexChatMessage(input: {
     result = await createFirstCodexChatTurn({
       chatSessionId: input.newSessionId ?? null,
       userWorkosId: input.userWorkosId,
+      workspaceId: input.workspaceId,
+      brainRef: input.brainRef ?? null,
       prompt,
       skills,
       clientMessageId: input.clientMessageId ?? null,
       attachments,
       settings,
       modelId: requestedModelId,
+      engine,
     });
   }
 
@@ -222,6 +263,9 @@ export async function createGoatCodexChatRuntimeAccess(input: {
   const session = await loadCodexChatSessionForChat(input);
   if (!session)
     return { ok: false as const, statusCode: 404, error: "Codex chat session not found." };
+  if (session.engine !== "codex") {
+    return { ok: false as const, statusCode: 404, error: "Codex chat session not found." };
+  }
   if (!session.sandboxId) {
     return {
       ok: false as const,
@@ -297,12 +341,15 @@ async function loadCodexChatSessionForChat(input: { userWorkosId: string; chatSe
 async function createFirstCodexChatTurn(input: {
   chatSessionId: string | null;
   userWorkosId: string;
+  workspaceId: string;
+  brainRef: string | null;
   prompt: string;
   skills: GoatCodexChatSkillSnapshot[];
   clientMessageId: string | null;
   attachments: GoatChatMessageAttachment[];
   settings: GoatCodexChatTurnSettings;
-  modelId: CodexChatModelId;
+  modelId: string;
+  engine: GoatCodexChatEngine;
 }): Promise<CodexChatMessageResult> {
   const chatSessionId = input.chatSessionId ?? `goat_chat_${randomUUID()}`;
   const codexChatSessionId = `goat_codex_chat_${randomUUID()}`;
@@ -312,8 +359,14 @@ async function createFirstCodexChatTurn(input: {
   const now = new Date();
   const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
   const title = toGoatTaskTitle(input.prompt || input.attachments[0]?.filename || "Attachment");
-  const codexModel = codexCliModelNameForModelId(input.modelId);
-  if (!codexModel) throw new Error(`Unsupported Codex model: ${input.modelId}`);
+  const codexModel =
+    input.engine === "claude_code"
+      ? claudeCodeCliModelNameForModelId(input.modelId)
+      : codexCliModelNameForModelId(input.modelId);
+  if (!codexModel) throw new Error(`Unsupported ${input.engine} model: ${input.modelId}`);
+  // Host dynamic tools (brain/actions) are not wired into the Claude engine yet.
+  const hostToolContractVersion =
+    input.engine === "claude_code" ? null : GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION;
 
   await getDb().execute(sql`
     WITH created_chat AS (
@@ -323,7 +376,7 @@ async function createFirstCodexChatTurn(input: {
         ${input.userWorkosId},
         ${title},
         ${input.modelId},
-        'codex',
+        ${input.engine},
         ${now},
         ${assistantCreatedAt}
       )
@@ -377,13 +430,19 @@ async function createFirstCodexChatTurn(input: {
     ),
     inserted_codex_session AS (
       INSERT INTO goat.codex_chat_sessions (
-        id, user_workos_id, chat_session_id, model, active_turn_id, status, created_at, updated_at
+        id, user_workos_id, chat_session_id, engine, model, brain_ref, workspace_id,
+        host_tool_contract_version,
+        active_turn_id, status, created_at, updated_at
       )
       VALUES (
         ${codexChatSessionId},
         ${input.userWorkosId},
         ${chatSessionId},
+        ${input.engine},
         ${codexModel},
+        ${input.brainRef},
+        ${input.workspaceId},
+        ${hostToolContractVersion},
         ${turnId},
         'queued',
         ${now},

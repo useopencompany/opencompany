@@ -1,5 +1,6 @@
 import {
   AGENT_MODEL_CATALOG,
+  CLAUDE_CODE_AGENT_MODEL_IDS,
   CODEX_AGENT_MODEL_IDS,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
 } from "@opencompany/agent-runtime";
@@ -9,6 +10,7 @@ const GOAT_MODEL_IDS = [
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-4.8",
   "openai/gpt-5.5",
+  "deepseek/deepseek-v4-pro",
   "moonshotai/kimi-k3",
   "moonshotai/kimi-k2.6",
 ] as const satisfies readonly AgentModelId[];
@@ -20,6 +22,10 @@ export const GOAT_MODELS = GOAT_MODEL_IDS.map((id) =>
 ).filter((model): model is NonNullable<typeof model> => model !== undefined);
 
 export const CODEX_MODELS = CODEX_AGENT_MODEL_IDS.map((id) =>
+  AGENT_MODEL_CATALOG.find((model) => model.id === id),
+).filter((model): model is NonNullable<typeof model> => model !== undefined);
+
+export const CLAUDE_CODE_MODELS = CLAUDE_CODE_AGENT_MODEL_IDS.map((id) =>
   AGENT_MODEL_CATALOG.find((model) => model.id === id),
 ).filter((model): model is NonNullable<typeof model> => model !== undefined);
 

@@ -18,7 +18,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 | `list` | List docs without retrieval or model calls (`--folder`, `--limit`, `--include-merged`). The `skills/` zone is omitted unless explicitly selected with `--folder skills` or a descendant. Use this for inventory, not wildcard queries. |
 | `get <id>` | Read one doc (`--section all\|truth\|timeline\|frontmatter`). |
 | `timeline <id>` | Dated evidence entries (`--since 30d`, `--limit`). |
-| `query <text>` | Hybrid retrieval: BM25 + optional embeddings, graph expansion (`--hops`, `--graph-direction out\|in\|both`), filters (`--folder`, `--since`, `--lexical-only`, `--include-invalid`, `--include-merged`). The `skills/` zone is omitted unless explicitly selected with `--folder skills` or a descendant. `--since` accepts compact windows like `6h`/`2d` or natural windows like `last 6 hours`. No LLM calls in the ranking loop (see [retrieval-planes.md](./retrieval-planes.md)). |
+| `query <text>` | Hybrid retrieval over curated pages by default: BM25 + optional embeddings, graph expansion (`--hops`, `--graph-direction out\|in\|both`), filters (`--folder`, `--kind`, `--since`, `--lexical-only`, `--include-invalid`, `--include-merged`), and continuation via `--offset`. Use `--kind evidence` only for an explicit raw-source lookup. The `skills/` zone is omitted unless explicitly selected with `--folder skills` or a descendant. `--since` accepts compact windows like `6h`/`2d` or natural windows like `last 6 hours`. Query output includes `pagination.hasMore` and `pagination.nextOffset`; repeat the same query with that offset to continue. No LLM calls in the ranking loop (see [retrieval-planes.md](./retrieval-planes.md)). |
 | `folder list` | Folders in use. |
 | `doctor` | Validation, link, folder-shape, and weak-provenance findings (`health.ts`). |
 
@@ -29,7 +29,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 | `create` | New doc: `--type` (one of the [8 entity types](./data-model.md#entity-types-the-8-type-contract)), `--id`, `--title`, `--truth`/`--truth-stdin`; optional `--folder`, `--kind`, `--alias`, `--tag`, `--relation type:id`, `--source-ref`. |
 | `ingest` | One-shot LLM planner from source text (`--text`/`--text-stdin`, required `--source-ref`, `--dry-run`). |
 | `rewrite <id>` | Replace compiled truth. |
-| `set <id>` | Update `--title`, `--type`, `--status`. Promoting to `--status active` requires the truth to cite `[[evidence:...]]`. |
+| `set <id>` | Update `--title`, `--type`, `--status`. Promoting to `--status active` requires the truth to cite valid provenance with `[[evidence:...]]` or `[[source:...]]`. |
 | `timeline-add <id>` | Append a dated evidence entry (`--at`, `--body`, `--source-ref`, `--evidence-id`). `append-timeline` is a compatibility alias. |
 | `append-evidence <subject-id>` | Create an immutable `ev-*` record in `evidence/` and link it to the subject (`--relation`, default `about`). |
 | `alias <id>` | `--add`/`--remove` aliases. |
@@ -44,7 +44,7 @@ Every surface that reads or writes a brain, and what each is allowed to do.
 | Tool | Where | Capability |
 | --- | --- | --- |
 | `goat_brain` | `apps/goat/lib/brain-cli.ts` + shared read surface in `apps/goat/lib/brain-surface.ts` | Reads (`query`/`get`/`timeline`/`list`) are served in-process by the [read plane](./retrieval-planes.md) (`@opencompany/db/goat-brain-read`) — no materialization, no CLI spawn. Main chat exposes the same read-only command surface as MCP and does not expose write commands. |
-| `save_to_brain` | `apps/goat/lib/brain-capture.ts` | Capture-only: instant draft page in `inbox/` + durable curation job. This is the intended chat write path. See [ingestion.md](./ingestion.md#2-chat-captures-agentic). |
+| `save_to_brain` | `apps/goat/lib/brain-capture.ts` | Capture-only for all members with access to the active brain: instant draft page in `inbox/` + durable curation job. Canonical integration refs can be copied with content or hydrated in the runner from a ref + integration id. This is the intended chat write path. See [ingestion.md](./ingestion.md#2-explicit-captures-from-chat-or-mcp-agentic). |
 
 ## Runner ingestion agents
 
@@ -67,13 +67,12 @@ the same tool runner. Reads are served by the read plane. `save_to_brain` requir
 access and immediately creates a draft in `inbox/`, then queues the same durable curation pipeline
 used by Goat chat. MCP clients do not receive raw document mutation tools.
 
-### Member MCP setup and completion
+### MCP setup and completion
 
-The reusable setup guide lives at `/setup/mcp` and is also embedded in the owner and invited-member
-onboarding flows. It gives Claude, ChatGPT, and Cursor equal prominence, remembers the user's chosen
-client, defaults to the active brain, and generates a first useful query from the user's display
-name, workspace, and selected brain. The permanent Settings → Integrations entry links back to the
-guide.
+The reusable setup guide lives at `/setup/mcp`. It gives Claude, ChatGPT, and Cursor equal
+prominence, remembers the user's chosen client, defaults to the active brain, and generates a first
+useful query from the user's display name, workspace, and selected brain. The permanent Settings →
+Integrations entry links to the guide; MCP setup is not part of onboarding.
 
 Setup completion is global per Goat user, not per workspace, brain, or client. The sidebar reminder
 stays visible until the user completes one successful `query` command through MCP against any brain
@@ -93,5 +92,5 @@ signal from the earliest qualifying historical tool run.
 | --- | --- | --- |
 | Runner ingestion agents | ✓ (CLI — needs read-your-writes against its job root) | ✓ (CLI, allow-listed) |
 | Goat chat `goat_brain` | ✓ (read plane) | never |
-| Goat chat `save_to_brain` | — | capture → curation job only |
+| Goat chat `save_to_brain` | — | capture → curation job only (all members with active-brain access) |
 | External agents (MCP) | ✓ (read plane: `goat_brain`, plus compatibility `query_brain`/`get_document`) | capture → curation job only (`save_to_brain`, workspace admins) |

@@ -1,7 +1,8 @@
 "use client";
 
-import type { GoatMcpClient } from "@opencompany/db/goat-schema";
+import { toast } from "@opencompany/ui/components/sonner";
 import {
+  AnthropicIcon,
   AttioIcon,
   FathomIcon,
   GitHubIcon,
@@ -13,15 +14,21 @@ import {
   type LucideIcon as IconComponent,
   LinearIcon,
   OpenAIIcon,
-  OpenCompanyMark,
   SlackIcon,
+  StripeIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useMemo, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useHydrated } from "@/components/useHydrated";
+import {
+  effectiveCapabilityMode,
+  type GoatCapabilityMode,
+  type GoatProviderCapability,
+  providerCapabilities,
+} from "@/lib/actions/capabilities";
+import { disconnectGoatClaudeCodeAuth, saveGoatClaudeCodeToken } from "@/lib/claude-code-auth";
 import {
   disconnectGoatCodexAuth,
   type GoatCodexDeviceAuthFlow,
@@ -31,8 +38,10 @@ import {
 import {
   disconnectGoatIntegrationAccountAction,
   getGoatIntegrationAccountUsageAction,
+  setGoatIntegrationCapabilityModeAction,
 } from "@/lib/integration-account-actions";
 import {
+  type GoatClaudeCodeProviderState,
   type GoatCodexProviderState,
   type GoatGitHubProviderState,
   type GoatGoogleProviderState,
@@ -42,15 +51,28 @@ import {
   type GoatLinearProviderState,
   type GoatPersonalAccountProvider,
   type GoatSlackProviderState,
+  type GoatStripeProviderState,
   goatIntegrationStateFromRows,
 } from "@/lib/integration-state";
+import { hasGoatGmailDraftScope, hasGoatGmailSendScope } from "@/lib/integrations/gmail-scopes";
+import { hasGoatGoogleDriveWriteScope } from "@/lib/integrations/google-drive-scopes";
+import {
+  goatIntegrationConnectionError,
+  goatIntegrationConnectionSuccess,
+} from "@/lib/onboarding-integrations";
 import { createGoatCollections, type GoatIntegrationRow } from "@/lib/task-collections";
 
 // Presentation metadata for each integration card: the real brand logo (or a
 // monogram fallback where no square vector mark exists), the colored logo tile,
 // and a short connection-focused description. Keyed by provider so the card
 // components derive everything from the provider string.
-type IntegrationMetaKey = GoatPersonalAccountProvider | "github" | "jamie" | "mcp" | "codex";
+type IntegrationMetaKey =
+  | GoatPersonalAccountProvider
+  | "github"
+  | "jamie"
+  | "stripe"
+  | "codex"
+  | "claude_code";
 
 type IntegrationMeta = {
   label: string;
@@ -83,7 +105,7 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   },
   google_calendar: {
     label: "Google Calendar",
-    description: "Give Goat visibility into your schedule and events.",
+    description: "Let Goat view and update your schedule and events.",
     Icon: GoogleCalendarIcon,
     tileClass: "bg-[#1A73E8] text-white",
   },
@@ -99,9 +121,15 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: LinearIcon,
     tileClass: "bg-[#5E6AD2] text-white",
   },
+  latitude: {
+    label: "Latitude",
+    description: "Observe, understand, and improve your AI agents from Goat.",
+    monogram: "L",
+    tileClass: "bg-[#171717] text-white",
+  },
   slack: {
     label: "Slack",
-    description: "Let Goat read channels and act as you in Slack.",
+    description: "Let Goat search and read your Slack conversations.",
     Icon: SlackIcon,
     tileClass: "bg-[#4A154B] text-white",
   },
@@ -117,6 +145,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: AttioIcon,
     tileClass: "bg-[#111111] text-white",
   },
+  stripe: {
+    label: "Stripe",
+    description: "Give Goat read-only access to payment activity, subscriptions, and receivables.",
+    Icon: StripeIcon,
+    tileClass: "bg-[#635BFF] text-white",
+  },
   granola: {
     label: "Granola",
     description: "Meeting notes flow in once Granola finishes each summary.",
@@ -129,56 +163,80 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: FathomIcon,
     tileClass: "bg-[#1355FF] text-white",
   },
-  mcp: {
-    label: "Goat MCP",
-    description: "Use Goat from Claude, ChatGPT, or Cursor over MCP.",
-    Icon: OpenCompanyMark,
-    tileClass: "bg-ink text-canvas",
-  },
   codex: {
     label: "Codex",
     description: "Connect your Codex subscription so Goat can run coding tasks.",
     Icon: OpenAIIcon,
     tileClass: "bg-black text-white",
   },
+  claude_code: {
+    label: "Claude Code",
+    description: "Connect your Claude subscription so Goat can run coding tasks.",
+    Icon: AnthropicIcon,
+    tileClass: "bg-[#CC785C] text-white",
+  },
 };
 
 export function SettingsIntegrationsPanel({
   initialIntegrations,
   isWorkspaceAdmin,
-  mcpSetup,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
-  mcpSetup: GoatMcpSetupView;
 }) {
   const hydrated = useHydrated();
-  if (!hydrated) {
-    return (
-      <IntegrationCards
-        integrations={initialIntegrations}
-        isWorkspaceAdmin={isWorkspaceAdmin}
-        mcpSetup={mcpSetup}
-      />
-    );
-  }
   return (
-    <LiveSettingsIntegrations
-      initialIntegrations={initialIntegrations}
-      isWorkspaceAdmin={isWorkspaceAdmin}
-      mcpSetup={mcpSetup}
-    />
+    <>
+      <IntegrationSetupFeedback />
+      {!hydrated ? (
+        <IntegrationCards integrations={initialIntegrations} isWorkspaceAdmin={isWorkspaceAdmin} />
+      ) : (
+        <LiveSettingsIntegrations
+          initialIntegrations={initialIntegrations}
+          isWorkspaceAdmin={isWorkspaceAdmin}
+        />
+      )}
+    </>
   );
+}
+
+function IntegrationSetupFeedback() {
+  const handled = useRef(false);
+
+  useEffect(() => {
+    if (handled.current) return;
+
+    const url = new URL(window.location.href);
+    const status = url.searchParams.get("setup");
+    if (status !== "connected" && status !== "error") return;
+
+    handled.current = true;
+    const provider = url.searchParams.get("integration");
+    if (status === "error") {
+      toast.error(goatIntegrationConnectionError(provider, url.searchParams.get("reason")));
+    } else {
+      toast.success(goatIntegrationConnectionSuccess(provider));
+    }
+
+    url.searchParams.delete("integration");
+    url.searchParams.delete("setup");
+    url.searchParams.delete("reason");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, []);
+
+  return null;
 }
 
 function LiveSettingsIntegrations({
   initialIntegrations,
   isWorkspaceAdmin,
-  mcpSetup,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
-  mcpSetup: GoatMcpSetupView;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
   const { data: rows, isLoading } = useLiveQuery((q) =>
@@ -190,6 +248,7 @@ function LiveSettingsIntegrations({
     return {
       ...liveIntegrations,
       codex: initialIntegrations.codex,
+      claude_code: initialIntegrations.claude_code,
       jamie: {
         ...liveIntegrations.jamie,
         integrationId: initialIntegrations.jamie.integrationId,
@@ -199,95 +258,190 @@ function LiveSettingsIntegrations({
     };
   }, [initialIntegrations, isLoading, rows]);
 
+  return <IntegrationCards integrations={integrations} isWorkspaceAdmin={isWorkspaceAdmin} />;
+}
+
+type IntegrationScope = "workspace" | "personal";
+
+// Group-card providers surfaced under each scope. These are all user-owned in the
+// data model (each member connects their own account), but the CRM / meeting /
+// issue-tracking tools read as shared workspace tooling, so we present them under
+// the Workspace scope; Gmail / Calendar / Drive / Slack stay personal.
+const WORKSPACE_ACCOUNT_PROVIDERS = [
+  "hubspot",
+  "attio",
+  "granola",
+  "fathom",
+] as const satisfies readonly GoatPersonalAccountProvider[];
+
+const PERSONAL_ACCOUNT_PROVIDERS = [
+  "gmail",
+  "google_calendar",
+  "google_drive",
+  "slack",
+  "latitude",
+] as const satisfies readonly GoatPersonalAccountProvider[];
+
+function countConnectedAccounts(
+  integrations: GoatIntegrationState,
+  providers: readonly GoatPersonalAccountProvider[],
+) {
+  let count = 0;
+  for (const provider of providers) {
+    count += integrations.personalAccounts[provider].filter((account) => account.connected).length;
+  }
+  return count;
+}
+
+function countWorkspaceConnected(integrations: GoatIntegrationState) {
   return (
-    <IntegrationCards
-      integrations={integrations}
-      isWorkspaceAdmin={isWorkspaceAdmin}
-      mcpSetup={mcpSetup}
-    />
+    (integrationStatus(integrations.github) === "Connected" ? 1 : 0) +
+    (integrationStatus(integrations.jamie) === "Connected" ? 1 : 0) +
+    (integrationStatus(integrations.linear) === "Connected" ? 1 : 0) +
+    (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
+    countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
+  );
+}
+
+function countPersonalConnected(integrations: GoatIntegrationState) {
+  return (
+    countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS) +
+    (integrations.codex.connected ? 1 : 0) +
+    (integrations.claude_code.connected ? 1 : 0)
   );
 }
 
 function IntegrationCards({
   integrations,
   isWorkspaceAdmin,
-  mcpSetup,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
-  mcpSetup: GoatMcpSetupView;
 }) {
+  const [scope, setScope] = useState<IntegrationScope>("workspace");
+
   return (
-    <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-3">
-        <SectionHeader
-          title="Workspace"
-          description={`Shared connections that feed the brains in this workspace.${
-            isWorkspaceAdmin ? "" : " Managed by workspace admins."
-          }`}
-        />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
-          <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
-        </div>
-      </section>
-      <section className="flex flex-col gap-3">
-        <SectionHeader
-          title="Personal"
-          description="Connections that act as you. Only you can manage them or wire them into brains."
-        />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <IntegrationProviderGroupCard
-            provider="gmail"
-            accounts={integrations.personalAccounts.gmail}
-          />
-          <IntegrationProviderGroupCard
-            provider="google_calendar"
-            accounts={integrations.personalAccounts.google_calendar}
-          />
-          <IntegrationProviderGroupCard
-            provider="google_drive"
-            accounts={integrations.personalAccounts.google_drive}
-          />
-          <IntegrationProviderGroupCard
-            provider="linear"
-            accounts={integrations.personalAccounts.linear}
-          />
-          <IntegrationProviderGroupCard
-            provider="slack"
-            accounts={integrations.personalAccounts.slack}
-          />
-          <IntegrationProviderGroupCard
-            provider="hubspot"
-            accounts={integrations.personalAccounts.hubspot}
-          />
-          <IntegrationProviderGroupCard
-            provider="attio"
-            accounts={integrations.personalAccounts.attio}
-          />
-          <IntegrationProviderGroupCard
-            provider="granola"
-            accounts={integrations.personalAccounts.granola}
-          />
-          <IntegrationProviderGroupCard
-            provider="fathom"
-            accounts={integrations.personalAccounts.fathom}
-          />
-          <McpIntegrationCard setup={mcpSetup} />
-          <CodexIntegrationCard integration={integrations.codex} />
-        </div>
-      </section>
+    <div className="flex flex-col gap-6">
+      <IntegrationScopeSwitch
+        scope={scope}
+        onScopeChange={setScope}
+        workspaceCount={countWorkspaceConnected(integrations)}
+        personalCount={countPersonalConnected(integrations)}
+      />
+      {scope === "workspace" ? (
+        <section className="flex flex-col gap-3">
+          <p className="text-[12px] leading-5 text-ink-subtle">
+            {`Shared connections available across this workspace.${
+              isWorkspaceAdmin ? "" : " Managed by workspace admins."
+            }`}
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
+            <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
+            <IntegrationCardRow integration={integrations.linear} />
+            <IntegrationCardRow integration={integrations.stripe} canConnect={isWorkspaceAdmin} />
+            <IntegrationProviderGroupCard
+              provider="hubspot"
+              accounts={integrations.personalAccounts.hubspot}
+            />
+            <IntegrationProviderGroupCard
+              provider="attio"
+              accounts={integrations.personalAccounts.attio}
+            />
+            <IntegrationProviderGroupCard
+              provider="granola"
+              accounts={integrations.personalAccounts.granola}
+            />
+            <IntegrationProviderGroupCard
+              provider="fathom"
+              accounts={integrations.personalAccounts.fathom}
+            />
+          </div>
+        </section>
+      ) : (
+        <section className="flex flex-col gap-3">
+          <p className="text-[12px] leading-5 text-ink-subtle">
+            Connections that act as you. Only you can manage them or wire them into brains.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <IntegrationProviderGroupCard
+              provider="gmail"
+              accounts={integrations.personalAccounts.gmail}
+            />
+            <IntegrationProviderGroupCard
+              provider="google_calendar"
+              accounts={integrations.personalAccounts.google_calendar}
+            />
+            <IntegrationProviderGroupCard
+              provider="google_drive"
+              accounts={integrations.personalAccounts.google_drive}
+            />
+            <IntegrationProviderGroupCard
+              provider="slack"
+              accounts={integrations.personalAccounts.slack}
+            />
+            <IntegrationProviderGroupCard
+              provider="latitude"
+              accounts={integrations.personalAccounts.latitude}
+            />
+            <CodexIntegrationCard integration={integrations.codex} />
+            <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
+          </div>
+        </section>
+      )}
     </div>
   );
 }
 
-function SectionHeader({ title, description }: { title: string; description: string }) {
+// Segmented control at the top of the page to flip between the workspace-owned
+// connections and the personal ones, each with a live count of what's connected.
+function IntegrationScopeSwitch({
+  scope,
+  onScopeChange,
+  workspaceCount,
+  personalCount,
+}: {
+  scope: IntegrationScope;
+  onScopeChange: (scope: IntegrationScope) => void;
+  workspaceCount: number;
+  personalCount: number;
+}) {
+  const tabs: { key: IntegrationScope; label: string; count: number }[] = [
+    { key: "workspace", label: "Workspace", count: workspaceCount },
+    { key: "personal", label: "Personal", count: personalCount },
+  ];
+
   return (
-    <div className="flex flex-col gap-1">
-      <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-        {title}
-      </h2>
-      <p className="text-[12px] leading-5 text-ink-subtle">{description}</p>
+    <div className="inline-flex w-fit items-center gap-2">
+      {tabs.map((tab) => {
+        const active = scope === tab.key;
+        return (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => onScopeChange(tab.key)}
+            aria-pressed={active}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20",
+              active
+                ? "bg-ink text-canvas"
+                : "border border-border bg-surface text-ink hover:bg-surface-hover",
+            )}
+          >
+            {tab.label}
+            {tab.count > 0 ? (
+              <span
+                className={cn(
+                  "inline-flex min-w-[18px] items-center justify-center rounded-full px-1 text-[11px] font-semibold leading-4",
+                  active ? "bg-canvas/20 text-canvas" : "bg-surface-muted text-ink-subtle",
+                )}
+              >
+                {tab.count}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -359,44 +513,6 @@ function NotConnectedStatus() {
   );
 }
 
-type GoatMcpSetupView = {
-  preferredClient: GoatMcpClient | null;
-  completedAt: string | null;
-};
-
-const MCP_CLIENT_LABELS: Record<GoatMcpClient, string> = {
-  claude: "Claude",
-  chatgpt: "ChatGPT",
-  cursor: "Cursor",
-};
-
-function McpIntegrationCard({ setup }: { setup: GoatMcpSetupView }) {
-  const clientLabel = setup.preferredClient ? MCP_CLIENT_LABELS[setup.preferredClient] : null;
-  const connected = Boolean(setup.completedAt);
-  const detail = connected
-    ? clientLabel
-      ? `Connected with ${clientLabel}`
-      : "Connected"
-    : clientLabel
-      ? `Continue setup for ${clientLabel}`
-      : "Claude, ChatGPT, or Cursor";
-
-  return (
-    <IntegrationCard
-      meta={INTEGRATION_META.mcp}
-      body={<p className="truncate text-[12px] leading-4 text-ink-subtle">{detail}</p>}
-      footer={
-        <Link
-          href="/settings/mcp"
-          className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          {connected ? "Manage" : "Set up"}
-        </Link>
-      }
-    />
-  );
-}
-
 // Single workspace connection (GitHub, Jamie): one status per provider. Renders
 // read-only for non-admin members via `canConnect`.
 function IntegrationCardRow({
@@ -408,7 +524,8 @@ function IntegrationCardRow({
     | GoatLinearProviderState
     | GoatGitHubProviderState
     | GoatJamieProviderState
-    | GoatSlackProviderState;
+    | GoatSlackProviderState
+    | GoatStripeProviderState;
   canConnect?: boolean;
 }) {
   const meta = INTEGRATION_META[integration.provider];
@@ -422,21 +539,39 @@ function IntegrationCardRow({
         ? integration.accountName
         : integration.provider === "jamie"
           ? integration.accountName
-          : integration.provider === "slack"
-            ? [integration.teamName, integration.accountName].filter(Boolean).join(" · ") || null
-            : (integration.accountEmail ?? integration.accountName);
+          : integration.provider === "stripe"
+            ? [integration.accountName, integration.livemode === false ? "Test mode" : null]
+                .filter(Boolean)
+                .join(" · ") || null
+            : integration.provider === "slack"
+              ? [integration.teamName, integration.accountName].filter(Boolean).join(" · ") || null
+              : (integration.accountEmail ?? integration.accountName);
+  const capabilityBody =
+    connected && integration.provider === "linear" && integration.integrationId ? (
+      <CapabilityModeRows
+        integrationId={integration.integrationId}
+        provider={integration.provider}
+        capabilityModes={integration.capabilityModes}
+      />
+    ) : undefined;
 
   return (
     <IntegrationCard
       meta={meta}
+      body={capabilityBody}
       footer={
         connected ? (
-          <div className="flex min-w-0 items-center gap-1.5">
-            <ConnectedStatus />
-            {accountLabel ? (
-              <span className="truncate text-[12px] leading-4 text-ink-subtle">
-                · {accountLabel}
-              </span>
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <ConnectedStatus />
+              {accountLabel ? (
+                <span className="truncate text-[12px] leading-4 text-ink-subtle">
+                  · {accountLabel}
+                </span>
+              ) : null}
+            </div>
+            {integration.provider === "stripe" && canConnect ? (
+              <ConnectLink href={connectHref} label="Manage" />
             ) : null}
           </div>
         ) : canConnect ? (
@@ -477,7 +612,12 @@ function IntegrationProviderGroupCard({
           ))}
         </div>
       }
-      footer={<ConnectLink href={connectHref} label="Add account" />}
+      footer={
+        <ConnectLink
+          href={connectHref}
+          label={provider === "google_calendar" ? "Reconnect or add" : "Add account"}
+        />
+      }
     />
   );
 }
@@ -500,6 +640,16 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
           account.accountEmail ||
           account.integrationId
         : account.accountEmail || account.accountName || account.integrationId;
+  const needsGoogleDriveWriteScope =
+    account.provider === "google_drive" &&
+    account.connected &&
+    !hasGoatGoogleDriveWriteScope(account.scopes);
+  const gmailScopeUpgradeLabel =
+    account.provider === "gmail" && account.connected && !hasGoatGmailDraftScope(account.scopes)
+      ? hasGoatGmailSendScope(account.scopes)
+        ? "Enable drafts"
+        : "Enable drafts & sending"
+      : null;
 
   const beginDisconnect = () => {
     setError(null);
@@ -550,6 +700,22 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
               Reconnect
             </a>
           )}
+          {needsGoogleDriveWriteScope ? (
+            <a
+              href={integrationConnectHref("google_drive")}
+              className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
+            >
+              Enable creating & editing
+            </a>
+          ) : null}
+          {gmailScopeUpgradeLabel ? (
+            <a
+              href={integrationConnectHref("gmail")}
+              className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
+            >
+              {gmailScopeUpgradeLabel}
+            </a>
+          ) : null}
           <button
             type="button"
             onClick={beginDisconnect}
@@ -560,6 +726,13 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
           </button>
         </div>
       </div>
+      {account.connected ? (
+        <CapabilityModeRows
+          integrationId={account.integrationId}
+          provider={account.provider}
+          capabilityModes={account.capabilityModes}
+        />
+      ) : null}
       {confirming ? (
         <div className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
           <span>
@@ -588,6 +761,113 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
         </div>
       ) : null}
       {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
+    </div>
+  );
+}
+
+// What the chat is allowed to do with this connection: one row per registered
+// capability with an On / Ask / Off pill.
+function CapabilityModeRows({
+  integrationId,
+  provider,
+  capabilityModes,
+}: {
+  integrationId: string;
+  provider: GoatPersonalAccountProvider;
+  capabilityModes: Record<string, unknown>;
+}) {
+  const capabilities = providerCapabilities(provider);
+  if (capabilities.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1 border-t border-border/60 pt-1.5">
+      {capabilities.map((capability) => (
+        <CapabilityModeRow
+          key={capability.id}
+          integrationId={integrationId}
+          capability={capability}
+          mode={effectiveCapabilityMode(provider, capability.id, capabilityModes)}
+        />
+      ))}
+    </div>
+  );
+}
+
+const CAPABILITY_MODE_OPTIONS: Array<{ mode: GoatCapabilityMode; label: string }> = [
+  { mode: "on", label: "On" },
+  { mode: "ask", label: "Ask" },
+  { mode: "off", label: "Off" },
+];
+
+function CapabilityModeRow({
+  integrationId,
+  capability,
+  mode,
+}: {
+  integrationId: string;
+  capability: GoatProviderCapability;
+  mode: GoatCapabilityMode;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  // Optimistic selection so the pill flips immediately; the Electric row (or
+  // router refresh) confirms it.
+  const [pendingMode, setPendingMode] = useState<GoatCapabilityMode | null>(null);
+  const currentMode = pendingMode ?? mode;
+
+  const select = (nextMode: GoatCapabilityMode) => {
+    if (nextMode === currentMode || isPending) return;
+    setPendingMode(nextMode);
+    startTransition(async () => {
+      const result = await setGoatIntegrationCapabilityModeAction(
+        integrationId,
+        capability.id,
+        nextMode,
+      );
+      if (!result.ok) {
+        setPendingMode(null);
+        toast.error(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1">
+        <div
+          className="truncate text-[12px] leading-4 text-ink-muted"
+          title={capability.description}
+        >
+          {capability.label}
+        </div>
+      </div>
+      <div
+        role="group"
+        aria-label={`${capability.label} permission`}
+        className="flex shrink-0 items-center rounded-full bg-surface-muted p-0.5"
+      >
+        {CAPABILITY_MODE_OPTIONS.map((option) => {
+          const active = option.mode === currentMode;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              aria-pressed={active}
+              disabled={isPending}
+              onClick={() => select(option.mode)}
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[11px] font-medium leading-4 transition-colors duration-150",
+                active
+                  ? "bg-surface text-ink shadow-sm"
+                  : "text-ink-subtle hover:text-ink disabled:opacity-60",
+              )}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -733,13 +1013,134 @@ function CodexIntegrationCard({ integration }: { integration: GoatCodexProviderS
   );
 }
 
+function ClaudeCodeIntegrationCard({ integration }: { integration: GoatClaudeCodeProviderState }) {
+  const router = useRouter();
+  const [token, setToken] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const submitToken = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await saveGoatClaudeCodeToken(token);
+      if (result.ok) {
+        setToken("");
+        setShowForm(false);
+        router.refresh();
+      } else {
+        setError(result.error);
+      }
+    });
+  };
+
+  const disconnect = () => {
+    setError(null);
+    startTransition(async () => {
+      await disconnectGoatClaudeCodeAuth();
+      setShowForm(false);
+      router.refresh();
+    });
+  };
+
+  const accountLabel =
+    integration.status === "connected"
+      ? integration.lastValidatedAt
+        ? `Connected ${formatDateTime(integration.lastValidatedAt)}`
+        : "Token saved; validation pending"
+      : integration.statusReason;
+
+  return (
+    <IntegrationCard
+      meta={INTEGRATION_META.claude_code}
+      body={
+        <div className="flex flex-col gap-2">
+          {accountLabel ? (
+            <p className="truncate text-[12px] leading-4 text-ink-subtle">{accountLabel}</p>
+          ) : null}
+          {showForm ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-[12px] leading-5 text-ink-muted">
+                Run <span className="font-mono font-semibold text-ink">claude setup-token</span> on
+                your machine, approve in the browser, and paste the token here. Tokens last about a
+                year.
+              </p>
+              <input
+                type="password"
+                value={token}
+                onChange={(event) => setToken(event.target.value)}
+                placeholder="sk-ant-oat…"
+                autoComplete="off"
+                spellCheck={false}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              />
+            </div>
+          ) : null}
+          {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
+        </div>
+      }
+      footer={
+        <div className="flex items-center gap-2">
+          {showForm ? (
+            <>
+              <button
+                type="button"
+                onClick={submitToken}
+                disabled={isPending || !token.trim()}
+                aria-busy={isPending}
+                className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
+              >
+                {isPending ? "Working" : "Save token"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm(false);
+                  setToken("");
+                  setError(null);
+                }}
+                disabled={isPending}
+                className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowForm(true)}
+                disabled={isPending}
+                className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
+              >
+                {buttonLabel(integration.status, isPending)}
+              </button>
+              {integration.connected ? (
+                <button
+                  type="button"
+                  onClick={disconnect}
+                  disabled={isPending}
+                  className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+                >
+                  Disconnect
+                </button>
+              ) : null}
+            </>
+          )}
+        </div>
+      }
+    />
+  );
+}
+
 function integrationStatus(
   integration:
     | GoatGoogleProviderState
     | GoatLinearProviderState
     | GoatGitHubProviderState
     | GoatJamieProviderState
-    | GoatSlackProviderState,
+    | GoatSlackProviderState
+    | GoatStripeProviderState,
 ) {
   if (integration.status === "connected") return "Connected";
   if (integration.provider === "jamie" && integration.apiKeyConfigured) return "Connected";
@@ -751,18 +1152,7 @@ function integrationStatus(
   return "Connect";
 }
 
-function integrationConnectHref(
-  provider:
-    | GoatGoogleProviderState["provider"]
-    | "linear"
-    | "github"
-    | "jamie"
-    | "slack"
-    | "hubspot"
-    | "granola"
-    | "fathom"
-    | "attio",
-) {
+function integrationConnectHref(provider: Exclude<IntegrationMetaKey, "codex">) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
     return "/api/integrations/google-calendar/start?returnTo=/settings/integrations";
@@ -776,9 +1166,12 @@ function integrationConnectHref(
   if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
   if (provider === "attio") return "/settings/attio";
+  if (provider === "stripe") return "/settings/stripe";
   if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
+  if (provider === "latitude")
+    return "/api/integrations/latitude/start?returnTo=/settings/integrations";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";
 }
 

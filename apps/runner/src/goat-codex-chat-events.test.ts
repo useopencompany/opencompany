@@ -61,7 +61,7 @@ describe("createGoatCodexChatProjector", () => {
       GoatCodexChatLeaseLostError,
     );
 
-    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
     expect(mocks.captureException).not.toHaveBeenCalled();
   });
 
@@ -82,6 +82,35 @@ describe("createGoatCodexChatProjector", () => {
       expect.any(Error),
       expect.objectContaining({ original_error_code: undefined }),
     );
+  });
+
+  it("does not project a replayed completed item twice", async () => {
+    mocks.execute
+      .mockResolvedValueOnce({ rows: [{ id: "event_1" }] })
+      .mockResolvedValueOnce({ rows: [{ id: "message_1" }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: "event_1" }] });
+    const projector = createGoatCodexChatProjector({
+      target: projectorTarget(),
+      redact: (value) => value,
+    });
+    const event = {
+      method: "item/completed",
+      params: {
+        threadId: "thread_1",
+        turnId: "turn_1",
+        item: { id: "message_item_1", type: "agentMessage", text: "Done." },
+      },
+    };
+
+    await projector.push([event]);
+    await projector.push([event]);
+
+    const statements = mocks.execute.mock.calls.map(([query]) => sqlText(query));
+    expect(statements.filter((query) => query.includes("UPDATE goat.chat_messages"))).toHaveLength(
+      1,
+    );
+    expect(statements).toContainEqual(expect.stringContaining("event_key"));
   });
 
   it("keeps the session queued until a queued follow-up turn is claimed", async () => {

@@ -302,6 +302,9 @@ the sandbox on a one-hour timeout while it is actively preparing or executing wo
 `RUNNER_E2B_IDLE_TIMEOUT_MS` so unused sandboxes pause shortly after the runner stops touching them.
 Persistent Goat Codex chat sandboxes use `RUNNER_GOAT_CODEX_CHAT_IDLE_TIMEOUT_MS` instead, defaulting
 to 5 minutes, so completed chat turns pause quickly while preserving the session sandbox for resume.
+During a rolling runner shutdown, active Cloud Codex proxies detach after a short drain window and
+the sandbox keeps a ten-minute handoff timeout. The next worker reclaims the lease and reconnects to
+the same app-server turn rather than submitting the user message again.
 If the stored E2B sandbox id has already disappeared, the runner creates a fresh sandbox instead of
 retrying the stale id.
 

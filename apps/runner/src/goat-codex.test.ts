@@ -31,6 +31,10 @@ const sandboxMocks = vi.hoisted(() => ({
   killSandbox: vi.fn(),
 }));
 
+const skillMocks = vi.hoisted(() => ({
+  materializeCodexSkillSnapshotsForSession: vi.fn(),
+}));
+
 vi.mock("@opencompany/db/goat-codex-auth", () => ({
   loadGoatCodexCredential: codexAuthMocks.loadGoatCodexCredential,
   markGoatCodexCredentialNeedsReauth: codexAuthMocks.markGoatCodexCredentialNeedsReauth,
@@ -63,6 +67,10 @@ vi.mock("./sandbox", () => ({
   killSandbox: sandboxMocks.killSandbox,
 }));
 
+vi.mock("./skills", () => ({
+  materializeCodexSkillSnapshotsForSession: skillMocks.materializeCodexSkillSnapshotsForSession,
+}));
+
 describe("runGoatCodexTask", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -78,6 +86,10 @@ describe("runGoatCodexTask", () => {
     sandboxMocks.cloneGitHubRepositoryIntoWorkdir.mockResolvedValue(undefined);
     sandboxMocks.killSandbox.mockResolvedValue(undefined);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox());
+    skillMocks.materializeCodexSkillSnapshotsForSession.mockResolvedValue({
+      fingerprint: "workflow-skills-fingerprint",
+      count: 1,
+    });
     appServerMocks.runCodexAppServerTurn.mockResolvedValue({
       sessionId: "thread_new",
       status: "success",
@@ -161,6 +173,57 @@ describe("runGoatCodexTask", () => {
       expect.objectContaining({
         existingEngineSessionId: "thread_existing",
         reasoningEffort: "medium",
+      }),
+    );
+  });
+
+  it("materializes and explicitly invokes workflow skill snapshots", async () => {
+    const sandbox = fakeSandbox();
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+
+    await runGoatCodexTask({
+      userWorkosId: "user_1",
+      taskId: "goat_task_1",
+      messageId: "msg_1",
+      prompt: "Review the implementation.",
+      systemPrompt: "Run the workflow.",
+      skills: [
+        {
+          id: "review-work",
+          name: "Review work",
+          description: "How to review changes.",
+          instructions: "Inspect the diff and run focused tests.",
+        },
+      ],
+      model: "openai/gpt-5.5",
+      env: env(),
+      signal: new AbortController().signal,
+    });
+
+    expect(skillMocks.materializeCodexSkillSnapshotsForSession).toHaveBeenCalledWith({
+      sandbox,
+      codexWorkRoot: "/home/user/.opencompany-goat/codex-task-skills",
+      skills: [
+        {
+          id: "review-work",
+          files: [
+            {
+              path: "SKILL.md",
+              content: expect.stringContaining("Inspect the diff and run focused tests."),
+            },
+          ],
+        },
+      ],
+    });
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillFingerprint: "workflow-skills-fingerprint",
+        skills: [
+          {
+            name: "review-work",
+            path: "/home/user/.opencompany-goat/codex-task-skills/.agents/skills/review-work/SKILL.md",
+          },
+        ],
       }),
     );
   });

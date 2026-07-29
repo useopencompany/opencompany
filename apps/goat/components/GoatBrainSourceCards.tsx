@@ -102,6 +102,40 @@ export function resolveGoatBrainSourceState(
   };
 }
 
+// Whether a source has enough ingestion scope selected to actually feed the
+// brain. Toggling a source "on" is not enough for the scope-required providers
+// (Slack/Linear/GitHub/Drive/HubSpot/Attio) — until a channel/team/repo/object
+// is picked, nothing flows. Used to distinguish "authorized" from "feeding" so
+// onboarding never leaves a source silently ingesting nothing.
+export function goatBrainSourceHasScope(
+  providerId: GoatBrainSourceProviderDef["id"],
+  config: Record<string, unknown> | undefined,
+): boolean {
+  switch (providerId) {
+    case "slack": {
+      const selection = slackSelectionFromConfig(config);
+      return selection.channels.length + selection.dms.length > 0;
+    }
+    case "linear":
+      return linearTeamsFromConfig(config).length > 0;
+    case "github":
+      return githubReposFromConfig(config).length > 0;
+    case "hubspot":
+      return hubspotObjectTypesFromConfig(config).length > 0;
+    case "attio":
+      return attioObjectTypesFromConfig(config).length > 0;
+    case "google_drive":
+      return googleDriveAllFilesFromConfig(config) || googleDriveResourceIds(config).length > 0;
+    case "gmail":
+      // Gmail defaults to both sent + received when unconfigured, so an enabled
+      // source is always feeding once the user confirms.
+      return gmailEventsFromConfig(config).length > 0;
+    default:
+      // Jamie / Granola / Fathom have no scope to pick — connecting is enough.
+      return true;
+  }
+}
+
 export function BrainSourcesSection({ brainRef }: { brainRef: string }) {
   const [details, setDetails] = useState<GoatBrainSourcesDetails | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -492,7 +526,7 @@ const ADD_SOURCE_CONSENT_COPY: Record<GoatPersonalBrainSourceProvider, string> =
   gmail:
     "Emails matching your filters — including what other people write to you — will be summarized into this brain. Everyone with access to this brain, now and in the future, can see what's captured.",
   slack:
-    "Messages from the channels and DMs you select — including what other people write — will be summarized into this brain and visible to everyone with access to it.",
+    "Messages from the Slack conversations you select — including Slack Connect conversations and what other people write — will be summarized into this brain and visible to everyone with access to it.",
   google_drive:
     "Changes to the files and folders you select will be summarized into this brain and visible to everyone with access to it.",
   linear:
@@ -831,6 +865,13 @@ type SlackConfigSelection = {
   dms: { id: string; name: string }[];
 };
 
+type SlackPickerOption = {
+  id: string;
+  name: string;
+  kind: "channel" | "dm";
+  isPrivate?: boolean;
+};
+
 function slackSelectionFromConfig(
   config: Record<string, unknown> | undefined,
 ): SlackConfigSelection {
@@ -851,19 +892,21 @@ function slackSelectionFromConfig(
   return { channels: parse(config?.channels), dms: parse(config?.dms) };
 }
 
-function SlackChannelPicker({
+export function SlackChannelPicker({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => slackSelectionFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [conversations, setConversations] = useState<GoatSlackConversationListResult | null>(null);
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<Map<string, { name: string; kind: "channel" | "dm" }>>(
@@ -897,6 +940,23 @@ function SlackChannelPicker({
     });
   };
 
+  const toggleConversationGroup = (options: SlackPickerOption[]) => {
+    if (options.length === 0) return;
+    setDirty(true);
+    setSelection((current) => {
+      const next = new Map(current);
+      const allSelected = options.every((option) => current.has(option.id));
+      for (const option of options) {
+        if (allSelected) {
+          next.delete(option.id);
+        } else {
+          next.set(option.id, { name: option.name, kind: option.kind });
+        }
+      }
+      return next;
+    });
+  };
+
   const save = () => {
     startTransition(async () => {
       const channels: { id: string; name: string }[] = [];
@@ -916,7 +976,7 @@ function SlackChannelPicker({
         return;
       }
       setDirty(false);
-      toast.success("Slack channels updated.");
+      toast.success("Slack conversations updated.");
       await onChanged();
     });
   };
@@ -924,7 +984,7 @@ function SlackChannelPicker({
   const selectedCount = selection.size;
   const summary =
     selectedCount === 0
-      ? "No channels selected yet — nothing is ingested until you choose some."
+      ? "No conversations selected yet — nothing is ingested until you choose some."
       : `${selectedCount} conversation${selectedCount === 1 ? "" : "s"} selected.`;
 
   if (!expanded) {
@@ -936,19 +996,39 @@ function SlackChannelPicker({
           onClick={() => setExpanded(true)}
           className="shrink-0 rounded-md border border-ink/15 px-2.5 py-1 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
         >
-          Choose channels
+          Choose conversations
         </button>
       </div>
     );
   }
 
   const query = search.trim().toLowerCase();
-  const channelOptions = (conversations?.ok ? conversations.channels : []).filter(
-    (channel) => !query || channel.name.toLowerCase().includes(query),
-  );
-  const dmOptions = (conversations?.ok ? conversations.dms : []).filter(
-    (dm) => !query || dm.name.toLowerCase().includes(query),
-  );
+  const loadedChannels = conversations?.ok ? conversations.channels : [];
+  const loadedDms = conversations?.ok ? conversations.dms : [];
+  const matchesSearch = (option: { name: string }) =>
+    !query || option.name.toLowerCase().includes(query);
+  const channelOptions: SlackPickerOption[] = loadedChannels
+    .filter((channel) => !channel.isSlackConnect && matchesSearch(channel))
+    .map((channel) => ({ ...channel, kind: "channel" }));
+  const slackConnectOptions: SlackPickerOption[] = [
+    ...loadedChannels
+      .filter((channel) => channel.isSlackConnect && matchesSearch(channel))
+      .map((channel) => ({ ...channel, kind: "channel" as const })),
+    ...loadedDms
+      .filter((dm) => dm.isSlackConnect && matchesSearch(dm))
+      .map((dm) => ({ ...dm, kind: "dm" as const })),
+  ];
+  const dmOptions: SlackPickerOption[] = loadedDms
+    .filter((dm) => !dm.isSlackConnect && matchesSearch(dm))
+    .map((dm) => ({ ...dm, kind: "dm" }));
+  const hasSlackConnectConversations =
+    loadedChannels.some((channel) => channel.isSlackConnect) ||
+    loadedDms.some((dm) => dm.isSlackConnect);
+  const bulkActionLabel = (options: SlackPickerOption[]) => {
+    const allSelected = options.length > 0 && options.every((option) => selection.has(option.id));
+    if (query) return allSelected ? "Clear matches" : "Select matches";
+    return allSelected ? "Clear" : "Select all";
+  };
 
   return (
     <div className="flex flex-col gap-2 border-t border-ink/10 pt-2">
@@ -961,9 +1041,10 @@ function SlackChannelPicker({
           />
           <input
             type="search"
+            aria-label="Search Slack conversations"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search channels"
+            placeholder="Search conversations"
             className="w-full rounded-md border border-ink/10 bg-transparent py-1 pl-7 pr-2 text-[12.5px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           />
         </div>
@@ -981,6 +1062,21 @@ function SlackChannelPicker({
         <div className="px-1 py-1.5 text-[12px] text-warning">{conversations.error}</div>
       ) : (
         <>
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+              Channels
+            </span>
+            {channelOptions.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => toggleConversationGroup(channelOptions)}
+                aria-label={`${bulkActionLabel(channelOptions)} channels`}
+                className="rounded px-1.5 py-0.5 text-[11.5px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+              >
+                {bulkActionLabel(channelOptions)}
+              </button>
+            ) : null}
+          </div>
           <div className="flex max-h-[220px] flex-col gap-px overflow-y-auto rounded-md border border-ink/10 p-1">
             {channelOptions.length === 0 ? (
               <div className="px-2 py-1.5 text-[12px] text-ink-subtle">No channels found.</div>
@@ -993,7 +1089,7 @@ function SlackChannelPicker({
                   <input
                     type="checkbox"
                     checked={selection.has(channel.id)}
-                    onChange={() => toggleConversation(channel.id, channel.name, "channel")}
+                    onChange={() => toggleConversation(channel.id, channel.name, channel.kind)}
                     className="accent-ink"
                   />
                   <span className="min-w-0 flex-1 truncate">#{channel.name}</span>
@@ -1004,19 +1100,87 @@ function SlackChannelPicker({
               ))
             )}
           </div>
+          {hasSlackConnectConversations ? (
+            <div className="rounded-md border border-ink/10 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[12.5px] font-medium text-ink">Slack Connect</span>
+                {slackConnectOptions.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleConversationGroup(slackConnectOptions)}
+                    aria-label={`${bulkActionLabel(slackConnectOptions)} Slack Connect conversations`}
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[11.5px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+                  >
+                    {bulkActionLabel(slackConnectOptions)}
+                  </button>
+                ) : null}
+              </div>
+              <p className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
+                These conversations include people outside your Slack workspace. Selected messages
+                are visible to everyone with access to this brain.
+              </p>
+              <div className="mt-1 flex max-h-[180px] flex-col gap-px overflow-y-auto">
+                {slackConnectOptions.length === 0 ? (
+                  <div className="px-1 py-1 text-[12px] text-ink-subtle">
+                    No matching Slack Connect conversations.
+                  </div>
+                ) : (
+                  slackConnectOptions.map((conversation) => (
+                    <label
+                      key={conversation.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1.5 text-[13px] text-ink/90 transition-colors hover:bg-surface-hover"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selection.has(conversation.id)}
+                        onChange={() =>
+                          toggleConversation(conversation.id, conversation.name, conversation.kind)
+                        }
+                        className="accent-ink"
+                      />
+                      <span className="min-w-0 flex-1 truncate">
+                        {conversation.kind === "channel" ? "#" : ""}
+                        {conversation.name}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-ink-subtle">
+                        {conversation.kind === "dm"
+                          ? "DM"
+                          : conversation.isPrivate
+                            ? "private channel"
+                            : "channel"}
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
           <div className="rounded-md border border-ink/10">
-            <button
-              type="button"
-              onClick={() => setDmsOpen((open) => !open)}
-              className="flex w-full items-center gap-1.5 px-2 py-1.5 text-[12.5px] font-medium text-ink transition-colors hover:bg-surface-hover"
-            >
-              {dmsOpen ? (
-                <ChevronDown size={13} strokeWidth={2} />
-              ) : (
-                <ChevronRight size={13} strokeWidth={2} />
-              )}
-              Direct messages
-            </button>
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => setDmsOpen((open) => !open)}
+                aria-expanded={dmsOpen}
+                className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-[12.5px] font-medium text-ink transition-colors hover:bg-surface-hover"
+              >
+                {dmsOpen ? (
+                  <ChevronDown size={13} strokeWidth={2} />
+                ) : (
+                  <ChevronRight size={13} strokeWidth={2} />
+                )}
+                Direct messages
+              </button>
+              {dmsOpen && dmOptions.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => toggleConversationGroup(dmOptions)}
+                  aria-label={`${bulkActionLabel(dmOptions)} direct messages`}
+                  className="mr-1 shrink-0 rounded px-1.5 py-0.5 text-[11.5px] font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink"
+                >
+                  {bulkActionLabel(dmOptions)}
+                </button>
+              ) : null}
+            </div>
             {dmsOpen ? (
               <div className="flex flex-col gap-1 px-2 pb-2">
                 <p className="text-[11.5px] leading-4 text-ink-subtle">
@@ -1035,7 +1199,7 @@ function SlackChannelPicker({
                         <input
                           type="checkbox"
                           checked={selection.has(dm.id)}
-                          onChange={() => toggleConversation(dm.id, dm.name, "dm")}
+                          onChange={() => toggleConversation(dm.id, dm.name, dm.kind)}
                           className="accent-ink"
                         />
                         <span className="min-w-0 flex-1 truncate">{dm.name}</span>
@@ -1061,7 +1225,7 @@ function SlackChannelPicker({
             onClick={save}
             className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
           >
-            {isPending ? "Saving…" : "Save channels"}
+            {isPending ? "Saving…" : "Save conversations"}
           </button>
         </div>
       ) : null}
@@ -1113,20 +1277,22 @@ function githubEventsFromConfig(
   );
 }
 
-function GitHubRepoPicker({
+export function GitHubRepoPicker({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => githubReposFromConfig(source?.config), [source]);
   const savedEvents = useMemo(() => githubEventsFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [repos, setRepos] = useState<GoatGitHubRepositoryListResult | null>(null);
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<Map<string, string>>(
@@ -1379,20 +1545,22 @@ function linearEventsFromConfig(
   return [...seen];
 }
 
-function LinearTeamPicker({
+export function LinearTeamPicker({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => linearTeamsFromConfig(source?.config), [source]);
   const savedEvents = useMemo(() => linearEventsFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [teams, setTeams] = useState<GoatLinearTeamListResult | null>(null);
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<Map<string, { name: string; key?: string }>>(
@@ -1654,20 +1822,22 @@ function hubspotEventsFromConfig(
   return [...seen];
 }
 
-function HubspotObjectPicker({
+export function HubspotObjectPicker({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => hubspotObjectTypesFromConfig(source?.config), [source]);
   const savedEvents = useMemo(() => hubspotEventsFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [selection, setSelection] = useState<Set<HubspotObjectSelection>>(() => new Set(saved));
   const [eventSelection, setEventSelection] = useState<Set<HubspotEventSelection>>(
     () => new Set(savedEvents),
@@ -1867,30 +2037,25 @@ function attioEventsFromConfig(config: Record<string, unknown> | undefined): Att
   return [...seen];
 }
 
-function attioIncludesSystemUpdates(config: Record<string, unknown> | undefined) {
-  return config?.includeSystemUpdates === true;
-}
-
-function AttioObjectPicker({
+export function AttioObjectPicker({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => attioObjectTypesFromConfig(source?.config), [source]);
   const savedEvents = useMemo(() => attioEventsFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [selection, setSelection] = useState<Set<AttioObjectSelection>>(() => new Set(saved));
   const [eventSelection, setEventSelection] = useState<Set<AttioEventSelection>>(
     () => new Set(savedEvents),
-  );
-  const [includeSystemUpdates, setIncludeSystemUpdates] = useState(() =>
-    attioIncludesSystemUpdates(source?.config),
   );
   const [dirty, setDirty] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -1929,7 +2094,6 @@ function AttioObjectPicker({
         enabled: source ? source.enabled : true,
         objectTypes: [...selection].map((id) => ({ id })),
         events: [...eventSelection].map((id) => ({ id })),
-        includeSystemUpdates: eventSelection.has("object_updated") && includeSystemUpdates,
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -2013,27 +2177,10 @@ function AttioObjectPicker({
             </label>
           ))}
         </div>
-        {eventSelection.has("object_updated") ? (
-          <label className="mx-1 mb-1 flex cursor-pointer items-start gap-2 rounded-md bg-surface-muted px-2 py-1.5 text-[12px] leading-4 text-ink-muted">
-            <input
-              type="checkbox"
-              checked={includeSystemUpdates}
-              onChange={(event) => {
-                setDirty(true);
-                setIncludeSystemUpdates(event.target.checked);
-              }}
-              className="mt-0.5 accent-ink"
-            />
-            <span>
-              Include Attio automation and system updates. This can create high-volume activity when
-              Attio recalculates CRM fields.
-            </span>
-          </label>
-        ) : null}
       </div>
       <p className="text-[11.5px] leading-4 text-ink-subtle">
         Selected Attio CRM activity is ingested into this brain and visible to everyone with access
-        to it. Unnamed records and system updates are excluded by default.
+        to it. Unnamed records and system updates are always excluded.
       </p>
       {dirty ? (
         <div className="flex justify-end">
@@ -2060,6 +2207,12 @@ const GMAIL_EVENT_OPTIONS: Array<{ id: GmailEventSelection; label: string }> = [
 
 const GMAIL_INSTRUCTIONS_MAX_LENGTH = 2000;
 
+// Sensible starting instruction for a freshly connected Gmail source so the
+// ingestion agent filters inbox noise from day one. Pre-filled (and fully
+// editable) for new sources only; existing sources keep whatever was saved.
+const GMAIL_DEFAULT_INSTRUCTIONS =
+  "Ignore transactional emails, spam, and personal emails. Only ingest emails that directly relate to our company.";
+
 function gmailEventsFromConfig(config: Record<string, unknown> | undefined): GmailEventSelection[] {
   const value = config?.events;
   if (!Array.isArray(value)) return GMAIL_EVENT_OPTIONS.map((option) => option.id);
@@ -2083,25 +2236,33 @@ function gmailInstructionsFromConfig(config: Record<string, unknown> | undefined
   return typeof value === "string" ? value : "";
 }
 
-function GmailSourceEditor({
+export function GmailSourceEditor({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const savedEvents = useMemo(() => gmailEventsFromConfig(source?.config), [source]);
   const savedInstructions = useMemo(() => gmailInstructionsFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  // A brand-new source (no row yet) starts from the default instruction and is
+  // immediately saveable, so accepting the defaults is one click. Existing
+  // sources keep exactly what was saved — including a deliberately empty value.
+  const isNewSource = !source;
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [eventSelection, setEventSelection] = useState<Set<GmailEventSelection>>(
     () => new Set(savedEvents),
   );
-  const [instructions, setInstructions] = useState(savedInstructions);
-  const [dirty, setDirty] = useState(false);
+  const [instructions, setInstructions] = useState(
+    isNewSource ? GMAIL_DEFAULT_INSTRUCTIONS : savedInstructions,
+  );
+  const [dirty, setDirty] = useState(isNewSource);
   const [isPending, startTransition] = useTransition();
 
   const toggleEvent = (eventId: GmailEventSelection) => {
@@ -2284,20 +2445,22 @@ function googleDriveAllFilesFromConfig(config: Record<string, unknown> | undefin
   return Boolean(allFiles && typeof allFiles === "object" && !Array.isArray(allFiles));
 }
 
-function GoogleDriveSourceEditor({
+export function GoogleDriveSourceEditor({
   brainRef,
   integrationId,
   source,
   onChanged,
+  defaultExpanded,
 }: {
   brainRef: string;
   integrationId: string;
   source: GoatBrainSourceView | null;
   onChanged: () => Promise<void>;
+  defaultExpanded?: boolean;
 }) {
   const saved = useMemo(() => googleDriveSelectionsFromConfig(source?.config), [source]);
   const savedAllFiles = useMemo(() => googleDriveAllFilesFromConfig(source?.config), [source]);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const [allFiles, setAllFiles] = useState(savedAllFiles);
   const [selection, setSelection] = useState<Map<string, GoogleDriveSelection>>(
     () => new Map(saved.map((resource) => [resource.id, resource])),
@@ -2564,7 +2727,7 @@ function GoogleDriveSourceEditor({
   );
 }
 
-function SourceToggle({
+export function SourceToggle({
   enabled,
   disabled,
   onToggle,

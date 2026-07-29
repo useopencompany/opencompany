@@ -100,7 +100,18 @@ export async function verifyGoatMcpBearerToken(
         userWorkosId,
       },
     };
-  } catch {
+  } catch (error) {
+    // All verification failures collapse to a 401, which forces the client to
+    // reconnect. Log the distinguishing details so we can tell an expected
+    // token expiry apart from an audience/issuer mismatch (unstable public
+    // host) or a JWKS-fetch/key-rotation blip.
+    const details = error as { code?: unknown; claim?: unknown } | undefined;
+    console.warn("[goat-mcp] bearer token rejected", {
+      code: typeof details?.code === "string" ? details.code : undefined,
+      claim: typeof details?.claim === "string" ? details.claim : undefined,
+      expectedAudience: goatMcpResourceIndicatorUrlFromRequest(_request),
+      expectedIssuer: domain.domain,
+    });
     return undefined;
   }
 }

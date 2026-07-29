@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
-import { extractXlsxText } from "./index";
+import { extractUtf8Text, extractXlsxText } from "./index";
 
 async function workbookBytes(build: (workbook: ExcelJS.Workbook) => void): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
@@ -34,5 +34,23 @@ describe("extractXlsxText", () => {
     const text = await extractXlsxText(bytes, { maxBytes: 500 });
     expect(Buffer.byteLength(text, "utf8")).toBeLessThan(1000);
     expect(text).toContain("truncated");
+  });
+});
+
+describe("extractUtf8Text", () => {
+  it("decodes and caps UTF-8 text", () => {
+    const text = extractUtf8Text(
+      Buffer.from(`1\n00:00:00,000 --> 00:00:01,000\n${"é".repeat(20)}`),
+      {
+        maxBytes: 50,
+      },
+    );
+    expect(text).toContain("00:00:00,000 --> 00:00:01,000");
+    expect(text).toContain("truncated");
+    expect(text).not.toContain("�");
+  });
+
+  it("rejects invalid UTF-8", () => {
+    expect(() => extractUtf8Text(Buffer.from([0xff, 0xfe]))).toThrow();
   });
 });

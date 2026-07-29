@@ -2,17 +2,21 @@ import "@testing-library/jest-dom/vitest";
 import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/agent-runtime";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
   type GoatChatUiMessage,
-  USE_CAPABILITY_TOOL_PART_TYPE,
+  USE_ACTION_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
 import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";
 
 const emptyTaskLookup: ChatTaskLookup = new Map();
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("MessageBubble assistant errors", () => {
   it("renders the turn error even when the assistant produced no parts", () => {
@@ -176,43 +180,270 @@ describe("MessageBubble assistant errors", () => {
     expect(screen.queryByText("Hiring update")).not.toBeInTheDocument();
   });
 
-  it("renders historical capability parts without operation as external source chips", () => {
+  it("renders use_action parts as expandable input and output details", async () => {
+    const user = userEvent.setup();
     const message: GoatChatUiMessage = {
       id: "assistant_6",
       role: "assistant",
       metadata: { sessionId: "goat_chat_1" },
       parts: [
         {
-          type: USE_CAPABILITY_TOOL_PART_TYPE,
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_action_1",
+          state: "output-available",
+          input: { action: "linear.list_issues", params: { team: "Goat" } },
+          output: {
+            ok: true,
+            action: "linear.list_issues",
+            result: { issues: [] },
+          },
+        },
+        { type: "text", text: "No open issues for the Goat team." },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    const toolCall = screen.getByTestId("chat-tool-call-use_action");
+    const disclosure = within(toolCall).getByRole("button", { name: /Linear List Issues/i });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(within(toolCall).queryByText("Done")).not.toBeInTheDocument();
+    expect(within(toolCall).queryByText("Input")).not.toBeInTheDocument();
+
+    await user.click(disclosure);
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(within(toolCall).getByText("Input")).toBeInTheDocument();
+    expect(within(toolCall).getByText("Output")).toBeInTheDocument();
+    expect(within(toolCall).getByText(/"team": "Goat"/)).toBeInTheDocument();
+    expect(within(toolCall).getByText(/"issues": \[\]/)).toBeInTheDocument();
+    expect(screen.getByText("No open issues for the Goat team.")).toBeInTheDocument();
+  });
+
+  it("renders browser screenshots from the authenticated transcript route", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_browser",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: "tool-browser_screenshot",
+          toolCallId: "tool_browser_1",
+          state: "output-available",
+          input: { fullPage: true },
+          output: {
+            ok: true,
+            command: "browser_screenshot",
+            screenshotUrl: "/api/chat-screenshots/goat_chat_1/1234-aabb.png",
+          },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByText("Screenshot")).toBeInTheDocument();
+    expect(screen.getByText("Full page")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Screenshot captured by Goat's browser" }),
+    ).toHaveAttribute("src", "/api/chat-screenshots/goat_chat_1/1234-aabb.png");
+  });
+
+  it("renders shared transcripts without approval requests or task navigation", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const message: GoatChatUiMessage = {
+      id: "assistant_shared",
+      role: "assistant",
+      metadata: {
+        taskId: "task_1",
+        task: {
+          id: "task_1",
+          displayId: "TASK-1",
+          title: "Private follow-up",
+          status: "queued",
+        },
+      },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_action_approval",
+          state: "output-available",
+          input: {
+            action: "lead.find_person_email",
+            params: { email: "ada@example.com" },
+          },
+          output: {
+            ok: false,
+            action: "lead.find_person_email",
+            error: {
+              code: "approval_required",
+              source: "lead",
+              message: "Approve this paid capability once to continue.",
+              approval: {
+                runId: "gcr_abc",
+                source: "lead",
+                action: "lead.find_person_email",
+                maxCostUsdMicros: 360_000,
+                expiresAt: "2026-07-23T10:15:00.000Z",
+                status: "awaiting_approval",
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} readOnly />);
+
+    expect(screen.queryByText("Approve paid capability?")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve once" })).not.toBeInTheDocument();
+    expect(screen.getByText("Private follow-up")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Private follow-up/ })).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("renders legacy paid capability approvals as inert historical cards", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              runId: "gcr_abc",
+              status: "expired",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    const message: GoatChatUiMessage = {
+      id: "assistant_approval",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_action_approval",
+          state: "output-available",
+          input: {
+            action: "lead.find_person_email",
+            params: { email: "ada@example.com" },
+          },
+          output: {
+            ok: false,
+            action: "lead.find_person_email",
+            error: {
+              code: "approval_required",
+              source: "lead",
+              message: "Approve this paid capability once to continue.",
+              approval: {
+                runId: "gcr_abc",
+                source: "lead",
+                action: "lead.find_person_email",
+                maxCostUsdMicros: 360_000,
+                expiresAt: "2026-07-23T10:15:00.000Z",
+                status: "awaiting_approval",
+              },
+            },
+          },
+        },
+      ],
+    };
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByText("Approve paid capability?")).toBeVisible();
+    expect(screen.getByText(/Maximum charge \$0\.36/)).toBeVisible();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(await screen.findByText("Expired")).toBeVisible();
+  });
+
+  it("renders a native paid capability approval with cost and distinguishing params", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              runId: "gcr_abc",
+              source: "lead",
+              action: "lead.find_person_email",
+              status: "awaiting_approval",
+              maxCostUsdMicros: 360_000,
+              sessionBudgetUsdMicros: 100_000,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    const onActionApproval = vi.fn(async () => undefined);
+    const message: GoatChatUiMessage = {
+      id: "assistant_native_approval",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_action_approval",
+          state: "approval-requested",
+          input: {
+            action: "lead.find_person_email",
+            params: { email: "ada@example.com" },
+          },
+          approval: { id: "approval_1" },
+        },
+      ],
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onActionApproval={onActionApproval}
+        allowActionApproval
+      />,
+    );
+
+    expect(screen.getByText("Run paid lookup?")).toBeVisible();
+    expect(await screen.findByText(/Up to \$0\.36/)).toBeVisible();
+    expect(screen.getByText("ada@example.com")).toBeVisible();
+    expect(screen.getByText(/session's \$0\.10 budget/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Approve for $0.36" }));
+    await waitFor(() =>
+      expect(onActionApproval).toHaveBeenCalledWith({
+        approvalId: "approval_1",
+        action: "lead.find_person_email",
+        decision: "accept",
+      }),
+    );
+  });
+
+  it("renders historical use_capability parts through the generic tool row without crashing", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_7",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: "tool-use_capability",
           toolCallId: "tool_capability_1",
           state: "output-available",
           input: { capability: "linear", request: "Find the launch issue" },
           output: {
             capability: "linear",
             summary: "ENG-123 tracks the launch.",
-            entities: [
-              {
-                type: "linear_issue",
-                id: "ENG-123",
-                url: "https://linear.app/acme/issue/ENG-123",
-                title: "Launch tracking",
-              },
-            ],
+            entities: [],
           },
-        },
+        } as unknown as GoatChatUiMessage["parts"][number],
         { type: "text", text: "ENG-123 tracks the launch." },
       ],
     };
 
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
-    const source = screen.getByRole("link", {
-      name: "Source 1: Launch tracking (ENG-123)",
-    });
-    expect(source).toHaveAttribute("href", "https://linear.app/acme/issue/ENG-123");
-    expect(source).toHaveAttribute("target", "_blank");
-    expect(source).toHaveAttribute("rel", "noopener noreferrer");
-    expect(screen.getByLabelText("Sources")).toBeInTheDocument();
+    expect(screen.getByText("Use Capability")).toBeInTheDocument();
+    expect(screen.getByText("ENG-123 tracks the launch.")).toBeInTheDocument();
   });
 });
 

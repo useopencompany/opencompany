@@ -53,8 +53,12 @@ export function createGoatCodexChatProjector(input: {
   target: GoatCodexChatProjectorTarget;
   redact: (value: string) => string;
   initialParts?: CodexUiMessagePart[];
+  // Engines that don't speak the codex app-server protocol (Claude Code) inject their
+  // own raw-event → normalized-event translation; everything downstream is shared.
+  normalizeEvent?: (raw: Record<string, unknown>) => CodexAppServerNormalizedEvent[];
 }) {
   const { target, redact } = input;
+  const normalizeEvent = input.normalizeEvent ?? normalizeCodexAppServerEvent;
   let parts: CodexUiMessagePart[] = input.initialParts ?? [];
   let turnError: string | null = null;
   let auditFailureReported = false;
@@ -102,14 +106,15 @@ export function createGoatCodexChatProjector(input: {
   };
 
   const insertEventRow = async (event: CodexAppServerNormalizedEvent) => {
-    if (!PERSISTED_EVENT_TYPES.has(event.type as GoatCodexChatEventType)) return;
+    if (!PERSISTED_EVENT_TYPES.has(event.type as GoatCodexChatEventType)) return true;
+    const eventKey = codexChatEventKey(event);
     try {
-      assertRowsChanged(
-        await getDb().execute(sql`
+      const result = await getDb().execute(sql`
           INSERT INTO goat.codex_chat_events (
             user_workos_id,
             codex_chat_session_id,
             codex_chat_turn_id,
+            event_key,
             type,
             payload,
             raw_event,
@@ -118,17 +123,33 @@ export function createGoatCodexChatProjector(input: {
           SELECT ${target.userWorkosId},
                  ${target.codexChatSessionId},
                  ${target.turnId},
+                 ${eventKey},
                  ${event.type},
                  ${JSON.stringify(redactJson(event.payload, redact))}::jsonb,
                  ${JSON.stringify(redactJson(event.rawEvent, redact))}::jsonb,
                  ${new Date()}
           WHERE EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+          ON CONFLICT (codex_chat_turn_id, event_key)
+            WHERE event_key IS NOT NULL
+            DO NOTHING
           RETURNING id
-        `),
-      );
+        `);
+      if (rowsFromExecute(result).length > 0) return true;
+      if (eventKey) {
+        const duplicate = await getDb().execute(sql`
+          SELECT id
+          FROM goat.codex_chat_events
+          WHERE codex_chat_turn_id = ${target.turnId}
+            AND event_key = ${eventKey}
+            AND EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+          LIMIT 1
+        `);
+        if (rowsFromExecute(duplicate).length > 0) return false;
+      }
+      throw new GoatCodexChatLeaseLostError();
     } catch (error) {
       if (error instanceof GoatCodexChatLeaseLostError) throw error;
-      if (auditFailureReported) return;
+      if (auditFailureReported) return true;
       auditFailureReported = true;
       const persistenceError = new Error("Goat Codex chat audit event persistence failed.");
       persistenceError.name = "GoatCodexChatEventPersistenceError";
@@ -139,6 +160,7 @@ export function createGoatCodexChatProjector(input: {
         original_error_name: error instanceof Error ? error.name : typeof error,
         original_error_code: databaseErrorCode(error),
       });
+      return true;
     }
   };
 
@@ -180,7 +202,7 @@ export function createGoatCodexChatProjector(input: {
     }
     if (event.type === "assistant.delta" || event.type === "unknown") return;
 
-    await insertEventRow(event);
+    const isNewEvent = await insertEventRow(event);
 
     if (event.type === "turn.started") {
       const codexTurnId = typeof event.payload.turnId === "string" ? event.payload.turnId : null;
@@ -191,6 +213,7 @@ export function createGoatCodexChatProjector(input: {
       // Terminal transitions and usage land in finalize() with the full summary.
       return;
     }
+    if (!isNewEvent) return;
 
     const commandOutputPreview =
       event.type === "command.completed" || event.type === "command.failed"
@@ -352,7 +375,7 @@ export function createGoatCodexChatProjector(input: {
     push(rawEvents: Record<string, unknown>[]) {
       return serializeProjection(async () => {
         for (const raw of rawEvents) {
-          for (const event of normalizeCodexAppServerEvent(raw)) {
+          for (const event of normalizeEvent(raw)) {
             await handleEvent(event);
           }
         }
@@ -427,9 +450,9 @@ export function createGoatCodexChatProjector(input: {
 
     cancelPendingInteractions() {
       return serializeProjection(async () => {
-        if (await cancelPendingInteractions()) {
-          await writeAssistantMessage({ error: turnError });
-        }
+        const didCancel = await cancelPendingInteractions();
+        if (didCancel) await writeAssistantMessage({ error: turnError });
+        return didCancel;
       });
     },
 
@@ -528,6 +551,32 @@ function elapsedTurnDurationMs(startedAt: Date | undefined, completedAt: Date) {
   if (!startedAt || Number.isNaN(startedAt.getTime())) return undefined;
   return Math.max(0, completedAt.getTime() - startedAt.getTime());
 }
+
+function codexChatEventKey(event: CodexAppServerNormalizedEvent) {
+  const itemId = typeof event.payload.itemId === "string" ? event.payload.itemId : null;
+  if (itemId && ITEM_LIFECYCLE_EVENT_TYPES.has(event.type)) return `${event.type}:${itemId}`;
+  const turnId = typeof event.payload.turnId === "string" ? event.payload.turnId : null;
+  if (turnId && (event.type === "turn.started" || event.type === "turn.completed")) {
+    return `${event.type}:${turnId}`;
+  }
+  return null;
+}
+
+const ITEM_LIFECYCLE_EVENT_TYPES = new Set<CodexAppServerNormalizedEvent["type"]>([
+  "assistant.completed",
+  "reasoning.completed",
+  "command.started",
+  "command.completed",
+  "command.failed",
+  "file_change.started",
+  "file_change.completed",
+  "mcp_tool.started",
+  "mcp_tool.completed",
+  "dynamic_tool.started",
+  "dynamic_tool.completed",
+  "web_search.started",
+  "web_search.completed",
+]);
 
 function databaseErrorCode(error: unknown): string | undefined {
   const seen = new Set<object>();

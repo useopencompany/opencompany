@@ -20,6 +20,7 @@ import {
   isNormalizedFathomMeetingSourceItem,
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
+  isNormalizedGoatBrainPointerSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedGoatImportSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
@@ -30,6 +31,7 @@ import {
   isNormalizedSlackConversationSourceItem,
   isNormalizedUploadAssetSourceItem,
   type NormalizedBrainSourceItem,
+  type NormalizedGoatBrainPointerSourceItem,
   type NormalizedJamieMeetingSourceItem,
 } from "@opencompany/goat-brain";
 import {
@@ -41,6 +43,7 @@ import {
   startGoatSpan,
   withGoatSpan,
 } from "@opencompany/goat-observability";
+import { flushLatitude } from "@opencompany/goat-observability/latitude";
 import { captureException, createLogger } from "@opencompany/observability";
 import { flushBraintrust, traceBraintrust } from "@opencompany/observability/braintrust";
 import { sql } from "drizzle-orm";
@@ -71,6 +74,7 @@ import {
   JAMIE_EVIDENCE_FOLDER,
   JAMIE_MEETING_FOLDER,
 } from "./goat-brain-jamie-writes";
+import { runGoatBrainPointerHydrate } from "./goat-brain-pointer-hydrators";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({
@@ -173,6 +177,24 @@ const GOAT_CHAT_CAPTURE_AGENT_INGEST_DESCRIPTOR = {
   sourceType: "capture",
 } as const satisfies GoatBrainIngestJobDescriptor;
 
+const POINTER_HYDRATE_DESCRIPTORS = [
+  {
+    kind: "brain_pointer_hydrate",
+    sourceProvider: "slack",
+    sourceType: "pointer",
+  },
+  {
+    kind: "brain_pointer_hydrate",
+    sourceProvider: "gmail",
+    sourceType: "pointer",
+  },
+  {
+    kind: "brain_pointer_hydrate",
+    sourceProvider: "linear",
+    sourceType: "pointer",
+  },
+] as const satisfies readonly GoatBrainIngestJobDescriptor[];
+
 const UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR = {
   kind: "brain_agent_ingest",
   sourceProvider: "upload",
@@ -253,6 +275,13 @@ const GOAT_BRAIN_INGEST_HANDLERS: readonly GoatBrainIngestHandler[] = [
     isPayload: isNormalizedGoatChatCaptureSourceItem,
     run: runTypedGoatBrainIngestHandler(runGoatChatCaptureAgentIngest),
   },
+  ...POINTER_HYDRATE_DESCRIPTORS.map(
+    (descriptor): GoatBrainIngestHandler<NormalizedGoatBrainPointerSourceItem> => ({
+      descriptor,
+      isPayload: isNormalizedGoatBrainPointerSourceItem,
+      run: runGoatBrainPointerHydrate,
+    }),
+  ),
   {
     descriptor: UPLOAD_ASSET_AGENT_INGEST_DESCRIPTOR,
     isPayload: isNormalizedUploadAssetSourceItem,
@@ -373,7 +402,8 @@ export function createDbGoatBrainIngestStore(): GoatBrainIngestStore {
             -- is disabled or removed. The source action also terminally skips
             -- existing work; this guard closes the concurrent claim race.
             AND (
-              job.integration_id IS NULL
+              job.kind = 'brain_pointer_hydrate'
+              OR job.integration_id IS NULL
               OR job.brain_ref IS NULL
               OR EXISTS (
                 SELECT 1
@@ -610,6 +640,8 @@ export async function runClaimedGoatBrainIngestJob(input: {
   env: Pick<RunnerEnv, "jobLeaseTtlMs" | "vercelAiGatewayApiKey"> & {
     blobReadWriteToken?: RunnerEnv["blobReadWriteToken"];
     exaApiKey?: RunnerEnv["exaApiKey"];
+    googleOAuthClientId?: RunnerEnv["googleOAuthClientId"];
+    googleOAuthClientSecret?: RunnerEnv["googleOAuthClientSecret"];
   };
   handlers?: readonly GoatBrainIngestHandler[];
   store?: GoatBrainIngestStore;
@@ -783,6 +815,12 @@ export async function runClaimedGoatBrainIngestJob(input: {
               vercelAiGatewayApiKey: input.env.vercelAiGatewayApiKey,
               blobReadWriteToken: input.env.blobReadWriteToken,
               ...(input.env.exaApiKey ? { exaApiKey: input.env.exaApiKey } : {}),
+              ...(input.env.googleOAuthClientId
+                ? { googleOAuthClientId: input.env.googleOAuthClientId }
+                : {}),
+              ...(input.env.googleOAuthClientSecret
+                ? { googleOAuthClientSecret: input.env.googleOAuthClientSecret }
+                : {}),
             },
             signal: runAbort.signal,
           }),
@@ -914,6 +952,7 @@ export async function runClaimedGoatBrainIngestJob(input: {
     // Flush the job's spans promptly; the runner is long-lived and may not shut
     // down (its only other flush point) for a long time. No-ops when disabled.
     await flushBraintrust();
+    await flushLatitude();
   }
 }
 
@@ -970,6 +1009,16 @@ async function debitIngestModelCost(
         brainQueryCostUsdMicros: budget?.brainQueryCostUsdMicros ?? 0,
         webSearchCostUsdMicros: budget?.webSearchCostUsdMicros ?? 0,
         usage: trace.usage,
+        ...(trace.triage
+          ? {
+              triage: {
+                model: trace.triage.model,
+                decision: trace.triage.decision,
+                modelCostUsdMicros: trace.triage.modelCostUsdMicros,
+                usage: trace.triage.usage,
+              },
+            }
+          : {}),
       },
     });
   } catch (error) {
@@ -987,22 +1036,40 @@ function recordBrainIngestModelCost(result: Record<string, unknown>) {
   const trace = normalizeGoatBrainIngestTrace(result.trace);
   if (!trace) return;
 
-  const inputTokens = trace.usage.inputTokens ?? 0;
-  const inputCacheReadTokens = trace.usage.cacheReadInputTokens ?? 0;
-  const inputCacheWriteTokens = trace.usage.cacheWriteInputTokens ?? 0;
+  if (trace.triage) {
+    recordBrainIngestModelUsageCost(trace.triage.model, trace.triage.usage);
+  }
+  // A triage skip has no second/full-agent model call; its top-level model and
+  // usage mirror the triage fields for backwards-compatible activity views.
+  if (trace.triage?.decision === "skip") return;
+  recordBrainIngestModelUsageCost(trace.model, trace.usage);
+}
+
+function recordBrainIngestModelUsageCost(
+  model: string,
+  usage: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+    cacheReadInputTokens?: number | null;
+    cacheWriteInputTokens?: number | null;
+  },
+) {
+  const inputTokens = usage.inputTokens ?? 0;
+  const inputCacheReadTokens = usage.cacheReadInputTokens ?? 0;
+  const inputCacheWriteTokens = usage.cacheWriteInputTokens ?? 0;
   const cost = calculateModelUsageCost({
-    modelName: trace.model,
+    modelName: model,
     inputTokens,
     inputNoCacheTokens: Math.max(inputTokens - inputCacheReadTokens - inputCacheWriteTokens, 0),
     inputCacheReadTokens,
     inputCacheWriteTokens,
-    outputTokens: trace.usage.outputTokens ?? 0,
+    outputTokens: usage.outputTokens ?? 0,
   });
 
   recordGoatModelCost({
     costUsdMicros: cost.totalCostUsdMicros,
     attributes: {
-      "goat.model": trace.model,
+      "goat.model": model,
       "goat.surface": "brain_ingest",
     },
   });

@@ -16,7 +16,7 @@ export function blend(
         GOAT_BRAIN_WEIGHT_RELEVANCE * (relevance / maxRelevance) +
         GOAT_BRAIN_WEIGHT_FRESHNESS * goatBrainFreshness(record.updatedAt, now),
     }))
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.score - a.score || a.record.id.localeCompare(b.record.id));
 }
 
 // Recency decay shared by every retrieval surface (CLI corpus ranking and the DB read plane).

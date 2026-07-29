@@ -50,16 +50,27 @@ const groups = {
       "WORKOS_COOKIE_PASSWORD",
       "GOAT_NEXT_PUBLIC_APP_URL",
       "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+      "GOAT_AUTHKIT_DOMAIN",
+      "GOAT_MACOS_OAUTH_AUDIENCE",
+      "GOAT_MACOS_OAUTH_CLIENT_ID",
       "VERCEL_AI_GATEWAY_API_KEY",
+      "BLOB_READ_WRITE_TOKEN",
       "RUNNER_PUBLIC_URL",
       "RUNNER_INTERNAL_TOKEN",
       "ELECTRIC_URL",
+      "MONID_API_KEY",
+      "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
+      "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
     ],
     optional: [
       "RUNNER_INTERNAL_URL",
       "EXA_API_KEY",
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
       "MCP_OAUTH_STATE_SECRET",
+      "CRON_SECRET",
+      "RESEND_API_KEY",
+      "RESEND_WELCOME_FROM",
+      "RESEND_REPLY_TO",
       "GITHUB_INTEGRATION_APP_ID",
       "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
       "GITHUB_INTEGRATION_APP_SLUG",
@@ -77,6 +88,14 @@ const groups = {
       "GOAT_OBSERVABILITY_ENABLED",
       "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
       "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+      "GOAT_CHAT_ACTIONS_KILL_SWITCH",
+      "GOAT_CHAT_SANDBOX_IMAGE",
+      "GOAT_MANAGED_CAPABILITIES_KILL_SWITCH",
+      "GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS",
+      "LATITUDE_API_KEY",
+      "LATITUDE_PROJECT_SLUG",
+      "LATITUDE_SERVICE_NAME",
+      "LATITUDE_TELEMETRY_DISABLED",
     ],
   },
   runner: {
@@ -84,6 +103,7 @@ const groups = {
     required: [
       "DATABASE_URL",
       "RUNNER_INTERNAL_TOKEN",
+      "GOAT_NEXT_PUBLIC_APP_URL",
       "RUNNER_STREAM_TOKEN_SECRET",
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
       "RUNNER_ALLOWED_ORIGINS",
@@ -114,6 +134,10 @@ const groups = {
       "GOAT_OBSERVABILITY_ENABLED",
       "GOAT_OTEL_EXPORTER_OTLP_ENDPOINT",
       "GOAT_OTEL_EXPORTER_OTLP_HEADERS",
+      "LATITUDE_API_KEY",
+      "LATITUDE_PROJECT_SLUG",
+      "LATITUDE_SERVICE_NAME",
+      "LATITUDE_TELEMETRY_DISABLED",
     ],
   },
   release: {
@@ -159,6 +183,17 @@ for (const name of selected) {
 
   if (optionalMissing.length > 0) {
     console.log(`  optional unset: ${optionalMissing.join(", ")}`);
+  }
+}
+
+if (selected.some((name) => name === "goat" || name === "runner")) {
+  const latitudeApiKeySet = !isUnset(process.env.LATITUDE_API_KEY);
+  const latitudeProjectSet = !isUnset(process.env.LATITUDE_PROJECT_SLUG);
+  if (latitudeApiKeySet !== latitudeProjectSet) {
+    failed = true;
+    console.log(
+      "\nLATITUDE_API_KEY and LATITUDE_PROJECT_SLUG must either both be set or both be unset.",
+    );
   }
 }
 

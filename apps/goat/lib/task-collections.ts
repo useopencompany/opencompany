@@ -9,6 +9,7 @@ import type {
   GoatTaskEventType,
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
+  GoatTaskReportedOutcome,
   GoatTaskStage,
   GoatTaskStatus,
   GoatTaskToolName,
@@ -26,10 +27,14 @@ export type GoatTaskRow = {
   model: string;
   schedule_id: string | null;
   scheduled_for: string | null;
+  workflow_id: string | null;
+  workflow_brain_ref: string | null;
   status: GoatTaskStatus;
   stage: GoatTaskStage;
   result: string | null;
   error: string | null;
+  reported_outcome: GoatTaskReportedOutcome | null;
+  outcome_comment: string | null;
   harness_spec: unknown;
   debug_trace: unknown;
   sandbox_id: string | null;
@@ -77,7 +82,7 @@ export type GoatChatSessionRow = {
   user_workos_id: string;
   title: string;
   model: string;
-  engine: "opencompany" | "local_codex" | "codex";
+  engine: "opencompany" | "local_codex" | "codex" | "claude_code";
   closed_at: string | null;
   pinned_at: string | null;
   created_at: string;
@@ -232,6 +237,7 @@ export type GoatIntegrationRow = {
   status: GoatIntegrationStatus;
   status_reason: string | null;
   scopes: string[];
+  capability_modes: Record<string, unknown>;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;

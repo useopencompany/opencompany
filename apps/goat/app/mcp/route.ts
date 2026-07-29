@@ -6,6 +6,7 @@ import {
   verifyGoatMcpBearerToken,
 } from "@/lib/mcp-oauth";
 import { registerGoatBrainTools } from "@/lib/mcp-server";
+import { OPENCOMPANY_MCP_SERVER_NAME } from "@/lib/mcp-setup";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -30,7 +31,7 @@ async function handleMcpRequest(request: Request) {
 
       const gatewayApiKey = process.env.VERCEL_AI_GATEWAY_API_KEY?.trim();
       if (!gatewayApiKey) {
-        return Response.json({ error: "Goat MCP is not configured." }, { status: 503 });
+        return Response.json({ error: "OpenCompany MCP is not configured." }, { status: 503 });
       }
 
       const handler = createMcpHandler(
@@ -43,11 +44,11 @@ async function handleMcpRequest(request: Request) {
         },
         {
           serverInfo: {
-            name: "goat",
+            name: OPENCOMPANY_MCP_SERVER_NAME,
             version: "0.1.0",
           },
           instructions:
-            "Use list_brains before the first brain operation when the user may have more than one brain. Use goat_brain for retrieval and follow returned page ids with get. When the user explicitly asks to save or remember content, call save_to_brain once with the faithful source content; it creates an inbox draft and queues background curation. Never save inferred preferences or conversational scratchpad content without clear user intent.",
+            'Brains are knowledge stores. Retrieve curated pages with search_brain (semantic + keyword recall), then fetch full documents by id with get_document; raw evidence is opt-in with kind: "evidence". Search results include pagination: when pagination.hasMore is true, repeat the same search with all filters unchanged and offset: pagination.nextOffset. Use list_documents to enumerate a brain and get_timeline for a record\'s dated history. goat_brain is an advanced escape hatch (doctor/help) — prefer the flat tools. Every tool takes an optional brain id; call list_brains first when the user may have more than one brain. When the user explicitly asks to save or remember content, call save_to_brain once with the faithful source content; it creates an inbox draft and queues background curation. Never save inferred preferences or conversational scratchpad content without clear user intent.',
         },
         {
           // Empty base path serves the streamable-HTTP transport at /mcp.

@@ -4,6 +4,8 @@ export * from "./goat-brain-files";
 export * from "./goat-brain-import";
 export * from "./goat-brain-ingest";
 export * from "./goat-brain-ingest-trace";
+export * from "./goat-capabilities";
+export * from "./goat-claude-code-auth";
 export * from "./goat-codex-auth";
 export * from "./goat-integrations";
 export * from "./goat-schema";

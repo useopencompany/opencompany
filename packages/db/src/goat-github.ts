@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   GITHUB_ACTIVITY_EVENT_TYPES,
@@ -5,8 +6,10 @@ import {
 } from "../../goat-brain/src/source-items";
 import { getDb } from "./client";
 import {
+  type GoatGitHubPullRequestEventType,
   type GoatIntegrationStatus,
   goatBrainSources,
+  goatGitHubPullRequestEvents,
   goatIntegrationResources,
   goatIntegrations,
 } from "./goat-schema";
@@ -40,6 +43,18 @@ export type GoatGitHubBrainSourceRoute = {
   integrationId: string;
   brainRef: string;
   config: GoatGitHubBrainSourceConfig;
+};
+
+export type GoatGitHubPullRequestEventInsert = {
+  integrationId: string;
+  userWorkosId: string;
+  installationId: string;
+  repositoryId: string;
+  pullRequestNumber: number;
+  deliveryId: string;
+  eventType: GoatGitHubPullRequestEventType;
+  payload: Record<string, unknown>;
+  eventTime: Date;
 };
 
 export function parseGoatGitHubBrainSourceConfig(value: unknown): GoatGitHubBrainSourceConfig {
@@ -108,6 +123,34 @@ export async function listEnabledGoatGitHubBrainSourceRoutes(
   }));
 }
 
+export async function insertGoatGitHubPullRequestEvents(
+  events: readonly GoatGitHubPullRequestEventInsert[],
+  db: DbLike = getDb(),
+): Promise<number> {
+  if (events.length === 0) return 0;
+  // GitHub retries deliveries with the same X-GitHub-Delivery UUID; the
+  // per-integration unique index makes redeliveries no-ops.
+  const rows = await db
+    .insert(goatGitHubPullRequestEvents)
+    .values(
+      events.map((event) => ({
+        id: newGoatGitHubPullRequestEventId(),
+        integrationId: event.integrationId,
+        userWorkosId: event.userWorkosId,
+        installationId: event.installationId,
+        repositoryId: event.repositoryId,
+        pullRequestNumber: event.pullRequestNumber,
+        deliveryId: event.deliveryId,
+        eventType: event.eventType,
+        payload: event.payload,
+        eventTime: event.eventTime,
+      })),
+    )
+    .onConflictDoNothing()
+    .returning({ id: goatGitHubPullRequestEvents.id });
+  return rows.length;
+}
+
 // Repositories the integration's installation can see, synced into
 // integration_resources at connect time — the repo picker reads from here so
 // it needs no GitHub API call.
@@ -172,4 +215,12 @@ function parseRepositoryRefs(value: unknown): GoatGitHubRepositoryRef[] | undefi
     return [{ id, fullName: fullName || id }];
   });
   return refs.length > 0 ? refs : undefined;
+}
+
+export function newGoatGitHubPullRequestEventId() {
+  return `gghprevt_${randomUUID().replace(/-/g, "")}`;
+}
+
+export function newGoatGitHubPullRequestWindowId() {
+  return `gghprwin_${randomUUID().replace(/-/g, "")}`;
 }

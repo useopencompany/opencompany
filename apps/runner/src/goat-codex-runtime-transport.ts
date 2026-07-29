@@ -36,7 +36,6 @@ const RUNTIME_PROTOCOL = "goat-codex-runtime-v1";
 const TICKET_PROTOCOL_PREFIX = "goat-ticket.";
 const TMUX_SESSION = "goat-codex";
 const HEARTBEAT_INTERVAL_MS = 60_000;
-const ACTIVE_VIEW_TIMEOUT_MS = 2 * 60_000;
 const PREVIEW_SESSION_CACHE_MS = 5_000;
 const runtimeToolInstalls = new Map<string, Promise<void>>();
 
@@ -191,7 +190,7 @@ export function attachRuntimeConnection(
     }
     heartbeatReceived = false;
     webSocket.ping();
-    void sandbox.setTimeout(ACTIVE_VIEW_TIMEOUT_MS).catch(() => {
+    void keepSandboxActive(sandbox).catch(() => {
       sendControl({ type: "status", status: "disconnected" });
     });
   }, HEARTBEAT_INTERVAL_MS);
@@ -416,7 +415,7 @@ async function proxyPreviewWebSocket(
         }
         heartbeatReceived = false;
         downstream.ping();
-        void target.sandbox.setTimeout(ACTIVE_VIEW_TIMEOUT_MS).catch(() => downstream.close());
+        void keepSandboxActive(target.sandbox).catch(() => downstream.close());
       }, HEARTBEAT_INTERVAL_MS);
       const close = () => {
         clearInterval(heartbeat);

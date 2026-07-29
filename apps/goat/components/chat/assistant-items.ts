@@ -1,3 +1,4 @@
+import { isBrowserToolName } from "@opencompany/browser-tools";
 import type { GoatTaskStatus } from "@opencompany/db/goat-schema";
 import type { GoatTaskView } from "@/components/GoatSurface";
 import {
@@ -8,6 +9,7 @@ import {
   CODEX_MCP_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_NAME,
   CODEX_WEB_SEARCH_TOOL_NAME,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   EDIT_TASK_SCHEDULE_TOOL_NAME,
@@ -19,8 +21,11 @@ import {
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
   type StartTaskToolOutput,
-  USE_CAPABILITY_TOOL_NAME,
-  type UseCapabilityToolOutput,
+  USE_ACTION_TOOL_NAME,
+  USE_SKILL_TOOL_NAME,
+  type UseActionToolOutput,
+  type UseSkillToolOutput,
+  WEB_FETCH_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
 
@@ -28,15 +33,25 @@ export type AssistantRenderItem =
   | { type: "text"; key: string; text: string; citations: BrainCitation[] }
   | { type: "reasoning"; key: string; text: string }
   | { type: "task"; key: string; task: ChatTaskCardView }
-  | { type: "tool"; key: string; tool: ToolCallView };
+  | { type: "tool"; key: string; tool: ToolCallView }
+  | { type: "subagent"; key: string; subagent: SubagentRenderView };
+
+// A Claude Code Task call: the tool header plus the subagent's own nested trace, already
+// resolved into render items so the UI can render them under an expandable subagent row.
+export type SubagentRenderView = {
+  tool: ToolCallView;
+  children: AssistantRenderItem[];
+};
+
+type RenderablePart = Record<string, unknown> & { type: string };
 
 export type BrainCitation = {
   key: string;
   label: string;
   title: string;
   href: string;
-  // External chips (capability entities) open provider URLs in a new tab;
-  // internal chips stay next/link Brain navigations.
+  // External chips open provider URLs in a new tab; internal chips stay
+  // next/link Brain navigations.
   external?: boolean;
 };
 
@@ -50,6 +65,7 @@ export type ChatTaskCardView = {
 export type ChatTaskLookup = ReadonlyMap<string, ChatTaskCardView>;
 
 export type ToolCallView = {
+  toolCallId: string;
   name: string;
   label: string;
   status: "running" | "completed" | "failed" | "waiting" | "stopped";
@@ -58,6 +74,10 @@ export type ToolCallView = {
   input: unknown;
   output: unknown;
   errorText: string | null;
+  // Raw part state, so approval-aware rows (use_action) can tell a pending
+  // approval request apart from an in-flight call.
+  state: string;
+  approvalId: string | null;
 };
 
 export function getOrderedAssistantItems(
@@ -65,6 +85,33 @@ export function getOrderedAssistantItems(
   taskLookup: ChatTaskLookup,
   stopped = false,
 ) {
+  const items = collectRenderItems(
+    message.parts as readonly RenderablePart[],
+    taskLookup,
+    stopped,
+    "",
+  );
+
+  const metadataTask = metadataTaskCard(message.metadata);
+  if (!items.some((item) => item.type === "task") && metadataTask) {
+    items.push({
+      type: "task",
+      key: "task-metadata",
+      task: resolveChatTaskCard(metadataTask, taskLookup),
+    });
+  }
+
+  return items;
+}
+
+// Shared by the top-level turn and each subagent's nested trace: folds a parts array into ordered
+// render items. keyPrefix keeps React keys unique across nesting levels.
+function collectRenderItems(
+  parts: readonly RenderablePart[],
+  taskLookup: ChatTaskLookup,
+  stopped: boolean,
+  keyPrefix: string,
+): AssistantRenderItem[] {
   const items: AssistantRenderItem[] = [];
   let textBuffer = "";
   let pendingCitations: BrainCitation[] = [];
@@ -77,32 +124,39 @@ export function getOrderedAssistantItems(
     pendingCitations = [];
   };
 
-  for (const [index, part] of message.parts.entries()) {
+  for (const [index, part] of parts.entries()) {
     if (part.type === "text") {
-      textBuffer += part.text;
+      textBuffer += typeof part.text === "string" ? part.text : "";
       continue;
     }
     if (part.type === "reasoning") {
-      if (!part.text.trim()) continue;
-      flushText(`text-${index}`);
-      items.push({ type: "reasoning", key: `reasoning-${index}`, text: part.text });
+      const text = typeof part.text === "string" ? part.text : "";
+      if (!text.trim()) continue;
+      flushText(`${keyPrefix}text-${index}`);
+      items.push({ type: "reasoning", key: `${keyPrefix}reasoning-${index}`, text });
       continue;
     }
     if (!isToolPartRecord(part)) continue;
     const tool = toolCallViewFromPart(part, stopped);
     if (!tool) continue;
-    flushText(`text-${index}`);
+    flushText(`${keyPrefix}text-${index}`);
     if (tool.name === GOAT_BRAIN_TOOL_NAME && tool.status === "completed") {
       pendingCitations = mergeBrainCitations(
         pendingCitations,
         brainCitationsFromToolOutput(tool.output),
       );
     }
-    if (tool.name === USE_CAPABILITY_TOOL_NAME && tool.status === "completed") {
-      pendingCitations = mergeBrainCitations(
-        pendingCitations,
-        capabilityCitationsFromToolOutput(tool.output),
-      );
+    if (tool.name === CODEX_SUBAGENT_TOOL_NAME) {
+      const childParts = Array.isArray(part.children) ? (part.children as RenderablePart[]) : [];
+      items.push({
+        type: "subagent",
+        key: `${keyPrefix}subagent-${index}`,
+        subagent: {
+          tool,
+          children: collectRenderItems(childParts, taskLookup, stopped, `${keyPrefix}sa${index}-`),
+        },
+      });
+      continue;
     }
     if (
       part.type === START_TASK_TOOL_PART_TYPE &&
@@ -111,28 +165,19 @@ export function getOrderedAssistantItems(
     ) {
       items.push({
         type: "task",
-        key: `task-${index}`,
+        key: `${keyPrefix}task-${index}`,
         task: resolveChatTaskCard(taskFromOutput(part.output), taskLookup),
       });
       continue;
     }
     items.push({
       type: "tool",
-      key: `tool-${index}`,
+      key: `${keyPrefix}tool-${index}`,
       tool,
     });
   }
 
-  flushText("text-end");
-
-  const metadataTask = metadataTaskCard(message.metadata);
-  if (!items.some((item) => item.type === "task") && metadataTask) {
-    items.push({
-      type: "task",
-      key: "task-metadata",
-      task: resolveChatTaskCard(metadataTask, taskLookup),
-    });
-  }
+  flushText(`${keyPrefix}text-end`);
 
   return items;
 }
@@ -157,14 +202,32 @@ export function toolCallViewFromPart(
     name === GOAT_BRAIN_TOOL_NAME && state === "output-available" && isGoatBrainToolOutput(output)
       ? !goatBrainToolOutputSucceeded(output)
       : false;
-  // A capability worker reports failures inside its envelope, not via the
-  // part state: completed-with-error renders as failed.
-  const failedCapability =
-    name === USE_CAPABILITY_TOOL_NAME &&
-    state === "output-available" &&
-    isUseCapabilityToolOutput(output)
-      ? Boolean(output.error)
+  // use_action reports failures inside its structured output, not via the
+  // part state: completed-with-ok=false renders as failed.
+  const failedAction =
+    name === USE_ACTION_TOOL_NAME && state === "output-available" && isUseActionToolOutput(output)
+      ? output.ok === false && output.error.code !== "approval_required"
       : false;
+  const failedSkill =
+    name === USE_SKILL_TOOL_NAME && state === "output-available" && isUseSkillToolOutput(output)
+      ? output.ok === false
+      : false;
+  const awaitingCapabilityApproval =
+    name === USE_ACTION_TOOL_NAME &&
+    state === "output-available" &&
+    isUseActionToolOutput(output) &&
+    output.ok === false &&
+    output.error.code === "approval_required";
+  const failedPublicWebTool =
+    (name === WEB_FETCH_TOOL_NAME || name === WEB_SEARCH_TOOL_NAME) &&
+    state === "output-available" &&
+    isRecord(output) &&
+    output.ok === false;
+  const failedBrowserTool =
+    isBrowserToolName(name) &&
+    state === "output-available" &&
+    isRecord(output) &&
+    output.ok === false;
   // Codex item parts (file changes, MCP tools, web searches) carry their outcome in
   // output.status rather than the part state.
   const codexItemOutcome =
@@ -173,13 +236,21 @@ export function toolCallViewFromPart(
       : null;
   const status = failedGoatBrain
     ? "failed"
-    : failedCapability
+    : failedAction
       ? "failed"
-      : codexItemOutcome === "failed"
+      : failedSkill
         ? "failed"
-        : codexItemOutcome === "interrupted"
-          ? "stopped"
-          : toolStatusFromState(state, stopped);
+        : awaitingCapabilityApproval
+          ? "waiting"
+          : failedPublicWebTool
+            ? "failed"
+            : failedBrowserTool
+              ? "failed"
+              : codexItemOutcome === "failed"
+                ? "failed"
+                : codexItemOutcome === "interrupted"
+                  ? "stopped"
+                  : toolStatusFromState(state, stopped);
   const codexPromptOutcome =
     (name === CODEX_QUESTION_TOOL_NAME || name === CODEX_APPROVAL_TOOL_NAME) &&
     state === "output-available" &&
@@ -187,8 +258,9 @@ export function toolCallViewFromPart(
       ? readString(output.status)
       : null;
   return {
+    toolCallId: typeof part.toolCallId === "string" ? part.toolCallId : "",
     name,
-    label: name === USE_CAPABILITY_TOOL_NAME ? capabilityToolLabel(part.input) : toolLabel(name),
+    label: name === USE_ACTION_TOOL_NAME ? actionToolLabel(part.input) : toolLabel(name),
     status,
     statusText:
       codexPromptOutcome === "answered"
@@ -199,11 +271,16 @@ export function toolCallViewFromPart(
             ? codexPromptOutcome === "canceled"
               ? "Canceled"
               : "Unanswered"
-            : toolStatusText(status, state),
+            : awaitingCapabilityApproval
+              ? "Approval needed"
+              : toolStatusText(status, state),
     detail: toolDetail(name, part, status),
     input: part.input,
     output: part.output,
     errorText: typeof part.errorText === "string" ? part.errorText : null,
+    state,
+    approvalId:
+      isRecord(part.approval) && typeof part.approval.id === "string" ? part.approval.id : null,
   };
 }
 
@@ -211,7 +288,8 @@ function isCodexItemToolName(name: string) {
   return (
     name === CODEX_FILE_CHANGE_TOOL_NAME ||
     name === CODEX_MCP_TOOL_NAME ||
-    name === CODEX_WEB_SEARCH_TOOL_NAME
+    name === CODEX_WEB_SEARCH_TOOL_NAME ||
+    name === CODEX_SUBAGENT_TOOL_NAME
   );
 }
 
@@ -239,7 +317,7 @@ export function toolStatusFromState(state: string, stopped = false): ToolCallVie
 }
 
 export function toolStatusText(status: ToolCallView["status"], state: string) {
-  if (state === "output-denied") return "Denied";
+  if (state === "output-denied") return "Declined";
   if (state === "approval-requested") return "Waiting";
   if (state === "approval-responded") return "Approved";
   if (status === "completed") return "Done";
@@ -258,11 +336,24 @@ export function toolLabel(name: string) {
   if (name === CODEX_FILE_CHANGE_TOOL_NAME) return "File change";
   if (name === CODEX_MCP_TOOL_NAME) return "MCP tool";
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) return "Web search";
+  if (name === CODEX_SUBAGENT_TOOL_NAME) return "Subagent";
   if (name === START_TASK_TOOL_NAME) return "Task";
   if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
   if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
+  if (name === WEB_FETCH_TOOL_NAME) return "Web Fetch";
   if (name === WEB_SEARCH_TOOL_NAME) return "Web Search";
+  if (name === "browser_open") return "Open page";
+  if (name === "browser_snapshot") return "Page snapshot";
+  if (name === "browser_click") return "Click";
+  if (name === "browser_fill") return "Fill field";
+  if (name === "browser_wait") return "Wait";
+  if (name === "browser_read") return "Read page";
+  if (name === "browser_get") return "Inspect page";
+  if (name === "browser_find") return "Find on page";
+  if (name === "browser_scroll") return "Scroll";
+  if (name === "browser_screenshot") return "Screenshot";
+  if (name === "browser_close") return "Close browser";
   return name
     .split(/[_-]+/)
     .filter(Boolean)
@@ -309,55 +400,172 @@ export function toolDetail(
   if (name === EDIT_TASK_SCHEDULE_TOOL_NAME || name === DELETE_TASK_SCHEDULE_TOOL_NAME) {
     return taskScheduleMutationToolDetail(part);
   }
-  if (name === USE_CAPABILITY_TOOL_NAME) {
-    return capabilityToolDetail(part);
+  if (name === USE_ACTION_TOOL_NAME) {
+    return actionToolDetail(part);
+  }
+  if (name === USE_SKILL_TOOL_NAME) {
+    return skillToolDetail(part);
+  }
+  if (isBrowserToolName(name)) {
+    return browserToolDetail(name, part);
+  }
+  if (
+    (name === WEB_FETCH_TOOL_NAME || name === WEB_SEARCH_TOOL_NAME) &&
+    part.state === "output-available" &&
+    isRecord(part.output) &&
+    part.output.ok === false &&
+    typeof part.output.error === "string"
+  ) {
+    return truncateToolPreview(part.output.error);
   }
 
   return formatToolInput(part.input);
 }
 
-function capabilityToolDetail(part: Record<string, unknown>) {
-  if (part.state === "output-available" && isUseCapabilityToolOutput(part.output)) {
-    if (part.output.error) return truncateToolPreview(part.output.error.hint);
-    return truncateToolPreview(part.output.summary);
+function browserToolDetail(name: string, part: Record<string, unknown> & { type: string }) {
+  const input = isRecord(part.input) ? part.input : {};
+  const output = isRecord(part.output) ? part.output : {};
+  if (
+    part.state === "output-available" &&
+    output.ok === false &&
+    typeof output.error === "string"
+  ) {
+    return truncateToolPreview(output.error);
   }
-  if (isRecord(part.input) && typeof part.input.request === "string") {
-    return truncateToolPreview(part.input.request);
+
+  if (name === "browser_open" || name === "browser_read") {
+    const url = readString(input.url);
+    if (url) return truncateToolPreview(browserUrlLabel(url));
+    const filter = readString(input.filter);
+    return truncateToolPreview(filter ? `Filter: ${filter}` : "Current page");
   }
-  return formatToolInput(part.input);
+  if (name === "browser_snapshot") {
+    const selector = readString(input.selector);
+    return truncateToolPreview(selector ?? "Interactive page elements");
+  }
+  if (name === "browser_click" || name === "browser_fill") {
+    return truncateToolPreview(readString(input.ref));
+  }
+  if (name === "browser_wait") {
+    const milliseconds = typeof input.milliseconds === "number" ? `${input.milliseconds} ms` : null;
+    return truncateToolPreview(
+      milliseconds ??
+        readString(input.ref) ??
+        readString(input.text) ??
+        readString(input.urlPattern) ??
+        readString(input.loadState),
+    );
+  }
+  if (name === "browser_get") {
+    return truncateToolPreview(
+      [readString(input.target), readString(input.ref) ?? readString(input.selector)]
+        .filter(Boolean)
+        .join(" · "),
+    );
+  }
+  if (name === "browser_find") {
+    return truncateToolPreview(
+      [readString(input.by), readString(input.value), readString(input.action)]
+        .filter(Boolean)
+        .join(" · "),
+    );
+  }
+  if (name === "browser_scroll") {
+    const pixels = typeof input.pixels === "number" ? `${input.pixels}px` : null;
+    return truncateToolPreview([readString(input.direction), pixels].filter(Boolean).join(" · "));
+  }
+  if (name === "browser_screenshot") {
+    return input.fullPage === true ? "Full page" : "Current viewport";
+  }
+  return null;
 }
 
-function capabilityToolLabel(input: unknown) {
-  const capability =
-    isRecord(input) && typeof input.capability === "string" ? input.capability : "";
-  if (!capability) return "Capability";
-  return toolLabel(capability);
+function browserUrlLabel(value: string) {
+  try {
+    const url = new URL(value);
+    return url.hostname || value;
+  } catch {
+    return value;
+  }
 }
 
-export function isUseCapabilityToolOutput(value: unknown): value is UseCapabilityToolOutput {
+function actionToolDetail(part: Record<string, unknown>) {
+  const action = isRecord(part.input) ? readString(part.input.action) : null;
+  if (part.state === "output-available" && isUseActionToolOutput(part.output)) {
+    if (part.output.ok === false) {
+      return truncateToolPreview([action, part.output.error.message].filter(Boolean).join(" - "));
+    }
+    if (isRecord(part.output.result) && part.output.result.untrustedProviderData === true) {
+      const resultCount =
+        typeof part.output.result.resultCount === "number"
+          ? `${part.output.result.resultCount} result${
+              part.output.result.resultCount === 1 ? "" : "s"
+            }`
+          : null;
+      const cost = isRecord(part.output.result.cost)
+        ? part.output.result.cost.state === "settling"
+          ? "cost settling"
+          : typeof part.output.result.cost.totalUsdMicros === "number"
+            ? formatActionCost(part.output.result.cost.totalUsdMicros)
+            : null
+        : null;
+      return truncateToolPreview([action, resultCount, cost].filter(Boolean).join(" · "));
+    }
+    return truncateToolPreview(action);
+  }
+  return truncateToolPreview(action) ?? formatToolInput(part.input);
+}
+
+function formatActionCost(usdMicros: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: usdMicros < 100_000 ? 3 : 2,
+    maximumFractionDigits: usdMicros < 100_000 ? 3 : 2,
+  }).format(usdMicros / 1_000_000);
+}
+
+function actionToolLabel(input: unknown) {
+  const action = isRecord(input) ? readString(input.action) : null;
+  if (!action) return "Action";
+  return toolLabel(action.split(".").join("_"));
+}
+
+export function isUseActionToolOutput(value: unknown): value is UseActionToolOutput {
   if (!isRecord(value)) return false;
-  return typeof value.summary === "string" && Array.isArray(value.entities);
+  if (typeof value.ok !== "boolean" || typeof value.action !== "string") return false;
+  return value.ok === true || isRecord(value.error);
 }
 
-export function capabilityCitationsFromToolOutput(output: unknown): BrainCitation[] {
-  if (!isUseCapabilityToolOutput(output)) return [];
-  const citations: BrainCitation[] = [];
-  for (const entity of output.entities) {
-    if (!isRecord(entity)) continue;
-    const id = readString(entity.id);
-    const url = readString(entity.url);
-    const type = readString(entity.type);
-    if (!id || !url || !type) continue;
-    const title = readString(entity.title);
-    addUniqueBrainCitation(citations, {
-      key: `capability:${output.capability}:${type}:${id}`,
-      label: title ?? id,
-      title: title ? `${title} (${id})` : id,
-      href: url,
-      external: true,
-    });
+function skillToolDetail(part: Record<string, unknown>) {
+  const skill = isRecord(part.input) ? readString(part.input.skill) : null;
+  if (part.state === "output-available" && isUseSkillToolOutput(part.output)) {
+    return part.output.ok
+      ? truncateToolPreview(part.output.skill.name)
+      : truncateToolPreview([skill, part.output.error.message].filter(Boolean).join(" - "));
   }
-  return mergeBrainCitations([], citations);
+  return truncateToolPreview(skill) ?? formatToolInput(part.input);
+}
+
+export function isUseSkillToolOutput(value: unknown): value is UseSkillToolOutput {
+  if (!isRecord(value) || typeof value.ok !== "boolean" || typeof value.skill === "undefined") {
+    return false;
+  }
+  if (value.ok === true) {
+    return (
+      isRecord(value.skill) &&
+      typeof value.skill.id === "string" &&
+      typeof value.skill.name === "string" &&
+      typeof value.skill.description === "string" &&
+      typeof value.skill.instructions === "string"
+    );
+  }
+  return (
+    typeof value.skill === "string" &&
+    isRecord(value.error) &&
+    typeof value.error.code === "string" &&
+    typeof value.error.message === "string"
+  );
 }
 
 function goatBrainToolDetail(
@@ -469,6 +677,13 @@ function codexStateToolDetail(name: string, part: Record<string, unknown>) {
   }
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) {
     return truncateToolPreview(readString(input.query) ?? "Web search");
+  }
+  if (name === CODEX_SUBAGENT_TOOL_NAME) {
+    const subagentType = readString(input.subagentType);
+    const description = readString(input.description) ?? readString(input.prompt);
+    return truncateToolPreview(
+      [subagentType, description].filter(Boolean).join(" · ") || "Subagent",
+    );
   }
   return null;
 }

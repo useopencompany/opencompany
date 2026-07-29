@@ -18,14 +18,18 @@ import {
 import { and, asc, desc, eq, exists, gte, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
+  applyApprovalResponsesToStoredParts,
   compareGoatChatMessageOrder,
+  dismissPendingApprovalsInStoredParts,
   GOAT_PINNED_CHAT_LIMIT,
   type GoatChatSessionView,
   type GoatChatSummaryView,
+  type GoatChatUiMessage,
   type GoatCodexRuntimeView,
   type GoatStoredChatMessage,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
+import { DEFAULT_CLAUDE_CHAT_REASONING_EFFORT } from "@/lib/claude-chat-settings";
 import { codexComposerSettingsFromTurnSettings } from "@/lib/codex-chat-settings";
 import { goatHomeActivityCutoff } from "@/lib/home-activity";
 import { toGoatTaskTitle } from "@/lib/task-display";
@@ -209,7 +213,7 @@ export async function createGoatChatUserTurn(
   },
   store: GoatChatStore = createDbGoatChatStore(),
 ) {
-  const session = await findOrCreateOpenSession({
+  const { session, created: sessionCreated } = await findOrCreateOpenSession({
     store,
     userWorkosId: input.userWorkosId,
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
@@ -233,9 +237,131 @@ export async function createGoatChatUserTurn(
   const storedMessages = [...previousMessages, toStoredChatMessage(userMessage)];
   return {
     session,
+    sessionCreated,
     userMessage,
     storedMessages,
     messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
+  };
+}
+
+// Continues the latest assistant message after the user answered its tool
+// approval request(s). No user message is inserted: the client re-sends the
+// assistant message carrying approval decisions, which are merged into the
+// stored copy (never trusting client-supplied inputs/outputs) and persisted so
+// the decided state survives a crash before the continuation stream lands.
+export async function createGoatChatApprovalContinuationTurn(
+  input: { userWorkosId: string; sessionId: string; message: GoatChatUiMessage },
+  store: GoatChatStore = createDbGoatChatStore(),
+): Promise<
+  | {
+      ok: true;
+      session: GoatChatSession;
+      lastUserMessage: GoatStoredChatMessage | null;
+      storedMessages: GoatStoredChatMessage[];
+      messages: GoatChatUiMessage[];
+      respondedApprovals: Array<{
+        approvalId: string;
+        toolCallId: string;
+        action: string;
+        approved: boolean;
+      }>;
+    }
+  | { ok: false; error: string }
+> {
+  const session = await store.findOpenSession({
+    userWorkosId: input.userWorkosId,
+    sessionId: input.sessionId,
+  });
+  if (!session) return { ok: false, error: "Chat session not found." };
+
+  const stored = await store.listMessages(session.id);
+  const lastStored = stored.at(-1);
+  if (
+    !lastStored ||
+    lastStored.role !== "assistant" ||
+    lastStored.id !== input.message.id ||
+    !lastStored.debugTrace
+  ) {
+    return {
+      ok: false,
+      error: "Approval responses can only continue the latest assistant message.",
+    };
+  }
+
+  const { parts, respondedApprovals } = applyApprovalResponsesToStoredParts(
+    lastStored.debugTrace.uiMessageParts,
+    input.message.parts,
+  );
+  if (respondedApprovals.length === 0) {
+    return { ok: false, error: "No pending approvals to respond to." };
+  }
+
+  const mergedTrace = { ...lastStored.debugTrace, uiMessageParts: parts };
+  await persistGoatChatAssistantMessage(
+    {
+      sessionId: session.id,
+      messageId: lastStored.id,
+      content: lastStored.content,
+      taskId: lastStored.taskId,
+      debugTrace: mergedTrace,
+    },
+    store,
+  );
+
+  const storedMessages = stored.map((message) =>
+    message.id === lastStored.id ? { ...message, debugTrace: mergedTrace } : message,
+  );
+  const lastUserMessage =
+    [...storedMessages].reverse().find((message) => message.role === "user") ?? null;
+  return {
+    ok: true,
+    session,
+    lastUserMessage,
+    storedMessages,
+    messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
+    respondedApprovals,
+  };
+}
+
+// Called on normal user turns before the history goes to the model: approval
+// requests the user talked past get denied as dismissed (an unresolved
+// approval request is a tool call with no result, which the model conversion
+// rejects). Changes are persisted so the chat UI resolves the stale card.
+export async function dismissStaleGoatChatApprovals(
+  turn: { storedMessages: GoatStoredChatMessage[] },
+  store: GoatChatStore = createDbGoatChatStore(),
+): Promise<{ changed: boolean; messages: GoatChatUiMessage[]; toolCallIds: string[] }> {
+  let changedAny = false;
+  const toolCallIds: string[] = [];
+  const storedMessages = await Promise.all(
+    turn.storedMessages.map(async (message) => {
+      if (message.role !== "assistant" || !message.debugTrace?.uiMessageParts) return message;
+      const {
+        parts,
+        changed,
+        toolCallIds: dismissedToolCallIds,
+      } = dismissPendingApprovalsInStoredParts(message.debugTrace.uiMessageParts);
+      if (!changed) return message;
+      changedAny = true;
+      toolCallIds.push(...dismissedToolCallIds);
+      const debugTrace = { ...message.debugTrace, uiMessageParts: parts };
+      await persistGoatChatAssistantMessage(
+        {
+          sessionId: message.sessionId,
+          messageId: message.id,
+          content: message.content,
+          taskId: message.taskId,
+          debugTrace,
+        },
+        store,
+      );
+      return { ...message, debugTrace };
+    }),
+  );
+  return {
+    changed: changedAny,
+    messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
+    toolCallIds,
   };
 }
 
@@ -465,21 +591,36 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
 
     async insertMessage(input) {
       const now = new Date();
-      const [message] = await db
-        .insert(goatChatMessages)
-        .values({
-          id: input.id ?? newGoatChatMessageId(),
-          sessionId: input.sessionId,
-          role: input.role,
-          content: input.content,
-          taskId: input.taskId ?? null,
-          debugTrace: input.debugTrace ?? null,
-          attachments: input.attachments ?? null,
-          attachmentTexts: input.attachmentTexts ?? null,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
+      const insert = db.insert(goatChatMessages).values({
+        id: input.id ?? newGoatChatMessageId(),
+        sessionId: input.sessionId,
+        role: input.role,
+        content: input.content,
+        taskId: input.taskId ?? null,
+        debugTrace: input.debugTrace ?? null,
+        attachments: input.attachments ?? null,
+        attachmentTexts: input.attachmentTexts ?? null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      // Assistant messages are upserts: an approval continuation finishes the
+      // stream under the same message id the paused turn already persisted.
+      // The guard keeps a colliding id from ever rewriting another session's
+      // (or a user's) message — the update is skipped and the throw below
+      // surfaces the conflict like the plain insert used to.
+      const [message] = await (input.role === "assistant"
+        ? insert.onConflictDoUpdate({
+            target: goatChatMessages.id,
+            set: {
+              content: input.content,
+              taskId: input.taskId ?? null,
+              debugTrace: input.debugTrace ?? null,
+              updatedAt: now,
+            },
+            setWhere: sql`${goatChatMessages.sessionId} = ${input.sessionId} and ${goatChatMessages.role} = 'assistant'`,
+          })
+        : insert
+      ).returning();
       if (!message) throw new Error("Unable to create Goat chat message.");
       return message;
     },
@@ -609,12 +750,17 @@ async function loadCodexComposerSettingsForChatSession(input: {
   userWorkosId: string;
   session: GoatChatSession;
 }) {
-  if (input.session.engine !== "codex") return null;
+  if (input.session.engine !== "codex" && input.session.engine !== "claude_code") return null;
   const settings = await input.store.loadLatestCodexTurnSettings?.({
     userWorkosId: input.userWorkosId,
     sessionId: input.session.id,
   });
-  return settings ? codexComposerSettingsFromTurnSettings(settings) : null;
+  return settings
+    ? codexComposerSettingsFromTurnSettings(
+        settings,
+        input.session.engine === "claude_code" ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT : undefined,
+      )
+    : null;
 }
 
 async function loadCodexRuntimeForChatSession(input: {
@@ -622,7 +768,8 @@ async function loadCodexRuntimeForChatSession(input: {
   userWorkosId: string;
   session: GoatChatSession;
 }) {
-  if (input.session.engine !== "codex") return null;
+  // Claude Code chats share the codex_chat_sessions runtime rows.
+  if (input.session.engine !== "codex" && input.session.engine !== "claude_code") return null;
   return (
     (await input.store.loadCodexRuntime?.({
       userWorkosId: input.userWorkosId,
@@ -656,7 +803,7 @@ async function findOrCreateOpenSession(input: {
       userWorkosId: input.userWorkosId,
       sessionId: input.sessionId,
     });
-    if (existing) return existing;
+    if (existing) return { session: existing, created: false };
   }
 
   if (input.newSessionId) {
@@ -664,15 +811,16 @@ async function findOrCreateOpenSession(input: {
       userWorkosId: input.userWorkosId,
       sessionId: input.newSessionId,
     });
-    if (existing) return existing;
+    if (existing) return { session: existing, created: false };
   }
 
-  return input.store.createSession({
+  const session = await input.store.createSession({
     ...(input.newSessionId ? { id: input.newSessionId } : {}),
     userWorkosId: input.userWorkosId,
     model: input.model,
     title: titleFromPrompt(input.prompt, input.firstAttachmentName ?? null),
   });
+  return { session, created: true };
 }
 
 function titleFromPrompt(prompt: string, firstAttachmentName: string | null = null) {

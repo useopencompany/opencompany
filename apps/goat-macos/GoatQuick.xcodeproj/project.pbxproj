@@ -1,0 +1,110 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		010000000000000000000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000001 /* AppDelegate.swift */; };
+		010000000000000000000002 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000002 /* AppModel.swift */; };
+		010000000000000000000003 /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000003 /* ComposerView.swift */; };
+		010000000000000000000004 /* Configuration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000004 /* Configuration.swift */; };
+		010000000000000000000005 /* GoatChatClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000005 /* GoatChatClient.swift */; };
+		010000000000000000000006 /* GoatQuickApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000006 /* GoatQuickApp.swift */; };
+		010000000000000000000007 /* HotKeyController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000007 /* HotKeyController.swift */; };
+		010000000000000000000008 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000008 /* KeychainStore.swift */; };
+		010000000000000000000009 /* LoopbackCallbackServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000009 /* LoopbackCallbackServer.swift */; };
+		01000000000000000000000A /* OAuthClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000000A /* OAuthClient.swift */; };
+		01000000000000000000000B /* PanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000000B /* PanelController.swift */; };
+		01000000000000000000000C /* PKCE.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02000000000000000000000C /* PKCE.swift */; };
+		010000000000000000000101 /* GoatChatClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000101 /* GoatChatClientTests.swift */; };
+		010000000000000000000102 /* LoopbackCallbackServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000102 /* LoopbackCallbackServerTests.swift */; };
+		010000000000000000000103 /* OAuthClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000103 /* OAuthClientTests.swift */; };
+		010000000000000000000104 /* PKCETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000104 /* PKCETests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		030000000000000000000001 = {isa = PBXContainerItemProxy; containerPortal = 040000000000000000000001 /* Project object */; proxyType = 1; remoteGlobalIDString = 050000000000000000000001; remoteInfo = GoatQuick; };
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		020000000000000000000001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		020000000000000000000002 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		020000000000000000000003 /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
+		020000000000000000000004 /* Configuration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Configuration.swift; sourceTree = "<group>"; };
+		020000000000000000000005 /* GoatChatClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoatChatClient.swift; sourceTree = "<group>"; };
+		020000000000000000000006 /* GoatQuickApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoatQuickApp.swift; sourceTree = "<group>"; };
+		020000000000000000000007 /* HotKeyController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyController.swift; sourceTree = "<group>"; };
+		020000000000000000000008 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		020000000000000000000009 /* LoopbackCallbackServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopbackCallbackServer.swift; sourceTree = "<group>"; };
+		02000000000000000000000A /* OAuthClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthClient.swift; sourceTree = "<group>"; };
+		02000000000000000000000B /* PanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelController.swift; sourceTree = "<group>"; };
+		02000000000000000000000C /* PKCE.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PKCE.swift; sourceTree = "<group>"; };
+		02000000000000000000000D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		02000000000000000000000E /* GoatQuick.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GoatQuick.entitlements; sourceTree = "<group>"; };
+		020000000000000000000101 /* GoatChatClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoatChatClientTests.swift; sourceTree = "<group>"; };
+		020000000000000000000102 /* LoopbackCallbackServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoopbackCallbackServerTests.swift; sourceTree = "<group>"; };
+		020000000000000000000103 /* OAuthClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OAuthClientTests.swift; sourceTree = "<group>"; };
+		020000000000000000000104 /* PKCETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PKCETests.swift; sourceTree = "<group>"; };
+		020000000000000000000201 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
+		020000000000000000000202 /* Local.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig.example; sourceTree = "<group>"; };
+		020000000000000000000203 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		020000000000000000000204 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		020000000000000000000301 /* Goat Quick.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Goat Quick.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		020000000000000000000302 /* GoatQuickTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GoatQuickTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		060000000000000000000001 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		060000000000000000000002 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		070000000000000000000001 = {isa = PBXGroup; children = (070000000000000000000002 /* GoatQuick */, 070000000000000000000003 /* GoatQuickTests */, 070000000000000000000004 /* Config */, 070000000000000000000005 /* Products */); sourceTree = "<group>"; };
+		070000000000000000000002 /* GoatQuick */ = {isa = PBXGroup; path = GoatQuick; sourceTree = "<group>"; children = (020000000000000000000001, 020000000000000000000002, 020000000000000000000003, 020000000000000000000004, 020000000000000000000005, 020000000000000000000006, 020000000000000000000007, 020000000000000000000008, 020000000000000000000009, 02000000000000000000000A, 02000000000000000000000B, 02000000000000000000000C, 02000000000000000000000D, 02000000000000000000000E); };
+		070000000000000000000003 /* GoatQuickTests */ = {isa = PBXGroup; path = GoatQuickTests; sourceTree = "<group>"; children = (020000000000000000000101, 020000000000000000000102, 020000000000000000000103, 020000000000000000000104); };
+		070000000000000000000004 /* Config */ = {isa = PBXGroup; path = Config; sourceTree = "<group>"; children = (020000000000000000000203, 020000000000000000000204, 020000000000000000000201, 020000000000000000000202); };
+		070000000000000000000005 /* Products */ = {isa = PBXGroup; children = (020000000000000000000301, 020000000000000000000302); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		050000000000000000000001 /* GoatQuick */ = {isa = PBXNativeTarget; buildConfigurationList = 090000000000000000000001; buildPhases = (080000000000000000000001, 060000000000000000000001, 0A000000000000000000000001); buildRules = (); dependencies = (); name = GoatQuick; productName = GoatQuick; productReference = 020000000000000000000301; productType = "com.apple.product-type.application"; };
+		050000000000000000000002 /* GoatQuickTests */ = {isa = PBXNativeTarget; buildConfigurationList = 090000000000000000000002; buildPhases = (080000000000000000000002, 060000000000000000000002, 0A000000000000000000000002); buildRules = (); dependencies = (0B000000000000000000000001); name = GoatQuickTests; productName = GoatQuickTests; productReference = 020000000000000000000302; productType = "com.apple.product-type.bundle.unit-test"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		040000000000000000000001 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2600; LastUpgradeCheck = 2600; TargetAttributes = {050000000000000000000001 = {CreatedOnToolsVersion = 26.0;}; 050000000000000000000002 = {CreatedOnToolsVersion = 26.0; TestTargetID = 050000000000000000000001;};};}; buildConfigurationList = 090000000000000000000003; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = 070000000000000000000001; productRefGroup = 070000000000000000000005; projectDirPath = ""; projectRoot = ""; targets = (050000000000000000000001, 050000000000000000000002); };
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0A000000000000000000000001 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		0A000000000000000000000002 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		080000000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000001, 010000000000000000000002, 010000000000000000000003, 010000000000000000000004, 010000000000000000000005, 010000000000000000000006, 010000000000000000000007, 010000000000000000000008, 010000000000000000000009, 01000000000000000000000A, 01000000000000000000000B, 01000000000000000000000C); runOnlyForDeploymentPostprocessing = 0; };
+		080000000000000000000002 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000101, 010000000000000000000102, 010000000000000000000103, 010000000000000000000104); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0B000000000000000000000001 = {isa = PBXTargetDependency; target = 050000000000000000000001; targetProxy = 030000000000000000000001; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0C000000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; ENABLE_HARDENED_RUNTIME = YES; SDKROOT = macosx; SWIFT_OPTIMIZATION_LEVEL = "-Onone";}; name = Debug; };
+		0C000000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; ENABLE_HARDENED_RUNTIME = YES; SDKROOT = macosx; SWIFT_COMPILATION_MODE = wholemodule;}; name = Release; };
+		0C000000000000000000000101 = {isa = XCBuildConfiguration; baseConfigurationReference = 020000000000000000000203; buildSettings = {CODE_SIGN_ENTITLEMENTS = GoatQuick/GoatQuick.entitlements; COMBINE_HIDPI_IMAGES = YES; ENABLE_TESTABILITY = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = GoatQuick/Info.plist; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; PRODUCT_BUNDLE_IDENTIFIER = com.opencompany.goat.quick; PRODUCT_MODULE_NAME = GoatQuick; PRODUCT_NAME = "Goat Quick"; SWIFT_EMIT_LOC_STRINGS = YES;}; name = Debug; };
+		0C000000000000000000000102 = {isa = XCBuildConfiguration; baseConfigurationReference = 020000000000000000000204; buildSettings = {CODE_SIGN_ENTITLEMENTS = GoatQuick/GoatQuick.entitlements; COMBINE_HIDPI_IMAGES = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = GoatQuick/Info.plist; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; PRODUCT_BUNDLE_IDENTIFIER = com.opencompany.goat.quick; PRODUCT_MODULE_NAME = GoatQuick; PRODUCT_NAME = "Goat Quick"; SWIFT_EMIT_LOC_STRINGS = YES;}; name = Release; };
+		0C000000000000000000000201 = {isa = XCBuildConfiguration; baseConfigurationReference = 020000000000000000000203; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; GENERATE_INFOPLIST_FILE = YES; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks"; PRODUCT_BUNDLE_IDENTIFIER = com.opencompany.goat.quick.tests; PRODUCT_NAME = "$(TARGET_NAME)"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Goat Quick.app/Contents/MacOS/Goat Quick";}; name = Debug; };
+		0C000000000000000000000202 = {isa = XCBuildConfiguration; baseConfigurationReference = 020000000000000000000204; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; GENERATE_INFOPLIST_FILE = YES; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks"; PRODUCT_BUNDLE_IDENTIFIER = com.opencompany.goat.quick.tests; PRODUCT_NAME = "$(TARGET_NAME)"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Goat Quick.app/Contents/MacOS/Goat Quick";}; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		090000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (0C000000000000000000000101, 0C000000000000000000000102); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		090000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (0C000000000000000000000201, 0C000000000000000000000202); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		090000000000000000000003 = {isa = XCConfigurationList; buildConfigurations = (0C000000000000000000000001, 0C000000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = 040000000000000000000001 /* Project object */;
+}

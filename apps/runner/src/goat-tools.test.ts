@@ -5,6 +5,7 @@ import { buildGoatTaskToolRuntime, buildGoatTaskTools } from "./goat-tools";
 const toolMocks = vi.hoisted(() => ({
   executeHostedTool: vi.fn(),
   executeGoatGoogleTool: vi.fn(),
+  executeGoatLatitudeMcpTool: vi.fn(),
   executeGoatLinearMcpTool: vi.fn(),
   browserExecute: vi.fn(),
   browserCleanup: vi.fn(),
@@ -23,6 +24,12 @@ vi.mock("./goat-linear-mcp-tools", () => ({
   executeGoatLinearMcpTool: toolMocks.executeGoatLinearMcpTool,
   isGoatLinearMcpToolName: (name: string) =>
     name === "linear_search_tools" || name === "linear_use_tool",
+}));
+
+vi.mock("./goat-latitude-mcp-tools", () => ({
+  executeGoatLatitudeMcpTool: toolMocks.executeGoatLatitudeMcpTool,
+  isGoatLatitudeMcpToolName: (name: string) =>
+    name === "latitude_search_tools" || name === "latitude_use_tool",
 }));
 
 vi.mock("./goat-browser-tools", () => ({
@@ -199,6 +206,37 @@ describe("buildGoatTaskTools usage metadata", () => {
         usage: expect.objectContaining({
           provider: "linear",
           operation: "create_issue",
+          costUsdMicros: 0,
+          costSource: "subscription",
+        }),
+      }),
+    );
+  });
+
+  it("records zero-cost display usage for the selected Latitude MCP operation", async () => {
+    toolMocks.executeGoatLatitudeMcpTool.mockResolvedValueOnce({
+      content: [{ type: "text", text: "ok" }],
+    });
+    const lifecycle = lifecycleMocks();
+    const tools = buildGoatTaskTools({
+      selectedTools: ["latitude_use_tool"],
+      userWorkosId: "user_1",
+      env: env(),
+      signal: new AbortController().signal,
+      lifecycle,
+    });
+
+    await callTool(toExecutableTool(tools.latitude_use_tool), {
+      input: { tool: "list_traces", arguments: { projectId: "project_1" } },
+      toolCallId: "call_latitude",
+    });
+
+    expect(lifecycle.onToolCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: "latitude_use_tool",
+        usage: expect.objectContaining({
+          provider: "latitude",
+          operation: "list_traces",
           costUsdMicros: 0,
           costSource: "subscription",
         }),

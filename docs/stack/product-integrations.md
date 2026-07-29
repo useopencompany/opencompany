@@ -87,11 +87,15 @@ no longer the operating system for product engineering work.
 **Where it is used:**
 
 - `packages/analytics/src/events.ts`.
+- `packages/analytics/src/goat-events.ts`.
 - `packages/analytics/src/client.tsx`.
+- `packages/analytics/src/goat-client.tsx`.
 - `packages/analytics/src/server.ts`.
+- `packages/analytics/src/goat-server.ts`.
 - `apps/web/instrumentation-client.ts`.
-- `NEXT_PUBLIC_POSTHOG_TOKEN`, `NEXT_PUBLIC_POSTHOG_HOST`,
-  `NEXT_PUBLIC_ANALYTICS_DEBUG` in `.env.example`.
+- `apps/goat/components/GoatAppShell.tsx`.
+- Legacy `NEXT_PUBLIC_POSTHOG_*` and dedicated `NEXT_PUBLIC_GOAT_POSTHOG_*` project values in
+  `.env.example`, with `NEXT_PUBLIC_ANALYTICS_DEBUG` for local payload inspection.
 - `docs/analytics.md`.
 
 **Why we use it:** We need a lightweight way to understand product behavior and debug onboarding or

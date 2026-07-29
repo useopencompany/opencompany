@@ -56,6 +56,7 @@ export async function loadGoatCodexRuntimeSession(input: {
     .where(
       and(
         eq(goatCodexChatSessions.id, input.codexChatSessionId),
+        eq(goatCodexChatSessions.engine, "codex"),
         ...(ownership ? [ownership] : []),
       ),
     )

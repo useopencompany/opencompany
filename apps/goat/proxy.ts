@@ -5,12 +5,13 @@ import { getGoatWorkOSRedirectUri } from "@/lib/workos";
 
 const UNAUTHENTICATED_PATHS = new Set([
   "/auth/callback",
+  "/auth/invite",
   "/auth/sign-in",
   "/api/healthz",
   "/mcp",
   "/changelog",
 ]);
-const UNAUTHENTICATED_PREFIXES = ["/.well-known/oauth-"];
+const UNAUTHENTICATED_PREFIXES = ["/.well-known/oauth-", "/share/"];
 
 export default async function proxy(request: NextRequest) {
   const localHttpsRedirect = localGoatHttpsRedirectUrl(request);
@@ -41,7 +42,7 @@ export const config = {
   ],
 };
 
-function isUnauthenticatedPath(pathname: string) {
+export function isUnauthenticatedPath(pathname: string) {
   return (
     UNAUTHENTICATED_PATHS.has(pathname) ||
     UNAUTHENTICATED_PREFIXES.some((prefix) => pathname.startsWith(prefix))

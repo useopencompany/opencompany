@@ -11,6 +11,7 @@ import type {
   GoatTaskMessageRole,
   GoatTaskMessageStatus,
   GoatTaskModelUsagePhase,
+  GoatTaskReportedOutcome,
   GoatTaskToolName,
 } from "@opencompany/db/goat-schema";
 import { goatTasks } from "@opencompany/db/goat-schema";
@@ -30,6 +31,7 @@ import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import {
   executeGoatTask,
+  type GoatTaskConversationMessage,
   type GoatTaskExecutorInput,
   type GoatTaskExecutorResult,
 } from "./goat-harness";
@@ -89,6 +91,11 @@ export type GoatTaskStore = {
     now: Date;
     messageId: string;
   }): Promise<string | null>;
+  listConversationMessages(input: {
+    id: string;
+    leaseId: string;
+    leaseOwner: string;
+  }): Promise<GoatTaskConversationMessage[]>;
   createMessage(input: {
     id: string;
     leaseId: string;
@@ -195,6 +202,8 @@ export type GoatTaskStore = {
     result: string;
     harnessSpec: GoatHarnessSpec;
     debugTrace: GoatTaskDebugTrace;
+    reportedOutcome?: GoatTaskReportedOutcome | null;
+    outcomeComment?: string | null;
   }): Promise<boolean>;
   fail(input: {
     id: string;
@@ -339,6 +348,22 @@ export function createDbGoatTaskStore(): GoatTaskStore {
         LIMIT 1
       `);
       return rowsFromExecute<{ id: string }>(result)[0]?.id ?? null;
+    },
+
+    async listConversationMessages(input) {
+      const result = await getDb().execute(sql`
+        SELECT message.role, message.content
+        FROM goat.task_messages AS message
+        INNER JOIN goat.tasks AS task ON task.id = message.task_id
+        WHERE task.id = ${input.id}
+          AND task.lease_id = ${input.leaseId}
+          AND task.lease_owner = ${input.leaseOwner}
+          AND task.status = 'running'
+          AND message.status = 'completed'
+          AND message.role IN ('user', 'assistant')
+        ORDER BY message.created_at ASC, message.id ASC
+      `);
+      return rowsFromExecute<GoatTaskConversationMessage>(result);
     },
 
     async createMessage(input) {
@@ -647,6 +672,8 @@ export function createDbGoatTaskStore(): GoatTaskStore {
               model = ${input.harnessSpec.model},
               result = ${input.result},
               error = NULL,
+              reported_outcome = ${input.reportedOutcome ?? null},
+              outcome_comment = ${input.outcomeComment ?? null},
               harness_spec = ${JSON.stringify(input.harnessSpec)}::jsonb,
               debug_trace = ${JSON.stringify(input.debugTrace)}::jsonb,
               lease_id = NULL,
@@ -1027,6 +1054,12 @@ export async function runClaimedGoatTask(input: {
       return;
     }
 
+    const conversationMessages = await store.listConversationMessages({
+      id: input.task.id,
+      leaseId,
+      leaseOwner,
+    });
+
     const githubRepositories = input.task.harnessSpec.tools.some((tool) =>
       tool.startsWith("github_"),
     )
@@ -1037,6 +1070,7 @@ export async function runClaimedGoatTask(input: {
       executor({
         task: input.task,
         env: input.env,
+        conversationMessages,
         plannerContext: { githubRepositories },
         signal: abortController.signal,
         sink: {
@@ -1338,6 +1372,8 @@ export async function runClaimedGoatTask(input: {
             result: result.result,
             harnessSpec: result.harnessSpec,
             debugTrace: mergeGoatTaskDebugTrace(result.debugTrace, latestDebugTrace),
+            reportedOutcome: result.reportedOutcome ?? null,
+            outcomeComment: result.outcomeComment ?? null,
           }),
         ),
       ),
@@ -1576,10 +1612,16 @@ const goatTaskColumnsSql = sql`
   task.user_workos_id AS "userWorkosId",
   task.prompt,
   task.model,
+  task.schedule_id AS "scheduleId",
+  task.scheduled_for AS "scheduledFor",
+  task.workflow_id AS "workflowId",
+  task.workflow_brain_ref AS "workflowBrainRef",
   task.status,
   task.stage,
   task.result,
   task.error,
+  task.reported_outcome AS "reportedOutcome",
+  task.outcome_comment AS "outcomeComment",
   task.harness_spec AS "harnessSpec",
   task.debug_trace AS "debugTrace",
   task.codex_engine_session_id AS "codexEngineSessionId",
@@ -1596,8 +1638,9 @@ const goatTaskColumnsSql = sql`
 
 type GoatTaskRow = Omit<
   GoatTask,
-  "nextRunAt" | "leaseExpiresAt" | "archivedAt" | "createdAt" | "updatedAt"
+  "scheduledFor" | "nextRunAt" | "leaseExpiresAt" | "archivedAt" | "createdAt" | "updatedAt"
 > & {
+  scheduledFor: Date | string | null;
   nextRunAt: Date | string;
   leaseExpiresAt: Date | string | null;
   archivedAt: Date | string | null;
@@ -1608,6 +1651,7 @@ type GoatTaskRow = Omit<
 function goatTaskFromRow(row: GoatTaskRow): GoatTask {
   return {
     ...row,
+    scheduledFor: row.scheduledFor ? toDate(row.scheduledFor) : null,
     nextRunAt: toDate(row.nextRunAt),
     leaseExpiresAt: row.leaseExpiresAt ? toDate(row.leaseExpiresAt) : null,
     archivedAt: row.archivedAt ? toDate(row.archivedAt) : null,

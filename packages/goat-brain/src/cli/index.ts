@@ -58,6 +58,9 @@ import { type CommandContext, type CommandResult, fail, notFound, ok, render } f
 
 type Handler = (ctx: CommandContext) => Promise<CommandResult>;
 
+const DEFAULT_QUERY_LIMIT = 10;
+const MAX_QUERY_LIMIT = 50;
+
 const COMMANDS: Record<string, Handler> = {
   help: helpCommand,
   create,
@@ -151,8 +154,10 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
   query: [
     "text",
     "folder",
+    "kind",
     "since",
     "limit",
+    "offset",
     "hops",
     "graph-direction",
     "lexical-only",
@@ -256,12 +261,15 @@ Examples:
        goat-brain query --text <text> [options]
 
 Search and retrieve relevant brain docs. Use list for inventory/enumeration instead of wildcard queries.
+Curated pages are searched by default; use --kind evidence for an explicit raw-source lookup.
 Merged, archived, and conflict-copy docs are excluded unless explicitly included.
 
 Options:
   --folder <path>
+  --kind page|evidence
   --since <duration-or-iso>
-  --limit <n>
+  --limit <n>            Results per page (default 10, max 50)
+  --offset <n>           Zero-based continuation offset
   --hops <n>
   --graph-direction out|in|both
   --lexical-only
@@ -273,6 +281,8 @@ Options:
 
 Examples:
   goat-brain query "hiring plan" --limit 5
+  goat-brain query "hiring plan" --offset 10
+  goat-brain query "pricing source" --kind evidence
   goat-brain query --text "Ada launch sequencing" --hops 2 --graph-direction both --json`,
   ingest: `Usage: goat-brain ingest (--text <text> | --text-stdin) --source-ref <ref> [options]
 
@@ -302,7 +312,8 @@ Examples:
 
 Update frontmatter fields for an existing document. Provide at least one of
 --title, --type, or --status. Promoting a page to --status active requires its
-compiled truth to cite evidence with [[evidence:<evidence-id>]].
+compiled truth to cite provenance with [[evidence:<evidence-id>]] or
+[[source:<provider>:<id>]].
 
 Options:
   --title <title>     New human-readable title.
@@ -529,13 +540,18 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
     timeline: evidenceEntry ? [evidenceEntry] : [],
   };
   const relativePath = await persist(ctx.root, doc);
-  return ok(`Created "${id}" at ${relativePath}.`, {
-    id,
-    folder,
-    path: relativePath,
-    ...(evidenceEntry ? { evidenceId: evidenceEntry.evidenceId } : {}),
-    ...(possibleDuplicates.length > 0 ? { warnings: { possibleDuplicates } } : {}),
-  });
+  return ok(
+    `Created "${id}" at ${relativePath} (status ${doc.frontmatter.status}; timeline entries ${doc.timeline.length}).`,
+    {
+      id,
+      folder,
+      path: relativePath,
+      status: doc.frontmatter.status,
+      timelineEntryCount: doc.timeline.length,
+      ...(evidenceEntry ? { evidenceId: evidenceEntry.evidenceId } : {}),
+      ...(possibleDuplicates.length > 0 ? { warnings: { possibleDuplicates } } : {}),
+    },
+  );
 }
 
 async function get(ctx: CommandContext): Promise<CommandResult> {
@@ -681,19 +697,36 @@ async function query(ctx: CommandContext): Promise<CommandResult> {
   if (graphDirectionInput && !graphDirection) {
     return fail('Invalid --graph-direction value. Use "out", "in", or "both".');
   }
-  const hits = await queryGoatBrain(
+  const kindInput = ctx.args.get("kind");
+  if (kindInput && !isValidGoatBrainKind(kindInput)) {
+    return fail('Invalid --kind value. Use "page" or "evidence".');
+  }
+  const kind: GoatBrainKind = kindInput && isValidGoatBrainKind(kindInput) ? kindInput : "page";
+  const limitInput = ctx.args.get("limit");
+  const limit = limitInput === undefined ? DEFAULT_QUERY_LIMIT : Number(limitInput);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_QUERY_LIMIT) {
+    return fail(`Invalid --limit value. Use an integer from 1 to ${MAX_QUERY_LIMIT}.`);
+  }
+  const offsetInput = ctx.args.get("offset");
+  const offset = offsetInput === undefined ? 0 : Number(offsetInput);
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    return fail("Invalid --offset value. Use a non-negative integer.");
+  }
+  const candidates = await queryGoatBrain(
     ctx.root,
     {
       text,
       ...(ctx.args.get("folder")
         ? { folder: normalizeGoatBrainFolderForV1(ctx.args.get("folder") ?? "") }
         : {}),
+      kind,
       ...(since ? { since } : {}),
       ...(ctx.args.number("hops") !== undefined
         ? { hops: Math.max(0, ctx.args.number("hops") ?? 0) }
         : {}),
       ...(graphDirection ? { graphDirection } : {}),
-      limit: ctx.args.number("limit") ?? 10,
+      limit: limit + 1,
+      offset,
       lexicalOnly: ctx.args.has("lexical-only"),
       ...(ctx.args.has("include-invalid") ? { includeInvalid: true } : {}),
       ...(ctx.args.has("include-merged") ? { includeMerged: true } : {}),
@@ -702,15 +735,36 @@ async function query(ctx: CommandContext): Promise<CommandResult> {
     },
     providers,
   );
+  const hasMore = candidates.length > limit;
+  const hits = candidates.slice(0, limit);
+  const nextOffset = hasMore ? offset + hits.length : undefined;
+  const instruction =
+    nextOffset !== undefined
+      ? `More matches are available. Repeat the same query with all filters unchanged and --offset ${nextOffset}.`
+      : undefined;
   const rendered = hits.length
     ? hits
         .map(
           (hit, index) =>
-            `${index + 1}. [${hit.folder}] ${hit.title} (${hit.id}, score ${hit.score}, updated ${hit.updatedAt})\n${hit.snippet}\nNext: goat-brain get ${hit.id}`,
+            `${offset + index + 1}. [${hit.folder}] ${hit.title} (${hit.id}, score ${hit.score}, updated ${hit.updatedAt})\n${hit.snippet}\nNext: goat-brain get ${hit.id}`,
         )
         .join("\n\n")
     : "No matching brain docs found.";
-  return { ...ok(rendered, { count: hits.length, hits }), usage };
+  return {
+    ...ok([rendered, instruction].filter(Boolean).join("\n\n"), {
+      count: hits.length,
+      hits,
+      scope: { kind },
+      pagination: {
+        limit,
+        offset,
+        returned: hits.length,
+        hasMore,
+        ...(nextOffset !== undefined ? { nextOffset, instruction } : {}),
+      },
+    }),
+    usage,
+  };
 }
 
 async function ingest(ctx: CommandContext): Promise<CommandResult> {
@@ -803,7 +857,15 @@ async function rewrite(ctx: CommandContext): Promise<CommandResult> {
   loaded.doc.compiledTruth = truth;
   loaded.doc.frontmatter.updatedAt = nowIso();
   const relativePath = await persist(ctx.root, loaded.doc);
-  return ok(`Rewrote compiled truth for "${id}".`, { id, path: relativePath });
+  return ok(
+    `Rewrote compiled truth for "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
 }
 
 async function set(ctx: CommandContext): Promise<CommandResult> {
@@ -845,13 +907,17 @@ async function set(ctx: CommandContext): Promise<CommandResult> {
   if (status) loaded.doc.frontmatter.status = status;
   loaded.doc.frontmatter.updatedAt = nowIso();
   const relativePath = await persist(ctx.root, loaded.doc);
-  return ok(`Updated "${id}".`, {
-    id,
-    path: relativePath,
-    title: loaded.doc.frontmatter.title,
-    type: loaded.doc.frontmatter.type,
-    status: loaded.doc.frontmatter.status,
-  });
+  return ok(
+    `Updated "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      title: loaded.doc.frontmatter.title,
+      type: loaded.doc.frontmatter.type,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
 }
 
 async function appendTimeline(ctx: CommandContext): Promise<CommandResult> {
@@ -899,11 +965,16 @@ async function appendTimeline(ctx: CommandContext): Promise<CommandResult> {
     loaded.doc.frontmatter.sources = sources;
   }
   const relativePath = await persist(ctx.root, loaded.doc);
-  return ok(`Appended timeline entry to "${id}".`, {
-    id,
-    path: relativePath,
-    evidenceId: entry.evidenceId,
-  });
+  return ok(
+    `Appended timeline entry to "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}; evidence ${entry.evidenceId}).`,
+    {
+      id,
+      path: relativePath,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+      evidenceId: entry.evidenceId,
+    },
+  );
 }
 
 async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
@@ -998,12 +1069,18 @@ async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
 
   const evidencePath = await persist(ctx.root, evidenceDoc);
   const subjectPath = await persist(ctx.root, subject.doc);
-  return ok(`Created evidence "${evidenceId}" and linked it to "${subjectId}".`, {
-    id: subjectId,
-    path: subjectPath,
-    evidenceId,
-    evidencePath,
-  });
+  return ok(
+    `Created active evidence "${evidenceId}" and linked it to "${subjectId}" (subject status ${subject.doc.frontmatter.status}; timeline entries ${subject.doc.timeline.length}).`,
+    {
+      id: subjectId,
+      path: subjectPath,
+      status: subject.doc.frontmatter.status,
+      timelineEntryCount: subject.doc.timeline.length,
+      evidenceId,
+      evidencePath,
+      evidenceStatus: evidenceDoc.frontmatter.status,
+    },
+  );
 }
 
 function sortedTimelineEntries(entries: GoatBrainDocument["timeline"]) {
@@ -1035,11 +1112,16 @@ async function alias(ctx: CommandContext): Promise<CommandResult> {
   loaded.doc.frontmatter.aliases = [...aliases].sort((a, b) => a.localeCompare(b));
   loaded.doc.frontmatter.updatedAt = nowIso();
   const relativePath = await persist(ctx.root, loaded.doc);
-  return ok(`Updated aliases for "${id}".`, {
-    id,
-    path: relativePath,
-    aliases: loaded.doc.frontmatter.aliases,
-  });
+  return ok(
+    `Updated aliases for "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      aliases: loaded.doc.frontmatter.aliases,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
 }
 
 async function link(ctx: CommandContext): Promise<CommandResult> {
@@ -1072,11 +1154,16 @@ async function link(ctx: CommandContext): Promise<CommandResult> {
   );
   loaded.doc.frontmatter.updatedAt = nowIso();
   const relativePath = await persist(ctx.root, loaded.doc);
-  return ok(`Updated related links for "${id}".`, {
-    id,
-    path: relativePath,
-    relations: loaded.doc.frontmatter.relations,
-  });
+  return ok(
+    `Updated related links for "${id}" (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: relativePath,
+      relations: loaded.doc.frontmatter.relations,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
 }
 
 async function merge(ctx: CommandContext): Promise<CommandResult> {
@@ -1114,12 +1201,19 @@ async function merge(ctx: CommandContext): Promise<CommandResult> {
 
   const targetPath = await persist(ctx.root, target.doc);
   const sourcePath = await persist(ctx.root, source.doc);
-  return ok(`Marked "${from}" as merged into "${into}".`, {
-    from,
-    into,
-    sourcePath,
-    targetPath,
-  });
+  return ok(
+    `Marked "${from}" as merged into "${into}" (target status ${target.doc.frontmatter.status}; timeline entries ${target.doc.timeline.length}).`,
+    {
+      from,
+      into,
+      sourcePath,
+      targetPath,
+      sourceStatus: source.doc.frontmatter.status,
+      sourceTimelineEntryCount: source.doc.timeline.length,
+      targetStatus: target.doc.frontmatter.status,
+      targetTimelineEntryCount: target.doc.timeline.length,
+    },
+  );
 }
 
 async function move(ctx: CommandContext): Promise<CommandResult> {
@@ -1142,7 +1236,16 @@ async function move(ctx: CommandContext): Promise<CommandResult> {
   loaded.doc.frontmatter.updatedAt = nowIso();
   const newPath = await persist(ctx.root, loaded.doc);
   if (newPath !== oldPath) await removeGoatBrainFile(ctx.root, oldPath);
-  return ok(`Moved "${id}" to ${folder}.`, { id, path: newPath, oldPath });
+  return ok(
+    `Moved "${id}" to ${folder} (status ${loaded.doc.frontmatter.status}; timeline entries ${loaded.doc.timeline.length}).`,
+    {
+      id,
+      path: newPath,
+      oldPath,
+      status: loaded.doc.frontmatter.status,
+      timelineEntryCount: loaded.doc.timeline.length,
+    },
+  );
 }
 
 async function del(ctx: CommandContext): Promise<CommandResult> {

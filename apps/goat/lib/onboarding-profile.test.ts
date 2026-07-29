@@ -1,8 +1,9 @@
 import { ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS } from "@opencompany/goat-brain/schema";
 import { describe, expect, it } from "vitest";
 import {
-  GOAT_ONBOARDING_BUILDING_MAX_LENGTH,
+  GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH,
   goatOnboardingFoldersForRole,
+  normalizeGoatOnboardingCompanyUrl,
   parseGoatOnboardingProfile,
 } from "./onboarding-profile";
 
@@ -27,48 +28,66 @@ describe("goatOnboardingFoldersForRole", () => {
 });
 
 describe("parseGoatOnboardingProfile", () => {
-  it("normalizes a supported role and optional building description", () => {
+  it.each([
+    [" opencompany.ai ", "https://opencompany.ai/"],
+    ["https:opencompany.ai/about", "https://opencompany.ai/about"],
+    ["http://opencompany.ai", "http://opencompany.ai/"],
+    ["https://opencompany.ai/company#team", "https://opencompany.ai/company"],
+  ])("normalizes a supported role and company URL (%s)", (companyUrl, normalizedCompanyUrl) => {
+    expect(parseGoatOnboardingProfile({ role: "founder", companyUrl })).toEqual({
+      ok: true,
+      role: "founder",
+      companyUrl: normalizedCompanyUrl,
+    });
+  });
+
+  it("accepts a well-formed URL without requiring the website to be reachable", () => {
     expect(
-      parseGoatOnboardingProfile({ role: "founder", building: "  A durable company  " }),
+      parseGoatOnboardingProfile({
+        role: "founder",
+        companyUrl: "https://temporarily-unavailable.example",
+      }),
     ).toEqual({
       ok: true,
       role: "founder",
-      building: "A durable company",
-    });
-    expect(parseGoatOnboardingProfile({ role: "research", building: "  " })).toEqual({
-      ok: true,
-      role: "research",
-      building: null,
+      companyUrl: "https://temporarily-unavailable.example/",
     });
   });
 
   it("rejects missing or unsupported roles", () => {
-    expect(parseGoatOnboardingProfile({ role: null, building: null })).toEqual({
+    expect(
+      parseGoatOnboardingProfile({ role: null, companyUrl: "https://opencompany.ai" }),
+    ).toEqual({
       ok: false,
       error: "Choose the role that best describes you.",
     });
-    expect(parseGoatOnboardingProfile({ role: "administrator", building: null })).toEqual({
+    expect(
+      parseGoatOnboardingProfile({ role: "administrator", companyUrl: "https://opencompany.ai" }),
+    ).toEqual({
       ok: false,
       error: "Choose the role that best describes you.",
     });
   });
 
-  it("rejects a non-text building description", () => {
-    expect(parseGoatOnboardingProfile({ role: "founder", building: 123 })).toEqual({
+  it("requires a valid company URL", () => {
+    expect(parseGoatOnboardingProfile({ role: "founder", companyUrl: "  " })).toEqual({
       ok: false,
-      error: "What you're building must be text.",
+      error: "Enter your company URL.",
+    });
+    expect(
+      parseGoatOnboardingProfile({ role: "founder", companyUrl: "mailto:team@example.com" }),
+    ).toEqual({
+      ok: false,
+      error: "Enter a valid company URL.",
     });
   });
 
-  it("rejects descriptions beyond the stored limit", () => {
-    const result = parseGoatOnboardingProfile({
-      role: "product",
-      building: "x".repeat(GOAT_ONBOARDING_BUILDING_MAX_LENGTH + 1),
-    });
-
-    expect(result).toEqual({
-      ok: false,
-      error: `What you're building is too long (max ${GOAT_ONBOARDING_BUILDING_MAX_LENGTH} characters).`,
-    });
+  it("rejects credentials and values beyond the stored limit", () => {
+    expect(normalizeGoatOnboardingCompanyUrl("https://user:secret@example.com")).toBeNull();
+    expect(
+      normalizeGoatOnboardingCompanyUrl(
+        `https://example.com/${"x".repeat(GOAT_ONBOARDING_COMPANY_URL_MAX_LENGTH)}`,
+      ),
+    ).toBeNull();
   });
 });

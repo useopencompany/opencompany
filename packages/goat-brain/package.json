@@ -35,6 +35,10 @@
       "types": "./src/skills.ts",
       "default": "./src/skills.ts"
     },
+    "./workflows": {
+      "types": "./src/workflows.ts",
+      "default": "./src/workflows.ts"
+    },
     "./usage": {
       "types": "./src/usage.ts",
       "default": "./src/usage.ts"

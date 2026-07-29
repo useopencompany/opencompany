@@ -635,7 +635,6 @@ describe("goat brain file sync", () => {
     expect(folders).toEqual(
       expect.arrayContaining([
         { path: "inbox", source: "system" },
-        { path: "skills", source: "system" },
         { path: "research", source: "custom" },
         { path: "people", source: "system" },
         { path: "companies", source: "system" },
@@ -663,7 +662,6 @@ describe("goat brain file sync", () => {
     expect(db.insertedFolders()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ path: "inbox", source: "system" }),
-        expect.objectContaining({ path: "skills", source: "system" }),
         expect.objectContaining({ path: "research", source: "custom" }),
         expect.objectContaining({ path: "partners", source: "custom" }),
         expect.objectContaining({ path: "people", source: "system" }),

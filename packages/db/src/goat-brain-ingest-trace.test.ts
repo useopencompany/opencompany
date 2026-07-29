@@ -53,6 +53,40 @@ describe("normalizeGoatBrainIngestTrace", () => {
     });
   });
 
+  it("normalizes an optional cheap-triage trace", () => {
+    expect(
+      normalizeGoatBrainIngestTrace({
+        ...trace(),
+        triage: {
+          model: "openai/gpt-5.4-nano",
+          decision: "ingest",
+          reason: " Contains a durable launch decision. ",
+          entityHints: ["  Launch project  ", "", 42, "Ada\nLovelace"],
+          usage: { inputTokens: 2_000, outputTokens: 80, totalTokens: 2_080 },
+          modelCostUsdMicros: 500,
+        },
+      }),
+    ).toMatchObject({
+      triage: {
+        model: "openai/gpt-5.4-nano",
+        decision: "ingest",
+        reason: "Contains a durable launch decision.",
+        entityHints: ["Launch project", "Ada Lovelace"],
+        usage: { inputTokens: 2_000, outputTokens: 80, totalTokens: 2_080 },
+        modelCostUsdMicros: 500,
+      },
+    });
+  });
+
+  it("drops malformed triage traces without breaking the ingest trace", () => {
+    expect(
+      normalizeGoatBrainIngestTrace({
+        ...trace(),
+        triage: { decision: "maybe", entityHints: ["Ada"] },
+      }),
+    ).not.toHaveProperty("triage");
+  });
+
   it("sanitizes malformed budget fields without breaking the trace", () => {
     expect(
       normalizeGoatBrainIngestTrace(trace([] as unknown as Record<string, unknown>)),

@@ -8,11 +8,11 @@ on:
   workflow_dispatch:
     inputs:
       deploy_runner:
-        description: "Trigger the Render runner deploy alongside the web deploy"
+        description: "Trigger the Render runner deploy"
         type: boolean
         default: true
       smoke:
-        description: "Run web and runner health checks after deploy"
+        description: "Run production health checks after deploy"
         type: boolean
         default: true
 
@@ -41,6 +41,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
 
       - name: Require main branch
         if: ${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
@@ -66,6 +67,51 @@ jobs:
         if: ${{ github.event_name == 'workflow_run' && steps.current-release.outputs.should_release == 'false' }}
         run: echo "This automatic release was superseded before setup, so no deployment work will run."
 
+      - name: Resolve previous successful production release
+        id: release-base
+        if: ${{ github.event_name == 'workflow_run' && steps.current-release.outputs.should_release == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const { data: deployments } = await github.rest.repos.listDeployments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                environment: "production",
+                per_page: 100,
+              });
+
+              for (const deployment of deployments) {
+                if (
+                  deployment.sha === process.env.RELEASE_SHA ||
+                  !/^[a-f0-9]{40}$/i.test(deployment.sha) ||
+                  !deployment.description?.startsWith("Production release ")
+                ) {
+                  continue;
+                }
+
+                const { data: statuses } = await github.rest.repos.listDeploymentStatuses({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  deployment_id: deployment.id,
+                  per_page: 100,
+                });
+
+                if (statuses.some((status) => status.state === "success")) {
+                  core.setOutput("base_sha", deployment.sha);
+                  core.info(`Using production release ${deployment.sha.slice(0, 7)} as the scope base.`);
+                  return;
+                }
+              }
+
+              core.warning("No previous successful production release was found; every surface will deploy.");
+              core.setOutput("base_sha", "");
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              core.warning(`Could not resolve the previous production release: ${message}`);
+              core.setOutput("base_sha", "");
+            }
+
       - name: Setup Bun
         if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
         uses: oven-sh/setup-bun@v2
@@ -75,6 +121,25 @@ jobs:
       - name: Install dependencies
         if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
         run: bun install --frozen-lockfile
+
+      - name: Plan production release scope
+        id: release-scope
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
+        env:
+          RELEASE_BASE_SHA: ${{ steps.release-base.outputs.base_sha }}
+          DEPLOY_RUNNER_INPUT: ${{ inputs.deploy_runner }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$DEPLOY_RUNNER_INPUT" == "true" ]]; then
+              bun run release:scope -- --all
+            else
+              bun run release:scope -- --all --skip-runner
+            fi
+          elif [[ -n "$RELEASE_BASE_SHA" ]]; then
+            bun run release:scope -- --base "$RELEASE_BASE_SHA" --head "$RELEASE_SHA"
+          else
+            bun run release:scope -- --all
+          fi
 
       - name: Fetch release secrets from Infisical
         if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
@@ -157,17 +222,17 @@ jobs:
         run: bun run db:migrate
 
       - name: Pull Vercel project config
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
         run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" --project="$VERCEL_PROJECT_ID"
 
       - name: Check Vercel web env
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
         env:
           OPENCOMPANY_LOAD_VERCEL_ENV: "1"
         run: bun run release:preflight -- --web
 
       - name: Build web
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
         env:
           OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
           NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
@@ -189,20 +254,20 @@ jobs:
 
       - name: Skip stale deploy
         if: ${{ github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'false' }}
-        run: echo "This automatic release was superseded after build, so web and runner deploys were skipped."
+        run: echo "This automatic release was superseded after build, so the planned production deploys were skipped."
 
       - name: Trigger runner deploy
         id: trigger-runner
-        if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.deploy_runner) }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.runner == 'true' }}
         run: bun run release:render -- --trigger-only
 
       - name: Deploy web
         id: deploy-web
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.web == 'true' }}
         run: node scripts/release-vercel-deploy.mjs --label web
 
       - name: Map Goat production app env
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
         run: |
           goat_url="${PRODUCTION_GOAT_URL%/}"
           if [ -z "$goat_url" ]; then
@@ -216,7 +281,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Check Vercel Goat project config
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
         run: |
           rm -rf .vercel
 
@@ -285,7 +350,7 @@ jobs:
           NODE
 
       - name: Check Vercel Goat env
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
         run: |
           node <<'NODE'
           const required = [
@@ -295,10 +360,18 @@ jobs:
             "WORKOS_COOKIE_PASSWORD",
             "GOAT_NEXT_PUBLIC_APP_URL",
             "GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+            "GOAT_AUTHKIT_DOMAIN",
+            "GOAT_MACOS_OAUTH_AUDIENCE",
+            "GOAT_MACOS_OAUTH_CLIENT_ID",
+            "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
+            "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
             "VERCEL_AI_GATEWAY_API_KEY",
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
             "ELECTRIC_URL",
+            "GOAT_HUBSPOT_CLIENT_ID",
+            "GOAT_HUBSPOT_CLIENT_SECRET",
+            "GOAT_HUBSPOT_STATE_SECRET",
           ];
 
           async function listProductionEnv(projectId, label, teamId, token) {
@@ -418,7 +491,7 @@ jobs:
           NODE
 
       - name: Build Goat
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
         env:
           OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
           NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
@@ -426,11 +499,11 @@ jobs:
 
       - name: Deploy Goat
         id: deploy-goat
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
         run: node scripts/release-vercel-deploy.mjs --label Goat --project-env GOAT_VERCEL_PROJECT_ID
 
       - name: Check Vercel marketing project config
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
         run: |
           rm -rf .vercel
 
@@ -505,7 +578,7 @@ jobs:
           NODE
 
       - name: Build marketing
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
         env:
           OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
           NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
@@ -513,7 +586,7 @@ jobs:
 
       - name: Deploy marketing
         id: deploy-marketing
-        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true') && steps.release-scope.outputs.marketing == 'true' }}
         run: node scripts/release-vercel-deploy.mjs --label marketing --project-env MARKETING_VERCEL_PROJECT_ID
 
       - name: Cancel runner deploy after Vercel failure
@@ -527,9 +600,12 @@ jobs:
       - name: Smoke check release
         if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
         env:
-          EXPECTED_RELEASE: ${{ env.RELEASE_SHA }}
+          EXPECTED_WEB_RELEASE: ${{ steps.release-scope.outputs.web == 'true' && env.RELEASE_SHA || '' }}
+          EXPECTED_GOAT_RELEASE: ${{ steps.release-scope.outputs.goat == 'true' && env.RELEASE_SHA || '' }}
+          EXPECTED_RUNNER_RELEASE: ${{ steps.release-scope.outputs.runner == 'true' && env.RELEASE_SHA || '' }}
+          SMOKE_WEB: "true"
           SMOKE_GOAT: "true"
-          SMOKE_RUNNER: ${{ github.event_name == 'workflow_run' || inputs.deploy_runner }}
+          SMOKE_RUNNER: "true"
           SMOKE_WEB_ATTEMPTS: "12"
           SMOKE_GOAT_ATTEMPTS: "12"
           SMOKE_RUNNER_ATTEMPTS: "12"

@@ -32,6 +32,7 @@ import {
   goatBrainFolderSourceForPath,
   isBuiltInGoatBrainEntityType,
   isGoatBrainSkillFolder,
+  isGoatBrainWorkflowFolder,
   isValidGoatBrainFolder,
   isValidGoatBrainId,
   isValidGoatBrainKind,
@@ -44,6 +45,7 @@ import {
   serializeGoatBrainDocument,
 } from "@opencompany/goat-brain";
 import { currentGoatUser } from "@/lib/auth";
+import { isGoatWorkflowModelToken } from "@/lib/workflow-model-options";
 
 export type GoatBrainFolderView = {
   id: string;
@@ -64,7 +66,7 @@ export type GoatBrainDocumentView = {
   content: string;
   body: string;
   timeline: GoatBrainTimelineEntry[];
-  format: "markdown" | "pdf" | "docx" | "xlsx" | "image";
+  format: "markdown" | "pdf" | "docx" | "xlsx" | "srt" | "image";
   mimeType: string;
   originalFileName?: string | null;
   assetStorageKey?: string | null;
@@ -280,6 +282,100 @@ export async function updateGoatBrainSkillForUser(input: {
         : existing.status,
       title: input.name.trim(),
       ...(input.description.trim() ? { description: input.description.trim() } : {}),
+      createdAt: parsed.frontmatter.createdAt ?? existing.createdAt.toISOString(),
+      updatedAt: nowIso(),
+      relations: parsed.frontmatter.relations ?? [],
+      ...(parsed.frontmatter.aliases ? { aliases: parsed.frontmatter.aliases } : {}),
+      ...(parsed.frontmatter.sources ? { sources: parsed.frontmatter.sources } : {}),
+      ...(parsed.frontmatter.mergedInto ? { mergedInto: parsed.frontmatter.mergedInto } : {}),
+    },
+  });
+  try {
+    const row = await updateGoatBrainFileContent({
+      brainRef: input.brainRef,
+      userWorkosId: input.userWorkosId,
+      fileId: input.documentId,
+      content,
+      ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
+    });
+    return {
+      ok: true,
+      path: goatBrainFilePathFor(row.folderPath, row.brainId),
+      document: documentViewFromFileRow(row),
+    };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) };
+  }
+}
+
+export async function createGoatBrainWorkflowForUser(input: {
+  brainRef: string;
+  userWorkosId: string;
+  folderPath: string;
+  name: string;
+  description?: string;
+}): Promise<BrainMutationResult> {
+  const folderPath = normalizeGoatBrainFolderForV1(input.folderPath);
+  if (!isGoatBrainWorkflowFolder(folderPath)) {
+    return { ok: false, message: 'Workflows must live in the "workflows" folder.' };
+  }
+  const invalid = validateGoatBrainSkillFields({
+    name: input.name,
+    description: input.description ?? "",
+  });
+  if (invalid) return { ok: false, message: invalid };
+  return createGoatBrainDocumentForUser({
+    brainRef: input.brainRef,
+    userWorkosId: input.userWorkosId,
+    folderPath,
+    fileName: input.name,
+    ...(input.description?.trim() ? { description: input.description.trim() } : {}),
+    brainIdMaxLength: 64,
+  });
+}
+
+export async function updateGoatBrainWorkflowForUser(input: {
+  brainRef: string;
+  userWorkosId: string;
+  documentId: string;
+  name: string;
+  description: string;
+  instructions: string;
+  // Model mention token ("kimi-k2.6", "codex", ...); undefined keeps the stored
+  // value, "" clears it back to the default.
+  model?: string;
+  expectedContentHash?: string;
+}): Promise<BrainMutationResult> {
+  const invalid = validateGoatBrainSkillFields(input);
+  if (invalid) return { ok: false, message: invalid };
+  if (input.model?.trim() && !isGoatWorkflowModelToken(input.model.trim())) {
+    return { ok: false, message: "That workflow model is not available." };
+  }
+  const existing = await getGoatBrainFile({
+    brainRef: input.brainRef,
+    fileId: input.documentId,
+  });
+  if (!existing) return { ok: false, message: "Brain workflow not found." };
+  if (existing.format !== "markdown" || !isGoatBrainWorkflowFolder(existing.folderPath)) {
+    return { ok: false, message: "That Brain document is not a workflow." };
+  }
+  const parsed = parseGoatBrainDocument(existing.content);
+  const model = input.model === undefined ? parsed.frontmatter.model : input.model.trim();
+  const content = serializeGoatBrainDocument({
+    title: input.name.trim(),
+    compiledTruth: input.instructions,
+    timeline: parsed.timeline,
+    frontmatter: {
+      id: existing.brainId,
+      folder: existing.folderPath,
+      kind: "page",
+      type: "note",
+      status: isValidGoatBrainStatus(parsed.frontmatter.status)
+        ? parsed.frontmatter.status
+        : existing.status,
+      title: input.name.trim(),
+      ...(input.description.trim() ? { description: input.description.trim() } : {}),
+      ...(model ? { model } : {}),
       createdAt: parsed.frontmatter.createdAt ?? existing.createdAt.toISOString(),
       updatedAt: nowIso(),
       relations: parsed.frontmatter.relations ?? [],

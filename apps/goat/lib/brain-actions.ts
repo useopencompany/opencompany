@@ -6,6 +6,7 @@ import {
   createGoatBrainDocumentForUser,
   createGoatBrainFolderForUser,
   createGoatBrainSkillForUser,
+  createGoatBrainWorkflowForUser,
   deleteGoatBrainDocumentForUser,
   deleteGoatBrainFolderForUser,
   moveGoatBrainDocumentForUser,
@@ -13,6 +14,7 @@ import {
   renameGoatBrainFolderForUser,
   updateGoatBrainDocumentForUser,
   updateGoatBrainSkillForUser,
+  updateGoatBrainWorkflowForUser,
 } from "@/lib/brain";
 import {
   createGoatBrainAssetForUser,
@@ -59,6 +61,24 @@ export async function createGoatBrainSkillAction(input: {
   });
 }
 
+export async function createGoatBrainWorkflowAction(input: {
+  brainRef: string;
+  folderPath: string;
+  name: string;
+  description?: string;
+}): Promise<BrainMutationResult> {
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
+  return createGoatBrainWorkflowForUser({
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
+    folderPath: input.folderPath,
+    name: input.name,
+    ...(input.description !== undefined ? { description: input.description } : {}),
+  });
+}
+
 export async function updateGoatBrainDocumentAction(input: {
   brainRef: string;
   documentId: string;
@@ -95,6 +115,30 @@ export async function updateGoatBrainSkillAction(input: {
     name: input.name,
     description: input.description,
     instructions: input.instructions,
+    ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
+  });
+}
+
+export async function updateGoatBrainWorkflowAction(input: {
+  brainRef: string;
+  documentId: string;
+  name: string;
+  description: string;
+  instructions: string;
+  model?: string;
+  expectedContentHash?: string;
+}): Promise<BrainMutationResult> {
+  const resolved = await resolveBrainMutationContext(input.brainRef);
+  if ("ok" in resolved) return resolved;
+  const { context, brain } = resolved;
+  return updateGoatBrainWorkflowForUser({
+    brainRef: brain.id,
+    userWorkosId: context.user.workosUserId,
+    documentId: input.documentId,
+    name: input.name,
+    description: input.description,
+    instructions: input.instructions,
+    ...(input.model !== undefined ? { model: input.model } : {}),
     ...(input.expectedContentHash ? { expectedContentHash: input.expectedContentHash } : {}),
   });
 }

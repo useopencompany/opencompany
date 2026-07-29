@@ -1,4 +1,5 @@
 import { createMDX } from "fumadocs-mdx/next";
+import { SENSITIVE_CALLBACK_REQUEST_PATTERN } from "./request-logging.mjs";
 
 const release =
   process.env.RELEASE_SHA ||
@@ -23,8 +24,16 @@ const nextConfig = {
     NEXT_PUBLIC_OBSERVABILITY_RELEASE: release,
     ...(release ? { NEXT_PUBLIC_BUILD_TIMESTAMP: new Date().toISOString() } : {}),
   },
+  logging: {
+    incomingRequests: {
+      ignore: [SENSITIVE_CALLBACK_REQUEST_PATTERN],
+    },
+  },
+  serverExternalPackages: ["@vercel/sandbox"],
   transpilePackages: [
     "@opencompany/agent-runtime",
+    "@opencompany/analytics",
+    "@opencompany/browser-tools",
     "@opencompany/db",
     "@opencompany/goat-brain",
     "@opencompany/ui",

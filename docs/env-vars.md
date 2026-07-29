@@ -58,7 +58,7 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `GITHUB_INTEGRATION_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign GitHub integration OAuth state. |
 | `GITHUB_INTEGRATION_APP_WEBHOOK_SECRET` | Vercel Goat envs | Integration GitHub App webhook secret; verifies `x-hub-signature-256` on `/api/webhooks/github/events` for Goat Brain GitHub ingestion. Set the App's webhook URL to `${GOAT_NEXT_PUBLIC_APP_URL}/api/webhooks/github/events` and subscribe to Pull requests, Issues, and Issue comments. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Vercel web/Goat envs, Render | Base64-encoded 32-byte key used to encrypt workspace and Goat provider credentials stored in Neon. Must match everywhere credentials are written or read. |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Vercel web/Goat envs, Render | Google OAuth client shared by Gmail, Google Calendar, and Google Drive integrations; credentials remain separate per provider. Goat direct redirect URIs are `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/gmail/callback`, `.../api/integrations/google-calendar/callback`, and `.../api/integrations/google-drive/callback`; hosted previews should use `GOOGLE_OAUTH_CALLBACK_URL` instead. Enable the Drive API. Drive requests the restricted `drive.readonly` scope, so the OAuth app requires Google verification and may require a security assessment. The runner also needs these values to refresh access tokens. Configure `${GOAT_NEXT_PUBLIC_APP_URL}/api/webhooks/google-drive` as the public notification address; local HTTP development automatically uses reconciliation polling only. |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Vercel web/Goat envs, Render | Google OAuth client shared by Gmail, Google Calendar, and Google Drive integrations; credentials remain separate per provider. Goat direct redirect URIs are `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/gmail/callback`, `.../api/integrations/google-calendar/callback`, and `.../api/integrations/google-drive/callback`; hosted previews should use `GOOGLE_OAUTH_CALLBACK_URL` instead. Enable the Calendar, Drive, Docs, and Gmail APIs. Gmail requests restricted `gmail.readonly` plus restricted `gmail.compose`, the narrowest scope that permits draft creation; Goat separately gates draft creation and sending, and existing Gmail connections must reconnect once to enable drafts. Calendar requests `calendar.events` so main-chat workers can change explicitly requested events; existing read-only Calendar connections must reconnect to grant it. Drive requests restricted `drive.readonly` access plus the sensitive `documents` scope for confirmation-gated Google Doc creation and editing; existing Drive connections must reconnect once to enable creating and editing Google Docs. The OAuth app requires Google verification and restricted server-side access may require a security assessment. The runner also needs these values to refresh access tokens. Configure `${GOAT_NEXT_PUBLIC_APP_URL}/api/webhooks/google-drive` as the public notification address; local HTTP development automatically uses reconciliation polling only. |
 | `GOOGLE_OAUTH_CALLBACK_URL` | Vercel web/Goat envs | Optional stable Google callback broker for hosted PR previews, e.g. `https://oauth.opencompany.cloud/api/google/callback`. Goat production always uses direct `${GOAT_NEXT_PUBLIC_APP_URL}` callbacks even when this shared value is present. |
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Vercel web/Goat envs | 32+ character secret used only to sign Google integration OAuth state. |
 | `MCP_OAUTH_STATE_SECRET` | Vercel web/Goat envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. Goat Linear's direct callback is `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/linear/callback`. |
@@ -98,12 +98,12 @@ Set these in Vercel Production.
 | `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. |
 | `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Yes | Production callback URL. Must match WorkOS dashboard. |
 | `WORKOS_REDIRECT_URI` | No | Server-only fallback. Usually leave unset. |
-| `GOAT_NEXT_PUBLIC_APP_URL` | Goat only | Canonical Goat app origin. Local default is `https://localhost:3443` through Caddy; hosted value is the separate Goat domain. |
+| `GOAT_NEXT_PUBLIC_APP_URL` | Goat + Runner | Canonical Goat app origin. Local default is `https://localhost:3443` through Caddy; hosted value is the separate Goat domain. The runner uses it only for private bearer-protected Cloud Codex action calls. |
 | `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Goat only | Goat AuthKit callback URL. Must be registered in the same WorkOS environment as the core app. |
 | `GOAT_STRIPE_API_KEY` | Goat only | Dedicated restricted Stripe key for Goat customers, credit top-up Checkout, off-session auto-refill charges, and portal sessions. Store the live value in Infisical `prod` + `/goat`; use the corresponding development source for test mode. |
 | `GOAT_STRIPE_CHECKOUT_ENABLED` | Goat hosted only | Production live-payment gate for credit top-up Checkout and auto-refill charges. Keep false until the business has configured its actual Stripe Tax registrations, then set true in Infisical `prod` + `/goat` and sync it to Goat Vercel. Test/local Checkout is not gated. The Goat Stripe account's webhook endpoint (the shared web `/api/stripe/webhook` route) must be subscribed to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `payment_intent.succeeded`, and `payment_intent.payment_failed`; its signing secret must match `STRIPE_WEBHOOK_SECRET` before enabling top-ups. |
 | `GOAT_CREDITS_ENFORCEMENT_ENABLED` | Goat only | Set `true` to enforce usage credits: chat turns hard-stop with 402 on an empty balance and new ingestion pauses until the balance is positive. Usage debits and the ledger record regardless of this flag. Keep false in prod until `GOAT_STRIPE_CHECKOUT_ENABLED` is true and the starter-grant backfill (`scripts/goat-backfill-starter-credits.mjs`) has run — enforcement without purchasable top-ups locks users out. Needed by the Goat web app and the runner. |
-| `CRON_SECRET` | Goat hosted only | Bearer secret protecting the hourly Goat billing reconciliation route (charges due auto-refills, then releases paused ingestion backlogs). Store it in Infisical `prod` + `/goat`; sync it to the Goat Vercel project, which sends it as the cron Authorization bearer token. |
+| `CRON_SECRET` | Goat hosted only | Bearer secret protecting the hourly Goat cron routes: billing reconciliation (`/api/billing/reconcile`, charges due auto-refills then releases paused ingestion backlogs) and the onboarding email sweep (`/api/cron/onboarding-emails`). Store it in Infisical `prod` + `/goat`; sync it to the Goat Vercel project, which sends it as the cron Authorization bearer token. |
 | `GOAT_PORT` | Local Goat only | Internal Next.js port for `bun run dev:goat`; defaults to `3002`. |
 | `GOAT_HTTPS_PORT` | Local Goat only | Browser-facing Caddy HTTPS port for `bun run dev:goat`; defaults to `3443`. |
 | `OPENCOMPANY_GITHUB_ORG` | Yes | GitHub org where workspace repos are created. |
@@ -149,9 +149,9 @@ Set these in Vercel Production.
 | `GOAT_FEEDBACK_LINEAR_TEAM_ID` | Goat only | Target Goat Linear team UUID for the sidebar feedback widget. Reuses the shared `LINEAR_API_KEY`; only the team differs. Enable Triage on this team so reports land in the Triage inbox. |
 | `GOAT_FEEDBACK_LINEAR_PROJECT_ID` | No | Optional project routing for Goat feedback. |
 | `GOAT_FEEDBACK_LINEAR_LABELS` | No | Optional comma-separated labels added to Goat feedback issues. |
-| `RESEND_API_KEY` | No | Enables transactional email through Resend. Missing values disable email sends. |
-| `RESEND_WELCOME_FROM` | No | Sender identity for the signup welcome email. Defaults to `Louis from opencompany <louis@updates.opencompany.cloud>`. |
-| `RESEND_REPLY_TO` | No | Reply-to address for transactional emails. Defaults to `louis@opencompany.cloud`. |
+| `RESEND_API_KEY` | No | Enables transactional/lifecycle email through Resend. Missing values disable email sends. Used by the web signup welcome email and the Goat founder onboarding drip — for Goat, store it in Infisical `prod` + `/goat` (the `/web` copy does not reach Goat). |
+| `RESEND_WELCOME_FROM` | No | Sender identity for the signup welcome email and the Goat onboarding drip. Defaults to `Louis from opencompany <louis@updates.opencompany.cloud>`. |
+| `RESEND_REPLY_TO` | No | Reply-to address for transactional/lifecycle emails. Defaults to `louis@opencompany.cloud`. |
 | `RESEND_REGISTERED_USERS_SEGMENT_ID` | Required with `RESEND_API_KEY` | Resend Segment ID for the `Registered Users` Segment. Create the Segment in Resend and store its ID in Infisical/Vercel before enabling Resend. |
 | `NEXT_PUBLIC_POSTHOG_TOKEN` | No | Enables PostHog client/server analytics. |
 | `NEXT_PUBLIC_POSTHOG_HOST` | No | PostHog host. |
@@ -166,6 +166,10 @@ Set these in Vercel Production.
 | `BRAINTRUST_API_KEY` | Required with `BRAINTRUST_ENABLED` | Braintrust API key for runner traces. |
 | `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |
 | `BRAINTRUST_PROJECT_NAME` | No | Braintrust project name for runner traces. Defaults to `OpenCompany Runner`. |
+| `LATITUDE_API_KEY` | Required with `LATITUDE_PROJECT_SLUG` | Enables full-content Latitude LLM tracing for Goat chat and runner ingestion when both values are set. |
+| `LATITUDE_PROJECT_SLUG` | Required with `LATITUDE_API_KEY` | Latitude project slug that receives Goat LLM spans. |
+| `LATITUDE_SERVICE_NAME` | No | Service name attached to Latitude spans. Defaults to `opencompany-goat`; set `opencompany-runner-goat` for the runner. |
+| `LATITUDE_TELEMETRY_DISABLED` | No | Kill switch for Latitude export when set to `true`, `1`, `on`, or `yes`. |
 | `BETTER_STACK_ERRORS_DSN` | No | Server-side error capture DSN override. |
 | `BETTER_STACK_PREVIEW_SOURCE_NAME` | No | Local/operator override for `bun run preview:debug-session` output. Defaults to `opencompany-runner-preview`; not a source token. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENABLED` | No | Browser observability toggle. |
@@ -190,17 +194,20 @@ Set these in the separate Vercel project for Goat:
 | `WORKOS_API_KEY` | Yes | Goat WorkOS Application API key. Must differ from the core app so API-created invitations preserve Goat application context. |
 | `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. Use the same value only when the cookie domain setup intentionally allows it. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Google or Slack | Same base64-encoded 32-byte key used by web and runner. Required when Goat Gmail/Calendar/Drive or either Slack connection is enabled. |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Google OAuth app used by Goat Gmail, Google Calendar, and Drive connect flows. Must match the runner values so refresh works. Drive also requires the Drive API and restricted-scope verification. |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Google OAuth app used by Goat Gmail, Google Calendar, and Drive connect flows. Must match the runner values so refresh works. Gmail draft creation requires the restricted `gmail.compose` scope; existing Gmail connections without it must reconnect once. Drive also requires the Drive and Docs APIs plus restricted-scope verification; accounts connected before Google Doc creation and editing were added must reconnect once to grant it. |
 | `GOOGLE_OAUTH_CALLBACK_URL` | Google only | Optional stable Google callback broker URL for hosted previews. Leave unset for direct Goat-domain callbacks. |
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Google only | Dedicated secret used to sign Goat Google OAuth setup state. |
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls for the default Goat chat agent. Same key the runner uses for Goat tasks. |
+| `BLOB_READ_WRITE_TOKEN` | Yes | Private chat attachments and authenticated browser screenshots. Use the Goat project's Blob store token. |
 | `GOAT_NEXT_PUBLIC_APP_URL` | Yes | Canonical Goat domain origin, for example `https://goat.example.com`. Production URL generation fails closed when this is missing instead of falling back to the legacy web origin. |
 | `GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Yes | Goat callback URL, for example `https://goat.example.com/auth/callback`. |
-| `GOAT_AUTHKIT_DOMAIN` | MCP only | AuthKit issuer origin used to verify Goat MCP connector bearer tokens, for example `https://example.authkit.app`. The WorkOS environment also needs Client ID Metadata Documents and Dynamic Client Registration enabled. |
+| `GOAT_AUTHKIT_DOMAIN` | Goat auth | AuthKit issuer origin used to verify Goat MCP connector and Goat Quick bearer tokens, for example `https://example.authkit.app`. MCP setup also requires Client ID Metadata Documents and Dynamic Client Registration in WorkOS. |
+| `GOAT_MACOS_OAUTH_AUDIENCE` | Goat Quick | Resource audience (`aud`) WorkOS places in access tokens accepted by Goat's `/api/chat`. This is distinct from the OAuth client ID and is not a secret. |
+| `GOAT_MACOS_OAUTH_CLIENT_ID` | Goat Quick | Client ID of the first-party public WorkOS OAuth application used by Goat Quick. This is a public identifier used by the native client and is intentionally distinct from the access token audience. |
 | `GOAT_SLACK_CLIENT_ID` / `GOAT_SLACK_CLIENT_SECRET` | Slack only | Goat Slack ingestion app OAuth credentials (user-token app, `user_scope` only — no bot token). Distinct from `SLACK_MCP_*` and `SLACK_SUPPORT_*`. Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack/callback`. |
 | `GOAT_SLACK_SIGNING_SECRET` | Slack only | Slack app signing secret used to verify Events API deliveries at `/api/webhooks/slack/events`. |
 | `GOAT_SLACK_STATE_SECRET` | Slack only | Dedicated secret used to sign Goat Slack OAuth setup state. Generate with `openssl rand -base64 32`. |
-| `GOAT_SLACK_BOT_CLIENT_ID` / `GOAT_SLACK_BOT_CLIENT_SECRET` | Slack bot only | Goat Slack answer-bot app OAuth credentials (bot-token app, `scope=` — separate Slack app from the ingestion one). Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack-bot/callback`. |
+| `GOAT_SLACK_BOT_CLIENT_ID` / `GOAT_SLACK_BOT_CLIENT_SECRET` | Slack bot only | Goat Slack answer-bot app OAuth credentials (bot-token app, `scope=` — separate Slack app from the ingestion one). Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack-bot/callback`. The Slack app manifest must grant the bot scopes in `GOAT_SLACK_BOT_SCOPES` (`app_mentions:read`, `chat:write`, `channels:read`, `groups:read`, `channels:history`, `groups:history`, `im:history`, `reactions:write`, `users:read`, `users:read.email`), subscribe to bot events `app_mention`, `message.channels`, `message.groups`, `message.im`, and enable App Home → Messages Tab ("Allow users to send … messages from the messages tab") so members can DM the bot. Workspaces installed before a scope was added keep working for mentions; the settings page shows a reconnect banner until they re-OAuth. |
 | `GOAT_SLACK_BOT_SIGNING_SECRET` | Slack bot only | Slack bot app signing secret used to verify Events API deliveries at `/api/webhooks/slack-bot/events`. |
 | `GOAT_SLACK_BOT_STATE_SECRET` | Slack bot only | Dedicated secret used to sign Goat Slack bot install state. Generate with `openssl rand -base64 32`. |
 | `RUNNER_INTERNAL_URL` / `RUNNER_PUBLIC_URL` | Yes | Server-to-server runner URL. `RUNNER_INTERNAL_URL` wins when set. |
@@ -209,11 +216,19 @@ Set these in the separate Vercel project for Goat:
 | `ELECTRIC_SOURCE_ID` / `ELECTRIC_SOURCE_SECRET` | Electric Cloud only | Electric Cloud source auth. |
 | `ELECTRIC_SECRET` / `ELECTRIC_TOKEN` | Self-hosted Electric only | Optional self-hosted Electric auth. |
 | `REDIS_URL` (or `KV_URL`) | No | Enables resumable Goat chat streams (`resumable-stream`): refreshes reattach to in-flight turns, disconnects no longer cancel generation, and the stop button cancels via `/api/chat/[sessionId]/stop`. Without it, chat still works; a mid-stream disconnect persists the partial response instead. |
-| `GOAT_CHAT_CAPABILITIES_KILL_SWITCH` | No | Set to `true` to globally disable the Goat chat capabilities beta (the `use_capability` tool and its Slack/Linear/YouTube workers) regardless of per-user flags, without a deploy rollback. |
-| `SUPADATA_API_KEY` | No | In the Goat web app, enables the `youtube_transcript` chat capability (Supadata-backed). Also used by the runner's hosted YouTube tools. |
+| `GOAT_CHAT_ACTIONS_KILL_SWITCH` | No | Set to `true` to globally disable Goat chat actions (the `list_actions`/`use_action` tools over Attio, Slack, Gmail, Google Calendar, Google Drive, and Linear) for everyone, without a deploy rollback. Chat actions are otherwise on by default for connected integrations. |
+| `GOAT_CHAT_SANDBOX_IMAGE` | Recommended with browser sandbox | Complete Vercel Container Registry image reference built from `apps/goat/sandbox-image`. Without it, the first browser use provisions `agent-browser` and Chromium in a stock Node 24 sandbox. See `docs/goat-chat-sandbox.md`. |
+| `MONID_API_KEY` | Yes | Server-only API key for Goat’s curated managed social and lead capabilities. Store it in Infisical `prod` + `/goat`; it must never reach the browser or runner. |
+| `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH` | No | Set to `true` to remove all managed social and lead capabilities from new chat turns without disabling connected-integration actions. Already-started runs continue through billing reconciliation. |
+| `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` | No | Comma-separated exact managed action ids (for example `x.search_posts,linkedin.list_comments`) to remove individual reviewed endpoints from new chat turns. Execution also fails closed if a stale catalog attempts a disabled action. |
+| `SUPADATA_API_KEY` | No | Used by the runner's hosted YouTube tools (Supadata-backed). |
 | `GOAT_OBSERVABILITY_ENABLED` | No | Enables Goat OpenTelemetry traces and metrics when `true`, `1`, `on`, or `yes`. Missing or false disables the package. |
 | `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` | Required with Goat OTel | OTLP HTTP base endpoint for SigNoz, for example `https://ingest.<region>.signoz.cloud:443` or `http://signoz:4318`. |
 | `GOAT_OTEL_EXPORTER_OTLP_HEADERS` | SigNoz Cloud only | Comma-separated OTLP headers, usually `signoz-ingestion-key=<key>`. Leave empty for most self-hosted SigNoz setups. |
+| `LATITUDE_API_KEY` / `LATITUDE_PROJECT_SLUG` | No; both required to enable | Enables full-content Latitude tracing for Goat chat and Slack bot model calls. Store both in Infisical `prod` + `/goat` before enabling. |
+| `LATITUDE_SERVICE_NAME` | No | Latitude service name. Defaults to `opencompany-goat`. |
+| `LATITUDE_TELEMETRY_DISABLED` | No | Emergency kill switch for Latitude export. |
+| `NEXT_PUBLIC_GOAT_POSTHOG_TOKEN` / `NEXT_PUBLIC_GOAT_POSTHOG_HOST` | Yes | Enables product analytics in the dedicated Goat PostHog project. Store the values in Infisical `prod` + `/goat`; do not reuse the legacy web project token. |
 
 Goat main chat uses `EXA_API_KEY` for optional lightweight public-web search. The runner also needs
 `EXA_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `E2B_API_KEY`,
@@ -321,6 +336,7 @@ Set these in the Render `opencompany-runner` service.
 |---|---:|---|
 | `DATABASE_URL` | Hosted only | Same hosted Neon database used by web. Do not store this in Infisical `dev`; local setup writes branch DB URLs to `.env.local`. |
 | `RUNNER_INTERNAL_TOKEN` | Yes | Must match Vercel. |
+| `GOAT_NEXT_PUBLIC_APP_URL` | Yes for Cloud Codex actions | Canonical Goat origin. The runner calls its private integration-action gateway with `RUNNER_INTERNAL_TOKEN`; neither value enters the Codex sandbox. |
 | `RUNNER_STREAM_TOKEN_SECRET` | Yes | Runner signing secret used for hosted-tool polling job ids. |
 | `RUNNER_ALLOWED_ORIGINS` | Yes | Comma-separated browser origins allowed for runner requests. |
 | `RUNNER_PREVIEW_BASE_DOMAIN` | Goat Codex workspace only | Wildcard preview base hostname routed to the runner, without a scheme (for example `preview.goat.example.com`). Configure both the base and `*.preview.goat.example.com` on Render. Local development can use `preview.localhost:3040`. |
@@ -377,6 +393,9 @@ Set these in the Render `opencompany-runner` service.
 | `BRAINTRUST_API_KEY` | Required with `BRAINTRUST_ENABLED` | Braintrust API key for runner traces. |
 | `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |
 | `BRAINTRUST_PROJECT_NAME` | No | Braintrust project name for runner traces. Defaults to `OpenCompany Runner`. |
+| `LATITUDE_API_KEY` / `LATITUDE_PROJECT_SLUG` | No; both required to enable | Enables full-content Latitude tracing for Goat brain ingestion. Store both in Infisical `prod` + `/runner` before enabling. |
+| `LATITUDE_SERVICE_NAME` | No | Latitude service name. Set to `opencompany-runner-goat` for runner spans. |
+| `LATITUDE_TELEMETRY_DISABLED` | No | Emergency kill switch for Latitude export. |
 
 Render also injects `PORT` and `RENDER_GIT_COMMIT`; do not set them manually unless debugging.
 
@@ -430,10 +449,14 @@ Release-only script vars:
 
 | Var | Required | Purpose |
 |---|---:|---|
-| `EXPECTED_RELEASE` | No | Smoke check expects health endpoint release fields to start with this SHA. |
+| `EXPECTED_RELEASE` | No | Backwards-compatible expected SHA for every enabled smoke-check surface that does not set a surface-specific override. |
+| `EXPECTED_WEB_RELEASE` | No | Expected SHA for the web health check. Set to an empty value to require health without a release match. |
+| `EXPECTED_GOAT_RELEASE` | No | Expected SHA for the Goat health check. Set to an empty value to require health without a release match. |
+| `EXPECTED_RUNNER_RELEASE` | No | Expected SHA for the runner health check. Set to an empty value to require health without a release match. |
 | `RENDER_DEPLOY_TIMEOUT_MS` | No | Maximum time to wait for the Render deploy API before smoke checks. Defaults to `900000`. |
 | `RENDER_DEPLOY_POLL_MS` | No | Delay between Render deploy status polls. Defaults to `10000`. |
 | `RENDER_DEPLOY_STALE_MS` | No | Age after which an in-flight Render deploy is considered hung or superseded; the release script cancels such deploys before triggering (and cancels its own deploy on wait timeout) so they cannot block the queue. Defaults to `600000`. |
+| `VERCEL_READY_POLL_MS` | No | Delay between Vercel deployment readiness polls. Defaults to `2000`. |
 | `SMOKE_WEB` | No | Set to `false`, `0`, or `no` to skip web health checks. Defaults to enabled. |
 | `SMOKE_GOAT` | No | Set to `true`, `1`, or `yes` to include the Goat health check. Defaults to disabled for local script runs; the production workflow enables it. |
 | `SMOKE_RUNNER` | No | Set to `false`, `0`, or `no` to skip runner health checks. Defaults to enabled. |

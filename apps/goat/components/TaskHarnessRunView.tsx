@@ -32,15 +32,11 @@ export function TaskHarnessRunView({ run }: { run: GoatHarnessRunViewModel }) {
 
   if (!run.hasDurableRun) {
     return (
-      <div className="flex w-full max-w-[720px] flex-col gap-5">
+      <div className="flex w-full flex-col gap-3">
         <TranscriptMessage role="user" content={run.task.prompt} />
         {finalResult ? <TranscriptMessage role="assistant" content={finalResult} /> : null}
-        {run.task.error ? (
-          <div className="max-w-full rounded-lg border border-danger-border bg-danger-bg px-3 py-2.5 text-[13px] leading-5 text-danger md:max-w-[68%]">
-            {run.task.error}
-          </div>
-        ) : null}
-        <div className="max-w-full text-[13px] leading-6 text-ink-muted md:max-w-[68%]">
+        {run.task.error ? <ErrorBubble message={run.task.error} /> : null}
+        <div className="max-w-[80%] text-[13px] leading-5 text-ink-muted">
           {run.legacyDetailText}
         </div>
       </div>
@@ -48,11 +44,11 @@ export function TaskHarnessRunView({ run }: { run: GoatHarnessRunViewModel }) {
   }
 
   return (
-    <div className="flex w-full max-w-[720px] flex-col gap-5">
+    <div className="flex w-full flex-col gap-3">
       <TranscriptMessage role="user" content={run.userMessage?.content || run.task.prompt} />
 
       {run.toolCalls.length > 0 ? (
-        <div className="space-y-1.5 md:max-w-[72%]">
+        <div className="flex flex-col gap-1.5">
           {run.toolCalls.map((toolCall) => (
             <ToolCallRow key={toolCall.id} toolCall={toolCall} />
           ))}
@@ -60,46 +56,31 @@ export function TaskHarnessRunView({ run }: { run: GoatHarnessRunViewModel }) {
       ) : null}
 
       {assistantMessages.length > 0 ? (
-        <div className="flex flex-col gap-5">
-          {assistantMessages.map((message) => (
-            <AssistantMessage key={message.id} message={message} />
-          ))}
-        </div>
+        assistantMessages.map((message) => <AssistantMessage key={message.id} message={message} />)
       ) : run.task.status === "queued" || run.task.status === "running" ? (
-        <div className="max-w-full text-[13px] leading-6 text-ink-muted md:max-w-[68%]">
+        <div className="max-w-[80%] text-[13px] leading-5 text-ink-muted">
           The runner is preparing the task transcript.
         </div>
       ) : null}
 
-      {run.task.error ? (
-        <div className="max-w-full rounded-lg border border-danger-border bg-danger-bg px-3 py-2.5 text-[13px] leading-5 text-danger md:max-w-[68%]">
-          {run.task.error}
-        </div>
-      ) : null}
+      {run.task.error ? <ErrorBubble message={run.task.error} /> : null}
 
-      {run.resultArtifact ? (
-        <section className="mt-2 flex flex-col gap-2 border-border border-t pt-5">
-          <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-            Result
-          </h2>
-          <ArtifactCard artifact={run.resultArtifact} />
-        </section>
-      ) : finalResult ? (
-        <section className="mt-2 flex flex-col gap-2 border-border border-t pt-5">
-          <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-            Result
-          </h2>
-          <Markdown
-            content={finalResult}
-            className="rounded-lg bg-surface-muted px-3 py-2.5 text-[13px] leading-5 text-ink"
-          />
-        </section>
-      ) : null}
+      {run.resultArtifact ? <ArtifactCard artifact={run.resultArtifact} /> : null}
     </div>
   );
 }
 
-function ArtifactCard({ artifact }: { artifact: GoatRunArtifact }) {
+function ErrorBubble({ message }: { message: string }) {
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[80%] rounded-2xl rounded-bl-md bg-danger-bg px-3 py-2 text-[13px] leading-5 text-danger">
+        {message}
+      </div>
+    </div>
+  );
+}
+
+export function ArtifactCard({ artifact }: { artifact: GoatRunArtifact }) {
   return (
     <div className="rounded-lg border border-border bg-surface px-3.5 py-3 text-[13px] leading-5 shadow-sm">
       <div className="flex min-w-0 items-start gap-3">
@@ -129,7 +110,7 @@ function ArtifactCard({ artifact }: { artifact: GoatRunArtifact }) {
 function AssistantMessage({ message }: { message: GoatRunMessage }) {
   if (!message.content.trim() && message.status === "running") {
     return (
-      <div className="flex items-center gap-1.5 text-[13px] leading-6 text-ink-muted">
+      <div className="flex items-center gap-1.5 text-[13px] leading-5 text-ink-muted">
         <LoaderCircle size={12} strokeWidth={2} className="animate-spin text-warning" />
         Assistant is working
       </div>
@@ -139,18 +120,22 @@ function AssistantMessage({ message }: { message: GoatRunMessage }) {
   return <TranscriptMessage role="assistant" content={message.content} />;
 }
 
+// Mirrors the main chat bubbles: assistant replies are plain left-aligned text,
+// user messages are the dark right-aligned bubble.
 function TranscriptMessage({ role, content }: { role: "user" | "assistant"; content: string }) {
   if (role === "assistant") {
     return (
-      <div className="max-w-full break-words text-[14px] leading-6 text-ink/90 md:max-w-[68%]">
-        <Markdown content={content} />
+      <div className="flex justify-start">
+        <div className="max-w-[80%] break-words text-[13px] leading-5 text-ink">
+          <Markdown content={content} />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex justify-start">
-      <div className="max-w-full break-words rounded-2xl rounded-tl-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink md:max-w-[68%]">
+    <div className="flex flex-col items-end gap-1.5">
+      <div className="max-w-[80%] break-words rounded-2xl rounded-br-md bg-ink px-3 py-2 text-[13px] leading-5 text-canvas">
         {content}
       </div>
     </div>

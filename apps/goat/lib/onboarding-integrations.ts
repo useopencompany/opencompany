@@ -17,13 +17,13 @@ export function goatOnboardingConnectHref(connectHref: string) {
   return `${url.pathname}${url.search}`;
 }
 
-export function goatOnboardingConnectionError(provider: string | null, reason: string | null) {
+export function goatIntegrationConnectionError(provider: string | null, reason: string | null) {
   const name = providerName(provider);
   switch (reason) {
     case "admin_required":
       return `Only a workspace admin can connect ${name}.`;
     case "not_configured":
-      return `${name} is not configured for this environment yet.`;
+      return `${name} isn't available right now. Please try again later.`;
     case "session_mismatch":
       return `Sign in with the same account that started the ${name} connection, then try again.`;
     case "github_denied":
@@ -31,6 +31,7 @@ export function goatOnboardingConnectionError(provider: string | null, reason: s
     case "slack_denied":
     case "linear_denied":
     case "hubspot_denied":
+    case "latitude_denied":
       return `${name} authorization was cancelled.`;
     case "missing_code":
     case "missing_installation_id":
@@ -41,12 +42,23 @@ export function goatOnboardingConnectionError(provider: string | null, reason: s
   }
 }
 
+export const goatOnboardingConnectionError = goatIntegrationConnectionError;
+
+export function goatIntegrationConnectionSuccess(provider: string | null) {
+  const name = providerName(provider);
+  return name === "This source" ? "Integration connected." : `${name} connected.`;
+}
+
 function providerName(provider: string | null) {
   switch (provider) {
     case "github":
       return "GitHub";
     case "gmail":
       return "Gmail";
+    case "google_calendar":
+      return "Google Calendar";
+    case "google_drive":
+      return "Google Drive";
     case "linear":
       return "Linear";
     case "slack":
@@ -55,6 +67,16 @@ function providerName(provider: string | null) {
       return "Jamie";
     case "hubspot":
       return "HubSpot";
+    case "granola":
+      return "Granola";
+    case "fathom":
+      return "Fathom";
+    case "attio":
+      return "Attio";
+    case "stripe":
+      return "Stripe";
+    case "latitude":
+      return "Latitude";
     default:
       return "This source";
   }

@@ -3,6 +3,7 @@
 import {
   AlertCircle,
   BookOpen,
+  Bot,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
@@ -12,7 +13,8 @@ import {
   Square,
   Terminal,
 } from "lucide-react";
-import { useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import {
   CODEX_COMMAND_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
@@ -22,6 +24,7 @@ import {
   EDIT_TASK_SCHEDULE_TOOL_NAME,
   GOAT_BRAIN_TOOL_NAME,
   SCHEDULE_TASK_TOOL_NAME,
+  USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
 import {
   formatDebugValue,
@@ -39,15 +42,32 @@ export type CodexToolAction =
       answers: Record<string, { answers: string[] }>;
     };
 
+export type ActionApprovalDecision = "accept" | "accept_always" | "decline";
+
+export type ActionApprovalRequest = {
+  approvalId: string;
+  action: string;
+  decision: ActionApprovalDecision;
+  reason?: string;
+};
+
 export function ToolCallItem({
   tool,
   onCodexAction,
   allowCodexPlanActions = false,
+  onActionApproval,
+  allowActionApproval = false,
+  readOnly = false,
 }: {
   tool: ToolCallView;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   allowCodexPlanActions?: boolean;
+  onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
+  allowActionApproval?: boolean;
+  readOnly?: boolean;
 }) {
+  if (readOnly) return <ToolCallRow tool={tool} />;
+
   if (tool.name === GOAT_BRAIN_TOOL_NAME) {
     return <BrainToolCallRow tool={tool} />;
   }
@@ -62,7 +82,455 @@ export function ToolCallItem({
   if (tool.name === CODEX_QUESTION_TOOL_NAME && codexQuestionInput(tool.input)) {
     return <CodexQuestionRow tool={tool} onAction={onCodexAction} />;
   }
+  if (tool.name === USE_ACTION_TOOL_NAME && capabilityApprovalFromTool(tool)) {
+    return <LegacyCapabilityApprovalRow tool={tool} />;
+  }
+  if (
+    tool.name === USE_ACTION_TOOL_NAME &&
+    tool.state === "approval-requested" &&
+    tool.approvalId
+  ) {
+    // A pending approval mid-thread (the user kept chatting past it) stays a
+    // plain row: only the latest assistant message is actionable.
+    if (allowActionApproval && onActionApproval) {
+      if (managedCapabilityActionFromTool(tool)) {
+        return <CapabilityApprovalCard tool={tool} onDecision={onActionApproval} />;
+      }
+      return <ActionApprovalCard tool={tool} onDecision={onActionApproval} />;
+    }
+  }
   return <ToolCallRow tool={tool} />;
+}
+
+function LegacyCapabilityApprovalRow({ tool }: { tool: ToolCallView }) {
+  const approval = capabilityApprovalFromTool(tool)!;
+  const [status, setStatus] = useState(approval.status);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/capabilities/approvals/${encodeURIComponent(approval.runId)}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const value = (await response.json()) as { status?: unknown };
+        if (typeof value.status === "string") {
+          setStatus((current) =>
+            current === "awaiting_approval" ? (value.status as string) : current,
+          );
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [approval.runId]);
+
+  return (
+    <div
+      data-testid="chat-capability-approval"
+      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <div className="text-[12px] font-semibold text-ink">Approve paid capability?</div>
+      <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+        {capabilitySourceLabel(approval.source)} · {capabilityActionLabel(approval.action)}
+      </p>
+      <p className="mt-1 text-[11px] leading-4 text-ink-subtle">
+        Maximum charge {formatUsdMicros(approval.maxCostUsdMicros)}, including the platform fee. The
+        final charge may be lower.
+      </p>
+      <p className="mt-2 text-[11px] font-medium text-ink-subtle">
+        {capabilityApprovalStatusLabel(status)}
+      </p>
+    </div>
+  );
+}
+
+function CapabilityApprovalCard({
+  tool,
+  onDecision,
+}: {
+  tool: ToolCallView;
+  onDecision: (request: ActionApprovalRequest) => Promise<void>;
+}) {
+  const approvalId = tool.approvalId;
+  const action = managedCapabilityActionFromTool(tool);
+  const [quote, setQuote] = useState<{
+    source: string;
+    action: string;
+    status: string;
+    maxCostUsdMicros: number;
+    sessionBudgetUsdMicros: number;
+  } | null>(null);
+  const [submitting, setSubmitting] = useState<"accept" | "decline" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const summary = actionApprovalSummary(tool.input);
+
+  useEffect(() => {
+    if (!tool.toolCallId) return;
+    const controller = new AbortController();
+    void fetch(`/api/capabilities/approvals/by-tool-call/${encodeURIComponent(tool.toolCallId)}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not load the paid lookup quote.");
+        const value = (await response.json()) as Record<string, unknown>;
+        if (
+          typeof value.source !== "string" ||
+          typeof value.action !== "string" ||
+          typeof value.status !== "string" ||
+          typeof value.maxCostUsdMicros !== "number" ||
+          typeof value.sessionBudgetUsdMicros !== "number"
+        ) {
+          throw new Error("The paid lookup quote is invalid.");
+        }
+        setQuote({
+          source: value.source,
+          action: value.action,
+          status: value.status,
+          maxCostUsdMicros: value.maxCostUsdMicros,
+          sessionBudgetUsdMicros: value.sessionBudgetUsdMicros,
+        });
+      })
+      .catch((cause) => {
+        if (!controller.signal.aborted) {
+          setError(
+            cause instanceof Error ? cause.message : "Could not load the paid lookup quote.",
+          );
+        }
+      });
+    return () => controller.abort();
+  }, [tool.toolCallId]);
+
+  if (!approvalId || !action) return <ToolCallRow tool={tool} />;
+  const approvalAvailable = quote?.status === "awaiting_approval";
+
+  const decide = (decision: "accept" | "decline") => {
+    if (submitting || (decision === "accept" && !approvalAvailable)) return;
+    setError(null);
+    setSubmitting(decision);
+    void onDecision({
+      approvalId,
+      action,
+      decision,
+      ...(decision === "decline"
+        ? {
+            reason:
+              "The user declined this paid lookup. Do not retry it; continue without that data.",
+          }
+        : {}),
+    }).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : "Could not send your decision.");
+      setSubmitting(null);
+    });
+  };
+
+  return (
+    <div
+      data-testid="chat-capability-approval"
+      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <div className="text-[12px] font-semibold text-ink">Run paid lookup?</div>
+      <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+        {quote
+          ? `${capabilitySourceLabel(quote.source)} · ${capabilityActionLabel(quote.action)}`
+          : capabilityActionLabel(action)}
+      </p>
+      {summary.lines.length > 0 ? (
+        <dl className="mt-2 space-y-1">
+          {summary.lines.map((line) => (
+            <div key={line.label} className="flex gap-2 text-[12px] leading-5">
+              <dt className="w-20 shrink-0 text-ink-subtle">{line.label}</dt>
+              <dd className="min-w-0 break-words text-ink-muted">{line.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {quote ? (
+        <>
+          <p className="mt-2 text-[11px] leading-4 text-ink-subtle">
+            Up to {formatUsdMicros(quote.maxCostUsdMicros)}, including the platform fee — the final
+            charge may be lower.
+          </p>
+          <p className="mt-1 text-[11px] leading-4 text-ink-subtle">
+            This would exceed this session&apos;s {formatUsdMicros(quote.sessionBudgetUsdMicros)}{" "}
+            budget.
+          </p>
+        </>
+      ) : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={!approvalAvailable || submitting !== null}
+          onClick={() => decide("accept")}
+          className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {submitting === "accept"
+            ? "Running..."
+            : approvalAvailable && quote
+              ? `Approve for ${formatUsdMicros(quote.maxCostUsdMicros)}`
+              : quote
+                ? capabilityApprovalStatusLabel(quote.status)
+                : "Loading price..."}
+        </button>
+        <button
+          type="button"
+          disabled={submitting !== null}
+          onClick={() => decide("decline")}
+          className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+      {error ? (
+        <p className="mt-2 text-[11px] text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function ActionApprovalCard({
+  tool,
+  onDecision,
+}: {
+  tool: ToolCallView;
+  onDecision: (request: ActionApprovalRequest) => Promise<void>;
+}) {
+  const [submitting, setSubmitting] = useState<ActionApprovalDecision | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const summary = actionApprovalSummary(tool.input);
+  const approvalId = tool.approvalId;
+  const action =
+    isRecord(tool.input) && typeof tool.input.action === "string" ? tool.input.action : "";
+  if (!approvalId) return <ToolCallRow tool={tool} />;
+
+  const decide = (decision: ActionApprovalDecision) => {
+    if (submitting) return;
+    setError(null);
+    setSubmitting(decision);
+    void onDecision({ approvalId, action, decision }).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : "Could not send your decision.");
+      setSubmitting(null);
+    });
+    // No .finally reset on success: the part state flips to approval-responded
+    // and this card unmounts into the resolved row.
+  };
+
+  return (
+    <div
+      data-testid="chat-action-approval"
+      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <div className="text-[12px] font-semibold text-ink">{summary.heading}</div>
+      {summary.lines.length > 0 ? (
+        <dl className="mt-2 space-y-1">
+          {summary.lines.map((line) => (
+            <div key={line.label} className="flex gap-2 text-[12px] leading-5">
+              <dt className="w-20 shrink-0 text-ink-subtle">{line.label}</dt>
+              <dd className="min-w-0 break-words text-ink-muted">{line.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={submitting !== null}
+          onClick={() => decide("accept")}
+          className="rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
+          {submitting === "accept" ? "Running..." : "Accept"}
+        </button>
+        <button
+          type="button"
+          disabled={submitting !== null}
+          onClick={() => decide("accept_always")}
+          className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
+        >
+          {submitting === "accept_always" ? "Saving..." : "Always allow"}
+        </button>
+        <button
+          type="button"
+          disabled={submitting !== null}
+          onClick={() => decide("decline")}
+          className="rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-surface-hover disabled:opacity-50"
+        >
+          Decline
+        </button>
+      </div>
+      {error ? (
+        <p className="mt-2 text-[11px] text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function capabilityApprovalFromTool(tool: ToolCallView) {
+  if (!isRecord(tool.output) || tool.output.ok !== false || !isRecord(tool.output.error)) {
+    return null;
+  }
+  const error = tool.output.error;
+  const approval = isRecord(error.approval) ? error.approval : null;
+  const input = isRecord(tool.input) ? tool.input : null;
+  const params = input && isRecord(input.params) ? input.params : null;
+  if (
+    error.code !== "approval_required" ||
+    !approval ||
+    typeof approval.runId !== "string" ||
+    typeof approval.source !== "string" ||
+    typeof approval.action !== "string" ||
+    typeof approval.maxCostUsdMicros !== "number" ||
+    !params
+  ) {
+    return null;
+  }
+  return {
+    runId: approval.runId,
+    source: approval.source,
+    action: approval.action,
+    maxCostUsdMicros: approval.maxCostUsdMicros,
+    status: typeof approval.status === "string" ? approval.status : "awaiting_approval",
+    params,
+  };
+}
+
+const MANAGED_CAPABILITY_SOURCE_IDS = new Set([
+  "x",
+  "linkedin",
+  "youtube",
+  "instagram",
+  "tiktok",
+  "lead",
+  "seo",
+]);
+
+function managedCapabilityActionFromTool(tool: ToolCallView) {
+  if (!isRecord(tool.input) || typeof tool.input.action !== "string") return null;
+  const source = tool.input.action.split(".", 1)[0] ?? "";
+  return MANAGED_CAPABILITY_SOURCE_IDS.has(source) ? tool.input.action : null;
+}
+
+function capabilitySourceLabel(source: string) {
+  const labels: Record<string, string> = {
+    x: "X",
+    linkedin: "LinkedIn",
+    youtube: "YouTube",
+    instagram: "Instagram",
+    tiktok: "TikTok",
+    lead: "Prospecting",
+    seo: "SEO",
+  };
+  return labels[source] ?? source;
+}
+
+function capabilityActionLabel(action: string) {
+  const name = action.split(".").at(-1) ?? action;
+  return name
+    .split("_")
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function capabilityApprovalStatusLabel(status: string) {
+  if (status === "awaiting_approval" || status === "approved") return "No longer available";
+  if (status === "canceled") return "Canceled";
+  if (status === "expired") return "Expired";
+  if (status === "failed") return "Failed";
+  if (status === "stopped") return "Stopped";
+  if (status === "timed_out") return "Timed out";
+  if (status === "succeeded") return "Completed";
+  if (status === "executing" || status === "running" || status === "stopping") {
+    return "Running";
+  }
+  return "Already used";
+}
+
+function formatUsdMicros(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: value < 100_000 ? 3 : 2,
+    maximumFractionDigits: value < 100_000 ? 3 : 2,
+  }).format(value / 1_000_000);
+}
+
+// Human-readable confirmation content per action; the raw JSON stays behind
+// the regular expandable tool row, never on the card.
+function actionApprovalSummary(input: unknown): {
+  heading: string;
+  lines: Array<{ label: string; value: string }>;
+} {
+  const record = isRecord(input) ? input : {};
+  const action = typeof record.action === "string" ? record.action : "";
+  const params = isRecord(record.params) ? record.params : {};
+
+  if (action === "google_calendar.create_event") {
+    const lines: Array<{ label: string; value: string }> = [];
+    if (typeof params.summary === "string") lines.push({ label: "Event", value: params.summary });
+    const when = formatEventWindow(params.start, params.end, params.time_zone);
+    if (when) lines.push({ label: "When", value: when });
+    if (typeof params.location === "string") {
+      lines.push({ label: "Where", value: params.location });
+    }
+    if (Array.isArray(params.attendees) && params.attendees.length > 0) {
+      lines.push({
+        label: "Invites",
+        value: params.attendees.filter((entry) => typeof entry === "string").join(", "),
+      });
+    }
+    if (typeof params.calendar_id === "string" && params.calendar_id !== "primary") {
+      lines.push({ label: "Calendar", value: params.calendar_id });
+    }
+    if (typeof params.account === "string") {
+      lines.push({ label: "Account", value: params.account });
+    }
+    return { heading: "Add this event to your Google Calendar?", lines };
+  }
+
+  return {
+    heading: action
+      ? `Run ${action.split(".").join(" · ").split("_").join(" ")}?`
+      : "Run this action?",
+    lines: Object.entries(params).flatMap(([key, value]) => {
+      if (value === undefined || value === null) return [];
+      const rendered =
+        typeof value === "string" ? value : Array.isArray(value) ? value.join(", ") : String(value);
+      return rendered ? [{ label: key.split("_").join(" "), value: rendered }] : [];
+    }),
+  };
+}
+
+function formatEventWindow(start: unknown, end: unknown, timeZone: unknown) {
+  if (typeof start !== "string" || typeof end !== "string") return null;
+  const allDay = /^\d{4}-\d{2}-\d{2}$/.test(start);
+  if (allDay) {
+    return start === end ? `${start} (all day)` : `${start} – ${end} (all day)`;
+  }
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return `${start} – ${end}`;
+  }
+  const zone = typeof timeZone === "string" && timeZone ? timeZone : undefined;
+  try {
+    const dayFormat = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      ...(zone ? { timeZone: zone } : {}),
+    });
+    const timeFormat = new Intl.DateTimeFormat(undefined, {
+      timeStyle: "short",
+      ...(zone ? { timeZone: zone } : {}),
+    });
+    const sameDay = dayFormat.format(startDate) === dayFormat.format(endDate);
+    return sameDay
+      ? `${dayFormat.format(startDate)}, ${timeFormat.format(startDate)} – ${timeFormat.format(endDate)}`
+      : `${dayFormat.format(startDate)} ${timeFormat.format(startDate)} – ${dayFormat.format(endDate)} ${timeFormat.format(endDate)}`;
+  } catch {
+    return `${start} – ${end}`;
+  }
 }
 
 function CodexPlanRow({
@@ -343,29 +811,174 @@ function codexQuestionInput(
 }
 
 function ToolCallRow({ tool }: { tool: ToolCallView }) {
+  const [expanded, setExpanded] = useState(false);
   const meta = getToolCallMeta(tool);
   const Icon = meta.icon;
+  const hasOutput = tool.output !== undefined;
+  const screenshotUrl = browserScreenshotUrl(tool.output);
   return (
     <div
       data-testid={`chat-tool-call-${tool.name}`}
-      className="flex max-w-[80%] items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 text-[12px] shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+      className="-ml-1 max-w-[92%] text-[11.5px] leading-5 text-ink-muted"
     >
-      <Icon
-        size={14}
-        strokeWidth={2}
-        className={`shrink-0 ${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-1.5">
-          <span className="truncate font-medium leading-4 text-ink">{tool.label}</span>
-          <span className={`${meta.className} shrink-0 text-[11px] leading-4`}>
-            {tool.statusText}
+      <div className="flex min-w-0 max-w-full items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <ChevronRight
+            size={11}
+            strokeWidth={1.9}
+            className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+            <Icon
+              size={11}
+              strokeWidth={1.75}
+              className={`${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
+            />
           </span>
-        </div>
-        {tool.detail ? <p className="truncate leading-4 text-ink-subtle">{tool.detail}</p> : null}
+          <span title={tool.label} className="min-w-0 truncate font-medium text-ink/65">
+            {tool.label}
+          </span>
+          {tool.detail ? (
+            <span
+              title={tool.detail}
+              className="inline-flex min-w-0 max-w-[min(440px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
+            >
+              <span className="min-w-0 truncate">{tool.detail}</span>
+            </span>
+          ) : null}
+          {tool.statusText !== "Done" && tool.statusText !== "Failed" ? (
+            <span className={`${meta.className} shrink-0 text-[10.5px] font-medium`}>
+              {tool.statusText}
+            </span>
+          ) : null}
+        </button>
       </div>
+      {expanded ? (
+        <div className="ml-6 mt-1 border-l border-border pl-3">
+          <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input) || "No input"} />
+          {hasOutput ? (
+            <ToolPreviewBlock label="Output" value={formatDebugValue(tool.output) || "No output"} />
+          ) : null}
+          {tool.errorText?.trim() ? (
+            <ToolPreviewBlock label="Error" value={tool.errorText} />
+          ) : null}
+          {!hasOutput && !tool.errorText ? (
+            <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
+          ) : null}
+        </div>
+      ) : null}
+      {screenshotUrl ? (
+        // Browser screenshots are private, same-origin assets; Next's image optimizer cannot
+        // forward the viewer's auth cookie to the protected route.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={screenshotUrl}
+          alt="Screenshot captured by Goat's browser"
+          loading="lazy"
+          className="ml-6 mt-2 max-h-[560px] w-auto max-w-[calc(100%-1.5rem)] rounded-lg border border-border bg-surface object-contain"
+        />
+      ) : null}
     </div>
   );
+}
+
+export function SubagentRow({
+  tool,
+  childCount,
+  children,
+}: {
+  tool: ToolCallView;
+  childCount: number;
+  children: ReactNode;
+}) {
+  // Expanded while the subagent is still working so its live trace is visible; collapsed once it
+  // finishes to keep the transcript tidy (the user can re-open it).
+  const [expanded, setExpanded] = useState(tool.status === "running" || tool.status === "waiting");
+  const meta = getToolCallMeta(tool);
+  const result =
+    isRecord(tool.output) && typeof tool.output.result === "string"
+      ? tool.output.result.trim()
+      : "";
+  const stepLabel = childCount === 1 ? "1 step" : `${childCount} steps`;
+  return (
+    <div
+      data-testid={`chat-tool-call-${tool.name}`}
+      className="-ml-1 max-w-[92%] text-[11.5px] leading-5 text-ink-muted"
+    >
+      <div className="flex min-w-0 max-w-full items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <ChevronRight
+            size={11}
+            strokeWidth={1.9}
+            className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+            <Bot
+              size={11}
+              strokeWidth={1.75}
+              className={`${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
+            />
+          </span>
+          <span title={tool.label} className="min-w-0 truncate font-medium text-ink/65">
+            {tool.label}
+          </span>
+          {tool.detail ? (
+            <span
+              title={tool.detail}
+              className="inline-flex min-w-0 max-w-[min(440px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
+            >
+              <span className="min-w-0 truncate">{tool.detail}</span>
+            </span>
+          ) : null}
+          {childCount > 0 ? (
+            <span className="shrink-0 text-[10.5px] text-ink-subtle">{stepLabel}</span>
+          ) : null}
+          {tool.statusText !== "Done" && tool.statusText !== "Failed" ? (
+            <span className={`${meta.className} shrink-0 text-[10.5px] font-medium`}>
+              {tool.statusText}
+            </span>
+          ) : null}
+        </button>
+      </div>
+      {expanded ? (
+        <div className="ml-[13px] mt-1 flex flex-col gap-2 border-l border-border pl-3">
+          {childCount > 0 ? (
+            children
+          ) : (
+            <div className="py-1 text-[11px] text-ink-subtle">
+              {tool.status === "running" ? "Subagent working..." : "No steps recorded"}
+            </div>
+          )}
+          {result ? (
+            <div className="border-t border-border/60 pt-1.5">
+              <div className="mb-0.5 text-[10px] font-medium uppercase text-ink-subtle">Result</div>
+              <div className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-[11.5px] leading-5 text-ink/70">
+                {result}
+              </div>
+            </div>
+          ) : null}
+          {tool.errorText?.trim() ? (
+            <ToolPreviewBlock label="Error" value={tool.errorText} />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function browserScreenshotUrl(value: unknown) {
+  if (!isRecord(value) || typeof value.screenshotUrl !== "string") return null;
+  return value.screenshotUrl.startsWith("/api/chat-screenshots/") ? value.screenshotUrl : null;
 }
 
 function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
@@ -408,12 +1021,12 @@ function BrainToolCallRow({ tool }: { tool: ToolCallView }) {
       </div>
       {expanded ? (
         <div className="ml-6 mt-1 border-l border-border pl-3">
-          <BrainPreviewBlock label="Input" value={formatDebugValue(tool.input)} />
-          {commandPreview ? <BrainPreviewBlock label="Command" value={commandPreview} /> : null}
-          {stdoutPreview ? <BrainPreviewBlock label="Stdout" value={stdoutPreview} /> : null}
-          {parsedPreview ? <BrainPreviewBlock label="Parsed" value={parsedPreview} /> : null}
-          {stderrPreview ? <BrainPreviewBlock label="Stderr" value={stderrPreview} /> : null}
-          {errorPreview ? <BrainPreviewBlock label="Error" value={errorPreview} /> : null}
+          <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input)} />
+          {commandPreview ? <ToolPreviewBlock label="Command" value={commandPreview} /> : null}
+          {stdoutPreview ? <ToolPreviewBlock label="Stdout" value={stdoutPreview} /> : null}
+          {parsedPreview ? <ToolPreviewBlock label="Parsed" value={parsedPreview} /> : null}
+          {stderrPreview ? <ToolPreviewBlock label="Stderr" value={stderrPreview} /> : null}
+          {errorPreview ? <ToolPreviewBlock label="Error" value={errorPreview} /> : null}
           {!isGoatBrainToolOutput(tool.output) && !tool.errorText ? (
             <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
           ) : null}
@@ -464,14 +1077,14 @@ function CodexCommandRow({ tool }: { tool: ToolCallView }) {
       {expanded ? (
         <div className="ml-6 mt-1 border-l border-border pl-3">
           {outputPreview ? (
-            <BrainPreviewBlock label="Output" value={outputPreview} />
+            <ToolPreviewBlock label="Output" value={outputPreview} />
           ) : (
             <div className="py-1 text-[11px] text-ink-subtle">
               {output || tool.errorText ? "No output" : "Waiting for result"}
             </div>
           )}
           {tool.errorText?.trim() ? (
-            <BrainPreviewBlock label="Error" value={tool.errorText} />
+            <ToolPreviewBlock label="Error" value={tool.errorText} />
           ) : null}
         </div>
       ) : null}
@@ -558,7 +1171,7 @@ function BrainStatusText({ status }: { status: ToolCallView["status"] }) {
   );
 }
 
-function BrainPreviewBlock({ label, value }: { label: string; value: string }) {
+function ToolPreviewBlock({ label, value }: { label: string; value: string }) {
   return (
     <div className="py-1 first:pt-0">
       <div className="mb-0.5 text-[10px] font-medium uppercase text-ink-subtle">{label}</div>

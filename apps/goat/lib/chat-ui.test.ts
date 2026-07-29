@@ -4,9 +4,15 @@ import {
   CODEX_COMMAND_TOOL_PART_TYPE,
   compareGoatChatMessageOrder,
   type GoatStoredChatMessage,
+  LIST_ACTIONS_TOOL_PART_TYPE,
+  LIST_SKILLS_TOOL_PART_TYPE,
+  listedActionSourceIdsFromMessages,
+  listedSkillIdsFromMessages,
   nextGoatChatMessageCreatedAt,
   START_TASK_TOOL_PART_TYPE,
   toGoatChatUiMessage,
+  USE_SKILL_TOOL_PART_TYPE,
+  usedSkillIdsFromMessages,
 } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
@@ -180,6 +186,164 @@ describe("toGoatChatUiMessage", () => {
       updatedAt: "2026-07-04T12:02:33.400Z",
       durationMs: 153_400,
     });
+  });
+
+  it("exposes persisted context usage in message metadata", () => {
+    const message = storedAssistantMessage({
+      debugTrace: {
+        schemaVersion: "opencompany.chat.debug.v1",
+        model: DEFAULT_GOAT_MODEL,
+        usage: {
+          inputTokens: 14_000,
+          outputTokens: 200,
+          totalTokens: 14_200,
+        },
+      },
+    });
+
+    expect(toGoatChatUiMessage(message).metadata?.contextTokens).toBe(14_200);
+  });
+});
+
+describe("listedActionSourceIdsFromMessages", () => {
+  it("recovers successful action discovery from earlier persisted turns", () => {
+    const discovered = toGoatChatUiMessage(
+      storedAssistantMessage({
+        debugTrace: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          model: DEFAULT_GOAT_MODEL,
+          uiMessageParts: [
+            {
+              type: LIST_ACTIONS_TOOL_PART_TYPE,
+              toolCallId: "list_linkedin",
+              state: "output-available",
+              input: { source: "linkedin" },
+              output: {
+                ok: true,
+                source: {
+                  id: "linkedin",
+                  kind: "managed",
+                  label: "LinkedIn",
+                  description: "Metered public LinkedIn research.",
+                },
+                actions: [],
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(listedActionSourceIdsFromMessages([discovered])).toEqual(["linkedin"]);
+  });
+
+  it("ignores unsuccessful discovery results", () => {
+    const failed = {
+      id: "assistant_failed",
+      role: "assistant" as const,
+      parts: [
+        {
+          type: LIST_ACTIONS_TOOL_PART_TYPE,
+          toolCallId: "list_unknown",
+          state: "output-available" as const,
+          input: { source: "linkedin" as const },
+          output: {
+            ok: false as const,
+            error: {
+              code: "unknown_source" as const,
+              message: "Unknown source.",
+              availableSources: [],
+            },
+          },
+        },
+      ],
+    };
+
+    expect(listedActionSourceIdsFromMessages([failed])).toEqual([]);
+  });
+});
+
+describe("listedSkillIdsFromMessages", () => {
+  it("recovers the exact skills returned by successful discovery", () => {
+    const discovered = toGoatChatUiMessage(
+      storedAssistantMessage({
+        debugTrace: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          model: DEFAULT_GOAT_MODEL,
+          uiMessageParts: [
+            {
+              type: LIST_SKILLS_TOOL_PART_TYPE,
+              toolCallId: "list_skills_1",
+              state: "output-available",
+              input: { query: "product" },
+              output: {
+                ok: true,
+                skills: [
+                  {
+                    id: "product-feature",
+                    name: "Product feature",
+                    description: "Build and verify product changes.",
+                  },
+                ],
+                total: 1,
+                truncated: false,
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(listedSkillIdsFromMessages([discovered])).toEqual(["product-feature"]);
+  });
+
+  it("ignores skill discovery that did not produce an available output", () => {
+    const running = {
+      id: "assistant_running",
+      role: "assistant" as const,
+      parts: [
+        {
+          type: LIST_SKILLS_TOOL_PART_TYPE,
+          toolCallId: "list_skills_1",
+          state: "input-available" as const,
+          input: { query: "product" },
+        },
+      ],
+    };
+
+    expect(listedSkillIdsFromMessages([running])).toEqual([]);
+  });
+});
+
+describe("usedSkillIdsFromMessages", () => {
+  it("recovers skills whose instructions were loaded successfully", () => {
+    const loaded = toGoatChatUiMessage(
+      storedAssistantMessage({
+        debugTrace: {
+          schemaVersion: "opencompany.chat.debug.v1",
+          model: DEFAULT_GOAT_MODEL,
+          uiMessageParts: [
+            {
+              type: USE_SKILL_TOOL_PART_TYPE,
+              toolCallId: "use_skill_1",
+              state: "output-available",
+              input: { skill: "product-feature" },
+              output: {
+                ok: true,
+                skill: {
+                  id: "product-feature",
+                  name: "Product feature",
+                  description: "Build and verify product changes.",
+                  instructions: "Inspect, implement, and verify.",
+                },
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(usedSkillIdsFromMessages([loaded])).toEqual(["product-feature"]);
   });
 });
 

@@ -76,6 +76,36 @@ export function codexCliModelNameForModelId(modelId: string): string | null {
     : null;
 }
 
+// Sonnet is the default because it is fully covered by Claude subscription limits on
+// every plan; larger tiers are gated behind usage credits on some plans.
+export const CLAUDE_CODE_DEFAULT_MODEL_ID: AgentModelId = "anthropic/claude-sonnet-5";
+export const CLAUDE_CODE_AGENT_MODEL_IDS = [
+  "anthropic/claude-sonnet-5",
+  "anthropic/claude-opus-4.8",
+  "anthropic/claude-haiku-4.5",
+] as const satisfies readonly AgentModelId[];
+
+const CLAUDE_CODE_MODEL_ID_SET = new Set<string>(CLAUDE_CODE_AGENT_MODEL_IDS);
+
+export function isClaudeCodeModelId(value: string): value is AgentModelId {
+  return CLAUDE_CODE_MODEL_ID_SET.has(value);
+}
+
+// Gateway ids use dotted versions ("claude-opus-4.8"); the Claude CLI and API use
+// dashed ones ("claude-opus-4-8").
+export function claudeCodeCliModelNameForModelId(modelId: string): string | null {
+  if (!isClaudeCodeModelId(modelId)) return null;
+  return modelId.replace(/^anthropic\//, "").replace(/\./g, "-");
+}
+
+export function claudeCodeModelSupportsReasoningEffort(model: string): boolean {
+  return CLAUDE_CODE_AGENT_MODEL_IDS.some(
+    (modelId) =>
+      !modelId.includes("haiku") &&
+      (model === modelId || model === claudeCodeCliModelNameForModelId(modelId)),
+  );
+}
+
 // Ratings were seeded from public data on 2026-06-03 (Artificial Analysis
 // Intelligence Index, output tokens/sec; OpenRouter / provider output pricing)
 // using these buckets. Keep new models consistent with them:
@@ -394,9 +424,25 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     ratings: { capability: 1, speed: 3, cost: 1 },
   },
   {
+    id: "deepseek/deepseek-v4-pro",
+    type: "model",
+    contextWindowTokens: 1_000_000,
+    label: "DeepSeek V4 Pro",
+    description: "Flagship DeepSeek model for complex reasoning and long-running agent work.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
+    ratings: { capability: 3, speed: 2, cost: 1 },
+    reasoning: {
+      providerOptions: {},
+      exposure: "raw",
+    },
+  },
+  {
     id: "deepseek/deepseek-v4-flash",
     type: "model",
-    contextWindowTokens: 256_000,
+    contextWindowTokens: 1_000_000,
     label: "DeepSeek V4 Flash",
     description: "High-throughput DeepSeek model for cost-sensitive agent work.",
     category: "Fast",

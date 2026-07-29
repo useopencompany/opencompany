@@ -1,6 +1,7 @@
 import type { GoatChatMessageAttachment } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  extractGoatChatAttachmentTexts,
   hydrateGoatChatAttachmentParts,
   parseGoatChatAttachmentsInput,
 } from "@/lib/chat-attachments";
@@ -42,6 +43,25 @@ describe("parseGoatChatAttachmentsInput", () => {
     expect(attachment?.id).toMatch(/^goat_chat_att_/);
     expect(attachment?.kind).toBe("pdf");
     expect(attachment?.blobPathname).toBe("goat-chat/user_1/report.pdf");
+  });
+
+  it("accepts and canonicalizes SRT attachment metadata", () => {
+    const parsed = parseGoatChatAttachmentsInput(
+      [
+        submittedAttachment({
+          mediaType: "text/plain",
+          filename: "captions.srt",
+          blobUrl: "https://blob.example.com/goat-chat/user_1/captions.srt",
+        }),
+      ],
+      "user_1",
+    );
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.attachments[0]).toMatchObject({
+      kind: "srt",
+      mediaType: "application/x-subrip",
+      filename: "captions.srt",
+    });
   });
 
   it("rejects blobs outside the caller's prefix", () => {
@@ -172,6 +192,44 @@ describe("hydrateGoatChatAttachmentParts", () => {
     expect(parts.some((part) => part.type === "text" && part.text.includes("revenue,120"))).toBe(
       true,
     );
+    expect(getMock).not.toHaveBeenCalled();
+  });
+
+  it("extracts and replays SRT text without a model attachment capability", async () => {
+    const subtitle = "1\n00:00:00,000 --> 00:00:01,000\nHello from the subtitles.";
+    getMock.mockResolvedValue({
+      statusCode: 200,
+      stream: blobStream(Buffer.from(subtitle)),
+    });
+    const attachment = storedAttachment({
+      id: "goat_chat_att_srt",
+      kind: "srt",
+      mediaType: "application/x-subrip",
+      filename: "captions.srt",
+      blobUrl: "https://blob.example.com/goat-chat/user_1/captions.srt",
+    });
+
+    const attachmentTexts = await extractGoatChatAttachmentTexts([attachment]);
+    expect(attachmentTexts).toEqual({ goat_chat_att_srt: subtitle });
+
+    getMock.mockClear();
+    const hydrated = await hydrateGoatChatAttachmentParts({
+      uiMessages: [userMessage("m1")],
+      storedMessages: [
+        {
+          id: "m1",
+          role: "user",
+          attachments: [attachment],
+          attachmentTexts,
+        },
+      ],
+      modelId: "moonshotai/kimi-k2.6",
+    });
+    expect(
+      hydrated[0]?.parts.some(
+        (part) => part.type === "text" && part.text.includes("Hello from the subtitles."),
+      ),
+    ).toBe(true);
     expect(getMock).not.toHaveBeenCalled();
   });
 

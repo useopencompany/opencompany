@@ -3,7 +3,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatBrainView } from "@/components/GoatBrainView";
-import { GoatBrainRoute, GoatPreferencesSettingsRoute } from "./GoatRoutes";
+import {
+  GoatBrainRoute,
+  GoatMcpSettingsRoute,
+  GoatPreferencesSettingsRoute,
+  GoatSkillEditorRoute,
+  GoatWorkflowEditorRoute,
+} from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -20,15 +26,27 @@ const appDataMock = vi.hoisted(() => ({
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
     workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
-    featureFlags: { taskSpawning: false, localCodexBridge: false, chatCapabilities: false },
+    featureFlags: { taskSpawning: false, localCodexBridge: false },
     integrations: {},
+    mcpSetup: { preferredClient: null, completedAt: null },
   },
 }));
 
 const userPreferencesMock = vi.hoisted(() => ({
   updateGoatLocalCodexBetaAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateGoatTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
-  updateGoatChatCapabilitiesBetaAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+}));
+
+const workflowActionsMock = vi.hoisted(() => ({
+  updateGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
+  archiveGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
+  createGoatWorkflowAction: vi.fn(async () => ({ ok: true, slug: "test-workflow" })),
+}));
+
+const skillActionsMock = vi.hoisted(() => ({
+  updateGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
+  archiveGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
+  createGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
 }));
 
 const themeMock = vi.hoisted(() => ({
@@ -79,6 +97,10 @@ vi.mock("@/components/AttioIntegrationSetup", () => ({
   AttioIntegrationSetup: () => null,
 }));
 
+vi.mock("@/components/StripeIntegrationSetup", () => ({
+  StripeIntegrationSetup: () => null,
+}));
+
 vi.mock("@/components/McpSetupGuide", () => ({
   McpSetupGuide: () => <div data-testid="mcp-setup-guide" />,
 }));
@@ -102,7 +124,18 @@ vi.mock("@/components/SettingsIntegrationsPanel", () => ({
 vi.mock("@/lib/user-preferences", () => ({
   updateGoatLocalCodexBetaAction: userPreferencesMock.updateGoatLocalCodexBetaAction,
   updateGoatTaskSpawningAction: userPreferencesMock.updateGoatTaskSpawningAction,
-  updateGoatChatCapabilitiesBetaAction: userPreferencesMock.updateGoatChatCapabilitiesBetaAction,
+}));
+
+vi.mock("@/lib/workflow-actions", () => ({
+  updateGoatWorkflowAction: workflowActionsMock.updateGoatWorkflowAction,
+  archiveGoatWorkflowAction: workflowActionsMock.archiveGoatWorkflowAction,
+  createGoatWorkflowAction: workflowActionsMock.createGoatWorkflowAction,
+}));
+
+vi.mock("@/lib/skill-actions", () => ({
+  updateGoatSkillAction: skillActionsMock.updateGoatSkillAction,
+  archiveGoatSkillAction: skillActionsMock.archiveGoatSkillAction,
+  createGoatSkillAction: skillActionsMock.createGoatSkillAction,
 }));
 
 vi.mock("@/components/ThemeProvider", () => ({
@@ -153,6 +186,17 @@ describe("GoatSettingsRoute", () => {
 
     await user.keyboard("{ArrowLeft}");
     expect(themeMock.setTheme).toHaveBeenLastCalledWith("light");
+  });
+
+  it("brands MCP settings as OpenCompany", () => {
+    const view = render(<GoatMcpSettingsRoute />);
+
+    expect(
+      screen.getByText(
+        "Connect Claude, ChatGPT, or Cursor to everything you can access in OpenCompany.",
+      ),
+    ).toBeInTheDocument();
+    expect(view.container).not.toHaveTextContent("Goat");
   });
 
   it("shows the Local Codex bridge beta switch and persists changes", async () => {
@@ -277,6 +321,7 @@ describe("GoatBrainRoute", () => {
   ])("uses Overview for $label", ({ path }) => {
     const overviewStats = {
       windowStartedAt: "2026-07-08T09:00:00.000Z",
+      itemsAddedLast7Days: 5,
       retrievalsLast7Days: 12,
       activeSources: 3,
     };
@@ -285,7 +330,7 @@ describe("GoatBrainRoute", () => {
         path={path}
         routeBrainId="goat_brain_team"
         selectedBrain={teamBrain}
-        initialBrainSnapshot={brainSnapshot}
+        initialBrainSnapshot={null}
         initialOverviewStats={overviewStats}
       />,
     );
@@ -296,8 +341,114 @@ describe("GoatBrainRoute", () => {
         initialFolderPath: null,
         initialBrainId: null,
         overviewStats,
+        initialDataLoaded: false,
       }),
       undefined,
+    );
+  });
+});
+
+describe("GoatWorkflowEditorRoute", () => {
+  beforeEach(() => {
+    workflowActionsMock.updateGoatWorkflowAction.mockClear();
+    routerMock.refresh.mockReset();
+  });
+
+  it("edits instructions with a rich text editor instead of a plain textarea", async () => {
+    const workflow = {
+      id: "test-workflow",
+      name: "Test workflow",
+      description: "Does a thing",
+      instructions: "Step one.\n\nStep two.",
+      model: "",
+    };
+
+    const { container } = render(
+      <GoatWorkflowEditorRoute
+        workflow={workflow}
+        initialStatus="draft"
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(await screen.findByText("Step one.")).toBeInTheDocument();
+    expect(screen.getByText("Step two.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(workflowActionsMock.updateGoatWorkflowAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: "test-workflow",
+          instructions: "Step one.\n\nStep two.",
+        }),
+      ),
+    );
+  });
+
+  it("hints at @-mentioning a skill only when the workspace has one to mention", () => {
+    const workflow = {
+      id: "test-workflow",
+      name: "Test workflow",
+      description: "Does a thing",
+      instructions: "Step one.",
+      model: "",
+    };
+
+    const { rerender } = render(
+      <GoatWorkflowEditorRoute
+        workflow={workflow}
+        initialStatus="draft"
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+    expect(screen.queryByText(/mention a skill/i)).not.toBeInTheDocument();
+
+    rerender(
+      <GoatWorkflowEditorRoute
+        workflow={workflow}
+        initialStatus="draft"
+        canEdit
+        skillCatalog={[{ id: "standup-notes", name: "Standup notes", description: "" }]}
+      />,
+    );
+    expect(screen.getByText(/mention a skill/i)).toBeInTheDocument();
+  });
+});
+
+describe("GoatSkillEditorRoute", () => {
+  beforeEach(() => {
+    skillActionsMock.updateGoatSkillAction.mockClear();
+    routerMock.refresh.mockReset();
+  });
+
+  it("edits instructions with a rich text editor instead of a plain textarea", async () => {
+    const skill = {
+      id: "test-skill",
+      name: "Test skill",
+      description: "Does a thing",
+      instructions: "Use this when asked.",
+    };
+
+    const { container } = render(
+      <GoatSkillEditorRoute skill={skill} initialStatus="draft" canEdit />,
+    );
+
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(await screen.findByText("Use this when asked.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(skillActionsMock.updateGoatSkillAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: "test-skill",
+          instructions: "Use this when asked.",
+        }),
+      ),
     );
   });
 });

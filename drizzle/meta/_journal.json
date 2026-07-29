@@ -1023,6 +1023,160 @@
       "when": 1784652411000,
       "tag": "0145_goat_billing_v4",
       "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 1784652412000,
+      "tag": "0146_goat_codex_chat_handoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1784652413000,
+      "tag": "0147_goat_brain_pointer_hydration",
+      "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1784652414000,
+      "tag": "0148_goat_integration_capability_modes",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1784652415000,
+      "tag": "0149_goat_slack_bot_v2",
+      "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1784793600000,
+      "tag": "0150_goat_github_pr_buffer",
+      "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1784793601000,
+      "tag": "0151_goat_managed_capabilities",
+      "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1784793602000,
+      "tag": "0152_goat_seo_capability",
+      "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1785141000000,
+      "tag": "0153_goat_stripe_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1785141001000,
+      "tag": "0154_goat_chat_shares",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1785141002000,
+      "tag": "0155_goat_codex_brain_tools",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1785141003000,
+      "tag": "0156_goat_onboarding_emails",
+      "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1785141004000,
+      "tag": "0157_goat_chat_sandbox_usage",
+      "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "7",
+      "when": 1785174319867,
+      "tag": "0158_goat_brain_srt_assets",
+      "breakpoints": true
+    },
+    {
+      "idx": 159,
+      "version": "7",
+      "when": 1785230000000,
+      "tag": "0159_goat_codex_read_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "7",
+      "when": 1785239118176,
+      "tag": "0160_goat_codex_engine_recovery_boundary",
+      "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "7",
+      "when": 1785239118177,
+      "tag": "0161_goat_latitude_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 162,
+      "version": "7",
+      "when": 1785240000000,
+      "tag": "0162_goat_claude_code_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 163,
+      "version": "7",
+      "when": 1785240000001,
+      "tag": "0163_goat_workflow_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 164,
+      "version": "7",
+      "when": 1785240000002,
+      "tag": "0164_goat_workflows_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 165,
+      "version": "7",
+      "when": 1785240000003,
+      "tag": "0165_goat_subagent_event_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 1785240000004,
+      "tag": "0166_goat_capability_session_budget",
+      "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "7",
+      "when": 1785270615449,
+      "tag": "0167_goat_remove_browser_listing_experiment",
+      "breakpoints": true
     }
   ]
 }

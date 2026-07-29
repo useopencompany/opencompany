@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/neon-http";
 import { describe, expect, it, vi } from "vitest";
-import { claimGoatSlackBotEvent } from "./goat-slack-bot";
+import { claimGoatSlackBotEvent, getGoatSlackBotThreadParticipation } from "./goat-slack-bot";
 
 describe("claimGoatSlackBotEvent", () => {
   it("claims a new event with a lease that only stale unfinished deliveries can replace", async () => {
@@ -31,5 +31,29 @@ describe("claimGoatSlackBotEvent", () => {
     await expect(
       claimGoatSlackBotEvent({ eventId: "Ev123", teamId: "T123" }, db),
     ).resolves.toBeNull();
+  });
+});
+
+describe("getGoatSlackBotThreadParticipation", () => {
+  it("excludes threads whose latest bot reply is older than the participation TTL", async () => {
+    const query = vi.fn(async (_statement: string, _params: unknown[], _options: object) => ({
+      rows: [],
+    }));
+    const db = drizzle(query as never);
+
+    await getGoatSlackBotThreadParticipation(
+      {
+        teamId: "T123",
+        channelId: "C123",
+        threadTs: "1784196000.000100",
+        now: new Date("2026-07-31T12:00:00.000Z"),
+      },
+      db,
+    );
+
+    const [statement, params] = query.mock.calls[0]!;
+    const normalized = statement.replace(/\s+/g, " ");
+    expect(normalized).toContain('"updated_at" >=');
+    expect(params).toContain(new Date("2026-07-01T12:00:00.000Z").toISOString());
   });
 });

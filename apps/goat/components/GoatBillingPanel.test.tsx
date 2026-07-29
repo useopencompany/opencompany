@@ -12,6 +12,12 @@ vi.mock("@/lib/billing/actions", () => ({
 const base: GoatBillingPanelData = {
   creditBalanceUsdMicros: 5_000_000,
   spendThisMonthUsdMicros: 1_230_000,
+  spendThisMonthByCategory: {
+    chat: 800_000,
+    ingestion: 300_000,
+    capabilities: 130_000,
+  },
+  recentActivity: [],
   lowBalanceWarnUsdMicros: 2_000_000,
   topUpAmountsCents: [500, 1_000, 2_000, 5_000, 10_000],
   defaultTopUpCents: 2_000,
@@ -45,6 +51,7 @@ describe("GoatBillingPanel", () => {
 
     expect(screen.getByText(/model cost \+ 20% platform fee, charged per message/i)).toBeVisible();
     expect(screen.getByText(/\$0\.20 per 50 ingested items/i)).toBeVisible();
+    expect(screen.getByText(/underlying provider cost \+ 20% platform fee/i)).toBeVisible();
   });
 
   it("warns when the balance is empty", () => {

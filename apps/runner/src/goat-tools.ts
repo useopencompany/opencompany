@@ -1,4 +1,9 @@
 import type { RuntimeToolName } from "@opencompany/agent-runtime";
+import {
+  BROWSER_TOOL_DESCRIPTIONS,
+  BROWSER_TOOL_INPUT_SCHEMAS,
+  isBrowserToolName,
+} from "@opencompany/browser-tools";
 import type { GoatTaskToolName } from "@opencompany/db/goat-schema";
 import { GOAT_SPANS, recordGoatToolCall, startGoatSpan } from "@opencompany/goat-observability";
 import { jsonSchema, type ToolSet, tool } from "ai";
@@ -19,6 +24,11 @@ import {
   type GoatGoogleToolName,
   isGoatGoogleToolName,
 } from "./goat-google-tools";
+import {
+  executeGoatLatitudeMcpTool,
+  type GoatLatitudeMcpToolName,
+  isGoatLatitudeMcpToolName,
+} from "./goat-latitude-mcp-tools";
 import {
   executeGoatLinearMcpTool,
   type GoatLinearMcpToolName,
@@ -54,6 +64,8 @@ export const GOAT_TASK_TOOL_NAMES = [
   "calendar_get_freebusy",
   "linear_search_tools",
   "linear_use_tool",
+  "latitude_search_tools",
+  "latitude_use_tool",
   "github_clone_repository",
   "github_shell",
   "github_status",
@@ -376,6 +388,18 @@ async function executeGoatTaskTool(input: {
       usage: zeroCostToolUsage(input.toolName, linearOperation(input.toolName, input.toolInput)),
     };
   }
+  if (isGoatLatitudeMcpToolName(input.toolName)) {
+    const output = await executeGoatLatitudeMcpTool({
+      name: input.toolName as GoatLatitudeMcpToolName,
+      args: input.toolInput,
+      userWorkosId: input.userWorkosId,
+      signal: input.signal,
+    });
+    return {
+      output,
+      usage: zeroCostToolUsage(input.toolName, remoteMcpOperation(input.toolName, input.toolInput)),
+    };
+  }
   if (isGoatGitHubToolName(input.toolName)) {
     const output = await input.githubSession.execute({
       name: input.toolName as GoatGitHubToolName,
@@ -539,31 +563,10 @@ function compactSocialItem(value: unknown): unknown {
 }
 
 function goatToolDescription(toolName: GoatTaskToolName) {
+  if (isBrowserToolName(toolName)) return BROWSER_TOOL_DESCRIPTIONS[toolName];
   switch (toolName) {
     case "exa_search":
       return "Search the web with Exa and return concise source results. A run can use at most 32 Exa searches. After 8 successful searches in a reflection window, the next Exa call returns reflectionRequired; emit a quick assistant update before retrying.";
-    case "browser_open":
-      return "Open a rendered browser page at an absolute http(s) URL in the task's isolated browser session. Read/research only: never log in, check out, purchase, mutate accounts, or handle credentials.";
-    case "browser_snapshot":
-      return "Return a compact accessibility snapshot of the active rendered browser page, with element refs like @e1 for later browser_click or browser_fill calls. Use includeUrls=true only when the task needs direct link URLs from a listing page.";
-    case "browser_click":
-      return "Click one element by a browser_snapshot ref like @e1. Use only for read/research navigation, filters, sorting, tabs, consent dismissal, or non-destructive interaction.";
-    case "browser_fill":
-      return "Fill one input by a browser_snapshot ref like @e1. Use for search boxes and read-only filters only; never enter credentials, payment details, or private user data.";
-    case "browser_wait":
-      return "Wait briefly for browser page state: milliseconds, an element ref, text, URL pattern, or load state.";
-    case "browser_read":
-      return "Read text from either the active rendered browser page or an absolute http(s) URL. Optionally filter returned lines by text. Prefer this over snapshots when page text is the main evidence.";
-    case "browser_get":
-      return "Get one targeted value from the active browser page: url, title, text, value, attr, or count. Prefer this over snapshots when you know what to inspect. For direct URLs from link refs, use target attr with attribute href instead of guessing slugs.";
-    case "browser_find":
-      return "Use semantic locators to find or act on one element without taking a broad snapshot. Supports role, text, label, placeholder, alt, title, testid, first, last, and nth.";
-    case "browser_scroll":
-      return "Scroll the active browser viewport up, down, left, or right. Use before a scoped follow-up snapshot or targeted get when content is below the fold.";
-    case "browser_screenshot":
-      return "Capture a screenshot of the active browser page for traceability. The output includes the saved screenshot path from agent-browser.";
-    case "browser_close":
-      return "Close the task's isolated browser session. Usually automatic at cleanup, but call it when browser work is done.";
     case "x_search_posts":
       return "Search public X posts through Apify-backed scraping. Use for current public conversations, hashtags, mentions, and posts from specific users. Public data only; no private, protected, or login-gated access.";
     case "x_get_profile":
@@ -594,6 +597,10 @@ function goatToolDescription(toolName: GoatTaskToolName) {
       return "List available Linear MCP tools, including names, descriptions, and input schemas. Call this before linear_use_tool.";
     case "linear_use_tool":
       return "Run one Linear MCP tool by exact name from linear_search_tools. Only create or update Linear records when the user explicitly asked for that action.";
+    case "latitude_search_tools":
+      return "List available Latitude MCP tools, including names, descriptions, annotations, and input schemas. Call this before latitude_use_tool.";
+    case "latitude_use_tool":
+      return "Run one Latitude MCP tool by exact name from latitude_search_tools. Only create or change Latitude resources when the user explicitly asked for that action.";
     case "github_clone_repository":
       return "Clone one connected GitHub repository into an ephemeral task sandbox. Call this before github_shell, github_status, or github_open_pull_request.";
     case "github_shell":
@@ -606,6 +613,7 @@ function goatToolDescription(toolName: GoatTaskToolName) {
 }
 
 function goatToolInputSchema(toolName: GoatTaskToolName) {
+  if (isBrowserToolName(toolName)) return BROWSER_TOOL_INPUT_SCHEMAS[toolName];
   switch (toolName) {
     case "exa_search":
       return {
@@ -620,137 +628,6 @@ function goatToolInputSchema(toolName: GoatTaskToolName) {
           },
         },
         required: ["query"],
-      } as const;
-    case "browser_open":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          url: { type: "string" },
-        },
-        required: ["url"],
-      } as const;
-    case "browser_snapshot":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          interactive: { type: "boolean" },
-          includeUrls: { type: "boolean" },
-          compact: { type: "boolean" },
-          depth: { type: "number", minimum: 1, maximum: 10 },
-          selector: { type: "string" },
-        },
-      } as const;
-    case "browser_click":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          ref: { type: "string" },
-        },
-        required: ["ref"],
-      } as const;
-    case "browser_fill":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          ref: { type: "string" },
-          text: { type: "string" },
-        },
-        required: ["ref", "text"],
-      } as const;
-    case "browser_wait":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          milliseconds: { type: "number", minimum: 100, maximum: 30000 },
-          ref: { type: "string" },
-          text: { type: "string" },
-          urlPattern: { type: "string" },
-          loadState: { type: "string", enum: ["load", "domcontentloaded", "networkidle"] },
-        },
-      } as const;
-    case "browser_read":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          url: { type: "string" },
-          filter: { type: "string" },
-          outline: { type: "boolean" },
-        },
-      } as const;
-    case "browser_get":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          target: { type: "string", enum: ["url", "title", "text", "value", "attr", "count"] },
-          ref: { type: "string" },
-          selector: { type: "string" },
-          attribute: { type: "string" },
-        },
-        required: ["target"],
-      } as const;
-    case "browser_find":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          by: {
-            type: "string",
-            enum: [
-              "role",
-              "text",
-              "label",
-              "placeholder",
-              "alt",
-              "title",
-              "testid",
-              "first",
-              "last",
-              "nth",
-            ],
-          },
-          value: { type: "string" },
-          action: {
-            type: "string",
-            enum: ["click", "fill", "type", "hover", "focus", "check", "uncheck"],
-          },
-          text: { type: "string" },
-          name: { type: "string" },
-          exact: { type: "boolean" },
-          index: { type: "number", minimum: 0, maximum: 10000 },
-        },
-        required: ["by", "value", "action"],
-      } as const;
-    case "browser_scroll":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          direction: { type: "string", enum: ["up", "down", "left", "right"] },
-          pixels: { type: "number", minimum: 1, maximum: 5000 },
-        },
-        required: ["direction"],
-      } as const;
-    case "browser_screenshot":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          fullPage: { type: "boolean" },
-          annotate: { type: "boolean" },
-        },
-      } as const;
-    case "browser_close":
-      return {
-        type: "object",
-        additionalProperties: false,
-        properties: {},
       } as const;
     case "x_search_posts":
       return {
@@ -898,6 +775,7 @@ function goatToolInputSchema(toolName: GoatTaskToolName) {
         },
       } as const;
     case "linear_use_tool":
+    case "latitude_use_tool":
       return {
         type: "object",
         additionalProperties: false,
@@ -909,6 +787,14 @@ function goatToolInputSchema(toolName: GoatTaskToolName) {
           },
         },
         required: ["tool"],
+      } as const;
+    case "latitude_search_tools":
+      return {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: { type: "string" },
+        },
       } as const;
     case "github_clone_repository":
       return {
@@ -970,6 +856,7 @@ function goatToolProvider(toolName: GoatTaskToolName) {
   if (toolName.startsWith("gmail_")) return "gmail";
   if (toolName.startsWith("calendar_")) return "google_calendar";
   if (toolName.startsWith("linear_")) return "linear";
+  if (toolName.startsWith("latitude_")) return "latitude";
   if (toolName.startsWith("github_")) return "github";
   if (toolName.startsWith("browser_")) return "browser";
   if (toolName.startsWith("x_") || toolName === "social_get_job") return "x";
@@ -979,6 +866,11 @@ function goatToolProvider(toolName: GoatTaskToolName) {
 
 function linearOperation(toolName: GoatTaskToolName, toolInput: unknown) {
   if (toolName !== "linear_use_tool") return toolName;
+  return remoteMcpOperation(toolName, toolInput);
+}
+
+function remoteMcpOperation(toolName: GoatTaskToolName, toolInput: unknown) {
+  if (!toolName.endsWith("_use_tool")) return toolName;
   return readString(asRecord(toolInput), "tool") || toolName;
 }
 

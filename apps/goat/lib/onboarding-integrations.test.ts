@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GOAT_ONBOARDING_CONNECTION_RETURN_TO,
+  goatIntegrationConnectionSuccess,
   goatOnboardingConnectHref,
   goatOnboardingConnectionError,
 } from "./onboarding-integrations";
@@ -27,7 +28,7 @@ describe("Goat onboarding integrations", () => {
       "Gmail authorization was cancelled.",
     );
     expect(goatOnboardingConnectionError("linear", "not_configured")).toBe(
-      "Linear is not configured for this environment yet.",
+      "Linear isn't available right now. Please try again later.",
     );
     expect(goatOnboardingConnectionError("linear", "session_mismatch")).toContain(
       "Sign in with the same account",
@@ -41,5 +42,11 @@ describe("Goat onboarding integrations", () => {
     expect(goatOnboardingConnectionError(null, "something_new")).toBe(
       "This source could not be connected. Please try again.",
     );
+  });
+
+  it("turns provider success into concise connection copy", () => {
+    expect(goatIntegrationConnectionSuccess("hubspot")).toBe("HubSpot connected.");
+    expect(goatIntegrationConnectionSuccess("google_drive")).toBe("Google Drive connected.");
+    expect(goatIntegrationConnectionSuccess(null)).toBe("Integration connected.");
   });
 });

@@ -12,6 +12,7 @@ import {
   buildCursorMcpDeeplink,
   buildGoatMcpFirstPrompt,
   GOAT_USER_MCP_ENDPOINT_PATH,
+  OPENCOMPANY_MCP_SERVER_NAME,
 } from "@/lib/mcp-setup";
 import {
   checkGoatMcpSetupStatusAction,
@@ -40,7 +41,7 @@ const CLIENTS: ClientDefinition[] = [
       "Open Customize → Connectors.",
       "Choose + → Add custom connector and paste the connector URL below.",
       "Add the connector, click Connect, and sign in with your OpenCompany account.",
-      "In a new chat, use + → Connectors to enable Goat.",
+      "In a new chat, use + → Connectors to enable OpenCompany.",
     ],
     note: "On Claude Team and Enterprise, an owner must add the connector to the organization before members can connect it.",
   },
@@ -66,9 +67,9 @@ const CLIENTS: ClientDefinition[] = [
     icon: Code2,
     steps: [
       "Use Add to Cursor below and approve the server configuration.",
-      "Open Cursor Settings → MCP and connect the new Goat server.",
+      "Open Cursor Settings → MCP and connect the new OpenCompany server.",
       "Complete the OpenCompany sign-in prompt in your browser.",
-      "Open Agent and make sure the Goat tools are enabled.",
+      "Open Agent and make sure the OpenCompany tools are enabled.",
     ],
   },
 ];
@@ -102,14 +103,17 @@ export function McpSetupGuide({
   const connectorUrl = origin
     ? `${origin}${GOAT_USER_MCP_ENDPOINT_PATH}`
     : GOAT_USER_MCP_ENDPOINT_PATH;
-  const cursorServerName = "goat";
   const cursorConfig = useMemo(
     () =>
-      JSON.stringify(buildCursorMcpConfig({ name: cursorServerName, url: connectorUrl }), null, 2),
+      JSON.stringify(
+        buildCursorMcpConfig({ name: OPENCOMPANY_MCP_SERVER_NAME, url: connectorUrl }),
+        null,
+        2,
+      ),
     [connectorUrl],
   );
   const cursorDeeplink = hydrated
-    ? buildCursorMcpDeeplink({ name: cursorServerName, url: connectorUrl })
+    ? buildCursorMcpDeeplink({ name: OPENCOMPANY_MCP_SERVER_NAME, url: connectorUrl })
     : "";
   const firstPrompt = buildGoatMcpFirstPrompt({ displayName, workspaceName });
 
@@ -223,7 +227,7 @@ export function McpSetupGuide({
           <section className="mt-6" aria-labelledby="mcp-connect-heading">
             <div className="mb-2 flex items-center justify-between gap-3">
               <h2 id="mcp-connect-heading" className="text-[12px] font-medium text-ink">
-                2. Connect Goat
+                2. Connect OpenCompany
               </h2>
               <a
                 href={selectedClient.docsUrl}
@@ -294,8 +298,8 @@ export function McpSetupGuide({
             </h2>
             <div className="rounded-xl border border-border bg-surface p-4">
               <p className="text-[12px] leading-5 text-ink-subtle">
-                Paste this into {selectedClient.label}. It starts with a Brain search so Goat can
-                verify the connection.
+                Paste this into {selectedClient.label}. It starts with a Brain search so OpenCompany
+                can verify the connection.
               </p>
               <div className="mt-3 rounded-lg bg-surface-muted p-3">
                 <p className="text-[12.5px] leading-5 text-ink-muted">{firstPrompt}</p>
@@ -329,7 +333,7 @@ function GuideHeader() {
         Use your brain where you already work
       </h1>
       <p className="text-[14px] leading-6 text-ink-muted">
-        Connect one AI client, then ask a real question so Goat can verify everything works.
+        Connect one AI client, then ask a real question so OpenCompany can verify everything works.
       </p>
     </div>
   );
@@ -381,9 +385,9 @@ function SetupStatus({
       <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-success-border bg-success-bg px-4 py-3">
         <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-success" />
         <div>
-          <p className="text-[12.5px] font-semibold text-ink">Goat is connected</p>
+          <p className="text-[12.5px] font-semibold text-ink">OpenCompany is connected</p>
           <p className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
-            Your first MCP query reached Goat successfully.
+            Your first MCP query reached OpenCompany successfully.
           </p>
         </div>
       </div>
@@ -400,7 +404,7 @@ function SetupStatus({
           className={`mt-0.5 text-[11.5px] leading-4 ${pollError ? "text-warning" : "text-ink-subtle"}`}
         >
           {pollError
-            ? "Goat could not check yet. Keep this page open and it will retry."
+            ? "OpenCompany could not check yet. Keep this page open and it will retry."
             : "Leave this page open, paste the question into your AI client, and approve the tool call."}
         </p>
       </div>

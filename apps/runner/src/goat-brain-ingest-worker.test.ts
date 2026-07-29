@@ -115,6 +115,27 @@ describe("Goat Brain ingest worker", () => {
       expect(claimNext).not.toHaveBeenCalled();
       resolveRelease({ released: 0, failed: 0 });
       await vi.waitFor(() => expect(claimNext).toHaveBeenCalledOnce());
+      expect(claimNext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          supportedJobs: expect.arrayContaining([
+            {
+              kind: "brain_pointer_hydrate",
+              sourceProvider: "slack",
+              sourceType: "pointer",
+            },
+            {
+              kind: "brain_pointer_hydrate",
+              sourceProvider: "gmail",
+              sourceType: "pointer",
+            },
+            {
+              kind: "brain_pointer_hydrate",
+              sourceProvider: "linear",
+              sourceType: "pointer",
+            },
+          ]),
+        }),
+      );
       expect(billing.releasePendingGoatIngestionReservations).toHaveBeenCalledWith({
         now: expect.any(Date),
         maxWorkspaces: 50,
@@ -202,6 +223,7 @@ describe("Goat Brain ingest worker", () => {
         id: "gbjob_123",
         sourceItemId: "gbsrc_123",
         userWorkosId: "user_123",
+        workspaceId: "goat_ws_user_123",
         sourceProvider: "jamie",
         sourceConnectionId: "gint_123",
         integrationId: "gint_123",

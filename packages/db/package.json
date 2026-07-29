@@ -16,9 +16,17 @@
       "types": "./src/codex-auth.ts",
       "default": "./src/codex-auth.ts"
     },
+    "./goat-claude-code-auth": {
+      "types": "./src/goat-claude-code-auth.ts",
+      "default": "./src/goat-claude-code-auth.ts"
+    },
     "./goat-codex-auth": {
       "types": "./src/goat-codex-auth.ts",
       "default": "./src/goat-codex-auth.ts"
+    },
+    "./goat-capabilities": {
+      "types": "./src/goat-capabilities.ts",
+      "default": "./src/goat-capabilities.ts"
     },
     "./goat-integrations": {
       "types": "./src/goat-integrations.ts",
@@ -55,6 +63,10 @@
     "./goat-github": {
       "types": "./src/goat-github.ts",
       "default": "./src/goat-github.ts"
+    },
+    "./goat-harness": {
+      "types": "./src/goat-harness.ts",
+      "default": "./src/goat-harness.ts"
     },
     "./goat-schema": {
       "types": "./src/goat-schema.ts",
@@ -100,6 +112,10 @@
       "types": "./src/goat-workspaces.ts",
       "default": "./src/goat-workspaces.ts"
     },
+    "./goat-onboarding-emails": {
+      "types": "./src/goat-onboarding-emails.ts",
+      "default": "./src/goat-onboarding-emails.ts"
+    },
     "./goat-billing": {
       "types": "./src/goat-billing.ts",
       "default": "./src/goat-billing.ts"
@@ -137,7 +153,7 @@
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config drizzle.config.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
-    "test": "tsc --noEmit --project tsconfig.json && vitest run"
+    "test": "vitest run"
   },
   "dependencies": {
     "@opencompany/agent-runtime": "workspace:*",

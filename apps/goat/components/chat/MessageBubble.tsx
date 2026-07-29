@@ -1,12 +1,22 @@
 "use client";
 
-import type { GoatChatUiMessage } from "@/lib/chat-ui";
+import type { ReactNode } from "react";
+import type { GoatChatUiAttachment, GoatChatUiMessage } from "@/lib/chat-ui";
 import { AssistantTextBubble } from "./AssistantTextBubble";
-import { type ChatTaskLookup, getOrderedAssistantItems } from "./assistant-items";
+import {
+  type AssistantRenderItem,
+  type ChatTaskLookup,
+  getOrderedAssistantItems,
+} from "./assistant-items";
 import { ReasoningItem } from "./ReasoningItem";
 import { TaskCard } from "./TaskCard";
 import { TurnDuration } from "./ThinkingIndicator";
-import { type CodexToolAction, ToolCallItem } from "./ToolCallItem";
+import {
+  type ActionApprovalRequest,
+  type CodexToolAction,
+  SubagentRow,
+  ToolCallItem,
+} from "./ToolCallItem";
 import { UserMessageBubble } from "./UserMessageBubble";
 
 export function MessageBubble({
@@ -16,6 +26,10 @@ export function MessageBubble({
   durationMs,
   onCodexAction,
   allowCodexPlanActions = false,
+  onActionApproval,
+  allowActionApproval = false,
+  readOnly = false,
+  attachmentSrc,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -23,9 +37,13 @@ export function MessageBubble({
   durationMs?: number | null | undefined;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   allowCodexPlanActions?: boolean;
+  onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
+  allowActionApproval?: boolean;
+  readOnly?: boolean;
+  attachmentSrc?: (messageId: string, attachment: GoatChatUiAttachment) => string | undefined;
 }) {
   if (message.role === "user") {
-    return <UserMessageBubble message={message} />;
+    return <UserMessageBubble message={message} {...(attachmentSrc ? { attachmentSrc } : {})} />;
   }
   return (
     <AssistantTurn
@@ -35,6 +53,9 @@ export function MessageBubble({
       durationMs={durationMs}
       onCodexAction={onCodexAction}
       allowCodexPlanActions={allowCodexPlanActions}
+      onActionApproval={onActionApproval}
+      allowActionApproval={allowActionApproval}
+      readOnly={readOnly}
     />
   );
 }
@@ -46,6 +67,9 @@ function AssistantTurn({
   durationMs,
   onCodexAction,
   allowCodexPlanActions,
+  onActionApproval,
+  allowActionApproval,
+  readOnly,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -53,6 +77,9 @@ function AssistantTurn({
   durationMs?: number | null | undefined;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   allowCodexPlanActions: boolean;
+  onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
+  allowActionApproval: boolean;
+  readOnly: boolean;
 }) {
   const error = message.metadata?.error;
   const items = getOrderedAssistantItems(
@@ -64,30 +91,50 @@ function AssistantTurn({
   // the error must still get a bubble or the turn renders as nothing.
   const showStandaloneError = Boolean(error) && !items.some((item) => item.type === "text");
 
+  // `nested` is set when rendering a subagent's own trace: its steps are historical, so they render
+  // as plain read-only rows (no plan-implement / approval affordances) and no turn-level error.
+  const renderItem = (item: AssistantRenderItem, nested: boolean): ReactNode => {
+    if (item.type === "text") {
+      return (
+        <AssistantTextBubble
+          key={item.key}
+          text={item.text}
+          citations={item.citations}
+          {...(!nested && error ? { error } : {})}
+        />
+      );
+    }
+    if (item.type === "reasoning") return <ReasoningItem key={item.key} text={item.text} />;
+    if (item.type === "task") {
+      return <TaskCard key={item.key} task={item.task} readOnly={readOnly} />;
+    }
+    if (item.type === "subagent") {
+      return (
+        <SubagentRow
+          key={item.key}
+          tool={item.subagent.tool}
+          childCount={item.subagent.children.length}
+        >
+          {item.subagent.children.map((child) => renderItem(child, true))}
+        </SubagentRow>
+      );
+    }
+    return (
+      <ToolCallItem
+        key={item.key}
+        tool={item.tool}
+        onCodexAction={onCodexAction}
+        allowCodexPlanActions={allowCodexPlanActions}
+        onActionApproval={onActionApproval}
+        allowActionApproval={allowActionApproval}
+        readOnly={readOnly || nested}
+      />
+    );
+  };
+
   return (
     <div className="flex flex-col gap-2">
-      {items.map((item) => {
-        if (item.type === "text") {
-          return (
-            <AssistantTextBubble
-              key={item.key}
-              text={item.text}
-              citations={item.citations}
-              {...(error ? { error } : {})}
-            />
-          );
-        }
-        if (item.type === "reasoning") return <ReasoningItem key={item.key} text={item.text} />;
-        if (item.type === "task") return <TaskCard key={item.key} task={item.task} />;
-        return (
-          <ToolCallItem
-            key={item.key}
-            tool={item.tool}
-            onCodexAction={onCodexAction}
-            allowCodexPlanActions={allowCodexPlanActions}
-          />
-        );
-      })}
+      {items.map((item) => renderItem(item, false))}
       {showStandaloneError && error ? <AssistantTextBubble text={error} error={error} /> : null}
       {typeof durationMs === "number" ? <TurnDuration durationMs={durationMs} /> : null}
     </div>

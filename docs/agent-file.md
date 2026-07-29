@@ -91,6 +91,7 @@ The model the OpenCompany engine runs on. Must be one of:
 | `anthropic/claude-fable-5`                 | Mythos-class Claude for long-running, complex agent tasks.      |
 | `google/gemini-3-flash`                    | Popular Gemini model with strong speed and long context.        |
 | `google/gemini-3.1-flash-lite-preview`     | Very fast, low-cost Gemini for simple high-volume tasks.        |
+| `deepseek/deepseek-v4-pro`                 | Flagship DeepSeek for complex reasoning and long agent work.    |
 | `deepseek/deepseek-v4-flash`               | High-throughput DeepSeek for cost-sensitive work.               |
 | `mistral/mistral-medium-3.5`               | Mistral model balancing quality, latency, and cost.             |
 | `minimax/minimax-m3`                       | Latest MiniMax with 1M context and agentic coding strength.     |

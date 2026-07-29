@@ -41,8 +41,10 @@ import { isGoatMcpSetupCompletionRun } from "@/lib/mcp-setup";
 
 const GOAT_BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;
 const GOAT_BRAIN_TRACE_SCHEMA_VERSION = "goat.brain.cli-run.v2";
+const DEFAULT_GOAT_BRAIN_QUERY_LIMIT = 10;
+const MAX_GOAT_BRAIN_QUERY_LIMIT = 50;
 const GOAT_BRAIN_TOOL_HELP =
-  'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, timeline-add, rewrite, alias, link, merge, move, delete, folder, doctor. The brain has required folders inbox, skills, people, companies, and evidence; core folders such as thoughts, projects, meetings, research, decisions, and concepts are adjustable and can be recreated with folder create when needed. Skills are excluded from default list/query retrieval; pass folder: "skills" (or a descendant) to retrieve them explicitly, while get remains available by id. query supports type/kind/folder filters and hops for graph expansion; hits list linked pages — follow them with get. get accepts one id or a list of ids (aliases resolve too). Use append-evidence to create sourced evidence records linked to a subject. Use includeMerged when you need merged records and includeArchived when you need archived ones.';
+  'Use goat_brain as { command, flags, stdin? }. For command-specific usage, call { command: "help", flags: { topic: "<command>" } }. Common commands: list, query, get, create, append-evidence, timeline-add, rewrite, alias, link, merge, move, delete, folder, doctor. The brain has required folders inbox, skills, people, companies, and evidence; core folders such as thoughts, projects, meetings, research, decisions, and concepts are adjustable and can be recreated with folder create when needed. Skills are excluded from default list/query retrieval; pass folder: "skills" (or a descendant) to retrieve them explicitly, while get remains available by id. query returns curated pages by default; pass kind: "evidence" only when raw evidence is explicitly needed. query supports type/kind/folder filters, hops for graph expansion, and offset pagination; when pagination.hasMore is true, repeat the same query with offset set to pagination.nextOffset. Hits list linked pages — follow them with get. get accepts one id or a list of ids (aliases resolve too). Use append-evidence to create sourced evidence records linked to a subject. Use includeMerged when you need merged records and includeArchived when you need archived ones.';
 
 const READ_ONLY_GOAT_BRAIN_COMMANDS = new Set<GoatBrainCliCommand>([
   "help",
@@ -268,8 +270,9 @@ async function runResolvedGoatBrainCliForUser(
 
 // --- read plane -------------------------------------------------------------------------------
 // query/get/timeline/list are served in-process by @opencompany/db/goat-brain-read instead of
-// materializing the brain and spawning the CLI. Output keeps the GoatBrainToolOutput contract
-// (human-readable stdout + machine-readable `parsed`) and every run is still traced.
+// materializing the brain and spawning the CLI. Read results expose the machine-readable `parsed`
+// payload only; returning the equivalent human rendering as `stdout` would duplicate every result
+// in the model context. Every run is still traced.
 
 async function runGoatBrainReadCommandForUser(
   input: {
@@ -299,7 +302,6 @@ async function runGoatBrainReadCommandForUser(
     }),
   };
   const flags = normalizeCliToolFlags(input.toolInput.flags ?? {});
-  const wantsJson = flagBoolean(flags.json) === true;
 
   let output: GoatBrainToolOutput;
   try {
@@ -307,7 +309,6 @@ async function runGoatBrainReadCommandForUser(
     output = {
       ok: true,
       exitCode: 0,
-      stdout: wantsJson ? JSON.stringify(result.parsed, null, 2) : result.stdout,
       stderr: "",
       command: resolved.display,
       argv: resolved.argv,
@@ -321,7 +322,9 @@ async function runGoatBrainReadCommandForUser(
       stderr: "",
       command: resolved.display,
       argv: resolved.argv,
-      error: `${errorMessage(error)}\n\n${GOAT_BRAIN_TOOL_HELP}`,
+      // Read errors return just the message: GOAT_BRAIN_TOOL_HELP documents write commands
+      // (create/rewrite/merge/delete…) the read surface cannot call, so appending it here misleads.
+      error: errorMessage(error),
     };
   }
 
@@ -360,24 +363,44 @@ async function executeGoatBrainReadCommand(
     case "query": {
       const folder = flagString(flags.folder);
       const type = readEntityTypeFlag(flags.type);
-      const kind = readKindFlag(flags.kind);
+      const kind = readKindFlag(flags.kind) ?? "page";
       const since = flagString(flags.since);
-      const limit = flagNumber(flags.limit);
+      const limit = readQueryLimit(flags.limit);
+      const offset = readQueryOffset(flags.offset);
       const hops = flagNumber(flags.hops);
-      const hits = await searchGoatBrain(ctx, {
-        text: flagString(flags.text) ?? "",
+      const includeNeighbors = flagBoolean(flags["include-neighbors"]);
+      const snippetChars = flagNumber(flags["snippet-chars"]);
+      const text = flagString(flags.text) ?? "";
+      const candidates = await searchGoatBrain(ctx, {
+        text,
         ...(folder ? { folder: normalizeGoatBrainFolderForV1(folder) } : {}),
         ...(type ? { type } : {}),
-        ...(kind ? { kind: kind as GoatBrainKind } : {}),
+        kind: kind as GoatBrainKind,
         ...(since ? { since } : {}),
-        ...(limit !== undefined ? { limit } : {}),
+        limit: limit + 1,
+        offset,
         ...(hops !== undefined ? { hops: Math.max(0, hops) } : {}),
+        ...(includeNeighbors !== undefined ? { includeNeighbors } : {}),
+        ...(snippetChars !== undefined ? { snippetChars } : {}),
         ...(flagBoolean(flags["lexical-only"]) ? { lexicalOnly: true } : {}),
         ...(flagBoolean(flags["include-merged"]) ? { includeMerged: true } : {}),
         ...(flagBoolean(flags["include-archived"]) ? { includeArchived: true } : {}),
         ...(flagBoolean(flags["include-conflicts"]) ? { includeConflicts: true } : {}),
       });
-      return { stdout: renderQueryHits(hits), parsed: { hits } };
+      const hasMore = candidates.length > limit;
+      const hits = candidates.slice(0, limit);
+      const pagination = queryPagination({ limit, offset, returned: hits.length, hasMore });
+      // `mode` distinguishes a relevance-ranked search from a recency-ordered browse (no query),
+      // where score reflects freshness only.
+      return {
+        stdout: renderQueryHits(hits, pagination),
+        parsed: {
+          hits,
+          mode: text ? "search" : "browse",
+          scope: { kind },
+          pagination,
+        },
+      };
     }
     case "get": {
       const ids = flagStringList(flags.id);
@@ -389,7 +412,7 @@ async function executeGoatBrainReadCommand(
       const result = await getGoatBrainDocuments(ctx, ids);
       if (result.documents.length === 0) {
         throw new Error(
-          `No brain doc found with id ${ids.map((id) => `"${id}"`).join(", ")}. Try query to locate it.`,
+          `No brain doc found with id ${ids.map((id) => `"${id}"`).join(", ")}. Search for it to find the right id.`,
         );
       }
       return {
@@ -406,7 +429,8 @@ async function executeGoatBrainReadCommand(
         ...(since ? { since } : {}),
         ...(limit !== undefined ? { limit } : {}),
       });
-      if (!result) throw new Error(`No brain doc found with id "${id}". Try query to locate it.`);
+      if (!result)
+        throw new Error(`No brain doc found with id "${id}". Search for it to find the right id.`);
       const stdout = result.entries.length
         ? result.entries
             .map((entry) =>
@@ -453,26 +477,52 @@ async function executeGoatBrainReadCommand(
   }
 }
 
-function renderQueryHits(hits: GoatBrainSearchHit[]): string {
-  if (hits.length === 0) return "No matches.";
-  return hits
-    .map((hit, index) => {
-      const neighbors = hit.neighbors
-        .map(
-          (link) =>
-            `${link.direction === "out" ? "→" : "←"} ${link.relationType} ${link.id} (${link.title}, ${link.kind}/${link.type})`,
-        )
-        .join(", ");
-      return [
-        `${index + 1}. [${hit.folder}] ${hit.title} (${hit.id}, ${hit.type}, score ${hit.score}, updated ${hit.updatedAt})`,
-        hit.snippet,
-        neighbors ? `Linked: ${neighbors}` : "",
-        `Next: get ${hit.id}`,
-      ]
-        .filter(Boolean)
-        .join("\n");
-    })
-    .join("\n\n");
+type GoatBrainQueryPagination = {
+  limit: number;
+  offset: number;
+  returned: number;
+  hasMore: boolean;
+  nextOffset?: number;
+  instruction?: string;
+};
+
+function queryPagination(input: {
+  limit: number;
+  offset: number;
+  returned: number;
+  hasMore: boolean;
+}): GoatBrainQueryPagination {
+  if (!input.hasMore) return input;
+  const nextOffset = input.offset + input.returned;
+  return {
+    ...input,
+    nextOffset,
+    instruction: `More matches are available. Repeat the same query with all filters unchanged and offset set to ${nextOffset}.`,
+  };
+}
+
+function renderQueryHits(hits: GoatBrainSearchHit[], pagination: GoatBrainQueryPagination): string {
+  const renderedHits = hits.length
+    ? hits
+        .map((hit, index) => {
+          const neighbors = hit.neighbors
+            .map(
+              (link) =>
+                `${link.direction === "out" ? "→" : "←"} ${link.relationType} ${link.id} (${link.title}, ${link.kind}/${link.type})`,
+            )
+            .join(", ");
+          return [
+            `${pagination.offset + index + 1}. [${hit.folder}] ${hit.title} (${hit.id}, ${hit.type}, score ${hit.score}, updated ${hit.updatedAt})`,
+            hit.snippet,
+            neighbors ? `Linked: ${neighbors}` : "",
+            `Next: get ${hit.id}`,
+          ]
+            .filter(Boolean)
+            .join("\n");
+        })
+        .join("\n\n")
+    : "No matches.";
+  return [renderedHits, pagination.instruction].filter(Boolean).join("\n\n");
 }
 
 function renderDocuments(
@@ -568,6 +618,33 @@ function flagNumber(value: GoatBrainToolFlagValue | undefined): number | undefin
   return undefined;
 }
 
+function readQueryLimit(value: GoatBrainToolFlagValue | undefined): number {
+  const parsed = flagNumber(value);
+  const limit = parsed ?? DEFAULT_GOAT_BRAIN_QUERY_LIMIT;
+  if (
+    (value !== undefined && parsed === undefined) ||
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > MAX_GOAT_BRAIN_QUERY_LIMIT
+  ) {
+    throw new Error(`limit must be an integer from 1 to ${MAX_GOAT_BRAIN_QUERY_LIMIT}.`);
+  }
+  return limit;
+}
+
+function readQueryOffset(value: GoatBrainToolFlagValue | undefined): number {
+  const parsed = flagNumber(value);
+  const offset = parsed ?? 0;
+  if (
+    (value !== undefined && parsed === undefined) ||
+    !Number.isSafeInteger(offset) ||
+    offset < 0
+  ) {
+    throw new Error("offset must be a non-negative integer.");
+  }
+  return offset;
+}
+
 function flagBoolean(value: GoatBrainToolFlagValue | undefined): boolean | undefined {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
@@ -652,7 +729,10 @@ const GOAT_BRAIN_TOOL_COMMAND_FLAGS: Record<GoatBrainCliCommand, readonly string
     "kind",
     "since",
     "limit",
+    "offset",
     "hops",
+    "include-neighbors",
+    "snippet-chars",
     // Accepted for compatibility with existing model habits; the read plane ignores them
     // (expansion is always both-direction, and stored documents are valid by construction).
     "graph-direction",
@@ -1064,11 +1144,10 @@ function publicGoatBrainCliOutput(
   return {
     ok: result.ok,
     exitCode: result.exitCode,
-    stdout,
     stderr,
     command: resolved.display,
     argv: resolved.argv,
-    ...(parsed !== null ? { parsed } : {}),
+    ...(parsed !== null ? { parsed } : { stdout }),
     ...(error ? { error } : {}),
   };
 }

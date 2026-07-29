@@ -5,6 +5,7 @@ import {
   isNormalizedAttioObjectSourceItem,
   isNormalizedGitHubActivitySourceItem,
   isNormalizedGmailThreadSourceItem,
+  isNormalizedGoatBrainPointerSourceItem,
   isNormalizedGoatChatCaptureSourceItem,
   isNormalizedGoatImportSourceItem,
   isNormalizedGoogleDriveDocumentSourceItem,
@@ -14,7 +15,9 @@ import {
   isNormalizedUploadAssetSourceItem,
   normalizeAttioObjectWindow,
   normalizeGitHubActivityWebhook,
+  normalizeGitHubPullRequestWindow,
   normalizeGmailThreadWindow,
+  normalizeGoatBrainPointerCapture,
   normalizeGoatChatCapture,
   normalizeGoatImportRun,
   normalizeGoogleDriveDocument,
@@ -404,6 +407,79 @@ describe("Goat chat capture normalization", () => {
     expect(isNormalizedGoatChatCaptureSourceItem({ sourceProvider: "goat-chat" })).toBe(false);
     expect(
       isNormalizedGoatChatCaptureSourceItem(normalizeJamieMeetingCompletedWebhook(jamiePayload())),
+    ).toBe(false);
+  });
+});
+
+describe("Goat Brain pointer capture normalization", () => {
+  const base = {
+    sourceRef: "slack:conversation:T123:C456:1234.5678",
+    title: "Slack launch discussion",
+    chatSessionId: "goat_chat_session_1",
+    userMessageId: "goat_chat_msg_1",
+    draftBrainId: "slack-launch-discussion",
+    draftFolder: "inbox",
+    capturedAt: "2026-07-09T10:00:00.000Z",
+  };
+
+  it("normalizes a hydratable source pointer", () => {
+    const item = normalizeGoatBrainPointerCapture({
+      ...base,
+      fallbackText: "A short fallback summary.",
+    });
+
+    expect(item).toMatchObject({
+      sourceProvider: "slack",
+      sourceType: "pointer",
+      externalId: base.sourceRef,
+      sourceRef: base.sourceRef,
+      title: "Slack launch discussion",
+    });
+    expect(item.content.pointer).toMatchObject({
+      ref: base.sourceRef,
+      fallbackText: "A short fallback summary.",
+      chatSessionId: "goat_chat_session_1",
+      userMessageId: "goat_chat_msg_1",
+      draftBrainId: "slack-launch-discussion",
+      draftFolder: "inbox",
+    });
+    expect(isNormalizedGoatBrainPointerSourceItem(item)).toBe(true);
+    expect(isNormalizedGoatBrainPointerSourceItem(JSON.parse(JSON.stringify(item)))).toBe(true);
+  });
+
+  it("deduplicates by canonical source ref instead of chat metadata", () => {
+    const first = normalizeGoatBrainPointerCapture(base);
+    const second = normalizeGoatBrainPointerCapture({
+      ...base,
+      fallbackText: "Different fallback text.",
+      chatSessionId: "another_session",
+      userMessageId: "another_message",
+      draftBrainId: "another-draft",
+    });
+
+    expect(second.contentHash).toBe(first.contentHash);
+  });
+
+  it("rejects unsupported pointer providers and unrelated guard payloads", () => {
+    expect(() =>
+      normalizeGoatBrainPointerCapture({
+        ...base,
+        sourceRef: "github:issue:opencompany:123",
+      }),
+    ).toThrow(BrainSourceNormalizationError);
+    expect(isNormalizedGoatBrainPointerSourceItem(null)).toBe(false);
+    expect(
+      isNormalizedGoatBrainPointerSourceItem(
+        normalizeGoatChatCapture({
+          text: "A note",
+          title: "Note",
+          chatSessionId: "session",
+          userMessageId: "message",
+          draftBrainId: "note",
+          draftFolder: "inbox",
+          capturedAt: "2026-07-09T10:00:00.000Z",
+        }),
+      ),
     ).toBe(false);
   });
 });
@@ -1057,6 +1133,68 @@ describe("GitHub activity normalization", () => {
     expect(item ? githubActivityEventType(item.content.activity) : null).toBe(
       "pull_request_commented",
     );
+  });
+
+  it("combines a pull request lifecycle into one activity window", () => {
+    const opened = normalizeGitHubActivityWebhook(
+      "pull_request",
+      { ...pullRequestPayload({ merged: false, merged_at: null }), action: "opened" },
+      { capturedAt },
+    );
+    const commented = normalizeGitHubActivityWebhook(
+      "issue_comment",
+      issueCommentPayload({
+        pullRequest: true,
+        issue: { number: 123, title: "Add usage-based billing" },
+        comment: { created_at: "2026-07-01T11:00:00Z" },
+      }),
+      { capturedAt: "2026-07-01T11:00:00.000Z" },
+    );
+    const merged = normalizeGitHubActivityWebhook("pull_request", pullRequestPayload(), {
+      capturedAt: "2026-07-01T12:00:00.000Z",
+    });
+    expect(opened).not.toBeNull();
+    expect(commented).not.toBeNull();
+    expect(merged).not.toBeNull();
+
+    const item = normalizeGitHubPullRequestWindow({
+      windowId: "gghprwin_test",
+      events: [merged!, opened!, commented!],
+      flushedAt: "2026-07-01T12:45:00.000Z",
+    });
+
+    expect(item).toMatchObject({
+      sourceProvider: "github",
+      sourceType: "activity",
+      externalId: "gghprwin_test",
+      sourceRef: "github:acme/api:pull:123",
+      occurredAt: "2026-07-01T09:30:00Z",
+      capturedAt: "2026-07-01T12:45:00.000Z",
+    });
+    expect(item.content.activity).toMatchObject({
+      kind: "pull_request",
+      number: 123,
+      state: "merged",
+      windowStart: "2026-07-01T09:30:00Z",
+      windowEnd: "2026-07-01T11:58:00Z",
+    });
+    expect(item.content.activity.events?.map((event) => event.state)).toEqual([
+      "opened",
+      "commented",
+      "merged",
+    ]);
+    expect(item.content.activity.events?.[1]).toMatchObject({
+      author: "grace",
+      body: "We decided to drop retries older than 24h and alert on the rest.",
+    });
+    expect(isNormalizedGitHubActivitySourceItem(item)).toBe(true);
+
+    const replay = normalizeGitHubPullRequestWindow({
+      windowId: "gghprwin_other",
+      events: [opened!, commented!, merged!],
+      flushedAt: "2026-07-02T00:00:00.000Z",
+    });
+    expect(replay.contentHash).toBe(item.contentHash);
   });
 
   it("ignores edited and deleted comments", () => {

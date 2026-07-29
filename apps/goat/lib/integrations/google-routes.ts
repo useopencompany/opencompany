@@ -1,6 +1,7 @@
 import { connectGoatGoogleIntegration } from "@opencompany/db/goat-integrations";
 import { NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
   appendGoatGoogleIntegrationStatus,
   buildGoatGoogleAuthorizationUrl,
@@ -113,6 +114,11 @@ export async function handleGoatGoogleOAuthCallback(
       tokens,
       expiresAt,
       scopes: readScopes(tokens.scope, config.scopes),
+    });
+    await captureGoatIntegrationAddedAnalytics({
+      userWorkosId: current.user.workosUserId,
+      workspaceId: current.workspace.id,
+      provider,
     });
 
     return NextResponse.redirect(

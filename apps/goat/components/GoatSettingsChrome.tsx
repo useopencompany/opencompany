@@ -9,7 +9,9 @@ import {
   MessageSquare,
   PanelLeft,
   PlugZap,
+  SearchCheck,
   SlidersHorizontal,
+  Sparkles,
   UserRound,
   Users,
 } from "lucide-react";
@@ -66,6 +68,19 @@ const NAV_GROUPS: SettingsNavGroup[] = [
   {
     label: "Workspace",
     items: [
+      {
+        href: "/settings/workspace/capabilities",
+        icon: SearchCheck,
+        label: "Capabilities",
+        isActive: (pathname) => pathname === "/settings/workspace/capabilities",
+      },
+      {
+        href: "/settings/skills",
+        icon: Sparkles,
+        label: "Skills",
+        isActive: (pathname) =>
+          pathname === "/settings/skills" || pathname.startsWith("/settings/skills/"),
+      },
       {
         href: "/settings/workspace/usage",
         icon: CircleDollarSign,

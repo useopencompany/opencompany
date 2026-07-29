@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getGoatAppUrl } from "@/lib/app-url";
 import { currentGoatUser } from "@/lib/auth";
 import {
   appendGoatLinearIngestStatus,
@@ -10,11 +11,12 @@ import {
 export async function GET(request: Request) {
   const { user } = await currentGoatUser();
   const url = new URL(request.url);
+  const appUrl = getGoatAppUrl();
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
 
   if (!isGoatLinearIngestConfigured()) {
     return NextResponse.redirect(
-      new URL(appendGoatLinearIngestStatus(returnTo, "error", "not_configured"), url),
+      new URL(appendGoatLinearIngestStatus(returnTo, "error", "not_configured"), appUrl),
     );
   }
 

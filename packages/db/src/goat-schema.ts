@@ -17,6 +17,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 // Postgres full-text search vector, written only by the database (a STORED generated column over
@@ -37,6 +38,12 @@ const vector = customType<{ data: string }>({
 });
 
 export type GoatTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+
+// Workflows and skills share a simple draft/active lifecycle: `draft` is
+// editable-but-not-yet-usable, `active` is available to fire (workflows) or
+// attach (skills). Mirrors the frontmatter `status` the Brain docs carried.
+export type GoatWorkflowStatus = "draft" | "active";
+export type GoatSkillStatus = "draft" | "active";
 
 export type GoatHarnessEngine = "opencompany" | "codex";
 
@@ -62,7 +69,9 @@ export type GoatIntegrationProvider =
   | "hubspot"
   | "granola"
   | "fathom"
-  | "attio";
+  | "attio"
+  | "stripe"
+  | "latitude";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear) are always personal. Installation-bound
@@ -74,6 +83,7 @@ export const WORKSPACE_OWNED_GOAT_INTEGRATION_PROVIDERS = [
   "github",
   "jamie",
   "slack_bot",
+  "stripe",
 ] as const satisfies readonly GoatIntegrationProvider[];
 export function isWorkspaceOwnedGoatIntegrationProvider(provider: GoatIntegrationProvider) {
   return (
@@ -127,6 +137,7 @@ export type GoatBrainSourceType =
   | "meeting"
   | "run"
   | "capture"
+  | "pointer"
   | "asset"
   | "conversation"
   | "issue"
@@ -138,12 +149,19 @@ export type GoatGmailMessageDirection = "sent" | "received";
 export type GoatSlackChannelType = "channel" | "group" | "im" | "mpim";
 export type GoatLinearEventEntityType = "issue" | "comment";
 export type GoatLinearEventAction = "create" | "update" | "remove";
+export type GoatGitHubPullRequestEventType =
+  | "pull_request_opened"
+  | "pull_request_merged"
+  | "pull_request_commented";
 export type GoatHubspotObjectType = "contact" | "company" | "deal";
 export type GoatHubspotEventAction = "create" | "update";
 export type GoatAttioObjectType = "person" | "company" | "deal";
 export type GoatAttioEventAction = "create" | "update" | "note";
 export type GoatBrainSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
-export type GoatBrainIngestJobKind = "brain_source_item_ingest" | "brain_agent_ingest";
+export type GoatBrainIngestJobKind =
+  | "brain_source_item_ingest"
+  | "brain_agent_ingest"
+  | "brain_pointer_hydrate";
 export type GoatBrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 export type GoatBrainImportStatus =
   | "discovering"
@@ -216,12 +234,25 @@ export type GoatTaskToolName =
   | "calendar_get_freebusy"
   | "linear_search_tools"
   | "linear_use_tool"
+  | "latitude_search_tools"
+  | "latitude_use_tool"
   | "github_clone_repository"
   | "github_shell"
   | "github_status"
-  | "github_open_pull_request";
+  | "github_open_pull_request"
+  // Shared main-chat tools, used by opencompany-engine task runs (tasks are a
+  // hidden main-chat run). Persisted to goat.task_messages.tool_name (text).
+  | "goat_brain"
+  | "save_to_brain"
+  | "web_search"
+  | "web_fetch"
+  | "list_actions"
+  | "use_action"
+  | "update_task_status";
 
 export type GoatTaskSkillId = "first-principles" | "yc-office-hours";
+
+export type GoatTaskReportedOutcome = "done" | "needs_attention";
 
 export type GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1";
@@ -233,6 +264,16 @@ export type GoatHarnessSpec = {
   skills: GoatTaskSkillId[];
   maxModelSteps: number;
   resultMode: "assistant_final" | "brain_markdown_report";
+  // Extra system-prompt blocks appended after the shared chat system prompt for
+  // opencompany-engine task runs (e.g. compiled workflow instructions + skills).
+  // The runner's chat loop feeds these as extraSystemBlocks.
+  systemBlocks?: string[];
+  workflow?: {
+    // The workspace-scoped workflow slug that spawned this task.
+    id: string;
+    workspaceId: string;
+    skillIds: string[];
+  };
   codex?: {
     repository?: string | null;
     createPullRequest?: boolean;
@@ -265,11 +306,32 @@ export type GoatCreditLedgerSource =
   | "starter_grant"
   | "stripe_topup"
   | "chat_model_usage"
+  | "capability_usage"
   | "frontier_ingest"
   | "ingest_overage"
   | "ingest_model_usage"
   | "ingest_fee"
   | "adjustment";
+export type GoatManagedCapabilitySource =
+  | "x"
+  | "linkedin"
+  | "youtube"
+  | "instagram"
+  | "tiktok"
+  | "lead"
+  | "seo";
+export type GoatCapabilityRunStatus =
+  | "awaiting_approval"
+  | "approved"
+  | "canceled"
+  | "expired"
+  | "executing"
+  | "running"
+  | "stopping"
+  | "succeeded"
+  | "failed"
+  | "stopped"
+  | "timed_out";
 export type GoatCheckoutSessionStatus = "pending" | "open" | "fulfilled" | "failed";
 export type GoatBrainVisibility = "workspace" | "restricted";
 export type GoatBrainFolderSource = "system" | "custom";
@@ -293,7 +355,7 @@ export type GoatBrainSource = {
   title?: string;
   capturedAt?: string;
 };
-export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx" | "xlsx" | "image";
+export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx" | "xlsx" | "srt" | "image";
 export type GoatBrainStatus = "draft" | "active" | "archived" | "merged";
 export type GoatBrainFrontmatterProjection = Record<string, unknown>;
 export type GoatBrainTimelineEntry = {
@@ -357,9 +419,11 @@ export type GoatTaskDebugTrace = {
 };
 
 export type GoatChatRole = "user" | "assistant";
-export type GoatChatEngine = "opencompany" | "local_codex" | "codex";
+export type GoatChatEngine = "opencompany" | "local_codex" | "codex" | "claude_code";
+// Engines whose turns run through the sandboxed coding-CLI queue (goat.codex_chat_*).
+export type GoatCodexChatEngine = "codex" | "claude_code";
 
-export type GoatChatAttachmentKind = "image" | "pdf" | "docx" | "xlsx";
+export type GoatChatAttachmentKind = "image" | "pdf" | "docx" | "xlsx" | "srt";
 export type GoatChatMessageAttachment = {
   id: string;
   kind: GoatChatAttachmentKind;
@@ -397,6 +461,10 @@ export const GOAT_LOCAL_CODEX_EVENT_TYPES = [
   "file_change.completed",
   "mcp_tool.started",
   "mcp_tool.completed",
+  "subagent.started",
+  "subagent.completed",
+  "dynamic_tool.started",
+  "dynamic_tool.completed",
   "web_search.started",
   "web_search.completed",
   "plan.updated",
@@ -504,6 +572,9 @@ export const goatWorkspaces = goat.table(
     createdByWorkosId: text("created_by_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "restrict" }),
+    capabilitySessionBudgetUsdMicros: bigint("capability_session_budget_usd_micros", {
+      mode: "number",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -526,15 +597,62 @@ export const goatOnboarding = goat.table("onboarding", {
   }),
   referralSource: text("referral_source"),
   // Self-reported profile captured on the first onboarding step. `role` is one
-  // of the ROLE_PROFILES ids in the wizard and seeds the tailored brain folders;
-  // `building` is a free-form one-liner describing what they're working on.
+  // of the ROLE_PROFILES ids in the wizard and seeds the tailored brain folders.
   role: text("role"),
+  // Legacy free-text field retained for existing rows. New Goat onboarding
+  // stores the normalized hostname in companyDomain and the homepage URL in
+  // contextUrls.
   building: text("building"),
   companyDomain: text("company_domain"),
   contextUrls: jsonb("context_urls").$type<string[]>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export type GoatOnboardingEmailStep = "welcome" | "checkin" | "feedback_call";
+export type GoatOnboardingEmailStatus = "pending" | "sending" | "sent" | "failed" | "skipped";
+
+// One row per (owner, step) of the founder onboarding drip. Enrollment inserts
+// three rows at first-workspace creation; a cron sweep claims due `pending` rows
+// (status flips to `sending` under a soft lease), sends via Resend, then marks
+// `sent`. The unique (user, step) index makes enrollment idempotent and gives
+// each send a stable Resend idempotency key. Only owners are enrolled — invited
+// members never reach the create-workspace branch that triggers it.
+export const goatOnboardingEmails = goat.table(
+  "onboarding_emails",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workosUserId: text("workos_user_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    step: text("step").$type<GoatOnboardingEmailStep>().notNull(),
+    status: text("status").$type<GoatOnboardingEmailStatus>().notNull().default("pending"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userStepIdx: uniqueIndex("goat_onboarding_emails_user_step_idx").on(
+      table.workosUserId,
+      table.step,
+    ),
+    statusScheduledIdx: index("goat_onboarding_emails_status_scheduled_idx").on(
+      table.status,
+      table.scheduledAt,
+    ),
+    stepCheck: check(
+      "goat_onboarding_emails_step_check",
+      sql`${table.step} IN ('welcome', 'checkin', 'feedback_call')`,
+    ),
+    statusCheck: check(
+      "goat_onboarding_emails_status_check",
+      sql`${table.status} IN ('pending', 'sending', 'sent', 'failed', 'skipped')`,
+    ),
+  }),
+);
 
 export const goatWorkspaceMembers = goat.table(
   "workspace_members",
@@ -559,6 +677,32 @@ export const goatWorkspaceMembers = goat.table(
     roleCheck: check(
       "goat_workspace_members_role_check",
       sql`${table.role} IN ('admin', 'member')`,
+    ),
+  }),
+);
+
+// OpenCompany-managed paid capabilities are workspace features, not user
+// integrations. Missing rows mean enabled; this table stores only explicit
+// workspace overrides.
+export const goatWorkspaceCapabilities = goat.table(
+  "workspace_capabilities",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    source: text("source").$type<GoatManagedCapabilitySource>().notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedByWorkosId: text("updated_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.source] }),
+    sourceCheck: check(
+      "goat_workspace_capabilities_source_check",
+      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo')`,
     ),
   }),
 );
@@ -729,7 +873,7 @@ export const goatCreditLedger = goat.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'stripe_topup', 'chat_model_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'stripe_topup', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );
@@ -993,7 +1137,7 @@ export const goatBrainDocuments = goat.table(
     ),
     formatCheck: check(
       "goat_brain_documents_format_check",
-      sql`${table.format} IN ('markdown', 'pdf', 'docx', 'xlsx', 'image')`,
+      sql`${table.format} IN ('markdown', 'pdf', 'docx', 'xlsx', 'srt', 'image')`,
     ),
     statusCheck: check(
       "goat_brain_documents_status_check",
@@ -1191,7 +1335,8 @@ export const goatIntegrations = goat.table(
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     // Set for workspace-owned integrations (installation-bound providers:
-    // github, jamie). NULL = personal integration owned by user_workos_id.
+    // GitHub, Jamie, Slack bot, Stripe). NULL = personal integration owned by
+    // user_workos_id.
     workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
       onDelete: "cascade",
     }),
@@ -1207,6 +1352,13 @@ export const goatIntegrations = goat.table(
     status: text("status").$type<GoatIntegrationStatus>().notNull().default("connected"),
     statusReason: text("status_reason"),
     scopes: jsonb("scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    // Sparse per-connection capability mode overrides (capability id → "on" |
+    // "off" | "ask"). Missing keys fall back to the app-level capability
+    // registry defaults, so defaults can evolve without a backfill.
+    capabilityModes: jsonb("capability_modes")
+      .$type<Partial<Record<string, "on" | "off" | "ask">>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1242,13 +1394,19 @@ export const goatIntegrations = goat.table(
     slackBotWorkspaceIdx: uniqueIndex("goat_integrations_slack_bot_workspace_idx")
       .on(table.workspaceId, table.provider)
       .where(sql`${table.workspaceId} IS NOT NULL AND ${table.provider} = 'slack_bot'`),
+    // Stripe credentials represent the workspace's single reporting account.
+    // Rotating a key or switching accounts updates that row instead of leaving
+    // another financial connection silently active.
+    stripeWorkspaceIdx: uniqueIndex("goat_integrations_stripe_workspace_idx")
+      .on(table.workspaceId, table.provider)
+      .where(sql`${table.workspaceId} IS NOT NULL AND ${table.provider} = 'stripe'`),
     workspaceProviderIdx: index("goat_integrations_workspace_provider_idx").on(
       table.workspaceId,
       table.provider,
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1297,7 +1455,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1351,7 +1509,7 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -1509,7 +1667,7 @@ export const goatBrainSourceItems = goat.table(
     ),
     sourceTypeCheck: check(
       "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting', 'run', 'capture', 'asset', 'conversation', 'issue', 'activity', 'thread', 'document')`,
+      sql`${table.sourceType} IN ('meeting', 'run', 'capture', 'pointer', 'asset', 'conversation', 'issue', 'activity', 'thread', 'document')`,
     ),
     lastIngestStatusCheck: check(
       "goat_brain_source_items_last_ingest_status_check",
@@ -1589,7 +1747,7 @@ export const goatBrainIngestJobs = goat.table(
     ),
     kindCheck: check(
       "goat_brain_ingest_jobs_kind_check",
-      sql`${table.kind} IN ('brain_source_item_ingest', 'brain_agent_ingest')`,
+      sql`${table.kind} IN ('brain_source_item_ingest', 'brain_agent_ingest', 'brain_pointer_hydrate')`,
     ),
     statusCheck: check(
       "goat_brain_ingest_jobs_status_check",
@@ -1719,6 +1877,33 @@ export const goatSlackBotEventClaims = goat.table("slack_bot_event_claims", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Threads the answer bot has replied in. Lets the message-event webhook decide
+// with one indexed lookup whether a reply-without-mention should get an answer,
+// instead of calling conversations.replies for every threaded message in every
+// channel the bot is in. Rows are upserted on each bot reply and pruned after
+// ~30 days of thread inactivity.
+export const goatSlackBotThreadParticipation = goat.table(
+  "slack_bot_thread_participation",
+  {
+    teamId: text("team_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    threadTs: text("thread_ts").notNull(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    lastBotReplyTs: text("last_bot_reply_ts").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      name: "slack_bot_thread_participation_pkey",
+      columns: [table.teamId, table.channelId, table.threadTs],
+    }),
+    updatedAtIdx: index("goat_sbtp_updated_at_idx").on(table.updatedAt),
+  }),
+);
+
 // Raw Slack message buffer: the events webhook inserts one row per relevant
 // message; the runner's flush sweeper batches unflushed rows per channel into a
 // conversation-window source item after a quiet period (source_item_id NULL =
@@ -1817,6 +2002,51 @@ export const goatLinearIssueEvents = goat.table(
     actionCheck: check(
       "goat_linear_issue_events_action_check",
       sql`${table.action} IN ('create', 'update', 'remove')`,
+    ),
+  }),
+);
+
+// Raw GitHub pull-request activity buffer: the webhook inserts one row per
+// opened, commented, or merged event; the runner's flush sweeper batches
+// unflushed rows per pull request into one activity-window source item after a
+// quiet period (source_item_id NULL = unflushed). Issue activity remains
+// direct-enqueue because it does not have the open-to-merge lifecycle that
+// causes repeated PR ingestion.
+export const goatGitHubPullRequestEvents = goat.table(
+  "github_pull_request_events",
+  {
+    id: text("id").primaryKey(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => goatIntegrations.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    installationId: text("installation_id").notNull(),
+    repositoryId: text("repository_id").notNull(),
+    pullRequestNumber: integer("pull_request_number").notNull(),
+    // GitHub's X-GitHub-Delivery UUID is stable across redelivery attempts.
+    deliveryId: text("delivery_id").notNull(),
+    eventType: text("event_type").$type<GoatGitHubPullRequestEventType>().notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    sourceItemId: text("source_item_id").references(() => goatBrainSourceItems.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    integrationDeliveryIdx: uniqueIndex(
+      "goat_github_pull_request_events_integration_delivery_idx",
+    ).on(table.integrationId, table.deliveryId),
+    pendingIdx: index("goat_github_pull_request_events_pending_idx")
+      .on(table.integrationId, table.repositoryId, table.pullRequestNumber, table.receivedAt)
+      .where(sql`${table.sourceItemId} IS NULL`),
+    sourceItemIdx: index("goat_github_pull_request_events_source_item_idx").on(table.sourceItemId),
+    eventTypeCheck: check(
+      "goat_github_pull_request_events_event_type_check",
+      sql`${table.eventType} IN ('pull_request_opened', 'pull_request_merged', 'pull_request_commented')`,
     ),
   }),
 );
@@ -2233,6 +2463,84 @@ export const goatTaskSchedules = goat.table(
   }),
 );
 
+// Workspace-scoped automations. Formerly stored as markdown documents in a
+// reserved `workflows/` Brain folder; extracted here so "how work happens" is a
+// first-class, company-level primitive rather than Brain (knowledge) content.
+// `slug` is the stable handle used by the `#` composer mention and persisted as
+// `tasks.workflow_id` when a workflow fires.
+export const goatWorkflows = goat.table(
+  "workflows",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    instructions: text("instructions").notNull().default(""),
+    // Engine/model token from the editor's Model dropdown (e.g. "kimi-k2.6",
+    // "codex"); empty when the workflow has not picked one explicitly.
+    model: text("model").notNull().default(""),
+    status: text("status").$type<GoatWorkflowStatus>().notNull().default("draft"),
+    createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => ({
+    // Slug is the mention handle; unique per workspace among live rows so an
+    // archived workflow's slug can be reused.
+    workspaceSlugIdx: uniqueIndex("goat_workflows_workspace_slug_idx")
+      .on(table.workspaceId, table.slug)
+      .where(sql`${table.archivedAt} IS NULL`),
+    workspaceUpdatedIdx: index("goat_workflows_workspace_updated_idx").on(
+      table.workspaceId,
+      table.archivedAt,
+      table.updatedAt,
+    ),
+    statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
+  }),
+);
+
+// Workspace-scoped, reusable agent capabilities. Formerly stored in a reserved
+// `skills/` Brain folder; extracted alongside workflows. `slug` is the handle
+// used by the `@skill/<slug>` composer mention. Attaching a skill to a chat
+// still snapshots its content immutably into `goatChatSessionSkills`.
+export const goatSkills = goat.table(
+  "skills",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    instructions: text("instructions").notNull().default(""),
+    status: text("status").$type<GoatSkillStatus>().notNull().default("draft"),
+    createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => ({
+    workspaceSlugIdx: uniqueIndex("goat_skills_workspace_slug_idx")
+      .on(table.workspaceId, table.slug)
+      .where(sql`${table.archivedAt} IS NULL`),
+    workspaceUpdatedIdx: index("goat_skills_workspace_updated_idx").on(
+      table.workspaceId,
+      table.archivedAt,
+      table.updatedAt,
+    ),
+    statusCheck: check("goat_skills_status_check", sql`${table.status} IN ('draft', 'active')`),
+  }),
+);
+
 export const goatTasks = goat.table(
   "tasks",
   {
@@ -2254,6 +2562,10 @@ export const goatTasks = goat.table(
     stage: text("stage").$type<GoatTaskStage>().notNull().default("queued"),
     result: text("result"),
     error: text("error"),
+    workflowId: text("workflow_id"),
+    workflowBrainRef: text("workflow_brain_ref"),
+    reportedOutcome: text("reported_outcome").$type<GoatTaskReportedOutcome>(),
+    outcomeComment: text("outcome_comment"),
     harnessSpec: jsonb("harness_spec").$type<GoatHarnessSpec>().notNull().default(sql`'{}'::jsonb`),
     debugTrace: jsonb("debug_trace")
       .$type<GoatTaskDebugTrace>()
@@ -2294,6 +2606,10 @@ export const goatTasks = goat.table(
     stageCheck: check(
       "goat_tasks_stage_check",
       sql`${table.stage} IN ('queued', 'planning', 'sandboxing', 'running', 'completed', 'failed', 'canceled')`,
+    ),
+    reportedOutcomeCheck: check(
+      "goat_tasks_reported_outcome_check",
+      sql`${table.reportedOutcome} IS NULL OR ${table.reportedOutcome} IN ('done', 'needs_attention')`,
     ),
   }),
 );
@@ -2606,7 +2922,131 @@ export const goatChatSessions = goat.table(
     ),
     engineCheck: check(
       "goat_chat_sessions_engine_check",
-      sql`${table.engine} IN ('opencompany', 'local_codex', 'codex')`,
+      sql`${table.engine} IN ('opencompany', 'local_codex', 'codex', 'claude_code')`,
+    ),
+  }),
+);
+
+// An explicit, unguessable public read boundary for a chat session. Shares are
+// separate from sessions so future access controls (revocation, expiry, password
+// hashes, or snapshot boundaries) can evolve without widening the core chat row.
+export const goatChatShares = goat.table(
+  "chat_session_shares",
+  {
+    id: text("id").primaryKey(),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    chatSessionIdx: uniqueIndex("goat_chat_session_shares_chat_session_idx").on(
+      table.chatSessionId,
+    ),
+  }),
+);
+
+// Durable paid-capability lifecycle. Inputs and provider output intentionally
+// stay out of this table: the exact input is bound by input_hash and the
+// safety-bounded provider result lives only in the requesting chat trace.
+export const goatCapabilityRuns = goat.table(
+  "capability_runs",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "restrict" }),
+    toolCallId: text("tool_call_id"),
+    source: text("source").$type<GoatManagedCapabilitySource>().notNull(),
+    action: text("action").notNull(),
+    inputHash: text("input_hash").notNull(),
+    provider: text("provider").notNull(),
+    endpoint: text("endpoint").notNull(),
+    status: text("status").$type<GoatCapabilityRunStatus>().notNull(),
+    quoteProviderCostUsdMicros: bigint("quote_provider_cost_usd_micros", {
+      mode: "number",
+    }).notNull(),
+    quotePlatformFeeUsdMicros: bigint("quote_platform_fee_usd_micros", {
+      mode: "number",
+    }).notNull(),
+    quoteTotalCostUsdMicros: bigint("quote_total_cost_usd_micros", {
+      mode: "number",
+    }).notNull(),
+    monidRunId: text("monid_run_id"),
+    providerHttpStatus: integer("provider_http_status"),
+    resultCount: integer("result_count"),
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", { mode: "number" }),
+    platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" }),
+    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" }),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    approvalExpiresAt: timestamp("approval_expires_at", { withTimezone: true }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    monidRunIdx: uniqueIndex("goat_capability_runs_monid_run_idx")
+      .on(table.monidRunId)
+      .where(sql`${table.monidRunId} IS NOT NULL`),
+    workspaceCreatedIdx: index("goat_capability_runs_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    chatSessionIdx: index("goat_capability_runs_chat_session_idx").on(table.chatSessionId),
+    reconciliationIdx: index("goat_capability_runs_reconciliation_idx")
+      .on(table.updatedAt, table.id)
+      .where(
+        sql`${table.status} IN ('executing', 'running', 'stopping') AND ${table.settledAt} IS NULL`,
+      ),
+    approvalIdx: index("goat_capability_runs_approval_idx").on(
+      table.userWorkosId,
+      table.chatSessionId,
+      table.status,
+      table.approvalExpiresAt,
+    ),
+    sourceCheck: check(
+      "goat_capability_runs_source_check",
+      sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo')`,
+    ),
+    providerCheck: check(
+      "goat_capability_runs_provider_check",
+      sql`${table.provider} IN ('tikhub', 'apify', 'pdl', 'semrush')`,
+    ),
+    inputHashCheck: check(
+      "goat_capability_runs_input_hash_check",
+      sql`${table.inputHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    moneyCheck: check(
+      "goat_capability_runs_money_check",
+      sql`${table.quoteProviderCostUsdMicros} >= 0
+        AND ${table.quotePlatformFeeUsdMicros} >= 0
+        AND ${table.quoteTotalCostUsdMicros} >= 0
+        AND ${table.quoteTotalCostUsdMicros} = ${table.quoteProviderCostUsdMicros} + ${table.quotePlatformFeeUsdMicros}
+        AND (${table.providerCostUsdMicros} IS NULL OR ${table.providerCostUsdMicros} >= 0)
+        AND (${table.platformFeeUsdMicros} IS NULL OR ${table.platformFeeUsdMicros} >= 0)
+        AND (${table.totalCostUsdMicros} IS NULL OR ${table.totalCostUsdMicros} >= 0)
+        AND (
+          (${table.providerCostUsdMicros} IS NULL AND ${table.platformFeeUsdMicros} IS NULL AND ${table.totalCostUsdMicros} IS NULL)
+          OR (
+            ${table.providerCostUsdMicros} IS NOT NULL
+            AND ${table.platformFeeUsdMicros} IS NOT NULL
+            AND ${table.totalCostUsdMicros} = ${table.providerCostUsdMicros} + ${table.platformFeeUsdMicros}
+          )
+        )
+        AND (${table.resultCount} IS NULL OR ${table.resultCount} >= 0)`,
+    ),
+    statusCheck: check(
+      "goat_capability_runs_status_check",
+      sql`${table.status} IN ('awaiting_approval', 'approved', 'canceled', 'expired', 'executing', 'running', 'stopping', 'succeeded', 'failed', 'stopped', 'timed_out')`,
     ),
   }),
 );
@@ -2625,7 +3065,7 @@ export const goatChatMessages = goat.table(
     }),
     debugTrace: jsonb("debug_trace").$type<GoatChatMessageDebugTrace | null>(),
     attachments: jsonb("attachments").$type<GoatChatMessageAttachment[] | null>(),
-    // docx/xlsx extracted text keyed by attachment id; server-side model context
+    // docx/xlsx/srt extracted text keyed by attachment id; server-side model context
     // only — excluded from the Electric shape.
     attachmentTexts: jsonb("attachment_texts").$type<Record<string, string> | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2638,6 +3078,57 @@ export const goatChatMessages = goat.table(
     ),
     taskIdx: index("goat_chat_messages_task_idx").on(table.taskId),
     roleCheck: check("goat_chat_messages_role_check", sql`${table.role} IN ('user', 'assistant')`),
+  }),
+);
+
+export const goatChatSandboxUsage = goat.table(
+  "chat_sandbox_usage",
+  {
+    id: serial("id").primaryKey(),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    userMessageId: text("user_message_id").references(() => goatChatMessages.id, {
+      onDelete: "set null",
+    }),
+    sandboxId: text("sandbox_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    activeMs: integer("active_ms").notNull().default(0),
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", {
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    totalCostUsdMicros: bigint("total_cost_usd_micros", { mode: "number" }).notNull().default(0),
+    rawMetrics: jsonb("raw_metrics")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    costBasis: jsonb("cost_basis")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userSessionCreatedAtIdx: index("goat_chat_sandbox_usage_user_session_created_at_idx").on(
+      table.userWorkosId,
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    sessionCreatedAtIdx: index("goat_chat_sandbox_usage_session_created_at_idx").on(
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    userMessageIdx: index("goat_chat_sandbox_usage_user_message_idx").on(table.userMessageId),
+    sandboxIdx: index("goat_chat_sandbox_usage_sandbox_idx").on(table.sandboxId),
   }),
 );
 
@@ -2882,12 +3373,21 @@ export const goatCodexChatSessions = goat.table(
     chatSessionId: text("chat_session_id")
       .notNull()
       .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    engine: text("engine").$type<GoatCodexChatEngine>().notNull().default("codex"),
     model: text("model").notNull().default("gpt-5.5"),
+    brainRef: text("brain_ref").references(() => goatBrains.id, {
+      onDelete: "set null",
+    }),
+    workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
+      onDelete: "set null",
+    }),
+    hostToolContractVersion: text("host_tool_contract_version"),
     sandboxId: text("sandbox_id"),
     codexThreadId: text("codex_thread_id"),
     activeTurnId: text("active_turn_id"),
     status: text("status").$type<GoatCodexChatSessionStatus>().notNull().default("queued"),
     error: text("error"),
+    sandboxTimeoutArmedAt: timestamp("sandbox_timeout_armed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2899,9 +3399,23 @@ export const goatCodexChatSessions = goat.table(
       table.userWorkosId,
       table.updatedAt,
     ),
+    terminalSandboxSweepIdx: index("goat_codex_chat_sessions_terminal_sandbox_sweep_idx")
+      .on(table.updatedAt, table.id)
+      .where(sql`
+        ${table.sandboxId} IS NOT NULL
+        AND ${table.status} IN ('idle', 'failed', 'interrupted', 'closed')
+        AND (
+          ${table.sandboxTimeoutArmedAt} IS NULL
+          OR ${table.sandboxTimeoutArmedAt} < ${table.updatedAt}
+        )
+      `),
     statusCheck: check(
       "goat_codex_chat_sessions_status_check",
       sql`${table.status} IN ('queued', 'starting', 'idle', 'running', 'failed', 'interrupted', 'closed')`,
+    ),
+    engineCheck: check(
+      "goat_codex_chat_sessions_engine_check",
+      sql`${table.engine} IN ('codex', 'claude_code')`,
     ),
   }),
 );
@@ -2937,6 +3451,9 @@ export const goatCodexChatTurns = goat.table(
       withTimezone: true,
     }),
     attempts: integer("attempts").notNull().default(0),
+    recoveryAttempts: integer("recovery_attempts").notNull().default(0),
+    engineRecoveryRequired: boolean("engine_recovery_required").notNull().default(false),
+    engineTurnBaselineIds: jsonb("engine_turn_baseline_ids").$type<string[]>(),
     leaseId: text("lease_id"),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
@@ -3018,6 +3535,7 @@ export const goatCodexChatEvents = goat.table(
     codexChatTurnId: text("codex_chat_turn_id").references(() => goatCodexChatTurns.id, {
       onDelete: "set null",
     }),
+    eventKey: text("event_key"),
     type: text("type").$type<GoatCodexChatEventType>().notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
     rawEvent: jsonb("raw_event").$type<Record<string, unknown>>(),
@@ -3032,6 +3550,9 @@ export const goatCodexChatEvents = goat.table(
       table.codexChatTurnId,
       table.createdAt,
     ),
+    turnEventKeyIdx: uniqueIndex("goat_codex_chat_events_turn_event_key_idx")
+      .on(table.codexChatTurnId, table.eventKey)
+      .where(sql`${table.eventKey} IS NOT NULL`),
     typeCheck: check(
       "goat_codex_chat_events_type_check",
       sql`${table.type} IN (${sql.join(
@@ -3145,6 +3666,35 @@ export const goatCodexDeviceAuthFlows = goat.table(
   }),
 );
 
+// Claude Code subscription auth: one long-lived setup-token per user, pasted in
+// settings (no device flow exists for Claude Code). Strictly per-user — sharing a
+// subscription credential across users is prohibited by Anthropic's terms.
+export const goatClaudeCodeCredentials = goat.table(
+  "claude_code_credentials",
+  {
+    userWorkosId: text("user_workos_id")
+      .primaryKey()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    encryptedAuthJson: jsonb("encrypted_auth_json")
+      .$type<GoatIntegrationCredentialEncryptedPayload>()
+      .notNull(),
+    encryptionKeyVersion: integer("encryption_key_version").notNull(),
+    status: text("status").$type<GoatCodexCredentialStatus>().notNull().default("connected"),
+    statusReason: text("status_reason"),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    statusIdx: index("goat_claude_code_credentials_status_idx").on(table.status),
+    statusCheck: check(
+      "goat_claude_code_credentials_status_check",
+      sql`${table.status} IN ('connected', 'needs_reauth')`,
+    ),
+  }),
+);
+
 export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   workspaceMemberships: many(goatWorkspaceMembers),
   brainMemberships: many(goatBrainMembers),
@@ -3163,6 +3713,9 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   taskToolUsage: many(goatTaskToolUsage),
   taskSandboxUsage: many(goatTaskSandboxUsage),
   chatSessions: many(goatChatSessions),
+  chatSandboxUsage: many(goatChatSandboxUsage),
+  capabilityRuns: many(goatCapabilityRuns),
+  capabilityOverrides: many(goatWorkspaceCapabilities),
   localBridges: many(goatLocalBridges),
   localCodexSessions: many(goatLocalCodexSessions),
   localCodexTurns: many(goatLocalCodexTurns),
@@ -3182,6 +3735,8 @@ export const goatWorkspacesRelations = relations(goatWorkspaces, ({ one, many })
     references: [goatUsers.workosUserId],
   }),
   members: many(goatWorkspaceMembers),
+  capabilities: many(goatWorkspaceCapabilities),
+  capabilityRuns: many(goatCapabilityRuns),
   billing: one(goatWorkspaceBilling),
   ingestionReservations: many(goatWorkspaceIngestionReservations),
   brains: many(goatBrains),
@@ -3204,6 +3759,20 @@ export const goatWorkspaceMembersRelations = relations(goatWorkspaceMembers, ({ 
     references: [goatUsers.workosUserId],
   }),
 }));
+
+export const goatWorkspaceCapabilitiesRelations = relations(
+  goatWorkspaceCapabilities,
+  ({ one }) => ({
+    workspace: one(goatWorkspaces, {
+      fields: [goatWorkspaceCapabilities.workspaceId],
+      references: [goatWorkspaces.id],
+    }),
+    updatedBy: one(goatUsers, {
+      fields: [goatWorkspaceCapabilities.updatedByWorkosId],
+      references: [goatUsers.workosUserId],
+    }),
+  }),
+);
 
 export const goatBrainsRelations = relations(goatBrains, ({ one, many }) => ({
   workspace: one(goatWorkspaces, {
@@ -3501,6 +4070,16 @@ export const goatCodexDeviceAuthFlowsRelations = relations(goatCodexDeviceAuthFl
   }),
 }));
 
+export const goatClaudeCodeCredentialsRelations = relations(
+  goatClaudeCodeCredentials,
+  ({ one }) => ({
+    user: one(goatUsers, {
+      fields: [goatClaudeCodeCredentials.userWorkosId],
+      references: [goatUsers.workosUserId],
+    }),
+  }),
+);
+
 export const goatIntegrationsRelations = relations(goatIntegrations, ({ one, many }) => ({
   user: one(goatUsers, {
     fields: [goatIntegrations.userWorkosId],
@@ -3697,9 +4276,33 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
     references: [goatUsers.workosUserId],
   }),
   messages: many(goatChatMessages),
+  sandboxUsage: many(goatChatSandboxUsage),
   skills: many(goatChatSessionSkills),
   brainToolRuns: many(goatBrainToolRuns),
   localCodexSessions: many(goatLocalCodexSessions),
+  capabilityRuns: many(goatCapabilityRuns),
+}));
+
+export const goatChatSharesRelations = relations(goatChatShares, ({ one }) => ({
+  chatSession: one(goatChatSessions, {
+    fields: [goatChatShares.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+}));
+
+export const goatCapabilityRunsRelations = relations(goatCapabilityRuns, ({ one }) => ({
+  workspace: one(goatWorkspaces, {
+    fields: [goatCapabilityRuns.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
+  user: one(goatUsers, {
+    fields: [goatCapabilityRuns.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  chatSession: one(goatChatSessions, {
+    fields: [goatCapabilityRuns.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
 }));
 
 export const goatChatMessagesRelations = relations(goatChatMessages, ({ one, many }) => ({
@@ -3717,6 +4320,22 @@ export const goatChatMessagesRelations = relations(goatChatMessages, ({ one, man
   }),
   localCodexAssistantTurns: many(goatLocalCodexTurns, {
     relationName: "goat_local_codex_turns_assistant_message",
+  }),
+  sandboxUsage: many(goatChatSandboxUsage),
+}));
+
+export const goatChatSandboxUsageRelations = relations(goatChatSandboxUsage, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatChatSandboxUsage.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  session: one(goatChatSessions, {
+    fields: [goatChatSandboxUsage.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+  userMessage: one(goatChatMessages, {
+    fields: [goatChatSandboxUsage.userMessageId],
+    references: [goatChatMessages.id],
   }),
 }));
 
@@ -3738,7 +4357,9 @@ export const goatChatSessionSkillsRelations = relations(goatChatSessionSkills, (
 export type GoatUser = typeof goatUsers.$inferSelect;
 export type GoatWorkspace = typeof goatWorkspaces.$inferSelect;
 export type GoatOnboarding = typeof goatOnboarding.$inferSelect;
+export type GoatOnboardingEmail = typeof goatOnboardingEmails.$inferSelect;
 export type GoatWorkspaceMember = typeof goatWorkspaceMembers.$inferSelect;
+export type GoatWorkspaceCapability = typeof goatWorkspaceCapabilities.$inferSelect;
 export type GoatWorkspaceBilling = typeof goatWorkspaceBilling.$inferSelect;
 export type GoatWorkspaceIngestionReservation =
   typeof goatWorkspaceIngestionReservations.$inferSelect;
@@ -3765,6 +4386,7 @@ export type GoatIntegrationCredential = typeof goatIntegrationCredentials.$infer
 export type GoatBrainSourceItem = typeof goatBrainSourceItems.$inferSelect;
 export type GoatBrainIngestJob = typeof goatBrainIngestJobs.$inferSelect;
 export type GoatCodexCredential = typeof goatCodexCredentials.$inferSelect;
+export type GoatClaudeCodeCredential = typeof goatClaudeCodeCredentials.$inferSelect;
 export type GoatCodexDeviceAuthFlow = typeof goatCodexDeviceAuthFlows.$inferSelect;
 export type GoatTaskSchedule = typeof goatTaskSchedules.$inferSelect;
 export type GoatTaskScheduleRun = typeof goatTaskScheduleRuns.$inferSelect;
@@ -3775,5 +4397,10 @@ export type GoatTaskModelUsage = typeof goatTaskModelUsage.$inferSelect;
 export type GoatTaskToolUsage = typeof goatTaskToolUsage.$inferSelect;
 export type GoatTaskSandboxUsage = typeof goatTaskSandboxUsage.$inferSelect;
 export type GoatChatSession = typeof goatChatSessions.$inferSelect;
+export type GoatChatShare = typeof goatChatShares.$inferSelect;
+export type GoatCapabilityRun = typeof goatCapabilityRuns.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
+export type GoatChatSandboxUsage = typeof goatChatSandboxUsage.$inferSelect;
 export type GoatChatSessionSkill = typeof goatChatSessionSkills.$inferSelect;
+export type GoatWorkflow = typeof goatWorkflows.$inferSelect;
+export type GoatSkill = typeof goatSkills.$inferSelect;

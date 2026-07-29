@@ -2,8 +2,15 @@
 
 import { getDb } from "@opencompany/db/client";
 import { goatBrainSources, goatIntegrations } from "@opencompany/db/goat-schema";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import {
+  type GoatCapabilityMode,
+  isGoatCapabilityId,
+  isGoatCapabilityMode,
+  providerCapability,
+} from "@/lib/actions/capabilities";
+import { resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import { currentGoatUser } from "@/lib/auth";
 
 export type GoatIntegrationAccountUsage = {
@@ -95,6 +102,87 @@ export async function disconnectGoatIntegrationAccountAction(
       error: error instanceof Error ? error.message : "Could not disconnect this account.",
     };
   }
+}
+
+// Settings control: one capability mode ("on" | "ask" | "off") for one
+// connection. Modes are stored as sparse overrides; registry defaults cover
+// missing keys.
+export async function setGoatIntegrationCapabilityModeAction(
+  integrationId: string,
+  capabilityId: string,
+  mode: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const context = await currentGoatUser();
+  if (!isGoatCapabilityMode(mode) || !isGoatCapabilityId(capabilityId)) {
+    return { ok: false, error: "Unknown permission mode." };
+  }
+  const owned = await loadOwnPersonalIntegration(integrationId, context.user.workosUserId);
+  if (!owned) return { ok: false, error: "Only the connection owner can manage this account." };
+  const [row] = await getDb()
+    .select({ provider: goatIntegrations.provider })
+    .from(goatIntegrations)
+    .where(eq(goatIntegrations.id, integrationId))
+    .limit(1);
+  const capability = row ? providerCapability(row.provider, capabilityId) : undefined;
+  if (!capability) {
+    return { ok: false, error: "This integration has no such permission." };
+  }
+  try {
+    await applyCapabilityMode([integrationId], capabilityId, mode);
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update the permission.",
+    };
+  }
+}
+
+// Chat "Always allow": flips the asked capability to "on" for every ask-mode
+// connection behind the action, so the next call runs without a confirmation.
+// The catalog is re-resolved server-side — the client only names the action.
+export async function alwaysAllowGoatChatActionAction(
+  actionId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const context = await currentGoatUser();
+  try {
+    const catalog = await resolveGoatActionCatalog({
+      userWorkosId: context.user.workosUserId,
+      workspaceId: context.workspace.id,
+    });
+    const action = catalog.actions.find((entry) => entry.id === actionId);
+    const permission = action?.permission;
+    if (!permission || permission.integrationIds.length === 0) {
+      // Nothing to flip (already on, or the action disappeared) — not an error
+      // worth surfacing over the one-off approval that is about to run.
+      return { ok: true };
+    }
+    await applyCapabilityMode(permission.integrationIds, permission.capabilityId, "on");
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update the permission.",
+    };
+  }
+}
+
+async function applyCapabilityMode(
+  integrationIds: string[],
+  capabilityId: string,
+  mode: GoatCapabilityMode,
+) {
+  await getDb()
+    .update(goatIntegrations)
+    .set({
+      capabilityModes: sql`${goatIntegrations.capabilityModes} || ${JSON.stringify({
+        [capabilityId]: mode,
+      })}::jsonb`,
+      updatedAt: new Date(),
+    })
+    .where(inArray(goatIntegrations.id, integrationIds));
 }
 
 async function loadOwnPersonalIntegration(integrationId: string, userWorkosId: string) {

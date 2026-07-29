@@ -103,7 +103,12 @@ import {
   getGoatLinearSourceIntegrationState,
   linearGraphqlRequest,
 } from "@/lib/integrations/linear-ingest";
-import { getGoatSlackIntegrationState, slackApiRequest } from "@/lib/integrations/slack";
+import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
+import {
+  type GoatSlackChannelOption,
+  type GoatSlackDmOption,
+  listGoatSlackConversationOptions,
+} from "@/lib/integrations/slack-conversations";
 import { triggerGoatGoogleDriveSyncWake } from "@/lib/task-runner";
 import { getGoatAppUrl } from "@/lib/workos";
 import type { GoatWorkspaceActionResult } from "@/lib/workspace-actions";
@@ -619,97 +624,23 @@ export async function setGoatBrainSourceEnabledAction(input: {
 export type GoatSlackConversationListResult =
   | {
       ok: true;
-      channels: Array<GoatSlackConversationRef & { isPrivate: boolean }>;
-      dms: GoatSlackConversationRef[];
+      channels: GoatSlackChannelOption[];
+      dms: GoatSlackDmOption[];
       partial: boolean;
     }
   | { ok: false; error: string };
-
-type SlackConversation = {
-  id?: string;
-  name?: string;
-  user?: string;
-  is_im?: boolean;
-  is_mpim?: boolean;
-  is_private?: boolean;
-  is_archived?: boolean;
-};
 
 export async function listGoatSlackConversationsAction(
   integrationId: string,
 ): Promise<GoatSlackConversationListResult> {
   const context = await currentGoatUser();
-  const token = await loadOwnSlackAccessToken(context.user.workosUserId, integrationId);
-  if (!token) {
+  const account = await loadOwnSlackAccount(context.user.workosUserId, integrationId);
+  if (!account) {
     return { ok: false, error: "Connect Slack in your settings first." };
   }
 
-  const channels: Array<GoatSlackConversationRef & { isPrivate: boolean }> = [];
-  const dms: GoatSlackConversationRef[] = [];
-  const imUserIds: { conversationId: string; slackUserId: string }[] = [];
-  let cursor: string | undefined;
-  let partial = false;
-
-  try {
-    do {
-      const page = await slackApiRequest<{
-        channels?: SlackConversation[];
-        response_metadata?: { next_cursor?: string };
-      }>({
-        method: "users.conversations",
-        token,
-        form: {
-          types: "public_channel,private_channel,mpim,im",
-          exclude_archived: "true",
-          limit: "200",
-          ...(cursor ? { cursor } : {}),
-        },
-      });
-      for (const conversation of page.channels ?? []) {
-        if (!conversation.id || conversation.is_archived) continue;
-        if (conversation.is_im) {
-          if (conversation.user) {
-            imUserIds.push({ conversationId: conversation.id, slackUserId: conversation.user });
-          }
-        } else if (conversation.is_mpim) {
-          dms.push({ id: conversation.id, name: conversation.name ?? conversation.id });
-        } else {
-          channels.push({
-            id: conversation.id,
-            name: conversation.name ?? conversation.id,
-            isPrivate: conversation.is_private ?? false,
-          });
-        }
-      }
-      cursor = page.response_metadata?.next_cursor || undefined;
-    } while (cursor);
-  } catch {
-    // Rate limits or transient Slack errors: return what we have so the picker
-    // stays usable instead of failing outright.
-    partial = true;
-  }
-
-  // Resolve DM counterpart names; failures degrade to raw user ids.
-  for (const im of imUserIds) {
-    try {
-      const result = await slackApiRequest<{ user?: { real_name?: string; name?: string } }>({
-        method: "users.info",
-        token,
-        form: { user: im.slackUserId },
-      });
-      dms.push({
-        id: im.conversationId,
-        name: result.user?.real_name?.trim() || result.user?.name?.trim() || im.slackUserId,
-      });
-    } catch {
-      dms.push({ id: im.conversationId, name: im.slackUserId });
-      partial = true;
-    }
-  }
-
-  channels.sort((a, b) => a.name.localeCompare(b.name));
-  dms.sort((a, b) => a.name.localeCompare(b.name));
-  return { ok: true, channels, dms, partial };
+  const options = await listGoatSlackConversationOptions(account);
+  return { ok: true, ...options };
 }
 
 export async function setGoatBrainSlackSourceAction(input: {
@@ -911,7 +842,6 @@ export async function setGoatBrainAttioSourceAction(input: {
   enabled: boolean;
   objectTypes: GoatAttioObjectTypeRef[];
   events: GoatAttioEventRef[];
-  includeSystemUpdates?: boolean;
 }): Promise<GoatWorkspaceActionResult> {
   const context = await requireBrainSourceContext(input.brainRef);
   if (!context) {
@@ -938,7 +868,6 @@ export async function setGoatBrainAttioSourceAction(input: {
       config: {
         objectTypes: sanitizeAttioObjectTypeRefs(input.objectTypes),
         events: sanitizeAttioEventRefs(input.events),
-        includeSystemUpdates: input.includeSystemUpdates === true,
       },
     });
 
@@ -1471,9 +1400,13 @@ function sanitizeRepositoryRefs(refs: GoatGitHubRepositoryRef[]): GoatGitHubRepo
   return sanitized;
 }
 
-async function loadOwnSlackAccessToken(userWorkosId: string, integrationId: string) {
+async function loadOwnSlackAccount(userWorkosId: string, integrationId: string) {
   const [integration] = await getDb()
-    .select({ id: goatIntegrations.id, status: goatIntegrations.status })
+    .select({
+      id: goatIntegrations.id,
+      status: goatIntegrations.status,
+      externalId: goatIntegrations.externalId,
+    })
     .from(goatIntegrations)
     .where(
       and(
@@ -1492,7 +1425,19 @@ async function loadOwnSlackAccessToken(userWorkosId: string, integrationId: stri
     kind: "oauth_token",
   }).catch(() => null);
   const token = credential?.payload.access_token;
-  return typeof token === "string" && token ? token : null;
+  const teamId = credential?.payload.team_id ?? integration.externalId;
+  const authedUserId = credential?.payload.authed_user_id;
+  if (
+    typeof token !== "string" ||
+    !token ||
+    typeof teamId !== "string" ||
+    !teamId ||
+    typeof authedUserId !== "string" ||
+    !authedUserId
+  ) {
+    return null;
+  }
+  return { token, teamId, authedUserId };
 }
 
 function sanitizeConversationRefs(refs: GoatSlackConversationRef[]): GoatSlackConversationRef[] {

@@ -27,6 +27,10 @@ export type SandboxLatencyObservation = {
 // turn outliving it would be frozen mid-command until autoResume wakes the sandbox.
 const ACTIVE_SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 const SANDBOX_REQUEST_TIMEOUT_MS = 30_000;
+// Resuming a paused sandbox can take longer than an ordinary control-plane request. Keep the
+// larger deadline scoped to connect so transient E2B cold starts do not make a durable session
+// unusable while routine sandbox operations still fail promptly.
+const SANDBOX_CONNECT_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
 const SANDBOX_USER = "user";
 const SANDBOX_ROOT_USER = "root";
 const METADATA_ROOT = "/home/user/.opencompany";
@@ -126,7 +130,7 @@ export async function connectSandbox(input: {
   try {
     const sandbox = await Sandbox.connect(input.sandboxId, {
       timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
-      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+      requestTimeoutMs: SANDBOX_CONNECT_REQUEST_TIMEOUT_MS,
     });
     emitSandboxLatency(input.onLatency, {
       operation: "connect",
@@ -259,6 +263,41 @@ export async function keepSandboxActive(sandbox: SandboxHandle) {
   await sandbox.setTimeout(ACTIVE_SANDBOX_TIMEOUT_MS, {
     requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
   });
+}
+
+// Static E2B lifecycle calls do not resume a paused sandbox. This is used by terminal-state
+// reconciliation after a runner hard-kill, where connecting just to shorten the timeout would
+// unnecessarily wake an already-paused workspace.
+export async function armSandboxIdleTimeoutById(sandboxId: string, idleTimeoutMs: number) {
+  try {
+    const info = await Sandbox.getInfo(sandboxId, {
+      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+    });
+    if (info.state === "paused") return true;
+    if (info.lifecycle?.onTimeout !== "pause") {
+      await Sandbox.pause(sandboxId, { requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });
+      return true;
+    }
+    await Sandbox.setTimeout(sandboxId, idleTimeoutMs, {
+      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+    });
+    return true;
+  } catch (error) {
+    if (isSandboxNotFound(error)) return false;
+    throw error;
+  }
+}
+
+export async function armSandboxActiveTimeoutById(sandboxId: string) {
+  try {
+    await Sandbox.setTimeout(sandboxId, ACTIVE_SANDBOX_TIMEOUT_MS, {
+      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+    });
+    return true;
+  } catch (error) {
+    if (isSandboxNotFound(error)) return false;
+    throw error;
+  }
 }
 
 export async function killSandbox(sandboxId: string) {
@@ -852,6 +891,21 @@ export function isCommandTimeoutError(error: unknown) {
   return Boolean(
     error && typeof error === "object" && (error as { name?: unknown }).name === "TimeoutError",
   );
+}
+
+// Sandbox create/connect uses the E2B control plane, which can reject healthy durable sessions
+// during capacity pressure, rate limiting, or a network timeout. Keep this policy scoped to
+// acquisition: the same broad errors during filesystem or command execution can be application
+// failures and must not replay a turn automatically.
+export function isRetryableSandboxAcquisitionError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "TimeoutError" || error.name === "RateLimitError") return true;
+  if (error.name === "AbortError") return true;
+  if (error.name === "TypeError" && /fetch failed|network|socket/i.test(error.message)) return true;
+  if (error.name !== "SandboxError") return false;
+
+  const status = Number.parseInt(error.message.match(/^(\d{3}):/)?.[1] ?? "", 10);
+  return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 function gitDiffCommand(workRoot: string) {

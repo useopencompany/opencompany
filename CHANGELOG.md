@@ -7,8 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-28
+
 ### Added
-- Migrated the published OpenCompany blog archive into the marketing site with its existing URLs and search metadata.
+- Claude Code is now a persistent sandbox chat engine in Goat, with subscription authentication, model and effort controls, attachments, resumable sessions, and expandable subagent traces (#928, #930, #935) — @louis and @opencompany-bot.
+- Build durable workspace workflows and reusable skills, edit their instructions with rich Markdown, and mention skills from workflow instructions with autocomplete (#927, #934, #937) — @louis and @opencompany-bot.
+- Main chat can discover and use relevant workspace skills without requiring an explicit `@skill` mention (#909) — @opencompany-bot.
+- Cloud Codex tasks can safely read from connected tools that are enabled for read-only access, without exposing provider credentials to the sandbox (#914) — @opencompany-bot.
+- Goat can create Gmail drafts without sending them, controlled by a separate per-account permission (#922) — @opencompany-bot.
+- Latitude is now available as a personal integration for chat and background tasks, with per-capability read and write controls (#925) — @opencompany-bot.
+- Switch between workspaces or create a new one directly from the workspace picker (#901) — @opencompany-bot.
+- Search within timestamped YouTube transcripts or bring a complete transcript into chat (#920, #933) — @louis and @opencompany-bot.
+- Look up a known prospect's work email from their name and company or LinkedIn profile, without re-running broad prospect research (#938) — @opencompany-bot.
+- Workspace admins can cap paid capability spend per chat, with one-off approval when a request would exceed the budget (#941) — @louis.
+
+### Changed
+- Paid research turns can now run up to six long-running capability calls instead of one (#940) — @louis.
+- Opening a Brain overview is now instant, even for Brains with many large documents (#919) — @opencompany-bot.
+- Claude Sonnet chats now reuse prompt context more efficiently through automatic prompt caching (#899) — @louis.
+- Goat analytics now use a minimal PostHog setup with four allowlisted events and no autocapture, session recording, heatmaps, or message content (#923, #931) — @opencompany-bot and @louis.
+- Chat headers use tighter spacing so the conversation has more room (#936) — @opencompany-bot.
+
+### Fixed
+- Approving or declining a connected-tool action no longer repeats a successful write in the same turn (#917) — @louis.
+- Cloud Codex work now survives runner deployments, paused-sandbox resumes, and transient sandbox placement failures more reliably (#918, #921, #924, #926) — @louis.
+- Workspace invitations now open the invited workspace directly and keep the active workspace in sync after sign-in (#902) — @opencompany-bot.
+- Claude Code setup accepts tokens copied with wrapping whitespace, and its home cards now show the correct engine and status (#929, #932) — @louis.
+- Long Claude Code turns can survive repeated runner handoffs without stranding the work (#939) — @louis.
+
+## [1.2.0] - 2026-07-27
+
+### Added
+- Share any Goat chat as a live, read-only link, then stop sharing whenever you want; sharing it again creates a fresh URL so old viewers stay locked out (#892, #896) — @opencompany-bot.
+- Goat Quick brings chat to the macOS menu bar with an Option-Command-Space shortcut (#876, #877) — @louis.
+- Goat can browse full websites in a persistent sandbox and read up to four specific URLs per turn alongside multi-search web research (#866, #868, #881, #906) — @louis and @opencompany-bot.
+- Connected tools can now take guarded actions from chat with per-connection On, Ask, and Off controls: create Calendar events; create, update, and comment on Linear issues; send Gmail; read and edit Google Docs; read Slack; and read, update, or configure Attio lists (#842, #843, #851, #859, #870, #873, #891, #894, #895, #897, #905) — @louis and @opencompany-bot.
+- New managed research capabilities cover X, LinkedIn, YouTube, Instagram, TikTok, Semrush SEO, and structured prospect search, with a price quote and approval before paid calls (#869, #874, #887, #888) — @louis and @opencompany-bot.
+- Connect a workspace Stripe account to ask read-only questions about payments, balances, subscriptions and estimated MRR, or open invoices (#890) — @opencompany-bot.
+- Cloud Codex tasks can query their active Brain, with access checked again on every call (#884) — @opencompany-bot.
+- Ask main chat to survey Slack, Gmail, and Linear and save focused findings to the Brain with their original source attached (#838) — @louis.
+- Attach `.srt` subtitle files in chat, save them to the Brain, or pass the originals into Cloud Codex (#907) — @opencompany-bot.
+- New workspace owners now receive a short founder onboarding email series with one-click unsubscribe (#900) — @louis.
+- A new shareable [use-cases page](https://www.opencompany.cloud/use-cases) shows what OpenCompany can do (#885) — @louis.
+
+### Changed
+- The Slack answer bot now runs through the full Goat agent, understands follow-up threads, can work across multiple Brains, and shows live status while it works (#854) — @louis.
+- You can keep drafting your next message while Goat responds, tool rows are less cluttered, and the context-window meter updates throughout multi-step turns (#857, #871, #872, #904) — @opencompany-bot.
+- Onboarding now guides connected sources all the way to actively feeding the Brain, and valid company URLs are no longer blocked by temporary reachability checks (#852, #883) — @louis and @opencompany-bot.
+- Brain queries now default to curated pages, paginate consistently across chat, MCP, and the CLI, and keep raw evidence available when you explicitly need it (#880) — @louis.
+- Basic Brain ingestion is more efficient, groups each GitHub pull request lifecycle into one filing pass, and preserves valid source citations (#846, #847, #848, #849, #850, #853) — @louis and @opencompany-bot.
+
+### Fixed
+- Accepted workspace invitations now appear after sign-in even when you already belong to another workspace (#889) — @opencompany-bot.
+- Brain sidebar context-menu actions work with the mouse again, and each chat keeps its original model instead of inheriting a choice from another tab (#864, #865) — @louis and @opencompany-bot.
+- Cloud Codex handoffs and long, parallel, or paid chat actions recover more reliably instead of timing out or rejecting valid tool calls (#858, #862, #875, #878, #879, #882, #886) — @louis.
+- Brain tool results no longer appear twice in the model's chat context (#903) — @louis.
+
+## [1.1.0] - 2026-07-22
+
+### Added
+- Four new brain sources file in automatically: Attio, HubSpot, Fathom, and Granola — so your CRM records, meeting notes, and calls land in the brain without you lifting a finger (#776, #757, #767, #758) — @louis.
+- Ask Goat right from Slack — mention @opencompany in a channel and it answers from your brain (beta) (#759) — @louis.
+- Goat chat can now search across your connected tools — Slack, Gmail, GitHub, Linear, Attio, Google Drive, and Google Calendar — and pull the results straight into the conversation (#830, #828, #832, #831, #807) — @louis.
+- Chat answers now cite the brain sources they came from, so you can see where an answer is grounded (#775) — @louis.
+- Codex coding sessions run in the cloud and show up as Tasks, with model selection and file attachments (#784, #766, #771) — @louis.
+- The changelog now lives in the sidebar, so you can see what's new without leaving the app (#833) — @louis.
+- Browse and restore your archived chats from the ⌘K palette (#796) — @louis.
+- Goat remembers the model you picked for main chat between sessions (#829) — @louis.
+- Kimi K3 is now in the model picker (#777) — @louis.
+- A sidebar feedback widget sends your bugs and ideas straight to our team (#764) — @louis.
+- Save anything to your brain over MCP from any agent (#748) — @louis.
+- Migrated the OpenCompany blog archive into the new marketing site, keeping its existing URLs and search metadata (#765) — @louis.
+
+### Changed
+- Billing is now a pure pay-as-you-go wallet — you pay only for what you use and top up yourself, with no seats or plans (#802) — @louis.
+- The integrations settings page was redesigned as a clean grid of brand cards, with a scope switcher and the option to connect tools during onboarding (#810, #824, #834) — @louis.
+- Brain ingestion is more reliable, resumes cleanly after upgrades, and brain search now returns sharper, better-ranked results (#792, #770, #835) — @louis.
+- A context-usage tooltip shows how full the model's context window is, and switching between chats is now instant (#795, #804) — @louis.
+
+### Fixed
+- Linear now reconnects cleanly instead of getting stuck showing as disconnected (#814) — @louis.
+- Codex chat sessions no longer get stuck when queued, closed, or interrupted by a deploy (#794, #798, #812) — @louis.
+- Attio system noise is kept out of the brain, and Attio ingestion is more robust (#819, #781) — @louis.
+- Integration setup failures now show a clear error instead of failing silently (#821) — @louis.
+- Checkout is more reliable, with fixed promotion-code and idempotency handling (#761, #763) — @louis.
 
 ## [1.0.0] - 2026-07-15
 

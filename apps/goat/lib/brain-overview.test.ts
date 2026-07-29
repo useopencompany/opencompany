@@ -7,7 +7,11 @@ describe("getGoatBrainOverviewStats", () => {
     const query = vi.fn(async (statement: string, params: unknown[]) => {
       void params;
       return {
-        rows: statement.includes('from "goat"."brain_tool_runs"') ? [[7]] : [[3]],
+        rows: statement.includes('from "goat"."brain_documents"')
+          ? [[11]]
+          : statement.includes('from "goat"."brain_tool_runs"')
+            ? [[7]]
+            : [[3]],
       };
     });
     const db = drizzle(query as never);
@@ -18,7 +22,11 @@ describe("getGoatBrainOverviewStats", () => {
         new Date("2026-07-16T10:00:00.000Z"),
         db as unknown as ReturnType<typeof import("@opencompany/db/client").getDb>,
       ),
-    ).resolves.toMatchObject({ retrievalsLast7Days: 7, activeSources: 3 });
+    ).resolves.toMatchObject({
+      itemsAddedLast7Days: 11,
+      retrievalsLast7Days: 7,
+      activeSources: 3,
+    });
 
     const sourceQuery = query.mock.calls.find(([statement]) =>
       statement.includes('from "goat"."brain_sources"'),

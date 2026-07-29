@@ -11,21 +11,23 @@ For the Brain (Goat's knowledge store — data model, ingestion, tools, contract
 Goat has four LLM paths:
 
 1. **Foreground chat:** a short-lived AI SDK stream from the browser to `apps/goat/app/api/chat`.
-   This agent answers directly, calls `goat_brain`, or calls `start_task`.
+   This agent answers directly, reads connected integrations, calls `goat_brain`, captures with
+   `save_to_brain`, or calls `start_task`.
 2. **Background task:** a durable row in `goat.tasks` claimed by `apps/runner`, planned into a
    `goat.harness.v1` config, then executed by an AI SDK model loop in the runner process.
 3. **Local Codex chat:** a Goat chat engine mode that queues commands for a user-run local bridge.
    The bridge creates a clean session folder under `~/.opencompany/goat/sessions`, runs
    `codex app-server`, and posts normalized Codex events back into the Goat chat.
 4. **Cloud Codex chat:** a Goat chat engine mode backed by a persistent E2B sandbox and Codex
-   app-server thread. Uploaded images, PDFs, Word files, and Excel files are materialized into that
-   sandbox; images are also sent to Codex as native local-image inputs.
+   app-server thread. Uploaded images, PDFs, Word files, Excel files, and SRT subtitles are
+   materialized into that sandbox; images are also sent to Codex as native local-image inputs. New
+   chats pin the active Brain and expose its read plane through a runner-hosted Codex dynamic tool.
 
 The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
 does not yet use `agent_sessions`, `.agent` files, Brain mounts, skills, approvals, or
 `delegate_to_agent`. It does expose selected user-scoped MCP integrations through the Goat
-task harness, starting with Linear.
+task harness, including Linear and Latitude.
 
 The wider OpenCompany runner does have a full multi-agent session loop. Goat can either keep its
 lighter task harness and grow it, or move durable Goat work onto that full session substrate.
@@ -40,23 +42,28 @@ Browser
       streamText(default Goat chat agent)
         answer directly
         OR call goat_brain
+        OR survey connected integrations with list_actions/use_action
+           and capture focused findings with save_to_brain
         OR, when Background tasks is enabled in Preferences, call start_task
           insert goat.tasks row
           POST /internal/goat/tasks/:taskId/run
-    OR Local Codex mode
-      POST /api/local-codex/messages
-        enqueue local Codex bridge command
-    OR Cloud Codex mode
-      POST /api/codex-chat/messages
-        persist the message and attachment metadata
-        enqueue a turn for the cloud Codex chat worker
+  GoatSurface #workflow submit
+    POST /api/workflows
+      insert goat.tasks row without creating a chat session or chat messages
+  GoatSurface Local Codex mode
+    POST /api/local-codex/messages
+      enqueue local Codex bridge command
+  GoatSurface Cloud Codex mode
+    POST /api/codex-chat/messages
+      persist the message and attachment metadata
+      enqueue a turn for the cloud Codex chat worker
 
 Runner
   Goat task worker wakes/polls
     claim queued task with lease
     plan harness spec with Gateway planner model
     create durable assistant task message
-    streamText with Gateway, Exa, Gmail, Calendar, and Linear MCP tools
+    streamText with Gateway, Exa, Gmail, Calendar, Linear MCP, and Latitude MCP tools
       append durable message and tool events
     use final assistant message as the task result
     mark task succeeded, failed, or canceled
@@ -87,13 +94,39 @@ recent open chat session. It passes those into `GoatSurface`.
 - `model`: the current chat model.
 - `message`: only the newest UI message.
 
-The composer can attach eligible pages from the active Brain's protected `skills/` folder with
-`@skill/<id>`. The visible token is paired with structured `{ kind: "skill", brainRef, id }`
-metadata; manually typed lookalikes stay plain text. The server resolves that metadata again under
-the current user's active-Brain access, rejects stale or cross-Brain references, and caps a turn at
-16 skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable
-snapshot in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original
-version.
+The composer can attach the workspace's skills (`goat.skills`) with `@skill/<slug>`. The visible
+token is paired with structured `{ kind: "skill", id }` metadata (`id` is the workspace-scoped
+skill slug). Exact skill tokens pasted into the composer are resolved against the workspace catalog,
+while manually typed lookalikes stay plain text. The server resolves that metadata again under the
+current user's active workspace, rejects unavailable references, and caps a turn at 16
+skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores an immutable snapshot
+in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
+
+Selecting a workflow with `#<id>` changes the composer action from **Send message** to **Start
+task**. Submission posts directly to `/api/workflows`, starts the durable task in the
+background, and leaves the current Home or chat surface in place. It does not call the foreground
+chat model or persist user/assistant chat messages for the workflow launch.
+Skills mentioned by the workflow are resolved and snapshotted when the task is created. OpenCompany
+task runs receive those snapshots as workflow prompt blocks; Codex task runs materialize them under
+`.agents/skills` and invoke them as native app-server skill inputs, matching explicit skill mentions
+in main Codex chat.
+
+Workflow runs remain grouped under **Tasks**, but task detail renders the same `GoatSurface` as a
+normal chat. The task's `goat.task_messages` rows are projected into chat bubbles, and the standard
+reply composer appends a new user turn, moves a terminal task back to `queued`, and resumes its
+runner with the prior user/assistant conversation. The normal chat stop control cancels an active
+task turn.
+
+Normal main chat can also discover workspace skills progressively. When the catalog is non-empty, the
+system prompt advertises only that a skill source exists; `list_skills` searches safe id, name, and
+description metadata, and `use_skill` loads the full instructions for one exact returned id. The
+successful tool result stays in conversation history, so model-selected skill instructions remain
+available on later turns without being copied into the system prompt or delegated tasks. Explicit
+and model-selected skills share the same per-turn limit of 16 skills / 256 KiB of instructions.
+
+The composer also accepts PDF, DOCX, XLSX, SRT, PNG, JPEG, and WebP files. SRT MIME values are
+normalized because browsers report them inconsistently. Foreground chat stores bounded extracted
+SRT text for the initial and follow-up turns; Cloud Codex receives the original file in its sandbox.
 
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
 matching `/chat/<id>` URL immediately with the native History API, without starting a server
@@ -107,6 +140,19 @@ Stopping generation calls `stop()`, which aborts the HTTP request. Closing chat 
 optionally stops the active stream, and marks the chat session closed through
 `closeGoatChatSessionAction`.
 
+### Public read-only chat links
+
+The link button in a persisted chat header opens sharing controls. The owner can create or reuse
+one opaque `goat.chat_session_shares` token for their session, copy `/share/<token>`, or stop
+sharing. Stopping sharing deletes the token so the public transcript and its attachment routes stop
+resolving immediately. Sharing again creates a new token; a revoked URL never becomes valid again.
+Shared routes sit outside the authenticated Goat app shell, render the existing transcript UI
+without a composer or mutation controls, and can serve that session's attachments through a
+token-scoped byte route. The link reads the current session on each request, so later messages are
+included; the copy confirmation says this explicitly. Normal `/chat/<id>` routes remain
+authenticated. Share pages are excluded from search indexing, and the token never grants access to
+any other session data.
+
 ## `/api/chat`
 
 `POST /api/chat` does the foreground work:
@@ -116,10 +162,17 @@ optionally stops the active stream, and marks the chat session closed through
 3. Requires `VERCEL_AI_GATEWAY_API_KEY`.
 4. Finds or creates an open `goat.chat_sessions` row.
 5. Persists the user message in `goat.chat_messages`.
-6. Creates the chat tool context for `start_task`, `goat_brain`, and optional `web_search`.
-7. Calls `streamText` through Vercel AI Gateway with the selected model.
+6. Resolves active-Brain skills, connected-integration actions, and the workspace's managed
+   social/lead capabilities, then creates the chat tool context for `goat_brain`, `save_to_brain`,
+   `list_skills`/`use_skill`, `list_actions`/`use_action`, optional `start_task`, and optional
+   `web_fetch`/`web_search`.
+7. Calls `streamText` through Vercel AI Gateway with the session's model.
 8. Streams the UI message response back to the browser.
 9. Persists the assistant message, debug trace, and optional task link on finish.
+
+The first message fixes the model for that chat session. The Home composer remembers the latest
+selection for the next chat, while an active chat keeps its stored model even if that Home preference
+changes in another tab.
 
 When a background task that was started from chat succeeds or fails, the runner appends a synthetic
 assistant message to the originating chat session if that session is still open. The message includes
@@ -130,19 +183,83 @@ model turn when the task finishes.
 The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, assembled from
 structured blocks in `apps/goat/lib/prompts/main-chat.ts`. The route injects runtime context such as
 the current date and a compact DB-backed `user_context` profile with the user's name, email, and
-timezone. `goat_brain` is always available and `web_search` is available when Exa is configured.
-Connected chat capabilities are dispatched through `use_capability` with an explicit operation:
-`read` for retrieval, or an advertised `create` or `write` for mutations. Slack and YouTube remain
-read-only. Linear advertises `write`; its read calls receive only read tools, while an explicitly
-requested write call additionally receives bounded `create_issue` access. Attio advertises
-scope-dependent `create` access for standard people, companies, deals, and notes, with one
-successful creation per call. Linear updates, comments, deletes, and every other unlisted mutation
-remain unavailable, as do Attio updates and deletes.
+timezone. `goat_brain` is always available. When Exa is configured, `web_fetch` reads up to four
+known URLs per chat turn through the Contents API while `web_search` discovers current public-web
+sources through Search.
+Connected integration and managed capability actions are dispatched through `list_actions` and
+`use_action`. The route resolves one compact source catalog from currently connected providers and
+the workspace's enabled managed capabilities, and the model must discover a source's concrete action
+ids and parameter schemas before executing one. Slack exposes
+conversation, message, thread, member, and scope-dependent search reads under one **Read Slack**
+permission, which defaults to **On** and can be changed to **Ask** or **Off** under Integrations.
+Gmail exposes message search, message and thread retrieval, explicitly requested plain-text draft
+creation, and explicitly requested sends, with an explicit account required when several are
+connected. Draft creation and sending have separate per-account permissions: creating drafts defaults
+to **On** because it leaves the email for manual review and sending, while sending defaults to
+confirmation-gated **Ask**. Google Calendar exposes a bounded event-list read, while Google Drive
+exposes file search, live Google Doc reads, new Doc creation with optional initial text, and exact
+text replacement in Google Docs. Linear exposes
+a curated catalog for reading issues and workspace context, creating and updating issues, and adding
+comments. Attio exposes bounded fuzzy search across standard people, companies, and deals; list,
+field, and membership discovery; and bounded list reads with saved-view filters, explicit filters,
+sorting, and pagination. Explicitly requested Gmail sends, Google Doc creation or edits, Attio record
+and list-entry updates, Linear writes, and Google Calendar event creation require confirmation by
+default and can be configured under Integrations. Latitude's live MCP catalog is mapped into the same
+action surface: tools annotated read-only default to On, while mutations and tools without that
+annotation default to Ask. An explicit account or workspace is required when several are connected.
+Stripe exposes read-only workspace
+metrics for balance activity by period, current balances, subscription health with estimated MRR,
+and open receivables. Stripe uses an encrypted restricted API key and is excluded from automatic
+Brain-fill surveying because those financial metrics are live operational state. Disconnected or
+disabled capabilities are absent from the catalog, guessed action ids cannot bypass it, and all
+provider credentials remain server-side. Deeper or multi-source connected-account work continues
+through background tasks.
+
+Managed X, LinkedIn, YouTube, Instagram, TikTok, prospecting, and Semrush SEO actions use a fixed
+server-to-server endpoint allowlist in `apps/goat/lib/capabilities/catalog.ts`. Prospecting includes
+bounded PDL person search across current title and seniority, person or company location, company
+industry, provider-estimated company employee count, and work-email availability. When the user
+already knows whom they want to contact, the focused PDL person-enrichment action accepts a LinkedIn
+URL or a full name plus company/location, requires a confidence-gated work email, and returns one
+compact contact record without running a broader prospect search. Every paid execution inspects its
+live endpoint schema and price before running,
+checks shared workspace credits, and requires a one-time approval above the per-action or per-turn
+thresholds. Provider data is treated as hostile input, redacted and bounded before it enters the chat
+trace, and billed once from the settled provider cost plus the platform fee. The durable
+`goat.capability_runs` row stores only the parameter hash and lifecycle/cost metadata; only the
+safety-bounded action result enters the requesting chat. The hourly billing reconciler settles
+interrupted or delayed runs.
+YouTube transcript actions fetch one full timestamped transcript through a reviewed Monid-backed
+Apify actor and validate that it belongs to the requested video. `youtube.get_transcript` returns
+the complete transcript as one plain-text result with video and language metadata, using a larger
+action-result allowance reserved for this validated shape; oversized transcripts fail explicitly
+instead of being silently truncated. `youtube.find_in_transcript` searches the same provider result
+server-side and returns only bounded timestamped context windows for a requested phrase.
+`MONID_API_KEY` belongs in Infisical `prod` + `/goat`, and
+`GOAT_MANAGED_CAPABILITIES_KILL_SWITCH=true` removes managed sources from new turns.
+`GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` accepts comma-separated action ids for endpoint
+isolation. Managed sources never participate in automatic Brain-fill surveying; the user must
+explicitly ask to save their results.
+
+Managed X profile discovery uses X's People-ranked search rather than an exact bio-field predicate.
+It can also page through the public followers of a supplied profile with the provider's opaque
+cursor.
+
+Run `bun run goat:capabilities:contract` with `MONID_API_KEY` to inspect every allowlisted
+endpoint and fail on removal or pricing/input-contract drift, including whether parameters belong
+in the request body, query, or path. The command never calls the paid run API and is intentionally
+opt-in.
+
+When connected integrations and an active brain are present, a conditional `brain_fill` prompt
+teaches the agent to survey breadth before depth, page promising sources, save focused findings
+with canonical provenance, summarize the pass, and ask what to deepen. This fill workflow stays in
+main chat even though ordinary deeper or multi-source work routes to a background task.
 `start_task` and the recurring schedule tools, prompt guidance, schedule context, background-task
 rows, routines, and runner claims are enabled only when the user opts into **Background tasks** in
 Preferences. The unified Tasks section itself remains available for Cloud Codex sessions. The
 database flag defaults off, so the standard Goat experience is chat plus Brain without background
-task spawning. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
+task spawning. Explicitly starting a `#workflow` opts the user into background tasks so its durable
+run can be claimed. Tool descriptions live in `apps/goat/lib/prompts/tool-descriptions.ts`.
 
 The default chat model is `anthropic/claude-sonnet-5`. New tasks store the chat-selected model at
 creation time, then the runner planner chooses the task execution model from its allowed model
@@ -238,12 +355,51 @@ Image uploads are additionally passed to `turn/start` as `localImage` inputs, so
 visible to the model rather than merely path-referenced. Keeping uploads outside the working
 directory prevents them from appearing in repository changes.
 
+The Codex app-server daemon runs behind its Unix-socket control transport inside E2B and outlives
+the runner-side proxy. A runner shutdown detaches that proxy, keeps the sandbox on its active
+timeout, releases the delivery lease, and lets the next worker `thread/resume` the same stored Codex
+turn id. The reconnect reconciles completed
+items and a terminal turn that landed while no runner was attached; stable per-item event keys make
+that replay idempotent. Lease claims count infrastructure ownership changes, while
+`recovery_attempts` increments only when the original Codex turn is missing or was interrupted and
+the worker must start one guarded continuation. Persisting the replacement Codex turn id rearms
+that guard for the new engine turn, so long-running chats can survive repeated deploys without
+allowing two continuations for the same missing turn. A dead proxy with a pending user-input
+request forces that guarded continuation because server-initiated requests cannot move between
+client connections.
+
+Transient E2B capacity, rate-limit, network, and acquisition-timeout failures defer the same durable
+turn with bounded exponential backoff instead of writing a failed assistant message. Authentication,
+template, and other configuration failures remain terminal. A deferred turn stays interruptible and
+keeps later messages behind it in the per-session FIFO. Before the runner can invoke Codex, it
+durably snapshots the engine thread's existing turn ids and marks the turn as requiring recovery.
+This keeps pre-engine infrastructure retries distinct from post-invocation lease recovery, and lets
+a replacement worker identify an unpersisted new engine turn without adopting older active work.
+
 Session skills are reconciled before every Cloud Codex turn under
 `/home/user/opencompany-goat/codex-chat/.agents/skills/`. The managed-skills manifest removes only
 OpenCompany-managed ids and preserves any unrelated native skills. A content fingerprint restarts
 the app-server daemon when the installed set changes, while the persistent Codex thread is resumed.
 Only skills whose first activation belongs to the current turn are included as native `skill`
 inputs; previously activated skills remain installed and in thread history.
+
+New Cloud Codex chats pin the user's active Brain and workspace on `goat.codex_chat_sessions`
+together with the host-tool contract version used to start the Codex thread. On `thread/start`, the
+runner registers the read-only `goat_brain`, `list_actions`, and `use_action` functions through
+app-server's experimental `dynamicTools` API. When Codex sends `item/tool/call`, the runner handles
+Brain reads directly or calls Goat's private action gateway with `RUNNER_INTERNAL_TOKEN`.
+
+The action gateway derives the user and workspace from the running turn, rechecks current workspace
+membership, resolves current connections and permission settings, and exposes only integration
+actions whose capability is `read` and permission mode is `on`. Writes, confirmation-gated actions,
+and paid managed capabilities are not present in the Cloud Codex catalog. Provider credentials,
+the internal bearer, and database access never enter E2B. A per-turn call budget bounds provider
+reads.
+
+Because app-server stores dynamic tool definitions on the thread, resumed turns provide the
+matching runner callbacks without trying to redefine the tools. Existing Brain-tool v1 sessions
+remain Brain-only. The Brain contract intentionally supports only `query`, `list`, `get`, and
+`timeline`; it cannot write to the Brain.
 
 The Cloud Codex Plan control starts the turn with app-server's experimental
 `collaborationMode.mode = "plan"`; `plan_mode_reasoning_effort` configures the mode's reasoning
@@ -264,6 +420,8 @@ interactions so stale cards cannot answer dead proxy connections. Cloud executio
 `approvalPolicy: "never"` inside the isolated workspace-write sandbox; unexpected command or file
 approval requests are declined rather than surfaced as misleading UI. Terminal and recovered turns
 clear stored answer bodies after settling the UI, including answers to questions marked secret.
+Pending dynamic host-tool calls also force a guarded recovery, since their result belongs to the
+runner proxy connection that received the original request.
 
 On the Goat home, open Cloud Codex sessions are projected into the unified Tasks section alongside
 background `goat.tasks`. This is a live UI projection of the chat-backed session and its
@@ -458,8 +616,13 @@ Available task harness tools:
 - `calendar_get_freebusy`
 - `linear_search_tools`
 - `linear_use_tool`
+- `latitude_search_tools`
+- `latitude_use_tool`
 - The Google tools run server-side in the runner and resolve encrypted OAuth credentials from the
   database.
+- The Linear and Latitude MCP meta-tools discover each server's current tool catalog before
+  executing an exact remote tool name. Latitude task writes are used only for explicit user
+  requests.
 
 E2B remains available elsewhere in the runner as a future tool backend; new Goat task runs do not
 depend on `/tmp/goat-harness.mjs`, `GOAT_OUTPUT_PATH`, progress stdout parsing, or a sandbox bridge.
@@ -468,10 +631,18 @@ depend on `/tmp/goat-harness.mjs`, `GOAT_OUTPUT_PATH`, progress stdout parsing, 
 
 Entry points:
 
+- `apps/goat/lib/capabilities/google-calendar.ts`
 - `apps/runner/src/goat-google-tools.ts`
 - `packages/db/src/goat-integrations.ts`
 
-The runner:
+Foreground chat runs Google Calendar through the capability worker. The Calendar capability keeps
+read, create, and write tool surfaces separate, resolves only the current user's connected
+accounts, refreshes encrypted OAuth credentials server-side, and requires an explicit account when
+more than one is connected. Create and write calls are scope-gated and limited to a single mutation
+attempt without attendee notifications.
+
+Durable background tasks continue to use the runner's read-only Gmail and Calendar tools. The
+runner:
 
 1. Checks the tool name is known.
 2. Resolves the user's connected account.
@@ -502,7 +673,8 @@ Important tables:
 - `goat.local_codex_turns`: local Codex user and assistant message linkage plus Codex turn status.
 - `goat.local_codex_commands`: queued bridge commands for start, steer, interrupt, and close.
 - `goat.local_codex_events`: raw app-server notifications plus normalized event type and payload.
-- `goat.codex_chat_sessions`: persistent cloud sandbox, app-server thread, active turn, and status.
+- `goat.codex_chat_sessions`: persistent cloud sandbox, app-server thread, active turn, status,
+  pinned Brain, and host-tool contract version.
 - `goat.codex_chat_turns`: leased Cloud Codex turn queue and message linkage.
 - `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
 - `goat.codex_chat_events`: normalized Cloud Codex event audit rows.
@@ -520,10 +692,11 @@ Task state is deliberately simple:
 queued -> running/planning -> running/running
   -> succeeded/completed
   -> failed/failed
+terminal task + user reply -> queued
 ```
 
-The UI maps this to Tasks rows and task detail pages. Goat task pages subscribe to TanStack DB
-collections backed by Electric shapes for `goat.tasks`, `goat.task_messages`, and
+The UI maps this to Tasks rows and chat-style task detail pages. Goat task pages subscribe to
+TanStack DB collections backed by Electric shapes for `goat.tasks`, `goat.task_messages`, and
 `goat.task_events`, scoped by `user_workos_id`. The active chat also subscribes to scoped
 `goat.chat_messages` rows so persisted task completion notifications appear without a manual
 refresh.
@@ -615,8 +788,12 @@ Common changes and where they belong:
 - Change when chat starts a task: `createOpenCompanyChatSystemPrompt` in
   `apps/goat/lib/prompts/main-chat.ts` and `createOpenCompanyChatToolContext` in
   `apps/goat/lib/chat-agent.ts`.
-- Change lightweight chat web search: `web_search` in `apps/goat/lib/chat-agent.ts` and the Exa
-  callback in `apps/goat/app/api/chat/route.ts`.
+- Change lightweight chat web access: `web_fetch`/`web_search` in
+  `apps/goat/lib/chat-agent.ts` and their Exa callbacks in `apps/goat/app/api/chat/route.ts`.
+- Change managed chat capabilities: the endpoint allowlist and validators in
+  `apps/goat/lib/capabilities/catalog.ts`, execution policy in
+  `apps/goat/lib/capabilities/execute.ts`, and workspace controls in
+  `apps/goat/app/(app)/settings/workspace/capabilities`.
 - Change chat streaming behavior: `apps/goat/app/api/chat/route.ts` and
   `apps/goat/components/GoatSurface.tsx`.
 - Change task creation defaults: `createGoatTaskForUser` in `apps/goat/lib/tasks.ts`.

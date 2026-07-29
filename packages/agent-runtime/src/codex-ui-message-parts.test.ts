@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
+import type { CodexAppServerNormalizedEvent } from "./codex-app-server-events";
 import { normalizeCodexAppServerEvent } from "./codex-app-server-events";
 import {
   applyCodexEventToUiMessageParts,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_PART_TYPE,
+  CODEX_DYNAMIC_TOOL_NAME,
   CODEX_FILE_CHANGE_TOOL_NAME,
   CODEX_GOAL_TOOL_NAME,
   CODEX_MCP_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_PART_TYPE,
   CODEX_WEB_SEARCH_TOOL_NAME,
   type CodexUiMessagePart,
+  type CodexUiSubagentPart,
   codexUiMessagePartsContent,
   createCodexCommandOutputAccumulator,
   finalizeCodexUiMessageParts,
@@ -18,6 +22,21 @@ import {
   parseCodexUiMessageParts,
   resolveCodexUiInteraction,
 } from "./codex-ui-message-parts";
+
+function normalizedEvent(
+  type: CodexAppServerNormalizedEvent["type"],
+  payload: Record<string, unknown>,
+): CodexAppServerNormalizedEvent {
+  return { type, payload, rawEvent: {} };
+}
+
+function reduceNormalized(parts: CodexUiMessagePart[], raw: CodexAppServerNormalizedEvent[]) {
+  let current = parts;
+  for (const event of raw) {
+    current = applyCodexEventToUiMessageParts(current, event).parts;
+  }
+  return current;
+}
 
 function events(raw: Record<string, unknown>[]) {
   return raw.flatMap((event) => normalizeCodexAppServerEvent(event));
@@ -406,6 +425,54 @@ describe("applyCodexEventToUiMessageParts", () => {
     ]);
   });
 
+  it("projects a Brain host tool call as a durable generic tool part", () => {
+    const parts = reduce(
+      [],
+      [
+        {
+          method: "item/started",
+          params: {
+            item: {
+              id: "dynamic_1",
+              type: "dynamicToolCall",
+              tool: "goat_brain",
+              arguments: { command: "query", flags: { text: "pricing" } },
+            },
+          },
+        },
+        {
+          method: "item/completed",
+          params: {
+            item: {
+              id: "dynamic_1",
+              type: "dynamicToolCall",
+              tool: "goat_brain",
+              arguments: { command: "query", flags: { text: "pricing" } },
+              status: "completed",
+              success: true,
+              contentItems: [{ type: "inputText", text: '{"hits":[]}' }],
+            },
+          },
+        },
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_DYNAMIC_TOOL_NAME,
+        toolCallId: "dynamic_1",
+        state: "output-available",
+        input: {
+          label: "Brain",
+          tool: "goat_brain",
+          arguments: { command: "query", flags: { text: "pricing" } },
+        },
+        output: { status: "completed", success: true },
+      },
+    ]);
+  });
+
   it("projects goal, question, and approval request states", () => {
     const parts = reduce(
       [],
@@ -583,10 +650,130 @@ describe("parseCodexUiMessageParts", () => {
         input: { label: "File change", changes: [{ path: "src/a.ts" }] },
         output: { status: "completed", changes: [{ path: "src/a.ts" }] },
       },
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_DYNAMIC_TOOL_NAME,
+        toolCallId: "dynamic_1",
+        state: "output-available",
+        input: { label: "Brain", tool: "goat_brain" },
+        output: { status: "completed", success: true },
+      },
       { type: "text", text: "hello" },
     ];
     expect(parseCodexUiMessageParts(JSON.parse(JSON.stringify(parts)))).toEqual(parts);
     expect(parseCodexUiMessageParts([{ type: "bogus" }, null, 5])).toEqual([]);
     expect(parseCodexUiMessageParts("nope")).toEqual([]);
+  });
+});
+
+describe("subagent (Task) nesting", () => {
+  it("nests a subagent's steps under its Task part and finalizes on completion", () => {
+    const parts = reduceNormalized(
+      [],
+      [
+        normalizedEvent("subagent.started", {
+          itemId: "task_1",
+          description: "Find bugs",
+          subagentType: "Explore",
+          prompt: "Look for bugs",
+        }),
+        // Nested reasoning + command from the subagent, stamped with the parent id.
+        normalizedEvent("reasoning.completed", {
+          itemId: "msg:0",
+          text: "thinking",
+          parentToolCallId: "task_1",
+        }),
+        normalizedEvent("command.started", {
+          itemId: "nested_1",
+          command: "ls",
+          parentToolCallId: "task_1",
+        }),
+        normalizedEvent("command.completed", {
+          itemId: "nested_1",
+          command: "ls",
+          output: { status: "completed", exitCode: null },
+          parentToolCallId: "task_1",
+        }),
+        normalizedEvent("subagent.completed", {
+          itemId: "task_1",
+          status: "completed",
+          result: "Found 2 bugs",
+        }),
+      ],
+    );
+
+    expect(parts).toHaveLength(1);
+    const subagent = parts[0] as CodexUiSubagentPart;
+    expect(subagent.type).toBe(CODEX_SUBAGENT_TOOL_PART_TYPE);
+    expect(subagent.state).toBe("output-available");
+    expect(subagent.input).toMatchObject({
+      label: "Subagent",
+      description: "Find bugs",
+      subagentType: "Explore",
+    });
+    expect(subagent.state === "output-available" && subagent.output).toMatchObject({
+      status: "completed",
+      result: "Found 2 bugs",
+    });
+    expect(subagent.children.map((child) => child.type)).toEqual([
+      "reasoning",
+      CODEX_COMMAND_TOOL_PART_TYPE,
+    ]);
+    // Nested text does not leak into the parent turn's visible content.
+    expect(codexUiMessagePartsContent(parts)).toBe("");
+  });
+
+  it("drops nested events whose parent Task part has not arrived", () => {
+    const parts = reduceNormalized(
+      [],
+      [normalizedEvent("assistant.completed", { content: "orphan", parentToolCallId: "task_x" })],
+    );
+    expect(parts).toEqual([]);
+  });
+
+  it("finalize settles a dangling subagent and its in-flight children", () => {
+    const running = reduceNormalized(
+      [],
+      [
+        normalizedEvent("subagent.started", { itemId: "task_1", description: "Work" }),
+        normalizedEvent("command.started", {
+          itemId: "nested_1",
+          command: "sleep 1",
+          parentToolCallId: "task_1",
+        }),
+      ],
+    );
+    const settled = finalizeCodexUiMessageParts(running, "interrupted").parts;
+    const subagent = settled[0] as CodexUiSubagentPart;
+    expect(subagent.state).toBe("output-available");
+    expect(subagent.state === "output-available" && subagent.output.status).toBe("interrupted");
+    const nestedCommand = subagent.children[0];
+    expect(nestedCommand?.type).toBe(CODEX_COMMAND_TOOL_PART_TYPE);
+    expect(nestedCommand && "state" in nestedCommand && nestedCommand.state).toBe(
+      "output-available",
+    );
+  });
+
+  it("round-trips a persisted subagent part with nested children", () => {
+    const parts: CodexUiMessagePart[] = [
+      {
+        type: CODEX_SUBAGENT_TOOL_PART_TYPE,
+        toolCallId: "task_1",
+        input: { label: "Subagent", description: "Find bugs", subagentType: "Explore" },
+        children: [
+          { type: "reasoning", text: "thinking", state: "done" },
+          {
+            type: CODEX_COMMAND_TOOL_PART_TYPE,
+            toolCallId: "nested_1",
+            state: "output-available",
+            input: { command: "ls" },
+            output: { status: "completed", exitCode: null },
+          },
+        ],
+        state: "output-available",
+        output: { status: "completed", result: "Found 2 bugs" },
+      },
+    ];
+    expect(parseCodexUiMessageParts(JSON.parse(JSON.stringify(parts)))).toEqual(parts);
   });
 });

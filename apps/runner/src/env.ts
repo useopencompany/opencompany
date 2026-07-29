@@ -25,6 +25,9 @@ export type RunnerEnv = {
   // Capability labels are prepended to this domain. A port may be included for local development.
   previewBaseDomain?: string | undefined;
   previewProtocol?: "http" | "https" | undefined;
+  // Public Goat origin used only by the runner host to call private, bearer-protected
+  // endpoints. Integration credentials and this bearer token never enter Codex sandboxes.
+  goatAppUrl?: string | undefined;
   // Kill switch for the LLM broker: set RUNNER_LLM_BROKER_ENABLED=false to revert to
   // direct key injection without a deploy.
   llmBrokerEnabled: boolean;
@@ -99,6 +102,7 @@ export function loadEnv(): RunnerEnv {
     publicUrl: optionalEnv("RUNNER_LLM_BROKER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
     previewBaseDomain: optionalPreviewBaseDomainEnv(),
     previewProtocol: optionalPreviewProtocolEnv(),
+    goatAppUrl: optionalEnv("GOAT_NEXT_PUBLIC_APP_URL"),
     llmBrokerEnabled: optionalBooleanEnv("RUNNER_LLM_BROKER_ENABLED", true),
     integrationCredentialEncryptionKey: requiredEncryptionKey(),
     exaApiKey: optionalEnv("EXA_API_KEY"),

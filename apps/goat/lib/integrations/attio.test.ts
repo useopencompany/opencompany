@@ -30,15 +30,19 @@ vi.mock("@opencompany/db/goat-integrations", () => ({
   saveGoatIntegrationCredential: mocks.saveCredential,
   markGoatIntegrationStatus: mocks.markStatus,
 }));
-vi.mock("@/lib/app-url", () => ({
+vi.mock("@opencompany/goat-agent/app-url", () => ({
   getGoatAppUrl: () => "https://goat.example",
 }));
 
 import {
   connectGoatAttioIntegration,
+  hasGoatAttioListConfigurationWriteScope,
+  hasGoatAttioListReadScopes,
+  hasGoatAttioListWriteScopes,
+  hasGoatAttioRecordWriteScopes,
   parseGoatAttioScopes,
   validateGoatAttioApiKey,
-} from "@/lib/integrations/attio";
+} from "@opencompany/goat-agent/integrations/attio";
 
 beforeEach(() => {
   mocks.insertedValues = undefined;
@@ -62,7 +66,41 @@ describe("Attio API key scope handling", () => {
         " note:read-write  object_configuration:read note:read-write record_permission:read-write ",
       ),
     ).toEqual(["note:read-write", "object_configuration:read", "record_permission:read-write"]);
+    expect(
+      parseGoatAttioScopes([
+        " list_configuration:read-write list_entry:read-write ",
+        "object_configuration:read-write",
+      ]),
+    ).toEqual([
+      "list_configuration:read-write",
+      "list_entry:read-write",
+      "object_configuration:read-write",
+    ]);
     expect(parseGoatAttioScopes(undefined)).toEqual([]);
+  });
+
+  it("requires both list capabilities while accepting read-write variants", () => {
+    expect(hasGoatAttioListReadScopes([])).toBe(false);
+    expect(hasGoatAttioListReadScopes(["list_configuration:read"])).toBe(false);
+    expect(hasGoatAttioListReadScopes(["list_configuration:read", "list_entry:read"])).toBe(true);
+    expect(
+      hasGoatAttioListReadScopes(["list_configuration:read-write", "list_entry:read-write"]),
+    ).toBe(true);
+  });
+
+  it("requires explicit record and list-entry write scopes for chat updates", () => {
+    expect(
+      hasGoatAttioRecordWriteScopes(["object_configuration:read", "record_permission:read-write"]),
+    ).toBe(true);
+    expect(
+      hasGoatAttioRecordWriteScopes(["object_configuration:read", "record_permission:read"]),
+    ).toBe(false);
+    expect(hasGoatAttioListWriteScopes(["list_configuration:read", "list_entry:read-write"])).toBe(
+      true,
+    );
+    expect(hasGoatAttioListWriteScopes(["list_configuration:read", "list_entry:read"])).toBe(false);
+    expect(hasGoatAttioListConfigurationWriteScope(["list_configuration:read"])).toBe(false);
+    expect(hasGoatAttioListConfigurationWriteScope(["list_configuration:read-write"])).toBe(true);
   });
 
   it("returns Attio scopes with the validated workspace identity", async () => {
@@ -74,8 +112,9 @@ describe("Attio API key scope handling", () => {
           workspace_id: "workspace_1",
           workspace_name: "Acme",
           workspace_slug: "acme",
-          scope:
+          scope: [
             "object_configuration:read record_permission:read-write note:read-write webhook:read-write",
+          ],
         }),
       ),
     );

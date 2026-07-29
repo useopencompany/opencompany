@@ -3,7 +3,16 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { GoatMcpClient } from "@opencompany/db/goat-schema";
 import { useLiveQuery } from "@tanstack/react-db";
-import { createContext, type ReactNode, useContext, useMemo } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { GoatTaskView } from "@/components/GoatSurface";
 import { GOAT_PINNED_CHAT_LIMIT, type GoatChatSummaryView } from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
@@ -18,6 +27,13 @@ import {
   type GoatTaskScheduleRow,
 } from "@/lib/task-collections";
 import type { GoatTaskScheduleView } from "@/lib/task-schedules";
+
+// Codex and Claude Code chats both persist their runtime in goat.codex_chat_sessions,
+// so home/archived cards must attach codexRuntime for either engine. Attaching it only
+// for "codex" leaves Claude cards stuck on the null-runtime "Connecting" label.
+function hasCodexChatRuntime(engine: GoatChatSessionRow["engine"]): boolean {
+  return engine === "codex" || engine === "claude_code";
+}
 
 type GoatUserView = {
   // Scopes client-side chat attachment uploads (blob prefix goat-chat/{id}/).
@@ -65,6 +81,7 @@ export type GoatAppInitialData = {
   integrations: GoatIntegrationState;
   featureFlags: GoatFeatureFlags;
   codexConnected: boolean;
+  claudeCodeConnected: boolean;
   chatResumeEnabled: boolean;
   mcpSetup: {
     preferredClient: GoatMcpClient | null;
@@ -85,6 +102,9 @@ type GoatAppData = GoatAppInitialData & {
 const GOAT_ARCHIVED_CHAT_LIMIT = 50;
 
 const GoatAppDataContext = createContext<GoatAppData | null>(null);
+const subscribeToHydration = () => () => undefined;
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
 
 export function GoatAppDataProvider({
   initialData,
@@ -93,11 +113,55 @@ export function GoatAppDataProvider({
   initialData: GoatAppInitialData;
   children: ReactNode;
 }) {
+  const initialValue = useMemo(() => initialGoatAppData(initialData), [initialData]);
+  const [liveSnapshot, setLiveSnapshot] = useState<{
+    initialData: GoatAppInitialData;
+    value: GoatAppData;
+  } | null>(null);
+  const updateLiveData = useCallback(
+    (value: GoatAppData) => setLiveSnapshot({ initialData, value }),
+    [initialData],
+  );
+  const value = liveSnapshot?.initialData === initialData ? liveSnapshot.value : initialValue;
+
+  return (
+    <GoatAppDataContext.Provider value={value}>
+      {children}
+      <GoatAppLiveDataSync initialData={initialData} onData={updateLiveData} />
+    </GoatAppDataContext.Provider>
+  );
+}
+
+function GoatAppLiveDataSync({
+  initialData,
+  onData,
+}: {
+  initialData: GoatAppInitialData;
+  onData: (value: GoatAppData) => void;
+}) {
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  );
+  return hydrated ? (
+    <GoatAppLiveDataSubscriptions initialData={initialData} onData={onData} />
+  ) : null;
+}
+
+function GoatAppLiveDataSubscriptions({
+  initialData,
+  onData,
+}: {
+  initialData: GoatAppInitialData;
+  onData: (value: GoatAppData) => void;
+}) {
   const collections = useMemo(() => createGoatCollections(), []);
+  // Tasks are not gated on the task-spawning flag: firing a workflow enables
+  // the flag server-side, and its task must appear in the sidebar immediately.
   const { data: taskRows, isLoading: tasksLoading } = useLiveQuery(
-    (q) =>
-      initialData.featureFlags.taskSpawning ? q.from({ task: collections.tasks }) : undefined,
-    [initialData.featureFlags.taskSpawning, collections],
+    (q) => q.from({ task: collections.tasks }),
+    [collections],
   );
   const { data: scheduleRows, isLoading: schedulesLoading } = useLiveQuery(
     (q) =>
@@ -117,7 +181,6 @@ export function GoatAppDataProvider({
   );
 
   const tasks = useMemo(() => {
-    if (!initialData.featureFlags.taskSpawning) return [];
     if (tasksLoading && !taskRows?.length) return initialData.tasks;
     return ((taskRows ?? []) as GoatTaskRow[])
       .map(taskRowToView)
@@ -129,7 +192,7 @@ export function GoatAppDataProvider({
             isRecentGoatHomeActivity(task.createdAt)),
       )
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [initialData.featureFlags.taskSpawning, initialData.tasks, taskRows, tasksLoading]);
+  }, [initialData.tasks, taskRows, tasksLoading]);
 
   const schedules = useMemo(() => {
     if (!initialData.featureFlags.taskSpawning) return [];
@@ -167,8 +230,9 @@ export function GoatAppDataProvider({
         model: row.model as AgentModelId,
         engine: row.engine,
         codexComposerSettings: initial?.codexComposerSettings ?? null,
-        codexRuntime:
-          row.engine === "codex" ? (liveCodexRuntime ?? initial?.codexRuntime ?? null) : null,
+        codexRuntime: hasCodexChatRuntime(row.engine)
+          ? (liveCodexRuntime ?? initial?.codexRuntime ?? null)
+          : null,
         preview: initial?.preview ?? "No messages yet.",
         updatedAt: row.updated_at,
         pinnedAt: row.pinned_at,
@@ -227,7 +291,9 @@ export function GoatAppDataProvider({
         model: row.model as AgentModelId,
         engine: row.engine,
         codexComposerSettings: null,
-        codexRuntime: row.engine === "codex" ? (codexRuntimeByChatId.get(row.id) ?? null) : null,
+        codexRuntime: hasCodexChatRuntime(row.engine)
+          ? (codexRuntimeByChatId.get(row.id) ?? null)
+          : null,
         preview: "Archived",
         updatedAt: row.updated_at,
         pinnedAt: null,
@@ -243,6 +309,7 @@ export function GoatAppDataProvider({
     return {
       ...liveIntegrations,
       codex: initialData.integrations.codex,
+      claude_code: initialData.integrations.claude_code,
       jamie: {
         ...liveIntegrations.jamie,
         integrationId: initialData.integrations.jamie.integrationId,
@@ -265,7 +332,11 @@ export function GoatAppDataProvider({
     [archivedChats, initialData, integrations, recentChats, schedules, taskRows, tasks],
   );
 
-  return <GoatAppDataContext.Provider value={value}>{children}</GoatAppDataContext.Provider>;
+  // TanStack DB currently has no server snapshot for useLiveQuery. Keep its
+  // subscriptions in this post-hydration bridge while the outer provider
+  // serves the server snapshot immediately, without remounting app children.
+  useEffect(() => onData(value), [onData, value]);
+  return null;
 }
 
 export function useGoatAppData() {
@@ -280,6 +351,14 @@ export function useGoatAppDataOptional() {
   return useContext(GoatAppDataContext);
 }
 
+function initialGoatAppData(initialData: GoatAppInitialData): GoatAppData {
+  return {
+    ...initialData,
+    taskRows: [],
+    archivedChats: [],
+  };
+}
+
 function taskRowToView(row: GoatTaskRow): GoatTaskView {
   return {
     id: row.id,
@@ -289,10 +368,13 @@ function taskRowToView(row: GoatTaskRow): GoatTaskView {
     model: row.model,
     scheduleId: row.schedule_id,
     scheduledFor: row.scheduled_for,
+    workflowId: row.workflow_id,
     status: row.status,
     stage: row.stage,
     result: row.result,
     error: row.error,
+    reportedOutcome: row.reported_outcome,
+    outcomeComment: row.outcome_comment,
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

@@ -121,7 +121,7 @@ export async function saveGoatOnboardingBrainFoldersAction(input: {
 
 export async function saveGoatOnboardingProfileAction(input: {
   role: string | null;
-  building: string | null;
+  companyUrl: string;
 }): Promise<GoatOnboardingActionResult> {
   const context = await currentGoatUser();
   const profile = parseGoatOnboardingProfile(input);
@@ -131,7 +131,9 @@ export async function saveGoatOnboardingProfileAction(input: {
       userWorkosId: context.user.workosUserId,
       workspaceId: context.workspace.id,
       role: profile.role,
-      building: profile.building,
+      building: null,
+      companyDomain: new URL(profile.companyUrl).hostname,
+      contextUrls: [profile.companyUrl],
     });
     return { ok: true };
   } catch (error) {
