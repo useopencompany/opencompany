@@ -564,6 +564,9 @@ async function runGoatTaskCodex(input: {
     prompt: input.prompt,
     systemPrompt: input.harnessSpec.systemPrompt,
     model: input.harnessSpec.model,
+    ...(input.harnessSpec.workflow?.skillSnapshots
+      ? { skills: input.harnessSpec.workflow.skillSnapshots }
+      : {}),
     existingEngineSessionId: input.existingEngineSessionId,
     env: input.env,
     signal: input.signal,

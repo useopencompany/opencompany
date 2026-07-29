@@ -104,7 +104,13 @@ export function compileGoatWorkflowHarnessSpec(input: {
   selection: GoatWorkflowEngineSelection;
   description: string;
 }): GoatHarnessSpec {
-  const skillBlocks = input.skills.map((skill) => serializeGoatBrainSkillMarkdown(skill));
+  // OpenCompany task runs receive workflow skills as prompt blocks. Codex gets
+  // the immutable snapshots below as native skill inputs instead, avoiding a
+  // second copy of the full instructions in the text prompt.
+  const skillBlocks =
+    input.selection.engine === "opencompany"
+      ? input.skills.map((skill) => serializeGoatBrainSkillMarkdown(skill))
+      : [];
   const systemPrompt = [
     `You are executing the user-authored workflow "${input.workflow.name}" as a background task.`,
     ...(input.workflow.description ? [`Workflow description: ${input.workflow.description}`] : []),
@@ -143,6 +149,16 @@ export function compileGoatWorkflowHarnessSpec(input: {
       id: input.workflow.id,
       workspaceId: input.workspaceId,
       skillIds: input.skills.map((skill) => skill.id),
+      ...(input.selection.engine === "codex"
+        ? {
+            skillSnapshots: input.skills.map((skill) => ({
+              id: skill.id,
+              name: skill.name,
+              description: skill.description,
+              instructions: skill.instructions,
+            })),
+          }
+        : {}),
     },
   };
 }

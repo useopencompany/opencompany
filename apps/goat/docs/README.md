@@ -106,6 +106,10 @@ Selecting a workflow with `#<id>` changes the composer action from **Send messag
 task**. Submission posts directly to `/api/workflows`, starts the durable task in the
 background, and leaves the current Home or chat surface in place. It does not call the foreground
 chat model or persist user/assistant chat messages for the workflow launch.
+Skills mentioned by the workflow are resolved and snapshotted when the task is created. OpenCompany
+task runs receive those snapshots as workflow prompt blocks; Codex task runs materialize them under
+`.agents/skills` and invoke them as native app-server skill inputs, matching explicit skill mentions
+in main Codex chat.
 
 Workflow runs remain grouped under **Tasks**, but task detail renders the same `GoatSurface` as a
 normal chat. The task's `goat.task_messages` rows are projected into chat bubbles, and the standard

@@ -138,4 +138,39 @@ describe("compileGoatWorkflowHarnessSpec", () => {
     });
     expect(spec.skills).toEqual([]);
   });
+
+  it("snapshots Codex workflow skills without duplicating them into the text prompt", () => {
+    const spec = compileGoatWorkflowHarnessSpec({
+      workflow: {
+        id: "code-review",
+        name: "Code review",
+        description: "",
+        instructions: "Review the implementation with @skill/review-work.",
+        model: "codex",
+      },
+      workspaceId: "ws_1",
+      skills: [
+        {
+          id: "review-work",
+          name: "Review work",
+          description: "How to review changes",
+          instructions: "Inspect the diff and run focused tests.",
+        },
+      ],
+      tools: ["github_shell"],
+      selection: { engine: "codex", model: "openai/gpt-5.5" },
+      description: "Review pull request 123",
+    });
+
+    expect(spec.systemPrompt).not.toContain("<workflow_skills>");
+    expect(spec.systemPrompt).not.toContain("Inspect the diff and run focused tests.");
+    expect(spec.workflow?.skillSnapshots).toEqual([
+      {
+        id: "review-work",
+        name: "Review work",
+        description: "How to review changes",
+        instructions: "Inspect the diff and run focused tests.",
+      },
+    ]);
+  });
 });
