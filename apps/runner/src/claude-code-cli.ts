@@ -60,6 +60,22 @@ export function buildClaudeCommandEnv(input: {
   return env;
 }
 
+// Matches the wrapper shell and the claude process of a turn run (both carry
+// "--output-format stream-json" on their command line) without matching the shell
+// executing this cleanup: its own command line contains "[-]-output-format", which the
+// pattern does not match. pkill exits 1 when nothing matched, hence the trailing true.
+export const KILL_LEFTOVER_CLAUDE_TURN_COMMAND =
+  "pkill -9 -f '[-]-output-format stream-json' || true";
+
+// A hard runner death (crash, OOM kill, SIGKILL at the end of a deploy grace period)
+// never reaches handle.kill(), so the background `claude` process survives in the
+// sandbox. Reclaiming the turn into the same sandbox would then run two agents in one
+// checkout — they race each other (file reverts, duplicate commits and PRs). Every run
+// against a reused sandbox must fence off leftover turn processes first.
+export async function killLeftoverClaudeTurnProcesses(sandbox: SandboxHandle) {
+  await sandbox.commands.run(KILL_LEFTOVER_CLAUDE_TURN_COMMAND, { timeoutMs: 30_000 });
+}
+
 export function buildClaudeTurnCommand(input: {
   workdir: string;
   promptPath: string;

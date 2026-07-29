@@ -20,6 +20,7 @@ import {
   buildClaudeTurnCommand,
   type ClaudeCodeCliAuth,
   ensureClaudeInstalled,
+  killLeftoverClaudeTurnProcesses,
   runClaudeCodeCliProcess,
 } from "./claude-code-cli";
 import type { CodexAppServerSummary } from "./codex-app-server";
@@ -58,8 +59,9 @@ const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
 
-// Claude Code recovery is an idempotent re-run of `claude --resume` against the persisted sandbox,
-// so it is safe to repeat across successive handoffs. Unlike Codex there is no engine-turn to
+// Claude Code recovery re-runs `claude --resume` against the persisted sandbox; that is only
+// idempotent because any CLI process left over from the prior attempt is killed before the
+// re-run (see killLeftoverClaudeTurnProcesses). Unlike Codex there is no engine-turn to
 // durably adopt, so nothing rearms the recovery guard between handoffs — a single-attempt cap would
 // strand any turn caught by two deploys. Allow several recoveries (each real infra churn, not model
 // misbehaviour, since a held lease is never reclaimed) while still bounding a genuine poison loop.
@@ -315,6 +317,12 @@ export async function runGoatClaudeCodeChatTurn(input: {
       });
     };
 
+    if (!sandboxReplaced) {
+      // Only a live runner can kill its background CLI; after a hard runner death the prior
+      // attempt's process is still running in this sandbox and would race the new run.
+      executionStage = "kill_leftover_turn_processes";
+      await killLeftoverClaudeTurnProcesses(sandbox);
+    }
     executionStage = "run_turn";
     const resumeSessionId = sandboxReplaced ? null : session.codexThreadId;
     const runOnce = (resume: string | null) =>
