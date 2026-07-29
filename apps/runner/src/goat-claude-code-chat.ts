@@ -20,6 +20,7 @@ import {
   buildClaudeTurnCommand,
   type ClaudeCodeCliAuth,
   ensureClaudeInstalled,
+  killLeftoverClaudeTurnProcesses,
   runClaudeCodeCliProcess,
 } from "./claude-code-cli";
 import type { CodexAppServerSummary } from "./codex-app-server";
@@ -66,11 +67,13 @@ const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
 
-// Claude Code recovery is an idempotent re-run of `claude --resume` against the persisted sandbox,
-// so it is safe to repeat across successive handoffs. Unlike Codex there is no engine-turn to
-// durably adopt, so nothing rearms the recovery guard between handoffs — a single-attempt cap would
-// strand any turn caught by two deploys. Allow several recoveries (each real infra churn, not model
-// misbehaviour, since a held lease is never reclaimed) while still bounding a genuine poison loop.
+// Claude Code recovery re-runs `claude --resume` against the persisted sandbox. Fence off any CLI
+// process left over from the prior attempt before touching the checkout so recovery runs are
+// serialized (see killLeftoverClaudeTurnProcesses), though their external side effects are not
+// intrinsically idempotent. Unlike Codex there is no engine-turn to durably adopt, so nothing
+// rearms the recovery guard between handoffs — a single-attempt cap would strand any turn caught
+// by two deploys. Allow several recoveries while still bounding repeated side effects and a genuine
+// poison loop.
 const CLAUDE_CHAT_MAX_RECOVERY_ATTEMPTS = 10;
 const CLAUDE_CHAT_RECOVERY_EXHAUSTED_MESSAGE =
   "This turn was interrupted by too many runner restarts to resume safely. Send your message again to continue.";
@@ -227,6 +230,13 @@ export async function runGoatClaudeCodeChatTurn(input: {
   let executionStage = "load_attachments";
   try {
     checkExternalAbort();
+    if (!sandboxReplaced) {
+      // Fence the reused checkout before any preparation writes. After a hard runner death,
+      // the prior CLI can still be editing files until this process is explicitly killed.
+      executionStage = "kill_leftover_turn_processes";
+      await killLeftoverClaudeTurnProcesses(sandbox);
+      checkExternalAbort();
+    }
     if (input.recovery) {
       executionStage = "claim_recovery";
       await claimCodexChatRecovery({
