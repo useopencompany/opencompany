@@ -98,6 +98,7 @@ describe("resolveGoogleDriveActions", () => {
     expect(catalog?.actions.map((action) => action.id)).toEqual([
       "google_drive.search_files",
       "google_drive.get_document",
+      "google_drive.create_document",
       "google_drive.replace_document_text",
     ]);
     expect(findAction(catalog, "google_drive.search_files")).toMatchObject({
@@ -111,7 +112,7 @@ describe("resolveGoogleDriveActions", () => {
       permission: {
         provider: "google_drive",
         capabilityId: "write",
-        label: "Edit Google Docs",
+        label: "Create & edit Docs",
         integrationIds: ["gint_drive_louis@example.com"],
       },
       params: { required: ["file_id", "find", "replace"] },
@@ -166,6 +167,7 @@ describe("resolveGoogleDriveActions", () => {
     ];
     catalog = await resolveGoogleDriveActions("user_1");
     expect(catalog?.actions.map((action) => action.id)).toEqual([
+      "google_drive.create_document",
       "google_drive.replace_document_text",
     ]);
 
@@ -413,6 +415,183 @@ describe("google_drive.get_document", () => {
   });
 });
 
+describe("google_drive.create_document", () => {
+  it("creates a Google Doc with initial text and returns its durable source", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall
+      .mockResolvedValueOnce({
+        documentId: "doc_new",
+        title: "Q3 plan",
+      })
+      .mockResolvedValueOnce({
+        documentId: "doc_new",
+        writeControl: { requiredRevisionId: "rev_1" },
+      });
+    const action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.create_document",
+    );
+
+    const result = await action.execute(
+      { title: "Q3 plan", text: "Launch on Monday.\nOwner: Ada" },
+      CONTEXT,
+    );
+
+    expect(mocks.googleApiCall).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        integrationId: "gint_drive_louis@example.com",
+        provider: "google_drive",
+      }),
+      "POST",
+      new URL("https://docs.googleapis.com/v1/documents"),
+      {
+        signal: CONTEXT.signal,
+        body: { title: "Q3 plan" },
+      },
+    );
+    expect(mocks.googleApiCall).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        integrationId: "gint_drive_louis@example.com",
+        provider: "google_drive",
+      }),
+      "POST",
+      new URL("https://docs.googleapis.com/v1/documents/doc_new:batchUpdate"),
+      {
+        signal: CONTEXT.signal,
+        body: {
+          requests: [
+            {
+              insertText: {
+                endOfSegmentLocation: {},
+                text: "Launch on Monday.\nOwner: Ada",
+              },
+            },
+          ],
+        },
+      },
+    );
+    expect(result).toMatchObject({
+      account: "louis@example.com",
+      integrationId: "gint_drive_louis@example.com",
+      document: {
+        id: "doc_new",
+        title: "Q3 plan",
+        mimeType: "application/vnd.google-apps.document",
+        sourceRef: "google-drive:file:doc_new",
+        url: "https://docs.google.com/document/d/doc_new/edit",
+        initialTextAdded: true,
+        revisionId: "rev_1",
+      },
+    });
+  });
+
+  it("creates a blank Google Doc in one request when no text is provided", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({
+      documentId: "doc_blank",
+      title: "Blank plan",
+    });
+    const action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.create_document",
+    );
+
+    const result = await action.execute({ title: "Blank plan" }, CONTEXT);
+
+    expect(mocks.googleApiCall).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      document: {
+        id: "doc_blank",
+        title: "Blank plan",
+      },
+    });
+    expect(result).not.toHaveProperty("document.initialTextAdded");
+  });
+
+  it("returns the created document and a warning if its initial text cannot be added", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall
+      .mockResolvedValueOnce({
+        documentId: "doc_partial",
+        title: "Partial plan",
+      })
+      .mockRejectedValueOnce(new Error("Google API request failed with 429."));
+    const action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.create_document",
+    );
+
+    const result = await action.execute(
+      { title: "Partial plan", text: "This could not be inserted." },
+      CONTEXT,
+    );
+
+    expect(result).toMatchObject({
+      document: {
+        id: "doc_partial",
+        initialTextAdded: false,
+        url: "https://docs.google.com/document/d/doc_partial/edit",
+      },
+      warning: expect.stringContaining(
+        "The document was created, but its initial text could not be added.",
+      ),
+    });
+    expect(result).toMatchObject({
+      warning: expect.stringContaining("Google API request failed with 429."),
+    });
+  });
+
+  it("rejects malformed document input before calling Google", async () => {
+    mocks.dbRows = [connectedRow()];
+    const action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.create_document",
+    );
+
+    await expect(action.execute({}, CONTEXT)).rejects.toThrow('"title" is required');
+    await expect(action.execute({ title: "x".repeat(301) }, CONTEXT)).rejects.toThrow(
+      '"title" must be at most 300 characters',
+    );
+    await expect(action.execute({ title: "Plan", text: 42 }, CONTEXT)).rejects.toThrow(
+      '"text" must be a string',
+    );
+    await expect(
+      action.execute({ title: "Plan", text: "x".repeat(100_001) }, CONTEXT),
+    ).rejects.toThrow('"text" must be at most 100000 characters');
+    await expect(action.execute({ title: "Plan", extra: true }, CONTEXT)).rejects.toThrow(
+      'Unknown parameter: "extra"',
+    );
+    expect(mocks.googleApiCall).not.toHaveBeenCalled();
+  });
+
+  it("re-checks OAuth scope and permission mode immediately before creating", async () => {
+    mocks.dbRows = [connectedRow()];
+    let action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.create_document",
+    );
+    mocks.dbRows = [connectedRow("louis@example.com", { scopes: [DRIVE_READ_SCOPE] })];
+
+    await expect(action.execute({ title: "Plan" }, CONTEXT)).rejects.toMatchObject({
+      name: "GoatActionAuthError",
+      code: "auth_expired",
+      provider: "google_drive",
+      message: expect.stringContaining("enable creating and editing Google Docs"),
+    } satisfies Partial<GoatActionAuthError>);
+
+    mocks.dbRows = [connectedRow()];
+    action = findAction(await resolveGoogleDriveActions("user_1"), "google_drive.create_document");
+    mocks.dbRows = [connectedRow("louis@example.com", { capabilityModes: { write: "off" } })];
+
+    await expect(action.execute({ title: "Plan" }, CONTEXT)).rejects.toBeInstanceOf(
+      GoatActionPermissionError,
+    );
+    expect(mocks.googleApiCall).not.toHaveBeenCalled();
+  });
+});
+
 describe("google_drive.replace_document_text", () => {
   it("replaces exact text with a revision guard and returns the changed occurrence count", async () => {
     mocks.dbRows = [connectedRow()];
@@ -506,7 +685,7 @@ describe("google_drive.replace_document_text", () => {
       name: "GoatActionAuthError",
       code: "auth_expired",
       provider: "google_drive",
-      message: expect.stringContaining("enable Google Docs editing"),
+      message: expect.stringContaining("enable creating and editing Google Docs"),
     } satisfies Partial<GoatActionAuthError>);
 
     mocks.dbRows = [connectedRow()];
