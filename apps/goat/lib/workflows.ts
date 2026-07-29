@@ -36,8 +36,6 @@ export type GoatWorkflowListItem = {
   slug: string;
   name: string;
   description: string;
-  trigger: GoatWorkflowTrigger;
-  steps: GoatWorkflowStep[];
   status: GoatWorkflowStatus;
   updatedAt: Date;
 };
@@ -123,26 +121,13 @@ export async function listGoatWorkflows(
       slug: goatWorkflows.slug,
       name: goatWorkflows.name,
       description: goatWorkflows.description,
-      instructions: goatWorkflows.instructions,
-      model: goatWorkflows.model,
-      steps: goatWorkflows.steps,
-      trigger: goatWorkflows.trigger,
       status: goatWorkflows.status,
       updatedAt: goatWorkflows.updatedAt,
     })
     .from(goatWorkflows)
     .where(and(eq(goatWorkflows.workspaceId, workspaceId), isNull(goatWorkflows.archivedAt)))
     .orderBy(desc(goatWorkflows.updatedAt));
-
-  return rows.map((row) => ({
-    slug: row.slug,
-    name: row.name,
-    description: row.description,
-    trigger: row.trigger,
-    steps: goatWorkflowStepsWithLegacyFallback(row),
-    status: row.status,
-    updatedAt: row.updatedAt,
-  }));
+  return rows;
 }
 
 export async function getGoatWorkflow(

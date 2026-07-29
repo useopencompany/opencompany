@@ -293,6 +293,11 @@ export type GoatHarnessSpec = {
     skillIds: string[];
     steps?: GoatHarnessWorkflowStep[];
     currentStepIndex?: number;
+    completedStepCount?: number;
+    lastCompletedStepOutcome?: {
+      reportedOutcome: GoatTaskReportedOutcome | null;
+      outcomeComment: string | null;
+    };
   };
   codex?: {
     repository?: string | null;

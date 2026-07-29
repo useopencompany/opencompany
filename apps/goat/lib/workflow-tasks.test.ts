@@ -144,6 +144,7 @@ describe("compileGoatWorkflowHarnessSpec", () => {
         workspaceId: "ws_1",
         skillIds: ["research", "coding-work"],
         currentStepIndex: 0,
+        completedStepCount: 0,
       },
     });
     expect(spec.systemPrompt).toBe(spec.workflow?.steps?.[0]?.systemPrompt);

@@ -691,7 +691,12 @@ describe("executeGoatWorkflowStepsTask", () => {
       vi
         .mocked(executorInput.reportStage)
         .mock.calls.map(([, patch]) => patch?.harnessSpec?.workflow?.currentStepIndex),
-    ).toEqual([0, 1]);
+    ).toEqual([0, 0, 1, 1]);
+    expect(
+      vi
+        .mocked(executorInput.reportStage)
+        .mock.calls.map(([, patch]) => patch?.harnessSpec?.workflow?.completedStepCount),
+    ).toEqual([0, 1, 1, 2]);
     expect(
       runStep.mock.calls.map(([input]) => input.task.harnessSpec.workflow?.currentStepIndex),
     ).toEqual([0, 1]);
@@ -726,6 +731,7 @@ describe("executeGoatWorkflowStepsTask", () => {
   it("halts when an intermediate step needs attention and prefixes its outcome", async () => {
     const sink = createSink();
     const spec = workflowHarnessSpec(["opencompany", "opencompany", "opencompany"]);
+    const executorInput = workflowExecutorInput(spec, sink);
     const runStep = vi.fn(
       async (input: GoatTaskExecutorInput): Promise<GoatTaskExecutorResult> => ({
         ...stepResult(input, "Partial result."),
@@ -734,11 +740,20 @@ describe("executeGoatWorkflowStepsTask", () => {
       }),
     );
 
-    const result = await executeGoatWorkflowStepsTask(workflowExecutorInput(spec, sink), runStep);
+    const result = await executeGoatWorkflowStepsTask(executorInput, runStep);
 
     expect(runStep).toHaveBeenCalledTimes(1);
     expect(result.reportedOutcome).toBe("needs_attention");
     expect(result.outcomeComment).toBe("Step 1 (Title 1): A source is unavailable.");
+    expect(
+      vi
+        .mocked(executorInput.reportStage)
+        .mock.calls.map(([, patch]) => patch?.harnessSpec?.workflow?.completedStepCount),
+    ).toEqual([0, 1]);
+    expect(result.harnessSpec.workflow?.lastCompletedStepOutcome).toEqual({
+      reportedOutcome: "needs_attention",
+      outcomeComment: "Step 1 (Title 1): A source is unavailable.",
+    });
   });
 
   it("publishes a done outcome only after the final step", async () => {
@@ -792,7 +807,82 @@ describe("executeGoatWorkflowStepsTask", () => {
     });
   });
 
-  it("keeps consecutive Codex sessions and clears them across engine transitions", async () => {
+  it("finalizes from the durable transcript when every step already completed", async () => {
+    const sink = createSink();
+    const spec = workflowHarnessSpec(["opencompany", "codex"], 1, 2);
+    spec.workflow!.lastCompletedStepOutcome = {
+      reportedOutcome: "done",
+      outcomeComment: "Draft complete.",
+    };
+    const runStep = vi.fn();
+
+    const result = await executeGoatWorkflowStepsTask(
+      workflowExecutorInput(spec, sink, [
+        { role: "user", content: "Prepare the report." },
+        { role: "assistant", content: "Research complete." },
+        { role: "user", content: "Step 2/2 — Title 2" },
+        { role: "assistant", content: "Final draft." },
+      ]),
+      runStep,
+    );
+
+    expect(runStep).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      result: "Final draft.",
+      reportedOutcome: "done",
+      outcomeComment: "Draft complete.",
+      harnessSpec: spec,
+    });
+  });
+
+  it("finalizes a checkpointed needs-attention stop without running later steps", async () => {
+    const sink = createSink();
+    const spec = workflowHarnessSpec(["opencompany", "opencompany", "codex"], 0, 1);
+    spec.workflow!.lastCompletedStepOutcome = {
+      reportedOutcome: "needs_attention",
+      outcomeComment: "Step 1 (Title 1): A source is unavailable.",
+    };
+    const runStep = vi.fn();
+
+    const result = await executeGoatWorkflowStepsTask(
+      workflowExecutorInput(spec, sink, [
+        { role: "user", content: "Prepare the report." },
+        { role: "assistant", content: "Partial result." },
+      ]),
+      runStep,
+    );
+
+    expect(runStep).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      result: "Partial result.",
+      reportedOutcome: "needs_attention",
+      outcomeComment: "Step 1 (Title 1): A source is unavailable.",
+      harnessSpec: spec,
+    });
+  });
+
+  it("does not mistake the original user request for a persisted step handoff", async () => {
+    const sink = createSink();
+    const spec = workflowHarnessSpec(["opencompany", "opencompany"]);
+    const runStep = vi.fn(
+      async (input: GoatTaskExecutorInput): Promise<GoatTaskExecutorResult> =>
+        stepResult(input, `Result ${runStep.mock.calls.length}`),
+    );
+
+    await executeGoatWorkflowStepsTask(
+      workflowExecutorInput(spec, sink, [
+        { role: "user", content: "Step 2/2 — this is user-authored text" },
+        { role: "assistant", content: "Step zero is complete." },
+      ]),
+      runStep,
+    );
+
+    expect(sink.createUserMessage).toHaveBeenCalledWith({
+      content: "Step 2/2 — Title 2",
+    });
+  });
+
+  it("keeps same-step Codex recovery but clears sessions before every later step", async () => {
     const sink = createSink();
     const spec = workflowHarnessSpec(["codex", "codex", "opencompany", "codex"]);
     const observedSessions: Array<string | null> = [];
@@ -816,7 +906,7 @@ describe("executeGoatWorkflowStepsTask", () => {
       runStep,
     );
 
-    expect(observedSessions).toEqual(["session-1", "session-2", null, null]);
+    expect(observedSessions).toEqual(["session-1", null, null, null]);
     expect(sink.updateCodexEngineSessionId).toHaveBeenNthCalledWith(1, "session-2");
     expect(sink.updateCodexEngineSessionId).toHaveBeenNthCalledWith(2, null);
   });
@@ -1148,6 +1238,7 @@ function createSink(): GoatTaskRunSink {
 function workflowHarnessSpec(
   engines: Array<"opencompany" | "codex">,
   currentStepIndex = 0,
+  completedStepCount = currentStepIndex,
 ): GoatHarnessSpec {
   const steps = engines.map((engine, index) => {
     const stepModel = engine === "codex" ? gptModel : model;
@@ -1173,6 +1264,7 @@ function workflowHarnessSpec(
       skillIds: [],
       steps,
       currentStepIndex,
+      completedStepCount,
     },
   };
 }

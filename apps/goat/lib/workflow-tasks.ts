@@ -178,6 +178,7 @@ export function compileGoatWorkflowHarnessSpec(input: {
       skillIds: input.skills.map((skill) => skill.id),
       steps,
       currentStepIndex: 0,
+      completedStepCount: 0,
       ...(hasCodexStep
         ? {
             skillSnapshots: input.skills.map((skill) => ({
