@@ -12,6 +12,7 @@ import {
   type GoatChatUiMessage,
   type GoatCodexRuntimeView,
   START_TASK_TOOL_PART_TYPE,
+  START_WORKFLOW_TOOL_PART_TYPE,
   WEB_FETCH_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
@@ -2556,6 +2557,67 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Research market")).toBeInTheDocument();
     expect(screen.getByText("TASK-42")).toBeInTheDocument();
     expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
+  });
+
+  it("renders a task card from start_workflow tool output", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [
+                { type: "text", text: "Started that workflow as a Task." },
+                {
+                  type: START_WORKFLOW_TOOL_PART_TYPE,
+                  toolCallId: "tool_1",
+                  state: "output-available",
+                  input: {
+                    workflowId: "customer-interview-synthesis",
+                    prompt: "Synthesize the Acme interview.",
+                  },
+                  output: {
+                    taskId: "task_1",
+                    taskDisplayId: "TASK-42",
+                    taskName: "Customer interview synthesis",
+                    status: "queued",
+                    prompt: "Synthesize the Acme interview.",
+                  },
+                },
+                {
+                  type: START_TASK_TOOL_PART_TYPE,
+                  toolCallId: "tool_2",
+                  state: "output-available",
+                  input: {
+                    name: "Fallback task",
+                    prompt: "Synthesize the Acme interview.",
+                  },
+                  output: {
+                    taskId: "task_1",
+                    taskDisplayId: "TASK-42",
+                    taskName: "Customer interview synthesis",
+                    status: "already_started",
+                    prompt: "Synthesize the Acme interview.",
+                  },
+                },
+              ],
+            } as unknown as GoatChatUiMessage,
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Started that workflow as a Task.")).toBeInTheDocument();
+    expect(screen.getAllByText("Customer interview synthesis")).toHaveLength(1);
+    expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
+    expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
   });
 
   it("renders current task status from task state instead of start_task output", () => {
