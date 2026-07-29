@@ -77,6 +77,7 @@ describe(".agent files", () => {
 
   test.each([
     "google/gemini-3-flash",
+    "deepseek/deepseek-v4-pro",
     "minimax/minimax-m3",
     "moonshotai/kimi-k2-thinking",
   ] as const)("round-trips newly supported AI Gateway model %s", (model) => {

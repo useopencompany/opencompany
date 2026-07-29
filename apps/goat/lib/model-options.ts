@@ -10,6 +10,7 @@ const GOAT_MODEL_IDS = [
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-4.8",
   "openai/gpt-5.5",
+  "deepseek/deepseek-v4-pro",
   "moonshotai/kimi-k3",
   "moonshotai/kimi-k2.6",
 ] as const satisfies readonly AgentModelId[];

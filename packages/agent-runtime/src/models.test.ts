@@ -5,6 +5,7 @@ import {
   CODEX_DEFAULT_MODEL_ID,
   claudeCodeModelSupportsReasoningEffort,
   codexCliModelNameForModelId,
+  getAgentModelRuntimeOptions,
   isCodexModelId,
 } from "./models";
 
@@ -34,5 +35,19 @@ describe("Claude Code model catalog", () => {
     expect(claudeCodeModelSupportsReasoningEffort("anthropic/claude-sonnet-5")).toBe(true);
     expect(claudeCodeModelSupportsReasoningEffort("claude-opus-4-8")).toBe(true);
     expect(claudeCodeModelSupportsReasoningEffort("anthropic/claude-haiku-4.5")).toBe(false);
+  });
+});
+
+describe("DeepSeek model catalog", () => {
+  it("exposes V4 Pro reasoning while retaining automatic Gateway caching", () => {
+    expect(getAgentModelRuntimeOptions("deepseek/deepseek-v4-pro")).toEqual({
+      supportsReasoning: true,
+      providerOptions: {
+        gateway: {
+          caching: "auto",
+        },
+      },
+      reasoningExposure: "raw",
+    });
   });
 });
