@@ -1184,6 +1184,13 @@
       "when": 1785326400000,
       "tag": "0168_remove_goat_local_codex_bridge",
       "breakpoints": true
+    },
+    {
+      "idx": 169,
+      "version": "7",
+      "when": 1785333600000,
+      "tag": "0169_drop_converted_local_codex_sessions",
+      "breakpoints": true
     }
   ]
 }
