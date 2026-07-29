@@ -33,6 +33,9 @@ describe("Goat onboarding integrations", () => {
     expect(goatOnboardingConnectionError("linear", "session_mismatch")).toContain(
       "Sign in with the same account",
     );
+    expect(goatOnboardingConnectionError("posthog", "posthog_denied")).toBe(
+      "PostHog authorization was cancelled.",
+    );
     expect(goatOnboardingConnectionError("github", "missing_code")).toContain(
       "did not return a valid authorization",
     );
@@ -47,6 +50,7 @@ describe("Goat onboarding integrations", () => {
   it("turns provider success into concise connection copy", () => {
     expect(goatIntegrationConnectionSuccess("hubspot")).toBe("HubSpot connected.");
     expect(goatIntegrationConnectionSuccess("google_drive")).toBe("Google Drive connected.");
+    expect(goatIntegrationConnectionSuccess("posthog")).toBe("PostHog connected.");
     expect(goatIntegrationConnectionSuccess(null)).toBe("Integration connected.");
   });
 });

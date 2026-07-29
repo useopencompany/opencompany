@@ -1205,6 +1205,13 @@
       "when": 1785336039727,
       "tag": "0171_goat_auto_model_routing_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 1785339080652,
+      "tag": "0172_goat_posthog_integration",
+      "breakpoints": true
     }
   ]
 }

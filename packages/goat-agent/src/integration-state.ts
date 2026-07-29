@@ -39,6 +39,16 @@ export type GoatLinearProviderState = {
   capabilityModes: Record<string, unknown>;
 };
 
+export type GoatPostHogProviderState = {
+  provider: "posthog";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  statusReason: string | null;
+  capabilityModes: Record<string, unknown>;
+};
+
 // The Linear brain-source connection (a Linear OAuth app with webhooks), as
 // opposed to GoatLinearProviderState which describes the MCP connector. Both
 // share provider "linear"; rows are told apart by external_id ("linear_mcp"
@@ -194,6 +204,7 @@ export type GoatIntegrationState = {
   google_calendar: GoatGoogleProviderState;
   google_drive: GoatGoogleProviderState;
   linear: GoatLinearProviderState;
+  posthog: GoatPostHogProviderState;
   github: GoatGitHubProviderState;
   jamie: GoatJamieProviderState;
   slack: GoatSlackProviderState;
@@ -306,6 +317,7 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     google_calendar: googleProviderState("google_calendar", byProvider.get("google_calendar")),
     google_drive: googleProviderState("google_drive", byProvider.get("google_drive")),
     linear: linearProviderState(byProvider.get("linear")),
+    posthog: posthogProviderState(byProvider.get("posthog")),
     github: githubProviderState(byProvider.get("github")),
     jamie: jamieProviderState(byProvider.get("jamie")),
     slack: slackProviderState(byProvider.get("slack")),
@@ -391,6 +403,30 @@ function linearProviderState(row: IntegrationStateRow | undefined): GoatLinearPr
 
   return {
     provider: "linear",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+    capabilityModes: row.capabilityModes ?? row.capability_modes ?? {},
+  };
+}
+
+function posthogProviderState(row: IntegrationStateRow | undefined): GoatPostHogProviderState {
+  if (!row) {
+    return {
+      provider: "posthog",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      statusReason: null,
+      capabilityModes: {},
+    };
+  }
+
+  return {
+    provider: "posthog",
     connected: row.status === "connected",
     status: row.status,
     integrationId: row.id ?? null,
