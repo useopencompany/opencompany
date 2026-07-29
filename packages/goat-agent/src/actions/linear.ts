@@ -211,10 +211,10 @@ const LINEAR_UPDATE_ISSUE_PARAMS: JSONSchema7 = {
         'Workflow state name or ID. To cancel an issue, set its team cancellation state (usually "Canceled").',
     },
     project: {
-      type: "string",
+      type: ["string", "null"],
       minLength: 1,
       maxLength: MAX_LINEAR_SELECTOR_CHARS,
-      description: "Project name, slug, or ID.",
+      description: "Project name, slug, or ID; use null to remove the project association.",
     },
     priority: {
       type: "integer",
@@ -683,7 +683,6 @@ export function normalizeLinearUpdateIssueInput(input: unknown): Record<string, 
     ["title", MAX_LINEAR_ISSUE_TITLE_CHARS],
     ["team", MAX_LINEAR_SELECTOR_CHARS],
     ["state", MAX_LINEAR_SELECTOR_CHARS],
-    ["project", MAX_LINEAR_SELECTOR_CHARS],
     ["parentId", MAX_LINEAR_PARENT_ID_CHARS],
   ] as const) {
     const value = optionalBoundedString(input, key, maxChars);
@@ -702,6 +701,12 @@ export function normalizeLinearUpdateIssueInput(input: unknown): Record<string, 
   } else {
     const assignee = optionalBoundedString(input, "assignee", MAX_LINEAR_SELECTOR_CHARS);
     if (assignee !== undefined) normalized.assignee = assignee;
+  }
+  if (input.project === null) {
+    normalized.project = null;
+  } else {
+    const project = optionalBoundedString(input, "project", MAX_LINEAR_SELECTOR_CHARS);
+    if (project !== undefined) normalized.project = project;
   }
 
   const priority = normalizeLinearPriority(input.priority);
