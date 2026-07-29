@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_MODEL_CATALOG,
+  CLAUDE_CODE_AGENT_MODEL_IDS,
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
+  claudeCodeCliModelNameForModelId,
   claudeCodeModelSupportsReasoningEffort,
   codexCliModelNameForModelId,
   getAgentModelRuntimeOptions,
@@ -31,6 +33,12 @@ describe("Codex model catalog", () => {
 });
 
 describe("Claude Code model catalog", () => {
+  it("maps Fable 5 to the Claude CLI and exposes adaptive reasoning", () => {
+    expect(CLAUDE_CODE_AGENT_MODEL_IDS).toContain("anthropic/claude-fable-5");
+    expect(claudeCodeCliModelNameForModelId("anthropic/claude-fable-5")).toBe("claude-fable-5");
+    expect(claudeCodeModelSupportsReasoningEffort("claude-fable-5")).toBe(true);
+  });
+
   it("exposes effort only for adaptive-reasoning models", () => {
     expect(claudeCodeModelSupportsReasoningEffort("anthropic/claude-sonnet-5")).toBe(true);
     expect(claudeCodeModelSupportsReasoningEffort("claude-opus-4-8")).toBe(true);

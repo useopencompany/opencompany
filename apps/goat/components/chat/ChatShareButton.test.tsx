@@ -60,7 +60,7 @@ describe("ChatShareButton", () => {
     expect(
       screen.getByText(/Anyone with the link can view this read-only chat, including new messages/),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Create & copy link" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create & copy link" }));
 
     expect(createGoatChatShareAction).toHaveBeenCalledWith("chat_1");
     await waitFor(() =>
