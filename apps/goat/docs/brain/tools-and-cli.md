@@ -93,4 +93,5 @@ signal from the earliest qualifying historical tool run.
 | Runner ingestion agents | ✓ (CLI — needs read-your-writes against its job root) | ✓ (CLI, allow-listed) |
 | Goat chat `goat_brain` | ✓ (read plane) | never |
 | Goat chat `save_to_brain` | — | capture → curation job only (all members with active-brain access) |
+| Cloud Codex `save_to_brain` | — | capture → curation job only against the Brain pinned to the Codex chat |
 | External agents (MCP) | ✓ (read plane: `goat_brain`, plus compatibility `query_brain`/`get_document`) | capture → curation job only (`save_to_brain`, workspace admins) |

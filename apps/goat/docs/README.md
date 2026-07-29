@@ -18,7 +18,8 @@ Goat has three LLM paths:
 3. **Cloud Codex chat:** a Goat chat engine mode backed by a persistent E2B sandbox and Codex
    app-server thread. Uploaded images, PDFs, Word files, Excel files, and SRT subtitles are
    materialized into that sandbox; images are also sent to Codex as native local-image inputs. New
-   chats pin the active Brain and expose its read plane through a runner-hosted Codex dynamic tool.
+   chats pin the active Brain and expose its read plane and capture-first save path through
+   runner-hosted Codex dynamic tools.
 
 The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
@@ -343,9 +344,12 @@ uploads.
 
 New Cloud Codex chats pin the user's active Brain and workspace on `goat.codex_chat_sessions`
 together with the host-tool contract version used to start the Codex thread. On `thread/start`, the
-runner registers the read-only `goat_brain`, `list_actions`, and `use_action` functions through
-app-server's experimental `dynamicTools` API. When Codex sends `item/tool/call`, the runner handles
-Brain reads directly or calls Goat's private action gateway with `RUNNER_INTERNAL_TOKEN`.
+runner registers `goat_brain`, `save_to_brain`, `list_actions`, and `use_action` through app-server's
+experimental `dynamicTools` API. The read-only `goat_brain` tool is handled directly by the runner.
+`save_to_brain` calls a private Goat gateway with `RUNNER_INTERNAL_TOKEN`, rechecks the running turn
+and current Brain access, then uses the same immediate-inbox-draft and background-curation pipeline
+as main chat. Its content-derived idempotency key lets a recovered Codex turn reuse the same
+completed capture.
 
 The action gateway derives the user and workspace from the running turn, rechecks current workspace
 membership, resolves current connections and permission settings, and exposes only integration
@@ -356,8 +360,10 @@ reads.
 
 Because app-server stores dynamic tool definitions on the thread, resumed turns provide the
 matching runner callbacks without trying to redefine the tools. Existing Brain-tool v1 sessions
-remain Brain-only. The Brain contract intentionally supports only `query`, `list`, `get`, and
-`timeline`; it cannot write to the Brain.
+remain Brain-only, and host-tool v2 sessions keep their read-only Brain and integration tools.
+Host-tool v3 adds the capture-only `save_to_brain` path. The `goat_brain` contract itself
+intentionally supports only `query`, `list`, `get`, and `timeline`; direct Brain mutations remain
+unavailable.
 
 The Cloud Codex Plan control starts the turn with app-server's experimental
 `collaborationMode.mode = "plan"`; `plan_mode_reasoning_effort` configures the mode's reasoning

@@ -728,7 +728,12 @@ function isSubagentPart(part: CodexUiMessagePart): part is CodexUiSubagentPart {
 function dynamicToolStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
   const tool = readString(event.payload.tool);
   const namespace = readString(event.payload.namespace);
-  const label = tool === "goat_brain" ? "Brain" : "OpenCompany tool";
+  const label =
+    tool === "goat_brain"
+      ? "Brain"
+      : tool === "save_to_brain"
+        ? "Save to Brain"
+        : "OpenCompany tool";
   const input = {
     label,
     ...(namespace ? { namespace } : {}),
