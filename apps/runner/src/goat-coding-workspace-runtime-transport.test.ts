@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +9,7 @@ import {
   attachRuntimeConnection,
   forwardPreviewWebSocketMessages,
   isGoatCodingWorkspaceOriginAllowed,
+  RUNTIME_TOOLS_INSTALL_COMMAND,
   rewritePreviewResponseHeaders,
 } from "./goat-coding-workspace-runtime-transport";
 import type { SandboxHandle } from "./sandbox";
@@ -207,5 +209,16 @@ describe("Goat coding workspace terminal transport", () => {
       sandbox,
       300_000,
     );
+  });
+});
+
+describe("Goat coding workspace runtime tools install command", () => {
+  // Regression: a missing `;` after `fi` made this command a bash syntax error, so every
+  // runtime connection failed before the install could run (issue behind the prod
+  // "Workspace unavailable" panel).
+  it("is valid bash syntax", () => {
+    const result = spawnSync("bash", ["-n", "-c", RUNTIME_TOOLS_INSTALL_COMMAND]);
+    expect(result.stderr.toString()).toBe("");
+    expect(result.status).toBe(0);
   });
 });
