@@ -30,7 +30,7 @@ const chatMock = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   stop: vi.fn(),
   finishSessionId: null as string | null,
-  finishWithSessionId: null as ((sessionId: string) => void) | null,
+  finishWithSessionId: null as ((sessionId: string, model?: string) => void) | null,
   sendError: null as Error | null,
   preparedRequestBodies: [] as unknown[],
   lastResume: null as boolean | null,
@@ -127,12 +127,12 @@ vi.mock("@ai-sdk/react", async () => {
       );
       chatMock.lastResume = options.resume ?? false;
       const transportRef = React.useRef(options.transport);
-      chatMock.finishWithSessionId = (sessionId: string) => {
+      chatMock.finishWithSessionId = (sessionId: string, model?: string) => {
         options.onFinish?.({
           message: {
             id: "assistant_1",
             role: "assistant",
-            metadata: { sessionId },
+            metadata: { sessionId, ...(model ? { model } : {}) },
             parts: [{ type: "text", text: "Done." }],
           },
         });
@@ -508,6 +508,37 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
       model: "anthropic/claude-opus-4.8",
     });
+  });
+
+  it("shows Auto only behind its flag and adopts the routed model after the first turn", async () => {
+    const user = userEvent.setup();
+
+    const { rerender } = render(
+      <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.queryByText("Picks once from your first message")).not.toBeInTheDocument();
+
+    rerender(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        autoModelRoutingEnabled
+      />,
+    );
+    await user.click(screen.getByText("Picks once from your first message"));
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Auto");
+
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "What is 2 + 2?");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(chatMock.preparedRequestBodies[0]).toMatchObject({ model: "auto" });
+    const sessionId = (chatMock.preparedRequestBodies[0] as { newSessionId: string }).newSessionId;
+    act(() => chatMock.finishWithSessionId?.(sessionId, "moonshotai/kimi-k2.6"));
+
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K2.6");
+    expect(screen.getByRole("button", { name: "Model" })).toBeDisabled();
   });
 
   it("remembers the last main chat model when returning Home and remounting", async () => {
@@ -1901,6 +1932,53 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Claude Code · Ready")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Claude Code task status: Ready" })).toBeInTheDocument();
     expect(screen.queryByText(/Codex · /)).not.toBeInTheDocument();
+  });
+
+  it("renders coding workspaces only for persistent Codex and Claude Code chats", () => {
+    const renderChat = (
+      engine: "codex" | "claude_code" | "opencompany",
+      taskConversation?: {
+        taskId: string;
+        status: "succeeded";
+        startedAtMs: number;
+      },
+    ) =>
+      render(
+        <GoatSurface
+          tasks={[]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={{
+            id: `goat_chat_${engine}`,
+            title: `${engine} chat`,
+            model: DEFAULT_GOAT_MODEL,
+            engine,
+            messages: [],
+          }}
+          {...(taskConversation ? { taskConversation } : {})}
+        />,
+      );
+
+    const codex = renderChat("codex");
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+    expect(screen.getByLabelText("Codex workspace")).toBeInTheDocument();
+    codex.unmount();
+
+    const claude = renderChat("claude_code");
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+    expect(screen.getByLabelText("Claude Code workspace")).toBeInTheDocument();
+    claude.unmount();
+
+    const openCompany = renderChat("opencompany");
+    expect(screen.queryByRole("button", { name: "Open workspace" })).not.toBeInTheDocument();
+    openCompany.unmount();
+
+    const backgroundTask = renderChat("opencompany", {
+      taskId: "goat_task_1",
+      status: "succeeded",
+      startedAtMs: Date.now(),
+    });
+    expect(screen.queryByRole("button", { name: "Open workspace" })).not.toBeInTheDocument();
+    backgroundTask.unmount();
   });
 
   it("keeps active and pinned Codex tasks visible and sorts active work first", () => {

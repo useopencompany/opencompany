@@ -89,6 +89,19 @@ const CHAT_MESSAGE_COLUMNS = [
   "updated_at",
 ] as const;
 
+// The runtime boundary resolves E2B resources server-side. Sandbox identifiers and Codex thread
+// internals are deliberately excluded from browser-synced shapes.
+const CODEX_CHAT_SESSION_COLUMNS = [
+  "id",
+  "user_workos_id",
+  "chat_session_id",
+  "model",
+  "status",
+  "error",
+  "created_at",
+  "updated_at",
+] as const;
+
 const ELECTRIC_CURSOR_PARAMS = ["offset", "handle", "live", "cursor", "replica"] as const;
 
 const SHAPE_SCOPES = {
@@ -169,10 +182,12 @@ const SHAPE_SCOPES = {
   codex_chat_sessions: {
     table: "goat.codex_chat_sessions",
     where: scopedCodexChatSessionWhere,
+    columns: CODEX_CHAT_SESSION_COLUMNS,
   },
   "goat.codex_chat_sessions": {
     table: "goat.codex_chat_sessions",
     where: scopedCodexChatSessionWhere,
+    columns: CODEX_CHAT_SESSION_COLUMNS,
   },
   integrations: {
     table: "goat.integrations",

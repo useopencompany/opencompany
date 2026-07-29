@@ -11,6 +11,11 @@ import type { RunnerEnv } from "./env";
 import { wakeGoatBrainImportWorker } from "./goat-brain-import-worker";
 import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
 import { wakeGoatCodexChatWorker } from "./goat-codex-chat-worker";
+import {
+  GoatCodingWorkspaceAccessError,
+  mintGoatCodingWorkspaceAccess,
+} from "./goat-coding-workspace-runtime";
+import { createGoatCodingWorkspaceTransport } from "./goat-coding-workspace-runtime-transport";
 import { wakeGoatGoogleDriveSyncWorker } from "./goat-google-drive-sync-worker";
 import { executeGoatGoogleTool, isGoatGoogleToolName } from "./goat-google-tools";
 import { planGoatHarnessForTask } from "./goat-harness";
@@ -33,7 +38,12 @@ export function createServer(
     llmBroker?: Pick<LlmBrokerOptions, "store" | "fetchImpl">;
   } = {},
 ) {
-  const app = Fastify({ logger: false });
+  const runtimeTransport = createGoatCodingWorkspaceTransport(env);
+  const app = Fastify({
+    logger: false,
+    serverFactory: runtimeTransport.serverFactory,
+  });
+  app.addHook("preClose", () => runtimeTransport.close());
 
   // LLM broker (llm-broker.ts): authenticated reverse proxy for sandboxed CLIs. Lives
   // in its own encapsulated plugin scope so its raw-buffer content-type parser cannot
@@ -134,6 +144,35 @@ export function createServer(
     const status = await getSandboxLifecycleStatus(sandboxId);
     reply.send({ ok: true, status });
   });
+
+  app.post(
+    "/internal/goat/coding-workspaces/sessions/:codingSessionId/runtime-access",
+    async (request, reply) => {
+      requireInternalAuth(request.headers.authorization, env.internalToken);
+      const { codingSessionId } = request.params as { codingSessionId: string };
+      const body = request.body as { userWorkosId?: unknown } | undefined;
+      const userWorkosId = typeof body?.userWorkosId === "string" ? body.userWorkosId.trim() : "";
+      if (!codingSessionId.trim() || !userWorkosId) {
+        reply.status(400).send({ error: "codingSessionId and userWorkosId are required." });
+        return;
+      }
+
+      try {
+        const access = await mintGoatCodingWorkspaceAccess({
+          codingSessionId,
+          userWorkosId,
+          env,
+        });
+        reply.send(access);
+      } catch (error) {
+        if (error instanceof GoatCodingWorkspaceAccessError) {
+          reply.status(error.statusCode).send({ error: error.message });
+          return;
+        }
+        throw error;
+      }
+    },
+  );
 
   app.delete("/internal/goat/codex-chat/sandboxes/:sandboxId", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
@@ -508,7 +547,9 @@ export function createServer(
 
 function requireInternalAuth(header: string | undefined, token: string) {
   if (header !== `Bearer ${token}`) {
-    throw new Error("Unauthorized runner request.");
+    const error = new Error("Unauthorized runner request.") as Error & { statusCode: number };
+    error.statusCode = 401;
+    throw error;
   }
 }
 

@@ -84,6 +84,7 @@ export type GoatAttributeValue = string | number | boolean | null | undefined;
 export type GoatAttributes = Record<string, GoatAttributeValue>;
 export type GoatGatewayFeature =
   | "chat"
+  | "chat-router"
   | "chat-title"
   | "task"
   | "brain-ingest"
@@ -152,6 +153,10 @@ const LOW_CARDINAL_METRIC_ATTRIBUTE_KEYS = new Set([
   "goat.outcome",
   "goat.failure_category",
   "goat.model",
+  "goat.model_selection",
+  "goat.router_tier",
+  "goat.router_reason",
+  "goat.router_outcome",
   "goat.engine",
   "goat.status",
   "goat.stage",

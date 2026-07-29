@@ -3,8 +3,15 @@ import { GOAT_SPANS, recordGoatTaskDispatch, startGoatSpan } from "@opencompany/
 
 const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
 const CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS = 5_000;
+const CODING_WORKSPACE_RUNTIME_ACCESS_TIMEOUT_MS = 10_000;
 
 export type GoatCodexSandboxStatus = "running" | "sleeping" | "deleted";
+export type GoatCodingWorkspaceRuntimeAccess = {
+  websocketUrl: string;
+  ticket: string;
+  expiresAt: number;
+  sandboxStatus: Exclude<GoatCodexSandboxStatus, "deleted">;
+};
 
 type RunnerContext = {
   task_id: string;
@@ -19,6 +26,26 @@ function runnerInternalBaseUrl() {
 
 function runnerToken() {
   return process.env.RUNNER_INTERNAL_TOKEN?.trim();
+}
+
+function runnerPublicBaseUrl() {
+  const publicUrl = process.env.RUNNER_PUBLIC_URL?.trim().replace(/\/+$/, "");
+  const goatUrl = process.env.GOAT_NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
+  if (!publicUrl || !goatUrl) return publicUrl;
+  try {
+    const runner = new URL(publicUrl);
+    const goat = new URL(goatUrl);
+    if (
+      goat.protocol === "https:" &&
+      runner.protocol === "http:" &&
+      (runner.hostname === "localhost" || runner.hostname === "127.0.0.1")
+    ) {
+      return goatUrl;
+    }
+  } catch {
+    return publicUrl;
+  }
+  return publicUrl;
 }
 
 export function goatRunnerConfigured() {
@@ -204,6 +231,72 @@ export async function getGoatCodexSandboxStatus(
     throw new Error("Goat codex sandbox status returned an invalid status.");
   }
   return body.status;
+}
+
+export async function requestGoatCodingWorkspaceRuntimeAccess(input: {
+  codingSessionId: string;
+  userWorkosId: string;
+}): Promise<GoatCodingWorkspaceRuntimeAccess> {
+  const internalBaseUrl = runnerInternalBaseUrl();
+  const publicBaseUrl = runnerPublicBaseUrl();
+  const token = runnerToken();
+  if (!internalBaseUrl || !publicBaseUrl || !token) {
+    throw new Error("Goat runner runtime access is not configured.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CODING_WORKSPACE_RUNTIME_ACCESS_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(
+      `${internalBaseUrl}/internal/goat/coding-workspaces/sessions/${encodeURIComponent(input.codingSessionId)}/runtime-access`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ userWorkosId: input.userWorkosId }),
+        signal: controller.signal,
+      },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    const message = typeof body?.error === "string" ? body.error : "Runtime access is unavailable.";
+    throw new GoatCodingWorkspaceRequestError(message, response.status);
+  }
+
+  const body = (await response.json()) as Record<string, unknown>;
+  if (
+    typeof body.ticket !== "string" ||
+    typeof body.expiresAt !== "number" ||
+    (body.sandboxStatus !== "running" && body.sandboxStatus !== "sleeping")
+  ) {
+    throw new Error("Goat runner returned invalid runtime access.");
+  }
+  const websocketUrl = new URL("/goat/runtime", `${publicBaseUrl}/`);
+  websocketUrl.protocol = websocketUrl.protocol === "https:" ? "wss:" : "ws:";
+
+  return {
+    websocketUrl: websocketUrl.toString(),
+    ticket: body.ticket,
+    expiresAt: body.expiresAt,
+    sandboxStatus: body.sandboxStatus,
+  };
+}
+
+export class GoatCodingWorkspaceRequestError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = "GoatCodingWorkspaceRequestError";
+  }
 }
 
 export async function killGoatCodexSandbox(sandboxId: string): Promise<boolean> {

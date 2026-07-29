@@ -2,6 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import {
+  CLOUD_CODING_ENGINE_CONFIG,
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
 } from "@opencompany/agent-runtime";
@@ -76,6 +77,7 @@ import {
   useSyncExternalStore,
   useTransition,
 } from "react";
+import { CodingWorkspacePanel } from "@/components/CodingWorkspacePanel";
 import { buildChatTaskLookup } from "@/components/chat/assistant-items";
 import {
   GoatComposerAttachments,
@@ -90,6 +92,10 @@ import { useGoatCreditBalance } from "@/components/chat/useGoatCreditBalance";
 import { useHydrated } from "@/components/useHydrated";
 import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
+import {
+  AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES,
+  AUTO_GOAT_MODEL_SELECTION,
+} from "@/lib/chat-auto-model";
 import {
   type GoatChatModelSelection,
   persistLastGoatChatSelection,
@@ -219,13 +225,13 @@ const ENGINE_CHAT_CONFIG: Record<
   }
 > = {
   codex: {
-    label: "Codex",
+    label: CLOUD_CODING_ENGINE_CONFIG.codex.label,
     messagesEndpoint: "/api/codex-chat/messages",
     interruptEndpoint: (chatSessionId) =>
       `/api/codex-chat/sessions/${encodeURIComponent(chatSessionId)}/interrupt`,
   },
   claude_code: {
-    label: "Claude Code",
+    label: CLOUD_CODING_ENGINE_CONFIG.claude_code.label,
     messagesEndpoint: "/api/claude-chat/messages",
     // Claude chats share the codex_chat session/turn rows, so the codex interrupt
     // and sandbox-status routes are engine-agnostic.
@@ -292,6 +298,7 @@ export function GoatSurface({
   codexConnected = false,
   claudeCodeConnected = false,
   taskSpawningEnabled = false,
+  autoModelRoutingEnabled = false,
   chatResumeEnabled = false,
   userName = "there",
   userWorkosId = "",
@@ -306,6 +313,7 @@ export function GoatSurface({
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
   taskSpawningEnabled?: boolean;
+  autoModelRoutingEnabled?: boolean;
   chatResumeEnabled?: boolean;
   userName?: string;
   // Scopes chat attachment uploads; attachments are disabled when absent.
@@ -362,6 +370,7 @@ export function GoatSurface({
       readLastGoatChatSelection(userWorkosId, {
         codexConnected,
         claudeCodeConnected,
+        autoModelRoutingEnabled,
       }),
     () => normalizeGoatModel(defaultModel),
   );
@@ -617,6 +626,9 @@ export function GoatSurface({
           pendingNewSessionIdRef.current = null;
         }
       }
+      if (chatModel === AUTO_GOAT_MODEL_SELECTION && message.metadata?.model) {
+        setChatModelOverride(normalizeGoatModel(message.metadata.model));
+      }
     },
     onError: (error) => {
       if (error.message?.includes(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE)) {
@@ -696,7 +708,9 @@ export function GoatSurface({
     enabled: attachmentsEnabled && !engineSubmitting && !newChatCommandOpen,
     ...(activeEngine === "codex" || activeEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
-      : {}),
+      : chatModel === AUTO_GOAT_MODEL_SELECTION
+        ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
+        : {}),
   });
   const clearComposerAttachments = composerAttachments.clearAttachments;
 
@@ -1798,6 +1812,7 @@ export function GoatSurface({
             defaultModel={defaultModel}
             codexConnected={codexConnected}
             claudeCodeConnected={claudeCodeConnected}
+            autoModelRoutingEnabled={autoModelRoutingEnabled}
             creditBalance={creditBalance}
             onSubmitted={closeCommandPalette}
           />
@@ -1868,440 +1883,459 @@ export function GoatSurface({
         </DialogContent>
       </Dialog>
 
-      {mode === "home" ? (
-        <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-          <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
-            {hasHomeActivity ? (
-              <>
-                {homeTasks.length > 0 ? (
-                  <section className="flex flex-col gap-1">
-                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                      Tasks
-                    </h2>
-                    <HomeTaskRows
-                      items={homeTasks}
-                      onArchiveTask={archiveTask}
-                      onArchiveChat={archiveChat}
-                      onSelectChat={openChat}
-                    />
-                  </section>
-                ) : null}
-
-                {homeChats.length > 0 ? (
-                  <section className="flex flex-col gap-1">
-                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                      Chats
-                    </h2>
-                    <ChatHistoryList
-                      chats={homeChats}
-                      onSelect={openChat}
-                      onArchive={archiveChat}
-                    />
-                  </section>
-                ) : null}
-
-                {homeSchedules.length > 0 ? (
-                  <section className="flex flex-col gap-1">
-                    <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                      Routines
-                    </h2>
-                    <ScheduleRows schedules={homeSchedules} />
-                  </section>
-                ) : null}
-              </>
-            ) : (
-              <p className="px-2 text-[15px] leading-6 text-ink-muted">
-                welcome back, {homeGreetingName}
-              </p>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="flex min-h-0 w-full flex-1 flex-col items-center">
-          <div className="w-full px-6 pb-2 pt-3">
-            <div className="flex w-full items-center justify-between gap-3">
-              <ChatTitleHeader
-                title={activeChatTitle}
-                model={activeChatModel}
-                engine={activeChatEngine}
-              />
-              <div className="flex shrink-0 items-center gap-2">
-                {!activeTaskConversation &&
-                chatSessionId &&
-                persistedChatSessionId === chatSessionId &&
-                hasMessages ? (
-                  <ChatShareButton chatSessionId={chatSessionId} disabled={isAgentWorking} />
-                ) : null}
-                {activeEngineChat?.engine === "codex" ||
-                activeEngineChat?.engine === "claude_code" ? (
-                  <CodexSessionStatusIndicator
-                    engine={activeEngineChat.engine}
-                    runtime={codexRuntime}
-                    optimisticStatus={
-                      engineSubmitting ? "starting" : engineRunning ? "running" : null
-                    }
-                    sandboxStatus={codexSandboxStatus}
-                  />
-                ) : null}
-                {currentContextTokens > 0 ? (
-                  <ChatContextMeter used={currentContextTokens} max={contextMaxTokens} />
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          <div
-            ref={threadRef}
-            className="min-h-0 w-full flex-1 justify-center overflow-y-auto px-6"
-            onWheel={markUserScrollIntent}
-            onTouchMove={markUserScrollIntent}
-            onScroll={(event) => {
-              if (!userScrollIntentRef.current) return;
-              const el = event.currentTarget;
-              const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-              isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
-            }}
-          >
-            <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pb-40 pt-2">
-              {chatMessages.map((message) => (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  taskLookup={chatTaskLookup}
-                  stopped={locallyStoppedAssistantMessageIds.has(message.id)}
-                  durationMs={chatMessageDurationMs(message, optimisticTurnDurations)}
-                  onCodexAction={handleCodexToolAction}
-                  allowCodexPlanActions={message.id === latestAssistantMessageId}
-                  onActionApproval={handleActionApproval}
-                  allowActionApproval={message.id === latestAssistantMessageId}
-                />
-              ))}
-              {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
-                <ThinkingIndicator
-                  startedAtMs={activeTurnTimerStartedAtMs}
-                  label={
-                    isEngineChat && activeEngine
-                      ? codexRuntime?.status === "queued"
-                        ? `${ENGINE_CHAT_CONFIG[activeEngine].label} is queued`
-                        : `${ENGINE_CHAT_CONFIG[activeEngine].label} is working`
-                      : "Goat is working"
-                  }
-                />
-              ) : null}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {mode === "chat" &&
-      !activeTaskConversation &&
-      chatSessionId &&
-      persistedChatSessionId === chatSessionId ? (
-        <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
-      ) : null}
-      {mode === "chat" &&
-      (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
-        <LiveCodexChatSessionStatus
-          chatSessionId={activeEngineChat.chatSessionId}
-          setRunning={setEngineRunning}
-          setSandboxStatus={setCodexSandboxStatus}
-          setRuntime={setCodexRuntime}
-        />
-      ) : null}
-      {mode === "chat" && taskSpawningEnabled ? (
-        <LiveChatTasks setTasks={setLiveChatTasks} />
-      ) : null}
-
-      <form
-        ref={formRef}
-        onSubmit={onSubmit}
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
-      >
-        <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
-          {chatSendBlocked ? (
-            <p
-              className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-4 text-ink shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-              role="alert"
-            >
-              Your workspace is out of credits — chat is paused.{" "}
-              <button
-                type="button"
-                onClick={() => router.push("/settings/workspace/billing")}
-                className="font-medium underline"
-              >
-                Top up to continue
-              </button>
-            </p>
-          ) : lowCreditBalance && creditBalance ? (
-            <p
-              className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-              role="status"
-            >
-              {formatCreditBalance(creditBalance.balanceUsdMicros)} in credits left.{" "}
-              <button
-                type="button"
-                onClick={() => router.push("/settings/workspace/billing")}
-                className="font-medium text-ink underline"
-              >
-                Add credits
-              </button>{" "}
-              to keep chat and ingestion running.
-            </p>
-          ) : null}
-          {chatError ? (
-            <p
-              className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-              role="alert"
-            >
-              {chatError.message || "Goat could not answer that right now."}
-            </p>
-          ) : null}
-          {mentionToken && mentionOptions.length > 0 ? (
-            <div
-              role="listbox"
-              aria-label="Mention menu"
-              className="absolute bottom-full left-3 z-20 mb-2 max-h-72 w-80 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
-            >
-              {mentionOptions.map((option, index) => (
-                <button
-                  key={option.token}
-                  type="button"
-                  role="option"
-                  aria-selected={index === mentionOptionIndex}
-                  onMouseEnter={() => setMentionOptionIndex(index)}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    selectMention(option);
-                  }}
-                  onClick={() => selectMention(option)}
-                  className={cn(
-                    "flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-surface-hover focus:bg-surface-hover focus:outline-none",
-                    index === mentionOptionIndex && "bg-surface-hover",
-                  )}
-                >
-                  {option.kind === "engine" ? (
-                    <Code2 size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
-                  ) : option.kind === "workflow" ? (
-                    <WorkflowIcon
-                      size={14}
-                      strokeWidth={2}
-                      className="mt-0.5 shrink-0 text-ink-subtle"
-                    />
-                  ) : (
-                    <Sparkles
-                      size={14}
-                      strokeWidth={2}
-                      className="mt-0.5 shrink-0 text-ink-subtle"
-                    />
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-medium leading-4 text-ink">
-                      {option.token}
-                    </span>
-                    {option.kind === "skill" || option.kind === "workflow" ? (
-                      <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
-                        {option.label}
-                        {option.description ? ` · ${option.description}` : ""}
-                      </span>
+      <div className="relative flex min-h-0 w-full flex-1">
+        <div className="relative flex min-w-0 flex-1 flex-col items-center overflow-hidden">
+          {mode === "home" ? (
+            <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
+              <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
+                {hasHomeActivity ? (
+                  <>
+                    {homeTasks.length > 0 ? (
+                      <section className="flex flex-col gap-1">
+                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                          Tasks
+                        </h2>
+                        <HomeTaskRows
+                          items={homeTasks}
+                          onArchiveTask={archiveTask}
+                          onArchiveChat={archiveChat}
+                          onSelectChat={openChat}
+                        />
+                      </section>
                     ) : null}
-                  </span>
-                  {option.kind === "engine" ? (
-                    <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
-                  ) : null}
-                  {option.kind === "workflow" ? (
-                    <span className="text-[12px] leading-4 text-ink-subtle">Task</span>
-                  ) : null}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {selectedWorkflowMention ? (
-            <div
-              role="status"
-              data-testid="workflow-task-hint"
-              className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-            >
-              <WorkflowIcon size={13} strokeWidth={2} className="shrink-0" />
-              <span>
-                Sending runs workflow{" "}
-                <span className="font-medium text-ink">{selectedWorkflowName}</span> as a background
-                task.
-              </span>
-            </div>
-          ) : null}
-          <div
-            {...composerAttachments.dragHandlers}
-            className="relative flex flex-col rounded-2xl border border-border bg-surface shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong"
-          >
-            {composerAttachments.isDragActive && attachmentsEnabled ? (
-              <GoatComposerDropOverlay />
-            ) : null}
-            {composerAttachments.attachments.length > 0 ? (
-              <div className="px-3.5 pt-3">
-                <GoatComposerAttachments
-                  attachments={composerAttachments.attachments}
-                  onRemove={composerAttachments.removeAttachment}
-                />
+
+                    {homeChats.length > 0 ? (
+                      <section className="flex flex-col gap-1">
+                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                          Chats
+                        </h2>
+                        <ChatHistoryList
+                          chats={homeChats}
+                          onSelect={openChat}
+                          onArchive={archiveChat}
+                        />
+                      </section>
+                    ) : null}
+
+                    {homeSchedules.length > 0 ? (
+                      <section className="flex flex-col gap-1">
+                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                          Routines
+                        </h2>
+                        <ScheduleRows schedules={homeSchedules} />
+                      </section>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="px-2 text-[15px] leading-6 text-ink-muted">
+                    welcome back, {homeGreetingName}
+                  </p>
+                )}
               </div>
-            ) : null}
-            <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
-              <div className="relative min-w-0 flex-1 self-center">
-                {input ? (
-                  <div
-                    ref={inputOverlayRef}
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
-                  >
-                    {renderComposerInputOverlay(input, activeSelectedMentions)}
-                  </div>
-                ) : null}
-                <textarea
-                  ref={inputRef}
-                  rows={1}
-                  id="prompt"
-                  name="prompt"
-                  value={input}
-                  placeholder={
-                    mode === "chat"
-                      ? "Reply..."
-                      : taskSpawningEnabled
-                        ? "Ask a question or describe a task..."
-                        : "Ask Goat anything..."
-                  }
-                  onChange={onInputChange}
-                  onBlur={() => setMentionToken(null)}
-                  onClick={(event) =>
-                    updateMentionToken(
-                      event.currentTarget.value,
-                      event.currentTarget.selectionStart,
-                    )
-                  }
-                  onKeyDown={onKeyDown}
-                  onScroll={syncInputOverlayScroll}
-                  onPaste={onInputPaste}
-                  onSelect={(event) =>
-                    updateMentionToken(
-                      event.currentTarget.value,
-                      event.currentTarget.selectionStart,
-                    )
-                  }
-                  disabled={workflowTaskSubmitting}
-                  className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
-                  style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-                  maxLength={10_000}
-                />
-              </div>
-              {isEngineChat && engineRunning ? (
-                <EngineStopButton
-                  label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
-                  onStop={stopGeneration}
-                />
-              ) : null}
-              <SubmitButton
-                disabled={
-                  (!input.trim() &&
-                    !composerAttachments.attachments.some(
-                      (attachment) => attachment.status === "ready",
-                    )) ||
-                  composerAttachments.isUploading ||
-                  engineSubmitting ||
-                  engineRunning ||
-                  workflowTaskSubmitting ||
-                  chatSendBlocked
-                }
-                isGenerating={isGenerating || isTaskConversationWorking}
-                startsWorkflowTask={Boolean(selectedWorkflowMention)}
-                onStop={stopGeneration}
-              />
             </div>
-            <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
-              {attachmentsEnabled ? (
-                <>
-                  <input
-                    ref={attachmentFileInputRef}
-                    type="file"
-                    multiple
-                    accept={GOAT_CHAT_ATTACHMENT_ACCEPT}
-                    className="hidden"
-                    onChange={(event) => {
-                      const files = Array.from(event.currentTarget.files ?? []);
-                      event.currentTarget.value = "";
-                      if (files.length > 0) composerAttachments.acceptFiles(files);
-                    }}
+          ) : (
+            <div className="flex min-h-0 w-full flex-1 flex-col items-center">
+              <div className="w-full px-6 pb-2 pt-3">
+                <div className="flex w-full items-center justify-between gap-3">
+                  <ChatTitleHeader
+                    title={activeChatTitle}
+                    model={activeChatModel}
+                    engine={activeChatEngine}
                   />
+                  <div className="flex shrink-0 items-center gap-2">
+                    {!activeTaskConversation &&
+                    chatSessionId &&
+                    persistedChatSessionId === chatSessionId &&
+                    hasMessages ? (
+                      <ChatShareButton chatSessionId={chatSessionId} disabled={isAgentWorking} />
+                    ) : null}
+                    {activeEngineChat?.engine === "codex" ||
+                    activeEngineChat?.engine === "claude_code" ? (
+                      <CodexSessionStatusIndicator
+                        engine={activeEngineChat.engine}
+                        runtime={codexRuntime}
+                        optimisticStatus={
+                          engineSubmitting ? "starting" : engineRunning ? "running" : null
+                        }
+                        sandboxStatus={codexSandboxStatus}
+                      />
+                    ) : null}
+                    {currentContextTokens > 0 ? (
+                      <ChatContextMeter used={currentContextTokens} max={contextMaxTokens} />
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                ref={threadRef}
+                className="min-h-0 w-full flex-1 justify-center overflow-y-auto px-6"
+                onWheel={markUserScrollIntent}
+                onTouchMove={markUserScrollIntent}
+                onScroll={(event) => {
+                  if (!userScrollIntentRef.current) return;
+                  const el = event.currentTarget;
+                  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+                  isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+                }}
+              >
+                <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pb-40 pt-2">
+                  {chatMessages.map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      taskLookup={chatTaskLookup}
+                      stopped={locallyStoppedAssistantMessageIds.has(message.id)}
+                      durationMs={chatMessageDurationMs(message, optimisticTurnDurations)}
+                      onCodexAction={handleCodexToolAction}
+                      allowCodexPlanActions={message.id === latestAssistantMessageId}
+                      onActionApproval={handleActionApproval}
+                      allowActionApproval={message.id === latestAssistantMessageId}
+                    />
+                  ))}
+                  {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
+                    <ThinkingIndicator
+                      startedAtMs={activeTurnTimerStartedAtMs}
+                      label={
+                        isEngineChat && activeEngine
+                          ? codexRuntime?.status === "queued"
+                            ? `${ENGINE_CHAT_CONFIG[activeEngine].label} is queued`
+                            : `${ENGINE_CHAT_CONFIG[activeEngine].label} is working`
+                          : "Goat is working"
+                      }
+                    />
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mode === "chat" &&
+          !activeTaskConversation &&
+          chatSessionId &&
+          persistedChatSessionId === chatSessionId ? (
+            <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
+          ) : null}
+          {mode === "chat" &&
+          (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
+            <LiveCodexChatSessionStatus
+              chatSessionId={activeEngineChat.chatSessionId}
+              setRunning={setEngineRunning}
+              setSandboxStatus={setCodexSandboxStatus}
+              setRuntime={setCodexRuntime}
+            />
+          ) : null}
+          {mode === "chat" && taskSpawningEnabled ? (
+            <LiveChatTasks setTasks={setLiveChatTasks} />
+          ) : null}
+
+          <form
+            ref={formRef}
+            onSubmit={onSubmit}
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center bg-gradient-to-t from-canvas via-canvas to-transparent px-6 pb-6 pt-8"
+          >
+            <div className="pointer-events-auto relative flex w-full max-w-[720px] flex-col gap-2">
+              {chatSendBlocked ? (
+                <p
+                  className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-4 text-ink shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                  role="alert"
+                >
+                  Your workspace is out of credits — chat is paused.{" "}
                   <button
                     type="button"
-                    aria-label="Attach files"
-                    disabled={isGenerating || engineSubmitting}
-                    onClick={() => attachmentFileInputRef.current?.click()}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                    onClick={() => router.push("/settings/workspace/billing")}
+                    className="font-medium underline"
                   >
-                    <Plus size={16} strokeWidth={1.9} />
+                    Top up to continue
                   </button>
-                </>
+                </p>
+              ) : lowCreditBalance && creditBalance ? (
+                <p
+                  className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                  role="status"
+                >
+                  {formatCreditBalance(creditBalance.balanceUsdMicros)} in credits left.{" "}
+                  <button
+                    type="button"
+                    onClick={() => router.push("/settings/workspace/billing")}
+                    className="font-medium text-ink underline"
+                  >
+                    Add credits
+                  </button>{" "}
+                  to keep chat and ingestion running.
+                </p>
               ) : null}
-              <GoatModelPicker
-                value={chatModel}
-                onChange={(model) => {
-                  setChatModelOverride(model);
-                  persistLastGoatChatSelection(userWorkosId, model);
-                  if (model === CODEX_PICKER_VALUE && model !== chatModel) {
-                    setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
-                  } else if (model === CLAUDE_PICKER_VALUE && model !== chatModel) {
-                    setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
-                    setCodexPlanModeEnabled(false);
-                    setCodexGoalModeEnabled(false);
-                    setCodexGoalObjective("");
-                    setCodexGoalTokenBudget("");
-                  } else if (model !== CODEX_PICKER_VALUE && model !== CLAUDE_PICKER_VALUE) {
-                    setCodexPlanModeEnabled(false);
-                    setCodexGoalModeEnabled(false);
-                    setCodexGoalObjective("");
-                    setCodexGoalTokenBudget("");
-                  }
-                }}
-                disabled={isGenerating || Boolean(chatSessionId)}
-                codexConnected={codexConnected}
-                claudeCodeConnected={claudeCodeConnected}
-              />
-              {showEngineComposerControls ? (
-                <EngineComposerControls
-                  model={
-                    activeEngine === "codex"
-                      ? { engine: "codex", value: codexModel, onChange: setCodexModel }
-                      : activeEngine === "claude_code"
-                        ? {
-                            engine: "claude_code",
-                            value: claudeModel,
-                            onChange: setClaudeModel,
-                          }
-                        : null
-                  }
-                  engineLabel={activeEngine === "claude_code" ? "Claude" : "Codex"}
-                  reasoningEffortAvailable={
-                    activeEngine !== "claude_code" ||
-                    claudeCodeModelSupportsReasoningEffort(claudeModel)
-                  }
-                  reasoningEffort={codexReasoningEffort}
-                  planModeEnabled={codexPlanModeEnabled}
-                  planModeAvailable={activeEngine === "codex"}
-                  goalModeAvailable={activeEngine !== "claude_code"}
-                  goalModeEnabled={codexGoalModeEnabled}
-                  goalObjective={codexGoalObjective}
-                  goalTokenBudget={codexGoalTokenBudget}
-                  disabled={engineSubmitting}
-                  modelDisabled={engineSubmitting || Boolean(activeEngineChat)}
-                  onReasoningEffortChange={setCodexReasoningEffort}
-                  onPlanModeEnabledChange={setCodexPlanModeEnabled}
-                  onGoalModeEnabledChange={setCodexGoalModeEnabled}
-                  onGoalObjectiveChange={setCodexGoalObjective}
-                  onGoalTokenBudgetChange={setCodexGoalTokenBudget}
-                />
+              {chatError ? (
+                <p
+                  className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-[12px] leading-4 text-danger shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                  role="alert"
+                >
+                  {chatError.message || "Goat could not answer that right now."}
+                </p>
               ) : null}
+              {mentionToken && mentionOptions.length > 0 ? (
+                <div
+                  role="listbox"
+                  aria-label="Mention menu"
+                  className="absolute bottom-full left-3 z-20 mb-2 max-h-72 w-80 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
+                >
+                  {mentionOptions.map((option, index) => (
+                    <button
+                      key={option.token}
+                      type="button"
+                      role="option"
+                      aria-selected={index === mentionOptionIndex}
+                      onMouseEnter={() => setMentionOptionIndex(index)}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        selectMention(option);
+                      }}
+                      onClick={() => selectMention(option)}
+                      className={cn(
+                        "flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-surface-hover focus:bg-surface-hover focus:outline-none",
+                        index === mentionOptionIndex && "bg-surface-hover",
+                      )}
+                    >
+                      {option.kind === "engine" ? (
+                        <Code2
+                          size={14}
+                          strokeWidth={2}
+                          className="mt-0.5 shrink-0 text-ink-subtle"
+                        />
+                      ) : option.kind === "workflow" ? (
+                        <WorkflowIcon
+                          size={14}
+                          strokeWidth={2}
+                          className="mt-0.5 shrink-0 text-ink-subtle"
+                        />
+                      ) : (
+                        <Sparkles
+                          size={14}
+                          strokeWidth={2}
+                          className="mt-0.5 shrink-0 text-ink-subtle"
+                        />
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-medium leading-4 text-ink">
+                          {option.token}
+                        </span>
+                        {option.kind === "skill" || option.kind === "workflow" ? (
+                          <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
+                            {option.label}
+                            {option.description ? ` · ${option.description}` : ""}
+                          </span>
+                        ) : null}
+                      </span>
+                      {option.kind === "engine" ? (
+                        <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
+                      ) : null}
+                      {option.kind === "workflow" ? (
+                        <span className="text-[12px] leading-4 text-ink-subtle">Task</span>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {selectedWorkflowMention ? (
+                <div
+                  role="status"
+                  data-testid="workflow-task-hint"
+                  className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                >
+                  <WorkflowIcon size={13} strokeWidth={2} className="shrink-0" />
+                  <span>
+                    Sending runs workflow{" "}
+                    <span className="font-medium text-ink">{selectedWorkflowName}</span> as a
+                    background task.
+                  </span>
+                </div>
+              ) : null}
+              <div
+                {...composerAttachments.dragHandlers}
+                className="relative flex flex-col rounded-2xl border border-border bg-surface shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong"
+              >
+                {composerAttachments.isDragActive && attachmentsEnabled ? (
+                  <GoatComposerDropOverlay />
+                ) : null}
+                {composerAttachments.attachments.length > 0 ? (
+                  <div className="px-3.5 pt-3">
+                    <GoatComposerAttachments
+                      attachments={composerAttachments.attachments}
+                      onRemove={composerAttachments.removeAttachment}
+                    />
+                  </div>
+                ) : null}
+                <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
+                  <div className="relative min-w-0 flex-1 self-center">
+                    {input ? (
+                      <div
+                        ref={inputOverlayRef}
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
+                      >
+                        {renderComposerInputOverlay(input, activeSelectedMentions)}
+                      </div>
+                    ) : null}
+                    <textarea
+                      ref={inputRef}
+                      rows={1}
+                      id="prompt"
+                      name="prompt"
+                      value={input}
+                      placeholder={
+                        mode === "chat"
+                          ? "Reply..."
+                          : taskSpawningEnabled
+                            ? "Ask a question or describe a task..."
+                            : "Ask Goat anything..."
+                      }
+                      onChange={onInputChange}
+                      onBlur={() => setMentionToken(null)}
+                      onClick={(event) =>
+                        updateMentionToken(
+                          event.currentTarget.value,
+                          event.currentTarget.selectionStart,
+                        )
+                      }
+                      onKeyDown={onKeyDown}
+                      onScroll={syncInputOverlayScroll}
+                      onPaste={onInputPaste}
+                      onSelect={(event) =>
+                        updateMentionToken(
+                          event.currentTarget.value,
+                          event.currentTarget.selectionStart,
+                        )
+                      }
+                      disabled={workflowTaskSubmitting}
+                      className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                      style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+                      maxLength={10_000}
+                    />
+                  </div>
+                  {isEngineChat && engineRunning ? (
+                    <EngineStopButton
+                      label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
+                      onStop={stopGeneration}
+                    />
+                  ) : null}
+                  <SubmitButton
+                    disabled={
+                      (!input.trim() &&
+                        !composerAttachments.attachments.some(
+                          (attachment) => attachment.status === "ready",
+                        )) ||
+                      composerAttachments.isUploading ||
+                      engineSubmitting ||
+                      engineRunning ||
+                      workflowTaskSubmitting ||
+                      chatSendBlocked
+                    }
+                    isGenerating={isGenerating || isTaskConversationWorking}
+                    startsWorkflowTask={Boolean(selectedWorkflowMention)}
+                    onStop={stopGeneration}
+                  />
+                </div>
+                <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+                  {attachmentsEnabled ? (
+                    <>
+                      <input
+                        ref={attachmentFileInputRef}
+                        type="file"
+                        multiple
+                        accept={GOAT_CHAT_ATTACHMENT_ACCEPT}
+                        className="hidden"
+                        onChange={(event) => {
+                          const files = Array.from(event.currentTarget.files ?? []);
+                          event.currentTarget.value = "";
+                          if (files.length > 0) composerAttachments.acceptFiles(files);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        aria-label="Attach files"
+                        disabled={isGenerating || engineSubmitting}
+                        onClick={() => attachmentFileInputRef.current?.click()}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                      >
+                        <Plus size={16} strokeWidth={1.9} />
+                      </button>
+                    </>
+                  ) : null}
+                  <GoatModelPicker
+                    value={chatModel}
+                    onChange={(model) => {
+                      setChatModelOverride(model);
+                      persistLastGoatChatSelection(userWorkosId, model);
+                      if (model === CODEX_PICKER_VALUE && model !== chatModel) {
+                        setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+                      } else if (model === CLAUDE_PICKER_VALUE && model !== chatModel) {
+                        setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+                        setCodexPlanModeEnabled(false);
+                        setCodexGoalModeEnabled(false);
+                        setCodexGoalObjective("");
+                        setCodexGoalTokenBudget("");
+                      } else if (model !== CODEX_PICKER_VALUE && model !== CLAUDE_PICKER_VALUE) {
+                        setCodexPlanModeEnabled(false);
+                        setCodexGoalModeEnabled(false);
+                        setCodexGoalObjective("");
+                        setCodexGoalTokenBudget("");
+                      }
+                    }}
+                    disabled={isGenerating || Boolean(chatSessionId)}
+                    codexConnected={codexConnected}
+                    claudeCodeConnected={claudeCodeConnected}
+                    autoModelRoutingEnabled={autoModelRoutingEnabled}
+                  />
+                  {showEngineComposerControls ? (
+                    <EngineComposerControls
+                      model={
+                        activeEngine === "codex"
+                          ? { engine: "codex", value: codexModel, onChange: setCodexModel }
+                          : activeEngine === "claude_code"
+                            ? {
+                                engine: "claude_code",
+                                value: claudeModel,
+                                onChange: setClaudeModel,
+                              }
+                            : null
+                      }
+                      engineLabel={activeEngine === "claude_code" ? "Claude" : "Codex"}
+                      reasoningEffortAvailable={
+                        activeEngine !== "claude_code" ||
+                        claudeCodeModelSupportsReasoningEffort(claudeModel)
+                      }
+                      reasoningEffort={codexReasoningEffort}
+                      planModeEnabled={codexPlanModeEnabled}
+                      planModeAvailable={activeEngine === "codex"}
+                      goalModeAvailable={activeEngine !== "claude_code"}
+                      goalModeEnabled={codexGoalModeEnabled}
+                      goalObjective={codexGoalObjective}
+                      goalTokenBudget={codexGoalTokenBudget}
+                      disabled={engineSubmitting}
+                      modelDisabled={engineSubmitting || Boolean(activeEngineChat)}
+                      onReasoningEffortChange={setCodexReasoningEffort}
+                      onPlanModeEnabledChange={setCodexPlanModeEnabled}
+                      onGoalModeEnabledChange={setCodexGoalModeEnabled}
+                      onGoalObjectiveChange={setCodexGoalObjective}
+                      onGoalTokenBudgetChange={setCodexGoalTokenBudget}
+                    />
+                  ) : null}
+                </div>
+              </div>
             </div>
-          </div>
+          </form>
         </div>
-      </form>
+        {mode === "chat" &&
+        (activeEngineChat?.engine === "codex" || activeEngineChat?.engine === "claude_code") ? (
+          <CodingWorkspacePanel
+            key={activeEngineChat.chatSessionId}
+            chatSessionId={activeEngineChat.chatSessionId}
+            sandboxStatus={codexSandboxStatus}
+            engineLabel={CLOUD_CODING_ENGINE_CONFIG[activeEngineChat.engine].label}
+            engineIsRunning={engineRunning || engineSubmitting}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -2315,6 +2349,7 @@ function QuickChatComposer({
   defaultModel,
   codexConnected,
   claudeCodeConnected,
+  autoModelRoutingEnabled,
   creditBalance,
   onSubmitted,
 }: {
@@ -2323,6 +2358,7 @@ function QuickChatComposer({
   defaultModel: string;
   codexConnected: boolean;
   claudeCodeConnected: boolean;
+  autoModelRoutingEnabled: boolean;
   creditBalance: ReturnType<typeof useGoatCreditBalance>["balance"];
   onSubmitted: () => void;
 }) {
@@ -2354,6 +2390,7 @@ function QuickChatComposer({
       readLastGoatChatSelection(userWorkosId, {
         codexConnected,
         claudeCodeConnected,
+        autoModelRoutingEnabled,
       }),
     () => normalizeGoatModel(defaultModel),
   );
@@ -2418,7 +2455,9 @@ function QuickChatComposer({
     enabled: attachmentsEnabled && !isSubmitting,
     ...(selectedEngine === "codex" || selectedEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
-      : {}),
+      : chatModel === AUTO_GOAT_MODEL_SELECTION
+        ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
+        : {}),
   });
 
   // The dialog stays mounted across opens; reset to a pristine draft each time it closes
@@ -3018,6 +3057,7 @@ function QuickChatComposer({
               disabled={isSubmitting}
               codexConnected={codexConnected}
               claudeCodeConnected={claudeCodeConnected}
+              autoModelRoutingEnabled={autoModelRoutingEnabled}
             />
             {showEngineComposerControls ? (
               <EngineComposerControls
@@ -4281,7 +4321,6 @@ function LiveCodexChatSessionStatusSubscriber({
       (candidate) => candidate.chat_session_id === chatSessionId,
     ) ?? null;
   const status = row?.status ?? null;
-  const sandboxId = row?.sandbox_id ?? null;
 
   useEffect(() => {
     if (isLoading) return;
@@ -4302,10 +4341,6 @@ function LiveCodexChatSessionStatusSubscriber({
       setSandboxStatus(null);
       return;
     }
-    if (!sandboxId) {
-      setSandboxStatus(status === "starting" || status === "running" ? "running" : null);
-      return;
-    }
 
     const controller = new AbortController();
     let active = true;
@@ -4321,6 +4356,8 @@ function LiveCodexChatSessionStatusSubscriber({
         if (!active) return;
         if (body.status === "running" || body.status === "sleeping" || body.status === "deleted") {
           setSandboxStatus(body.status);
+        } else if (body.status === null) {
+          setSandboxStatus(null);
         }
       } catch {
         // The session status still tells us when a turn is actively starting/running.
@@ -4339,7 +4376,7 @@ function LiveCodexChatSessionStatusSubscriber({
       controller.abort();
       clearInterval(interval);
     };
-  }, [chatSessionId, sandboxId, setSandboxStatus, status]);
+  }, [chatSessionId, setSandboxStatus, status]);
 
   return null;
 }
@@ -4833,20 +4870,24 @@ function GoatModelPicker({
   disabled,
   codexConnected = false,
   claudeCodeConnected = false,
+  autoModelRoutingEnabled = false,
 }: {
   value: GoatChatModelSelection;
   onChange: (modelId: GoatChatModelSelection) => void;
   disabled: boolean;
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
+  autoModelRoutingEnabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const isAutoSelected = value === AUTO_GOAT_MODEL_SELECTION;
   const isCodexSelected = value === CODEX_PICKER_VALUE;
   const isClaudeSelected = value === CLAUDE_PICKER_VALUE;
   const isEngineSelected = isCodexSelected || isClaudeSelected;
-  const selectedModel = !isEngineSelected
-    ? (findGoatModel(value) ?? findGoatModel(DEFAULT_GOAT_MODEL))
-    : null;
+  const selectedModel =
+    !isAutoSelected && !isEngineSelected
+      ? (findGoatModel(value) ?? findGoatModel(DEFAULT_GOAT_MODEL))
+      : null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -4856,7 +4897,9 @@ function GoatModelPicker({
         disabled={disabled}
         className="mb-px flex h-7 max-w-[170px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
       >
-        {isCodexSelected ? (
+        {isAutoSelected ? (
+          <Sparkles size={13} strokeWidth={1.9} className="shrink-0" />
+        ) : isCodexSelected ? (
           <OpenAIIcon size={13} strokeWidth={1.9} className="shrink-0" />
         ) : isClaudeSelected ? (
           <AnthropicIcon size={13} strokeWidth={1.9} className="shrink-0" />
@@ -4869,11 +4912,13 @@ function GoatModelPicker({
           />
         )}
         <span className="truncate">
-          {isCodexSelected
-            ? "Codex"
-            : isClaudeSelected
-              ? "Claude Code"
-              : (selectedModel?.label ?? "Model")}
+          {isAutoSelected
+            ? "Auto"
+            : isCodexSelected
+              ? "Codex"
+              : isClaudeSelected
+                ? "Claude Code"
+                : (selectedModel?.label ?? "Model")}
         </span>
         <ChevronDown size={12} strokeWidth={2} className="shrink-0" />
       </PopoverTrigger>
@@ -4886,6 +4931,36 @@ function GoatModelPicker({
           <CommandInput placeholder="Search models..." />
           <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
             <CommandEmpty>No models found.</CommandEmpty>
+            {autoModelRoutingEnabled ? (
+              <CommandGroup heading="Routing">
+                <CommandItem
+                  value={AUTO_GOAT_MODEL_SELECTION}
+                  keywords={["Auto", "automatic", "routing", "recommended"]}
+                  onSelect={() => {
+                    onChange(AUTO_GOAT_MODEL_SELECTION);
+                    setOpen(false);
+                  }}
+                  title="Choose a model from the first message and keep it for the chat."
+                  className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                >
+                  <Check
+                    size={13}
+                    strokeWidth={2}
+                    className={cn(
+                      "shrink-0 text-ink",
+                      isAutoSelected ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <Sparkles size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium leading-4">Auto</div>
+                    <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                      Picks once from your first message
+                    </div>
+                  </div>
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
             {codexConnected || claudeCodeConnected ? (
               <CommandGroup heading="Engines">
                 {codexConnected ? (
@@ -4952,7 +5027,8 @@ function GoatModelPicker({
             ) : null}
             <CommandGroup heading="Models">
               {GOAT_MODELS.map((model) => {
-                const isSelected = !isEngineSelected && model.id === selectedModel?.id;
+                const isSelected =
+                  !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
                 return (
                   <CommandItem
                     key={model.id}

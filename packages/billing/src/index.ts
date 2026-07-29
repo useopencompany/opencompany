@@ -9,7 +9,7 @@ export const PLATFORM_FEE_BPS = 2000;
 
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;
-const MODEL_PRICING_VERSION = "2026-07-29.standard";
+const MODEL_PRICING_VERSION = "2026-07-29.standard.2";
 
 type PricingProvider =
   | "openai"
@@ -22,8 +22,10 @@ type PricingProvider =
   | "xai"
   | "zai";
 
+type BillableModelId = AgentModelId | "google/gemini-3.1-flash-lite";
+
 type ModelPricing = {
-  model: AgentModelId;
+  model: BillableModelId;
   provider: PricingProvider;
   inputUsdMicrosPerMillion: number;
   cachedInputUsdMicrosPerMillion: number;
@@ -75,7 +77,7 @@ export type WorkspaceUsageDebitInput = {
 // prices: when verifying or changing an entry, note it as
 // `// verified YYYY-MM-DD` on the entry and bump the pricingVersion below —
 // a stale entry silently misprices real debits.
-const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
+const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
   "openai/gpt-5.6-sol": {
     model: "openai/gpt-5.6-sol",
     provider: "openai",
@@ -198,6 +200,15 @@ const MODEL_PRICING: Partial<Record<AgentModelId, ModelPricing>> = {
   },
   "google/gemini-3.1-flash-lite-preview": {
     model: "google/gemini-3.1-flash-lite-preview",
+    provider: "google",
+    inputUsdMicrosPerMillion: 250_000,
+    cachedInputUsdMicrosPerMillion: 30_000,
+    cacheWriteUsdMicrosPerMillion: 250_000,
+    outputUsdMicrosPerMillion: 1_500_000,
+  },
+  // verified 2026-07-29 against Google's published Gemini API rates
+  "google/gemini-3.1-flash-lite": {
+    model: "google/gemini-3.1-flash-lite",
     provider: "google",
     inputUsdMicrosPerMillion: 250_000,
     cachedInputUsdMicrosPerMillion: 30_000,

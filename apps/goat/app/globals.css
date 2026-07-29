@@ -1,4 +1,5 @@
 @import "@opencompany/ui/globals.css";
+@import "@xterm/xterm/css/xterm.css";
 
 @theme {
   --color-canvas: #f7f7f5;
