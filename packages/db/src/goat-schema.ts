@@ -1,4 +1,3 @@
-import type { CloudCodingEngine } from "@opencompany/agent-runtime";
 import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, type SQL, sql } from "drizzle-orm";
@@ -422,7 +421,7 @@ export type GoatTaskDebugTrace = {
 export type GoatChatRole = "user" | "assistant";
 export type GoatChatEngine = "opencompany" | "codex" | "claude_code";
 // Engines whose turns run through the sandboxed coding-CLI queue (goat.codex_chat_*).
-export type GoatCodexChatEngine = CloudCodingEngine;
+export type GoatCodexChatEngine = "codex" | "claude_code";
 
 export type GoatChatAttachmentKind = "image" | "pdf" | "docx" | "xlsx" | "srt";
 export type GoatChatMessageAttachment = {
