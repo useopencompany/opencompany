@@ -17,6 +17,8 @@ export type PublicGoatChatView = Pick<GoatChatSessionView, "title" | "messages">
   shareId: string;
 };
 
+export type PublicGoatChatMetadata = Pick<PublicGoatChatView, "shareId" | "title">;
+
 type PublicGoatChatSessionRecord = Pick<GoatChatSessionView, "id" | "title">;
 
 export type GoatChatShareStore = {
@@ -88,10 +90,7 @@ export async function loadPublicGoatChat(
   shareIdInput: string,
   store: GoatChatShareStore = createDbGoatChatShareStore(),
 ): Promise<PublicGoatChatView | null> {
-  const shareId = shareIdInput.trim();
-  if (!isGoatChatShareId(shareId)) return null;
-
-  const result = await store.findShare(shareId);
+  const result = await findPublicGoatChat(shareIdInput, store);
   if (!result) return null;
 
   const messages = await store.listMessages(result.chatSession.id);
@@ -99,6 +98,19 @@ export async function loadPublicGoatChat(
     shareId: result.share.id,
     title: result.chatSession.title,
     messages: messages.map(toPublicGoatChatUiMessage),
+  };
+}
+
+export async function loadPublicGoatChatMetadata(
+  shareIdInput: string,
+  store: GoatChatShareStore = createDbGoatChatShareStore(),
+): Promise<PublicGoatChatMetadata | null> {
+  const result = await findPublicGoatChat(shareIdInput, store);
+  if (!result) return null;
+
+  return {
+    shareId: result.share.id,
+    title: result.chatSession.title,
   };
 }
 
@@ -187,6 +199,12 @@ export function createDbGoatChatShareStore(
       return chatStore.listMessages(chatSessionId);
     },
   };
+}
+
+async function findPublicGoatChat(shareIdInput: string, store: GoatChatShareStore) {
+  const shareId = shareIdInput.trim();
+  if (!isGoatChatShareId(shareId)) return null;
+  return store.findShare(shareId);
 }
 
 function toPublicGoatChatUiMessage(message: GoatStoredChatMessage): GoatChatUiMessage {
