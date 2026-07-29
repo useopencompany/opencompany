@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  GOAT_CODING_WORKSPACE_SANDBOX_NETWORK,
   isAllowedPreviewPort,
   mintGoatCodingWorkspaceAccess,
   parseListeningPorts,
@@ -37,6 +38,13 @@ beforeEach(() => {
 });
 
 describe("Goat coding workspace preview port discovery", () => {
+  it("keeps raw sandbox traffic private for every coding engine", () => {
+    expect(GOAT_CODING_WORKSPACE_SANDBOX_NETWORK).toEqual({
+      allowPublicTraffic: false,
+      maskRequestHost: "localhost:${PORT}",
+    });
+  });
+
   it("normalizes, de-duplicates, and filters listening ports", () => {
     expect(parseListeningPorts("5173\n3000\n22\n50005\n3000\n65536\nnot-a-port\n8080")).toEqual([
       5_173, 3_000, 8_080,

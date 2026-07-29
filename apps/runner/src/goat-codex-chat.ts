@@ -46,6 +46,7 @@ import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
+import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./goat-coding-workspace-runtime";
 import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
@@ -137,10 +138,7 @@ export async function runGoatCodexChatTurn(input: {
       metadata: {
         user_id: turn.userWorkosId,
       },
-      network: {
-        allowPublicTraffic: false,
-        maskRequestHost: "localhost:${PORT}",
-      },
+      network: GOAT_CODING_WORKSPACE_SANDBOX_NETWORK,
       idleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
     });
   } catch (error) {

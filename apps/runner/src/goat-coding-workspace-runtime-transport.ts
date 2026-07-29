@@ -775,7 +775,18 @@ async function ensureRuntimeTools(sandbox: SandboxHandle) {
     )
     .then(() => undefined);
   runtimeToolInstalls.set(sandbox.sandboxId, install);
-  install.catch(() => runtimeToolInstalls.delete(sandbox.sandboxId));
+  void install.then(
+    () => {
+      if (runtimeToolInstalls.get(sandbox.sandboxId) === install) {
+        runtimeToolInstalls.delete(sandbox.sandboxId);
+      }
+    },
+    () => {
+      if (runtimeToolInstalls.get(sandbox.sandboxId) === install) {
+        runtimeToolInstalls.delete(sandbox.sandboxId);
+      }
+    },
+  );
   return install;
 }
 
