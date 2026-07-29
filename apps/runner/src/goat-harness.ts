@@ -1,3 +1,4 @@
+import { getGoatWorkflowHarnessSkillSnapshots } from "@opencompany/db/goat-harness";
 import type {
   GoatHarnessSpec,
   GoatTaskDebugTrace,
@@ -542,6 +543,7 @@ async function runGoatTaskCodex(input: {
   sink: GoatTaskRunSink;
   assistantMessageId: string;
 }): Promise<{ assistantContent: string; usage?: LanguageModelUsage }> {
+  const workflowSkillSnapshots = getGoatWorkflowHarnessSkillSnapshots(input.harnessSpec);
   let codexAssistantContent = "";
   let lastCodexAssistantContentFlushAt = 0;
   const agentTextByItemId = new Map<string, string>();
@@ -564,9 +566,7 @@ async function runGoatTaskCodex(input: {
     prompt: input.prompt,
     systemPrompt: input.harnessSpec.systemPrompt,
     model: input.harnessSpec.model,
-    ...(input.harnessSpec.workflow?.skillSnapshots
-      ? { skills: input.harnessSpec.workflow.skillSnapshots }
-      : {}),
+    ...(workflowSkillSnapshots ? { skills: workflowSkillSnapshots } : {}),
     existingEngineSessionId: input.existingEngineSessionId,
     env: input.env,
     signal: input.signal,

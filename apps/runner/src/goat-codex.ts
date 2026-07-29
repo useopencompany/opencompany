@@ -5,12 +5,8 @@ import {
   markGoatCodexCredentialNeedsReauth,
   rotateGoatCodexCredential,
 } from "@opencompany/db/goat-codex-auth";
-import {
-  type GoatWorkflowSkillSnapshot,
-  goatIntegrationResources,
-  goatIntegrations,
-} from "@opencompany/db/goat-schema";
-import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
+import { goatIntegrationResources, goatIntegrations } from "@opencompany/db/goat-schema";
+import { type GoatBrainSkill, serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
 import type { LanguageModelUsage } from "ai";
 import { and, eq, ne, sql } from "drizzle-orm";
 import {
@@ -77,7 +73,7 @@ export async function runGoatCodexTask(input: {
   messageId: string;
   prompt: string;
   systemPrompt: string;
-  skills?: GoatWorkflowSkillSnapshot[];
+  skills?: GoatBrainSkill[];
   model: string;
   existingEngineSessionId?: string | null;
   repository?: string | null;
@@ -134,7 +130,7 @@ async function runGoatCodexWithAuth(input: {
   messageId: string;
   prompt: string;
   systemPrompt: string;
-  skills?: GoatWorkflowSkillSnapshot[];
+  skills?: GoatBrainSkill[];
   model: string;
   existingEngineSessionId?: string | null;
   repository: GoatCodexRepositoryAccess | null;
@@ -201,7 +197,7 @@ async function runGoatCodexCommand(input: {
   messageId: string;
   prompt: string;
   systemPrompt: string;
-  skills?: GoatWorkflowSkillSnapshot[];
+  skills?: GoatBrainSkill[];
   model: string;
   existingEngineSessionId?: string | null;
   repository: GoatCodexRepositoryAccess | null;

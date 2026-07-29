@@ -1,11 +1,7 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
-import type {
-  GoatHarnessEngine,
-  GoatHarnessSpec,
-  GoatTask,
-  GoatTaskToolName,
-} from "@opencompany/db/goat-schema";
+import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
+import type { GoatHarnessEngine, GoatTask, GoatTaskToolName } from "@opencompany/db/goat-schema";
 import { goatTasks, goatUsers } from "@opencompany/db/goat-schema";
 import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
 import { and, eq } from "drizzle-orm";
@@ -103,7 +99,7 @@ export function compileGoatWorkflowHarnessSpec(input: {
   tools: GoatTaskToolName[];
   selection: GoatWorkflowEngineSelection;
   description: string;
-}): GoatHarnessSpec {
+}): GoatWorkflowHarnessSpec {
   // OpenCompany task runs receive workflow skills as prompt blocks. Codex gets
   // the immutable snapshots below as native skill inputs instead, avoiding a
   // second copy of the full instructions in the text prompt.

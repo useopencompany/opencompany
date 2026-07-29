@@ -254,13 +254,6 @@ export type GoatTaskSkillId = "first-principles" | "yc-office-hours";
 
 export type GoatTaskReportedOutcome = "done" | "needs_attention";
 
-export type GoatWorkflowSkillSnapshot = {
-  id: string;
-  name: string;
-  description: string;
-  instructions: string;
-};
-
 export type GoatHarnessSpec = {
   schemaVersion: "goat.harness.v1";
   engine: GoatHarnessEngine;
@@ -280,10 +273,6 @@ export type GoatHarnessSpec = {
     id: string;
     workspaceId: string;
     skillIds: string[];
-    // Immutable skill contents resolved when the workflow task was created.
-    // Codex materializes these as native SKILL.md inputs; older persisted specs
-    // only have skillIds, so this remains optional.
-    skillSnapshots?: GoatWorkflowSkillSnapshot[];
   };
   codex?: {
     repository?: string | null;

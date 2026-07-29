@@ -1,4 +1,5 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
 import type { GoatHarnessSpec, goatTasks } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
@@ -814,7 +815,7 @@ describe("executeGoatTask", () => {
   });
 
   it("forwards preplanned workflow skill snapshots to the Codex executor", async () => {
-    const codexHarnessSpec: GoatHarnessSpec = {
+    const codexHarnessSpec: GoatWorkflowHarnessSpec = {
       ...harnessSpec,
       engine: "codex",
       model: gptModel,
