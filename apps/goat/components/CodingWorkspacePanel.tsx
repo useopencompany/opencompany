@@ -236,23 +236,20 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     [chatSessionId, clearConnectionTimeout, requestPreview],
   );
 
-  const selectTab = useCallback(
-    (tab: WorkspaceTab) => {
-      setExpanded(true);
-      setMobilePanelOpened(true);
-      setActiveTab(tab);
-      setError(null);
-      if (connectionState === "ready" && socketRef.current?.readyState === WebSocket.OPEN) {
-        if (tab === "preview") {
-          setPortsLoaded(false);
-          socketRef.current.send(JSON.stringify({ type: "ports.refresh" }));
-        }
-        return;
+  const selectTab = (tab: WorkspaceTab) => {
+    setExpanded(true);
+    setMobilePanelOpened(true);
+    setActiveTab(tab);
+    setError(null);
+    if (connectionState === "ready" && socketRef.current?.readyState === WebSocket.OPEN) {
+      if (tab === "preview") {
+        setPortsLoaded(false);
+        socketRef.current.send(JSON.stringify({ type: "ports.refresh" }));
       }
-      void connect(tab);
-    },
-    [connect, connectionState],
-  );
+      return;
+    }
+    void connect(tab);
+  };
 
   const collapse = useCallback(() => {
     restoreFocusOnCollapseRef.current = true;
@@ -282,15 +279,11 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
           collapse();
           return;
         }
-        if (activeTab) {
-          setExpanded(true);
-          setMobilePanelOpened(true);
-          return;
-        }
-        selectTab("terminal");
+        setExpanded(true);
+        setMobilePanelOpened(true);
       },
     }),
-    [activeTab, collapse, panelExpanded, selectTab],
+    [collapse, panelExpanded],
   );
 
   useEffect(() => {
