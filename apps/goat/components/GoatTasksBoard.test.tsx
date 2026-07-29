@@ -162,6 +162,10 @@ describe("GoatTasksBoardRoute", () => {
     expect(within(sheet).getByText("The launch brief is ready.")).toBeInTheDocument();
     expect(within(sheet).getByText("$0.1234")).toBeInTheDocument();
     expect(within(sheet).getByText("3m 12s")).toBeInTheDocument();
+    expect(within(sheet).getByRole("link", { name: "View run" })).toHaveAttribute(
+      "href",
+      "/tasks/TASK-12/run",
+    );
     expect(within(sheet).getByRole("link", { name: "Open full view" })).toHaveAttribute(
       "href",
       "/tasks/TASK-12",
