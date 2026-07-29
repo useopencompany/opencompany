@@ -276,9 +276,6 @@ function TaskBoardSheet({
     : null;
   const terminal = TERMINAL_TASK_STATUSES.has(task.status);
   const { summary, error: summaryError } = useGoatTaskSummary(task.id, terminal);
-  const workflowName = task.workflowId
-    ? (workflowNames[task.workflowId] ?? `#${task.workflowId}`)
-    : null;
   const durationLabel = !terminal
     ? null
     : summary?.durationMs !== null && summary?.durationMs !== undefined
@@ -307,7 +304,7 @@ function TaskBoardSheet({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="left-auto right-0 top-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-y-auto rounded-none border-y-0 border-r-0 bg-surface p-0 text-ink data-[ending-style]:translate-x-full data-[ending-style]:scale-100 data-[ending-style]:opacity-100 data-[starting-style]:translate-x-full data-[starting-style]:scale-100 data-[starting-style]:opacity-100 sm:w-[720px]">
+      <DialogContent className="left-auto right-0 top-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-y-auto rounded-none border-y-0 border-r-0 bg-surface p-0 text-ink data-[ending-style]:translate-x-full data-[ending-style]:scale-100 data-[ending-style]:opacity-100 data-[starting-style]:translate-x-full data-[starting-style]:scale-100 data-[starting-style]:opacity-100 sm:w-[720px] sm:max-w-[calc(100vw-2rem)]">
         <header className="border-b border-border px-5 pb-4 pt-5 pr-12">
           <DialogTitle className="text-[17px] font-semibold leading-6 text-ink">
             {toGoatTaskTitle(task.name)}
@@ -322,12 +319,6 @@ function TaskBoardSheet({
             <p className="whitespace-pre-wrap break-words text-[13px] leading-6 text-ink-muted">
               {task.prompt}
             </p>
-
-            {workflowName && !task.scheduleId ? (
-              <p className="mt-3 text-[12px] leading-5 text-ink-subtle">
-                From workflow <span className="text-ink-muted">{workflowName}</span>
-              </p>
-            ) : null}
 
             {task.scheduleId ? (
               <section className="mt-4 flex flex-col gap-2">

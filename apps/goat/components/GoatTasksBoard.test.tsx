@@ -159,7 +159,9 @@ describe("GoatTasksBoardRoute", () => {
     const sheet = screen.getByRole("dialog");
     expect(within(sheet).getByText("TASK-12")).toBeInTheDocument();
     expect(within(sheet).getByText("Write a concise launch brief.")).toBeInTheDocument();
+    expect(within(sheet).getByText("Completed")).toBeInTheDocument();
     expect(within(sheet).getByText("The launch brief is ready.")).toBeInTheDocument();
+    expect(within(sheet).getByText("Launch Brief")).toBeInTheDocument();
     expect(within(sheet).getByText("$0.1234")).toBeInTheDocument();
     expect(within(sheet).getByText("3m 12s")).toBeInTheDocument();
     expect(within(sheet).getByRole("link", { name: "View run" })).toHaveAttribute(
@@ -213,6 +215,50 @@ describe("GoatTasksBoardRoute", () => {
     expect(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" }),
     ).toBeDisabled();
+  });
+
+  it("logs a failed task's error as its own activity entry", async () => {
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({
+        id: "failed",
+        name: "Sync CRM contacts",
+        status: "failed",
+        error: "Could not reach the CRM API.",
+        created_at: "2026-07-29T09:00:00.000Z",
+        updated_at: "2026-07-29T09:01:00.000Z",
+      }),
+    ];
+
+    render(<GoatTasksBoardRoute workflowNames={{}} />);
+    await user.click(screen.getByRole("link", { name: "Open Sync CRM contacts" }));
+
+    const sheet = screen.getByRole("dialog");
+    const activity = within(sheet.querySelector("ol") as HTMLOListElement);
+    expect(activity.getByText("Failed")).toBeInTheDocument();
+    expect(activity.getByText("Could not reach the CRM API.")).toBeInTheDocument();
+    expect(activity.queryByText("Completed")).not.toBeInTheDocument();
+  });
+
+  it("shows only the created entry in the activity log for a freshly queued task", async () => {
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({
+        id: "queued",
+        name: "Research the market",
+        status: "queued",
+        created_at: "2026-07-29T09:00:00.000Z",
+        updated_at: "2026-07-29T09:00:00.000Z",
+      }),
+    ];
+
+    render(<GoatTasksBoardRoute workflowNames={{}} />);
+    await user.click(screen.getByRole("link", { name: "Open Research the market" }));
+
+    const sheet = screen.getByRole("dialog");
+    const activity = within(sheet.querySelector("ol") as HTMLOListElement);
+    expect(activity.getByText("Created")).toBeInTheDocument();
+    expect(activity.getAllByRole("listitem")).toHaveLength(1);
   });
 
   it("shows a skeleton until the canonical live task dataset is ready", () => {
