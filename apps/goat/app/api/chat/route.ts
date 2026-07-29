@@ -2,7 +2,6 @@ import {
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
 } from "@opencompany/agent-runtime";
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
@@ -62,6 +61,7 @@ import {
   type StartedTask,
   stringifyFinishReason,
 } from "@/lib/chat-agent";
+import { captureGoatChatMessageSent } from "@/lib/chat-analytics";
 import { saveChatAttachmentsToGoatBrain } from "@/lib/chat-attachment-capture";
 import {
   extractGoatChatAttachmentTexts,
@@ -540,23 +540,15 @@ export async function POST(request: Request): Promise<Response> {
     // One event covers both new and continued chats. `is_first_message` keeps the new-chat
     // funnel queryable without double-capturing the first user action.
     after(
-      captureGoatServerEvent(
-        "chat_message_sent",
-        context.user.workosUserId,
-        {
-          workspace_id: context.workspace.id,
-          session_id: turn.session.id,
-          is_first_message: turn.sessionCreated,
-          model: turn.session.model,
-          message_length: userInput.prompt.length,
-        },
-        {
-          workspaceId: context.workspace.id,
-          email: context.user.email,
-          firstName: context.user.firstName,
-          lastName: context.user.lastName,
-        },
-      ),
+      captureGoatChatMessageSent({
+        user: context.user,
+        workspaceId: context.workspace.id,
+        sessionId: turn.session.id,
+        isFirstMessage: turn.sessionCreated,
+        engine: turn.session.engine,
+        model: turn.session.model,
+        messageLength: userInput.prompt.length,
+      }),
     );
   }
 

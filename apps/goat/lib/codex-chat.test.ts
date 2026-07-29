@@ -269,7 +269,12 @@ describe("createGoatCodexChatMessage", () => {
         codex_chat_sessions: {
           id: "goat_codex_chat_1",
           chatSessionId: "goat_chat_1",
+          engine: "codex",
+          model: "gpt-5.6-terra",
           status: "running",
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-terra",
         },
       },
     ]);
@@ -278,7 +283,16 @@ describe("createGoatCodexChatMessage", () => {
       sessionId: "goat_chat_1",
       prompt: "also do this",
     });
-    expect(result).toMatchObject({ ok: true, mode: "queued", sessionId: "goat_chat_1" });
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "queued",
+      sessionId: "goat_chat_1",
+      analytics: {
+        isFirstMessage: false,
+        engine: "codex",
+        model: "openai/gpt-5.6-terra",
+      },
+    });
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.wake).toHaveBeenCalledTimes(1);
   });
@@ -289,7 +303,12 @@ describe("createGoatCodexChatMessage", () => {
         codex_chat_sessions: {
           id: "goat_codex_chat_1",
           chatSessionId: "goat_chat_1",
+          engine: "codex",
+          model: "gpt-5.6-sol",
           status: "running",
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
         },
       },
     ]);
@@ -325,8 +344,13 @@ describe("createGoatCodexChatMessage", () => {
         codex_chat_sessions: {
           id: "goat_codex_chat_1",
           chatSessionId: "goat_chat_1",
+          engine: "codex",
+          model: "gpt-5.6-sol",
           status,
           error: "Previous turn failed.",
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
         },
       },
     ]);
@@ -378,6 +402,9 @@ describe("interruptGoatCodexChatSession", () => {
           chatSessionId: "goat_chat_1",
           status: "running",
         },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
+        },
       },
     ]);
     const result = await interruptGoatCodexChatSession({
@@ -400,6 +427,9 @@ describe("interruptGoatCodexChatSession", () => {
           id: "goat_codex_chat_1",
           chatSessionId: "goat_chat_1",
           status,
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
         },
       },
     ]);
@@ -482,6 +512,9 @@ describe("getGoatCodexChatSandboxStatus", () => {
           sandboxId: null,
           status: "queued",
         },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
+        },
       },
     ]);
 
@@ -502,6 +535,9 @@ describe("getGoatCodexChatSandboxStatus", () => {
           chatSessionId: "goat_chat_1",
           sandboxId: "sbx_123",
           status: "idle",
+        },
+        chat_sessions: {
+          model: "openai/gpt-5.6-sol",
         },
       },
     ]);
