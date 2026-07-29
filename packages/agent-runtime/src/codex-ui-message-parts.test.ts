@@ -473,6 +473,39 @@ describe("applyCodexEventToUiMessageParts", () => {
     ]);
   });
 
+  it("labels a Brain capture host tool clearly", () => {
+    const parts = reduce(
+      [],
+      [
+        {
+          method: "item/started",
+          params: {
+            item: {
+              id: "dynamic_save_1",
+              type: "dynamicToolCall",
+              tool: "save_to_brain",
+              arguments: { content: "Remember this." },
+            },
+          },
+        },
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_DYNAMIC_TOOL_NAME,
+        toolCallId: "dynamic_save_1",
+        state: "input-available",
+        input: {
+          label: "Save to Brain",
+          tool: "save_to_brain",
+          arguments: { content: "Remember this." },
+        },
+      },
+    ]);
+  });
+
   it("projects goal, question, and approval request states", () => {
     const parts = reduce(
       [],
