@@ -6,6 +6,13 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@opencompany/ui/components/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@opencompany/ui/components/select";
 import { toast } from "@opencompany/ui/components/sonner";
 import { Archive, ListTodo, Loader2 } from "lucide-react";
 import Link from "next/link";
@@ -39,14 +46,43 @@ const TERMINAL_TASK_STATUSES = new Set<GoatTaskView["status"]>(["succeeded", "fa
 const CAPPED_TASK_BOARD_COLUMNS = new Set<GoatTaskBoardColumn>(["done", "canceled"]);
 export const GOAT_TASK_BOARD_COLUMN_CAP = 50;
 
+type GoatTaskTimeRange = "7d" | "30d" | "90d" | "all";
+
+const TASK_TIME_RANGE_OPTIONS = [
+  "7d",
+  "30d",
+  "90d",
+  "all",
+] as const satisfies readonly GoatTaskTimeRange[];
+
+const TASK_TIME_RANGE_LABELS: Record<GoatTaskTimeRange, string> = {
+  "7d": "Last 7 days",
+  "30d": "Last 30 days",
+  "90d": "Last 90 days",
+  all: "All time",
+};
+
+const TASK_TIME_RANGE_MS: Record<Exclude<GoatTaskTimeRange, "all">, number> = {
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+  "90d": 90 * 24 * 60 * 60 * 1000,
+};
+
+function isGoatTaskTimeRange(value: unknown): value is GoatTaskTimeRange {
+  return TASK_TIME_RANGE_OPTIONS.some((option) => option === value);
+}
+
 export function GoatTasksBoardRoute({ workflowNames }: { workflowNames: Record<string, string> }) {
   const { featureFlags, taskRows, tasksReady } = useGoatAppData();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState<GoatTaskTimeRange>("7d");
+  const [nowMs] = useState(() => Date.now());
   const { activeTasks, columns } = useMemo(() => {
     const liveTasks = taskRows.map(taskRowToView);
     const nonArchived = liveTasks
       .filter((task) => !task.archivedAt)
       .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    const cutoffMs = timeRange === "all" ? null : nowMs - TASK_TIME_RANGE_MS[timeRange];
     const grouped: Record<GoatTaskBoardColumn, GoatTaskView[]> = {
       in_progress: [],
       in_review: [],
@@ -55,10 +91,17 @@ export function GoatTasksBoardRoute({ workflowNames }: { workflowNames: Record<s
     };
 
     for (const task of nonArchived) {
-      grouped[goatTaskBoardColumn(task)].push(task);
+      const column = goatTaskBoardColumn(task);
+      // Only the terminal columns are date-filtered so a stalled in-progress
+      // or in-review task never disappears just because it's old.
+      if (cutoffMs !== null && CAPPED_TASK_BOARD_COLUMNS.has(column)) {
+        const updatedMs = new Date(task.updatedAt).getTime();
+        if (Number.isFinite(updatedMs) && updatedMs < cutoffMs) continue;
+      }
+      grouped[column].push(task);
     }
     return { activeTasks: nonArchived, columns: grouped };
-  }, [taskRows]);
+  }, [taskRows, timeRange, nowMs]);
   const selectedTask = selectedTaskId
     ? (activeTasks.find((task) => task.id === selectedTaskId) ?? null)
     : null;
@@ -70,13 +113,35 @@ export function GoatTasksBoardRoute({ workflowNames }: { workflowNames: Record<s
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-5 sm:px-6">
         <div className="flex w-full max-w-[1480px] flex-col gap-8 pb-24 pt-14 sm:pt-20">
-          <header className="flex flex-col gap-1.5">
-            <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
-              Tasks
-            </h1>
-            <p className="text-[13px] leading-5 text-ink-subtle">
-              Background runs from workflows, schedules, and chat.
-            </p>
+          <header className="flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-1.5">
+              <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
+                Tasks
+              </h1>
+              <p className="text-[13px] leading-5 text-ink-subtle">
+                Background runs from workflows, schedules, and chat.
+              </p>
+            </div>
+            <Select
+              value={timeRange}
+              onValueChange={(value) => {
+                if (isGoatTaskTimeRange(value)) setTimeRange(value);
+              }}
+            >
+              <SelectTrigger
+                aria-label="Filter tasks by time range"
+                className="mt-1 h-7 w-[132px] shrink-0 border-border-subtle bg-surface px-2 text-[11.5px] text-ink shadow-none"
+              >
+                <SelectValue>{TASK_TIME_RANGE_LABELS[timeRange]}</SelectValue>
+              </SelectTrigger>
+              <SelectContent className="min-w-[140px]">
+                {TASK_TIME_RANGE_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option} className="text-[12px]">
+                    {TASK_TIME_RANGE_LABELS[option]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </header>
 
           {activeTasks.length === 0 ? (

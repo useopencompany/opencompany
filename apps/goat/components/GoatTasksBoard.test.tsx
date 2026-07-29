@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoatTaskRow } from "@/lib/task-collections";
 import { GOAT_TASK_BOARD_COLUMN_CAP, GoatTasksBoardRoute } from "./GoatTasksBoard";
 
@@ -63,7 +63,13 @@ vi.mock("@/lib/use-task-summary", () => ({
 }));
 
 describe("GoatTasksBoardRoute", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     appDataMock.featureFlags.taskSpawning = true;
     appDataMock.taskRows = [];
@@ -240,6 +246,41 @@ describe("GoatTasksBoardRoute", () => {
     ).toBeInTheDocument();
     await user.click(within(doneColumn).getByRole("button", { name: "Show 2 more" }));
     expect(within(doneColumn).getAllByRole("link")).toHaveLength(GOAT_TASK_BOARD_COLUMN_CAP + 2);
+  });
+
+  it("defaults to the last 7 days and hides older terminal tasks until widened", async () => {
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({
+        id: "recent-done",
+        name: "Recently completed task",
+        status: "succeeded",
+        updated_at: "2026-07-28T09:00:00.000Z",
+      }),
+      taskRow({
+        id: "old-done",
+        name: "Old completed task",
+        status: "succeeded",
+        updated_at: "2026-06-01T09:00:00.000Z",
+      }),
+      taskRow({
+        id: "old-running",
+        name: "Stalled in-progress task",
+        status: "running",
+        updated_at: "2026-06-01T09:00:00.000Z",
+      }),
+    ];
+
+    render(<GoatTasksBoardRoute workflowNames={{}} />);
+
+    expect(screen.getByText("Recently completed task")).toBeInTheDocument();
+    expect(screen.queryByText("Old completed task")).not.toBeInTheDocument();
+    expect(screen.getByText("Stalled in-progress task")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: "Filter tasks by time range" }));
+    await user.click(await screen.findByRole("option", { name: "All time" }));
+
+    expect(await screen.findByText("Old completed task")).toBeInTheDocument();
   });
 
   it("shows the Tasks & Workflows beta gate when disabled", () => {
