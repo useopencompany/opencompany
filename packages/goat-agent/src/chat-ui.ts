@@ -130,6 +130,7 @@ export type GoatChatUiAttachment = {
 
 export type GoatChatMessageMetadata = {
   sessionId?: string;
+  model?: string;
   mentions?: GoatChatMention[];
   attachments?: GoatChatUiAttachment[];
   taskId?: string;
@@ -699,6 +700,7 @@ export function toGoatChatMessageMetadata(
         }
       : null;
   const error = message.debugTrace?.error;
+  const model = message.debugTrace?.model;
   const aborted = message.debugTrace?.aborted === true;
   const timing = toGoatChatMessageTiming(message);
   const attachments = toGoatChatUiAttachments(message.attachments);
@@ -706,6 +708,7 @@ export function toGoatChatMessageMetadata(
 
   if (
     !message.sessionId &&
+    !model &&
     !message.taskId &&
     !task &&
     !timing &&
@@ -718,6 +721,7 @@ export function toGoatChatMessageMetadata(
   }
   return {
     sessionId: message.sessionId,
+    ...(model ? { model } : {}),
     ...(attachments ? { attachments } : {}),
     ...(message.taskId ? { taskId: message.taskId } : {}),
     ...(task ? { task } : {}),

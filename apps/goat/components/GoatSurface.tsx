@@ -91,6 +91,10 @@ import { useHydrated } from "@/components/useHydrated";
 import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import {
+  AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES,
+  AUTO_GOAT_MODEL_SELECTION,
+} from "@/lib/chat-auto-model";
+import {
   type GoatChatModelSelection,
   persistLastGoatChatSelection,
   readLastGoatChatSelection,
@@ -292,6 +296,7 @@ export function GoatSurface({
   codexConnected = false,
   claudeCodeConnected = false,
   taskSpawningEnabled = false,
+  autoModelRoutingEnabled = false,
   chatResumeEnabled = false,
   userName = "there",
   userWorkosId = "",
@@ -306,6 +311,7 @@ export function GoatSurface({
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
   taskSpawningEnabled?: boolean;
+  autoModelRoutingEnabled?: boolean;
   chatResumeEnabled?: boolean;
   userName?: string;
   // Scopes chat attachment uploads; attachments are disabled when absent.
@@ -362,6 +368,7 @@ export function GoatSurface({
       readLastGoatChatSelection(userWorkosId, {
         codexConnected,
         claudeCodeConnected,
+        autoModelRoutingEnabled,
       }),
     () => normalizeGoatModel(defaultModel),
   );
@@ -617,6 +624,9 @@ export function GoatSurface({
           pendingNewSessionIdRef.current = null;
         }
       }
+      if (chatModel === AUTO_GOAT_MODEL_SELECTION && message.metadata?.model) {
+        setChatModelOverride(normalizeGoatModel(message.metadata.model));
+      }
     },
     onError: (error) => {
       if (error.message?.includes(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE)) {
@@ -696,7 +706,9 @@ export function GoatSurface({
     enabled: attachmentsEnabled && !engineSubmitting && !newChatCommandOpen,
     ...(activeEngine === "codex" || activeEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
-      : {}),
+      : chatModel === AUTO_GOAT_MODEL_SELECTION
+        ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
+        : {}),
   });
   const clearComposerAttachments = composerAttachments.clearAttachments;
 
@@ -1798,6 +1810,7 @@ export function GoatSurface({
             defaultModel={defaultModel}
             codexConnected={codexConnected}
             claudeCodeConnected={claudeCodeConnected}
+            autoModelRoutingEnabled={autoModelRoutingEnabled}
             creditBalance={creditBalance}
             onSubmitted={closeCommandPalette}
           />
@@ -2263,6 +2276,7 @@ export function GoatSurface({
                 disabled={isGenerating || Boolean(chatSessionId)}
                 codexConnected={codexConnected}
                 claudeCodeConnected={claudeCodeConnected}
+                autoModelRoutingEnabled={autoModelRoutingEnabled}
               />
               {showEngineComposerControls ? (
                 <EngineComposerControls
@@ -2315,6 +2329,7 @@ function QuickChatComposer({
   defaultModel,
   codexConnected,
   claudeCodeConnected,
+  autoModelRoutingEnabled,
   creditBalance,
   onSubmitted,
 }: {
@@ -2323,6 +2338,7 @@ function QuickChatComposer({
   defaultModel: string;
   codexConnected: boolean;
   claudeCodeConnected: boolean;
+  autoModelRoutingEnabled: boolean;
   creditBalance: ReturnType<typeof useGoatCreditBalance>["balance"];
   onSubmitted: () => void;
 }) {
@@ -2354,6 +2370,7 @@ function QuickChatComposer({
       readLastGoatChatSelection(userWorkosId, {
         codexConnected,
         claudeCodeConnected,
+        autoModelRoutingEnabled,
       }),
     () => normalizeGoatModel(defaultModel),
   );
@@ -2418,7 +2435,9 @@ function QuickChatComposer({
     enabled: attachmentsEnabled && !isSubmitting,
     ...(selectedEngine === "codex" || selectedEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
-      : {}),
+      : chatModel === AUTO_GOAT_MODEL_SELECTION
+        ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
+        : {}),
   });
 
   // The dialog stays mounted across opens; reset to a pristine draft each time it closes
@@ -3018,6 +3037,7 @@ function QuickChatComposer({
               disabled={isSubmitting}
               codexConnected={codexConnected}
               claudeCodeConnected={claudeCodeConnected}
+              autoModelRoutingEnabled={autoModelRoutingEnabled}
             />
             {showEngineComposerControls ? (
               <EngineComposerControls
@@ -4833,20 +4853,24 @@ function GoatModelPicker({
   disabled,
   codexConnected = false,
   claudeCodeConnected = false,
+  autoModelRoutingEnabled = false,
 }: {
   value: GoatChatModelSelection;
   onChange: (modelId: GoatChatModelSelection) => void;
   disabled: boolean;
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
+  autoModelRoutingEnabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const isAutoSelected = value === AUTO_GOAT_MODEL_SELECTION;
   const isCodexSelected = value === CODEX_PICKER_VALUE;
   const isClaudeSelected = value === CLAUDE_PICKER_VALUE;
   const isEngineSelected = isCodexSelected || isClaudeSelected;
-  const selectedModel = !isEngineSelected
-    ? (findGoatModel(value) ?? findGoatModel(DEFAULT_GOAT_MODEL))
-    : null;
+  const selectedModel =
+    !isAutoSelected && !isEngineSelected
+      ? (findGoatModel(value) ?? findGoatModel(DEFAULT_GOAT_MODEL))
+      : null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -4856,7 +4880,9 @@ function GoatModelPicker({
         disabled={disabled}
         className="mb-px flex h-7 max-w-[170px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
       >
-        {isCodexSelected ? (
+        {isAutoSelected ? (
+          <Sparkles size={13} strokeWidth={1.9} className="shrink-0" />
+        ) : isCodexSelected ? (
           <OpenAIIcon size={13} strokeWidth={1.9} className="shrink-0" />
         ) : isClaudeSelected ? (
           <AnthropicIcon size={13} strokeWidth={1.9} className="shrink-0" />
@@ -4869,11 +4895,13 @@ function GoatModelPicker({
           />
         )}
         <span className="truncate">
-          {isCodexSelected
-            ? "Codex"
-            : isClaudeSelected
-              ? "Claude Code"
-              : (selectedModel?.label ?? "Model")}
+          {isAutoSelected
+            ? "Auto"
+            : isCodexSelected
+              ? "Codex"
+              : isClaudeSelected
+                ? "Claude Code"
+                : (selectedModel?.label ?? "Model")}
         </span>
         <ChevronDown size={12} strokeWidth={2} className="shrink-0" />
       </PopoverTrigger>
@@ -4886,6 +4914,36 @@ function GoatModelPicker({
           <CommandInput placeholder="Search models..." />
           <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
             <CommandEmpty>No models found.</CommandEmpty>
+            {autoModelRoutingEnabled ? (
+              <CommandGroup heading="Routing">
+                <CommandItem
+                  value={AUTO_GOAT_MODEL_SELECTION}
+                  keywords={["Auto", "automatic", "routing", "recommended"]}
+                  onSelect={() => {
+                    onChange(AUTO_GOAT_MODEL_SELECTION);
+                    setOpen(false);
+                  }}
+                  title="Choose a model from the first message and keep it for the chat."
+                  className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                >
+                  <Check
+                    size={13}
+                    strokeWidth={2}
+                    className={cn(
+                      "shrink-0 text-ink",
+                      isAutoSelected ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <Sparkles size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium leading-4">Auto</div>
+                    <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                      Picks once from your first message
+                    </div>
+                  </div>
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
             {codexConnected || claudeCodeConnected ? (
               <CommandGroup heading="Engines">
                 {codexConnected ? (
@@ -4952,7 +5010,8 @@ function GoatModelPicker({
             ) : null}
             <CommandGroup heading="Models">
               {GOAT_MODELS.map((model) => {
-                const isSelected = !isEngineSelected && model.id === selectedModel?.id;
+                const isSelected =
+                  !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
                 return (
                   <CommandItem
                     key={model.id}

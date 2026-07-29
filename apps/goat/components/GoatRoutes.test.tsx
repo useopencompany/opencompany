@@ -26,7 +26,7 @@ const appDataMock = vi.hoisted(() => ({
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
     workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
-    featureFlags: { taskSpawning: false },
+    featureFlags: { taskSpawning: false, autoModelRouting: false },
     integrations: {},
     mcpSetup: { preferredClient: null, completedAt: null },
   },
@@ -34,6 +34,7 @@ const appDataMock = vi.hoisted(() => ({
 
 const userPreferencesMock = vi.hoisted(() => ({
   updateGoatTaskSpawningAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateGoatAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
@@ -113,6 +114,7 @@ vi.mock("@/components/SettingsIntegrationsPanel", () => ({
 
 vi.mock("@/lib/user-preferences", () => ({
   updateGoatTaskSpawningAction: userPreferencesMock.updateGoatTaskSpawningAction,
+  updateGoatAutoModelRoutingAction: userPreferencesMock.updateGoatAutoModelRoutingAction,
 }));
 
 vi.mock("@/lib/workflow-actions", () => ({
@@ -141,6 +143,9 @@ describe("GoatSettingsRoute", () => {
     themeMock.setTheme.mockClear();
     routerMock.refresh.mockReset();
     userPreferencesMock.updateGoatTaskSpawningAction.mockClear();
+    userPreferencesMock.updateGoatAutoModelRoutingAction.mockClear();
+    appDataMock.value.featureFlags.taskSpawning = false;
+    appDataMock.value.featureFlags.autoModelRouting = false;
   });
 
   it("shows the appearance theme selector and updates the selected theme", async () => {
@@ -195,6 +200,25 @@ describe("GoatSettingsRoute", () => {
 
     expect(await screen.findByText("Could not update this preference.")).toBeInTheDocument();
     expect(routerMock.refresh).not.toHaveBeenCalled();
+  });
+
+  it("enables and disables automatic model routing", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<GoatPreferencesSettingsRoute />);
+
+    const toggle = screen.getByRole("switch", { name: "Automatic model routing" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await user.click(toggle);
+    expect(userPreferencesMock.updateGoatAutoModelRoutingAction).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+
+    appDataMock.value.featureFlags.autoModelRouting = true;
+    rerender(<GoatPreferencesSettingsRoute />);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await user.click(toggle);
+    expect(userPreferencesMock.updateGoatAutoModelRoutingAction).toHaveBeenLastCalledWith(false);
   });
 });
 

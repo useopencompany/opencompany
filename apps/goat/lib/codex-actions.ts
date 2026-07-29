@@ -1,5 +1,5 @@
 import {
-  GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
+  GOAT_CODEX_ACTION_HOST_TOOL_CONTRACT_VERSIONS,
   type GoatCodexActionGatewayRequest,
   type GoatCodexActionGatewayResponse,
 } from "@opencompany/agent-runtime";
@@ -10,7 +10,7 @@ import {
   goatUsers,
   goatWorkspaceMembers,
 } from "@opencompany/db/goat-schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import { executeGoatAction } from "@/lib/actions/execute";
 import type { GoatResolvedActionCatalog } from "@/lib/actions/types";
@@ -178,7 +178,9 @@ async function loadGoatCodexActionContext(
     .where(
       and(
         eq(goatCodexChatSessions.id, request.codexChatSessionId),
-        eq(goatCodexChatSessions.hostToolContractVersion, GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION),
+        inArray(goatCodexChatSessions.hostToolContractVersion, [
+          ...GOAT_CODEX_ACTION_HOST_TOOL_CONTRACT_VERSIONS,
+        ]),
         eq(goatCodexChatTurns.status, "running"),
       ),
     )
