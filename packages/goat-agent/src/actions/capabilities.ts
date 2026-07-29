@@ -54,8 +54,8 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
     },
     {
       id: "write",
-      label: "Edit Google Docs",
-      description: "Replace text in Google Docs you can edit.",
+      label: "Create & edit Docs",
+      description: "Create new Google Docs and replace text in documents you can edit.",
       defaultMode: "ask",
     },
   ],
