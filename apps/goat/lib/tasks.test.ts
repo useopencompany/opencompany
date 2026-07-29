@@ -242,6 +242,7 @@ describe("cancelGoatTaskAction", () => {
         avatarUrl: null,
         timezone: "UTC",
         taskSpawningEnabled: true,
+        autoModelRoutingEnabled: false,
         chatCapabilitiesBetaEnabled: false,
         preferredMcpClient: null,
         mcpSetupCompletedAt: null,

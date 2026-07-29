@@ -11,6 +11,7 @@ import {
   persistGoatChatAssistantMessage,
 } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX } from "@/lib/chat-agent";
+import { resolveAutoGoatModel } from "@/lib/chat-model-router";
 import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import {
@@ -145,6 +146,10 @@ vi.mock("@/lib/chat-title", () => ({
   generateGoatChatTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
 }));
 
+vi.mock("@/lib/chat-model-router", () => ({
+  resolveAutoGoatModel: vi.fn(),
+}));
+
 vi.mock("next/server", () => ({
   after: vi.fn((work: Promise<unknown>) => work),
 }));
@@ -222,6 +227,16 @@ describe("POST /api/chat", () => {
     vi.mocked(resolveGoatSkillMentions).mockResolvedValue([]);
     vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([]);
     vi.mocked(generateGoatWorkflowTaskTitle).mockResolvedValue(undefined);
+    vi.mocked(resolveAutoGoatModel).mockResolvedValue({
+      model: "moonshotai/kimi-k3",
+      tier: "frontier",
+      reason: "router_fallback",
+      classifier: {
+        model: "google/gemini-3.1-flash-lite",
+        durationMs: 1_000,
+        outcome: "timeout",
+      },
+    });
   });
 
   it("rejects unauthenticated requests", async () => {
@@ -260,6 +275,98 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(400);
     await expect(response.text()).resolves.toContain("Messages can be at most");
+  });
+
+  it("resolves Auto to one concrete model before creating the session", async () => {
+    mockAuth({ autoModelRoutingEnabled: true });
+    mockCreateTurn();
+    vi.mocked(resolveAutoGoatModel).mockResolvedValue({
+      model: "moonshotai/kimi-k2.6",
+      tier: "standard",
+      reason: "simple_answer",
+      classifier: {
+        model: "google/gemini-3.1-flash-lite",
+        durationMs: 420,
+        outcome: "success",
+      },
+    });
+    mockStreamText().mockReturnValue({
+      toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+    } as never);
+
+    const response = await POST(
+      jsonRequest({
+        model: "auto",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "What is the capital of France?" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(resolveAutoGoatModel).toHaveBeenCalledWith({
+      prompt: "What is the capital of France?",
+      attachments: [],
+      gatewayApiKey: "test-key",
+      userWorkosId: "user_1",
+      workspaceId: "goat_ws_user_1",
+    });
+    expect(createGoatChatUserTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "moonshotai/kimi-k2.6" }),
+      expect.anything(),
+    );
+    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+      "chat_message_sent",
+      "user_1",
+      expect.objectContaining({
+        model: "moonshotai/kimi-k2.6",
+        selection_mode: "auto",
+        routing_tier: "standard",
+        routing_reason: "simple_answer",
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("rejects Auto when the account feature flag is off", async () => {
+    mockAuth({ autoModelRoutingEnabled: false });
+
+    const response = await POST(
+      jsonRequest({
+        model: "auto",
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "Hello" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(resolveAutoGoatModel).not.toHaveBeenCalled();
+    expect(createGoatChatUserTurn).not.toHaveBeenCalled();
+  });
+
+  it("rejects Auto on an existing session", async () => {
+    mockAuth({ autoModelRoutingEnabled: true });
+
+    const response = await POST(
+      jsonRequest({
+        model: "auto",
+        sessionId: "session_1",
+        message: {
+          id: "ui_user_2",
+          role: "user",
+          parts: [{ type: "text", text: "Continue" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toContain("only available when starting a new chat");
+    expect(resolveAutoGoatModel).not.toHaveBeenCalled();
   });
 
   it("rejects workflow mentions before creating a normal chat turn", async () => {
@@ -635,9 +742,9 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(200);
     expect(metadataUpdates).toEqual([
-      { sessionId: "session_1" },
-      { sessionId: "session_1", contextTokens: 12_800 },
-      { sessionId: "session_1", contextTokens: 19_200 },
+      { sessionId: "session_1", model: "openai/gpt-5.5" },
+      { sessionId: "session_1", model: "openai/gpt-5.5", contextTokens: 12_800 },
+      { sessionId: "session_1", model: "openai/gpt-5.5", contextTokens: 19_200 },
     ]);
   });
 
@@ -2348,6 +2455,7 @@ function mockAuth(
     lastName: string | null;
     timezone: string;
     taskSpawningEnabled: boolean;
+    autoModelRoutingEnabled: boolean;
     role: "admin" | "member";
   }> = {},
 ) {
@@ -2369,6 +2477,7 @@ function mockAuth(
         avatarUrl: null,
         timezone: user.timezone,
         taskSpawningEnabled: overrides.taskSpawningEnabled ?? true,
+        autoModelRoutingEnabled: overrides.autoModelRoutingEnabled ?? false,
         chatCapabilitiesBetaEnabled: false,
         onboardedAt: new Date(),
         createdAt: new Date(),
@@ -2415,18 +2524,21 @@ const ACTIVE_BRAIN = {
 };
 
 function mockCreateTurn() {
-  mockCreateGoatChatUserTurn().mockResolvedValue({
-    session: {
-      id: "session_1",
-      model: "openai/gpt-5.5",
-      engine: "opencompany",
-    },
-    sessionCreated: true,
-    userMessage: {
-      id: "user_message_1",
-    },
-    storedMessages: [],
-    messages: [],
+  mockCreateGoatChatUserTurn().mockImplementation(async (...args: unknown[]) => {
+    const input = args[0] as { model?: string } | undefined;
+    return {
+      session: {
+        id: "session_1",
+        model: input?.model ?? "openai/gpt-5.5",
+        engine: "opencompany",
+      },
+      sessionCreated: true,
+      userMessage: {
+        id: "user_message_1",
+      },
+      storedMessages: [],
+      messages: [],
+    };
   });
 }
 

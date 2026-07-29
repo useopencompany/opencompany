@@ -445,6 +445,7 @@ export function normalizeGoatChatCapture(input: {
   draftFolder: string;
   capturedAt: string;
   sourceRef?: string;
+  externalId?: string;
 }): NormalizedGoatChatCaptureSourceItem {
   const text = input.text.trim();
   if (!text) throw invalid("capture text must not be empty", "invalid_capture");
@@ -463,6 +464,7 @@ export function normalizeGoatChatCapture(input: {
   if (!isValidGoatBrainSourceRef(sourceRef)) {
     throw invalid("capture sourceRef must be valid", "invalid_capture");
   }
+  const externalId = input.externalId?.trim() || draftBrainId;
 
   const capture = {
     text,
@@ -475,7 +477,7 @@ export function normalizeGoatChatCapture(input: {
   const contentHashInput = {
     sourceProvider: "goat-chat",
     sourceType: "capture",
-    externalId: draftBrainId,
+    externalId,
     title,
     capture,
   };
@@ -483,9 +485,9 @@ export function normalizeGoatChatCapture(input: {
   return {
     sourceProvider: "goat-chat",
     sourceType: "capture",
-    // The inbox draft id is minted per capture, so it doubles as the stable
-    // external id for dedupe.
-    externalId: draftBrainId,
+    // Normal chat captures use the minted draft id. Durable host-tool callers
+    // can supply a stable key so a recovered turn does not create a second draft.
+    externalId,
     sourceRef,
     title,
     occurredAt: capturedAt,

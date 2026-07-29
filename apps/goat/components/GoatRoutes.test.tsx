@@ -25,7 +25,7 @@ const appDataMock = vi.hoisted(() => ({
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: "admin" },
     workspaces: [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }],
     workspaceMembers: [],
-    featureFlags: { taskSpawning: false },
+    featureFlags: { taskSpawning: false, autoModelRouting: false },
     integrations: {},
     mcpSetup: { preferredClient: null, completedAt: null },
   },

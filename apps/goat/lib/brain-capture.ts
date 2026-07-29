@@ -5,6 +5,7 @@ import {
   upsertGoatBrainFile,
 } from "@opencompany/db/goat-brain-files";
 import {
+  findExistingGoatBrainChatCaptureIngest,
   findExistingGoatBrainPointerIngest,
   GOAT_BRAIN_AGENT_INGEST_JOB_KIND,
   GOAT_BRAIN_POINTER_HYDRATE_JOB_KIND,
@@ -34,6 +35,7 @@ export type GoatBrainCaptureResult =
       title: string;
       jobId: string | null;
       enqueued: boolean;
+      alreadyCaptured?: boolean;
       quotaPaused?: boolean;
     }
   | {
@@ -42,7 +44,7 @@ export type GoatBrainCaptureResult =
     };
 
 export type GoatBrainCaptureSource =
-  | { kind: "chat"; connectionId: string; itemId: string }
+  | { kind: "chat"; connectionId: string; itemId: string; idempotencyKey?: string }
   | { kind: "mcp"; connectionId: string; itemId: string };
 
 // Explicit saves from Goat chat or MCP are capture-first: persist a draft page
@@ -98,6 +100,29 @@ export async function captureToGoatBrainInbox(input: {
     };
   }
 
+  const idempotencyKey =
+    input.source.kind === "chat" ? input.source.idempotencyKey?.trim() : undefined;
+  if (!isPointerCapture && idempotencyKey) {
+    const existing = await findExistingGoatBrainChatCaptureIngest({
+      userWorkosId: input.userWorkosId,
+      sourceConnectionId: input.source.connectionId,
+      externalId: idempotencyKey,
+      brainRef: input.brainRef,
+    });
+    if (existing) {
+      return {
+        ok: true,
+        draftBrainId: existing.draftBrainId,
+        path: goatBrainFilePathFor(existing.draftFolder, existing.draftBrainId),
+        title: existing.title,
+        jobId: existing.jobId,
+        enqueued: false,
+        alreadyCaptured: true,
+        quotaPaused: existing.planPaused,
+      };
+    }
+  }
+
   if (isPointerCapture) {
     const existing = await findExistingGoatBrainPointerIngest({
       userWorkosId: input.userWorkosId,
@@ -114,6 +139,7 @@ export async function captureToGoatBrainInbox(input: {
         title: existing.title,
         jobId: existing.jobId,
         enqueued: false,
+        alreadyCaptured: true,
         quotaPaused: existing.planPaused,
       };
     }
@@ -172,6 +198,7 @@ export async function captureToGoatBrainInbox(input: {
         draftFolder: GOAT_BRAIN_CAPTURE_FOLDER,
         capturedAt,
         sourceRef: resolvedSourceRef,
+        ...(idempotencyKey ? { externalId: idempotencyKey } : {}),
       });
   const result = await upsertGoatBrainSourceItemAndEnqueue({
     userWorkosId: input.userWorkosId,

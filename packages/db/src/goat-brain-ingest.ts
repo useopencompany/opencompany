@@ -4,6 +4,7 @@ import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import {
   type GoatBrainHydratablePointerProvider,
   isNormalizedGoatBrainPointerSourceItem,
+  isNormalizedGoatChatCaptureSourceItem,
   type NormalizedBrainSourceItem,
 } from "../../goat-brain/src/index";
 import { getDb } from "./client";
@@ -55,6 +56,62 @@ export type ExistingGoatBrainPointerIngest = {
   draftFolder: string;
   title: string;
 };
+
+export type ExistingGoatBrainChatCaptureIngest = {
+  jobId: string;
+  status: GoatBrainIngestJobStatus;
+  planPaused: boolean;
+  draftBrainId: string;
+  draftFolder: string;
+  title: string;
+};
+
+export async function findExistingGoatBrainChatCaptureIngest(input: {
+  userWorkosId: string;
+  sourceConnectionId: string;
+  externalId: string;
+  brainRef: string;
+  db?: DbLike;
+}): Promise<ExistingGoatBrainChatCaptureIngest | null> {
+  const db = input.db ?? getDb();
+  const [row] = await db
+    .select({
+      normalizedPayload: goatBrainSourceItems.normalizedPayload,
+      jobId: goatBrainIngestJobs.id,
+      status: goatBrainIngestJobs.status,
+      planPaused: goatBrainIngestJobs.planPaused,
+    })
+    .from(goatBrainSourceItems)
+    .innerJoin(
+      goatBrainIngestJobs,
+      and(
+        eq(goatBrainIngestJobs.sourceItemId, goatBrainSourceItems.id),
+        eq(goatBrainIngestJobs.kind, GOAT_BRAIN_AGENT_INGEST_JOB_KIND),
+        eq(goatBrainIngestJobs.brainRef, input.brainRef),
+      ),
+    )
+    .where(
+      and(
+        eq(goatBrainSourceItems.userWorkosId, input.userWorkosId),
+        eq(goatBrainSourceItems.sourceProvider, "goat-chat"),
+        eq(goatBrainSourceItems.sourceConnectionId, input.sourceConnectionId),
+        eq(goatBrainSourceItems.sourceType, "capture"),
+        eq(goatBrainSourceItems.externalId, input.externalId),
+      ),
+    )
+    .orderBy(desc(goatBrainIngestJobs.createdAt))
+    .limit(1);
+  if (!row || !isNormalizedGoatChatCaptureSourceItem(row.normalizedPayload)) return null;
+  const capture = row.normalizedPayload.content.capture;
+  return {
+    jobId: row.jobId,
+    status: row.status,
+    planPaused: row.planPaused,
+    draftBrainId: capture.draftBrainId,
+    draftFolder: capture.draftFolder,
+    title: row.normalizedPayload.title,
+  };
+}
 
 export async function findExistingGoatBrainPointerIngest(input: {
   userWorkosId: string;

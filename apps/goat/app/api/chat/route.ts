@@ -68,6 +68,8 @@ import {
   hydrateGoatChatAttachmentParts,
   parseGoatChatAttachmentsInput,
 } from "@/lib/chat-attachments";
+import { isAutoGoatModelSelection } from "@/lib/chat-auto-model";
+import { type GoatChatModelRoutingResult, resolveAutoGoatModel } from "@/lib/chat-model-router";
 import { parseOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
 import { resolveGoatChatRequestContext } from "@/lib/chat-request-auth";
 import {
@@ -104,6 +106,7 @@ import {
 import { executeGoatChatExaFetch } from "@/lib/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
+import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import type { ChatBrowserToolSession } from "@/lib/sandbox/browser-tools";
 import {
   activateAndListGoatChatSessionSkills,
@@ -177,17 +180,18 @@ export async function POST(request: Request): Promise<Response> {
     return new Response(parsedAttachments.error, { status: 400 });
   }
   const attachments = parsedAttachments?.ok ? parsedAttachments.attachments : [];
+  const autoModelRequested = Boolean(message && isAutoGoatModelSelection(body.value.model));
 
   const parsed = message
     ? validateGoatChatInput({
         prompt: textFromGoatChatUiMessage(message),
-        model: body.value.model,
+        model: autoModelRequested ? DEFAULT_GOAT_MODEL : body.value.model,
         sessionId: body.value.sessionId,
         hasAttachments: attachments.length > 0,
       })
     : null;
   if (parsed && !parsed.ok) return new Response(parsed.error, { status: 400 });
-  const userInput = parsed?.ok ? parsed.value : null;
+  let userInput = parsed?.ok ? parsed.value : null;
   const parsedNewSessionId = message
     ? parseOptimisticGoatChatSessionId(body.value.newSessionId)
     : null;
@@ -201,7 +205,16 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  if (userInput) {
+  if (autoModelRequested && !context.user.autoModelRoutingEnabled) {
+    return new Response("Auto model routing is not enabled for this account.", { status: 403 });
+  }
+  if (autoModelRequested && userInput?.sessionId) {
+    return new Response("Auto model routing is only available when starting a new chat.", {
+      status: 400,
+    });
+  }
+
+  if (userInput && !autoModelRequested) {
     const attachmentCapabilities = modelSupportsAttachments(userInput.model);
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
@@ -224,6 +237,11 @@ export async function POST(request: Request): Promise<Response> {
     mentionEngine === "codex" && (await isGoatCodexConnectedForUser(context.user.workosUserId))
       ? "codex"
       : undefined;
+  if (autoModelRequested && requestedEngine) {
+    return new Response("Auto model routing cannot be combined with an engine mention.", {
+      status: 400,
+    });
+  }
   if (requestedEngine && attachments.length > 0) {
     return new Response("Attachments are not supported in engine chats yet.", {
       status: 400,
@@ -293,7 +311,7 @@ export async function POST(request: Request): Promise<Response> {
   // delegated work.
   const actionsEnabled = !requestedEngine && !isGoatChatActionsKilled();
   const emptyCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
-  const [actionCatalog, skillCatalog, workflowCatalog] = await Promise.all([
+  const [actionCatalog, skillCatalog, workflowCatalog, modelRouting] = await Promise.all([
     actionsEnabled
       ? resolveGoatActionCatalog({
           userWorkosId: context.user.workosUserId,
@@ -324,7 +342,36 @@ export async function POST(request: Request): Promise<Response> {
           return [];
         })
       : Promise.resolve([]),
+    autoModelRequested && userInput
+      ? resolveAutoGoatModel({
+          prompt: userInput.prompt,
+          attachments,
+          gatewayApiKey,
+          userWorkosId: context.user.workosUserId,
+          workspaceId: context.workspace.id,
+        })
+      : Promise.resolve<GoatChatModelRoutingResult | null>(null),
   ]);
+  if (modelRouting && userInput) {
+    userInput = { ...userInput, model: modelRouting.model };
+  }
+  if (userInput && autoModelRequested) {
+    const attachmentCapabilities = modelSupportsAttachments(userInput.model);
+    if (
+      attachments.some((attachment) => attachment.kind === "image") &&
+      !attachmentCapabilities.images
+    ) {
+      return new Response("The selected model does not support image attachments.", {
+        status: 400,
+      });
+    }
+    if (
+      attachments.some((attachment) => attachment.kind === "pdf") &&
+      !attachmentCapabilities.pdf
+    ) {
+      return new Response("The selected model does not support PDF attachments.", { status: 400 });
+    }
+  }
 
   const store = createDbGoatChatStore();
   const recurringSchedules = taskToolsEnabled
@@ -341,6 +388,15 @@ export async function POST(request: Request): Promise<Response> {
     ...(userIdHash ? { "goat.user_id_hash": userIdHash } : {}),
     "goat.model": telemetryModel,
     "goat.task_started": false,
+    ...(autoModelRequested ? { "goat.model_selection": "auto" } : {}),
+    ...(modelRouting
+      ? {
+          "goat.router_tier": modelRouting.tier,
+          "goat.router_reason": modelRouting.reason,
+          "goat.router_outcome": modelRouting.classifier.outcome,
+          "goat.router_duration_ms": modelRouting.classifier.durationMs,
+        }
+      : {}),
     ...(approvalMessage ? { "goat.approval_continuation": true } : {}),
   });
   let chatFinished = false;
@@ -512,6 +568,20 @@ export async function POST(request: Request): Promise<Response> {
       "goat.chat_message_id": turn.userMessageId,
       "goat.model": turn.session.model,
     });
+    if (modelRouting?.classifier.usage) {
+      after(
+        recordChatModelCost({
+          model: modelRouting.classifier.model,
+          usage: modelRouting.classifier.usage,
+          workspaceId: context.workspace.id,
+          userWorkosId: context.user.workosUserId,
+          chatSessionId: turn.session.id,
+          userMessageId: turn.userMessageId,
+          idempotencyKeySuffix: ":routing",
+          stage: "routing",
+        }),
+      );
+    }
   } catch (error) {
     finishChatTelemetry("failure", {}, error);
     throw error;
@@ -548,6 +618,15 @@ export async function POST(request: Request): Promise<Response> {
         engine: turn.session.engine,
         model: turn.session.model,
         messageLength: userInput.prompt.length,
+        selectionMode: autoModelRequested ? "auto" : "manual",
+        ...(modelRouting
+          ? {
+              routingTier: modelRouting.tier,
+              routingReason: modelRouting.reason,
+              routingOutcome: modelRouting.classifier.outcome,
+              routingDurationMs: modelRouting.classifier.durationMs,
+            }
+          : {}),
       }),
     );
   }
@@ -1275,6 +1354,7 @@ export async function POST(request: Request): Promise<Response> {
     messageMetadata: ({ part }) =>
       toStreamMessageMetadata(
         turn.session.id,
+        turn.session.model,
         toolContext.getStartedTask(),
         part.type === "finish-step" ? goatChatContextTokensFromUsage(part.usage) : undefined,
       ),
@@ -1597,6 +1677,7 @@ async function recordChatModelCost(input: {
   chatSessionId: string;
   userMessageId: string;
   idempotencyKeySuffix?: string;
+  stage?: "generation" | "routing";
 }) {
   if (!input.usage) return;
   const cost = calculateModelUsageCost({
@@ -1612,6 +1693,7 @@ async function recordChatModelCost(input: {
     attributes: {
       "goat.model": input.model,
       "goat.surface": "chat",
+      "goat.stage": input.stage ?? "generation",
     },
   });
   // Usage-based chat: debit the turn's total cost (provider + platform fee)
@@ -1696,11 +1778,13 @@ function normalizeScheduleLookupText(value: string) {
 
 function toStreamMessageMetadata(
   sessionId: string,
+  model: string,
   task: StartedTask | null,
   contextTokens?: number,
 ): GoatChatMessageMetadata {
   return {
     sessionId,
+    model,
     ...(contextTokens !== undefined ? { contextTokens } : {}),
     ...(task
       ? {

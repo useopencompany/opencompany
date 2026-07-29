@@ -26,6 +26,7 @@ vi.mock("@/components/GoatAppDataProvider", () => ({
     chatResumeEnabled: true,
     featureFlags: {
       taskSpawning: true,
+      autoModelRouting: false,
     },
   }),
 }));

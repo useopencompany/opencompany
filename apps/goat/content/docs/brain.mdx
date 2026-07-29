@@ -76,12 +76,16 @@ The Brain page (`/brain/...`) renders `GoatBrainView` with a Tiptap markdown edi
 
 ### 2. Chat captures (`save_to_brain`)
 
-When the user asks chat to keep something — "save this reference", "here's an idea" — the chat agent calls `save_to_brain`. The flow is deliberately capture-first, in two phases:
+When the user asks main chat or a Cloud Codex chat to keep something — "save this reference",
+"here's an idea" — the agent calls `save_to_brain`. Both surfaces use the same deliberately
+capture-first flow, in two phases:
 
 1. **Capture now.** `captureToGoatBrainInbox` (`apps/goat/lib/brain-capture.ts`) immediately writes the content as a draft page in `inbox/` (type `note`, status `draft`) in the same request. Plain chat saves use `goat-chat:<messageId>` provenance; integration and web saves preserve the canonical `sourceRef` returned by the action. Nothing the user saves can be lost, even if everything downstream fails, and the draft appears in the Brain UI instantly.
-2. **Curate later.** A copied-content save normalizes a `goat-chat`/`capture` source item and enqueues a `brain_agent_ingest` job. A ref-only Slack, Gmail, or Linear save instead normalizes a provider `pointer` and enqueues `brain_pointer_hydrate`; the runner re-fetches the full provider content before delegating to the existing provider ingest profile. Both paths are pinned to the active brain and wake the runner. The capture-curation agent checks the brain for an existing home, then folds the finding into an existing page or promotes the draft in place.
+2. **Curate later.** A copied-content save normalizes a `goat-chat`/`capture` source item and enqueues a `brain_agent_ingest` job. A ref-only Slack, Gmail, or Linear save instead normalizes a provider `pointer` and enqueues `brain_pointer_hydrate`; the runner re-fetches the full provider content before delegating to the existing provider ingest profile. Both paths are scoped to the Brain selected for the chat and wake the runner. The capture-curation agent checks the brain for an existing home, then folds the finding into an existing page or promotes the draft in place.
 
-Duplicate `save_to_brain` calls within one chat turn dedupe to a single draft; identical webhook re-deliveries dedupe at the source-item layer via content hash.
+Duplicate `save_to_brain` calls within one main-chat turn dedupe to a single draft. Cloud Codex
+captures also carry a durable content-derived key, so retries after runner recovery reuse the same
+completed capture. Identical webhook re-deliveries dedupe at the source-item layer via content hash.
 
 Every workspace member with access to the active brain can use the chat capture path. Direct
 `goat_brain` mutations and task/schedule tools remain unavailable to non-admin members. Each save
@@ -153,7 +157,10 @@ Brains belong to workspaces. `visibility: "workspace"` brains are readable by ev
 - Document format, links, validation, retrieval, CLI: `packages/goat-brain/src/` (after CLI changes, regenerate the bundle with `bun run bundle`).
 - Tables, access control, file sync, ingest queue: `packages/db/src/goat-schema.ts`, `goat-brain-files.ts`, `goat-brain-ingest.ts`, `goat-workspaces.ts` (schema changes need a Drizzle migration).
 - Ingestion worker and agent prompts: `apps/runner/src/goat-brain-ingest-worker.ts`, `apps/runner/src/goat-brain-agent-ingest.ts`.
-- Chat capture flow: `apps/goat/lib/brain-capture.ts` and the `save_to_brain` wiring in `apps/goat/lib/chat-agent.ts` and `apps/goat/app/api/chat/route.ts`.
+- Chat capture flow: `apps/goat/lib/brain-capture.ts`, the main-chat wiring in
+  `apps/goat/lib/chat-agent.ts` and `apps/goat/app/api/chat/route.ts`, and the Cloud Codex host tool
+  and gateway in `apps/runner/src/goat-codex-brain-capture-tool.ts` and
+  `apps/goat/lib/codex-brain-capture.ts`.
 - New source providers: normalize into `brain_source_items`, enqueue a `brain_agent_ingest` job, and add a handler — the Jamie webhook route and the chat capture path are the templates.
 - Brain UI: `apps/goat/components/GoatBrainView.tsx`, `MarkdownGoatBrainEditor.tsx`, `GoatBrainSwitcher.tsx`, and server actions in `apps/goat/lib/brain-actions.ts`.
 - Design references: `apps/goat/docs/brain/pointer-copy-contract.md` and `apps/goat/docs/brain/retrieval-planes.md`.
