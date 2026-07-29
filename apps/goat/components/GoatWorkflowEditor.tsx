@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState, useTransition } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import type { GoatSkillCatalogItem } from "@/lib/skills";
 import { archiveGoatWorkflowAction, updateGoatWorkflowAction } from "@/lib/workflow-actions";
@@ -100,7 +100,6 @@ export function GoatWorkflowEditor({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isArchiving, startArchiving] = useTransition();
   const draftRef = useRef(draft);
-  draftRef.current = draft;
   const mountedRef = useRef(true);
   const autosaveRef = useRef({
     savedValue: serializeWorkflowDraft(draft),
@@ -108,7 +107,10 @@ export function GoatWorkflowEditor({
     inFlight: false,
     sequence: 0,
   });
-  const saveLatestRef = useRef<() => Promise<void>>(async () => {});
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -117,59 +119,62 @@ export function GoatWorkflowEditor({
     };
   }, []);
 
-  saveLatestRef.current = async () => {
-    const autosave = autosaveRef.current;
-    const snapshot = draftRef.current;
-    const value = serializeWorkflowDraft(snapshot);
-    if (value === autosave.savedValue || value === autosave.failedValue) return;
-    if (autosave.inFlight) return;
+  const saveLatest = useCallback(
+    async function saveLatestDraft() {
+      const autosave = autosaveRef.current;
+      const snapshot = draftRef.current;
+      const value = serializeWorkflowDraft(snapshot);
+      if (value === autosave.savedValue) return;
+      if (autosave.inFlight) return;
 
-    autosave.inFlight = true;
-    const sequence = ++autosave.sequence;
-    setSaveState("saving");
-    setSaveError(null);
-
-    let result: Awaited<ReturnType<typeof updateGoatWorkflowAction>>;
-    try {
-      result = await updateGoatWorkflowAction({
-        slug: workflow.id,
-        name: snapshot.name,
-        description: snapshot.description,
-        trigger: snapshot.trigger,
-        steps: snapshot.steps,
-        status: snapshot.status,
-      });
-    } catch {
-      result = { ok: false, message: "The workflow could not be saved. Try again." };
-    }
-
-    if (!mountedRef.current || sequence !== autosave.sequence) return;
-    autosave.inFlight = false;
-    const latestValue = serializeWorkflowDraft(draftRef.current);
-    if (result.ok) {
-      autosave.savedValue = value;
-      autosave.failedValue = null;
-      router.refresh();
-    } else {
-      autosave.failedValue = value;
-      if (latestValue === value) {
-        setSaveState("error");
-        setSaveError(result.message);
-      }
-    }
-
-    const shouldSaveLatest =
-      latestValue !== autosave.savedValue && latestValue !== autosave.failedValue;
-    if (shouldSaveLatest) {
+      autosave.inFlight = true;
+      const sequence = ++autosave.sequence;
       setSaveState("saving");
-      void saveLatestRef.current();
-      return;
-    }
-    if (latestValue === autosave.savedValue) {
-      setSaveState("saved");
       setSaveError(null);
-    }
-  };
+
+      let result: Awaited<ReturnType<typeof updateGoatWorkflowAction>>;
+      try {
+        result = await updateGoatWorkflowAction({
+          slug: workflow.id,
+          name: snapshot.name,
+          description: snapshot.description,
+          trigger: snapshot.trigger,
+          steps: snapshot.steps,
+          status: snapshot.status,
+        });
+      } catch {
+        result = { ok: false, message: "The workflow could not be saved. Try again." };
+      }
+
+      if (!mountedRef.current || sequence !== autosave.sequence) return;
+      autosave.inFlight = false;
+      const latestValue = serializeWorkflowDraft(draftRef.current);
+      if (result.ok) {
+        autosave.savedValue = value;
+        autosave.failedValue = null;
+        router.refresh();
+      } else {
+        autosave.failedValue = value;
+        if (latestValue === value) {
+          setSaveState("error");
+          setSaveError(result.message);
+        }
+      }
+
+      const shouldSaveLatest =
+        latestValue !== autosave.savedValue && latestValue !== autosave.failedValue;
+      if (shouldSaveLatest) {
+        setSaveState("saving");
+        void saveLatestDraft();
+        return;
+      }
+      if (latestValue === autosave.savedValue) {
+        setSaveState("saved");
+        setSaveError(null);
+      }
+    },
+    [router, workflow.id],
+  );
 
   useEffect(() => {
     if (!canEdit) return;
@@ -185,10 +190,10 @@ export function GoatWorkflowEditor({
     setSaveState("saving");
     setSaveError(null);
     const timer = setTimeout(() => {
-      void saveLatestRef.current();
+      void saveLatest();
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [canEdit, draft]);
+  }, [canEdit, draft, saveLatest]);
 
   const patch = (partial: Partial<WorkflowDraft>) => {
     if (!canEdit) return;
@@ -251,7 +256,7 @@ export function GoatWorkflowEditor({
                   {saveError}
                 </span>
               ) : null}
-              <SaveIndicator state={saveState} canEdit={canEdit} />
+              <SaveIndicator state={saveState} canEdit={canEdit} onRetry={saveLatest} />
               {canEdit ? <EditorMoreMenu onArchive={archive} isArchiving={isArchiving} /> : null}
             </div>
           </div>
@@ -695,7 +700,15 @@ function ModelOption({
   );
 }
 
-function SaveIndicator({ state, canEdit }: { state: SaveState; canEdit: boolean }) {
+function SaveIndicator({
+  state,
+  canEdit,
+  onRetry,
+}: {
+  state: SaveState;
+  canEdit: boolean;
+  onRetry: () => Promise<void>;
+}) {
   if (!canEdit) {
     return <span className="px-1.5 text-[12px] text-ink-subtle">Read only</span>;
   }
@@ -708,7 +721,15 @@ function SaveIndicator({ state, canEdit }: { state: SaveState; canEdit: boolean 
     );
   }
   if (state === "error") {
-    return <span className="px-1.5 text-[12px] text-warning">Not saved</span>;
+    return (
+      <button
+        type="button"
+        onClick={() => void onRetry()}
+        className="rounded-md px-1.5 py-1 text-[12px] font-medium text-warning transition-colors hover:bg-warning-bg focus:outline-none focus-visible:ring-1 focus-visible:ring-warning/30"
+      >
+        Retry save
+      </button>
+    );
   }
   return (
     <span className="flex items-center gap-1.5 px-1.5 text-[12px] text-ink-subtle">

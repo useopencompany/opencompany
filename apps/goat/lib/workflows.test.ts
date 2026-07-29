@@ -70,7 +70,7 @@ describe("validateGoatWorkflowFields", () => {
     ).toMatch(/unique/);
   });
 
-  it("requires at least one non-empty step before activation", () => {
+  it("requires every step to have instructions before activation", () => {
     expect(
       validateGoatWorkflowFields({
         name: "Workflow",
@@ -89,6 +89,15 @@ describe("validateGoatWorkflowFields", () => {
           { ...validStep, instructions: " " },
           { ...validStep, id: "step-2" },
         ],
+        status: "active",
+      }),
+    ).toMatch(/every workflow step/i);
+    expect(
+      validateGoatWorkflowFields({
+        name: "Workflow",
+        description: "",
+        trigger: "manual",
+        steps: [validStep, { ...validStep, id: "step-2" }],
         status: "active",
       }),
     ).toBeNull();
@@ -123,6 +132,53 @@ describe("goatWorkflowStepsWithLegacyFallback", () => {
         instructions: "",
       }),
     ).toEqual([]);
+  });
+
+  it("prefers a newer legacy write when mixed-version columns disagree", () => {
+    expect(
+      goatWorkflowStepsWithLegacyFallback({
+        slug: "weekly-update",
+        steps: [validStep],
+        model: "sonnet-5",
+        instructions: "Edited by an older web pod.",
+      }),
+    ).toEqual([
+      {
+        id: "step-weekly-update",
+        title: "",
+        model: "sonnet-5",
+        instructions: "Edited by an older web pod.",
+      },
+    ]);
+  });
+
+  it("preserves a model-only legacy draft", () => {
+    expect(
+      goatWorkflowStepsWithLegacyFallback({
+        slug: "weekly-update",
+        steps: [],
+        model: "sonnet-5",
+        instructions: "",
+      }),
+    ).toEqual([
+      {
+        id: "step-weekly-update",
+        title: "",
+        model: "sonnet-5",
+        instructions: "",
+      },
+    ]);
+  });
+
+  it("keeps native steps when their dual-written legacy mirror agrees", () => {
+    expect(
+      goatWorkflowStepsWithLegacyFallback({
+        slug: "weekly-update",
+        steps: [validStep],
+        model: validStep.model,
+        instructions: renderStepsAsMarkdown([validStep]),
+      }),
+    ).toEqual([validStep]);
   });
 });
 

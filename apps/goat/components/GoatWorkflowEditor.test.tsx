@@ -9,7 +9,12 @@ const routerMock = vi.hoisted(() => ({
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
-  update: vi.fn(async () => ({ ok: true as const, slug: "weekly-update" })),
+  update: vi.fn(
+    async (): Promise<{ ok: true; slug: string } | { ok: false; message: string }> => ({
+      ok: true,
+      slug: "weekly-update",
+    }),
+  ),
   archive: vi.fn(async () => ({ ok: true as const, slug: "weekly-update" })),
 }));
 
@@ -120,6 +125,26 @@ describe("GoatWorkflowEditor", () => {
         steps: [expect.objectContaining({ id: "step-1", title: "Final edit" })],
       }),
     );
+  });
+
+  it("lets an editor retry a transient autosave failure without another edit", async () => {
+    workflowActionsMock.update
+      .mockResolvedValueOnce({ ok: false, message: "Temporary save failure." })
+      .mockResolvedValueOnce({ ok: true, slug: "weekly-update" });
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.change(screen.getByLabelText("Step 1 name"), { target: { value: "Retry me" } });
+    await advanceAutosave();
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Temporary save failure.");
+    const retry = screen.getByRole("button", { name: "Retry save" });
+    await act(async () => {
+      fireEvent.click(retry);
+      await Promise.resolve();
+    });
+
+    expect(workflowActionsMock.update).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
   it("adds and removes steps without allowing the final step to be removed", () => {

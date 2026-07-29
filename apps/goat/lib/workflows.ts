@@ -108,7 +108,7 @@ export async function listGoatWorkflowCatalog(
   const catalog: GoatWorkflowCatalogItem[] = [];
   for (const row of rows) {
     const steps = goatWorkflowStepsWithLegacyFallback(row);
-    if (!steps.some((step) => step.instructions.trim())) continue;
+    if (steps.length === 0 || steps.some((step) => !step.instructions.trim())) continue;
     catalog.push({ id: row.slug, name: row.name, description: row.description });
   }
   return catalog;
@@ -193,7 +193,8 @@ export async function resolveGoatWorkflowMention(input: {
   if (
     !workflow ||
     workflow.status !== "active" ||
-    !workflow.steps.some((step) => step.instructions.trim())
+    workflow.steps.length === 0 ||
+    workflow.steps.some((step) => !step.instructions.trim())
   ) {
     throw new GoatWorkflowMentionError(
       `Workflow "#${input.mention.id}" is unavailable or incomplete.`,
@@ -240,8 +241,8 @@ export function validateGoatWorkflowFields(input: {
       return "That workflow model is not available.";
     }
   }
-  if (input.status === "active" && !input.steps.some((step) => step.instructions.trim())) {
-    return "Add workflow instructions before making it active.";
+  if (input.status === "active" && input.steps.some((step) => !step.instructions.trim())) {
+    return "Add instructions to every workflow step before making it active.";
   }
   return null;
 }
@@ -328,8 +329,21 @@ export function goatWorkflowStepsWithLegacyFallback(input: {
   instructions: string;
   model: string;
 }): GoatWorkflowStep[] {
-  if (input.steps.length > 0) return input.steps;
-  if (!input.instructions.trim()) return [];
+  const legacyFieldsAreEmpty = !input.instructions.trim() && !input.model.trim();
+  const nativeStepsAreEmpty = input.steps.every(
+    (step) => !step.instructions.trim() && !step.model.trim() && !step.title.trim(),
+  );
+  const legacyMirrorMatches =
+    input.steps.length > 0 &&
+    renderStepsAsMarkdown(input.steps) === input.instructions &&
+    (input.steps[0]?.model ?? "") === input.model;
+  if (
+    input.steps.length > 0 &&
+    (legacyMirrorMatches || (legacyFieldsAreEmpty && nativeStepsAreEmpty))
+  ) {
+    return input.steps;
+  }
+  if (legacyFieldsAreEmpty && input.steps.length === 0) return [];
   return [
     {
       id: `step-${input.slug.slice(0, 64)}`,

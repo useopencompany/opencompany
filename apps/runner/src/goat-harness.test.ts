@@ -15,6 +15,7 @@ import {
 import { GOAT_HARNESS_CREATION_SYSTEM_PROMPT } from "./prompts/goat-harness-creation";
 
 const aiMock = vi.hoisted(() => ({
+  generateText: vi.fn(),
   generateObject: vi.fn(),
   streamText: vi.fn(),
   createGateway: vi.fn(() => (model: string) => ({ model })),
@@ -30,6 +31,7 @@ const goatCodexMock = vi.hoisted(() => ({
 }));
 
 vi.mock("ai", () => ({
+  generateText: aiMock.generateText,
   generateObject: aiMock.generateObject,
   streamText: aiMock.streamText,
   createGateway: aiMock.createGateway,
@@ -74,6 +76,15 @@ const harnessSpec: GoatHarnessSpec = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  aiMock.generateText.mockResolvedValue({
+    toolCalls: [
+      {
+        toolName: "update_task_status",
+        input: { status: "done", comment: "The current work completed." },
+      },
+    ],
+    usage: { inputTokens: 8, outputTokens: 3, totalTokens: 11 },
+  });
   goatBrainMock.createGoatBrainMarkdownReportForTask.mockResolvedValue({
     type: "brain_markdown_report",
     title: "Marseille Market Research",
@@ -730,6 +741,31 @@ describe("executeGoatWorkflowStepsTask", () => {
     expect(result.outcomeComment).toBe("Step 1 (Title 1): A source is unavailable.");
   });
 
+  it("publishes a done outcome only after the final step", async () => {
+    const sink = createSink();
+    const spec = workflowHarnessSpec(["opencompany", "opencompany"]);
+    const runStep = vi.fn(async (input: GoatTaskExecutorInput): Promise<GoatTaskExecutorResult> => {
+      await input.sink.appendEvent({
+        type: "task.status",
+        payload: { reportedOutcome: "done", outcomeComment: "Step complete." },
+      });
+      return {
+        ...stepResult(input, `Result ${runStep.mock.calls.length}`),
+        reportedOutcome: "done",
+        outcomeComment: "Step complete.",
+      };
+    });
+
+    await executeGoatWorkflowStepsTask(workflowExecutorInput(spec, sink), runStep);
+
+    const outcomeEvents = vi
+      .mocked(sink.appendEvent)
+      .mock.calls.filter(
+        ([event]) => event.type === "task.status" && event.payload?.reportedOutcome === "done",
+      );
+    expect(outcomeEvents).toHaveLength(1);
+  });
+
   it("resumes from the checkpointed current step", async () => {
     const sink = createSink();
     const spec = workflowHarnessSpec(["opencompany", "opencompany", "opencompany"], 1);
@@ -989,6 +1025,61 @@ describe("executeGoatTask", () => {
         skills: codexHarnessSpec.workflow?.skillSnapshots,
       }),
     );
+  });
+
+  it("scopes each Codex closer to the current workflow step", async () => {
+    const spec = workflowHarnessSpec(["codex", "codex"]);
+    const sink = createSink();
+
+    await executeGoatTask({
+      task: task({ workflowId: "workflow", harnessSpec: spec }),
+      env: env(),
+      signal: new AbortController().signal,
+      sink,
+      reportStage: vi.fn(async () => {}),
+    });
+
+    expect(aiMock.generateText).toHaveBeenCalledTimes(2);
+    const firstCloser = aiMock.generateText.mock.calls[0]?.[0] as {
+      system: string;
+      prompt: string;
+    };
+    const secondCloser = aiMock.generateText.mock.calls[1]?.[0] as {
+      system: string;
+      prompt: string;
+    };
+    expect(firstCloser.system).toContain("current step's own instructions");
+    expect(firstCloser.system).toContain("later workflow steps remain");
+    expect(firstCloser.prompt).toContain("Current workflow step: Step 1/2 — Title 1");
+    expect(firstCloser.prompt).toContain("Current step instructions:\nSystem prompt 1");
+    expect(secondCloser.prompt).toContain("Current workflow step: Step 2/2 — Title 2");
+    expect(secondCloser.prompt).toContain("Current step instructions:\nSystem prompt 2");
+  });
+
+  it("halts when a Codex closer reports that the current step needs attention", async () => {
+    aiMock.generateText.mockResolvedValueOnce({
+      toolCalls: [
+        {
+          toolName: "update_task_status",
+          input: { status: "needs_attention", comment: "The implementation is blocked." },
+        },
+      ],
+      usage: { inputTokens: 8, outputTokens: 3, totalTokens: 11 },
+    });
+    const spec = workflowHarnessSpec(["codex", "codex"]);
+
+    const result = await executeGoatTask({
+      task: task({ workflowId: "workflow", harnessSpec: spec }),
+      env: env(),
+      signal: new AbortController().signal,
+      sink: createSink(),
+      reportStage: vi.fn(async () => {}),
+    });
+
+    expect(goatCodexMock.runGoatCodexTask).toHaveBeenCalledTimes(1);
+    expect(aiMock.generateText).toHaveBeenCalledTimes(1);
+    expect(result.reportedOutcome).toBe("needs_attention");
+    expect(result.outcomeComment).toBe("Step 1 (Title 1): The implementation is blocked.");
   });
 
   it("fails the assistant message when the chat loop returns empty content", async () => {

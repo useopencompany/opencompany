@@ -272,8 +272,19 @@ export async function executeGoatWorkflowStepsTask(
       },
     });
 
+    const isFinalStep = stepIndex === steps.length - 1;
     const stepSink: GoatTaskRunSink = {
       ...input.sink,
+      appendEvent: async (eventInput) => {
+        if (
+          !isFinalStep &&
+          eventInput.type === "task.status" &&
+          eventInput.payload?.reportedOutcome === "done"
+        ) {
+          return;
+        }
+        await input.sink.appendEvent(eventInput);
+      },
       updateCodexEngineSessionId: async (sessionId) => {
         codexEngineSessionId = sessionId;
         await input.sink.updateCodexEngineSessionId(sessionId);
@@ -293,7 +304,6 @@ export async function executeGoatWorkflowStepsTask(
     finalResult = result;
     conversation.push({ role: "assistant", content: result.result });
 
-    const isFinalStep = stepIndex === steps.length - 1;
     if (!isFinalStep && result.reportedOutcome === "needs_attention") {
       const outcomeComment = prefixGoatWorkflowStepOutcome(
         stepIndex,
@@ -620,6 +630,12 @@ async function runGoatWorkflowTaskCloser(input: {
   signal: AbortSignal;
 }): Promise<GoatWorkflowTaskOutcome | null> {
   try {
+    const workflow = input.task.harnessSpec.workflow;
+    const currentStepIndex = workflow?.currentStepIndex ?? 0;
+    const currentStep = workflow?.steps?.[currentStepIndex];
+    const currentStepLabel = currentStep
+      ? `Step ${currentStepIndex + 1}/${workflow?.steps?.length ?? 1} — ${currentStep.title.trim() || "Untitled step"}`
+      : null;
     const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
     const { generateText } = getBraintrustAISDK(ai);
     const attribution = createGoatGatewayAttribution({
@@ -636,18 +652,28 @@ async function runGoatWorkflowTaskCloser(input: {
       () =>
         generateText({
           model: gateway(GOAT_WORKFLOW_CLOSER_MODEL),
-          system:
-            'You close out finished background workflow tasks. Decide whether the result is complete (status "done") or whether the user should look at it (status "needs_attention": partial results, blockers, errors, questions, or anything the task explicitly wants reviewed). Always call update_task_status exactly once.',
+          system: currentStep
+            ? 'You close out one finished step in a sequential background workflow. Judge whether the current step\'s own instructions were completed (status "done") or whether the user should look at it (status "needs_attention": blockers, errors, questions, or an incomplete current step). Do not mark it needs_attention merely because later workflow steps remain. Always call update_task_status exactly once.'
+            : 'You close out finished background workflow tasks. Decide whether the result is complete (status "done") or whether the user should look at it (status "needs_attention": partial results, blockers, errors, questions, or anything the task explicitly wants reviewed). Always call update_task_status exactly once.',
           prompt: [
             `Task: ${input.task.name}`,
             "",
-            "Task request:",
+            "Overall task request:",
             input.task.prompt,
             "",
-            "Final result:",
+            ...(currentStep
+              ? [
+                  `Current workflow step: ${currentStepLabel}`,
+                  "",
+                  "Current step instructions:",
+                  currentStep.systemPrompt.slice(0, 12_000),
+                  "",
+                  "Current step result:",
+                ]
+              : ["Final result:"]),
             input.finalContent.slice(0, 12_000),
             "",
-            "Call update_task_status now with the status and a short comment (one sentence, plain text) summarizing what happened. The comment is shown on the task card.",
+            `Call update_task_status now with the status and a short comment (one sentence, plain text) summarizing what happened${currentStep ? " in this step" : ""}. The comment is shown on the task card.`,
           ].join("\n"),
           tools: {
             update_task_status: ai.tool({
