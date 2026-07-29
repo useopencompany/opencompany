@@ -352,6 +352,7 @@ export function GoatSurface({
   const optimisticAttachmentPreviewUrlsRef = useRef<ReadonlyMap<string, string[]>>(new Map());
   const persistedMessageIdsRef = useRef<ReadonlySet<string>>(new Set());
   const [workspacePanelExpanded, setWorkspacePanelExpanded] = useState(false);
+  const [workspacePanelSessionId, setWorkspacePanelSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [mentionToken, setMentionToken] = useState<ActiveMentionToken | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<GoatChatMention[]>([]);
@@ -676,6 +677,13 @@ export function GoatSurface({
     if (activeInitialChatEngine) return { engine: activeInitialChatEngine, chatSessionId };
     return engineChatSession?.chatSessionId === chatSessionId ? engineChatSession : null;
   }, [activeInitialChatEngine, chatSessionId, engineChatSession]);
+  // The workspace panel remounts (via its `key`) on every session switch, so its own
+  // expanded state always resets — mirror that here during render so the header
+  // toggle icon never flashes "collapse" for a session that just mounted collapsed.
+  if (workspacePanelSessionId !== (activeEngineChat?.chatSessionId ?? null)) {
+    setWorkspacePanelSessionId(activeEngineChat?.chatSessionId ?? null);
+    setWorkspacePanelExpanded(false);
+  }
   const isCodexMode = chatModel === CODEX_PICKER_VALUE;
   const isClaudeMode = chatModel === CLAUDE_PICKER_VALUE;
   const selectedEngine: GoatEngineChatKind | null = isCodexMode
