@@ -82,7 +82,7 @@ export type GoatTaskStore = {
     leaseId: string;
     leaseOwner: string;
     now: Date;
-    codexEngineSessionId: string;
+    codexEngineSessionId: string | null;
   }): Promise<boolean>;
   ensureUserMessage(input: {
     id: string;
@@ -382,7 +382,8 @@ export function createDbGoatTaskStore(): GoatTaskStore {
           tool_call_id,
           response_to_message_id,
           created_at,
-          updated_at
+          updated_at,
+          completed_at
         )
         SELECT
           ${input.messageId},
@@ -396,7 +397,8 @@ export function createDbGoatTaskStore(): GoatTaskStore {
           ${input.toolCallId ?? null},
           ${input.responseToMessageId ?? null},
           ${input.now},
-          ${input.now}
+          ${input.now},
+          ${input.status === "completed" ? input.now : null}
         FROM goat.tasks AS task
         WHERE task.id = ${input.id}
           AND task.lease_id = ${input.leaseId}
@@ -1074,6 +1076,36 @@ export async function runClaimedGoatTask(input: {
         plannerContext: { githubRepositories },
         signal: abortController.signal,
         sink: {
+          createUserMessage: async (messageInput) => {
+            const messageId = newGoatTaskMessageId();
+            await requireLeaseWrite(
+              store.createMessage({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                messageId,
+                role: "user",
+                status: "completed",
+                content: messageInput.content,
+                modelMessage: { role: "user", content: messageInput.content },
+              }),
+              "create user message",
+            );
+            await requireLeaseWrite(
+              store.appendEvent({
+                id: input.task.id,
+                leaseId,
+                leaseOwner,
+                now: new Date(),
+                type: "message.created",
+                payload: { role: "user", status: "completed" },
+                messageId,
+              }),
+              "append user message event",
+            );
+            return { id: messageId };
+          },
           createAssistantMessage: async (messageInput) => {
             const messageId = newGoatTaskMessageId();
             await requireLeaseWrite(

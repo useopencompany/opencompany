@@ -8,7 +8,6 @@ import {
   GoatMcpSettingsRoute,
   GoatPreferencesSettingsRoute,
   GoatSkillEditorRoute,
-  GoatWorkflowEditorRoute,
 } from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
@@ -280,77 +279,6 @@ describe("GoatBrainRoute", () => {
       }),
       undefined,
     );
-  });
-});
-
-describe("GoatWorkflowEditorRoute", () => {
-  beforeEach(() => {
-    workflowActionsMock.updateGoatWorkflowAction.mockClear();
-    routerMock.refresh.mockReset();
-  });
-
-  it("edits instructions with a rich text editor instead of a plain textarea", async () => {
-    const workflow = {
-      id: "test-workflow",
-      name: "Test workflow",
-      description: "Does a thing",
-      instructions: "Step one.\n\nStep two.",
-      model: "",
-    };
-
-    const { container } = render(
-      <GoatWorkflowEditorRoute
-        workflow={workflow}
-        initialStatus="draft"
-        canEdit
-        skillCatalog={[]}
-      />,
-    );
-
-    expect(container.querySelector("textarea")).toBeNull();
-    expect(await screen.findByText("Step one.")).toBeInTheDocument();
-    expect(screen.getByText("Step two.")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() =>
-      expect(workflowActionsMock.updateGoatWorkflowAction).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: "test-workflow",
-          instructions: "Step one.\n\nStep two.",
-        }),
-      ),
-    );
-  });
-
-  it("hints at @-mentioning a skill only when the workspace has one to mention", () => {
-    const workflow = {
-      id: "test-workflow",
-      name: "Test workflow",
-      description: "Does a thing",
-      instructions: "Step one.",
-      model: "",
-    };
-
-    const { rerender } = render(
-      <GoatWorkflowEditorRoute
-        workflow={workflow}
-        initialStatus="draft"
-        canEdit
-        skillCatalog={[]}
-      />,
-    );
-    expect(screen.queryByText(/mention a skill/i)).not.toBeInTheDocument();
-
-    rerender(
-      <GoatWorkflowEditorRoute
-        workflow={workflow}
-        initialStatus="draft"
-        canEdit
-        skillCatalog={[{ id: "standup-notes", name: "Standup notes", description: "" }]}
-      />,
-    );
-    expect(screen.getByText(/mention a skill/i)).toBeInTheDocument();
   });
 });
 

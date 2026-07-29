@@ -1,37 +1,55 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// workflow-tasks pulls in server-only modules (auth, db, tasks); the pure
-// parsing/compile functions under test never touch them.
-vi.mock("@/lib/tasks", () => ({ createGoatTaskForUser: vi.fn() }));
-vi.mock("@/lib/codex-auth", () => ({ isGoatCodexConnectedForUser: vi.fn() }));
-vi.mock("@/lib/integrations/google-data", () => ({ getGoatAvailableHarnessTools: vi.fn() }));
-vi.mock("@/lib/chat-title", () => ({ generateGoatChatTitle: vi.fn() }));
-vi.mock("@/lib/skills", () => ({ resolveGoatSkillMentions: vi.fn() }));
-vi.mock("@/lib/workflows", () => ({
+const mocks = vi.hoisted(() => ({
+  createGoatTaskForUser: vi.fn(),
+  isGoatCodexConnectedForUser: vi.fn(),
+  getGoatAvailableHarnessTools: vi.fn(),
+  resolveGoatSkillMentions: vi.fn(),
   resolveGoatWorkflowMention: vi.fn(),
+}));
+
+vi.mock("@/lib/tasks", () => ({ createGoatTaskForUser: mocks.createGoatTaskForUser }));
+vi.mock("@/lib/codex-auth", () => ({
+  isGoatCodexConnectedForUser: mocks.isGoatCodexConnectedForUser,
+}));
+vi.mock("@/lib/integrations/google-data", () => ({
+  getGoatAvailableHarnessTools: mocks.getGoatAvailableHarnessTools,
+}));
+vi.mock("@/lib/chat-title", () => ({ generateGoatChatTitle: vi.fn() }));
+vi.mock("@/lib/skills", () => ({ resolveGoatSkillMentions: mocks.resolveGoatSkillMentions }));
+vi.mock("@/lib/workflows", () => ({
+  resolveGoatWorkflowMention: mocks.resolveGoatWorkflowMention,
   GoatWorkflowMentionError: class GoatWorkflowMentionError extends Error {},
 }));
 vi.mock("@opencompany/db/client", () => ({ getDb: vi.fn() }));
 
 const {
   compileGoatWorkflowHarnessSpec,
+  createGoatTaskFromWorkflow,
   extractGoatWorkflowSkillMentionRefs,
-  parseGoatWorkflowEngineSelection,
+  resolveGoatWorkflowStepSelection,
 } = await import("@/lib/workflow-tasks");
 
-describe("parseGoatWorkflowEngineSelection", () => {
-  it("defaults to the opencompany engine on kimi when nothing is selected", () => {
-    expect(parseGoatWorkflowEngineSelection({ instructions: "Just do the work." })).toEqual({
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.isGoatCodexConnectedForUser.mockResolvedValue(true);
+  mocks.getGoatAvailableHarnessTools.mockResolvedValue(["exa_search"]);
+  mocks.resolveGoatSkillMentions.mockResolvedValue([]);
+});
+
+describe("resolveGoatWorkflowStepSelection", () => {
+  it("defaults to the opencompany engine on Kimi", () => {
+    expect(resolveGoatWorkflowStepSelection({ model: "", instructions: "Do the work." })).toEqual({
       engine: "opencompany",
       model: "moonshotai/kimi-k2.6",
     });
   });
 
-  it("prefers the frontmatter model over instruction mentions", () => {
+  it("prefers the step model field over inline mentions", () => {
     expect(
-      parseGoatWorkflowEngineSelection({
+      resolveGoatWorkflowStepSelection({
         model: "sonnet-5",
-        instructions: "Fix the bug with @codex please",
+        instructions: "Fix the bug with @codex.",
       }),
     ).toEqual({
       engine: "opencompany",
@@ -39,73 +57,63 @@ describe("parseGoatWorkflowEngineSelection", () => {
     });
   });
 
-  it("throws on an unknown frontmatter model", () => {
-    expect(() =>
-      parseGoatWorkflowEngineSelection({ model: "gpt-9", instructions: "Do it." }),
-    ).toThrowError(/not available/);
-  });
-
-  it("selects codex from an @codex mention", () => {
+  it("uses an inline model mention for a backfilled step", () => {
     expect(
-      parseGoatWorkflowEngineSelection({ instructions: "Fix the bug with @codex please" }),
+      resolveGoatWorkflowStepSelection({
+        model: "",
+        instructions: "Fix the bug with @codex.",
+      }),
     ).toEqual({
       engine: "codex",
       model: "openai/gpt-5.5",
     });
   });
 
-  it("selects a goat model from a model mention", () => {
-    expect(parseGoatWorkflowEngineSelection({ instructions: "Write it on @sonnet-5." })).toEqual({
-      engine: "opencompany",
-      model: "anthropic/claude-sonnet-5",
-    });
-  });
-
-  it("ignores skill mentions and unknown tokens", () => {
-    expect(
-      parseGoatWorkflowEngineSelection({ instructions: "Use @skill/research and email @louis" }),
-    ).toEqual({
-      engine: "opencompany",
-      model: "moonshotai/kimi-k2.6",
-    });
-  });
-
-  it("throws when more than one model is mentioned", () => {
+  it("rejects unavailable and ambiguous step models", () => {
     expect(() =>
-      parseGoatWorkflowEngineSelection({ instructions: "Try @codex or @sonnet-5" }),
+      resolveGoatWorkflowStepSelection({ model: "gpt-9", instructions: "Do it." }),
+    ).toThrowError(/not available/);
+    expect(() =>
+      resolveGoatWorkflowStepSelection({
+        model: "",
+        instructions: "Try @codex or @sonnet-5.",
+      }),
     ).toThrowError(/more than one model/);
-  });
-
-  it("tolerates repeating the same model mention", () => {
-    expect(
-      parseGoatWorkflowEngineSelection({ instructions: "@codex first, then @codex again" }).engine,
-    ).toBe("codex");
   });
 });
 
 describe("extractGoatWorkflowSkillMentionRefs", () => {
-  it("collects deduped skill mentions", () => {
+  it("collects deduped skill mentions from one step", () => {
     expect(
       extractGoatWorkflowSkillMentionRefs(
         "Use @skill/research and @skill/writing then @skill/research again.",
       ),
     ).toEqual([{ id: "research" }, { id: "writing" }]);
   });
-
-  it("ignores non-skill tokens", () => {
-    expect(extractGoatWorkflowSkillMentionRefs("Ping @codex and #weekly")).toEqual([]);
-  });
 });
 
 describe("compileGoatWorkflowHarnessSpec", () => {
-  it("compiles a preplanned spec that skips the runner planner", () => {
+  it("compiles independent step models and skills with a step-zero compatibility mirror", () => {
     const spec = compileGoatWorkflowHarnessSpec({
       workflow: {
         id: "weekly-report",
         name: "Weekly report",
         description: "Compiles the weekly report.",
-        instructions: "Collect updates and summarize. Use @skill/research on @kimi-k2.6.",
-        model: "",
+        trigger: "manual",
+        steps: [
+          {
+            id: "step-1",
+            title: "Research",
+            model: "kimi-k2.6",
+            instructions: "Collect updates with @skill/research.",
+          },
+          {
+            id: "step-2",
+            title: "Implement",
+            model: "codex",
+            instructions: "Apply the findings with @skill/coding-work.",
+          },
+        ],
       },
       workspaceId: "ws_1",
       skills: [
@@ -115,62 +123,146 @@ describe("compileGoatWorkflowHarnessSpec", () => {
           description: "How to research",
           instructions: "Search broadly.",
         },
+        {
+          id: "coding-work",
+          name: "Coding work",
+          description: "How to implement",
+          instructions: "Inspect, implement, and verify.",
+        },
       ],
       tools: ["exa_search"],
-      selection: { engine: "opencompany", model: "moonshotai/kimi-k2.6" },
       description: "Prepare this week's report",
     });
 
-    // Mirrors the runner's hasPreplannedHarnessSpec gate.
-    expect(spec.schemaVersion).toBe("goat.harness.v1");
-    expect(spec.systemPrompt.trim().length).toBeGreaterThan(0);
-    expect(spec.initialUserMessage.trim().length).toBeGreaterThan(0);
-    expect(spec.tools.length).toBeGreaterThan(0);
-
-    expect(spec.systemPrompt).toContain("<workflow_instructions>");
-    expect(spec.systemPrompt).toContain("Collect updates and summarize.");
-    expect(spec.systemPrompt).toContain('name: "research"');
-    expect(spec.initialUserMessage).toContain("Prepare this week's report");
-    expect(spec.workflow).toEqual({
-      id: "weekly-report",
-      workspaceId: "ws_1",
+    expect(spec).toMatchObject({
+      schemaVersion: "goat.harness.v1",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k2.6",
+      initialUserMessage: expect.stringContaining("Prepare this week's report"),
+      workflow: {
+        id: "weekly-report",
+        workspaceId: "ws_1",
+        skillIds: ["research", "coding-work"],
+        currentStepIndex: 0,
+      },
+    });
+    expect(spec.systemPrompt).toBe(spec.workflow?.steps?.[0]?.systemPrompt);
+    expect(spec.systemBlocks).toEqual(spec.workflow?.steps?.[0]?.systemBlocks);
+    expect(spec.workflow?.steps).toHaveLength(2);
+    expect(spec.workflow?.steps?.[0]).toMatchObject({
+      index: 0,
+      title: "Research",
+      engine: "opencompany",
+      model: "moonshotai/kimi-k2.6",
       skillIds: ["research"],
     });
-    expect(spec.skills).toEqual([]);
-  });
-
-  it("snapshots Codex workflow skills without duplicating them into the text prompt", () => {
-    const spec = compileGoatWorkflowHarnessSpec({
-      workflow: {
-        id: "code-review",
-        name: "Code review",
-        description: "",
-        instructions: "Review the implementation with @skill/review-work.",
-        model: "codex",
-      },
-      workspaceId: "ws_1",
-      skills: [
-        {
-          id: "review-work",
-          name: "Review work",
-          description: "How to review changes",
-          instructions: "Inspect the diff and run focused tests.",
-        },
-      ],
-      tools: ["github_shell"],
-      selection: { engine: "codex", model: "openai/gpt-5.5" },
-      description: "Review pull request 123",
+    expect(spec.workflow?.steps?.[0]?.systemPrompt).toContain('name: "research"');
+    expect(spec.workflow?.steps?.[0]?.systemPrompt).not.toContain('name: "coding-work"');
+    expect(spec.workflow?.steps?.[1]).toMatchObject({
+      index: 1,
+      title: "Implement",
+      engine: "codex",
+      model: "openai/gpt-5.5",
+      skillIds: ["coding-work"],
     });
-
-    expect(spec.systemPrompt).not.toContain("<workflow_skills>");
-    expect(spec.systemPrompt).not.toContain("Inspect the diff and run focused tests.");
+    expect(spec.workflow?.steps?.[1]?.systemPrompt).not.toContain("<workflow_skills>");
     expect(spec.workflow?.skillSnapshots).toEqual([
       {
-        id: "review-work",
-        name: "Review work",
-        description: "How to review changes",
-        instructions: "Inspect the diff and run focused tests.",
+        id: "research",
+        name: "Research",
+        description: "How to research",
+        instructions: "Search broadly.",
+      },
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "How to implement",
+        instructions: "Inspect, implement, and verify.",
       },
     ]);
+  });
+});
+
+describe("createGoatTaskFromWorkflow", () => {
+  it("requires Codex connectivity when any workflow step uses Codex", async () => {
+    mocks.resolveGoatWorkflowMention.mockResolvedValue({
+      id: "mixed-workflow",
+      name: "Mixed workflow",
+      description: "",
+      trigger: "manual",
+      steps: [
+        {
+          id: "step-1",
+          title: "Research",
+          model: "kimi-k2.6",
+          instructions: "Research.",
+        },
+        {
+          id: "step-2",
+          title: "Code",
+          model: "codex",
+          instructions: "Implement.",
+        },
+      ],
+    });
+    mocks.isGoatCodexConnectedForUser.mockResolvedValue(false);
+
+    await expect(
+      createGoatTaskFromWorkflow({
+        userWorkosId: "user_1",
+        workspaceId: "ws_1",
+        mention: { id: "mixed-workflow" },
+        description: "Run it",
+      }),
+    ).rejects.toThrow(/uses Codex/);
+
+    expect(mocks.isGoatCodexConnectedForUser).toHaveBeenCalledWith("user_1");
+    expect(mocks.createGoatTaskForUser).not.toHaveBeenCalled();
+  });
+
+  it("resolves the union of step skills once and queues step zero's model", async () => {
+    mocks.resolveGoatWorkflowMention.mockResolvedValue({
+      id: "mixed-workflow",
+      name: "Mixed workflow",
+      description: "",
+      trigger: "manual",
+      steps: [
+        {
+          id: "step-1",
+          title: "Research",
+          model: "kimi-k2.6",
+          instructions: "Use @skill/research.",
+        },
+        {
+          id: "step-2",
+          title: "Write",
+          model: "sonnet-5",
+          instructions: "Use @skill/writing and @skill/research.",
+        },
+      ],
+    });
+    mocks.resolveGoatSkillMentions.mockResolvedValue([
+      { id: "research", name: "Research", description: "", instructions: "Research well." },
+      { id: "writing", name: "Writing", description: "", instructions: "Write clearly." },
+    ]);
+    mocks.createGoatTaskForUser.mockResolvedValue({ id: "task_1" });
+
+    await createGoatTaskFromWorkflow({
+      userWorkosId: "user_1",
+      workspaceId: "ws_1",
+      mention: { id: "mixed-workflow" },
+      description: "Run it",
+    });
+
+    expect(mocks.resolveGoatSkillMentions).toHaveBeenCalledWith({
+      workspaceId: "ws_1",
+      mentions: [{ id: "research" }, { id: "writing" }],
+    });
+    expect(mocks.createGoatTaskForUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "moonshotai/kimi-k2.6",
+        workflowId: "mixed-workflow",
+      }),
+    );
   });
 });

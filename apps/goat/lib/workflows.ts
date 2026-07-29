@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
-import { type GoatWorkflowStatus, goatWorkflows } from "@opencompany/db/goat-schema";
+import {
+  type GoatWorkflowStatus,
+  type GoatWorkflowStep,
+  type GoatWorkflowTrigger,
+  goatWorkflows,
+} from "@opencompany/db/goat-schema";
 import {
   GOAT_BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH,
   GOAT_BRAIN_WORKFLOW_NAME_MAX_LENGTH,
-  type GoatBrainWorkflow,
   isValidGoatBrainId,
   normalizeGoatBrainId,
 } from "@opencompany/goat-brain";
@@ -19,17 +23,21 @@ import { isGoatWorkflowModelToken } from "@/lib/workflow-model-options";
 
 type Db = ReturnType<typeof getDb>;
 
-// The content shape carried through mentions and task compilation. `id` holds
-// the workspace-unique slug (the `#` handle and `tasks.workflow_id`) — kept
-// named `id` so it stays drop-in with the former Brain-doc shape
-// (`GoatBrainWorkflow`).
-export type GoatWorkspaceWorkflow = GoatBrainWorkflow;
+// `id` is the workspace-unique slug used by composer mentions and task rows.
+export type GoatWorkspaceWorkflow = {
+  id: string;
+  name: string;
+  description: string;
+  trigger: GoatWorkflowTrigger;
+  steps: GoatWorkflowStep[];
+};
 
 export type GoatWorkflowListItem = {
   slug: string;
   name: string;
   description: string;
-  model: string;
+  trigger: GoatWorkflowTrigger;
+  steps: GoatWorkflowStep[];
   status: GoatWorkflowStatus;
   updatedAt: Date;
 };
@@ -67,7 +75,7 @@ export function readGoatWorkflowMentionRef(
     }
     mentions.push({ id: candidate.id });
   }
-  const unique = [...new Map(mentions.map((m) => [m.id, m])).values()];
+  const unique = [...new Map(mentions.map((mention) => [mention.id, mention])).values()];
   if (unique.length > 1) {
     return { ok: false, error: "Mention at most one workflow per message." };
   }
@@ -83,6 +91,9 @@ export async function listGoatWorkflowCatalog(
       slug: goatWorkflows.slug,
       name: goatWorkflows.name,
       description: goatWorkflows.description,
+      instructions: goatWorkflows.instructions,
+      model: goatWorkflows.model,
+      steps: goatWorkflows.steps,
     })
     .from(goatWorkflows)
     .where(
@@ -94,7 +105,13 @@ export async function listGoatWorkflowCatalog(
     )
     .orderBy(asc(goatWorkflows.name));
 
-  return rows.map((row) => ({ id: row.slug, name: row.name, description: row.description }));
+  const catalog: GoatWorkflowCatalogItem[] = [];
+  for (const row of rows) {
+    const steps = goatWorkflowStepsWithLegacyFallback(row);
+    if (!steps.some((step) => step.instructions.trim())) continue;
+    catalog.push({ id: row.slug, name: row.name, description: row.description });
+  }
+  return catalog;
 }
 
 export async function listGoatWorkflows(
@@ -106,14 +123,26 @@ export async function listGoatWorkflows(
       slug: goatWorkflows.slug,
       name: goatWorkflows.name,
       description: goatWorkflows.description,
+      instructions: goatWorkflows.instructions,
       model: goatWorkflows.model,
+      steps: goatWorkflows.steps,
+      trigger: goatWorkflows.trigger,
       status: goatWorkflows.status,
       updatedAt: goatWorkflows.updatedAt,
     })
     .from(goatWorkflows)
     .where(and(eq(goatWorkflows.workspaceId, workspaceId), isNull(goatWorkflows.archivedAt)))
     .orderBy(desc(goatWorkflows.updatedAt));
-  return rows;
+
+  return rows.map((row) => ({
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    trigger: row.trigger,
+    steps: goatWorkflowStepsWithLegacyFallback(row),
+    status: row.status,
+    updatedAt: row.updatedAt,
+  }));
 }
 
 export async function getGoatWorkflow(
@@ -128,6 +157,8 @@ export async function getGoatWorkflow(
       description: goatWorkflows.description,
       instructions: goatWorkflows.instructions,
       model: goatWorkflows.model,
+      steps: goatWorkflows.steps,
+      trigger: goatWorkflows.trigger,
       status: goatWorkflows.status,
     })
     .from(goatWorkflows)
@@ -144,8 +175,8 @@ export async function getGoatWorkflow(
     id: row.slug,
     name: row.name,
     description: row.description,
-    instructions: row.instructions,
-    model: row.model,
+    trigger: row.trigger,
+    steps: goatWorkflowStepsWithLegacyFallback(row),
     status: row.status,
   };
 }
@@ -159,7 +190,11 @@ export async function resolveGoatWorkflowMention(input: {
     throw new GoatWorkflowMentionError("No active workspace is available for workflow mentions.");
   }
   const workflow = await getGoatWorkflow(input.workspaceId, input.mention.id, input.db ?? getDb());
-  if (!workflow || workflow.status !== "active" || !workflow.instructions.trim()) {
+  if (
+    !workflow ||
+    workflow.status !== "active" ||
+    !workflow.steps.some((step) => step.instructions.trim())
+  ) {
     throw new GoatWorkflowMentionError(
       `Workflow "#${input.mention.id}" is unavailable or incomplete.`,
     );
@@ -172,7 +207,8 @@ export async function resolveGoatWorkflowMention(input: {
 export function validateGoatWorkflowFields(input: {
   name: string;
   description: string;
-  instructions?: string;
+  trigger: GoatWorkflowTrigger;
+  steps: GoatWorkflowStep[];
   status?: GoatWorkflowStatus;
 }): string | null {
   const name = input.name.trim();
@@ -187,7 +223,24 @@ export function validateGoatWorkflowFields(input: {
   if (description.includes("<") || description.includes(">")) {
     return 'Workflow descriptions cannot contain "<" or ">".';
   }
-  if (input.status === "active" && !input.instructions?.trim()) {
+  if (input.steps.length === 0) return "Add at least one workflow step.";
+  if (input.steps.length > 20) return "Workflows can have at most 20 steps.";
+
+  const stepIds = new Set<string>();
+  for (const step of input.steps) {
+    if (!step.id.trim() || step.id.length > 200) return "Workflow step IDs are invalid.";
+    if (stepIds.has(step.id)) return "Workflow step IDs must be unique.";
+    stepIds.add(step.id);
+    if (step.title.length > 120) return "Workflow step titles must be 120 characters or fewer.";
+    if (step.instructions.length > 20_000) {
+      return "Workflow step instructions must be 20,000 characters or fewer.";
+    }
+    const model = step.model.trim();
+    if (model && !isGoatWorkflowModelToken(model)) {
+      return "That workflow model is not available.";
+    }
+  }
+  if (input.status === "active" && !input.steps.some((step) => step.instructions.trim())) {
     return "Add workflow instructions before making it active.";
   }
   return null;
@@ -199,9 +252,12 @@ export async function createGoatWorkflow(input: {
   name: string;
   description?: string;
 }): Promise<GoatWorkflowMutationResult> {
+  const steps = [emptyGoatWorkflowStep()];
   const invalid = validateGoatWorkflowFields({
     name: input.name,
     description: input.description ?? "",
+    trigger: "manual",
+    steps,
   });
   if (invalid) return { ok: false, message: invalid };
   const db = getDb();
@@ -214,6 +270,8 @@ export async function createGoatWorkflow(input: {
     description: input.description?.trim() ?? "",
     instructions: "",
     model: "",
+    steps,
+    trigger: "manual",
     status: "draft",
     createdByWorkosId: input.createdByWorkosId,
   });
@@ -225,26 +283,30 @@ export async function updateGoatWorkflow(input: {
   slug: string;
   name: string;
   description: string;
-  instructions: string;
-  // Model mention token ("kimi-k2.6", "codex", ...); undefined keeps the stored
-  // value, "" clears it back to the default.
-  model?: string;
+  trigger: GoatWorkflowTrigger;
+  steps: GoatWorkflowStep[];
   status: GoatWorkflowStatus;
 }): Promise<GoatWorkflowMutationResult> {
   const invalid = validateGoatWorkflowFields(input);
   if (invalid) return { ok: false, message: invalid };
-  const model = input.model?.trim();
-  if (model && !isGoatWorkflowModelToken(model)) {
-    return { ok: false, message: "That workflow model is not available." };
-  }
+  const steps = input.steps.map((step) => ({
+    id: step.id,
+    title: step.title,
+    model: step.model.trim(),
+    instructions: step.instructions,
+  }));
   const db = getDb();
   const result = await db
     .update(goatWorkflows)
     .set({
       name: input.name.trim(),
       description: input.description.trim(),
-      instructions: input.instructions,
-      ...(input.model !== undefined ? { model: model ?? "" } : {}),
+      steps,
+      trigger: input.trigger,
+      // Keep these legacy columns coherent for one release so an older runner
+      // or rolled-back web pod still executes a readable single-step workflow.
+      instructions: renderStepsAsMarkdown(steps),
+      model: steps[0]?.model ?? "",
       status: input.status,
       updatedAt: new Date(),
     })
@@ -258,6 +320,33 @@ export async function updateGoatWorkflow(input: {
     .returning({ slug: goatWorkflows.slug });
   if (result.length === 0) return { ok: false, message: "Workflow not found." };
   return { ok: true, slug: input.slug };
+}
+
+export function goatWorkflowStepsWithLegacyFallback(input: {
+  slug: string;
+  steps: GoatWorkflowStep[];
+  instructions: string;
+  model: string;
+}): GoatWorkflowStep[] {
+  if (input.steps.length > 0) return input.steps;
+  if (!input.instructions.trim()) return [];
+  return [
+    {
+      id: `step-${input.slug.slice(0, 64)}`,
+      title: "",
+      model: input.model,
+      instructions: input.instructions,
+    },
+  ];
+}
+
+export function renderStepsAsMarkdown(steps: readonly GoatWorkflowStep[]): string {
+  return steps
+    .map((step, index) => {
+      const title = step.title.trim() || `Step ${index + 1}`;
+      return [`## ${index + 1}. ${title}`, "", step.instructions].join("\n").trimEnd();
+    })
+    .join("\n\n");
 }
 
 export async function archiveGoatWorkflow(input: {
@@ -280,6 +369,15 @@ export async function archiveGoatWorkflow(input: {
   return { ok: true, slug: input.slug };
 }
 
+function emptyGoatWorkflowStep(): GoatWorkflowStep {
+  return {
+    id: `step-${randomUUID()}`,
+    title: "",
+    model: "",
+    instructions: "",
+  };
+}
+
 async function uniqueGoatWorkflowSlug(db: Db, workspaceId: string, name: string): Promise<string> {
   const base = normalizeGoatBrainId(name).slice(0, 64).replace(/-+$/g, "") || "workflow";
   const rows = await db
@@ -288,8 +386,8 @@ async function uniqueGoatWorkflowSlug(db: Db, workspaceId: string, name: string)
     .where(and(eq(goatWorkflows.workspaceId, workspaceId), isNull(goatWorkflows.archivedAt)));
   const taken = new Set(rows.map((row) => row.slug));
   if (!taken.has(base)) return base;
-  for (let n = 2; n < 1000; n++) {
-    const candidate = `${base.slice(0, 60)}-${n}`;
+  for (let number = 2; number < 1000; number += 1) {
+    const candidate = `${base.slice(0, 60)}-${number}`;
     if (!taken.has(candidate)) return candidate;
   }
   return `${base.slice(0, 55)}-${randomUUID().slice(0, 8)}`;
