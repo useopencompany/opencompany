@@ -324,6 +324,49 @@ describe("runClaimedGoatTask", () => {
     );
   });
 
+  it("persists completed user handoff messages and their creation event", async () => {
+    const store = createStore();
+    const executor = vi.fn(async (input: GoatTaskExecutorInput) => {
+      await input.sink.createUserMessage({ content: "Step 2/2 — Draft the update" });
+      return {
+        result: "Done.",
+        harnessSpec,
+        debugTrace,
+      };
+    });
+
+    await runClaimedGoatTask({
+      task: task(),
+      env: env(),
+      store,
+      executor,
+    });
+
+    expect(store.createMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "goat_task_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        role: "user",
+        status: "completed",
+        content: "Step 2/2 — Draft the update",
+        modelMessage: {
+          role: "user",
+          content: "Step 2/2 — Draft the update",
+        },
+      }),
+    );
+    const handoffMessageId = vi.mocked(store.createMessage).mock.calls[0]?.[0].messageId;
+    expect(store.appendEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "goat_task_1",
+        messageId: handoffMessageId,
+        type: "message.created",
+        payload: { role: "user", status: "completed" },
+      }),
+    );
+  });
+
   it("aborts without completing when heartbeat loses the lease", async () => {
     vi.useFakeTimers();
     try {
