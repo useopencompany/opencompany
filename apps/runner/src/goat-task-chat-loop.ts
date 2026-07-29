@@ -41,7 +41,7 @@ import { createGateway, type LanguageModelUsage } from "ai";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { runGoatTaskBrainRead } from "./goat-codex-brain-tool";
-import type { GoatTaskRunSink } from "./goat-harness";
+import type { GoatTaskConversationMessage, GoatTaskRunSink } from "./goat-harness";
 
 type GoatTask = typeof goatTasks.$inferSelect;
 
@@ -75,6 +75,7 @@ export async function runGoatTaskChatLoop(input: {
   env: RunnerEnv;
   task: GoatTask;
   harnessSpec: GoatHarnessSpec;
+  conversationMessages?: readonly GoatTaskConversationMessage[];
   signal: AbortSignal;
   sink: GoatTaskRunSink;
   assistantMessageId: string;
@@ -94,6 +95,7 @@ async function runGoatTaskChatLoopInner(input: {
   env: RunnerEnv;
   task: GoatTask;
   harnessSpec: GoatHarnessSpec;
+  conversationMessages?: readonly GoatTaskConversationMessage[];
   signal: AbortSignal;
   sink: GoatTaskRunSink;
   assistantMessageId: string;
@@ -103,7 +105,12 @@ async function runGoatTaskChatLoopInner(input: {
   const gatewayApiKey = env.vercelAiGatewayApiKey;
   const exaApiKey = env.exaApiKey?.trim();
   const currentDate = new Date();
-  const userMessage = harnessSpec.initialUserMessage?.trim() || task.prompt;
+  const messages = taskConversationMessages(
+    input.conversationMessages,
+    harnessSpec.initialUserMessage?.trim() || task.prompt,
+  );
+  const userMessage =
+    [...messages].reverse().find((message) => message.role === "user")?.content ?? task.prompt;
 
   // New workflow tasks persist their workspace in the immutable harness spec.
   // Bind actions to that workspace and select its General Brain for read-only
@@ -311,7 +318,7 @@ async function runGoatTaskChatLoopInner(input: {
   const stream = streamText({
     model: gateway(harnessSpec.model),
     system,
-    messages: [{ role: "user", content: userMessage }],
+    messages,
     tools: toolContext.tools,
     stopWhen: [ai.stepCountIs(maxSteps)],
     prepareStep: ({ stepNumber }) => prepareOpenCompanyChatStep({ stepNumber, maxSteps }),
@@ -421,6 +428,25 @@ async function runGoatTaskChatLoopInner(input: {
     ...(reportedOutcome ? { reportedOutcome } : {}),
     ...(outcomeComment ? { outcomeComment } : {}),
   };
+}
+
+function taskConversationMessages(
+  messages: readonly GoatTaskConversationMessage[] | undefined,
+  initialUserMessage: string,
+): GoatTaskConversationMessage[] {
+  const completed = (messages ?? [])
+    .map((message) => ({ role: message.role, content: message.content.trim() }))
+    .filter((message) => message.content.length > 0);
+  if (completed.filter((message) => message.role === "user").length <= 1) {
+    return [{ role: "user", content: initialUserMessage }];
+  }
+
+  let replacedInitialUserMessage = false;
+  return completed.map((message) => {
+    if (message.role !== "user" || replacedInitialUserMessage) return message;
+    replacedInitialUserMessage = true;
+    return { role: "user", content: initialUserMessage };
+  });
 }
 
 function recordUsageMetrics(

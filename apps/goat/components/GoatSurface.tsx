@@ -154,7 +154,7 @@ import {
   setGoatTaskScheduleEnabledAction,
   updateGoatTaskScheduleAction,
 } from "@/lib/task-schedules";
-import { archiveGoatTaskAction } from "@/lib/tasks";
+import { archiveGoatTaskAction, cancelGoatTaskAction, continueGoatTaskAction } from "@/lib/tasks";
 import { updateGoatTimezoneAction } from "@/lib/user-preferences";
 import type { GoatWorkflowCatalogItem } from "@/lib/workflows";
 
@@ -279,6 +279,12 @@ export type GoatTaskView = {
   updatedAt: string;
 };
 
+export type GoatTaskConversation = {
+  taskId: string;
+  status: GoatTaskStatus;
+  startedAtMs: number;
+};
+
 type GoatHomeTaskItem =
   | { kind: "background"; task: GoatTaskView }
   | { kind: "codex"; chat: GoatChatSummaryView };
@@ -297,6 +303,7 @@ export function GoatSurface({
   chatResumeEnabled = false,
   userName = "there",
   userWorkosId = "",
+  taskConversation = null,
 }: {
   tasks: readonly GoatTaskView[];
   schedules?: readonly GoatTaskScheduleView[];
@@ -312,6 +319,9 @@ export function GoatSurface({
   userName?: string;
   // Scopes chat attachment uploads; attachments are disabled when absent.
   userWorkosId?: string;
+  // Workflow task details reuse this chat surface, while task messages remain
+  // backed by the durable task transcript instead of chat session rows.
+  taskConversation?: GoatTaskConversation | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -424,6 +434,7 @@ export function GoatSurface({
   const [engineRunning, setEngineRunning] = useState(false);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [workflowTaskSubmitting, setWorkflowTaskSubmitting] = useState(false);
+  const [taskMessageSubmitting, setTaskMessageSubmitting] = useState(false);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [newChatPrompt, setNewChatPrompt] = useState("");
   const [restoringChatId, setRestoringChatId] = useState<string | null>(null);
@@ -472,6 +483,8 @@ export function GoatSurface({
   );
   const hasHomeActivity = homeTasks.length > 0 || homeChats.length > 0 || homeSchedules.length > 0;
   const homeGreetingName = userName.trim() || "there";
+  const activeTaskConversation =
+    taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
 
   const beginActiveTurn = useCallback((assistantMessageId: string | null = null) => {
     const startedAtMs = Date.now();
@@ -591,6 +604,7 @@ export function GoatSurface({
     // comes from the Electric-synced liveChat state and is merged below.
     resume:
       chatResumeEnabled &&
+      !taskConversation &&
       Boolean(initialChat) &&
       (initialChat?.engine ?? "opencompany") === "opencompany",
     // Batch stream chunks into ~20fps UI updates instead of rendering the
@@ -665,14 +679,14 @@ export function GoatSurface({
   );
   // Workflows are not gated on the task-spawning setting: firing one opts the
   // user into background tasks server-side.
-  const workflowMentionsEnabled = !activeEngine;
+  const workflowMentionsEnabled = !activeEngine && !activeTaskConversation;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
       return mention.id === "claude" ? claudeCodeConnected : codexConnected;
     }
     if (mention.kind === "workflow") return workflowMentionsEnabled;
-    return activeEngine !== "local_codex";
+    return activeEngine !== "local_codex" && !activeTaskConversation;
   });
   const mentionOptions = buildMentionOptions({
     token: mentionToken,
@@ -681,7 +695,7 @@ export function GoatSurface({
     selectedMentions: activeSelectedMentions,
     codexConnected,
     claudeCodeConnected,
-    skillsEnabled: activeEngine !== "local_codex",
+    skillsEnabled: activeEngine !== "local_codex" && !activeTaskConversation,
     workflowsEnabled: workflowMentionsEnabled,
   });
   const selectedWorkflowMention = activeSelectedMentions.find(isWorkflowMention) ?? null;
@@ -697,7 +711,10 @@ export function GoatSurface({
       initialChat.engine === "local_codex",
   );
   const attachmentsEnabled =
-    Boolean(userWorkosId) && activeEngine !== "local_codex" && !localCodexFeatureDisabledForChat;
+    Boolean(userWorkosId) &&
+    !activeTaskConversation &&
+    activeEngine !== "local_codex" &&
+    !localCodexFeatureDisabledForChat;
   const composerAttachments = useGoatChatAttachments({
     userWorkosId,
     modelName: String(chatModel),
@@ -713,7 +730,7 @@ export function GoatSurface({
   // must not blank the menu for the rest of the session — keep the previous catalog
   // and let the next open retry.
   const skillMentionMenuOpen = Boolean(
-    userWorkosId && mentionToken && activeEngine !== "local_codex",
+    userWorkosId && mentionToken && activeEngine !== "local_codex" && !activeTaskConversation,
   );
   useEffect(() => {
     if (!skillMentionMenuOpen) return;
@@ -774,12 +791,22 @@ export function GoatSurface({
   }, [chatMessages]);
   const hasMessages = chatMessages.length > 0;
   const isEngineWorking = isEngineChat && (engineRunning || engineSubmitting);
-  const isAgentWorking = isGenerating || isEngineWorking;
+  const isTaskConversationWorking = Boolean(
+    activeTaskConversation &&
+      (activeTaskConversation.status === "queued" ||
+        activeTaskConversation.status === "running" ||
+        taskMessageSubmitting),
+  );
+  const isAgentWorking = isGenerating || isEngineWorking || isTaskConversationWorking;
   const latestActiveTurnStartedAtMs = useMemo(
     () => latestChatTurnStartedAtMs(chatMessages),
     [chatMessages],
   );
-  const activeTurnTimerStartedAtMs = activeTurnStartedAtMs ?? latestActiveTurnStartedAtMs;
+  const activeTurnTimerStartedAtMs =
+    activeTurnStartedAtMs ??
+    latestActiveTurnStartedAtMs ??
+    activeTaskConversation?.startedAtMs ??
+    null;
   const paletteRecentChats = useMemo(
     () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
     [optimisticallyArchivedChatIds, recentChats],
@@ -1203,6 +1230,47 @@ export function GoatSurface({
       toast.error("Remove failed attachments before sending.");
       return;
     }
+
+    if (activeTaskConversation) {
+      const messageId = `goat_task_msg_${crypto.randomUUID()}`;
+      const optimisticMessage = {
+        id: messageId,
+        role: "user",
+        parts: [{ type: "text", text: prompt }],
+      } as GoatChatUiMessage;
+
+      clearError();
+      setInput("");
+      setMentionToken(null);
+      setSelectedMentions([]);
+      setTaskMessageSubmitting(true);
+      beginActiveTurn();
+      setMessages((current) => [...current, optimisticMessage]);
+      void continueGoatTaskAction(activeTaskConversation.taskId, prompt, messageId)
+        .then((result) => {
+          if (!mountedRef.current) return;
+          if (!result.ok) {
+            setMessages((current) => current.filter((message) => message.id !== messageId));
+            setInput(prompt);
+            clearActiveTurn();
+            toast.error(result.error ?? "Could not continue that task.");
+            return;
+          }
+          router.refresh();
+        })
+        .catch(() => {
+          if (!mountedRef.current) return;
+          setMessages((current) => current.filter((message) => message.id !== messageId));
+          setInput(prompt);
+          clearActiveTurn();
+          toast.error("Could not continue that task.");
+        })
+        .finally(() => {
+          if (mountedRef.current) setTaskMessageSubmitting(false);
+        });
+      return;
+    }
+
     const mentions = activeSelectedMentions.filter((mention) =>
       goatChatMentionIsVisible(prompt, mention),
     );
@@ -1540,6 +1608,16 @@ export function GoatSurface({
   }, [isGenerating, openChat, router, stop]);
 
   const stopGeneration = useCallback(() => {
+    if (activeTaskConversation) {
+      setTaskMessageSubmitting(false);
+      void cancelGoatTaskAction(activeTaskConversation.taskId)
+        .then((result) => {
+          if (!result.ok) toast.error(result.error ?? "Could not stop that task.");
+        })
+        .catch(() => toast.error("Could not stop that task."));
+      return;
+    }
+
     if (activeEngineChat) {
       const config = ENGINE_CHAT_CONFIG[activeEngineChat.engine];
       setEngineRunning(false);
@@ -1568,7 +1646,7 @@ export function GoatSurface({
       }
     }
     void stop();
-  }, [activeEngineChat, chatResumeEnabled, chatSessionId, messages, stop]);
+  }, [activeEngineChat, activeTaskConversation, chatResumeEnabled, chatSessionId, messages, stop]);
 
   useEffect(() => {
     if (mode !== "chat") return;
@@ -1907,7 +1985,10 @@ export function GoatSurface({
                 engine={activeChatEngine}
               />
               <div className="flex shrink-0 items-center gap-2">
-                {chatSessionId && persistedChatSessionId === chatSessionId && hasMessages ? (
+                {!activeTaskConversation &&
+                chatSessionId &&
+                persistedChatSessionId === chatSessionId &&
+                hasMessages ? (
                   <ChatShareButton chatSessionId={chatSessionId} disabled={isAgentWorking} />
                 ) : null}
                 {activeEngineChat?.engine === "codex" ||
@@ -1971,7 +2052,10 @@ export function GoatSurface({
         </div>
       )}
 
-      {mode === "chat" && chatSessionId && persistedChatSessionId === chatSessionId ? (
+      {mode === "chat" &&
+      !activeTaskConversation &&
+      chatSessionId &&
+      persistedChatSessionId === chatSessionId ? (
         <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
       ) : null}
       {mode === "chat" && activeEngineChat?.engine === "local_codex" ? (
@@ -2199,7 +2283,7 @@ export function GoatSurface({
                   localCodexFeatureDisabledForChat ||
                   chatSendBlocked
                 }
-                isGenerating={isGenerating}
+                isGenerating={isGenerating || isTaskConversationWorking}
                 startsWorkflowTask={Boolean(selectedWorkflowMention)}
                 onStop={stopGeneration}
               />

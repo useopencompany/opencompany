@@ -771,6 +771,11 @@ describe("executeGoatTask", () => {
       executeGoatTask({
         task: task({ codexEngineSessionId: "thread_existing", harnessSpec: codexHarnessSpec }),
         env: env(),
+        conversationMessages: [
+          { role: "user", content: "Fix octo/repo." },
+          { role: "assistant", content: "I fixed the tests." },
+          { role: "user", content: "Now update the documentation too." },
+        ],
         signal: new AbortController().signal,
         sink,
         reportStage: vi.fn(async () => {}),
@@ -790,7 +795,7 @@ describe("executeGoatTask", () => {
     expect(goatCodexMock.runGoatCodexTask).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
-        prompt: "Fix octo/repo.",
+        prompt: "Now update the documentation too.",
         existingEngineSessionId: "thread_existing",
         repository: "octo/repo",
         createPullRequest: true,

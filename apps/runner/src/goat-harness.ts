@@ -52,6 +52,11 @@ const ASSISTANT_CONTENT_FLUSH_INTERVAL_MS = 500;
 
 type GoatTask = typeof goatTasks.$inferSelect;
 
+export type GoatTaskConversationMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export type GoatTaskRunSink = {
   createAssistantMessage(input: {
     content: string;
@@ -130,6 +135,7 @@ export type GoatTaskRunSink = {
 export type GoatTaskExecutorInput = {
   task: GoatTask;
   env: RunnerEnv;
+  conversationMessages?: readonly GoatTaskConversationMessage[];
   plannerContext?: {
     githubRepositories?: readonly string[];
   };
@@ -216,6 +222,7 @@ async function executeGoatOpenCompanyTaskInner(
       env: input.env,
       task: input.task,
       harnessSpec,
+      ...(input.conversationMessages ? { conversationMessages: input.conversationMessages } : {}),
       signal: input.signal,
       sink: input.sink,
       assistantMessageId: assistant.id,
@@ -337,7 +344,10 @@ async function executeGoatCodexTaskInner(
   try {
     const result = await runGoatTaskCodex({
       taskId: input.task.id,
-      prompt: input.task.prompt,
+      prompt: currentGoatTaskTurnPrompt(
+        input.conversationMessages,
+        harnessSpec.initialUserMessage || input.task.prompt,
+      ),
       env: input.env,
       userWorkosId: input.task.userWorkosId,
       existingEngineSessionId: input.task.codexEngineSessionId,
@@ -551,7 +561,7 @@ async function runGoatTaskCodex(input: {
     userWorkosId: input.userWorkosId,
     taskId: input.taskId,
     messageId: input.assistantMessageId,
-    prompt: input.harnessSpec.initialUserMessage || input.prompt,
+    prompt: input.prompt,
     systemPrompt: input.harnessSpec.systemPrompt,
     model: input.harnessSpec.model,
     existingEngineSessionId: input.existingEngineSessionId,
@@ -622,6 +632,19 @@ async function runGoatTaskCodex(input: {
   }
 
   return { assistantContent: result.content, ...(result.usage ? { usage: result.usage } : {}) };
+}
+
+function currentGoatTaskTurnPrompt(
+  messages: readonly GoatTaskConversationMessage[] | undefined,
+  initialPrompt: string,
+): string {
+  const userMessages = (messages ?? []).filter(
+    (message): message is GoatTaskConversationMessage & { role: "user" } =>
+      message.role === "user" && message.content.trim().length > 0,
+  );
+  return userMessages.length > 1
+    ? userMessages[userMessages.length - 1]!.content.trim()
+    : initialPrompt.trim();
 }
 
 function hasPreplannedHarnessSpec(value: GoatHarnessSpec) {

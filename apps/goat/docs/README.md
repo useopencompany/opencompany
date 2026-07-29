@@ -107,6 +107,12 @@ task**. Submission posts directly to `/api/workflows`, starts the durable task i
 background, and leaves the current Home or chat surface in place. It does not call the foreground
 chat model or persist user/assistant chat messages for the workflow launch.
 
+Workflow runs remain grouped under **Tasks**, but task detail renders the same `GoatSurface` as a
+normal chat. The task's `goat.task_messages` rows are projected into chat bubbles, and the standard
+reply composer appends a new user turn, moves a terminal task back to `queued`, and resumes its
+runner with the prior user/assistant conversation. The normal chat stop control cancels an active
+task turn.
+
 Normal main chat can also discover workspace skills progressively. When the catalog is non-empty, the
 system prompt advertises only that a skill source exists; `list_skills` searches safe id, name, and
 description metadata, and `use_skill` loads the full instructions for one exact returned id. The
@@ -681,10 +687,11 @@ Task state is deliberately simple:
 queued -> running/planning -> running/running
   -> succeeded/completed
   -> failed/failed
+terminal task + user reply -> queued
 ```
 
-The UI maps this to Tasks rows and task detail pages. Goat task pages subscribe to TanStack DB
-collections backed by Electric shapes for `goat.tasks`, `goat.task_messages`, and
+The UI maps this to Tasks rows and chat-style task detail pages. Goat task pages subscribe to
+TanStack DB collections backed by Electric shapes for `goat.tasks`, `goat.task_messages`, and
 `goat.task_events`, scoped by `user_workos_id`. The active chat also subscribes to scoped
 `goat.chat_messages` rows so persisted task completion notifications appear without a manual
 refresh.
