@@ -1,4 +1,7 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { McpServer as McpServerType } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { GoatCodexActionGatewayRequest } from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 import { registerGoatClaudeActionTools } from "./claude-actions";
@@ -21,7 +24,7 @@ function registerTools(executeAction: typeof executeGoatCodexActionGateway) {
         tools.set(name, { config, callback });
       },
     ),
-  } as unknown as McpServer;
+  } as unknown as McpServerType;
   registerGoatClaudeActionTools(
     server,
     { codexChatSessionId: "codex_session_1", codexChatTurnId: "codex_turn_1" },
@@ -105,5 +108,48 @@ describe("registerGoatClaudeActionTools", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("not_permitted");
+  });
+
+  // The tests above register against a mocked server object and call the resulting
+  // callback directly, which never exercises the SDK's real zod-to-JSON-schema
+  // conversion or wire-protocol round-trip. Verify that path separately against a
+  // real McpServer/Client pair so a schema that "looks right" but breaks conversion
+  // wouldn't slip through.
+  it("survives a real MCP client/server round-trip", async () => {
+    const server = new McpServer({ name: "test", version: "0.1.0" });
+    registerGoatClaudeActionTools(
+      server,
+      { codexChatSessionId: "codex_session_1", codexChatTurnId: "codex_turn_1" },
+      {
+        executeAction: vi.fn<typeof executeGoatCodexActionGateway>(async ({ request }) =>
+          request.operation === "list"
+            ? { ok: true, sources: [{ id: "gmail", label: "Gmail", description: "d" }] }
+            : { ok: true, action: request.action, result: { echoedParams: request.params } },
+        ),
+      },
+    );
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "smoke-client", version: "0.1.0" });
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const tools = await client.listTools();
+    expect(tools.tools.map((tool) => tool.name)).toEqual(["list_actions", "use_action"]);
+
+    const listResult = await client.callTool({ name: "list_actions", arguments: {} });
+    expect(listResult.structuredContent).toEqual({
+      ok: true,
+      sources: [{ id: "gmail", label: "Gmail", description: "d" }],
+    });
+
+    const useResult = await client.callTool({
+      name: "use_action",
+      arguments: { action: "gmail.list", params: { limit: 5 } },
+    });
+    expect(useResult.structuredContent).toEqual({
+      ok: true,
+      action: "gmail.list",
+      result: { echoedParams: { limit: 5 } },
+    });
   });
 });
