@@ -51,14 +51,12 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     chatSessionId,
     sandboxStatus,
     engineLabel,
-    engineIsRunning,
     onExpandedChange,
     onRequestFocusReturn,
   }: {
     chatSessionId: string;
     sandboxStatus: GoatCodexSandboxStatus | null;
     engineLabel: string;
-    engineIsRunning: boolean;
     onExpandedChange?: (expanded: boolean) => void;
     onRequestFocusReturn?: () => void;
   },
@@ -437,16 +435,8 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
           />
         ) : connectionState === "ready" && socket ? (
           activeTab === "terminal" ? (
-            <div className="flex min-h-0 flex-1 flex-col bg-[#11130f]">
-              {engineIsRunning ? (
-                <p className="border-b border-white/10 bg-amber-300/10 px-3 py-2 text-[11px] leading-4 text-amber-100">
-                  {engineLabel} is working in this directory. Terminal changes apply immediately and
-                  may overlap with its edits.
-                </p>
-              ) : null}
-              <div className="min-h-0 flex-1">
-                <CodingWorkspaceTerminal socket={socket} />
-              </div>
+            <div className="min-h-0 flex-1 bg-[#11130f]">
+              <CodingWorkspaceTerminal socket={socket} />
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col">

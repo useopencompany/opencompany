@@ -13,12 +13,10 @@ function Harness({
   chatSessionId,
   sandboxStatus,
   engineLabel,
-  engineIsRunning,
 }: {
   chatSessionId: string;
   sandboxStatus: GoatCodexSandboxStatus | null;
   engineLabel: string;
-  engineIsRunning: boolean;
 }) {
   const panelRef = useRef<CodingWorkspacePanelHandle>(null);
   const toggleButtonRef = useRef<HTMLButtonElement>(null);
@@ -32,7 +30,6 @@ function Harness({
         chatSessionId={chatSessionId}
         sandboxStatus={sandboxStatus}
         engineLabel={engineLabel}
-        engineIsRunning={engineIsRunning}
         onRequestFocusReturn={() => toggleButtonRef.current?.focus()}
       />
     </>
@@ -101,14 +98,7 @@ describe("CodingWorkspacePanel", () => {
 
   it("starts collapsed and shows status without waking until the user chooses a tab", async () => {
     const user = userEvent.setup();
-    render(
-      <Harness
-        chatSessionId="chat_1"
-        sandboxStatus="sleeping"
-        engineLabel="Codex"
-        engineIsRunning={false}
-      />,
-    );
+    render(<Harness chatSessionId="chat_1" sandboxStatus="sleeping" engineLabel="Codex" />);
 
     expect(screen.queryByLabelText("Codex workspace")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
@@ -122,28 +112,16 @@ describe("CodingWorkspacePanel", () => {
   });
 
   it("uses the intended default desktop width when no preference is stored", () => {
-    render(
-      <Harness
-        chatSessionId="chat_1"
-        sandboxStatus="sleeping"
-        engineLabel="Codex"
-        engineIsRunning={false}
-      />,
-    );
+    render(<Harness chatSessionId="chat_1" sandboxStatus="sleeping" engineLabel="Codex" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle workspace" }));
     expect(screen.getByLabelText("Codex workspace")).toHaveStyle({ width: "440px" });
   });
 
-  it("uses the active engine label for accessibility, previews, and edit warnings", async () => {
+  it("uses the active engine label for accessibility and previews without an edit warning", async () => {
     const user = userEvent.setup();
     render(
-      <Harness
-        chatSessionId="chat_claude"
-        sandboxStatus="running"
-        engineLabel="Claude Code"
-        engineIsRunning
-      />,
+      <Harness chatSessionId="chat_claude" sandboxStatus="running" engineLabel="Claude Code" />,
     );
 
     await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
@@ -151,7 +129,7 @@ describe("CodingWorkspacePanel", () => {
     await user.click(screen.getByRole("button", { name: "Terminal" }));
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
     act(() => MockWebSocket.instances[0]!.open());
-    expect(screen.getByText(/Claude Code is working in this directory/)).toBeInTheDocument();
+    expect(screen.queryByText(/working in this directory/)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Preview" }));
     act(() =>
@@ -179,14 +157,7 @@ describe("CodingWorkspacePanel", () => {
         dispatchEvent: vi.fn(),
       })),
     );
-    render(
-      <Harness
-        chatSessionId="chat_1"
-        sandboxStatus="sleeping"
-        engineLabel="Codex"
-        engineIsRunning={false}
-      />,
-    );
+    render(<Harness chatSessionId="chat_1" sandboxStatus="sleeping" engineLabel="Codex" />);
 
     await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
     const dialog = screen.getByRole("dialog", { name: "Codex workspace" });
@@ -204,14 +175,7 @@ describe("CodingWorkspacePanel", () => {
 
   it("discovers the strongest port, validates manual entry, and handles reconnect state", async () => {
     const user = userEvent.setup();
-    render(
-      <Harness
-        chatSessionId="chat_1"
-        sandboxStatus="running"
-        engineLabel="Codex"
-        engineIsRunning={false}
-      />,
-    );
+    render(<Harness chatSessionId="chat_1" sandboxStatus="running" engineLabel="Codex" />);
     await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
     await user.click(screen.getByRole("button", { name: "Preview" }));
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
@@ -271,14 +235,7 @@ describe("CodingWorkspacePanel", () => {
 
   it("rejects preview URLs with non-HTTP schemes", async () => {
     const user = userEvent.setup();
-    render(
-      <Harness
-        chatSessionId="chat_1"
-        sandboxStatus="running"
-        engineLabel="Codex"
-        engineIsRunning={false}
-      />,
-    );
+    render(<Harness chatSessionId="chat_1" sandboxStatus="running" engineLabel="Codex" />);
     await user.click(screen.getByRole("button", { name: "Toggle workspace" }));
     await user.click(screen.getByRole("button", { name: "Preview" }));
     await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
@@ -299,14 +256,7 @@ describe("CodingWorkspacePanel", () => {
 
   it("offers a retry when the workspace WebSocket handshake stalls", async () => {
     vi.useFakeTimers();
-    render(
-      <Harness
-        chatSessionId="chat_1"
-        sandboxStatus="sleeping"
-        engineLabel="Codex"
-        engineIsRunning={false}
-      />,
-    );
+    render(<Harness chatSessionId="chat_1" sandboxStatus="sleeping" engineLabel="Codex" />);
     fireEvent.click(screen.getByRole("button", { name: "Toggle workspace" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview" }));
     await act(async () => {
