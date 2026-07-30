@@ -131,7 +131,7 @@ describe("createGoatCodexChatProjector", () => {
 
     const sessionUpdate = mocks.execute.mock.calls
       .map(([query]) => sqlText(query))
-      .find((query) => query.includes("UPDATE goat.codex_chat_sessions AS session"));
+      .find((query) => query.includes("UPDATE goat.codex_chat_sessions AS runtime"));
     expect(sessionUpdate).toContain("WITH settled_turn AS");
     expect(sessionUpdate).toContain("UPDATE goat.codex_chat_turns AS turn");
     expect(sessionUpdate).toContain("queued.status = 'queued'");

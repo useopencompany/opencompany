@@ -1,15 +1,13 @@
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { recordGoatCreditDebit } from "@opencompany/db/goat-credits";
-import type {
-  GoatChatMessageDebugTrace,
-  GoatCodexChatSessionStatus,
-} from "@opencompany/db/goat-schema";
+import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
 import { recordGoatModelCost, recordGoatModelUsageTokens } from "@opencompany/goat-observability";
 import { createLogger } from "@opencompany/observability";
 import type { LanguageModelUsage } from "ai";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
+import { type GoatTaskTurnCompletion, settleGoatDurableTurn } from "./goat-task-turn";
 import { rowsFromExecute } from "./sql-exec";
 
 const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1" as const;
@@ -104,65 +102,6 @@ export function createGoatOpenCompanyChatProjector(input: {
     );
   };
 
-  const settleTurn = async (options: {
-    turnStatus: "completed" | "failed" | "interrupted";
-    sessionStatus: GoatCodexChatSessionStatus;
-    error: string | null;
-    completedAt: Date;
-  }) => {
-    assertRowsChanged(
-      await getDb().execute(sql`
-        WITH settled_turn AS (
-          UPDATE goat.codex_chat_turns AS turn
-          SET status = ${options.turnStatus},
-              error = ${options.error},
-              completed_at = ${options.completedAt},
-              updated_at = ${options.completedAt}
-          WHERE turn.id = ${target.turnId}
-            AND turn.user_workos_id = ${target.userWorkosId}
-            AND turn.lease_id = ${target.leaseId}
-            AND turn.lease_owner = ${target.leaseOwner}
-            AND turn.status = 'running'
-          RETURNING turn.id
-        ),
-        next_queued_turn AS (
-          SELECT queued.id
-          FROM goat.codex_chat_turns AS queued
-          WHERE queued.codex_chat_session_id = ${target.codexChatSessionId}
-            AND queued.user_workos_id = ${target.userWorkosId}
-            AND queued.status = 'queued'
-            AND (queued.run_after IS NULL OR queued.run_after <= ${options.completedAt})
-            AND EXISTS (SELECT 1 FROM settled_turn)
-          ORDER BY queued.created_at ASC, queued.id ASC
-          LIMIT 1
-        )
-        UPDATE goat.codex_chat_sessions AS session
-        SET active_turn_id = (SELECT id FROM next_queued_turn),
-            status = CASE
-              WHEN EXISTS (SELECT 1 FROM next_queued_turn) THEN 'queued'
-              ELSE ${options.sessionStatus}
-            END,
-            error = ${options.error},
-            updated_at = ${options.completedAt}
-        WHERE session.id = ${target.codexChatSessionId}
-          AND session.user_workos_id = ${target.userWorkosId}
-          AND (session.active_turn_id IS NULL OR session.active_turn_id = ${target.turnId})
-          AND EXISTS (SELECT 1 FROM settled_turn)
-        RETURNING session.id
-      `),
-    );
-    assertRowsChanged(
-      await getDb().execute(sql`
-        UPDATE goat.chat_sessions AS session
-        SET updated_at = ${options.completedAt}
-        WHERE session.id = ${target.chatSessionId}
-          AND session.user_workos_id = ${target.userWorkosId}
-          AND EXISTS (${turnLeaseSubquery({ runningOnly: false })})
-        RETURNING session.id
-      `),
-    );
-  };
-
   return {
     async started() {
       const now = new Date();
@@ -215,47 +154,63 @@ export function createGoatOpenCompanyChatProjector(input: {
       if (row.interrupt_requested_at) throw new GoatOpenCompanyChatInterruptedError();
     },
 
-    async completed(projection: GoatOpenCompanyChatProjection) {
+    async completed(
+      projection: GoatOpenCompanyChatProjection,
+      taskCompletion?: GoatTaskTurnCompletion | null,
+    ) {
       const completedAt = new Date();
       const durationMs = elapsedTurnDurationMs(target.turnStartedAt, completedAt);
       await writeAssistantMessage(projection, {
         ...(durationMs !== undefined ? { durationMs } : {}),
       });
-      await settleTurn({
+      await settleGoatDurableTurn({
+        target,
         turnStatus: "completed",
         sessionStatus: "idle",
         error: null,
         completedAt,
+        taskCompletion,
       });
     },
 
-    async interrupted(projection: GoatOpenCompanyChatProjection) {
+    async interrupted(
+      projection: GoatOpenCompanyChatProjection,
+      taskCompletion?: GoatTaskTurnCompletion | null,
+    ) {
       const completedAt = new Date();
       const durationMs = elapsedTurnDurationMs(target.turnStartedAt, completedAt);
       await writeAssistantMessage(projection, {
         aborted: true,
         ...(durationMs !== undefined ? { durationMs } : {}),
       });
-      await settleTurn({
+      await settleGoatDurableTurn({
+        target,
         turnStatus: "interrupted",
         sessionStatus: "interrupted",
         error: null,
         completedAt,
+        taskCompletion,
       });
     },
 
-    async failed(error: string, projection: GoatOpenCompanyChatProjection) {
+    async failed(
+      error: string,
+      projection: GoatOpenCompanyChatProjection,
+      taskCompletion?: GoatTaskTurnCompletion | null,
+    ) {
       const completedAt = new Date();
       const durationMs = elapsedTurnDurationMs(target.turnStartedAt, completedAt);
       await writeAssistantMessage(projection, {
         error,
         ...(durationMs !== undefined ? { durationMs } : {}),
       });
-      await settleTurn({
+      await settleGoatDurableTurn({
+        target,
         turnStatus: "failed",
         sessionStatus: "idle",
         error,
         completedAt,
+        taskCompletion,
       });
     },
   };

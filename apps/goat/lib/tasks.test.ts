@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
   return {
     execute: vi.fn(),
     select: vi.fn(),
+    triggerGoatCodexChatWake: vi.fn(),
     triggerGoatTaskRun: vi.fn(),
   };
 });
@@ -24,6 +25,7 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@/lib/task-runner", () => ({
+  triggerGoatCodexChatWake: mocks.triggerGoatCodexChatWake,
   triggerGoatTaskRun: mocks.triggerGoatTaskRun,
 }));
 
@@ -101,7 +103,7 @@ describe("createGoatTaskForUser", () => {
   });
 
   it("leaves the task queued when runner dispatch fails", async () => {
-    mocks.triggerGoatTaskRun.mockRejectedValue(new Error("runner unavailable"));
+    mocks.triggerGoatCodexChatWake.mockRejectedValue(new Error("runner unavailable"));
 
     const task = await createGoatTaskForUser({
       userWorkosId: "user_1",
@@ -111,14 +113,11 @@ describe("createGoatTaskForUser", () => {
 
     expect(task).toMatchObject({ id: "task_1", status: "queued", stage: "queued" });
     expect(mocks.execute).toHaveBeenCalledTimes(1);
-    expect(mocks.triggerGoatTaskRun).toHaveBeenCalledWith(
-      expect.stringMatching(/^goat_task_/),
-      expect.objectContaining({ event: "goat.runner_task_created_dispatch" }),
-    );
+    expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
     expect(warnSpy).toHaveBeenCalledWith(
-      "Goat runner dispatch failed; the task remains queued for polling.",
+      "Goat durable task wake failed; the turn remains queued for polling.",
       expect.objectContaining({
-        event: "goat.runner_task_created_dispatch_failed",
+        event: "goat.durable_task_created_wake_failed",
       }),
     );
     expect(sqlTextFromExecuteCall(0)).toContain("task_spawning_enabled = true");
@@ -224,11 +223,57 @@ describe("getCurrentUserGoatTaskSummary", () => {
     expect(sqlTextFromExecuteCall(0)).toContain("SELECT MIN");
     expect(sqlTextFromExecuteCall(0)).toContain("SELECT COUNT(*)");
   });
+
+  it("summarizes session task duration and linked chat credit debits", async () => {
+    vi.clearAllMocks();
+    mocks.select.mockReturnValue({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => [
+            {
+              id: "task_1",
+              displayId: "TASK-1",
+              userWorkosId: "user_1",
+              sessionId: "goat_chat_task_1",
+              status: "succeeded",
+            },
+          ]),
+        })),
+      })),
+    });
+    mocks.execute.mockResolvedValue([
+      {
+        runStartedAt: null,
+        runCompletedAt: null,
+        runDurationMs: "245000",
+        usageRowCount: "2",
+        totalCostUsdMicros: "81400",
+      },
+    ]);
+
+    await expect(getCurrentUserGoatTaskSummary("TASK-1")).resolves.toEqual({
+      cost: {
+        hasRecordedCosts: true,
+        totalCostUsdMicros: 81_400,
+      },
+      durationMs: 245_000,
+    });
+    expect(sqlTextFromExecuteCall(0)).toContain("goat.credit_ledger");
+    expect(sqlTextFromExecuteCall(0)).toContain("goat.chat_messages");
+    expect(sqlTextFromExecuteCall(0)).not.toContain("goat.task_model_usage");
+  });
 });
 
 describe("cancelGoatTaskAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.select.mockReturnValue({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => [{ sessionId: "goat_chat_task_1" }]),
+        })),
+      })),
+    });
     vi.mocked(currentGoatUser).mockResolvedValue({
       authUser: {
         id: "user_1",
@@ -291,9 +336,11 @@ describe("cancelGoatTaskAction", () => {
     });
 
     expect(mocks.execute).toHaveBeenCalledTimes(1);
-    expect(sqlTextFromExecuteCall(0)).toContain("UPDATE goat.task_messages AS message");
-    expect(sqlTextFromExecuteCall(0)).toContain("message.status = 'running'");
+    expect(sqlTextFromExecuteCall(0)).toContain("UPDATE goat.codex_chat_turns AS turn");
+    expect(sqlTextFromExecuteCall(0)).toContain("UPDATE goat.chat_messages AS message");
+    expect(sqlTextFromExecuteCall(0)).toContain("turn.status = 'running'");
     expect(sqlTextFromExecuteCall(0)).toContain("'Stopped by user.'");
+    expect(sqlTextFromExecuteCall(0)).not.toContain("goat.task_messages");
   });
 
   it("rejects terminal or inaccessible tasks", async () => {
@@ -309,6 +356,13 @@ describe("cancelGoatTaskAction", () => {
 describe("continueGoatTaskAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.select.mockReturnValue({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => [{ sessionId: "goat_chat_task_1" }]),
+        })),
+      })),
+    });
   });
 
   it("appends a user turn and requeues a completed task", async () => {
@@ -326,11 +380,11 @@ describe("continueGoatTaskAction", () => {
     expect(sqlTextFromExecuteCall(0)).toContain(
       "task.status IN ('succeeded', 'failed', 'canceled')",
     );
-    expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.task_messages");
-    expect(mocks.triggerGoatTaskRun).toHaveBeenCalledWith("goat_task_1", {
-      task_id: "goat_task_1",
-      event: "goat.runner_task_continued_dispatch",
-    });
+    expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.chat_messages");
+    expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.codex_chat_turns");
+    expect(sqlTextFromExecuteCall(0)).not.toContain("goat.task_messages");
+    expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
+    expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
   });
 
   it("does not append another turn while the task is active or inaccessible", async () => {

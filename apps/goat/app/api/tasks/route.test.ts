@@ -54,6 +54,7 @@ describe("POST /api/tasks", () => {
     });
     expect(createGoatTaskForUser).toHaveBeenCalledWith({
       userWorkosId: "user_1",
+      workspaceId: "workspace_1",
       prompt: "Research the market",
       model: "openai/gpt-5.5",
     });

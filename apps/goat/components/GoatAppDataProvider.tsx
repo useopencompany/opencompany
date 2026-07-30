@@ -240,7 +240,7 @@ function GoatAppLiveDataSubscriptions({
       };
     };
     const openRows = ((chatSessionRows ?? []) as GoatChatSessionRow[]).filter(
-      (row) => !row.closed_at,
+      (row) => !row.closed_at && row.kind !== "task",
     );
     const activeCodexChatIds = new Set(
       ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[])
@@ -283,7 +283,7 @@ function GoatAppLiveDataSubscriptions({
       ]),
     );
     return ((chatSessionRows ?? []) as GoatChatSessionRow[])
-      .filter((row) => row.closed_at)
+      .filter((row) => row.closed_at && row.kind !== "task")
       .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
       .slice(0, GOAT_ARCHIVED_CHAT_LIMIT)
       .map((row) => ({
@@ -378,6 +378,7 @@ export function taskRowToView(row: GoatTaskRow): GoatTaskView {
     name: row.name,
     prompt: row.prompt,
     model: row.model,
+    sessionId: row.session_id,
     scheduleId: row.schedule_id,
     scheduledFor: row.scheduled_for,
     workflowId: row.workflow_id,

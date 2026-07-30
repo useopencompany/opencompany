@@ -97,6 +97,7 @@ function LiveTaskRunProvider({
       modelUsage: costRowsLoading ? [] : liveModelUsage,
       toolUsage: costRowsLoading ? [] : liveToolUsage,
       sandboxUsage: costRowsLoading ? [] : liveSandboxUsage,
+      chat: initialRun.chat,
       ...(costRowsLoading || !hasLiveCostRows ? { cost: initialRun.cost } : {}),
     });
     return applyInitialCostFloor(liveRun, initialRun);
@@ -141,6 +142,7 @@ function taskFromInitialRun(run: GoatHarnessRunViewModel): GoatTaskRow {
     user_workos_id: "",
     prompt: run.task.prompt,
     model: run.task.model,
+    session_id: run.task.sessionId,
     schedule_id: null,
     scheduled_for: null,
     workflow_id: run.task.workflowId,

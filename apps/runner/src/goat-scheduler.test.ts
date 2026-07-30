@@ -45,7 +45,39 @@ describe("sweepDueGoatTaskSchedules", () => {
         },
       ])
       .mockResolvedValueOnce([{ id: "goat_task_schedule_run_1" }])
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "goat_task_1",
+          displayId: "TASK-1",
+          name: "Daily briefing",
+          userWorkosId: "user_1",
+          prompt: "Send a daily briefing.",
+          model: harnessSpec.model,
+          sessionId: "goat_chat_1",
+          scheduleId: "goat_task_schedule_1",
+          scheduledFor: new Date("2026-06-03T09:00:00.000Z"),
+          status: "queued",
+          stage: "queued",
+          result: null,
+          error: null,
+          workflowId: null,
+          workflowBrainRef: null,
+          reportedOutcome: null,
+          outcomeComment: null,
+          harnessSpec,
+          debugTrace: {},
+          codexEngineSessionId: null,
+          sandboxId: null,
+          attempts: 0,
+          nextRunAt: new Date("2026-06-03T12:00:00.000Z"),
+          leaseId: null,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          archivedAt: null,
+          createdAt: new Date("2026-06-03T12:00:00.000Z"),
+          updatedAt: new Date("2026-06-03T12:00:00.000Z"),
+        },
+      ])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
     mocks.transaction.mockImplementation(async (callback) => callback({ execute }));
@@ -60,8 +92,8 @@ describe("sweepDueGoatTaskSchedules", () => {
 
     expect(onTaskCreated).toHaveBeenCalledOnce();
     expect(sqlTextFromExecuteCall(execute, 0)).toContain("task_spawning_enabled");
-    expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.tasks");
-    expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.task_messages");
+    expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.chat_sessions");
+    expect(sqlTextFromExecuteCall(execute, 2)).toContain("INSERT INTO goat.codex_chat_turns");
   });
 
   it("skips duplicate schedule runs without creating another task", async () => {
@@ -99,7 +131,7 @@ function sqlTextFromExecuteCall(execute: ReturnType<typeof vi.fn>, callIndex: nu
     | undefined;
   return (
     query?.queryChunks
-      ?.map((chunk) => (typeof chunk === "string" ? "?" : (chunk.value ?? []).join("")))
+      ?.map((chunk) => (typeof chunk === "string" ? "?" : (chunk?.value ?? []).join("")))
       .join("") ?? ""
   );
 }

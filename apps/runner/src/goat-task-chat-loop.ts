@@ -18,6 +18,7 @@ import {
   createOpenCompanyChatToolContext,
   type GoatTaskReportedStatus,
   prepareOpenCompanyChatStep,
+  TASK_SYSTEM_BLOCK,
 } from "@opencompany/goat-agent/chat-agent";
 import type {
   GoatChatActionCatalog,
@@ -51,13 +52,6 @@ const TASK_WEB_SEARCH_CALLS_PER_TURN = 20;
 const TASK_WEB_FETCH_CALLS_PER_TURN = 20;
 const TASK_ACTION_CALLS_PER_TURN = 20;
 const TASK_OUTCOME_COMMENT_MAX_LENGTH = 200;
-
-const TASK_SYSTEM_BLOCK = [
-  "<background_task_run>",
-  "You are running as an autonomous background task. There is no interactive user to answer questions or approve steps — work to completion with the tools available.",
-  'When you have finished, call update_task_status exactly once to report the outcome ("done" or "needs_attention"), then write your final result as your last message.',
-  "</background_task_run>",
-].join("\n");
 
 export type GoatTaskChatLoopResult = {
   assistantContent: string;

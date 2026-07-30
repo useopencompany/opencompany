@@ -17,6 +17,7 @@ import {
   GoatCodexChatRetryableInfrastructureError,
 } from "./goat-codex-chat-errors";
 import { runGoatOpenCompanyChatTurn } from "./goat-opencompany-chat";
+import { loadGoatTaskTurnContext } from "./goat-task-turn";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
 
@@ -174,6 +175,7 @@ export async function runClaimedTurn(
     )
     .limit(1);
   if (!session) throw new Error(`Codex chat session ${turn.codexChatSessionId} not found.`);
+  const taskContext = await loadGoatTaskTurnContext({ turn, session });
 
   if (turn.attempts === 1) {
     const queueStartedAt =
@@ -244,6 +246,7 @@ export async function runClaimedTurn(
         turn,
         session,
         env,
+        ...(taskContext ? { taskContext } : {}),
         ...(recoveryRequired ? { recovery: { reason: "lease_reclaimed" as const } } : {}),
         shouldAbort: () =>
           options.handoffSignal?.aborted ? new GoatCodexChatHandoffError() : heartbeatAbort,

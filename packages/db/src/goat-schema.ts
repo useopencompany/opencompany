@@ -63,6 +63,7 @@ export type GoatTaskStage =
   | "failed"
   | "canceled";
 export type GoatTaskScheduleRunStatus = "pending" | "created" | "failed";
+export type GoatChatSessionKind = "chat" | "task";
 
 export type GoatIntegrationProvider =
   | "gmail"
@@ -2623,6 +2624,9 @@ export const goatTasks = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     prompt: text("prompt").notNull(),
     model: text("model").$type<AgentModelId>().notNull(),
+    sessionId: text("session_id").references(() => goatChatSessions.id, {
+      onDelete: "set null",
+    }),
     scheduleId: text("schedule_id").references(() => goatTaskSchedules.id, {
       onDelete: "set null",
     }),
@@ -2668,6 +2672,9 @@ export const goatTasks = goat.table(
     ),
     leaseExpiresAtIdx: index("goat_tasks_lease_expires_at_idx").on(table.leaseExpiresAt),
     scheduleIdx: index("goat_tasks_schedule_idx").on(table.scheduleId, table.scheduledFor),
+    sessionIdx: uniqueIndex("goat_tasks_session_idx")
+      .on(table.sessionId)
+      .where(sql`${table.sessionId} IS NOT NULL`),
     statusCheck: check(
       "goat_tasks_status_check",
       sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed', 'canceled')`,
@@ -2978,6 +2985,7 @@ export const goatChatSessions = goat.table(
     title: text("title").notNull().default("New chat"),
     model: text("model").$type<AgentModelId>().notNull(),
     engine: text("engine").$type<GoatChatEngine>().notNull().default("opencompany"),
+    kind: text("kind").$type<GoatChatSessionKind>().notNull().default("chat"),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     pinnedAt: timestamp("pinned_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -2993,6 +3001,7 @@ export const goatChatSessions = goat.table(
       "goat_chat_sessions_engine_check",
       sql`${table.engine} IN ('opencompany', 'codex', 'claude_code')`,
     ),
+    kindCheck: check("goat_chat_sessions_kind_check", sql`${table.kind} IN ('chat', 'task')`),
   }),
 );
 
@@ -3933,6 +3942,10 @@ export const goatTasksRelations = relations(goatTasks, ({ one, many }) => ({
     fields: [goatTasks.userWorkosId],
     references: [goatUsers.workosUserId],
   }),
+  session: one(goatChatSessions, {
+    fields: [goatTasks.sessionId],
+    references: [goatChatSessions.id],
+  }),
   schedule: one(goatTaskSchedules, {
     fields: [goatTasks.scheduleId],
     references: [goatTaskSchedules.id],
@@ -4050,6 +4063,7 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
     fields: [goatChatSessions.userWorkosId],
     references: [goatUsers.workosUserId],
   }),
+  task: one(goatTasks),
   messages: many(goatChatMessages),
   sandboxUsage: many(goatChatSandboxUsage),
   skills: many(goatChatSessionSkills),

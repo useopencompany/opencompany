@@ -7,6 +7,7 @@ import {
   type GoatChatMessageDebugTrace,
   type GoatChatRole,
   type GoatChatSession,
+  type GoatChatSessionKind,
   type GoatCodexChatTurnSettings,
   goatChatMessages,
   goatChatSessions,
@@ -55,6 +56,7 @@ export type GoatChatStore = {
   findOpenSession(input: {
     userWorkosId: string;
     sessionId?: string | null;
+    kind?: GoatChatSessionKind;
   }): Promise<GoatChatSession | null>;
   listOpenSessions(input: {
     userWorkosId: string;
@@ -133,12 +135,13 @@ export async function loadCurrentGoatChatSessionById(
 }
 
 export async function loadGoatChatSessionByIdForUser(
-  input: { userWorkosId: string; sessionId: string },
+  input: { userWorkosId: string; sessionId: string; kind?: GoatChatSessionKind },
   store: GoatChatStore = createDbGoatChatStore(),
 ): Promise<GoatChatSessionView | null> {
   const session = await store.findOpenSession({
     userWorkosId: input.userWorkosId,
     sessionId: input.sessionId,
+    kind: input.kind ?? "chat",
   });
   if (!session) return null;
 
@@ -431,10 +434,12 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
             eq(goatChatSessions.id, input.sessionId.trim()),
             eq(goatChatSessions.userWorkosId, input.userWorkosId),
             isNull(goatChatSessions.closedAt),
+            eq(goatChatSessions.kind, input.kind ?? "chat"),
           )
         : and(
             eq(goatChatSessions.userWorkosId, input.userWorkosId),
             isNull(goatChatSessions.closedAt),
+            eq(goatChatSessions.kind, input.kind ?? "chat"),
           );
 
       const [session] = await db
@@ -458,6 +463,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
             and(
               eq(goatChatSessions.userWorkosId, input.userWorkosId),
               isNull(goatChatSessions.closedAt),
+              eq(goatChatSessions.kind, "chat"),
               isNotNull(goatChatSessions.pinnedAt),
             ),
           )
@@ -470,6 +476,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
             and(
               eq(goatChatSessions.userWorkosId, input.userWorkosId),
               isNull(goatChatSessions.closedAt),
+              eq(goatChatSessions.kind, "chat"),
               isNull(goatChatSessions.pinnedAt),
               exists(
                 db
@@ -493,6 +500,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
             and(
               eq(goatChatSessions.userWorkosId, input.userWorkosId),
               isNull(goatChatSessions.closedAt),
+              eq(goatChatSessions.kind, "chat"),
               isNull(goatChatSessions.pinnedAt),
               ...(input.updatedAfter ? [gte(goatChatSessions.updatedAt, input.updatedAfter)] : []),
             ),
@@ -640,6 +648,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
           and(
             eq(goatChatSessions.id, input.sessionId),
             eq(goatChatSessions.userWorkosId, input.userWorkosId),
+            eq(goatChatSessions.kind, "chat"),
             isNull(goatChatSessions.closedAt),
           ),
         )
@@ -655,6 +664,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
           and(
             eq(goatChatSessions.id, input.sessionId),
             eq(goatChatSessions.userWorkosId, input.userWorkosId),
+            eq(goatChatSessions.kind, "chat"),
             isNotNull(goatChatSessions.closedAt),
           ),
         )
@@ -669,6 +679,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
         .where(
           and(
             eq(goatChatSessions.userWorkosId, input.userWorkosId),
+            eq(goatChatSessions.kind, "chat"),
             ne(goatChatSessions.id, input.sessionId),
             isNull(goatChatSessions.closedAt),
             isNotNull(goatChatSessions.pinnedAt),
@@ -693,6 +704,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
             and(
               eq(goatChatSessions.id, input.sessionId),
               eq(goatChatSessions.userWorkosId, input.userWorkosId),
+              eq(goatChatSessions.kind, "chat"),
               isNull(goatChatSessions.closedAt),
               ...(input.pinned ? [pinCapacity] : []),
             ),

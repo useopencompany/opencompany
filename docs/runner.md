@@ -288,6 +288,7 @@ Required environment variables:
 - `RUNNER_LLM_BROKER_PUBLIC_URL` (optional; defaults to Render's `RENDER_EXTERNAL_URL`. Public runner URL for E2B sandbox callbacks to the LLM broker (`/broker/*`). Unset locally unless the local runner port is exposed through a public tunnel.)
 - `RUNNER_LLM_BROKER_ENABLED` (optional, defaults to `true`; no-deploy kill switch back to direct key injection)
 - `RUNNER_GOAT_TASK_WORKER_ENABLED` (optional, defaults to `false`; set `true` only for runner deployments meant to execute Goat tasks. `bun run dev:goat` injects it locally.)
+- `GOAT_TASK_SESSION_EXECUTION_ENABLED` (optional, defaults to `true`; creates new Goat tasks as durable chat sessions and turns. Set `false` on both Goat and runner only as a rollback to the legacy task queue.)
 - `RUNNER_GOAT_BROWSER_ENABLED` (optional, defaults to `false`; set `true` to let Goat harnesses grant rendered browser navigation tools)
 - `AGENT_BROWSER_PROVIDER` (optional; production defaults to `browserless`, local dev can leave unset for local Chrome)
 - `BROWSERLESS_API_KEY` (required when Goat Browser uses Browserless)

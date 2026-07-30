@@ -8,6 +8,7 @@ import {
 import { getDb } from "@opencompany/db/client";
 import {
   type GoatChatMessageAttachment,
+  type GoatChatSessionKind,
   type GoatCodexChatEngine,
   type GoatCodexChatTurnSettings,
   goatChatSessions,
@@ -151,6 +152,7 @@ export async function createGoatCodexChatMessage(input: {
     const session = await loadCodexChatSessionForChat({
       userWorkosId: input.userWorkosId,
       chatSessionId: input.sessionId,
+      kind: "chat",
     });
     if (!session) return { ok: false, status: 404, error: "Codex chat session not found." };
     if ((session.engine ?? "codex") !== engine) {
@@ -200,6 +202,7 @@ export async function interruptGoatCodexChatSession(input: {
   const session = await loadCodexChatSessionForChat({
     userWorkosId: input.userWorkosId,
     chatSessionId: input.chatSessionId,
+    kind: "chat",
   });
   if (!session) return { ok: false, status: 404, error: "Codex chat session not found." };
 
@@ -357,7 +360,11 @@ export async function closeGoatCodexChatSessionForChat(input: {
   });
 }
 
-async function loadCodexChatSessionForChat(input: { userWorkosId: string; chatSessionId: string }) {
+async function loadCodexChatSessionForChat(input: {
+  userWorkosId: string;
+  chatSessionId: string;
+  kind?: GoatChatSessionKind;
+}) {
   const [row] = await getDb()
     .select()
     .from(goatCodexChatSessions)
@@ -367,6 +374,7 @@ async function loadCodexChatSessionForChat(input: { userWorkosId: string; chatSe
         eq(goatCodexChatSessions.userWorkosId, input.userWorkosId),
         eq(goatCodexChatSessions.chatSessionId, input.chatSessionId),
         isNull(goatChatSessions.closedAt),
+        ...(input.kind ? [eq(goatChatSessions.kind, input.kind)] : []),
       ),
     )
     .limit(1);

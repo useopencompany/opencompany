@@ -13,13 +13,18 @@ import {
   goatTaskToolUsage,
   goatUsers,
 } from "@opencompany/db/goat-schema";
+import {
+  createGoatTaskSession,
+  enqueueGoatTaskSessionTurn,
+  goatTaskSessionExecutionEnabled,
+} from "@opencompany/db/goat-task-sessions";
 import { and, asc, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { goatHomeActivityCutoff } from "@/lib/home-activity";
 import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
 import { normalizeGoatTaskName } from "@/lib/task-display";
-import { triggerGoatTaskRun } from "@/lib/task-runner";
+import { triggerGoatCodexChatWake, triggerGoatTaskRun } from "@/lib/task-runner";
 import { GOAT_TASK_PROMPT_MAX_LENGTH } from "@/lib/task-validation";
 
 export type ArchiveTaskResult = {
@@ -81,54 +86,90 @@ export async function getCurrentUserGoatTaskSummary(taskId: string) {
   const [aggregate] = rowsFromExecute<{
     runStartedAt: Date | string | null;
     runCompletedAt: Date | string | null;
+    runDurationMs: number | string | null;
     usageRowCount: number | string;
     totalCostUsdMicros: number | string;
   }>(
-    await getDb().execute(sql`
-      SELECT
-        (
-          SELECT MIN(${goatTaskMessages.createdAt})
-          FROM ${goatTaskMessages}
-          WHERE ${goatTaskMessages.taskId} = ${task.id}
-            AND ${goatTaskMessages.userWorkosId} = ${task.userWorkosId}
-            AND ${goatTaskMessages.role} <> 'user'
-        ) AS "runStartedAt",
-        (
-          SELECT MAX(${goatTaskMessages.completedAt})
-          FROM ${goatTaskMessages}
-          WHERE ${goatTaskMessages.taskId} = ${task.id}
-            AND ${goatTaskMessages.userWorkosId} = ${task.userWorkosId}
-        ) AS "runCompletedAt",
-        (
-          SELECT COUNT(*) FROM ${goatTaskModelUsage}
-          WHERE ${goatTaskModelUsage.taskId} = ${task.id}
-            AND ${goatTaskModelUsage.userWorkosId} = ${task.userWorkosId}
-        ) + (
-          SELECT COUNT(*) FROM ${goatTaskToolUsage}
-          WHERE ${goatTaskToolUsage.taskId} = ${task.id}
-            AND ${goatTaskToolUsage.userWorkosId} = ${task.userWorkosId}
-        ) + (
-          SELECT COUNT(*) FROM ${goatTaskSandboxUsage}
-          WHERE ${goatTaskSandboxUsage.taskId} = ${task.id}
-            AND ${goatTaskSandboxUsage.userWorkosId} = ${task.userWorkosId}
-        ) AS "usageRowCount",
-        (
-          SELECT COALESCE(SUM(${goatTaskModelUsage.totalCostUsdMicros}), 0)
-          FROM ${goatTaskModelUsage}
-          WHERE ${goatTaskModelUsage.taskId} = ${task.id}
-            AND ${goatTaskModelUsage.userWorkosId} = ${task.userWorkosId}
-        ) + (
-          SELECT COALESCE(SUM(${goatTaskToolUsage.totalCostUsdMicros}), 0)
-          FROM ${goatTaskToolUsage}
-          WHERE ${goatTaskToolUsage.taskId} = ${task.id}
-            AND ${goatTaskToolUsage.userWorkosId} = ${task.userWorkosId}
-        ) + (
-          SELECT COALESCE(SUM(${goatTaskSandboxUsage.totalCostUsdMicros}), 0)
-          FROM ${goatTaskSandboxUsage}
-          WHERE ${goatTaskSandboxUsage.taskId} = ${task.id}
-            AND ${goatTaskSandboxUsage.userWorkosId} = ${task.userWorkosId}
-        ) AS "totalCostUsdMicros"
-    `),
+    await getDb().execute(
+      task.sessionId
+        ? sql`
+            SELECT
+              NULL AS "runStartedAt",
+              NULL AS "runCompletedAt",
+              (
+                SELECT SUM(
+                  CASE
+                    WHEN jsonb_typeof(message.debug_trace->'durationMs') = 'number'
+                      THEN (message.debug_trace->>'durationMs')::bigint
+                    ELSE NULL
+                  END
+                )
+                FROM goat.chat_messages AS message
+                WHERE message.session_id = ${task.sessionId}
+                  AND message.role = 'assistant'
+              ) AS "runDurationMs",
+              (
+                SELECT COUNT(*)
+                FROM goat.credit_ledger AS ledger
+                WHERE ledger.chat_session_id = ${task.sessionId}
+                  AND ledger.user_workos_id = ${task.userWorkosId}
+                  AND ledger.amount_usd_micros < 0
+              ) AS "usageRowCount",
+              (
+                SELECT COALESCE(SUM(-ledger.amount_usd_micros), 0)
+                FROM goat.credit_ledger AS ledger
+                WHERE ledger.chat_session_id = ${task.sessionId}
+                  AND ledger.user_workos_id = ${task.userWorkosId}
+                  AND ledger.amount_usd_micros < 0
+              ) AS "totalCostUsdMicros"
+          `
+        : sql`
+            SELECT
+              (
+                SELECT MIN(${goatTaskMessages.createdAt})
+                FROM ${goatTaskMessages}
+                WHERE ${goatTaskMessages.taskId} = ${task.id}
+                  AND ${goatTaskMessages.userWorkosId} = ${task.userWorkosId}
+                  AND ${goatTaskMessages.role} <> 'user'
+              ) AS "runStartedAt",
+              (
+                SELECT MAX(${goatTaskMessages.completedAt})
+                FROM ${goatTaskMessages}
+                WHERE ${goatTaskMessages.taskId} = ${task.id}
+                  AND ${goatTaskMessages.userWorkosId} = ${task.userWorkosId}
+              ) AS "runCompletedAt",
+              NULL AS "runDurationMs",
+              (
+                SELECT COUNT(*) FROM ${goatTaskModelUsage}
+                WHERE ${goatTaskModelUsage.taskId} = ${task.id}
+                  AND ${goatTaskModelUsage.userWorkosId} = ${task.userWorkosId}
+              ) + (
+                SELECT COUNT(*) FROM ${goatTaskToolUsage}
+                WHERE ${goatTaskToolUsage.taskId} = ${task.id}
+                  AND ${goatTaskToolUsage.userWorkosId} = ${task.userWorkosId}
+              ) + (
+                SELECT COUNT(*) FROM ${goatTaskSandboxUsage}
+                WHERE ${goatTaskSandboxUsage.taskId} = ${task.id}
+                  AND ${goatTaskSandboxUsage.userWorkosId} = ${task.userWorkosId}
+              ) AS "usageRowCount",
+              (
+                SELECT COALESCE(SUM(${goatTaskModelUsage.totalCostUsdMicros}), 0)
+                FROM ${goatTaskModelUsage}
+                WHERE ${goatTaskModelUsage.taskId} = ${task.id}
+                  AND ${goatTaskModelUsage.userWorkosId} = ${task.userWorkosId}
+              ) + (
+                SELECT COALESCE(SUM(${goatTaskToolUsage.totalCostUsdMicros}), 0)
+                FROM ${goatTaskToolUsage}
+                WHERE ${goatTaskToolUsage.taskId} = ${task.id}
+                  AND ${goatTaskToolUsage.userWorkosId} = ${task.userWorkosId}
+              ) + (
+                SELECT COALESCE(SUM(${goatTaskSandboxUsage.totalCostUsdMicros}), 0)
+                FROM ${goatTaskSandboxUsage}
+                WHERE ${goatTaskSandboxUsage.taskId} = ${task.id}
+                  AND ${goatTaskSandboxUsage.userWorkosId} = ${task.userWorkosId}
+              ) AS "totalCostUsdMicros"
+          `,
+    ),
   );
 
   if (!aggregate) {
@@ -143,10 +184,14 @@ export async function getCurrentUserGoatTaskSummary(taskId: string) {
   const completedAt = aggregate.runCompletedAt
     ? new Date(aggregate.runCompletedAt).getTime()
     : Number.NaN;
+  const recordedDurationMs =
+    aggregate.runDurationMs === null ? Number.NaN : Number(aggregate.runDurationMs);
   const durationMs =
-    terminal && Number.isFinite(startedAt) && Number.isFinite(completedAt)
-      ? Math.max(0, completedAt - startedAt)
-      : null;
+    terminal && Number.isFinite(recordedDurationMs)
+      ? Math.max(0, recordedDurationMs)
+      : terminal && Number.isFinite(startedAt) && Number.isFinite(completedAt)
+        ? Math.max(0, completedAt - startedAt)
+        : null;
   const usageRowCount = Number(aggregate.usageRowCount);
   const totalCostUsdMicros = Number(aggregate.totalCostUsdMicros);
 
@@ -265,6 +310,21 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
 
   const { user } = await currentGoatUser();
   const now = new Date();
+  const [sessionTask] = await getDb()
+    .select({ sessionId: goatTasks.sessionId })
+    .from(goatTasks)
+    .where(and(eq(goatTasks.id, taskId), eq(goatTasks.userWorkosId, user.workosUserId)))
+    .limit(1);
+  if (sessionTask?.sessionId) {
+    const result = await cancelSessionBackedGoatTask({
+      taskId,
+      userWorkosId: user.workosUserId,
+      sessionId: sessionTask.sessionId,
+      now,
+    });
+    return result ? { ok: true, error: null } : { ok: false, error: "Could not stop task." };
+  }
+
   const result = await getDb().execute(sql`
     WITH canceled_task AS (
       UPDATE goat.tasks AS task
@@ -360,6 +420,35 @@ export async function continueGoatTaskAction(
   }
 
   const { user } = await currentGoatUser();
+  const [task] = await getDb()
+    .select({ sessionId: goatTasks.sessionId })
+    .from(goatTasks)
+    .where(and(eq(goatTasks.id, normalizedTaskId), eq(goatTasks.userWorkosId, user.workosUserId)))
+    .limit(1);
+  if (task?.sessionId) {
+    const continued = await enqueueGoatTaskSessionTurn({
+      taskId: normalizedTaskId,
+      userWorkosId: user.workosUserId,
+      prompt: content,
+      clientMessageId,
+    });
+    if (!continued) {
+      return {
+        ok: false,
+        error: "Wait for this task to finish before sending another message.",
+        messageId: null,
+      };
+    }
+    await triggerGoatCodexChatWake().catch((error) => {
+      console.warn("Goat durable task wake failed; the turn remains queued for polling.", {
+        event: "goat.durable_task_continued_wake_failed",
+        task_id: normalizedTaskId,
+        error,
+      });
+    });
+    return { ok: true, error: null, messageId: continued.id };
+  }
+
   const messageId = safeGoatTaskMessageId(clientMessageId) ?? `goat_task_msg_${randomUUID()}`;
   const now = new Date();
   const result = await getDb().execute(sql`
@@ -479,6 +568,8 @@ export async function continueGoatTaskAction(
 
 export async function createGoatTaskForUser(input: {
   userWorkosId: string;
+  workspaceId?: string | null;
+  brainRef?: string | null;
   prompt: string;
   model: AgentModelId;
   name?: string;
@@ -513,6 +604,45 @@ export async function createGoatTaskForUser(input: {
     maxModelSteps: 16,
     resultMode: "assistant_final",
   };
+  if (goatTaskSessionExecutionEnabled()) {
+    let task: GoatTask;
+    try {
+      task = await createGoatTaskSession({
+        userWorkosId: input.userWorkosId,
+        workspaceId: input.workspaceId ?? null,
+        brainRef: input.brainRef ?? null,
+        prompt: input.prompt,
+        name,
+        harnessSpec,
+        scheduleId: input.scheduleId ?? null,
+        scheduledFor: input.scheduledFor ?? null,
+        workflowId: input.workflowId ?? null,
+        workflowBrainRef: input.workflowBrainRef ?? null,
+        now,
+      });
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== "Unable to create Goat task session.") {
+        throw error;
+      }
+      const currentTaskSpawningState = await loadGoatTaskSpawningState(input.userWorkosId);
+      if (currentTaskSpawningState === null) {
+        throw new Error("Unable to create a Goat task for an unknown user.");
+      }
+      if (!currentTaskSpawningState) {
+        throw new Error(TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE);
+      }
+      throw error;
+    }
+    await triggerGoatCodexChatWake().catch((error) => {
+      console.warn("Goat durable task wake failed; the turn remains queued for polling.", {
+        event: "goat.durable_task_created_wake_failed",
+        task_id: task.id,
+        error,
+      });
+    });
+    return task;
+  }
+
   const modelMessage = { role: "user", content: input.prompt };
   const task = rowsFromExecute<GoatTaskRow>(
     await getDb().execute(sql`
@@ -589,6 +719,7 @@ export async function createGoatTaskForUser(input: {
         task.user_workos_id AS "userWorkosId",
         task.prompt AS "prompt",
         task.model AS "model",
+        task.session_id AS "sessionId",
         task.schedule_id AS "scheduleId",
         task.scheduled_for AS "scheduledFor",
         task.workflow_id AS "workflowId",
@@ -641,6 +772,86 @@ export async function createGoatTaskForUser(input: {
   }
 
   return task;
+}
+
+async function cancelSessionBackedGoatTask(input: {
+  taskId: string;
+  userWorkosId: string;
+  sessionId: string;
+  now: Date;
+}) {
+  const result = await getDb().execute(sql`
+    WITH canceled_task AS (
+      UPDATE goat.tasks AS task
+      SET status = 'canceled',
+          stage = 'canceled',
+          error = 'Stopped by user.',
+          lease_id = NULL,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          updated_at = ${input.now}
+      WHERE task.id = ${input.taskId}
+        AND task.user_workos_id = ${input.userWorkosId}
+        AND task.session_id = ${input.sessionId}
+        AND task.status IN ('queued', 'running')
+      RETURNING task.id
+    ),
+    requested_running AS (
+      UPDATE goat.codex_chat_turns AS turn
+      SET interrupt_requested_at = COALESCE(turn.interrupt_requested_at, ${input.now}),
+          updated_at = ${input.now}
+      WHERE turn.chat_session_id = ${input.sessionId}
+        AND turn.user_workos_id = ${input.userWorkosId}
+        AND turn.status = 'running'
+        AND EXISTS (SELECT 1 FROM canceled_task)
+      RETURNING turn.id
+    ),
+    canceled_queued AS (
+      UPDATE goat.codex_chat_turns AS turn
+      SET status = 'interrupted',
+          completed_at = ${input.now},
+          updated_at = ${input.now}
+      WHERE turn.chat_session_id = ${input.sessionId}
+        AND turn.user_workos_id = ${input.userWorkosId}
+        AND turn.status = 'queued'
+        AND EXISTS (SELECT 1 FROM canceled_task)
+      RETURNING turn.assistant_message_id
+    ),
+    aborted_messages AS (
+      UPDATE goat.chat_messages AS message
+      SET debug_trace = COALESCE(
+            message.debug_trace,
+            jsonb_build_object('schemaVersion', 'goat.codex_chat.debug.v1')
+          ) || jsonb_build_object('aborted', true),
+          updated_at = ${input.now}
+      FROM canceled_queued AS turn
+      WHERE message.id = turn.assistant_message_id
+      RETURNING message.id
+    ),
+    settled_runtime AS (
+      UPDATE goat.codex_chat_sessions AS runtime
+      SET status = 'interrupted',
+          active_turn_id = NULL,
+          error = NULL,
+          updated_at = ${input.now}
+      WHERE runtime.chat_session_id = ${input.sessionId}
+        AND runtime.user_workos_id = ${input.userWorkosId}
+        AND NOT EXISTS (
+          SELECT 1
+          FROM goat.codex_chat_turns AS running
+          WHERE running.codex_chat_session_id = runtime.id
+            AND running.status = 'running'
+        )
+        AND EXISTS (SELECT 1 FROM canceled_task)
+      RETURNING runtime.id
+    )
+    SELECT task.id
+    FROM canceled_task AS task
+    CROSS JOIN (SELECT count(*) FROM requested_running) AS running_requests
+    CROSS JOIN (SELECT count(*) FROM aborted_messages) AS message_updates
+    CROSS JOIN (SELECT count(*) FROM settled_runtime) AS runtime_updates
+  `);
+  return rowsFromExecute<{ id: string }>(result).length > 0;
 }
 
 function safeGoatTaskMessageId(value: string | null | undefined) {

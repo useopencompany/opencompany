@@ -281,6 +281,7 @@ export type GoatTaskView = {
   name: string;
   prompt: string;
   model: string;
+  sessionId?: string | null;
   scheduleId?: string | null;
   scheduledFor?: string | null;
   workflowId?: string | null;
@@ -299,6 +300,7 @@ export type GoatTaskConversation = {
   taskId: string;
   status: GoatTaskStatus;
   startedAtMs: number;
+  sessionBacked?: boolean;
 };
 
 type GoatHomeTaskItem =
@@ -1236,7 +1238,9 @@ export function GoatSurface({
     }
 
     if (activeTaskConversation) {
-      const messageId = `goat_task_msg_${crypto.randomUUID()}`;
+      const messageId = activeTaskConversation.sessionBacked
+        ? `goat_chat_msg_${crypto.randomUUID()}`
+        : `goat_task_msg_${crypto.randomUUID()}`;
       const optimisticMessage = {
         id: messageId,
         role: "user",
@@ -2137,7 +2141,7 @@ export function GoatSurface({
           )}
 
           {mode === "chat" &&
-          !activeTaskConversation &&
+          (!activeTaskConversation || activeTaskConversation.sessionBacked) &&
           chatSessionId &&
           persistedChatSessionId === chatSessionId ? (
             <LiveChatMessages sessionId={chatSessionId} onChange={setLiveChat} />
@@ -4985,6 +4989,7 @@ function taskRowToView(row: GoatTaskRow): GoatTaskView {
     name: row.name,
     prompt: row.prompt,
     model: row.model,
+    sessionId: row.session_id,
     scheduleId: row.schedule_id,
     scheduledFor: row.scheduled_for,
     status: row.status,

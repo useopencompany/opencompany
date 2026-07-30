@@ -224,6 +224,7 @@ function createStore({ messages = [] }: { messages?: GoatStoredChatMessage[] } =
     title: "Architecture review",
     model: DEFAULT_GOAT_MODEL,
     engine: "opencompany",
+    kind: "chat",
     closedAt: null,
     pinnedAt: null,
     createdAt,
