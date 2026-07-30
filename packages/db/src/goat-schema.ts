@@ -312,6 +312,7 @@ export type GoatHarnessSpec = {
 
 export type GoatWorkspaceRole = "admin" | "member";
 export type GoatMcpClient = "claude" | "chatgpt" | "cursor";
+export type GoatTaskViewMode = "board" | "list";
 export type GoatWorkspacePlan = "free" | "pro";
 export type GoatStripeSubscriptionStatus =
   | "incomplete"
@@ -565,6 +566,8 @@ export const goatUsers = goat.table(
     taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
+    // Board vs list layout for the Tasks page; persisted per user across devices.
+    taskViewMode: text("task_view_mode").notNull().default("board").$type<GoatTaskViewMode>(),
     preferredMcpClient: text("preferred_mcp_client").$type<GoatMcpClient>(),
     // Set exactly once, when this user first completes a successful Brain query over MCP.
     mcpSetupCompletedAt: timestamp("mcp_setup_completed_at", { withTimezone: true }),
@@ -577,6 +580,10 @@ export const goatUsers = goat.table(
     preferredMcpClientCheck: check(
       "goat_users_preferred_mcp_client_check",
       sql`${table.preferredMcpClient} IS NULL OR ${table.preferredMcpClient} IN ('claude', 'chatgpt', 'cursor')`,
+    ),
+    taskViewModeCheck: check(
+      "goat_users_task_view_mode_check",
+      sql`${table.taskViewMode} IN ('board', 'list')`,
     ),
   }),
 );

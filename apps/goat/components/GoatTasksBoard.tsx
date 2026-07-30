@@ -1,5 +1,6 @@
 "use client";
 
+import type { GoatTaskViewMode } from "@opencompany/db/goat-schema";
 import {
   Dialog,
   DialogContent,
@@ -14,9 +15,9 @@ import {
   SelectValue,
 } from "@opencompany/ui/components/select";
 import { toast } from "@opencompany/ui/components/sonner";
-import { Archive, ArrowUpRight, ListTodo, Loader2 } from "lucide-react";
+import { Archive, ArrowUpRight, LayoutGrid, ListTodo, Loader2, Rows3 } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useMemo, useState, useTransition } from "react";
+import { type KeyboardEvent, type ReactNode, useMemo, useState, useTransition } from "react";
 import { taskRowToView, useGoatAppData } from "@/components/GoatAppDataProvider";
 import {
   formatGoatRelativeTime,
@@ -41,6 +42,7 @@ import {
 } from "@/lib/task-display";
 import { archiveGoatTaskAction } from "@/lib/tasks";
 import { useGoatTaskSummary } from "@/lib/use-task-summary";
+import { updateGoatTaskViewModeAction } from "@/lib/user-preferences";
 
 const TERMINAL_TASK_STATUSES = new Set<GoatTaskView["status"]>(["succeeded", "failed", "canceled"]);
 const CAPPED_TASK_BOARD_COLUMNS = new Set<GoatTaskBoardColumn>(["done", "canceled"]);
@@ -72,11 +74,32 @@ function isGoatTaskTimeRange(value: unknown): value is GoatTaskTimeRange {
   return TASK_TIME_RANGE_OPTIONS.some((option) => option === value);
 }
 
-export function GoatTasksBoardRoute({ workflowNames }: { workflowNames: Record<string, string> }) {
+export function GoatTasksBoardRoute({
+  workflowNames,
+  initialViewMode = "board",
+}: {
+  workflowNames: Record<string, string>;
+  initialViewMode?: GoatTaskViewMode;
+}) {
   const { featureFlags, taskRows, tasksReady } = useGoatAppData();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<GoatTaskTimeRange>("7d");
+  const [viewMode, setViewModeState] = useState<GoatTaskViewMode>(initialViewMode);
+  const [, startViewModeTransition] = useTransition();
   const [nowMs] = useState(() => Date.now());
+
+  function setViewMode(mode: GoatTaskViewMode) {
+    if (mode === viewMode) return;
+    const previous = viewMode;
+    setViewModeState(mode);
+    startViewModeTransition(async () => {
+      const result = await updateGoatTaskViewModeAction(mode);
+      if (!result.ok) {
+        setViewModeState(previous);
+        toast.error("Could not save your view preference.");
+      }
+    });
+  }
   const { activeTasks, columns } = useMemo(() => {
     const liveTasks = taskRows.map(taskRowToView);
     const nonArchived = liveTasks
@@ -122,26 +145,29 @@ export function GoatTasksBoardRoute({ workflowNames }: { workflowNames: Record<s
                 Background runs from workflows, schedules, and chat.
               </p>
             </div>
-            <Select
-              value={timeRange}
-              onValueChange={(value) => {
-                if (isGoatTaskTimeRange(value)) setTimeRange(value);
-              }}
-            >
-              <SelectTrigger
-                aria-label="Filter tasks by time range"
-                className="mt-1 h-7 w-[132px] shrink-0 border-border-subtle bg-surface px-2 text-[11.5px] text-ink shadow-none"
+            <div className="mt-1 flex shrink-0 items-center gap-2">
+              <TaskViewModeToggle value={viewMode} onChange={setViewMode} />
+              <Select
+                value={timeRange}
+                onValueChange={(value) => {
+                  if (isGoatTaskTimeRange(value)) setTimeRange(value);
+                }}
               >
-                <SelectValue>{TASK_TIME_RANGE_LABELS[timeRange]}</SelectValue>
-              </SelectTrigger>
-              <SelectContent className="min-w-[140px]">
-                {TASK_TIME_RANGE_OPTIONS.map((option) => (
-                  <SelectItem key={option} value={option} className="text-[12px]">
-                    {TASK_TIME_RANGE_LABELS[option]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                <SelectTrigger
+                  aria-label="Filter tasks by time range"
+                  className="h-7 w-[132px] shrink-0 border-border-subtle bg-surface px-2 text-[11.5px] text-ink shadow-none"
+                >
+                  <SelectValue>{TASK_TIME_RANGE_LABELS[timeRange]}</SelectValue>
+                </SelectTrigger>
+                <SelectContent className="min-w-[140px]">
+                  {TASK_TIME_RANGE_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={option} className="text-[12px]">
+                      {TASK_TIME_RANGE_LABELS[option]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </header>
 
           {activeTasks.length === 0 ? (
@@ -149,6 +175,12 @@ export function GoatTasksBoardRoute({ workflowNames }: { workflowNames: Record<s
               icon={ListTodo}
               title="No tasks yet"
               description="Fire a workflow with # in chat, start an ad-hoc task, or set up a scheduled run — each run shows up here."
+            />
+          ) : viewMode === "list" ? (
+            <TaskListView
+              columns={columns}
+              workflowNames={workflowNames}
+              onSelectTask={setSelectedTaskId}
             />
           ) : (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -211,6 +243,187 @@ export function GoatTasksBoardSkeleton() {
         </div>
       </div>
     </main>
+  );
+}
+
+const TASK_VIEW_MODE_OPTIONS = [
+  { value: "board", label: "Board", icon: LayoutGrid },
+  { value: "list", label: "List", icon: Rows3 },
+] as const satisfies ReadonlyArray<{
+  value: GoatTaskViewMode;
+  label: string;
+  icon: typeof LayoutGrid;
+}>;
+
+function TaskViewModeToggle({
+  value,
+  onChange,
+}: {
+  value: GoatTaskViewMode;
+  onChange: (mode: GoatTaskViewMode) => void;
+}) {
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    event.preventDefault();
+    const currentIndex = TASK_VIEW_MODE_OPTIONS.findIndex((option) => option.value === value);
+    const delta = event.key === "ArrowRight" ? 1 : -1;
+    const nextIndex =
+      (currentIndex + delta + TASK_VIEW_MODE_OPTIONS.length) % TASK_VIEW_MODE_OPTIONS.length;
+    const next = TASK_VIEW_MODE_OPTIONS[nextIndex];
+    if (next) onChange(next.value);
+  }
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Task view"
+      onKeyDown={handleKeyDown}
+      className="inline-flex h-7 w-fit shrink-0 rounded-lg border border-border-subtle bg-surface p-0.5"
+    >
+      {TASK_VIEW_MODE_OPTIONS.map((option) => {
+        const Icon = option.icon;
+        const selected = value === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={option.label}
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onChange(option.value)}
+            className={`inline-flex h-6 w-7 items-center justify-center rounded-md transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+              selected
+                ? "bg-surface-active text-ink shadow-[0_1px_1px_rgba(15,15,15,0.05)]"
+                : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+            }`}
+          >
+            <Icon size={13} strokeWidth={1.9} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function TaskListView({
+  columns,
+  workflowNames,
+  onSelectTask,
+}: {
+  columns: Record<GoatTaskBoardColumn, GoatTaskView[]>;
+  workflowNames: Record<string, string>;
+  onSelectTask: (taskId: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-6">
+      {GOAT_TASK_BOARD_COLUMNS.map((column) => (
+        <TaskListSection
+          key={column}
+          column={column}
+          tasks={columns[column]}
+          workflowNames={workflowNames}
+          onSelectTask={onSelectTask}
+        />
+      ))}
+    </div>
+  );
+}
+
+function TaskListSection({
+  column,
+  tasks,
+  workflowNames,
+  onSelectTask,
+}: {
+  column: GoatTaskBoardColumn;
+  tasks: GoatTaskView[];
+  workflowNames: Record<string, string>;
+  onSelectTask: (taskId: string) => void;
+}) {
+  const label = GOAT_TASK_BOARD_COLUMN_COPY[column];
+  const [expanded, setExpanded] = useState(false);
+  const capped = CAPPED_TASK_BOARD_COLUMNS.has(column) && !expanded;
+  const visibleTasks = capped ? tasks.slice(0, GOAT_TASK_BOARD_COLUMN_CAP) : tasks;
+  const remaining = tasks.length - visibleTasks.length;
+
+  if (tasks.length === 0) return null;
+
+  return (
+    <section aria-label={label} className="flex min-w-0 flex-col">
+      <header className="flex items-center gap-2 border-b border-border px-1 pb-2">
+        <h2 className="text-[12px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+          {label}
+        </h2>
+        <span className="min-w-5 rounded-full bg-surface-muted px-1.5 py-0.5 text-center text-[10.5px] font-medium tabular-nums text-ink-subtle">
+          {tasks.length}
+        </span>
+      </header>
+      <ul className="flex flex-col divide-y divide-border-subtle">
+        {visibleTasks.map((task) => (
+          <li key={task.id}>
+            <TaskListRow
+              task={task}
+              sourceLabel={taskSourceLabel(task, workflowNames)}
+              onSelect={() => onSelectTask(task.id)}
+            />
+          </li>
+        ))}
+      </ul>
+      {remaining > 0 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="mt-2 flex min-h-9 w-full items-center justify-center rounded-lg border border-dashed border-border px-4 text-center text-[11.5px] font-medium leading-5 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          Show {remaining} more
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+function TaskListRow({
+  task,
+  sourceLabel,
+  onSelect,
+}: {
+  task: GoatTaskView;
+  sourceLabel: string;
+  onSelect: () => void;
+}) {
+  const href = `/tasks/${encodeURIComponent(task.displayId)}`;
+  return (
+    <Link
+      href={href}
+      prefetch
+      onClick={(event) => {
+        if (
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        ) {
+          return;
+        }
+        event.preventDefault();
+        onSelect();
+      }}
+      aria-label={`Open ${toGoatTaskTitle(task.name)}`}
+      className="group flex min-w-0 items-center gap-3 px-1.5 py-2.5 text-left transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      <TaskStatusDot task={task} />
+      <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-tight text-ink">
+        {toGoatTaskTitle(task.name)}
+      </span>
+      <span className="hidden shrink-0 truncate rounded-full bg-surface-muted px-2 py-0.5 text-[10.5px] font-medium leading-4 text-ink-muted sm:inline-block sm:max-w-[160px]">
+        {sourceLabel}
+      </span>
+      <span className="w-16 shrink-0 text-right text-[11px] leading-4 text-ink-subtle">
+        {formatGoatRelativeTime(task.updatedAt)}
+      </span>
+    </Link>
   );
 }
 
