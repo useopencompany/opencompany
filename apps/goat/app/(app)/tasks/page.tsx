@@ -13,5 +13,10 @@ export default async function TasksPage() {
   const workflowNames = Object.fromEntries(
     workflows.map((workflow) => [workflow.slug, workflow.name]),
   );
-  return <GoatTasksBoardRoute workflowNames={workflowNames} />;
+  return (
+    <GoatTasksBoardRoute
+      workflowNames={workflowNames}
+      initialViewMode={context.user.taskViewMode}
+    />
+  );
 }

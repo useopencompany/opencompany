@@ -58,6 +58,16 @@ vi.mock("@/lib/tasks", () => ({
   archiveGoatTaskAction: archiveTaskMock,
 }));
 
+const updateTaskViewModeMock = vi.hoisted(() =>
+  vi.fn(
+    async (mode: "board" | "list") => ({ ok: true, mode }) as { ok: boolean; mode: typeof mode },
+  ),
+);
+
+vi.mock("@/lib/user-preferences", () => ({
+  updateGoatTaskViewModeAction: updateTaskViewModeMock,
+}));
+
 vi.mock("@/lib/use-task-summary", () => ({
   useGoatTaskSummary: () => summaryMock.value,
 }));
@@ -339,6 +349,44 @@ describe("GoatTasksBoardRoute", () => {
     render(<GoatTasksBoardRoute workflowNames={{}} />);
 
     expect(screen.getByText("Tasks & Workflows is a beta feature")).toBeInTheDocument();
+  });
+
+  it("switches to a grouped list view and persists the choice per user", async () => {
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({
+        id: "queued",
+        name: "Research the market",
+        status: "queued",
+      }),
+    ];
+
+    render(<GoatTasksBoardRoute workflowNames={{}} />);
+
+    expect(screen.getByRole("radio", { name: "Board" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("radio", { name: "List" }));
+
+    expect(screen.getByRole("radio", { name: "List" })).toHaveAttribute("aria-checked", "true");
+    expect(
+      within(screen.getByRole("region", { name: "In progress" })).getByText("Research the market"),
+    ).toBeInTheDocument();
+    expect(updateTaskViewModeMock).toHaveBeenCalledWith("list");
+  });
+
+  it("reverts the view toggle if persisting the preference fails", async () => {
+    updateTaskViewModeMock.mockResolvedValueOnce({ ok: false, mode: "board" });
+    const user = userEvent.setup();
+    appDataMock.taskRows = [
+      taskRow({ id: "queued", name: "Research the market", status: "queued" }),
+    ];
+
+    render(<GoatTasksBoardRoute workflowNames={{}} />);
+
+    await user.click(screen.getByRole("radio", { name: "List" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "Board" })).toHaveAttribute("aria-checked", "true"),
+    );
   });
 });
 

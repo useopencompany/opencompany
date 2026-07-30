@@ -2,7 +2,7 @@
 
 import { normalizeScheduleTimezone } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import { goatUsers } from "@opencompany/db/goat-schema";
+import { type GoatTaskViewMode, goatUsers } from "@opencompany/db/goat-schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
@@ -40,6 +40,20 @@ export async function updateGoatTaskSpawningAction(enabled: boolean) {
     ok: Boolean(updated),
     enabled: updated?.taskSpawningEnabled ?? user.taskSpawningEnabled,
   } as const;
+}
+
+export async function updateGoatTaskViewModeAction(mode: GoatTaskViewMode) {
+  const { user } = await currentGoatUser();
+  if (mode === user.taskViewMode) return { ok: true, mode } as const;
+
+  const [updated] = await getDb()
+    .update(goatUsers)
+    .set({ taskViewMode: mode, updatedAt: new Date() })
+    .where(eq(goatUsers.workosUserId, user.workosUserId))
+    .returning({ taskViewMode: goatUsers.taskViewMode });
+
+  revalidatePath("/tasks");
+  return { ok: Boolean(updated), mode: updated?.taskViewMode ?? user.taskViewMode } as const;
 }
 
 export async function updateGoatAutoModelRoutingAction(enabled: boolean) {
