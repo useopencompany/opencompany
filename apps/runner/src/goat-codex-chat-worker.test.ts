@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import {
   GoatCodexChatHandoffError,
+  GoatCodexChatLeaseLostError,
   GoatCodexChatRetryableInfrastructureError,
 } from "./goat-codex-chat-errors";
 import {
@@ -29,6 +30,7 @@ const dbMock = vi.hoisted(() => {
 
 const chatMocks = vi.hoisted(() => ({
   runGoatCodexChatTurn: vi.fn(),
+  runGoatOpenCompanyChatTurn: vi.fn(),
 }));
 
 const telemetry = vi.hoisted(() => ({ recordGoatHistogram: vi.fn() }));
@@ -54,6 +56,10 @@ vi.mock("./db", () => ({
 
 vi.mock("./goat-codex-chat", () => ({
   runGoatCodexChatTurn: chatMocks.runGoatCodexChatTurn,
+}));
+
+vi.mock("./goat-opencompany-chat", () => ({
+  runGoatOpenCompanyChatTurn: chatMocks.runGoatOpenCompanyChatTurn,
 }));
 
 vi.mock("./goat-codex-chat-events", () => ({
@@ -200,6 +206,7 @@ describe("terminal Goat Codex sandbox reconciliation", () => {
 
     await expect(sweepTerminalGoatCodexChatSandboxes({ idleTimeoutMs: 300_000 })).resolves.toBe(1);
 
+    expect(sqlText(dbMock.execute.mock.calls[0]?.[0])).toContain("sandbox_id IS NOT NULL");
     expect(sandboxMocks.armSandboxIdleTimeoutById).toHaveBeenCalledWith("sbx_1", 300_000);
     expect(sqlText(dbMock.execute.mock.calls[1]?.[0])).toContain("sandbox_timeout_armed_at");
   });
@@ -233,6 +240,7 @@ describe("runClaimedTurn", () => {
     sessionRows.length = 0;
     sessionRows.push(session());
     chatMocks.runGoatCodexChatTurn.mockResolvedValue(undefined);
+    chatMocks.runGoatOpenCompanyChatTurn.mockResolvedValue(undefined);
     dbMock.execute.mockResolvedValue({ rows: [{ id: "updated" }] });
   });
 
@@ -283,6 +291,60 @@ describe("runClaimedTurn", () => {
       5_000,
       expect.any(Object),
     );
+  });
+
+  it("dispatches OpenCompany turns without coding-engine recovery state", async () => {
+    sessionRows.length = 0;
+    sessionRows.push(session({ engine: "opencompany", model: "anthropic/claude-sonnet-5" }));
+
+    await runClaimedTurn(
+      turn({
+        attempts: 2,
+        codexTurnId: "legacy-value-that-must-be-ignored",
+        engineRecoveryRequired: true,
+      }),
+      env(),
+    );
+
+    expect(chatMocks.runGoatOpenCompanyChatTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: expect.objectContaining({ engine: "opencompany" }),
+        turn: expect.objectContaining({ attempts: 2 }),
+      }),
+    );
+    expect(chatMocks.runGoatOpenCompanyChatTurn.mock.calls[0]?.[0]).not.toHaveProperty("recovery");
+    expect(chatMocks.runGoatCodexChatTurn).not.toHaveBeenCalled();
+  });
+
+  it("propagates heartbeat lease loss into an active OpenCompany stream", async () => {
+    vi.useFakeTimers();
+    sessionRows.length = 0;
+    sessionRows.push(session({ engine: "opencompany", model: "anthropic/claude-sonnet-5" }));
+    dbMock.execute.mockImplementation(async (query) =>
+      sqlText(query).includes("SET lease_expires_at")
+        ? { rows: [] }
+        : { rows: [{ id: "updated" }] },
+    );
+    chatMocks.runGoatOpenCompanyChatTurn.mockImplementationOnce(
+      (input) =>
+        new Promise<"settled">((_resolve, reject) => {
+          const timer = setInterval(() => {
+            const error = input.shouldAbort();
+            if (!error) return;
+            clearInterval(timer);
+            reject(error);
+          }, 10);
+        }),
+    );
+
+    try {
+      const running = runClaimedTurn(turn(), env({ jobLeaseTtlMs: 15_000 }));
+      const outcome = running.catch((error) => error);
+      await vi.advanceTimersByTimeAsync(5_020);
+      await expect(outcome).resolves.toBeInstanceOf(GoatCodexChatLeaseLostError);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("recovers a persisted engine turn across the migration rollout", async () => {

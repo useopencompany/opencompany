@@ -1492,6 +1492,71 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("starts a typed #task request as an ad-hoc background task", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/skills") return Response.json({ skills: [] });
+      if (url === "/api/workflows") return Response.json({ workflows: [] });
+      if (url === "/api/tasks" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_1",
+              displayId: "TASK-1",
+              name: "Research competitors",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_1",
+          title: "Existing chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [],
+        }}
+        userWorkosId="user_1"
+        taskSpawningEnabled
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "#task research our three closest competitors");
+
+    expect(screen.getByTestId("selected-task-mention")).toHaveTextContent("#task");
+    expect(screen.getByTestId("ad-hoc-task-hint")).toHaveTextContent(
+      "Sending starts this as an ad-hoc background task.",
+    );
+    await user.click(screen.getByRole("button", { name: "Start task" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/tasks",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/tasks" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      description: "#task research our three closest competitors",
+      model: DEFAULT_GOAT_MODEL,
+    });
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+    expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("does not load or offer workflow mentions when Tasks & Workflows is disabled", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -1524,6 +1589,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/workflows")).toBe(false);
     expect(screen.queryByRole("option", { name: /Morning Test/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /#task/i })).not.toBeInTheDocument();
   });
 
   it("does not show Codex mention options when Codex is not connected", async () => {

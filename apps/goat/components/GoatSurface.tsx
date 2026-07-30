@@ -95,6 +95,12 @@ import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/T
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useGoatCreditBalance } from "@/components/chat/useGoatCreditBalance";
 import { useHydrated } from "@/components/useHydrated";
+import {
+  descriptionFromGoatAdHocTaskPrompt,
+  GOAT_AD_HOC_TASK_ID,
+  GOAT_AD_HOC_TASK_TOKEN,
+  hasGoatAdHocTaskToken,
+} from "@/lib/ad-hoc-task";
 import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import {
@@ -183,12 +189,18 @@ type ActiveMentionToken = {
   start: number;
   end: number;
   query: string;
-  // "@" opens engine/skill mentions; "#" opens workflow mentions (send spawns a task).
+  // "@" opens engine/skill mentions; "#" opens task/workflow mentions.
   sigil: "@" | "#";
 };
 
 type MentionOption =
   | { kind: "engine"; token: "@codex" | "@claude"; label: string; mention: GoatChatMention }
+  | {
+      kind: "task";
+      token: typeof GOAT_AD_HOC_TASK_TOKEN;
+      label: string;
+      description: string;
+    }
   | {
       kind: "skill";
       token: string;
@@ -440,7 +452,7 @@ export function GoatSurface({
   );
   const [engineRunning, setEngineRunning] = useState(false);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
-  const [workflowTaskSubmitting, setWorkflowTaskSubmitting] = useState(false);
+  const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
   const [taskMessageSubmitting, setTaskMessageSubmitting] = useState(false);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
@@ -705,6 +717,7 @@ export function GoatSurface({
       creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
   );
   const workflowMentionsEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
+  const selectedAdHocTask = workflowMentionsEnabled && hasGoatAdHocTaskToken(input);
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
@@ -723,7 +736,9 @@ export function GoatSurface({
     skillsEnabled: !activeTaskConversation,
     workflowsEnabled: workflowMentionsEnabled,
   });
-  const selectedWorkflowMention = activeSelectedMentions.find(isWorkflowMention) ?? null;
+  const selectedWorkflowMention = selectedAdHocTask
+    ? null
+    : (activeSelectedMentions.find(isWorkflowMention) ?? null);
   const selectedWorkflowName = selectedWorkflowMention
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
@@ -1193,7 +1208,7 @@ export function GoatSurface({
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isAgentWorking || workflowTaskSubmitting) return;
+    if (isAgentWorking || backgroundTaskSubmitting) return;
     if (chatSendBlocked) {
       toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
@@ -1278,6 +1293,48 @@ export function GoatSurface({
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
 
+    if (workflowMentionsEnabled && hasGoatAdHocTaskToken(prompt)) {
+      const description = descriptionFromGoatAdHocTaskPrompt(prompt);
+      if (!description) {
+        toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
+        return;
+      }
+      if (pendingAttachments.length > 0) {
+        toast.error("Attachments are not supported when starting a background task yet.");
+        return;
+      }
+
+      clearError();
+      setInput("");
+      setMentionToken(null);
+      setSelectedMentions([]);
+      setBackgroundTaskSubmitting(true);
+      void startGoatAdHocTask({
+        description: prompt,
+        model: String(chatModel),
+        ...(mentions.some((mention) => mention.kind === "engine" && mention.id === "codex")
+          ? { engine: "codex" }
+          : {}),
+      })
+        .then(({ task }) => {
+          if (!mountedRef.current) return;
+          router.refresh();
+          toast.success(`Started ${task.name} in the background.`);
+        })
+        .catch((error) => {
+          if (!mountedRef.current) return;
+          setInput(prompt);
+          setSelectedMentions(mentions);
+          toast.error(
+            error instanceof Error ? error.message : "Could not start that background task.",
+          );
+        })
+        .finally(() => {
+          if (mountedRef.current) setBackgroundTaskSubmitting(false);
+        });
+      return;
+    }
+
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
       if (pendingAttachments.length > 0) {
@@ -1289,7 +1346,7 @@ export function GoatSurface({
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
-      setWorkflowTaskSubmitting(true);
+      setBackgroundTaskSubmitting(true);
       void startGoatWorkflowTask({
         workflow: workflowMention,
         description: prompt,
@@ -1308,7 +1365,7 @@ export function GoatSurface({
           );
         })
         .finally(() => {
-          if (mountedRef.current) setWorkflowTaskSubmitting(false);
+          if (mountedRef.current) setBackgroundTaskSubmitting(false);
         });
       return;
     }
@@ -1683,7 +1740,7 @@ export function GoatSurface({
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (!isAgentWorking && !workflowTaskSubmitting) formRef.current?.requestSubmit();
+      if (!isAgentWorking && !backgroundTaskSubmitting) formRef.current?.requestSubmit();
     }
   };
 
@@ -1806,6 +1863,11 @@ export function GoatSurface({
     const nextCaret = before.length + option.token.length + 1;
     pendingInputCaretRef.current = nextCaret;
     setInput(nextInput);
+    if (option.kind === "task") {
+      setSelectedMentions((current) => current.filter((mention) => mention.kind !== "workflow"));
+      setMentionToken(null);
+      return;
+    }
     setSelectedMentions((current) => {
       if (option.mention.kind === "engine") {
         return [...current.filter((mention) => mention.kind !== "engine"), option.mention];
@@ -1851,6 +1913,7 @@ export function GoatSurface({
             defaultModel={defaultModel}
             codexConnected={codexConnected}
             claudeCodeConnected={claudeCodeConnected}
+            taskSpawningEnabled={taskSpawningEnabled}
             autoModelRoutingEnabled={autoModelRoutingEnabled}
             creditBalance={creditBalance}
             onSubmitted={closeCommandPalette}
@@ -2171,6 +2234,12 @@ export function GoatSurface({
                           strokeWidth={2}
                           className="mt-0.5 shrink-0 text-ink-subtle"
                         />
+                      ) : option.kind === "task" ? (
+                        <Play
+                          size={14}
+                          strokeWidth={2}
+                          className="mt-0.5 shrink-0 text-ink-subtle"
+                        />
                       ) : (
                         <Sparkles
                           size={14}
@@ -2182,7 +2251,9 @@ export function GoatSurface({
                         <span className="block truncate text-[13px] font-medium leading-4 text-ink">
                           {option.token}
                         </span>
-                        {option.kind === "skill" || option.kind === "workflow" ? (
+                        {option.kind === "skill" ||
+                        option.kind === "workflow" ||
+                        option.kind === "task" ? (
                           <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
                             {option.label}
                             {option.description ? ` · ${option.description}` : ""}
@@ -2192,14 +2263,23 @@ export function GoatSurface({
                       {option.kind === "engine" ? (
                         <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
                       ) : null}
-                      {option.kind === "workflow" ? (
+                      {option.kind === "workflow" || option.kind === "task" ? (
                         <span className="text-[12px] leading-4 text-ink-subtle">Task</span>
                       ) : null}
                     </button>
                   ))}
                 </div>
               ) : null}
-              {selectedWorkflowMention ? (
+              {selectedAdHocTask ? (
+                <div
+                  role="status"
+                  data-testid="ad-hoc-task-hint"
+                  className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                >
+                  <Play size={13} strokeWidth={2} className="shrink-0" />
+                  <span>Sending starts this as an ad-hoc background task.</span>
+                </div>
+              ) : selectedWorkflowMention ? (
                 <div
                   role="status"
                   data-testid="workflow-task-hint"
@@ -2236,7 +2316,11 @@ export function GoatSurface({
                         aria-hidden="true"
                         className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
                       >
-                        {renderComposerInputOverlay(input, activeSelectedMentions)}
+                        {renderComposerInputOverlay(
+                          input,
+                          activeSelectedMentions,
+                          selectedAdHocTask,
+                        )}
                       </div>
                     ) : null}
                     <textarea
@@ -2269,7 +2353,7 @@ export function GoatSurface({
                           event.currentTarget.selectionStart,
                         )
                       }
-                      disabled={workflowTaskSubmitting}
+                      disabled={backgroundTaskSubmitting}
                       className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
                       style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                       maxLength={10_000}
@@ -2290,11 +2374,11 @@ export function GoatSurface({
                       composerAttachments.isUploading ||
                       engineSubmitting ||
                       engineRunning ||
-                      workflowTaskSubmitting ||
+                      backgroundTaskSubmitting ||
                       chatSendBlocked
                     }
                     isGenerating={isGenerating || isTaskConversationWorking}
-                    startsWorkflowTask={Boolean(selectedWorkflowMention)}
+                    startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />
                 </div>
@@ -2396,7 +2480,6 @@ export function GoatSurface({
             chatSessionId={activeEngineChat.chatSessionId}
             sandboxStatus={codexSandboxStatus}
             engineLabel={CLOUD_CODING_ENGINE_CONFIG[activeEngineChat.engine].label}
-            engineIsRunning={engineRunning || engineSubmitting}
             onExpandedChange={setWorkspacePanelExpanded}
             onRequestFocusReturn={() => workspaceToggleButtonRef.current?.focus()}
           />
@@ -2407,14 +2490,15 @@ export function GoatSurface({
 }
 
 // The Cmd+K quick-compose surface. Same controls as the main composer (attachments,
-// model/engine picker, mentions), but it always starts a brand-new chat that runs in
-// the background — it never adopts the result into view or navigates to it.
+// model/engine picker, mentions), but it always starts new background work — it
+// never adopts the result into view or navigates to it.
 function QuickChatComposer({
   open,
   userWorkosId,
   defaultModel,
   codexConnected,
   claudeCodeConnected,
+  taskSpawningEnabled,
   autoModelRoutingEnabled,
   creditBalance,
   onSubmitted,
@@ -2424,6 +2508,7 @@ function QuickChatComposer({
   defaultModel: string;
   codexConnected: boolean;
   claudeCodeConnected: boolean;
+  taskSpawningEnabled: boolean;
   autoModelRoutingEnabled: boolean;
   creditBalance: ReturnType<typeof useGoatCreditBalance>["balance"];
   onSubmitted: () => void;
@@ -2484,7 +2569,8 @@ function QuickChatComposer({
       ? "claude_code"
       : null;
   const isEngineChat = selectedEngine !== null;
-  const workflowMentionsEnabled = !selectedEngine;
+  const workflowMentionsEnabled = taskSpawningEnabled && !selectedEngine;
+  const selectedAdHocTask = workflowMentionsEnabled && hasGoatAdHocTaskToken(input);
   const outOfCredits = Boolean(
     creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
   );
@@ -2508,7 +2594,9 @@ function QuickChatComposer({
     skillsEnabled: true,
     workflowsEnabled: workflowMentionsEnabled,
   });
-  const selectedWorkflowMention = activeSelectedMentions.find(isWorkflowMention) ?? null;
+  const selectedWorkflowMention = selectedAdHocTask
+    ? null
+    : (activeSelectedMentions.find(isWorkflowMention) ?? null);
   const selectedWorkflowName = selectedWorkflowMention
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
@@ -2624,6 +2712,11 @@ function QuickChatComposer({
     const nextCaret = before.length + option.token.length + 1;
     pendingInputCaretRef.current = nextCaret;
     setInput(nextInput);
+    if (option.kind === "task") {
+      setSelectedMentions((current) => current.filter((mention) => mention.kind !== "workflow"));
+      setMentionToken(null);
+      return;
+    }
     setSelectedMentions((current) => {
       if (option.mention.kind === "engine") {
         return [...current.filter((mention) => mention.kind !== "engine"), option.mention];
@@ -2811,6 +2904,45 @@ function QuickChatComposer({
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
 
+    if (workflowMentionsEnabled && hasGoatAdHocTaskToken(prompt)) {
+      const description = descriptionFromGoatAdHocTaskPrompt(prompt);
+      if (!description) {
+        toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
+        return;
+      }
+      if (pendingAttachments.length > 0) {
+        toast.error("Attachments are not supported when starting a background task yet.");
+        return;
+      }
+
+      setIsSubmitting(true);
+      setInput("");
+      setMentionToken(null);
+      setSelectedMentions([]);
+      onSubmitted();
+      void startGoatAdHocTask({
+        description: prompt,
+        model: String(chatModel),
+        ...(mentions.some((mention) => mention.kind === "engine" && mention.id === "codex")
+          ? { engine: "codex" }
+          : {}),
+      })
+        .then(({ task }) => {
+          // Not gated on mountedRef: the dialog has already closed.
+          router.refresh();
+          toast.success(`Started ${task.name} in the background.`);
+        })
+        .catch((error) => {
+          toast.error(
+            error instanceof Error ? error.message : "Could not start that background task.",
+          );
+        })
+        .finally(() => {
+          if (mountedRef.current) setIsSubmitting(false);
+        });
+      return;
+    }
+
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
       if (pendingAttachments.length > 0) {
@@ -2968,6 +3100,8 @@ function QuickChatComposer({
                   strokeWidth={2}
                   className="mt-0.5 shrink-0 text-ink-subtle"
                 />
+              ) : option.kind === "task" ? (
+                <Play size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
               ) : (
                 <Sparkles size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
               )}
@@ -2975,7 +3109,7 @@ function QuickChatComposer({
                 <span className="block truncate text-[13px] font-medium leading-4 text-ink">
                   {option.token}
                 </span>
-                {option.kind === "skill" || option.kind === "workflow" ? (
+                {option.kind === "skill" || option.kind === "workflow" || option.kind === "task" ? (
                   <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
                     {option.label}
                     {option.description ? ` · ${option.description}` : ""}
@@ -2985,14 +3119,23 @@ function QuickChatComposer({
               {option.kind === "engine" ? (
                 <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
               ) : null}
-              {option.kind === "workflow" ? (
+              {option.kind === "workflow" || option.kind === "task" ? (
                 <span className="text-[12px] leading-4 text-ink-subtle">Task</span>
               ) : null}
             </button>
           ))}
         </div>
       ) : null}
-      {selectedWorkflowMention ? (
+      {selectedAdHocTask ? (
+        <div
+          role="status"
+          data-testid="ad-hoc-task-hint"
+          className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+        >
+          <Play size={13} strokeWidth={2} className="shrink-0" />
+          <span>Sending starts this as an ad-hoc background task.</span>
+        </div>
+      ) : selectedWorkflowMention ? (
         <div
           role="status"
           data-testid="workflow-task-hint"
@@ -3030,7 +3173,7 @@ function QuickChatComposer({
                   aria-hidden="true"
                   className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
                 >
-                  {renderComposerInputOverlay(input, activeSelectedMentions)}
+                  {renderComposerInputOverlay(input, activeSelectedMentions, selectedAdHocTask)}
                 </div>
               ) : null}
               <textarea
@@ -3068,7 +3211,7 @@ function QuickChatComposer({
                 chatSendBlocked
               }
               isGenerating={false}
-              startsWorkflowTask={Boolean(selectedWorkflowMention)}
+              startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
               onStop={() => {}}
             />
           </div>
@@ -3546,13 +3689,13 @@ function skillMentionsFromPastedText(input: {
   });
 }
 
-// "#" tokens are only treated as workflow mentions when they match a real catalog id —
-// markdown headings and things like "#123" stay plain text.
+// Apart from the reserved #task directive, "#" tokens are only treated as workflow
+// mentions when they match a real catalog id. Markdown headings and "#123" stay plain text.
 function workflowMentionIdsFromText(value: string) {
   const ids = new Set<string>();
   for (const match of value.matchAll(/(^|\s)#([a-z0-9][a-z0-9-]{0,63})(?=\s|$)/gi)) {
-    const id = match[2];
-    if (id) ids.add(id.toLowerCase());
+    const id = match[2]?.toLowerCase();
+    if (id && id !== GOAT_AD_HOC_TASK_ID) ids.add(id);
   }
   return ids;
 }
@@ -3606,8 +3749,8 @@ function buildMentionOptions(input: {
   if (!input.token) return [];
   const query = input.token.query;
 
-  // "#" is the workflow sigil: sending with a workflow mention spawns a
-  // background task instead of a chat turn, so it gets its own menu.
+  // "#" is the task sigil: it starts either the reserved ad-hoc task or one
+  // saved workflow as a background task instead of a foreground chat turn.
   if (input.token.sigil === "#") {
     if (!input.workflowsEnabled) return [];
     const hasSelectedWorkflow = input.selectedMentions.some(
@@ -3615,7 +3758,16 @@ function buildMentionOptions(input: {
     );
     if (hasSelectedWorkflow) return [];
     const options: MentionOption[] = [];
+    if (!query || "task ad-hoc background".includes(query)) {
+      options.push({
+        kind: "task",
+        token: GOAT_AD_HOC_TASK_TOKEN,
+        label: "Ad-hoc task",
+        description: "Run this request in the background",
+      });
+    }
     for (const workflow of input.workflows) {
+      if (workflow.id === GOAT_AD_HOC_TASK_ID) continue;
       const haystack = `${workflow.id} ${workflow.name} ${workflow.description}`.toLowerCase();
       if (query && !haystack.includes(query)) continue;
       options.push({
@@ -3656,16 +3808,37 @@ function buildMentionOptions(input: {
   return options;
 }
 
-function renderComposerInputOverlay(value: string, mentions: GoatChatMention[]) {
-  const ranges = mentions
-    .flatMap((mention) => {
-      const token = goatChatMentionToken(mention);
-      const match = new RegExp(`(^|\\s)(${escapeRegExp(token)})(?=\\s|$)`, "i").exec(value);
-      if (!match || match.index === undefined) return [];
-      const start = match.index + (match[1]?.length ?? 0);
-      return [{ start, end: start + (match[2]?.length ?? token.length), kind: mention.kind }];
-    })
-    .toSorted((left, right) => left.start - right.start);
+function renderComposerInputOverlay(
+  value: string,
+  mentions: GoatChatMention[],
+  includeAdHocTask = false,
+) {
+  const mentionRanges = mentions.flatMap((mention) => {
+    const token = goatChatMentionToken(mention);
+    const match = new RegExp(`(^|\\s)(${escapeRegExp(token)})(?=\\s|$)`, "i").exec(value);
+    if (!match || match.index === undefined) return [];
+    const start = match.index + (match[1]?.length ?? 0);
+    return [{ start, end: start + (match[2]?.length ?? token.length), kind: mention.kind }];
+  });
+  const taskMatch = includeAdHocTask
+    ? new RegExp(`(^|\\s)(${escapeRegExp(GOAT_AD_HOC_TASK_TOKEN)})(?=\\s|$)`, "i").exec(value)
+    : null;
+  const taskRanges =
+    taskMatch?.index === undefined
+      ? []
+      : [
+          {
+            start: taskMatch.index + (taskMatch[1]?.length ?? 0),
+            end:
+              taskMatch.index +
+              (taskMatch[1]?.length ?? 0) +
+              (taskMatch[2]?.length ?? GOAT_AD_HOC_TASK_TOKEN.length),
+            kind: "task" as const,
+          },
+        ];
+  const ranges = [...mentionRanges, ...taskRanges].toSorted(
+    (left, right) => left.start - right.start,
+  );
   if (ranges.length === 0) return value;
 
   const parts: React.ReactNode[] = [];
@@ -3678,12 +3851,14 @@ function renderComposerInputOverlay(value: string, mentions: GoatChatMention[]) 
         data-testid={
           range.kind === "engine"
             ? "selected-codex-mention"
-            : range.kind === "workflow"
-              ? "selected-workflow-mention"
-              : "selected-skill-mention"
+            : range.kind === "task"
+              ? "selected-task-mention"
+              : range.kind === "workflow"
+                ? "selected-workflow-mention"
+                : "selected-skill-mention"
         }
         className={
-          range.kind === "workflow"
+          range.kind === "workflow" || range.kind === "task"
             ? "rounded-sm bg-ink/15 font-medium text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.15)]"
             : "rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]"
         }
@@ -3727,6 +3902,37 @@ async function fetchGoatBrainWorkflowCatalog(signal?: AbortSignal) {
   return Array.isArray(payload.workflows)
     ? (payload.workflows.filter(isGoatSkillCatalogItem) as GoatWorkflowCatalogItem[])
     : [];
+}
+
+async function startGoatAdHocTask(input: { description: string; model: string; engine?: "codex" }) {
+  const response = await fetch("/api/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const payload = (await response.json().catch(() => null)) as {
+    error?: unknown;
+    task?: { id?: unknown; displayId?: unknown; name?: unknown };
+  } | null;
+  if (!response.ok) {
+    throw new Error(
+      typeof payload?.error === "string" ? payload.error : "Could not start that background task.",
+    );
+  }
+  if (
+    typeof payload?.task?.id !== "string" ||
+    typeof payload.task.displayId !== "string" ||
+    typeof payload.task.name !== "string"
+  ) {
+    throw new Error("The background task started, but its response was invalid.");
+  }
+  return {
+    task: {
+      id: payload.task.id,
+      displayId: payload.task.displayId,
+      name: payload.task.name,
+    },
+  };
 }
 
 async function startGoatWorkflowTask(input: {
@@ -5185,12 +5391,12 @@ function modelProviderLabel(id: string) {
 function SubmitButton({
   disabled,
   isGenerating,
-  startsWorkflowTask = false,
+  startsTask = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
-  startsWorkflowTask?: boolean;
+  startsTask?: boolean;
   onStop: () => void;
 }) {
   if (isGenerating) {
@@ -5210,12 +5416,12 @@ function SubmitButton({
   return (
     <button
       type="submit"
-      aria-label={startsWorkflowTask ? "Start task" : "Send message"}
-      title={startsWorkflowTask ? "Start task" : undefined}
+      aria-label={startsTask ? "Start task" : "Send message"}
+      title={startsTask ? "Start task" : undefined}
       disabled={disabled}
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-30"
     >
-      {startsWorkflowTask ? (
+      {startsTask ? (
         <Play size={13} strokeWidth={2.2} fill="currentColor" />
       ) : (
         <ArrowUp size={15} strokeWidth={2.2} />

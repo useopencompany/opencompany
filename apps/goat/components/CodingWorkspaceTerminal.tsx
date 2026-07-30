@@ -28,6 +28,9 @@ export default function CodingWorkspaceTerminal({ socket }: { socket: WebSocket 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(container);
+    // xterm leaves this unspecified, which lets password managers mistake its hidden input for a
+    // credential field and offer to fill secrets into the shell.
+    terminal.textarea?.setAttribute("autocomplete", "off");
 
     const sendSize = (type: "terminal.attach" | "terminal.resize") => {
       if (socket.readyState !== WebSocket.OPEN) return;

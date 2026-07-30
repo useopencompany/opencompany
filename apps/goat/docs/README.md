@@ -53,8 +53,8 @@ Browser
         OR, when the user explicitly asks to run an active workflow, call start_workflow
           compile the workflow and insert its goat.tasks row
           POST /internal/goat/tasks/:taskId/run
-  GoatSurface #workflow submit
-    POST /api/workflows
+  GoatSurface #task / #workflow submit
+    POST /api/tasks or /api/workflows
       insert goat.tasks row without creating a chat session or chat messages
   GoatSurface cloud coding modes
     POST /api/codex-chat/messages or /api/claude-chat/messages
@@ -113,6 +113,12 @@ Skills mentioned by the workflow are resolved and snapshotted when the task is c
 task runs receive those snapshots as workflow prompt blocks; Codex task runs materialize them under
 `.agents/skills` and invoke them as native app-server skill inputs, matching explicit skill mentions
 in main Codex chat.
+
+The reserved `#task` token provides the same direct composer handoff for one-off work without a
+saved workflow. The composer posts the request to `/api/tasks`, removes the directive from the
+runner prompt, creates a normal durable Goat task with the selected chat model, and keeps the current
+surface in place. Both `#task` and saved workflow mentions require the **Tasks & Workflows**
+preference and currently reject attachments.
 
 Workflow runs remain grouped under **Tasks**, but task detail renders the same `GoatSurface` as a
 normal chat. The task's `goat.task_messages` rows are projected into chat bubbles, and the standard
@@ -321,8 +327,7 @@ E2B hosts.
 The sidebar is available only for persistent Codex and Claude Code chats. Foreground OpenCompany
 chat, background tasks, scheduled runs, and tool sandboxes do not receive it. Opening the panel
 alone does not wake a sleeping sandbox; selecting Preview or Terminal does. The terminal uses an
-engine-neutral tmux session, and the UI warns with the active engine's name when a turn may edit the
-same directory concurrently.
+engine-neutral tmux session.
 
 Claude Code turns run the Claude CLI in the Claude-specific working directory and resume its saved
 session id after runner handoffs. Codex execution has additional app-server, Plan mode, interaction,
@@ -341,10 +346,23 @@ uploads.
 
 ### Codex execution
 
+The legacy-named `goat.codex_chat_turns` queue is the durable, per-session FIFO execution substrate
+for `codex`, `claude_code`, and the internal-only `opencompany` engine path. A claimed OpenCompany
+turn runs the shared AI SDK chat loop without a sandbox or engine thread, streams text, reasoning,
+and tool lifecycle parts into its pre-created assistant `goat.chat_messages` row, and reconstructs
+follow-up model history from those persisted UI message parts. Its headless tool catalog includes
+read-only Brain/web tools and only integration actions whose permission mode is `on`; managed
+capabilities and approval-gated actions are excluded. No product route selects this durable
+OpenCompany path yet. It is exercisable only through the bearer-authenticated
+`POST /api/internal/opencompany-chat/messages` endpoint, which accepts an explicit user, workspace,
+prompt, and optional Brain/session/model before enqueueing through the same durable queue.
+
 Cloud Codex uses a persistent sandbox per Goat chat and resumes the same Codex app-server thread on
 follow-up turns. New turns remain `queued` until the runner claims them, then move through
 `starting` and `running`; the worker uses the runner-wide concurrency setting rather than a
-Cloud-Codex-specific limit. The composer accepts the same private-blob uploads as normal Goat chat.
+Cloud-Codex-specific limit. OpenCompany sessions leave the sandbox/thread columns null and are
+ignored by terminal-sandbox reconciliation. The composer accepts the same private-blob uploads as
+normal Goat chat.
 At run time, the worker downloads the current turn's files into
 `~/.opencompany-goat/codex-chat-attachments/<turn-id>/` and includes those paths in the user task.
 Image uploads are additionally passed to `turn/start` as `localImage` inputs, so screenshots are
@@ -531,7 +549,9 @@ Failed and canceled tasks are not automatically retried by this worker. Only sta
 
 ## Harness Planning
 
-`executeGoatTask` first calls `planGoatHarnessForTask`.
+OpenCompany-engine tasks already carry their engine and model in `harnessSpec` and run directly on
+the shared chat substrate. Codex-engine tasks call `planGoatHarnessForTask` to infer the coding
+repository, pull-request behavior, reasoning effort, and optional goal-mode settings.
 
 The planner is a separate AI SDK `generateObject` Gateway call using:
 
@@ -578,8 +598,8 @@ Normalization is intentionally conservative:
 - `maxModelSteps` is a runaway ceiling, not a difficulty estimate. The planner default is 16,
   browser-capable tasks are normalized to at least 16, and the runner reserves the final step for
   a no-tool answer.
-- Gmail, Calendar, and Linear operations are selected only if both available to the user and chosen
-  by the planner.
+- Legacy operation names in stored harness specs are normalized conservatively so old rows remain
+  readable. OpenCompany-engine runs resolve the live shared chat tool catalog instead.
 - The execution engine must be `opencompany` or `codex`. Missing legacy values normalize to
   `opencompany`.
 - The execution model must be one of the planner's allowed model options.
@@ -600,14 +620,19 @@ Entry points:
 
 - `apps/runner/src/goat-harness.ts`
 - `apps/runner/src/goat-codex.ts`
-- `apps/runner/src/goat-tools.ts`
-- `apps/runner/src/goat-google-tools.ts`
+- `apps/runner/src/goat-task-chat-loop.ts`
+- `packages/goat-agent/src/chat-agent.ts`
 
-After planning, the task reports `stage: "running"` and calls AI SDK `streamText` in the runner
-process. The runner:
+The task reports `stage: "running"` and creates a running assistant message. OpenCompany-engine
+tasks then execute as hidden main-chat turns: they use the shared Goat system prompt and tool
+context, including Brain reads, web search/fetch, connected integration actions, and the task-only
+`update_task_status` tool. Codex-engine tasks retain their coding sandbox path.
+
+The runner:
 
 1. Creates a running assistant `goat.task_messages` row.
-2. Builds AI SDK tools from the planned operation names.
+2. Resolves the current shared chat tool catalog for OpenCompany tasks, or starts the Codex
+   sandbox for coding tasks.
 3. Streams model text into the assistant row on a short throttle and at step boundaries for
    `assistant_final` runs. For `brain_markdown_report`, the report body is buffered instead.
 4. Appends `tool.started`, `tool.completed`, and `tool.failed` events durably.
@@ -617,55 +642,24 @@ process. The runner:
 
 If the final assistant content is empty, the task fails. There is no `goat_result` tool.
 
-Available task harness tools:
-
-- `exa_search`: runs in the runner process against Exa.
-- `gmail_search`
-- `gmail_get_message`
-- `gmail_list_threads`
-- `gmail_get_thread`
-- `calendar_list_calendars`
-- `calendar_list_events`
-- `calendar_get_event`
-- `calendar_get_freebusy`
-- `linear_search_tools`
-- `linear_use_tool`
-- `latitude_search_tools`
-- `latitude_use_tool`
-- The Google tools run server-side in the runner and resolve encrypted OAuth credentials from the
-  database.
-- The Linear and Latitude MCP meta-tools discover each server's current tool catalog before
-  executing an exact remote tool name. Latitude task writes are used only for explicit user
-  requests.
-
-E2B remains available elsewhere in the runner as a future tool backend; new Goat task runs do not
-depend on `/tmp/goat-harness.mjs`, `GOAT_OUTPUT_PATH`, progress stdout parsing, or a sandbox bridge.
+OpenCompany task tools use the same limits, validation, and connected-account resolution as
+foreground chat. They do not use a second task-only tool tree or a sandbox callback bridge.
 
 ## Google Tools
 
 Entry points:
 
 - `apps/goat/lib/capabilities/google-calendar.ts`
-- `apps/runner/src/goat-google-tools.ts`
+- `packages/goat-agent/src/actions/catalog.ts`
+- `packages/goat-agent/src/actions/execute.ts`
 - `packages/db/src/goat-integrations.ts`
 
 Foreground chat runs Google Calendar through the capability worker. The Calendar capability keeps
 read, create, and write tool surfaces separate, resolves only the current user's connected
 accounts, refreshes encrypted OAuth credentials server-side, and requires an explicit account when
 more than one is connected. Create and write calls are scope-gated and limited to a single mutation
-attempt without attendee notifications.
-
-Durable background tasks continue to use the runner's read-only Gmail and Calendar tools. The
-runner:
-
-1. Checks the tool name is known.
-2. Resolves the user's connected account.
-3. Loads encrypted OAuth credentials from the database.
-4. Refreshes the access token when needed.
-5. Calls the Google API server-side.
-6. Returns sanitized JSON output to the task model.
-
-If Google rejects a refresh token, the integration is marked `needs_reauth`.
+attempt without attendee notifications. Background OpenCompany tasks use the same connected action
+catalog as chat rather than a separate runner-only Google implementation.
 
 ## Data Model
 
@@ -681,9 +675,11 @@ Important tables:
   here as synthetic assistant messages.
 - `goat.chat_session_skills`: immutable skill snapshots activated by user messages. A snapshot
   remains available for the rest of that chat even if its source Brain changes or is deleted.
-- `goat.codex_chat_sessions`: persistent Codex/Claude Code sandbox, engine thread/session, active
-  turn, status, pinned Brain, and host-tool contract version.
-- `goat.codex_chat_turns`: leased persistent cloud coding turn queue and message linkage.
+- `goat.codex_chat_sessions`: durable engine runtime state. Codex/Claude Code rows include their
+  persistent sandbox and engine thread/session; OpenCompany rows leave those fields null. All rows
+  track the active turn, status, pinned Brain, and workspace.
+- `goat.codex_chat_turns`: leased, per-session-FIFO durable chat turn queue and message linkage for
+  all three engines (the legacy table name is intentionally retained).
 - `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
 - `goat.codex_chat_events`: normalized persistent cloud coding event audit rows.
 - `goat.repo_configs`: workspace-scoped repository setup instructions, masked env key names, and
@@ -815,11 +811,10 @@ Common changes and where they belong:
 - Change Goat Codex subscription auth: `apps/goat/lib/codex-auth.ts`,
   `apps/runner/src/codex-auth.ts`, and `packages/db/src/goat-codex-auth.ts`.
 - Change Goat Codex execution: `apps/runner/src/goat-codex.ts`.
-- Change fallback task harness instructions: `apps/runner/src/prompts/goat-task-harness.ts`.
-- Add or change harness tools: `apps/runner/src/goat-tools.ts`, implementation files like
-  `apps/runner/src/goat-google-tools.ts`, and `GoatTaskToolName` in
-  `packages/db/src/goat-schema.ts`.
-- Change the task model loop: `executeGoatTask` in `apps/runner/src/goat-harness.ts`.
+- Add or change shared chat/task tools: `packages/goat-agent/src/chat-agent.ts` and the Goat app or
+  runner callbacks passed into `createOpenCompanyChatToolContext`.
+- Change the task model loop: `executeGoatTask` in `apps/runner/src/goat-harness.ts` and
+  `runGoatTaskChatLoop` in `apps/runner/src/goat-task-chat-loop.ts`.
 - Move Goat onto full multi-agent sessions: start from `apps/runner/src/agent-loop.ts`,
   `apps/runner/src/session-lifecycle.ts`, `apps/runner/src/delegation.ts`, and
   `docs/agent-file.md`.
