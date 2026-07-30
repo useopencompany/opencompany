@@ -215,22 +215,31 @@ describe("Goat coding workspace terminal transport", () => {
 describe("Goat coding workspace terminal input latency", () => {
   it("coalesces keystrokes and never queues input behind control operations", async () => {
     const kill = vi.fn(async () => true);
-    const inputCalls: Buffer[] = [];
-    let releaseFirstKeystroke: () => void = () => {};
-    const sendInput = vi.fn((_pid: number, data: Uint8Array) => {
-      inputCalls.push(Buffer.from(data));
-      // Hold the first real keystroke RPC open so later keystrokes must coalesce.
-      if (inputCalls.length === 2) {
-        return new Promise<void>((resolve) => {
-          releaseFirstKeystroke = resolve;
-        });
-      }
-      return Promise.resolve();
+    // Keyed by keystroke content so the assertions never depend on call ordering
+    // relative to the tmux bootstrap write (which is CI-timing sensitive).
+    const keystrokes: string[] = [];
+    let releaseTypedA: () => void = () => {};
+    const typedAHeld = new Promise<void>((resolve) => {
+      releaseTypedA = resolve;
+    });
+    const sendInput = vi.fn(async (_pid: number, data: Uint8Array) => {
+      const text = Buffer.from(data).toString();
+      if (text.includes("tmux new-session")) return; // bootstrap write, not a keystroke
+      keystrokes.push(text);
+      // Hold the "a" RPC open so "b"/"c" typed meanwhile must coalesce into one call.
+      if (text === "a") await typedAHeld;
     });
     const create = vi.fn(async () => ({ pid: 42, kill }));
+    let releasePortScan: () => void = () => {};
+    const portScanReached = new Promise<void>((resolve) => {
+      releasePortScan = resolve;
+    });
     const run = vi.fn((command: string) => {
-      // The ports.refresh scan hangs forever; typing must not wait behind it.
-      if (command.startsWith("ss ")) return new Promise(() => {});
+      // The ports.refresh scan blocks until released; typing must not wait behind it.
+      if (command.startsWith("ss ")) {
+        releasePortScan();
+        return new Promise(() => {});
+      }
       return Promise.resolve({ stdout: "" });
     });
     const sandbox = {
@@ -265,20 +274,26 @@ describe("Goat coding workspace terminal input latency", () => {
     client.send(JSON.stringify({ type: "terminal.attach", cols: 80, rows: 24 }));
     await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
 
+    // Kick off a control op that blocks in the sandbox, then type immediately.
     client.send(JSON.stringify({ type: "ports.refresh" }));
+    await portScanReached;
     client.send(Buffer.from("a"));
-    // Delivered while the port scan is still hanging (call 1 is the tmux bootstrap).
-    await vi.waitFor(() => expect(inputCalls).toHaveLength(2));
-    expect(inputCalls[1]?.toString()).toBe("a");
+    // "a" is delivered even though the port scan is still blocked in the control queue.
+    await vi.waitFor(() => expect(keystrokes).toEqual(["a"]));
 
-    client.send(Buffer.from("b"));
-    client.send(Buffer.from("c"));
-    // Let both frames reach the server while the "a" RPC is still held open.
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(sendInput).toHaveBeenCalledTimes(2);
-    releaseFirstKeystroke();
-    await vi.waitFor(() => expect(inputCalls).toHaveLength(3));
-    expect(inputCalls[2]?.toString()).toBe("bc");
+    // Both arrive while the "a" RPC is still in flight, so they coalesce into one call.
+    // Wait for each frame's write to complete before releasing "a", so the server has
+    // buffered both keystrokes by the time the in-flight RPC resolves and flushes.
+    await new Promise<void>((resolve, reject) =>
+      client.send(Buffer.from("b"), (error) => (error ? reject(error) : resolve())),
+    );
+    await new Promise<void>((resolve, reject) =>
+      client.send(Buffer.from("c"), (error) => (error ? reject(error) : resolve())),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(keystrokes).toEqual(["a"]);
+    releaseTypedA();
+    await vi.waitFor(() => expect(keystrokes).toEqual(["a", "bc"]));
 
     client.close();
   });
