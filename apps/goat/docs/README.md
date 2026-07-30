@@ -20,7 +20,11 @@ Goat has three LLM paths:
    materialized into that sandbox. Each engine keeps its own resumable thread/session state and
    trusted working directory. Codex additionally receives images as native local-image inputs; new
    Codex chats pin the active Brain and expose its read plane and capture-first save path through
-   runner-hosted dynamic tools.
+   runner-hosted dynamic tools. Both Codex and Claude Code chats expose the same read-only
+   integration action catalog (`list_actions`/`use_action`, `apps/goat/lib/codex-actions.ts`) —
+   Codex through app-server dynamic tools, Claude Code through a turn-scoped internal MCP server
+   (`apps/goat/app/api/internal/claude-actions`) since that is Claude Code's only custom-tool
+   mechanism. Brain tools remain Codex-only for now.
 
 The Goat task path is not currently a full OpenCompany `.agent` session. It reuses runner
 infrastructure, Vercel AI Gateway, leases, observability, and server-side tools, but it
@@ -390,6 +394,19 @@ actions whose capability is `read` and permission mode is `on`. Writes, confirma
 and paid managed capabilities are not present in the Cloud Codex catalog. Provider credentials,
 the internal bearer, and database access never enter E2B. A per-turn call budget bounds provider
 reads.
+
+Claude Code chats reach the same gateway (`executeGoatCodexActionGateway`) and the same read-only
+policy, but through a different transport: the `claude` CLI runs entirely inside the sandbox and
+only supports custom tools over MCP, so there is no host-side app-server relay to keep credentials
+out of E2B the way Codex does. Instead, `apps/runner/src/goat-claude-code-chat.ts` mints a
+short-lived, HMAC-signed ticket bound to that one `codexChatSessionId`/`codexChatTurnId`
+(`packages/agent-runtime/src/goat-claude-action-gateway-auth.ts`, signed with
+`RUNNER_INTERNAL_TOKEN` as the HMAC key) and writes it into an `--mcp-config` file pointing at
+`apps/goat/app/api/internal/claude-actions`, a streamable-HTTP MCP server
+(`apps/goat/lib/claude-actions.ts`) that verifies the ticket instead of the raw bearer token. The
+ticket only proves "mint this turn's action calls"; it expires with the turn and cannot reach any
+other internal route, unlike `RUNNER_INTERNAL_TOKEN` itself, which is deliberately never placed in
+the Claude Code sandbox.
 
 Because app-server stores dynamic tool definitions on the thread, resumed turns provide the
 matching runner callbacks without trying to redefine the tools. Existing Brain-tool v1 sessions

@@ -383,9 +383,10 @@ async function createFirstCodexChatTurn(input: {
       ? claudeCodeCliModelNameForModelId(input.modelId)
       : codexCliModelNameForModelId(input.modelId);
   if (!codexModel) throw new Error(`Unsupported ${input.engine} model: ${input.modelId}`);
-  // Host dynamic tools (brain/actions) are not wired into the Claude engine yet.
-  const hostToolContractVersion =
-    input.engine === "claude_code" ? null : GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION;
+  // Host tool contract version gates both engines' dynamic tools: Codex reads it in
+  // apps/runner/src/goat-codex-chat.ts, Claude Code in apps/runner/src/goat-claude-code-chat.ts.
+  // Claude Code only wires the action-gateway tools today, not the brain tools.
+  const hostToolContractVersion = GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION;
 
   await getDb().execute(sql`
     WITH created_chat AS (

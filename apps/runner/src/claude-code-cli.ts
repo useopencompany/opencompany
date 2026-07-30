@@ -82,6 +82,7 @@ export function buildClaudeTurnCommand(input: {
   model: string | null;
   reasoningEffort: CodexReasoningEffort | null;
   resumeSessionId: string | null;
+  mcpConfigPath: string | null;
 }) {
   const args = [
     "claude",
@@ -94,6 +95,11 @@ export function buildClaudeTurnCommand(input: {
     ...(input.model ? [`--model ${shellQuote(input.model)}`] : []),
     ...(input.reasoningEffort ? [`--effort ${shellQuote(input.reasoningEffort)}`] : []),
     ...(input.resumeSessionId ? [`--resume ${shellQuote(input.resumeSessionId)}`] : []),
+    // Only ever set when the turn's action tools are enabled; --strict-mcp-config keeps
+    // this the sole MCP source so nothing in the checkout can smuggle in extra tools.
+    ...(input.mcpConfigPath
+      ? [`--mcp-config ${shellQuote(input.mcpConfigPath)}`, "--strict-mcp-config"]
+      : []),
   ];
   return [
     `cd ${shellQuote(input.workdir)}`,

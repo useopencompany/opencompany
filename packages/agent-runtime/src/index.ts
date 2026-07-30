@@ -10,6 +10,7 @@ export * from "./config";
 export * from "./events";
 export * from "./exa-search";
 export * from "./github-cli";
+export * from "./goat-claude-action-gateway-auth";
 export * from "./goat-codex-actions";
 export * from "./goat-codex-brain-capture";
 export * from "./ids";
