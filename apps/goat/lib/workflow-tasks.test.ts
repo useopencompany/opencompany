@@ -99,7 +99,6 @@ describe("compileGoatWorkflowHarnessSpec", () => {
         id: "weekly-report",
         name: "Weekly report",
         description: "Compiles the weekly report.",
-        trigger: "manual",
         steps: [
           {
             id: "step-1",
@@ -190,7 +189,6 @@ describe("createGoatTaskFromWorkflow", () => {
       id: "mixed-workflow",
       name: "Mixed workflow",
       description: "",
-      trigger: "manual",
       steps: [
         {
           id: "step-1",
@@ -226,7 +224,6 @@ describe("createGoatTaskFromWorkflow", () => {
       id: "mixed-workflow",
       name: "Mixed workflow",
       description: "",
-      trigger: "manual",
       steps: [
         {
           id: "step-1",

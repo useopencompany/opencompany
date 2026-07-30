@@ -67,7 +67,7 @@ Local repo files inspected:
 - `apps/runner/src/goat-codex.ts`
 - `apps/runner/src/codex-session.ts`
 - `apps/runner/src/codex-app-server.ts`
-- `apps/runner/src/goat-browser-tools.ts`
+- `apps/goat/lib/sandbox/browser-tools.ts`
 - `apps/runner/e2b/codex/template.ts`
 - `scripts/dev.mjs`
 - `scripts/next-goat.mjs`
@@ -112,7 +112,9 @@ single-run Codex path.
 
 ## Existing Browser Tooling
 
-There is already a Goat browser tool implementation in `apps/runner/src/goat-browser-tools.ts`.
+Goat's foreground chat browser implementation lives in
+`apps/goat/lib/sandbox/browser-tools.ts`. Background OpenCompany tasks share the main-chat tool
+context instead of carrying a separate runner-only browser wrapper.
 
 It wraps `agent-browser` and exposes:
 
@@ -133,7 +135,7 @@ capabilities such as eval, download, upload, network, and state.
 
 This is useful precedent, but it is not enough for Codex preview browser work:
 
-- It is runner-side task tooling, not Codex-sandbox-local app preview tooling.
+- It is foreground chat tooling, not Codex-sandbox-local app preview tooling.
 - It is designed for browsing public or normal web pages, not for app preview attached to a coding
   sandbox and dev server.
 - It does not model a persistent authenticated preview context.

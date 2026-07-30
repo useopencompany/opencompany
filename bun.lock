@@ -154,7 +154,6 @@
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/analytics": "workspace:*",
         "@opencompany/billing": "workspace:*",
-        "@opencompany/browser-tools": "workspace:*",
         "@opencompany/crypto": "workspace:*",
         "@opencompany/db": "workspace:*",
         "@opencompany/file-extract": "workspace:*",
@@ -165,7 +164,6 @@
         "@opencompany/observability": "workspace:*",
         "@sentry/bun": "^10.53.1",
         "@vercel/blob": "^2.4.0",
-        "agent-browser": "^0.27.2",
         "ai": "^6.0.189",
         "ajv": "8.20.0",
         "cron-parser": "^5.6.1",
@@ -1894,8 +1892,6 @@
     "add-mcp": ["add-mcp@1.8.0", "", { "dependencies": { "@clack/prompts": "^0.9.1", "@iarna/toml": "^2.2.5", "chalk": "^5.4.1", "commander": "^13.1.0", "js-yaml": "^4.1.0", "jsonc-parser": "^3.3.1" }, "bin": { "add-mcp": "dist/index.js" } }, "sha512-dpYLGGD5jbiaGjTn1IVBZDwWfp7h94bigZ/lt6pxbj0rDa9HUm63qxuTpCF74k6ixd528NljJXZ1eKlVSeHCKA=="],
 
     "agent-base": ["agent-base@7.1.4", "", {}, "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ=="],
-
-    "agent-browser": ["agent-browser@0.27.3", "", { "bin": { "agent-browser": "bin/agent-browser.js" } }, "sha512-isQ1xWoYOnfR8BigYRlYmkFOrqw71tKEmUEMmFJGStQFOyCrLSsKoOAZEu8TjPZdmjD1nPQ/hLLYlxTwdHnA0Q=="],
 
     "ai": ["ai@6.0.189", "", { "dependencies": { "@ai-sdk/gateway": "3.0.118", "@ai-sdk/provider": "3.0.10", "@ai-sdk/provider-utils": "4.0.27", "@opentelemetry/api": "^1.9.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-Quz97oHJp+XhOdKV7FCefOfGVsRAKRFCO0KFpNDGg8dBkclWvYZ04K57rkdNUrdAUmZ11MkG12S7blRXSh/Xdw=="],
 

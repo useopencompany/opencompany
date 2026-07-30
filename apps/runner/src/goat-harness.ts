@@ -31,7 +31,7 @@ import {
 } from "./goat-brain";
 import { runGoatCodexTask } from "./goat-codex";
 import { runGoatTaskChatLoop } from "./goat-task-chat-loop";
-import { normalizeGoatTaskToolNames } from "./goat-tools";
+import { normalizeGoatTaskToolNames } from "./goat-task-tool-names";
 import type { HostedToolUsage } from "./hosted-tools";
 import {
   buildGoatHarnessCreationPrompt,

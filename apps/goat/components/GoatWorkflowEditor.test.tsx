@@ -52,7 +52,6 @@ const workflow = {
   id: "weekly-update",
   name: "Weekly update",
   description: "Summarize the week.",
-  trigger: "manual" as const,
   status: "draft" as const,
   steps: [
     {
@@ -76,7 +75,7 @@ describe("GoatWorkflowEditor", () => {
     vi.useRealTimers();
   });
 
-  it("debounces edits and saves the step plan with its trigger", async () => {
+  it("debounces edits and saves the step plan", async () => {
     render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Weekly update" }));
@@ -91,7 +90,6 @@ describe("GoatWorkflowEditor", () => {
       slug: "weekly-update",
       name: "Investor update",
       description: "Summarize the week.",
-      trigger: "manual",
       steps: workflow.steps,
       status: "draft",
     });

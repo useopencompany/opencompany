@@ -519,7 +519,9 @@ Failed and canceled tasks are not automatically retried by this worker. Only sta
 
 ## Harness Planning
 
-`executeGoatTask` first calls `planGoatHarnessForTask`.
+OpenCompany-engine tasks already carry their engine and model in `harnessSpec` and run directly on
+the shared chat substrate. Codex-engine tasks call `planGoatHarnessForTask` to infer the coding
+repository, pull-request behavior, reasoning effort, and optional goal-mode settings.
 
 The planner is a separate AI SDK `generateObject` Gateway call using:
 
@@ -566,8 +568,8 @@ Normalization is intentionally conservative:
 - `maxModelSteps` is a runaway ceiling, not a difficulty estimate. The planner default is 16,
   browser-capable tasks are normalized to at least 16, and the runner reserves the final step for
   a no-tool answer.
-- Gmail, Calendar, and Linear operations are selected only if both available to the user and chosen
-  by the planner.
+- Legacy operation names in stored harness specs are normalized conservatively so old rows remain
+  readable. OpenCompany-engine runs resolve the live shared chat tool catalog instead.
 - The execution engine must be `opencompany` or `codex`. Missing legacy values normalize to
   `opencompany`.
 - The execution model must be one of the planner's allowed model options.
@@ -588,14 +590,19 @@ Entry points:
 
 - `apps/runner/src/goat-harness.ts`
 - `apps/runner/src/goat-codex.ts`
-- `apps/runner/src/goat-tools.ts`
-- `apps/runner/src/goat-google-tools.ts`
+- `apps/runner/src/goat-task-chat-loop.ts`
+- `packages/goat-agent/src/chat-agent.ts`
 
-After planning, the task reports `stage: "running"` and calls AI SDK `streamText` in the runner
-process. The runner:
+The task reports `stage: "running"` and creates a running assistant message. OpenCompany-engine
+tasks then execute as hidden main-chat turns: they use the shared Goat system prompt and tool
+context, including Brain reads, web search/fetch, connected integration actions, and the task-only
+`update_task_status` tool. Codex-engine tasks retain their coding sandbox path.
+
+The runner:
 
 1. Creates a running assistant `goat.task_messages` row.
-2. Builds AI SDK tools from the planned operation names.
+2. Resolves the current shared chat tool catalog for OpenCompany tasks, or starts the Codex
+   sandbox for coding tasks.
 3. Streams model text into the assistant row on a short throttle and at step boundaries for
    `assistant_final` runs. For `brain_markdown_report`, the report body is buffered instead.
 4. Appends `tool.started`, `tool.completed`, and `tool.failed` events durably.
@@ -605,55 +612,24 @@ process. The runner:
 
 If the final assistant content is empty, the task fails. There is no `goat_result` tool.
 
-Available task harness tools:
-
-- `exa_search`: runs in the runner process against Exa.
-- `gmail_search`
-- `gmail_get_message`
-- `gmail_list_threads`
-- `gmail_get_thread`
-- `calendar_list_calendars`
-- `calendar_list_events`
-- `calendar_get_event`
-- `calendar_get_freebusy`
-- `linear_search_tools`
-- `linear_use_tool`
-- `latitude_search_tools`
-- `latitude_use_tool`
-- The Google tools run server-side in the runner and resolve encrypted OAuth credentials from the
-  database.
-- The Linear and Latitude MCP meta-tools discover each server's current tool catalog before
-  executing an exact remote tool name. Latitude task writes are used only for explicit user
-  requests.
-
-E2B remains available elsewhere in the runner as a future tool backend; new Goat task runs do not
-depend on `/tmp/goat-harness.mjs`, `GOAT_OUTPUT_PATH`, progress stdout parsing, or a sandbox bridge.
+OpenCompany task tools use the same limits, validation, and connected-account resolution as
+foreground chat. They do not use a second task-only tool tree or a sandbox callback bridge.
 
 ## Google Tools
 
 Entry points:
 
 - `apps/goat/lib/capabilities/google-calendar.ts`
-- `apps/runner/src/goat-google-tools.ts`
+- `packages/goat-agent/src/actions/catalog.ts`
+- `packages/goat-agent/src/actions/execute.ts`
 - `packages/db/src/goat-integrations.ts`
 
 Foreground chat runs Google Calendar through the capability worker. The Calendar capability keeps
 read, create, and write tool surfaces separate, resolves only the current user's connected
 accounts, refreshes encrypted OAuth credentials server-side, and requires an explicit account when
 more than one is connected. Create and write calls are scope-gated and limited to a single mutation
-attempt without attendee notifications.
-
-Durable background tasks continue to use the runner's read-only Gmail and Calendar tools. The
-runner:
-
-1. Checks the tool name is known.
-2. Resolves the user's connected account.
-3. Loads encrypted OAuth credentials from the database.
-4. Refreshes the access token when needed.
-5. Calls the Google API server-side.
-6. Returns sanitized JSON output to the task model.
-
-If Google rejects a refresh token, the integration is marked `needs_reauth`.
+attempt without attendee notifications. Background OpenCompany tasks use the same connected action
+catalog as chat rather than a separate runner-only Google implementation.
 
 ## Data Model
 
@@ -803,11 +779,10 @@ Common changes and where they belong:
 - Change Goat Codex subscription auth: `apps/goat/lib/codex-auth.ts`,
   `apps/runner/src/codex-auth.ts`, and `packages/db/src/goat-codex-auth.ts`.
 - Change Goat Codex execution: `apps/runner/src/goat-codex.ts`.
-- Change fallback task harness instructions: `apps/runner/src/prompts/goat-task-harness.ts`.
-- Add or change harness tools: `apps/runner/src/goat-tools.ts`, implementation files like
-  `apps/runner/src/goat-google-tools.ts`, and `GoatTaskToolName` in
-  `packages/db/src/goat-schema.ts`.
-- Change the task model loop: `executeGoatTask` in `apps/runner/src/goat-harness.ts`.
+- Add or change shared chat/task tools: `packages/goat-agent/src/chat-agent.ts` and the Goat app or
+  runner callbacks passed into `createOpenCompanyChatToolContext`.
+- Change the task model loop: `executeGoatTask` in `apps/runner/src/goat-harness.ts` and
+  `runGoatTaskChatLoop` in `apps/runner/src/goat-task-chat-loop.ts`.
 - Move Goat onto full multi-agent sessions: start from `apps/runner/src/agent-loop.ts`,
   `apps/runner/src/session-lifecycle.ts`, `apps/runner/src/delegation.ts`, and
   `docs/agent-file.md`.

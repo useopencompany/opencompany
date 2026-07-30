@@ -5,15 +5,10 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
-  Clock,
-  Hash,
   Loader2,
-  type LucideIcon,
-  MessagesSquare,
   MoreHorizontal,
   Plus,
   Sparkles,
-  SquareKanban,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -32,54 +27,9 @@ const AUTOSAVE_DELAY_MS = 1200;
 const MAX_WORKFLOW_STEPS = 20;
 
 type WorkflowStatus = GoatWorkflowDetail["status"];
-type WorkflowTrigger = GoatWorkflowDetail["trigger"];
 type WorkflowStep = GoatWorkflowDetail["steps"][number];
-type WorkflowDraft = Pick<
-  GoatWorkflowDetail,
-  "name" | "description" | "status" | "trigger" | "steps"
->;
+type WorkflowDraft = Pick<GoatWorkflowDetail, "name" | "description" | "status" | "steps">;
 type SaveState = "saved" | "saving" | "error";
-
-type TriggerOption = {
-  id: WorkflowTrigger;
-  label: string;
-  hint: string;
-  icon: LucideIcon;
-  available: boolean;
-};
-
-const MANUAL_TRIGGER: TriggerOption = {
-  id: "manual",
-  label: "Manual",
-  hint: "Fire with # in chat",
-  icon: Hash,
-  available: true,
-};
-
-const TRIGGER_OPTIONS: TriggerOption[] = [
-  MANUAL_TRIGGER,
-  {
-    id: "slack",
-    label: "New Slack message",
-    hint: "When a message matches",
-    icon: MessagesSquare,
-    available: false,
-  },
-  {
-    id: "linear",
-    label: "New Linear issue",
-    hint: "When an issue is created",
-    icon: SquareKanban,
-    available: false,
-  },
-  {
-    id: "schedule",
-    label: "On a schedule",
-    hint: "Run on a recurring cadence",
-    icon: Clock,
-    available: false,
-  },
-];
 
 const DEFAULT_MODEL_LABEL =
   GOAT_WORKFLOW_MODEL_OPTIONS.find((option) => option.token === DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN)
@@ -138,7 +88,6 @@ export function GoatWorkflowEditor({
           slug: workflow.id,
           name: snapshot.name,
           description: snapshot.description,
-          trigger: snapshot.trigger,
           steps: snapshot.steps,
           status: snapshot.status,
         });
@@ -282,12 +231,6 @@ export function GoatWorkflowEditor({
               />
             </div>
           </header>
-
-          <TriggerCard
-            value={draft.trigger}
-            onChange={(trigger) => patch({ trigger })}
-            disabled={!canEdit}
-          />
 
           <div className="flex flex-col gap-3">
             <SectionLabel>Steps</SectionLabel>
@@ -463,92 +406,6 @@ function StatusDot({ status }: { status: WorkflowStatus }) {
       aria-hidden="true"
       className={`h-1.5 w-1.5 rounded-full ${status === "active" ? "bg-success" : "bg-ink-faint"}`}
     />
-  );
-}
-
-function TriggerCard({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: WorkflowTrigger;
-  onChange: (value: WorkflowTrigger) => void;
-  disabled: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = TRIGGER_OPTIONS.find((option) => option.id === value) ?? MANUAL_TRIGGER;
-  const SelectedIcon = selected.icon;
-
-  return (
-    <section className="flex flex-col gap-3">
-      <SectionLabel>Trigger</SectionLabel>
-      <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
-        <PopoverTrigger
-          type="button"
-          disabled={disabled}
-          className="flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-surface px-3.5 py-3 text-left transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default disabled:hover:bg-surface data-[popup-open]:bg-surface-hover"
-        >
-          <span className="flex min-w-0 items-center gap-2.5">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-surface-muted text-ink-subtle">
-              <SelectedIcon size={14} strokeWidth={1.9} />
-            </span>
-            <span className="flex min-w-0 flex-col">
-              <span className="truncate text-[13px] font-medium leading-4 text-ink">
-                {selected.label}
-              </span>
-              <span className="truncate text-[12px] leading-4 text-ink-subtle">
-                {selected.hint}
-              </span>
-            </span>
-          </span>
-          {disabled ? null : (
-            <ChevronDown size={14} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-          )}
-        </PopoverTrigger>
-        <PopoverContent
-          align="start"
-          sideOffset={6}
-          className="w-[320px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
-        >
-          {TRIGGER_OPTIONS.map((option) => {
-            const OptionIcon = option.icon;
-            return (
-              <button
-                key={option.id}
-                type="button"
-                disabled={!option.available}
-                onClick={() => {
-                  onChange(option.id);
-                  setOpen(false);
-                }}
-                className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors duration-150 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent"
-              >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-surface-muted text-ink-subtle">
-                  <OptionIcon size={14} strokeWidth={1.9} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium leading-4 text-ink">
-                    {option.label}
-                  </span>
-                  <span className="block truncate text-[11.5px] leading-4 text-ink-subtle">
-                    {option.hint}
-                  </span>
-                </span>
-                {option.available ? (
-                  value === option.id ? (
-                    <Check size={13} strokeWidth={2} className="shrink-0 text-ink" />
-                  ) : null
-                ) : (
-                  <span className="shrink-0 rounded-full bg-surface-muted px-1.5 py-px text-[10px] font-medium uppercase tracking-[0.04em] text-ink-subtle">
-                    Soon
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </PopoverContent>
-      </Popover>
-    </section>
   );
 }
 
@@ -795,7 +652,6 @@ function workflowDraft(workflow: GoatWorkflowDetail): WorkflowDraft {
     name: workflow.name,
     description: workflow.description,
     status: workflow.status,
-    trigger: workflow.trigger,
     steps: workflow.steps,
   };
 }

@@ -1,9 +1,8 @@
 import { GoogleApiRequestError } from "./google-api-auth";
 
-// Gmail REST helpers for the ingestion workers (poll + flush). The agent tool
-// surface in goat-google-tools has its own parsing tuned for tool output; the
-// shapes here are tuned for the thread-window normalizer (directions, ISO
-// dates, quoted-reply stripping).
+// Gmail REST helpers for the ingestion workers (poll + flush), with shapes
+// tuned for the thread-window normalizer (directions, ISO dates, and
+// quoted-reply stripping).
 
 const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 const MAX_BODY_CHARS = 12_000;

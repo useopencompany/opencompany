@@ -126,6 +126,7 @@ describe("POST /api/codex-chat/messages", () => {
       attachments: [],
       clientMessageId: "client_msg_1",
       settings: undefined,
+      engine: "codex",
     });
     expect(mockGenerateGoatChatTitleForMessage()).not.toHaveBeenCalled();
     expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
