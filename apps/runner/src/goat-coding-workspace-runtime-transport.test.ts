@@ -213,10 +213,10 @@ describe("Goat coding workspace terminal transport", () => {
 });
 
 describe("Goat coding workspace terminal input latency", () => {
-  it("coalesces keystrokes and never queues input behind control operations", async () => {
+  it("coalesces keystrokes while an input RPC is in flight and bypasses the control queue", async () => {
     const kill = vi.fn(async () => true);
-    // Keyed by keystroke content so the assertions never depend on call ordering
-    // relative to the tmux bootstrap write (which is CI-timing sensitive).
+    // Keyed by keystroke content so assertions never depend on call ordering relative to
+    // the tmux bootstrap write.
     const keystrokes: string[] = [];
     let releaseTypedA: () => void = () => {};
     const typedAHeld = new Promise<void>((resolve) => {
@@ -230,17 +230,22 @@ describe("Goat coding workspace terminal input latency", () => {
       if (text === "a") await typedAHeld;
     });
     const create = vi.fn(async () => ({ pid: 42, kill }));
-    let releasePortScan: () => void = () => {};
-    const portScanReached = new Promise<void>((resolve) => {
-      releasePortScan = resolve;
+    // A control op (ports.refresh) that blocks in the sandbox until released, proving
+    // keystrokes are not queued behind it. Resolvable so the test leaves no pending work.
+    let releaseControlOp: () => void = () => {};
+    const controlOpBlocked = new Promise<void>((resolve) => {
+      releaseControlOp = resolve;
     });
-    const run = vi.fn((command: string) => {
-      // The ports.refresh scan blocks until released; typing must not wait behind it.
+    let controlOpReached: () => void = () => {};
+    const controlOpStarted = new Promise<void>((resolve) => {
+      controlOpReached = resolve;
+    });
+    const run = vi.fn(async (command: string) => {
       if (command.startsWith("ss ")) {
-        releasePortScan();
-        return new Promise(() => {});
+        controlOpReached();
+        await controlOpBlocked;
       }
-      return Promise.resolve({ stdout: "" });
+      return { stdout: "" };
     });
     const sandbox = {
       sandboxId: "sandbox_1",
@@ -270,31 +275,31 @@ describe("Goat coding workspace terminal input latency", () => {
 
     const address = server.address() as AddressInfo;
     const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
+    const send = (frame: Buffer | string) =>
+      new Promise<void>((resolve, reject) =>
+        client.send(frame, (error) => (error ? reject(error) : resolve())),
+      );
     await new Promise<void>((resolve) => client.once("open", resolve));
-    client.send(JSON.stringify({ type: "terminal.attach", cols: 80, rows: 24 }));
-    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce());
+    await send(JSON.stringify({ type: "terminal.attach", cols: 80, rows: 24 }));
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce(), { timeout: 5_000 });
 
-    // Kick off a control op that blocks in the sandbox, then type immediately.
-    client.send(JSON.stringify({ type: "ports.refresh" }));
-    await portScanReached;
-    client.send(Buffer.from("a"));
-    // "a" is delivered even though the port scan is still blocked in the control queue.
-    await vi.waitFor(() => expect(keystrokes).toEqual(["a"]));
+    // Start a control op that blocks in the sandbox, then type immediately.
+    await send(JSON.stringify({ type: "ports.refresh" }));
+    await controlOpStarted;
+    await send(Buffer.from("a"));
+    // "a" is delivered even though the control op is still blocked in the sandbox.
+    await vi.waitFor(() => expect(keystrokes).toEqual(["a"]), { timeout: 5_000 });
 
-    // Both arrive while the "a" RPC is still in flight, so they coalesce into one call.
-    // Wait for each frame's write to complete before releasing "a", so the server has
-    // buffered both keystrokes by the time the in-flight RPC resolves and flushes.
-    await new Promise<void>((resolve, reject) =>
-      client.send(Buffer.from("b"), (error) => (error ? reject(error) : resolve())),
-    );
-    await new Promise<void>((resolve, reject) =>
-      client.send(Buffer.from("c"), (error) => (error ? reject(error) : resolve())),
-    );
+    // Both writes complete before releasing "a", so the server has buffered them by the
+    // time the in-flight RPC resolves and flushes; they must coalesce into one call.
+    await send(Buffer.from("b"));
+    await send(Buffer.from("c"));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(keystrokes).toEqual(["a"]);
     releaseTypedA();
-    await vi.waitFor(() => expect(keystrokes).toEqual(["a", "bc"]));
+    await vi.waitFor(() => expect(keystrokes).toEqual(["a", "bc"]), { timeout: 5_000 });
 
+    releaseControlOp();
     client.close();
   });
 });
