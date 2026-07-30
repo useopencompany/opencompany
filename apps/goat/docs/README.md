@@ -49,8 +49,8 @@ Browser
         OR, when the user explicitly asks to run an active workflow, call start_workflow
           compile the workflow and insert its goat.tasks row
           POST /internal/goat/tasks/:taskId/run
-  GoatSurface #workflow submit
-    POST /api/workflows
+  GoatSurface #task / #workflow submit
+    POST /api/tasks or /api/workflows
       insert goat.tasks row without creating a chat session or chat messages
   GoatSurface cloud coding modes
     POST /api/codex-chat/messages or /api/claude-chat/messages
@@ -109,6 +109,12 @@ Skills mentioned by the workflow are resolved and snapshotted when the task is c
 task runs receive those snapshots as workflow prompt blocks; Codex task runs materialize them under
 `.agents/skills` and invoke them as native app-server skill inputs, matching explicit skill mentions
 in main Codex chat.
+
+The reserved `#task` token provides the same direct composer handoff for one-off work without a
+saved workflow. The composer posts the request to `/api/tasks`, removes the directive from the
+runner prompt, creates a normal durable Goat task with the selected chat model, and keeps the current
+surface in place. Both `#task` and saved workflow mentions require the **Tasks & Workflows**
+preference and currently reject attachments.
 
 Workflow runs remain grouped under **Tasks**, but task detail renders the same `GoatSurface` as a
 normal chat. The task's `goat.task_messages` rows are projected into chat bubbles, and the standard
