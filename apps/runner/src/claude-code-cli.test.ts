@@ -53,6 +53,7 @@ describe("buildClaudeTurnCommand", () => {
       model: "claude-sonnet-5",
       reasoningEffort: "xhigh",
       resumeSessionId: "sess-1",
+      mcpConfigPath: null,
     });
     expect(command).toContain("unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN");
     expect(command).toContain("--output-format stream-json");
@@ -62,6 +63,8 @@ describe("buildClaudeTurnCommand", () => {
     expect(command).toContain("--effort 'xhigh'");
     expect(command).toContain("--resume 'sess-1'");
     expect(command).not.toContain("--bare");
+    expect(command).not.toContain("--mcp-config");
+    expect(command).not.toContain("--strict-mcp-config");
   });
 
   it("omits resume and model when not provided", () => {
@@ -71,10 +74,24 @@ describe("buildClaudeTurnCommand", () => {
       model: null,
       reasoningEffort: null,
       resumeSessionId: null,
+      mcpConfigPath: null,
     });
     expect(command).not.toContain("--resume");
     expect(command).not.toContain("--model");
     expect(command).not.toContain("--effort");
+  });
+
+  it("adds a strict mcp config flag when an mcp config path is provided", () => {
+    const command = buildClaudeTurnCommand({
+      workdir: "/w",
+      promptPath: "/p",
+      model: null,
+      reasoningEffort: null,
+      resumeSessionId: null,
+      mcpConfigPath: "/home/user/.claude-mcp/turn-t1.json",
+    });
+    expect(command).toContain("--mcp-config '/home/user/.claude-mcp/turn-t1.json'");
+    expect(command).toContain("--strict-mcp-config");
   });
 });
 
@@ -89,6 +106,7 @@ describe("KILL_LEFTOVER_CLAUDE_TURN_COMMAND", () => {
       model: "claude-sonnet-5",
       reasoningEffort: null,
       resumeSessionId: "sess-1",
+      mcpConfigPath: null,
     });
     // pkill -f matches the leftover wrapper shell and claude process by this signature...
     expect(regex.test(turnCommand)).toBe(true);
