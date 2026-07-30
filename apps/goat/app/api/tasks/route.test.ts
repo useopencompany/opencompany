@@ -123,6 +123,18 @@ describe("POST /api/tasks", () => {
     expect(createGoatTaskForUser).not.toHaveBeenCalled();
   });
 
+  it("requires an authenticated Goat user", async () => {
+    vi.mocked(currentGoatUser).mockResolvedValueOnce(null as never);
+
+    const response = await POST(
+      jsonRequest({ description: "#task Research the market", model: DEFAULT_GOAT_MODEL }),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
+    expect(createGoatTaskForUser).not.toHaveBeenCalled();
+  });
+
   it("honors the Tasks & Workflows preference", async () => {
     vi.mocked(currentGoatUser).mockResolvedValueOnce({
       user: {
