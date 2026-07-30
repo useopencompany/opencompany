@@ -10,6 +10,7 @@ const aiMock = vi.hoisted(() => ({
   stepCountIs: vi.fn((steps: number) => ({ steps })),
 }));
 const toolContextMock = vi.hoisted(() => ({
+  TASK_SYSTEM_BLOCK: "<background_task_run />",
   createOpenCompanyChatToolContext: vi.fn(
     (_input: { updateTaskStatus?: (i: { status: string; comment: string }) => Promise<void> }) => ({
       tools: {} as Record<string, unknown>,
@@ -331,6 +332,7 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     userWorkosId: "user_1",
     prompt: "Do the thing.",
     model,
+    sessionId: null,
     scheduleId: null,
     scheduledFor: null,
     workflowId: null,

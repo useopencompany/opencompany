@@ -229,6 +229,7 @@ export async function createGoatTaskFromWorkflow(input: {
 
   return createGoatTaskForUser({
     userWorkosId: input.userWorkosId,
+    workspaceId,
     prompt: description,
     model: stepSelections[0]!.model,
     name: workflow.name,

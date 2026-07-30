@@ -15,6 +15,7 @@ import type {
   GoatTaskToolName,
   GoatTaskToolUsage,
 } from "@opencompany/db/goat-schema";
+import type { GoatChatSessionView } from "@/lib/chat-ui";
 
 export type GoatTaskRunTaskInput =
   | {
@@ -23,6 +24,7 @@ export type GoatTaskRunTaskInput =
       name: string;
       prompt: string;
       model: string;
+      sessionId?: string | null;
       status: GoatTaskStatus;
       stage: GoatTaskStage;
       result: string | null;
@@ -40,6 +42,7 @@ export type GoatTaskRunTaskInput =
       name: string;
       prompt: string;
       model: string;
+      session_id?: string | null;
       status: GoatTaskStatus;
       stage: GoatTaskStage;
       result: string | null;
@@ -168,6 +171,7 @@ export type GoatHarnessRunViewModel = {
     name: string;
     prompt: string;
     model: string;
+    sessionId: string | null;
     engine: GoatHarnessEngine;
     status: GoatTaskStatus;
     stage: GoatTaskStage;
@@ -188,6 +192,7 @@ export type GoatHarnessRunViewModel = {
   events: GoatRunEvent[];
   models: GoatRunModelSummary[];
   harnessConfig: GoatRunHarnessConfig | null;
+  chat: GoatChatSessionView | null;
   cost: GoatRunCostSummary;
 };
 
@@ -309,6 +314,7 @@ export function buildGoatHarnessRun(input: {
   toolUsage?: readonly GoatTaskRunToolUsageInput[];
   sandboxUsage?: readonly GoatTaskRunSandboxUsageInput[];
   cost?: GoatRunCostSummary;
+  chat?: GoatChatSessionView | null;
 }): GoatHarnessRunViewModel {
   const task = normalizeTask(input.task);
   const messages = input.messages.map(normalizeMessage).toSorted(compareCreatedAt);
@@ -333,6 +339,7 @@ export function buildGoatHarnessRun(input: {
     events,
     models,
     harnessConfig,
+    chat: input.chat ?? null,
     cost:
       input.cost ??
       buildCostSummary({
@@ -732,6 +739,7 @@ function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["tas
       name: task.name,
       prompt: task.prompt,
       model: task.model,
+      sessionId: task.sessionId ?? null,
       engine,
       status: task.status,
       stage: task.stage,
@@ -750,6 +758,7 @@ function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["tas
     name: task.name,
     prompt: task.prompt,
     model: task.model,
+    sessionId: task.session_id ?? null,
     engine,
     status: task.status,
     stage: task.stage,

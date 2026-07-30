@@ -62,6 +62,7 @@ export type GoatBrainMarkdownReportArtifact = {
 export async function createGoatBrainMarkdownReportForTask(input: {
   userWorkosId: string;
   taskId: string;
+  taskTurnId?: string | undefined;
   title: string;
   markdown: string;
 }): Promise<GoatBrainMarkdownReportArtifact> {
@@ -73,7 +74,31 @@ export async function createGoatBrainMarkdownReportForTask(input: {
 
   const title = firstMarkdownHeading(body) || input.title.trim() || "Research report";
   const brainRef = await resolveGoatBrainRefForUser(input.userWorkosId);
-  const brainId = await nextAvailableBrainId(brainRef, title);
+  const existingFiles = await listGoatBrainFiles(
+    { brainRef },
+    {
+      includeInvalid: true,
+      db: getDb(),
+    },
+  );
+  const taskTurnSourceRef = input.taskTurnId ? `goat-task-turn:${input.taskTurnId}` : null;
+  const existingReport = taskTurnSourceRef
+    ? existingFiles.find((file) => file.sources.some((source) => source.ref === taskTurnSourceRef))
+    : null;
+  if (existingReport) {
+    return {
+      type: "brain_markdown_report",
+      title: existingReport.title || title,
+      documentId: existingReport.id,
+      brainId: existingReport.brainId,
+      folderPath: existingReport.folderPath,
+      brainPath: goatBrainFilePathFor(existingReport.folderPath, existingReport.brainId),
+      url: brainDocumentUrl(existingReport.folderPath, existingReport.brainId),
+      mimeType: GOAT_BRAIN_FILE_MIME_TYPE,
+    };
+  }
+
+  const brainId = nextAvailableBrainId(existingFiles, title);
   const folderPath = GOAT_BRAIN_REPORT_FOLDER;
   const now = new Date().toISOString();
   const evidenceId = normalizeEvidenceId(`ev-created-from-${input.taskId}`) ?? "ev-task-created";
@@ -95,6 +120,15 @@ export async function createGoatBrainMarkdownReportForTask(input: {
           title: `Task ${input.taskId}`,
           capturedAt: now,
         },
+        ...(taskTurnSourceRef
+          ? [
+              {
+                ref: taskTurnSourceRef,
+                title: `Task turn ${input.taskTurnId}`,
+                capturedAt: now,
+              },
+            ]
+          : []),
       ],
     },
     title,
@@ -328,15 +362,11 @@ async function resolveGoatBrainRefForUser(userWorkosId: string): Promise<string>
   return brain.id;
 }
 
-async function nextAvailableBrainId(brainRef: string, title: string): Promise<string> {
+function nextAvailableBrainId(
+  rows: Awaited<ReturnType<typeof listGoatBrainFiles>>,
+  title: string,
+): string {
   const base = normalizeGoatBrainId(title) || "research-report";
-  const rows = await listGoatBrainFiles(
-    { brainRef },
-    {
-      includeInvalid: true,
-      db: getDb(),
-    },
-  );
   const used = new Set(rows.map((row) => row.brainId));
   if (!used.has(base)) return base;
   for (let index = 2; index < 1000; index++) {

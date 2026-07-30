@@ -1032,6 +1032,8 @@ export async function POST(request: Request): Promise<Response> {
           startTask: async (task) => {
             const created = await createGoatTaskForUser({
               userWorkosId: context.user.workosUserId,
+              workspaceId: context.workspace.id,
+              brainRef: context.activeBrain?.id ?? null,
               ...(task.name ? { name: task.name } : {}),
               prompt: task.prompt,
               model: task.model,

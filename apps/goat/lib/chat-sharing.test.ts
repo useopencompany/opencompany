@@ -49,7 +49,8 @@ describe("Goat chat sharing", () => {
 
     const [ownerStatement, ownerParams] = query.mock.calls[0]!;
     expect(ownerStatement).toContain('from "goat"."chat_sessions"');
-    expect(ownerParams).toEqual(expect.arrayContaining(["chat_1", "user_1"]));
+    expect(ownerStatement).toContain('"goat"."chat_sessions"."kind"');
+    expect(ownerParams).toEqual(expect.arrayContaining(["chat_1", "user_1", "chat"]));
     const [insertStatement] = query.mock.calls[1]!;
     expect(insertStatement).toContain("on conflict");
     expect(insertStatement).toContain('"chat_session_id"');
@@ -108,7 +109,30 @@ describe("Goat chat sharing", () => {
     expect(statement).toContain(
       'inner join "goat"."chat_sessions" on "goat"."chat_session_shares"."chat_session_id"',
     );
-    expect(params).toEqual(expect.arrayContaining(["chat_1", "user_1"]));
+    expect(statement).toContain('"goat"."chat_sessions"."kind"');
+    expect(params).toEqual(expect.arrayContaining(["chat_1", "user_1", "chat"]));
+  });
+
+  it("only resolves public shares for ordinary chat sessions", async () => {
+    const query = vi.fn(async (...args: [string, unknown[], object]) => {
+      void args;
+      return {
+        rows: [[SHARE_ID, "chat_1", "2026-07-27T10:00:00.000Z", "chat_1", "Architecture review"]],
+      };
+    });
+    const client = Object.assign(query, {
+      transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
+    });
+    const store = createDbGoatChatShareStore(drizzle(client as never) as never);
+
+    await expect(store.findShare(SHARE_ID)).resolves.toMatchObject({
+      share: { id: SHARE_ID },
+      chatSession: { id: "chat_1", title: "Architecture review" },
+    });
+
+    const [statement, params] = query.mock.calls[0]!;
+    expect(statement).toContain('"goat"."chat_sessions"."kind"');
+    expect(params).toEqual(expect.arrayContaining([SHARE_ID, "chat"]));
   });
 
   it("deletes a share only after confirming chat ownership", async () => {
@@ -224,6 +248,7 @@ function createStore({ messages = [] }: { messages?: GoatStoredChatMessage[] } =
     title: "Architecture review",
     model: DEFAULT_GOAT_MODEL,
     engine: "opencompany",
+    kind: "chat",
     closedAt: null,
     pinnedAt: null,
     createdAt,

@@ -227,6 +227,7 @@ export function createDbGoatTaskStore(): GoatTaskStore {
             ON "user".workos_user_id = task.user_workos_id
           WHERE
             "user".task_spawning_enabled = true
+            AND task.session_id IS NULL
             AND (
               (task.status = 'queued' AND task.next_run_at <= ${input.now})
               OR (task.status = 'running' AND task.lease_expires_at < ${input.now})
@@ -1644,6 +1645,7 @@ const goatTaskColumnsSql = sql`
   task.user_workos_id AS "userWorkosId",
   task.prompt,
   task.model,
+  task.session_id AS "sessionId",
   task.schedule_id AS "scheduleId",
   task.scheduled_for AS "scheduledFor",
   task.workflow_id AS "workflowId",

@@ -25,6 +25,7 @@ export type GoatTaskRow = {
   user_workos_id: string;
   prompt: string;
   model: string;
+  session_id: string | null;
   schedule_id: string | null;
   scheduled_for: string | null;
   workflow_id: string | null;
@@ -83,6 +84,7 @@ export type GoatChatSessionRow = {
   title: string;
   model: string;
   engine: "opencompany" | "codex" | "claude_code";
+  kind: "chat" | "task";
   closed_at: string | null;
   pinned_at: string | null;
   created_at: string;

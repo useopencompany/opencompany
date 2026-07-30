@@ -400,6 +400,7 @@ function taskRow(
     user_workos_id: "user_1",
     prompt: overrides.prompt ?? "Do the task.",
     model: "openai/gpt-5.2",
+    session_id: overrides.session_id ?? null,
     schedule_id: overrides.schedule_id ?? null,
     scheduled_for: overrides.scheduled_for ?? null,
     workflow_id: overrides.workflow_id ?? null,

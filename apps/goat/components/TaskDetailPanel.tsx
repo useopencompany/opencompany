@@ -4,8 +4,8 @@ import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatSurface } from "@/components/GoatSurface";
 import { TaskRunLiveProvider } from "@/components/TaskRunPanel";
 import type { GoatChatSessionView } from "@/lib/chat-ui";
+import { legacyGoatHarnessRunToChatMessages } from "@/lib/legacy-task-chat-messages";
 import { normalizeGoatModel } from "@/lib/model-options";
-import { goatHarnessRunToChatMessages } from "@/lib/task-chat-messages";
 import type { GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 
 export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunViewModel }) {
@@ -15,14 +15,14 @@ export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunView
   return (
     <TaskRunLiveProvider initialRun={initialRun}>
       {(run) => {
-        const initialChat: GoatChatSessionView = {
+        // Session-backed tasks are already ordinary chats. Only pre-cutover
+        // legacy rows need the compatibility projection from task_messages.
+        const initialChat: GoatChatSessionView = run.chat ?? {
           id: run.task.id,
           title: run.task.name,
           model: normalizeGoatModel(run.task.model),
-          // Task-backed turns use the task continuation action for every
-          // engine, including Codex tasks with their own persisted session.
           engine: "opencompany",
-          messages: goatHarnessRunToChatMessages(run),
+          messages: legacyGoatHarnessRunToChatMessages(run),
         };
 
         return (
@@ -44,6 +44,7 @@ export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunView
               taskId: run.task.id,
               status: run.task.status,
               startedAtMs: taskActivityStartedAtMs(run),
+              sessionBacked: Boolean(run.task.sessionId),
             }}
           />
         );

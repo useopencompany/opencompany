@@ -137,8 +137,13 @@ const goatGoogleDriveSyncWorker = env.goatTaskWorkerEnabled
   ? startGoatGoogleDriveSyncWorker(env)
   : null;
 const goatTaskScheduleWorker =
-  env.goatTaskWorkerEnabled && goatTaskWorker
-    ? startGoatTaskScheduleWorker({ onTaskCreated: goatTaskWorker.notify })
+  env.goatTaskWorkerEnabled && goatTaskWorker && goatCodexChatWorker
+    ? startGoatTaskScheduleWorker({
+        onTaskCreated: () => {
+          goatTaskWorker.notify();
+          goatCodexChatWorker.notify();
+        },
+      })
     : null;
 if (!goatTaskWorker) {
   logger.info("Goat task worker disabled", {

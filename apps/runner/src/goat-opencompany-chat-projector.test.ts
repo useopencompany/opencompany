@@ -62,7 +62,7 @@ describe("createGoatOpenCompanyChatProjector", () => {
       parts: [{ type: "text", text: "Partial answer", state: "done" }],
     });
 
-    expect(dbMock.execute).toHaveBeenCalledTimes(3);
+    expect(dbMock.execute).toHaveBeenCalledTimes(2);
     expect(queryValues(dbMock.execute.mock.calls[0]?.[0])).toEqual(
       expect.arrayContaining([expect.stringContaining('"aborted":true')]),
     );

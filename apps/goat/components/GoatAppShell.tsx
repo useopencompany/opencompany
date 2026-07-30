@@ -103,6 +103,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       name: task.name,
       prompt: task.prompt,
       model: task.model,
+      sessionId: task.sessionId,
       scheduleId: task.scheduleId,
       scheduledFor: task.scheduledFor?.toISOString() ?? null,
       workflowId: task.workflowId,

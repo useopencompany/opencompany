@@ -42,6 +42,7 @@ export async function POST(request: Request) {
 
   const task = await createGoatTaskForUser({
     userWorkosId: context.user.workosUserId,
+    workspaceId: context.workspace.id,
     prompt: parsed.value.prompt,
     model: parsed.value.model,
     ...(engine ? { engine } : {}),

@@ -22,6 +22,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { CodexAppServerRequest, CodexAppServerSummary } from "./codex-app-server";
 import { getDb } from "./db";
 import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
+import { type GoatTaskTurnCompletion, settleGoatDurableTurn } from "./goat-task-turn";
 import { rowsFromExecute } from "./sql-exec";
 
 const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1" as const;
@@ -293,59 +294,17 @@ export function createGoatCodexChatProjector(input: {
     sessionStatus: GoatCodexChatSessionStatus;
     error: string | null;
     completedAt?: Date;
+    taskCompletion?: GoatTaskTurnCompletion | null | undefined;
   }) => {
     const now = options.completedAt ?? new Date();
-    assertRowsChanged(
-      await getDb().execute(sql`
-        WITH settled_turn AS (
-          UPDATE goat.codex_chat_turns AS turn
-          SET status = ${options.turnStatus},
-              error = ${options.error},
-              completed_at = ${now},
-              updated_at = ${now}
-          WHERE turn.id = ${target.turnId}
-            AND turn.user_workos_id = ${target.userWorkosId}
-            AND turn.lease_id = ${target.leaseId}
-            AND turn.lease_owner = ${target.leaseOwner}
-            AND turn.status = 'running'
-          RETURNING turn.id
-        ),
-        next_queued_turn AS (
-          SELECT queued.id
-          FROM goat.codex_chat_turns AS queued
-          WHERE queued.codex_chat_session_id = ${target.codexChatSessionId}
-            AND queued.user_workos_id = ${target.userWorkosId}
-            AND queued.status = 'queued'
-            AND (queued.run_after IS NULL OR queued.run_after <= ${now})
-            AND EXISTS (SELECT 1 FROM settled_turn)
-          ORDER BY queued.created_at ASC, queued.id ASC
-          LIMIT 1
-        )
-        UPDATE goat.codex_chat_sessions AS session
-        SET active_turn_id = (SELECT id FROM next_queued_turn),
-            status = CASE
-              WHEN EXISTS (SELECT 1 FROM next_queued_turn) THEN 'queued'
-              ELSE ${options.sessionStatus}
-            END,
-            error = ${options.error},
-            updated_at = ${now}
-        WHERE session.id = ${target.codexChatSessionId}
-          AND session.user_workos_id = ${target.userWorkosId}
-          AND (session.active_turn_id IS NULL OR session.active_turn_id = ${target.turnId})
-          AND EXISTS (SELECT 1 FROM settled_turn)
-        RETURNING session.id
-      `),
-    );
-    assertRowsChanged(
-      await getDb().execute(sql`
-        UPDATE goat.chat_sessions AS session
-        SET updated_at = ${now}
-        WHERE session.id = ${target.chatSessionId}
-          AND session.user_workos_id = ${target.userWorkosId}
-          AND EXISTS (${turnLeaseSubquery({ runningOnly: false })})
-        RETURNING session.id
-      `),
-    );
+    await settleGoatDurableTurn({
+      target,
+      turnStatus: options.turnStatus,
+      sessionStatus: options.sessionStatus,
+      error: options.error,
+      completedAt: now,
+      taskCompletion: options.taskCompletion,
+    });
   };
 
   const turnLeaseSubquery = (options: { runningOnly: boolean }) => sql`
@@ -457,7 +416,13 @@ export function createGoatCodexChatProjector(input: {
       });
     },
 
-    finalize(summary: CodexAppServerSummary) {
+    finalize(
+      summary: CodexAppServerSummary,
+      options: {
+        taskCompletion?: GoatTaskTurnCompletion | null;
+        replacementContent?: string | null;
+      } = {},
+    ) {
       return serializeProjection(async () => {
         const completedAt = new Date();
         await cancelPendingInteractions();
@@ -469,6 +434,12 @@ export function createGoatCodexChatProjector(input: {
             }
           : undefined;
         if (summary.status === "success") {
+          if (options.replacementContent?.trim()) {
+            parts = [
+              ...parts.filter((part) => part.type !== "text"),
+              { type: "text", text: options.replacementContent.trim() },
+            ];
+          }
           // Safety net: if no assistant.completed event produced a text part, fall back to the
           // accumulator's result so the turn never ends visually empty.
           if (!parts.some((part) => part.type === "text" && part.text.trim()) && summary.result) {
@@ -489,6 +460,7 @@ export function createGoatCodexChatProjector(input: {
             sessionStatus: "idle",
             error: null,
             completedAt,
+            taskCompletion: options.taskCompletion,
           });
           return;
         }
@@ -500,11 +472,17 @@ export function createGoatCodexChatProjector(input: {
           usage,
           durationMs: elapsedTurnDurationMs(target.turnCreatedAt, completedAt),
         });
-        await settleTurn({ turnStatus: "failed", sessionStatus: "idle", error, completedAt });
+        await settleTurn({
+          turnStatus: "failed",
+          sessionStatus: "idle",
+          error,
+          completedAt,
+          taskCompletion: options.taskCompletion,
+        });
       });
     },
 
-    interrupted() {
+    interrupted(taskCompletion?: GoatTaskTurnCompletion | null) {
       return serializeProjection(async () => {
         const completedAt = new Date();
         await cancelPendingInteractions();
@@ -518,11 +496,18 @@ export function createGoatCodexChatProjector(input: {
           sessionStatus: "interrupted",
           error: null,
           completedAt,
+          taskCompletion,
         });
       });
     },
 
-    fail(error: string, options: { sessionStatus?: GoatCodexChatSessionStatus } = {}) {
+    fail(
+      error: string,
+      options: {
+        sessionStatus?: GoatCodexChatSessionStatus;
+        taskCompletion?: GoatTaskTurnCompletion | null;
+      } = {},
+    ) {
       return serializeProjection(async () => {
         const completedAt = new Date();
         await cancelPendingInteractions();
@@ -536,6 +521,7 @@ export function createGoatCodexChatProjector(input: {
           sessionStatus: options.sessionStatus ?? "idle",
           error,
           completedAt,
+          taskCompletion: options.taskCompletion,
         });
       });
     },

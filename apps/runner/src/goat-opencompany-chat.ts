@@ -18,6 +18,8 @@ import {
   createOpenCompanyChatToolContext,
   OPENCOMPANY_CHAT_MAX_STEPS,
   prepareOpenCompanyChatStep,
+  TASK_SYSTEM_BLOCK,
+  TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
 } from "@opencompany/goat-agent/chat-agent";
 import type {
   GoatChatActionCatalog,
@@ -48,7 +50,11 @@ import { asc, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { runGoatTaskBrainRead } from "./goat-codex-brain-tool";
-import { GoatCodexChatHandoffError, GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
+import {
+  GoatCodexChatHandoffError,
+  GoatCodexChatLeaseLostError,
+  GoatTaskTurnCanceledError,
+} from "./goat-codex-chat-errors";
 import {
   createGoatOpenCompanyChatProjector,
   GoatOpenCompanyChatInterruptedError,
@@ -56,6 +62,12 @@ import {
   type GoatOpenCompanyChatProjector,
   type GoatOpenCompanyChatUiPart,
 } from "./goat-opencompany-chat-projector";
+import {
+  buildGoatTaskTerminalProjection,
+  buildGoatTaskTurnCompletion,
+  type GoatTaskTurnContext,
+  markGoatTaskTurnRunning,
+} from "./goat-task-turn";
 
 const ASSISTANT_PARTS_FLUSH_INTERVAL_MS = 500;
 const INTERRUPT_POLL_INTERVAL_MS = 500;
@@ -69,6 +81,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
   turn: GoatCodexChatTurn;
   session: GoatCodexChatSession;
   env: RunnerEnv;
+  taskContext?: GoatTaskTurnContext | undefined;
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
   const { turn, session, env } = input;
@@ -100,7 +113,10 @@ export async function runGoatOpenCompanyChatTurn(input: {
   let projection: GoatOpenCompanyChatProjection = { parts: [] };
 
   if (turn.interruptRequestedAt) {
-    await projector.interrupted(projection);
+    await projector.interrupted(
+      projection,
+      input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : null,
+    );
     return "settled";
   }
 
@@ -113,11 +129,15 @@ export async function runGoatOpenCompanyChatTurn(input: {
 
   try {
     await abortWatcher.checkNow();
+    if (input.taskContext) {
+      await markGoatTaskTurnRunning({ context: input.taskContext, turn });
+    }
     const runtime = await resolveOpenCompanyChatRuntime({
       turn,
       session,
       env,
       signal: generationController.signal,
+      taskContext: input.taskContext,
     });
     throwIfAborted(generationController.signal);
     const messages = await loadGoatOpenCompanyChatModelMessages({
@@ -131,8 +151,9 @@ export async function runGoatOpenCompanyChatTurn(input: {
     const { streamText } = getBraintrustAISDK(ai);
     const attribution = createGoatGatewayAttribution({
       userWorkosId: turn.userWorkosId,
-      feature: "chat",
+      feature: input.taskContext ? "task" : "chat",
       chatSessionId: session.chatSessionId,
+      ...(input.taskContext ? { taskId: input.taskContext.task.id } : {}),
       ...(runtime.brain ? { brainRef: runtime.brain.id } : {}),
     });
     const stream = streamText({
@@ -140,11 +161,11 @@ export async function runGoatOpenCompanyChatTurn(input: {
       system: runtime.system,
       messages,
       tools: runtime.toolContext.tools,
-      stopWhen: stepCountIs(OPENCOMPANY_CHAT_MAX_STEPS),
+      stopWhen: stepCountIs(runtime.maxSteps),
       prepareStep: ({ stepNumber }) =>
         prepareOpenCompanyChatStep({
           stepNumber,
-          maxSteps: OPENCOMPANY_CHAT_MAX_STEPS,
+          maxSteps: runtime.maxSteps,
         }),
       ...(runtime.toolContext.repairToolCall
         ? { experimental_repairToolCall: runtime.toolContext.repairToolCall }
@@ -167,7 +188,18 @@ export async function runGoatOpenCompanyChatTurn(input: {
     await abortWatcher.checkNow();
     await abortWatcher.stop();
     projection = withCompletedResponseFallback(projection);
-    await projector.completed(projection);
+    const taskOutcome = runtime.getTaskOutcome();
+    await projector.completed(
+      projection,
+      input.taskContext
+        ? buildGoatTaskTurnCompletion({
+            context: input.taskContext,
+            result: projectionText(projection),
+            reportedOutcome: taskOutcome.reportedOutcome,
+            outcomeComment: taskOutcome.outcomeComment,
+          })
+        : null,
+    );
     return "settled";
   } catch (error) {
     const effectiveError = recognizedAbortError(error)
@@ -182,8 +214,14 @@ export async function runGoatOpenCompanyChatTurn(input: {
     if (effectiveError instanceof GoatCodexChatHandoffError) {
       return "handed_off";
     }
-    if (effectiveError instanceof GoatOpenCompanyChatInterruptedError) {
-      await projector.interrupted(projection);
+    if (
+      effectiveError instanceof GoatOpenCompanyChatInterruptedError ||
+      effectiveError instanceof GoatTaskTurnCanceledError
+    ) {
+      await projector.interrupted(
+        projection,
+        input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : null,
+      );
       return "settled";
     }
     if (effectiveError instanceof GoatCodexChatLeaseLostError) {
@@ -199,7 +237,11 @@ export async function runGoatOpenCompanyChatTurn(input: {
       error_name: effectiveError instanceof Error ? effectiveError.name : typeof effectiveError,
       error: message,
     });
-    await projector.failed(message, projection);
+    await projector.failed(
+      message,
+      projection,
+      input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : null,
+    );
     return "settled";
   } finally {
     await abortWatcher.stop();
@@ -533,8 +575,9 @@ async function resolveOpenCompanyChatRuntime(input: {
   session: GoatCodexChatSession;
   env: RunnerEnv;
   signal: AbortSignal;
+  taskContext?: GoatTaskTurnContext | undefined;
 }) {
-  const { turn, session, env, signal } = input;
+  const { turn, session, env, signal, taskContext } = input;
   const model = session.model as AgentModelId;
   if (!AGENT_MODEL_CATALOG.some((candidate) => candidate.id === model)) {
     throw new Error(`Unsupported OpenCompany chat model: ${session.model}.`);
@@ -601,6 +644,8 @@ async function resolveOpenCompanyChatRuntime(input: {
 
   const currentDate = new Date();
   const exaApiKey = env.exaApiKey?.trim();
+  let reportedOutcome: "done" | "needs_attention" | null = null;
+  let outcomeComment: string | null = null;
   const toolContext = createOpenCompanyChatToolContext({
     model,
     latestUserMessage: turn.prompt,
@@ -670,8 +715,21 @@ async function resolveOpenCompanyChatRuntime(input: {
           },
         }
       : {}),
+    ...(taskContext
+      ? {
+          updateTaskStatus: async (outcome) => {
+            reportedOutcome = outcome.status;
+            outcomeComment = outcome.comment.trim().slice(0, 200);
+          },
+          limits: {
+            webSearchCallsPerTurn: 20,
+            webFetchCallsPerTurn: 20,
+            actionCallsPerTurn: 20,
+          },
+        }
+      : {}),
   });
-  const system = createOpenCompanyChatSystemPrompt({
+  const baseSystem = createOpenCompanyChatSystemPrompt({
     currentDate,
     webFetchEnabled: Boolean(exaApiKey),
     webSearchEnabled: Boolean(exaApiKey),
@@ -692,7 +750,27 @@ async function resolveOpenCompanyChatRuntime(input: {
         }
       : {}),
   });
-  return { model, brain, toolContext, system };
+  const taskSystemBlocks = taskContext
+    ? [
+        TASK_SYSTEM_BLOCK,
+        TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
+        ...(taskContext.harnessSpec.systemBlocks?.length
+          ? taskContext.harnessSpec.systemBlocks
+          : taskContext.harnessSpec.systemPrompt.trim()
+            ? [taskContext.harnessSpec.systemPrompt]
+            : []),
+      ]
+    : [];
+  return {
+    model,
+    brain,
+    toolContext,
+    system: [baseSystem, ...taskSystemBlocks].join("\n\n"),
+    maxSteps: taskContext
+      ? Math.max(1, taskContext.harnessSpec.maxModelSteps || OPENCOMPANY_CHAT_MAX_STEPS)
+      : OPENCOMPANY_CHAT_MAX_STEPS,
+    getTaskOutcome: () => ({ reportedOutcome, outcomeComment }),
+  };
 }
 
 function createOpenCompanyAbortWatcher(input: {
@@ -821,6 +899,7 @@ function recognizedAbortError(value: unknown): value is Error {
   return (
     value instanceof GoatCodexChatHandoffError ||
     value instanceof GoatOpenCompanyChatInterruptedError ||
+    value instanceof GoatTaskTurnCanceledError ||
     value instanceof GoatCodexChatLeaseLostError
   );
 }
@@ -847,6 +926,13 @@ function readStringAllowEmpty(value: unknown) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function projectionText(projection: GoatOpenCompanyChatProjection) {
+  return projection.parts
+    .flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : []))
+    .join("")
+    .trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

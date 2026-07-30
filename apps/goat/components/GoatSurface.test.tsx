@@ -277,7 +277,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
   });
 
-  it("continues a workflow task through the same chat composer", async () => {
+  it("continues a session-backed workflow task through the same chat composer", async () => {
     const user = userEvent.setup();
 
     render(
@@ -285,7 +285,7 @@ describe("GoatSurface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_GOAT_MODEL}
         initialChat={{
-          id: "goat_task_1",
+          id: "goat_chat_task_1",
           title: "Morning workflow",
           model: DEFAULT_GOAT_MODEL,
           engine: "opencompany",
@@ -306,6 +306,7 @@ describe("GoatSurface chat streaming UI", () => {
           taskId: "goat_task_1",
           status: "succeeded",
           startedAtMs: Date.now(),
+          sessionBacked: true,
         }}
       />,
     );
@@ -322,7 +323,7 @@ describe("GoatSurface chat streaming UI", () => {
       expect(continueGoatTaskAction).toHaveBeenCalledWith(
         "goat_task_1",
         "Please check the afternoon too",
-        expect.stringMatching(/^goat_task_msg_[0-9a-f-]{36}$/),
+        expect.stringMatching(/^goat_chat_msg_[0-9a-f-]{36}$/),
       ),
     );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();

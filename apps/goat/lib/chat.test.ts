@@ -688,6 +688,36 @@ describe("Goat chat history helpers", () => {
     ).resolves.toBeNull();
   });
 
+  it("keeps task sessions out of chat routes unless the caller requests task kind", async () => {
+    const { store, sessions } = createInMemoryChatStore();
+    const createdAt = new Date("2026-07-04T12:00:00.000Z");
+    sessions.push({
+      id: "goat_chat_task_1",
+      userWorkosId: "user_1",
+      title: "Background research",
+      model: DEFAULT_GOAT_MODEL,
+      engine: "opencompany",
+      kind: "task",
+      closedAt: null,
+      pinnedAt: null,
+      createdAt,
+      updatedAt: createdAt,
+    });
+
+    await expect(
+      loadGoatChatSessionByIdForUser(
+        { userWorkosId: "user_1", sessionId: "goat_chat_task_1" },
+        store,
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      loadGoatChatSessionByIdForUser(
+        { userWorkosId: "user_1", sessionId: "goat_chat_task_1", kind: "task" },
+        store,
+      ),
+    ).resolves.toMatchObject({ id: "goat_chat_task_1" });
+  });
+
   it("includes latest Codex composer settings on loaded and recent chats", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T12:30:00.000Z"));
@@ -715,6 +745,7 @@ describe("Goat chat history helpers", () => {
         title: "Codex chat",
         model: DEFAULT_GOAT_MODEL,
         engine: "codex",
+        kind: "chat",
         closedAt: null,
         pinnedAt: null,
         createdAt: now,
@@ -776,6 +807,7 @@ describe("Goat chat history helpers", () => {
       title: "Claude chat",
       model: "anthropic/claude-opus-4.8",
       engine: "claude_code",
+      kind: "chat",
       closedAt: null,
       pinnedAt: null,
       createdAt: now,
@@ -815,7 +847,10 @@ function createInMemoryChatStore(
   const store: GoatChatStore = {
     async findOpenSession(input) {
       const openSessions = sessions.filter(
-        (session) => session.userWorkosId === input.userWorkosId && !session.closedAt,
+        (session) =>
+          session.userWorkosId === input.userWorkosId &&
+          !session.closedAt &&
+          session.kind === (input.kind ?? "chat"),
       );
       if (input.sessionId) {
         return openSessions.find((session) => session.id === input.sessionId) ?? null;
@@ -827,7 +862,10 @@ function createInMemoryChatStore(
 
     async listOpenSessions(input) {
       const open = sessions.filter(
-        (session) => session.userWorkosId === input.userWorkosId && !session.closedAt,
+        (session) =>
+          session.userWorkosId === input.userWorkosId &&
+          !session.closedAt &&
+          session.kind === "chat",
       );
       const pinned = open
         .filter((session) => session.pinnedAt)
@@ -851,6 +889,7 @@ function createInMemoryChatStore(
         title: input.title,
         model: input.model,
         engine: "opencompany",
+        kind: "chat",
         closedAt: null,
         pinnedAt: null,
         createdAt: now,

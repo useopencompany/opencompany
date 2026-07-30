@@ -106,9 +106,9 @@ skills / 256 KiB of canonical `SKILL.md` content. The first valid mention stores
 in `goat.chat_session_skills`; re-mentioning the same id keeps that session's original version.
 
 Selecting a workflow with `#<id>` changes the composer action from **Send message** to **Start
-task**. Submission posts directly to `/api/workflows`, starts the durable task in the
-background, and leaves the current Home or chat surface in place. It does not call the foreground
-chat model or persist user/assistant chat messages for the workflow launch.
+task**. Submission posts directly to `/api/workflows`, creates a task-flavored chat session and its
+first durable turn, and leaves the current Home or chat surface in place. It does not call the
+foreground chat model.
 Skills mentioned by the workflow are resolved and snapshotted when the task is created. OpenCompany
 task runs receive those snapshots as workflow prompt blocks; Codex task runs materialize them under
 `.agents/skills` and invoke them as native app-server skill inputs, matching explicit skill mentions
@@ -116,15 +116,16 @@ in main Codex chat.
 
 The reserved `#task` token provides the same direct composer handoff for one-off work without a
 saved workflow. The composer posts the request to `/api/tasks`, removes the directive from the
-runner prompt, creates a normal durable Goat task with the selected chat model, and keeps the current
-surface in place. Both `#task` and saved workflow mentions require the **Tasks & Workflows**
-preference and currently reject attachments.
+runner prompt, creates a task chat session with the selected model, and keeps the current surface
+in place. Both `#task` and saved workflow mentions require the **Tasks & Workflows** preference and
+currently reject attachments.
 
 Workflow runs remain grouped under **Tasks**, but task detail renders the same `GoatSurface` as a
-normal chat. The task's `goat.task_messages` rows are projected into chat bubbles, and the standard
-reply composer appends a new user turn, moves a terminal task back to `queued`, and resumes its
-runner with the prior user/assistant conversation. The normal chat stop control cancels an active
-task turn.
+normal chat. Session-backed tasks render their native `goat.chat_messages` and subscribe to the
+same session and durable-turn state as cloud chats. The standard reply composer appends a user
+message and durable turn on that session, preserving its complete message and tool context. The
+normal chat stop control interrupts the active turn. Rows created before the session cutover retain
+a read-only compatibility projection from `goat.task_messages`.
 
 Normal main chat can also discover workspace skills progressively. When the catalog is non-empty, the
 system prompt advertises only that a skill source exists; `list_skills` searches safe id, name, and
@@ -466,86 +467,51 @@ continues to show it in conversation history.
 Entry points:
 
 - `apps/goat/lib/tasks.ts`
-- `apps/goat/lib/task-runner.ts`
-- `apps/goat/lib/integrations/google-data.ts`
+- `apps/goat/lib/workflow-tasks.ts`
+- `apps/runner/src/goat-scheduler.ts`
+- `packages/db/src/goat-task-sessions.ts`
 
-`createGoatTaskForUser` creates the task row. It:
+All ad-hoc, workflow, and scheduled task entry points call `createGoatTaskSession`. In one database
+statement it:
 
-- Generates a `goat_task_*` id.
-- Normalizes a short display name.
-- Computes available harness tools.
-- Inserts `goat.tasks` with `status: "queued"`, `stage: "queued"`, `nextRunAt: now`, and an
-  initial `harnessSpec`.
-- Inserts the durable initial `goat.task_messages` user row in the same transaction.
-- Best-effort dispatches the runner through `triggerGoatTaskRun`.
+- Creates a `goat.chat_sessions` row with `kind: "task"`.
+- Inserts the thin `goat.tasks` projection linked through `session_id`.
+- Inserts native user and pending assistant `goat.chat_messages`.
+- Creates the engine runtime row and enqueues the first leased `goat.codex_chat_turn`.
+- Persists the compiled harness, workflow, and schedule metadata on the projection.
 
-Available task harness tools are user-specific:
+Callers validate product permissions, compile or seed the harness, then wake the shared durable chat
+worker. `GOAT_TASK_SESSION_EXECUTION_ENABLED=false` is a temporary rollback switch that routes new
+tasks to the legacy task queue. It defaults to enabled. Existing rows without `session_id` continue
+to drain through the legacy task worker and retain their old history.
 
-- `exa_search` is always available.
-- Gmail operation tools are included only when the user has a connected Gmail integration.
-- Calendar operation tools are included only when the user has a connected Google Calendar
-  integration.
-- Linear MCP meta-tools are included only when the user has a connected Linear integration.
+Available OpenCompany task tools are resolved from the same user-specific Brain, web, browser, and
+connected-action catalog as foreground chat. Codex task configuration still comes from the task
+planner so repository selection, pull-request intent, reasoning effort, goal mode, and report mode
+remain task-specific.
 
-`triggerGoatTaskRun` calls:
-
-```text
-POST {RUNNER_INTERNAL_URL}/internal/goat/tasks/:taskId/run
-Authorization: Bearer {RUNNER_INTERNAL_TOKEN}
-```
-
-If the runner URL or token is missing, the task stays queued for polling.
-
-## Runner Worker
+## Durable Task Turns
 
 Entry points:
 
 - `apps/runner/src/index.ts`
-- `apps/runner/src/server.ts`
-- `apps/runner/src/goat-worker.ts`
-- `apps/runner/src/goat-harness.ts`
+- `apps/runner/src/goat-codex-chat-worker.ts`
+- `apps/runner/src/goat-opencompany-chat.ts`
+- `apps/runner/src/goat-codex-chat.ts`
+- `apps/runner/src/goat-task-turn.ts`
 
-The runner process starts a normal session job worker and a Goat task worker. The HTTP route
-`/internal/goat/tasks/:taskId/run` does not claim that exact task directly. It authenticates the
-internal token, logs the accepted request, and wakes the in-process Goat worker.
+Tasks use the engine-agnostic durable turn worker and the same per-session FIFO, lease, heartbeat,
+recovery, and assistant projection as cloud chat. Loading a turn whose chat has `kind: "task"`
+loads its linked task projection. The adapter marks the task running, applies any needed planning,
+and executes through the turn's selected OpenCompany or Codex engine.
 
-The worker loop:
+One fenced settlement statement completes the turn and runtime session, updates the task
+projection, and writes the origin-chat notification. Success maps to `succeeded/completed`, failure
+to `failed/failed`, and interruption to `canceled/canceled`. A user reply to a terminal task queues
+a new turn on the existing session without collapsing history.
 
-- Polls roughly every second by default.
-- Runs with bounded concurrency, defaulting to `min(2, env.workerConcurrency)`.
-- Claims the next eligible task using `FOR UPDATE SKIP LOCKED`.
-- Reclaims `running` tasks whose lease has expired.
-- Sets `status: "running"`, `stage: "planning"`, increments `attempts`, and writes a lease id,
-  lease owner, and lease expiry.
-- Heartbeats every 5 seconds while the executor runs.
-- Aborts the executor if the lease is lost.
-
-On success it writes:
-
-- `status: "succeeded"`
-- `stage: "completed"`
-- `result`, copied from the final assistant task message
-- final `harnessSpec`
-- merged `debugTrace`
-
-On failure it writes:
-
-- `status: "failed"`
-- `stage: "failed"`
-- `error`
-- optional debug trace from the harness error
-
-On user stop it writes:
-
-- `status: "canceled"`
-- `stage: "canceled"`
-- `error: "Stopped by user."`
-- clears the active lease
-
-During the run it also writes lease-owned rows in `goat.task_messages` and `goat.task_events` for
-assistant content, tool starts/completions/failures, and task status milestones.
-
-Failed and canceled tasks are not automatically retried by this worker. Only stale `running` tasks are reclaimed.
+`apps/runner/src/goat-worker.ts` remains only for rows with no `session_id`; it is a compatibility
+drain path and does not claim session-backed tasks.
 
 ## Harness Planning
 
@@ -618,32 +584,24 @@ The planner request and response content are stored in `debugTrace.planner`.
 
 Entry points:
 
-- `apps/runner/src/goat-harness.ts`
-- `apps/runner/src/goat-codex.ts`
-- `apps/runner/src/goat-task-chat-loop.ts`
+- `apps/runner/src/goat-opencompany-chat.ts`
+- `apps/runner/src/goat-codex-chat.ts`
+- `apps/runner/src/goat-task-turn.ts`
 - `packages/goat-agent/src/chat-agent.ts`
 
-The task reports `stage: "running"` and creates a running assistant message. OpenCompany-engine
-tasks then execute as hidden main-chat turns: they use the shared Goat system prompt and tool
-context, including Brain reads, web search/fetch, connected integration actions, and the task-only
-`update_task_status` tool. Codex-engine tasks retain their coding sandbox path.
+Task mode adds only the autonomous `TASK_SYSTEM_BLOCK`, the untrusted-content safety block, raised
+headless call limits, and the shared `update_task_status` tool to an OpenCompany turn. All other
+prompt, message, tool, streaming, credit, and usage behavior is the standard chat adapter.
 
-The runner:
+Codex tasks use the standard persistent Codex turn adapter while preserving planner-produced
+repository and pull-request configuration, task reasoning/goal settings, Markdown report
+materialization, and the small closer model that reports the final task outcome. The closer reuses
+the shared `update_task_status` schema.
 
-1. Creates a running assistant `goat.task_messages` row.
-2. Resolves the current shared chat tool catalog for OpenCompany tasks, or starts the Codex
-   sandbox for coding tasks.
-3. Streams model text into the assistant row on a short throttle and at step boundaries for
-   `assistant_final` runs. For `brain_markdown_report`, the report body is buffered instead.
-4. Appends `tool.started`, `tool.completed`, and `tool.failed` events durably.
-5. Returns recoverable tool failures to the model as tool results.
-6. Completes with the trimmed final assistant message content, or saves the final Markdown report
-   into the `research/` Brain folder and completes with an artifact link.
-
-If the final assistant content is empty, the task fails. There is no `goat_result` tool.
-
-OpenCompany task tools use the same limits, validation, and connected-account resolution as
-foreground chat. They do not use a second task-only tool tree or a sandbox callback bridge.
+Workflows are sequences of ordinary durable turns. When a step reports `done`, settlement
+atomically appends the next step's handoff user message and assistant placeholder, enqueues the next
+turn, and switches the session engine/model to that step's compiled values. `needs_attention`,
+failure, or interruption halts the workflow. Current step state remains on the task projection.
 
 ## Google Tools
 
@@ -669,7 +627,8 @@ Important tables:
 
 - `goat.users`: WorkOS-backed Goat user profile, including the off-by-default
   `task_spawning_enabled` and `auto_model_routing_enabled` feature flags.
-- `goat.chat_sessions`: one open or closed chat thread per user.
+- `goat.chat_sessions`: one open or closed thread per user. `kind` distinguishes ordinary chats
+  from task sessions without changing their message or execution model.
 - `goat.chat_messages`: persisted user and assistant chat messages. Assistant messages can point
   at a `taskId` so the UI can render a task card. Task completion notifications are also persisted
   here as synthetic assistant messages.
@@ -684,11 +643,10 @@ Important tables:
 - `goat.codex_chat_events`: normalized persistent cloud coding event audit rows.
 - `goat.repo_configs`: workspace-scoped repository setup instructions, masked env key names, and
   encrypted environment-file payloads used by Codex and Claude Code chat sandboxes.
-- `goat.tasks`: durable background task queue, status, stage, result, error, lease, harness spec,
-  debug trace, and sandbox id.
-- `goat.task_messages`: durable task transcript rows for user, assistant, and tool messages.
-- `goat.task_events`: durable task timeline rows for harness planning, message lifecycle, and tool
-  lifecycle events.
+- `goat.tasks`: thin task projection linked to a chat through `session_id`, with status, stage,
+  result/outcome, workflow/schedule metadata, board fields, and the current compiled harness.
+- `goat.task_messages` and `goat.task_events`: legacy compatibility history. New tasks never write
+  them.
 - `goat.integrations`: connected Gmail, Google Calendar, and Linear accounts.
 - `goat.integration_credentials`: encrypted OAuth token payloads.
 
@@ -701,11 +659,11 @@ queued -> running/planning -> running/running
 terminal task + user reply -> queued
 ```
 
-The UI maps this to Tasks rows and chat-style task detail pages. Goat task pages subscribe to
-TanStack DB collections backed by Electric shapes for `goat.tasks`, `goat.task_messages`, and
-`goat.task_events`, scoped by `user_workos_id`. The active chat also subscribes to scoped
-`goat.chat_messages` rows so persisted task completion notifications appear without a manual
-refresh.
+The UI maps this projection to Tasks rows while task detail renders the linked chat session
+natively. Goat task pages subscribe to `goat.tasks` plus the standard session messages and runtime
+state. Legacy rows without a session still subscribe to `goat.task_messages` and `goat.task_events`
+for read compatibility. Origin chats subscribe to `goat.chat_messages`, so task completion
+notifications appear without a manual refresh.
 
 Settings and Brain use the same pattern for `goat.integrations`, `goat.brain_folders`, and
 `goat.brain_documents`. Server props are initial render fallbacks; after hydration, live Electric

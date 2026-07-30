@@ -1303,6 +1303,7 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     userWorkosId: "user_1",
     prompt: "Research Marseille.",
     model,
+    sessionId: null,
     scheduleId: null,
     scheduledFor: null,
     workflowId: null,

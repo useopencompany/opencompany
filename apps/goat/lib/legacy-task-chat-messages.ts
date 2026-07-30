@@ -1,10 +1,11 @@
 import type { GoatChatUiMessage } from "@/lib/chat-ui";
 import type { GoatHarnessRunToolCall, GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 
-// Reprojects a durable task conversation onto the exact message shape the main
-// chat renders. Task messages stay in their original turn order; tool calls are
-// attached to the assistant turn whose lifetime contains them.
-export function goatHarnessRunToChatMessages(run: GoatHarnessRunViewModel): GoatChatUiMessage[] {
+// Read-only compatibility projection for task rows created before tasks became
+// native chat sessions. New tasks render their chat_messages directly.
+export function legacyGoatHarnessRunToChatMessages(
+  run: GoatHarnessRunViewModel,
+): GoatChatUiMessage[] {
   const conversation = run.messages.filter(
     (message) => message.role === "user" || message.role === "assistant",
   );

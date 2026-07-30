@@ -2012,6 +2012,8 @@ describe("POST /api/chat", () => {
     expect(isGoatCodexConnectedForUser).toHaveBeenCalledWith("user_1");
     expect(createGoatTaskForUser).toHaveBeenCalledWith({
       userWorkosId: "user_1",
+      workspaceId: "goat_ws_user_1",
+      brainRef: "goat_brain_user_1",
       name: "Test repo access",
       prompt: "Check repo access and report whether development work can start.",
       model: "openai/gpt-5.5",

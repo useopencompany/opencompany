@@ -121,6 +121,7 @@ describe("createGoatBrainMarkdownReportForTask", () => {
     const artifact = await createGoatBrainMarkdownReportForTask({
       userWorkosId: "user_1",
       taskId: "goat_task_1",
+      taskTurnId: "goat_codex_chat_turn_1",
       title: "Fallback title",
       markdown: "# Market Report\n\nFindings.",
     });
@@ -158,12 +159,16 @@ describe("createGoatBrainMarkdownReportForTask", () => {
           format: "markdown",
           kind: "page",
           mimeType: "text/markdown",
-          sources: [
+          sources: expect.arrayContaining([
             expect.objectContaining({
               ref: "goat-task:goat_task_1",
               title: "Task goat_task_1",
             }),
-          ],
+            expect.objectContaining({
+              ref: "goat-task-turn:goat_codex_chat_turn_1",
+              title: "Task turn goat_codex_chat_turn_1",
+            }),
+          ]),
           contentHash: expect.any(String),
         }),
         expect.objectContaining({
@@ -175,6 +180,47 @@ describe("createGoatBrainMarkdownReportForTask", () => {
         }),
       ]),
     );
+  });
+
+  it("reuses the report already written for the same durable task turn", async () => {
+    const existing = {
+      ...brainRow({
+        documentId: "doc_existing",
+        brainId: "market-report",
+        folderPath: "research",
+        content: brainDoc({
+          id: "market-report",
+          folder: "research",
+          title: "Market Report",
+          truth: "Findings.",
+        }),
+      }),
+      title: "Market Report",
+      sources: [
+        {
+          ref: "goat-task-turn:goat_codex_chat_turn_1",
+          title: "Task turn goat_codex_chat_turn_1",
+          capturedAt: "2026-07-30T09:00:00.000Z",
+        },
+      ],
+    };
+    const db = createGoatBrainDb({ selectResults: [[existing]] });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await expect(
+      createGoatBrainMarkdownReportForTask({
+        userWorkosId: "user_1",
+        taskId: "goat_task_1",
+        taskTurnId: "goat_codex_chat_turn_1",
+        title: "Fallback title",
+        markdown: "# Market Report\n\nFindings.",
+      }),
+    ).resolves.toMatchObject({
+      documentId: "doc_existing",
+      brainId: "market-report",
+      brainPath: "research/market-report.md",
+    });
+    expect(db.insertedValues).toEqual([]);
   });
 });
 
