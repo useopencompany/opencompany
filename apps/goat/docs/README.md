@@ -342,10 +342,23 @@ uploads.
 
 ### Codex execution
 
+The legacy-named `goat.codex_chat_turns` queue is the durable, per-session FIFO execution substrate
+for `codex`, `claude_code`, and the internal-only `opencompany` engine path. A claimed OpenCompany
+turn runs the shared AI SDK chat loop without a sandbox or engine thread, streams text, reasoning,
+and tool lifecycle parts into its pre-created assistant `goat.chat_messages` row, and reconstructs
+follow-up model history from those persisted UI message parts. Its headless tool catalog includes
+read-only Brain/web tools and only integration actions whose permission mode is `on`; managed
+capabilities and approval-gated actions are excluded. No product route selects this durable
+OpenCompany path yet. It is exercisable only through the bearer-authenticated
+`POST /api/internal/opencompany-chat/messages` endpoint, which accepts an explicit user, workspace,
+prompt, and optional Brain/session/model before enqueueing through the same durable queue.
+
 Cloud Codex uses a persistent sandbox per Goat chat and resumes the same Codex app-server thread on
 follow-up turns. New turns remain `queued` until the runner claims them, then move through
 `starting` and `running`; the worker uses the runner-wide concurrency setting rather than a
-Cloud-Codex-specific limit. The composer accepts the same private-blob uploads as normal Goat chat.
+Cloud-Codex-specific limit. OpenCompany sessions leave the sandbox/thread columns null and are
+ignored by terminal-sandbox reconciliation. The composer accepts the same private-blob uploads as
+normal Goat chat.
 At run time, the worker downloads the current turn's files into
 `~/.opencompany-goat/codex-chat-attachments/<turn-id>/` and includes those paths in the user task.
 Image uploads are additionally passed to `turn/start` as `localImage` inputs, so screenshots are
@@ -645,9 +658,11 @@ Important tables:
   here as synthetic assistant messages.
 - `goat.chat_session_skills`: immutable skill snapshots activated by user messages. A snapshot
   remains available for the rest of that chat even if its source Brain changes or is deleted.
-- `goat.codex_chat_sessions`: persistent Codex/Claude Code sandbox, engine thread/session, active
-  turn, status, pinned Brain, and host-tool contract version.
-- `goat.codex_chat_turns`: leased persistent cloud coding turn queue and message linkage.
+- `goat.codex_chat_sessions`: durable engine runtime state. Codex/Claude Code rows include their
+  persistent sandbox and engine thread/session; OpenCompany rows leave those fields null. All rows
+  track the active turn, status, pinned Brain, and workspace.
+- `goat.codex_chat_turns`: leased, per-session-FIFO durable chat turn queue and message linkage for
+  all three engines (the legacy table name is intentionally retained).
 - `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
 - `goat.codex_chat_events`: normalized persistent cloud coding event audit rows.
 - `goat.repo_configs`: workspace-scoped repository setup instructions, masked env key names, and

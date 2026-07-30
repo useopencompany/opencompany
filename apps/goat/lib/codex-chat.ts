@@ -30,6 +30,7 @@ import {
   parseCodexChatModelId,
 } from "@/lib/codex-chat-constants";
 import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
+import { DEFAULT_GOAT_MODEL, normalizeGoatModel } from "@/lib/model-options";
 import { toGoatTaskTitle } from "@/lib/task-display";
 import {
   type GoatCodexSandboxStatus,
@@ -42,9 +43,11 @@ import {
 
 export { CODEX_CHAT_DEFAULT_MODEL, CODEX_PICKER_VALUE } from "@/lib/codex-chat-constants";
 
-// Cloud Codex chat sessions record the gateway-style model id on the chat session (like every
-// other engine) while the codex_chat_sessions row keeps the Codex CLI model name.
+// Coding-engine sessions record the gateway-style model id on chat_sessions while their
+// codex_chat_sessions row keeps the CLI model name. OpenCompany durable turns use the gateway id
+// in both rows because they have no separate sandbox runtime.
 const CODEX_CHAT_DEBUG_SCHEMA_VERSION = "goat.codex_chat.debug.v1";
+const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
 
 export const CODEX_CHAT_DISCONNECTED_MESSAGE =
   "Connect Codex in Goat settings before chatting with the Codex engine.";
@@ -94,7 +97,9 @@ export async function createGoatCodexChatMessage(input: {
     return { ok: false, status: 400, error: "Messages can be at most 10,000 characters." };
   }
 
-  if (engine === "claude_code") {
+  if (engine === "opencompany") {
+    // Internal-only durable OpenCompany enqueues need no coding-CLI credential.
+  } else if (engine === "claude_code") {
     if (!(await isGoatClaudeCodeConnectedForUser(input.userWorkosId))) {
       return { ok: false, status: 409, error: CLAUDE_CHAT_DISCONNECTED_MESSAGE };
     }
@@ -103,28 +108,42 @@ export async function createGoatCodexChatMessage(input: {
   }
 
   let settings: GoatCodexChatTurnSettings = {};
-  const parsedSettings =
-    engine === "claude_code"
-      ? parseClaudeChatSettings(input.settings)
-      : parseCodexChatSettings(input.settings);
-  if (!parsedSettings.ok) return { ok: false, status: 400, error: parsedSettings.error };
-  settings = parsedSettings.settings;
+  if (engine !== "opencompany") {
+    const parsedSettings =
+      engine === "claude_code"
+        ? parseClaudeChatSettings(input.settings)
+        : parseCodexChatSettings(input.settings);
+    if (!parsedSettings.ok) return { ok: false, status: 400, error: parsedSettings.error };
+    settings = parsedSettings.settings;
+  }
+  const normalizedOpenCompanyModel =
+    engine === "opencompany" && input.model !== undefined
+      ? normalizeGoatModel(input.model)
+      : DEFAULT_GOAT_MODEL;
   const requestedModelId =
-    engine === "claude_code"
+    engine === "opencompany"
       ? input.model === undefined
-        ? CLAUDE_CHAT_DEFAULT_MODEL_ID
-        : parseClaudeChatModelId(input.model)
-      : input.model === undefined
-        ? CODEX_CHAT_DEFAULT_MODEL_ID
-        : parseCodexChatModelId(input.model);
+        ? DEFAULT_GOAT_MODEL
+        : normalizedOpenCompanyModel === input.model
+          ? normalizedOpenCompanyModel
+          : null
+      : engine === "claude_code"
+        ? input.model === undefined
+          ? CLAUDE_CHAT_DEFAULT_MODEL_ID
+          : parseClaudeChatModelId(input.model)
+        : input.model === undefined
+          ? CODEX_CHAT_DEFAULT_MODEL_ID
+          : parseCodexChatModelId(input.model);
   if (!requestedModelId) {
     return {
       ok: false,
       status: 400,
       error:
-        engine === "claude_code"
-          ? "Select a supported Claude model."
-          : "Select a supported Codex model.",
+        engine === "opencompany"
+          ? "Select a supported Goat model."
+          : engine === "claude_code"
+            ? "Select a supported Claude model."
+            : "Select a supported Codex model.",
     };
   }
   let result: CodexChatMessageResult;
@@ -208,8 +227,10 @@ export async function interruptGoatCodexChatSession(input: {
       RETURNING assistant_message_id
     )
     UPDATE goat.chat_messages AS message
-    SET debug_trace = COALESCE(message.debug_trace, '{}'::jsonb)
-          || jsonb_build_object('aborted', true, 'schemaVersion', ${CODEX_CHAT_DEBUG_SCHEMA_VERSION}::text),
+    SET debug_trace = COALESCE(
+          message.debug_trace,
+          ${JSON.stringify(emptyDurableAssistantDebugTrace(session.engine, session.model))}::jsonb
+        ) || jsonb_build_object('aborted', true),
         updated_at = ${now}
     FROM cancelled
     WHERE message.id = cancelled.assistant_message_id
@@ -378,14 +399,16 @@ async function createFirstCodexChatTurn(input: {
   const now = new Date();
   const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
   const title = toGoatTaskTitle(input.prompt || input.attachments[0]?.filename || "Attachment");
-  const codexModel =
-    input.engine === "claude_code"
-      ? claudeCodeCliModelNameForModelId(input.modelId)
-      : codexCliModelNameForModelId(input.modelId);
-  if (!codexModel) throw new Error(`Unsupported ${input.engine} model: ${input.modelId}`);
+  const engineModel =
+    input.engine === "opencompany"
+      ? input.modelId
+      : input.engine === "claude_code"
+        ? claudeCodeCliModelNameForModelId(input.modelId)
+        : codexCliModelNameForModelId(input.modelId);
+  if (!engineModel) throw new Error(`Unsupported ${input.engine} model: ${input.modelId}`);
   // Host dynamic tools (brain/actions) are not wired into the Claude engine yet.
   const hostToolContractVersion =
-    input.engine === "claude_code" ? null : GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION;
+    input.engine === "codex" ? GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION : null;
 
   await getDb().execute(sql`
     WITH created_chat AS (
@@ -441,7 +464,7 @@ async function createFirstCodexChatTurn(input: {
         ${chatSessionId},
         'assistant',
         '',
-        ${JSON.stringify(emptyAssistantDebugTrace(codexModel))}::jsonb,
+        ${JSON.stringify(emptyDurableAssistantDebugTrace(input.engine, engineModel))}::jsonb,
         ${assistantCreatedAt},
         ${assistantCreatedAt}
       )
@@ -458,7 +481,7 @@ async function createFirstCodexChatTurn(input: {
         ${input.userWorkosId},
         ${chatSessionId},
         ${input.engine},
-        ${codexModel},
+        ${engineModel},
         ${input.brainRef},
         ${input.workspaceId},
         ${hostToolContractVersion},
@@ -542,13 +565,12 @@ async function enqueueExistingCodexChatMessage(input: {
     ),
     aborted_wakeup_messages AS (
       UPDATE goat.chat_messages AS message
-      SET debug_trace = COALESCE(message.debug_trace, '{}'::jsonb)
-            || jsonb_build_object(
-              'aborted',
-              true,
-              'schemaVersion',
-              ${CODEX_CHAT_DEBUG_SCHEMA_VERSION}::text
-            ),
+      SET debug_trace = COALESCE(
+            message.debug_trace,
+            ${JSON.stringify(
+              emptyDurableAssistantDebugTrace(input.session.engine, input.session.model),
+            )}::jsonb
+          ) || jsonb_build_object('aborted', true),
           updated_at = ${now}
       FROM cancelled_wakeups
       WHERE message.id = cancelled_wakeups.assistant_message_id
@@ -595,7 +617,9 @@ async function enqueueExistingCodexChatMessage(input: {
         ${input.session.chatSessionId},
         'assistant',
         '',
-        ${JSON.stringify(emptyAssistantDebugTrace(input.session.model))}::jsonb,
+        ${JSON.stringify(
+          emptyDurableAssistantDebugTrace(input.session.engine, input.session.model),
+        )}::jsonb,
         ${assistantCreatedAt},
         ${assistantCreatedAt}
       )
@@ -691,13 +715,10 @@ async function cancelQueuedCodexChatWakeups(
       RETURNING assistant_message_id
     )
     UPDATE goat.chat_messages AS message
-    SET debug_trace = COALESCE(message.debug_trace, '{}'::jsonb)
-          || jsonb_build_object(
-            'aborted',
-            true,
-            'schemaVersion',
-            ${CODEX_CHAT_DEBUG_SCHEMA_VERSION}::text
-          ),
+    SET debug_trace = COALESCE(
+          message.debug_trace,
+          jsonb_build_object('schemaVersion', ${CODEX_CHAT_DEBUG_SCHEMA_VERSION}::text)
+        ) || jsonb_build_object('aborted', true),
         updated_at = ${input.now}
     FROM cancelled_wakeups
     WHERE message.id = cancelled_wakeups.assistant_message_id
@@ -719,6 +740,17 @@ function skillsJsonbValue(skills: GoatCodexChatSkillSnapshot[]) {
       instructions: skill.instructions,
     })),
   );
+}
+
+function emptyDurableAssistantDebugTrace(engine: GoatCodexChatEngine, model: string) {
+  if (engine === "opencompany") {
+    return {
+      schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
+      model,
+      uiMessageParts: [],
+    };
+  }
+  return emptyAssistantDebugTrace(model);
 }
 
 function safeClientMessageId(value: string | null | undefined) {
