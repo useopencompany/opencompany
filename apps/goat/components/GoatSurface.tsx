@@ -448,7 +448,9 @@ export function GoatSurface({
   const [codexRuntime, setCodexRuntime] = useState<GoatCodexRuntimeView | null>(
     initialChat?.codexRuntime ?? null,
   );
-  const [engineRunning, setEngineRunning] = useState(false);
+  const [engineRunning, setEngineRunning] = useState(() =>
+    isCodexRuntimeActive(initialChat?.codexRuntime),
+  );
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
   const [taskMessageSubmitting, setTaskMessageSubmitting] = useState(false);
@@ -983,7 +985,7 @@ export function GoatSurface({
           ? (chat?.codexRuntime ?? null)
           : null,
       );
-      setEngineRunning(false);
+      setEngineRunning(isCodexRuntimeActive(chat?.codexRuntime));
       clearActiveTurn();
       setOptimisticTurnDurations(new Map());
       setMessages([]);
@@ -2045,7 +2047,11 @@ export function GoatSurface({
                           engine={activeEngineChat.engine}
                           runtime={codexRuntime}
                           optimisticStatus={
-                            engineSubmitting ? "starting" : engineRunning ? "running" : null
+                            engineSubmitting
+                              ? "starting"
+                              : engineRunning && !isCodexRuntimeActive(codexRuntime)
+                                ? "running"
+                                : null
                           }
                           sandboxStatus={codexSandboxStatus}
                         />
@@ -2345,7 +2351,7 @@ export function GoatSurface({
                       maxLength={10_000}
                     />
                   </div>
-                  {isEngineChat && engineRunning ? (
+                  {isEngineChat && engineRunning && !activeTaskConversation ? (
                     <EngineStopButton
                       label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
                       onStop={stopGeneration}
@@ -4426,6 +4432,12 @@ function codexRuntimeMeta(runtime: GoatCodexRuntimeView | null): CodexRuntimeMet
   };
 }
 
+function isCodexRuntimeActive(runtime: { status?: string | null } | null | undefined) {
+  return (
+    runtime?.status === "queued" || runtime?.status === "starting" || runtime?.status === "running"
+  );
+}
+
 function CodexSessionStatusIndicator({
   engine,
   runtime,
@@ -4584,7 +4596,7 @@ function LiveCodexChatSessionStatusSubscriber({
           }
         : null,
     );
-    setRunning(status === "queued" || status === "starting" || status === "running");
+    setRunning(isCodexRuntimeActive(row));
   }, [isLoading, row, setRunning, setRuntime, status]);
 
   useEffect(() => {
