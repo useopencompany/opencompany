@@ -2,7 +2,14 @@ import type {
   GoatTaskReportedOutcome,
   GoatTaskStage,
   GoatTaskStatus,
+  GoatTaskViewMode,
 } from "@opencompany/db/goat-schema";
+
+export const GOAT_TASK_VIEW_MODES: GoatTaskViewMode[] = ["board", "list"];
+
+export function isGoatTaskViewMode(value: unknown): value is GoatTaskViewMode {
+  return GOAT_TASK_VIEW_MODES.some((mode) => mode === value);
+}
 
 export const GOAT_STAGE_COPY: Record<GoatTaskStage, string> = {
   queued: "Waiting for runner",

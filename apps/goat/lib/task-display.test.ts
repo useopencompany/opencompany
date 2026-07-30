@@ -4,6 +4,7 @@ import {
   formatGoatTaskDurationMs,
   goatTaskBoardColumn,
   goatWorkflowTaskDisplayStatus,
+  isGoatTaskViewMode,
 } from "@/lib/task-display";
 
 describe("goatTaskBoardColumn", () => {
@@ -64,5 +65,15 @@ describe("formatGoatTaskDurationMs", () => {
     expect(formatGoatTaskDurationMs(192_000)).toBe("3m 12s");
     expect(formatGoatTaskDurationMs(3_792_000)).toBe("1h 3m 12s");
     expect(formatGoatTaskDurationMs(Number.NaN)).toBe("—");
+  });
+});
+
+describe("isGoatTaskViewMode", () => {
+  it("accepts only the known view modes", () => {
+    expect(isGoatTaskViewMode("board")).toBe(true);
+    expect(isGoatTaskViewMode("list")).toBe(true);
+    expect(isGoatTaskViewMode("kanban")).toBe(false);
+    expect(isGoatTaskViewMode(null)).toBe(false);
+    expect(isGoatTaskViewMode(undefined)).toBe(false);
   });
 });

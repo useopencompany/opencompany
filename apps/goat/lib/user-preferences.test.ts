@@ -2,7 +2,10 @@ import { getDb } from "@opencompany/db/client";
 import { revalidatePath } from "next/cache";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
-import { updateGoatAutoModelRoutingAction } from "@/lib/user-preferences";
+import {
+  updateGoatAutoModelRoutingAction,
+  updateGoatTaskViewModeAction,
+} from "@/lib/user-preferences";
 
 const dbMocks = vi.hoisted(() => ({
   update: vi.fn(),
@@ -59,11 +62,56 @@ describe("updateGoatAutoModelRoutingAction", () => {
   });
 });
 
-function mockCurrentUser(autoModelRoutingEnabled: boolean) {
+describe("updateGoatTaskViewModeAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getDb).mockReturnValue({ update: dbMocks.update } as never);
+    dbMocks.update.mockReturnValue({ set: dbMocks.set });
+    dbMocks.set.mockReturnValue({ where: dbMocks.where });
+    dbMocks.where.mockReturnValue({ returning: dbMocks.returning });
+    dbMocks.returning.mockResolvedValue([{ taskViewMode: "list" }]);
+    mockCurrentUser(false, "board");
+  });
+
+  it("updates the per-user view mode and revalidates the tasks page", async () => {
+    const result = await updateGoatTaskViewModeAction("list");
+
+    expect(result).toEqual({ ok: true, mode: "list" });
+    expect(dbMocks.set).toHaveBeenCalledWith({
+      taskViewMode: "list",
+      updatedAt: expect.any(Date),
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/tasks");
+  });
+
+  it("skips the write when the preference already matches", async () => {
+    mockCurrentUser(false, "list");
+
+    await expect(updateGoatTaskViewModeAction("list")).resolves.toEqual({
+      ok: true,
+      mode: "list",
+    });
+
+    expect(getDb).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mode outside the known set instead of hitting the database", async () => {
+    await expect(updateGoatTaskViewModeAction("kanban" as never)).resolves.toEqual({
+      ok: false,
+      mode: "board",
+    });
+
+    expect(getDb).not.toHaveBeenCalled();
+  });
+});
+
+function mockCurrentUser(autoModelRoutingEnabled: boolean, taskViewMode = "board") {
   vi.mocked(currentGoatUser).mockResolvedValue({
     user: {
       workosUserId: "user_1",
       autoModelRoutingEnabled,
+      taskViewMode,
     },
   } as never);
 }

@@ -6,6 +6,7 @@ import { type GoatTaskViewMode, goatUsers } from "@opencompany/db/goat-schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
+import { isGoatTaskViewMode } from "@/lib/task-display";
 
 export async function updateGoatTimezoneAction(timezone: string) {
   const { user } = await currentGoatUser();
@@ -44,6 +45,7 @@ export async function updateGoatTaskSpawningAction(enabled: boolean) {
 
 export async function updateGoatTaskViewModeAction(mode: GoatTaskViewMode) {
   const { user } = await currentGoatUser();
+  if (!isGoatTaskViewMode(mode)) return { ok: false, mode: user.taskViewMode } as const;
   if (mode === user.taskViewMode) return { ok: true, mode } as const;
 
   const [updated] = await getDb()
