@@ -10,10 +10,12 @@ import {
   shellQuote,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import { getGoatWorkflowHarnessSkillSnapshots } from "@opencompany/db/goat-harness";
 import {
   type GoatChatMessageAttachment,
   type GoatCodexChatSession,
   type GoatCodexChatTurn,
+  type GoatHarnessSpec,
   goatChatMessages,
   goatChatSessionSkills,
   goatCodexChatInteractions,
@@ -23,6 +25,7 @@ import {
 import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/goat-agent/chat-agent";
 import {
   GOAT_CODEX_BRAIN_TOOL_CONTRACT_VERSION,
+  type GoatBrainSkill,
   serializeGoatBrainSkillMarkdown,
 } from "@opencompany/goat-brain";
 import { captureException, createLogger } from "@opencompany/observability";
@@ -321,33 +324,31 @@ export async function runGoatCodexChatTurn(input: {
     checkExternalAbort();
     executionStage = "load_skills";
     const sessionSkills = await loadGoatCodexChatSessionSkills(turn);
+    const turnSkills = resolveGoatCodexTurnSkills({
+      sessionSkills,
+      userMessageId: turn.userMessageId,
+      ...(taskContext ? { harnessSpec: taskContext.harnessSpec } : {}),
+    });
     checkExternalAbort();
     executionStage = "materialize_skills";
     const codexSkills = await materializeCodexSkillSnapshotsForSession({
       sandbox,
       codexWorkRoot: CODEX_CHAT_WORKDIR,
-      skills: sessionSkills.map((skill) => ({
-        id: skill.skillId,
+      skills: turnSkills.snapshots.map((skill) => ({
+        id: skill.id,
         files: [
           {
             path: "SKILL.md",
-            content: serializeGoatBrainSkillMarkdown({
-              id: skill.skillId,
-              name: skill.name,
-              description: skill.description,
-              instructions: skill.instructions,
-            }),
+            content: serializeGoatBrainSkillMarkdown(skill),
           },
         ],
       })),
     });
     checkExternalAbort();
-    const invokedSkills = sessionSkills
-      .filter((skill) => skill.activatedMessageId === turn.userMessageId)
-      .map((skill) => ({
-        name: skill.skillId,
-        path: `${CODEX_CHAT_WORKDIR}/.agents/skills/${skill.skillId}/SKILL.md`,
-      }));
+    const invokedSkills = turnSkills.invokedSkillIds.map((skillId) => ({
+      name: skillId,
+      path: `${CODEX_CHAT_WORKDIR}/.agents/skills/${skillId}/SKILL.md`,
+    }));
     executionStage = "materialize_attachments";
     const materializedAttachments = await materializeGoatCodexChatAttachments({
       sandbox,
@@ -855,6 +856,50 @@ export async function loadGoatCodexChatSessionSkills(turn: GoatCodexChatTurn) {
       asc(goatCodexChatTurns.id),
       asc(goatChatSessionSkills.skillId),
     );
+}
+
+type GoatCodexTurnSessionSkill = {
+  skillId: string;
+  activatedMessageId: string;
+  name: string;
+  description: string;
+  instructions: string;
+};
+
+function resolveGoatCodexTurnSkills(input: {
+  sessionSkills: readonly GoatCodexTurnSessionSkill[];
+  userMessageId: string;
+  harnessSpec?: GoatHarnessSpec | undefined;
+}) {
+  const snapshotsById = new Map<string, GoatBrainSkill>();
+  const invokedSkillIds = new Set<string>();
+
+  for (const skill of input.sessionSkills) {
+    snapshotsById.set(skill.skillId, {
+      id: skill.skillId,
+      name: skill.name,
+      description: skill.description,
+      instructions: skill.instructions,
+    });
+    if (skill.activatedMessageId === input.userMessageId) {
+      invokedSkillIds.add(skill.skillId);
+    }
+  }
+
+  const workflowSkills = input.harnessSpec
+    ? (getGoatWorkflowHarnessSkillSnapshots(input.harnessSpec) ?? [])
+    : [];
+  for (const skill of workflowSkills) {
+    // The task-creation snapshot is the workflow's immutable contract. Prefer it when an
+    // interactive session snapshot happens to use the same id.
+    snapshotsById.set(skill.id, skill);
+    invokedSkillIds.add(skill.id);
+  }
+
+  return {
+    snapshots: [...snapshotsById.values()],
+    invokedSkillIds: [...invokedSkillIds],
+  };
 }
 
 // GitHub auth is injected whenever the user has a connected Goat GitHub integration; the token
