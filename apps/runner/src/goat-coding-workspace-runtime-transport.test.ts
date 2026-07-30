@@ -256,7 +256,9 @@ describe("Goat coding workspace terminal input latency", () => {
     const server = new WebSocketServer({ port: 0 });
     openServers.push(server);
     await new Promise<void>((resolve) => server.once("listening", resolve));
+    let serverSocket: WebSocket | undefined;
     server.on("connection", (webSocket) => {
+      serverSocket = webSocket;
       attachRuntimeConnection(
         webSocket,
         sandbox,
@@ -299,8 +301,14 @@ describe("Goat coding workspace terminal input latency", () => {
     releaseTypedA();
     await vi.waitFor(() => expect(keystrokes).toEqual(["a", "bc"]), { timeout: 5_000 });
 
+    // Unblock the control op and fully tear down the connection before the test returns,
+    // so afterEach's server.close() has no lingering socket to wait on under CI load.
     releaseControlOp();
-    client.close();
+    await new Promise<void>((resolve) => {
+      if (!serverSocket || serverSocket.readyState === WebSocket.CLOSED) return resolve();
+      serverSocket.once("close", () => resolve());
+      client.close();
+    });
   });
 });
 
