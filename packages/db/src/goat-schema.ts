@@ -445,8 +445,8 @@ export type GoatTaskDebugTrace = {
 
 export type GoatChatRole = "user" | "assistant";
 export type GoatChatEngine = "opencompany" | "codex" | "claude_code";
-// Engines whose turns run through the sandboxed coding-CLI queue (goat.codex_chat_*).
-export type GoatCodexChatEngine = "codex" | "claude_code";
+// Engines whose durable turns run through the legacy-named goat.codex_chat_* queue.
+export type GoatCodexChatEngine = GoatChatEngine;
 
 export type GoatChatAttachmentKind = "image" | "pdf" | "docx" | "xlsx" | "srt";
 export type GoatChatMessageAttachment = {
@@ -3275,7 +3275,7 @@ export const goatCodexChatSessions = goat.table(
     ),
     engineCheck: check(
       "goat_codex_chat_sessions_engine_check",
-      sql`${table.engine} IN ('codex', 'claude_code')`,
+      sql`${table.engine} IN ('opencompany', 'codex', 'claude_code')`,
     ),
   }),
 );

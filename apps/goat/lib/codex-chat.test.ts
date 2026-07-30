@@ -287,6 +287,48 @@ describe("createGoatCodexChatMessage", () => {
     expect(statement.queryChunks).toContain('{"reasoningEffort":"xhigh"}');
   });
 
+  it("enqueues an internal OpenCompany turn without coding credentials or sandbox state", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "Summarize the launch notes",
+      engine: "opencompany",
+      model: "anthropic/claude-sonnet-5",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "started",
+      analytics: {
+        isFirstMessage: true,
+        engine: "opencompany",
+        model: "anthropic/claude-sonnet-5",
+      },
+    });
+    expect(mocks.codexConnected).not.toHaveBeenCalled();
+    expect(mocks.claudeConnected).not.toHaveBeenCalled();
+    const statement = mocks.execute.mock.calls[0]?.[0] as { queryChunks?: unknown[] };
+    expect(statement.queryChunks).toContain("opencompany");
+    expect(statement.queryChunks).toContain("anthropic/claude-sonnet-5");
+    expect(JSON.stringify(statement.queryChunks)).toContain("opencompany.chat.debug.v1");
+    expect(statement.queryChunks).not.toContain("goat-codex-host-tools.v3");
+  });
+
+  it("rejects unsupported models for an internal OpenCompany enqueue", async () => {
+    const result = await createGoatCodexChatMessage({
+      userWorkosId: "user_1",
+      prompt: "hello",
+      engine: "opencompany",
+      model: "openai/not-a-model",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 400,
+      error: "Select a supported Goat model.",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it("returns 404 for an unknown or foreign session", async () => {
     mocks.selectResults.push([]);
     const result = await createGoatCodexChatMessage({
@@ -482,6 +524,30 @@ describe("interruptGoatCodexChatSession", () => {
     // One UPDATE for the running turn's interrupt flag, one CTE for queued-turn cancellation,
     // and one session settle for the case where no running turn is left to do it.
     expect(mocks.execute).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps the OpenCompany debug schema when canceling a queued internal turn", async () => {
+    mocks.selectResults.push([
+      {
+        codex_chat_sessions: {
+          id: "goat_codex_chat_1",
+          chatSessionId: "goat_chat_1",
+          engine: "opencompany",
+          model: "anthropic/claude-sonnet-5",
+          status: "queued",
+        },
+        chat_sessions: {
+          model: "anthropic/claude-sonnet-5",
+        },
+      },
+    ]);
+
+    await interruptGoatCodexChatSession({
+      userWorkosId: "user_1",
+      chatSessionId: "goat_chat_1",
+    });
+
+    expect(JSON.stringify(mocks.execute.mock.calls[1]?.[0])).toContain("opencompany.chat.debug.v1");
   });
 
   it.each([

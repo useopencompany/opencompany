@@ -16,6 +16,7 @@ import {
   GoatCodexChatLeaseLostError,
   GoatCodexChatRetryableInfrastructureError,
 } from "./goat-codex-chat-errors";
+import { runGoatOpenCompanyChatTurn } from "./goat-opencompany-chat";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
 
@@ -190,7 +191,9 @@ export async function runClaimedTurn(
   }
 
   const recoveryRequired =
-    turn.attempts > 1 && (turn.engineRecoveryRequired || turn.codexTurnId !== null);
+    session.engine !== "opencompany" &&
+    turn.attempts > 1 &&
+    (turn.engineRecoveryRequired || turn.codexTurnId !== null);
   if (recoveryRequired) {
     logger.info("Reattaching reclaimed Goat Codex chat turn", {
       event: "opencompany.goat_codex_chat_turn_reattach_started",
@@ -246,9 +249,11 @@ export async function runClaimedTurn(
           options.handoffSignal?.aborted ? new GoatCodexChatHandoffError() : heartbeatAbort,
       };
       const outcome =
-        session.engine === "claude_code"
-          ? await runGoatClaudeCodeChatTurn(turnInput)
-          : await runGoatCodexChatTurn(turnInput);
+        session.engine === "opencompany"
+          ? await runGoatOpenCompanyChatTurn(turnInput)
+          : session.engine === "claude_code"
+            ? await runGoatClaudeCodeChatTurn(turnInput)
+            : await runGoatCodexChatTurn(turnInput);
       handedOff = outcome === "handed_off";
     } catch (error) {
       if (error instanceof GoatCodexChatHandoffError) {
