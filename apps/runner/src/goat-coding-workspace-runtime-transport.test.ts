@@ -212,6 +212,106 @@ describe("Goat coding workspace terminal transport", () => {
   });
 });
 
+describe("Goat coding workspace terminal input latency", () => {
+  it("coalesces keystrokes while an input RPC is in flight and bypasses the control queue", async () => {
+    const kill = vi.fn(async () => true);
+    // Keyed by keystroke content so assertions never depend on call ordering relative to
+    // the tmux bootstrap write.
+    const keystrokes: string[] = [];
+    let releaseTypedA: () => void = () => {};
+    const typedAHeld = new Promise<void>((resolve) => {
+      releaseTypedA = resolve;
+    });
+    const sendInput = vi.fn(async (_pid: number, data: Uint8Array) => {
+      const text = Buffer.from(data).toString();
+      if (text.includes("tmux new-session")) return; // bootstrap write, not a keystroke
+      keystrokes.push(text);
+      // Hold the "a" RPC open so "b"/"c" typed meanwhile must coalesce into one call.
+      if (text === "a") await typedAHeld;
+    });
+    const create = vi.fn(async () => ({ pid: 42, kill }));
+    // A control op (ports.refresh) that blocks in the sandbox until released, proving
+    // keystrokes are not queued behind it. Resolvable so the test leaves no pending work.
+    let releaseControlOp: () => void = () => {};
+    const controlOpBlocked = new Promise<void>((resolve) => {
+      releaseControlOp = resolve;
+    });
+    let controlOpReached: () => void = () => {};
+    const controlOpStarted = new Promise<void>((resolve) => {
+      controlOpReached = resolve;
+    });
+    const run = vi.fn(async (command: string) => {
+      if (command.startsWith("ss ")) {
+        controlOpReached();
+        await controlOpBlocked;
+      }
+      return { stdout: "" };
+    });
+    const sandbox = {
+      sandboxId: "sandbox_1",
+      commands: { run },
+      pty: { create, sendInput, resize: vi.fn(async () => undefined) },
+      setTimeout: vi.fn(async () => undefined),
+    } as unknown as SandboxHandle;
+    const server = new WebSocketServer({ port: 0 });
+    openServers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    let serverSocket: WebSocket | undefined;
+    server.on("connection", (webSocket) => {
+      serverSocket = webSocket;
+      attachRuntimeConnection(
+        webSocket,
+        sandbox,
+        {
+          id: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
+          chatSessionId: "chat_1",
+          userWorkosId: "user_1",
+          sandboxId: "sandbox_1",
+          status: "idle",
+          engine: "codex",
+        } satisfies GoatCodingWorkspaceSession,
+        { goatCodexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
+        vi.fn(async () => undefined),
+      );
+    });
+
+    const address = server.address() as AddressInfo;
+    const client = new WebSocket(`ws://127.0.0.1:${address.port}`);
+    const send = (frame: Buffer | string) =>
+      new Promise<void>((resolve, reject) =>
+        client.send(frame, (error) => (error ? reject(error) : resolve())),
+      );
+    await new Promise<void>((resolve) => client.once("open", resolve));
+    await send(JSON.stringify({ type: "terminal.attach", cols: 80, rows: 24 }));
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce(), { timeout: 5_000 });
+
+    // Start a control op that blocks in the sandbox, then type immediately.
+    await send(JSON.stringify({ type: "ports.refresh" }));
+    await controlOpStarted;
+    await send(Buffer.from("a"));
+    // "a" is delivered even though the control op is still blocked in the sandbox.
+    await vi.waitFor(() => expect(keystrokes).toEqual(["a"]), { timeout: 5_000 });
+
+    // Both writes complete before releasing "a", so the server has buffered them by the
+    // time the in-flight RPC resolves and flushes; they must coalesce into one call.
+    await send(Buffer.from("b"));
+    await send(Buffer.from("c"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(keystrokes).toEqual(["a"]);
+    releaseTypedA();
+    await vi.waitFor(() => expect(keystrokes).toEqual(["a", "bc"]), { timeout: 5_000 });
+
+    // Unblock the control op and fully tear down the connection before the test returns,
+    // so afterEach's server.close() has no lingering socket to wait on under CI load.
+    releaseControlOp();
+    await new Promise<void>((resolve) => {
+      if (!serverSocket || serverSocket.readyState === WebSocket.CLOSED) return resolve();
+      serverSocket.once("close", () => resolve());
+      client.close();
+    });
+  });
+});
+
 describe("Goat coding workspace runtime tools install command", () => {
   // Regression: a missing `;` after `fi` made this command a bash syntax error, so every
   // runtime connection failed before the install could run (issue behind the prod

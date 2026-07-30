@@ -40,6 +40,7 @@ const PREVIEW_UPSTREAM_CONNECT_TIMEOUT_MS = 15_000;
 const PREVIEW_SESSION_CACHE_MS = 5_000;
 const MAX_PREVIEW_SESSION_CACHE_ENTRIES = 256;
 const MAX_PENDING_PREVIEW_WEBSOCKET_BYTES = 256 * 1_024;
+const MAX_PENDING_TERMINAL_INPUT_BYTES = 256 * 1_024;
 const runtimeToolInstalls = new Map<string, Promise<void>>();
 
 type PreviewTarget = {
@@ -220,6 +221,37 @@ export function attachRuntimeConnection(
   let disposed = false;
   let operation = Promise.resolve();
 
+  // Terminal input bypasses the control-operation queue: keystrokes must never wait
+  // behind a port scan or preview lookup. While one sendInput RPC is in flight,
+  // further keystrokes coalesce into a single follow-up call, so a typing burst costs
+  // at most two sandbox round-trips instead of one per key.
+  let pendingInput: Buffer[] = [];
+  let pendingInputBytes = 0;
+  let inputInFlight = false;
+  const flushTerminalInput = () => {
+    if (inputInFlight || disposed || terminalPid === null || pendingInput.length === 0) return;
+    const pid = terminalPid;
+    const data = Buffer.concat(pendingInput);
+    pendingInput = [];
+    pendingInputBytes = 0;
+    inputInFlight = true;
+    sandbox.pty
+      .sendInput(pid, data)
+      .catch(() => {
+        sendControl({ type: "error", scope: "terminal", message: "Terminal input failed." });
+      })
+      .finally(() => {
+        inputInFlight = false;
+        flushTerminalInput();
+      });
+  };
+  const enqueueTerminalInput = (data: Buffer) => {
+    if (disposed || pendingInputBytes + data.byteLength > MAX_PENDING_TERMINAL_INPUT_BYTES) return;
+    pendingInput.push(data);
+    pendingInputBytes += data.byteLength;
+    flushTerminalInput();
+  };
+
   const sendControl = (message: Record<string, unknown>) => {
     if (webSocket.readyState === WebSocket.OPEN) webSocket.send(JSON.stringify(message));
   };
@@ -279,6 +311,8 @@ export function attachRuntimeConnection(
       Buffer.from(`exec tmux new-session -A -s ${TMUX_SESSION}\r`),
     );
     sendControl({ type: "terminal.attached" });
+    // Deliver anything typed while the PTY was still starting.
+    flushTerminalInput();
   };
 
   const refreshPorts = async () => {
@@ -310,15 +344,7 @@ export function attachRuntimeConnection(
 
   webSocket.on("message", (raw, isBinary) => {
     if (isBinary) {
-      const data = copyWebSocketData(raw);
-      operation = operation
-        .then(async () => {
-          if (disposed || terminalPid === null) return;
-          await sandbox.pty.sendInput(terminalPid, data);
-        })
-        .catch(() => {
-          sendControl({ type: "error", scope: "terminal", message: "Terminal input failed." });
-        });
+      enqueueTerminalInput(copyWebSocketData(raw));
       return;
     }
 
@@ -358,6 +384,8 @@ export function attachRuntimeConnection(
 
   webSocket.on("close", () => {
     disposed = true;
+    pendingInput = [];
+    pendingInputBytes = 0;
     clearInterval(heartbeat);
     void terminalHandle?.kill().catch(() => {});
     void restoreTimeout(session.id, sandbox, env.goatCodexChatIdleTimeoutMs).catch((error) => {
