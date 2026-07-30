@@ -44,7 +44,6 @@ describe("workspace automation lifecycle", () => {
         instructions: "Draft the launch brief.",
         model: "",
         steps: [],
-        trigger: "manual",
         status: "draft",
       },
     ]);
@@ -102,7 +101,6 @@ describe("workspace automation lifecycle", () => {
       validateGoatWorkflowFields({
         name: "Launch brief",
         description: "",
-        trigger: "manual",
         steps: [{ id: "step-1", title: "", model: "", instructions: "  " }],
         status: "active",
       }),

@@ -1,6 +1,6 @@
 "use server";
 
-import type { GoatWorkflowStep, GoatWorkflowTrigger } from "@opencompany/db/goat-schema";
+import type { GoatWorkflowStep } from "@opencompany/db/goat-schema";
 import { isValidGoatBrainId } from "@opencompany/goat-brain";
 import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
@@ -51,7 +51,6 @@ export async function updateGoatWorkflowAction(input: {
   slug: string;
   name: string;
   description: string;
-  trigger: GoatWorkflowTrigger;
   steps: GoatWorkflowStep[];
   status: "draft" | "active";
 }): Promise<GoatWorkflowMutationResult> {
@@ -60,15 +59,11 @@ export async function updateGoatWorkflowAction(input: {
     !isValidGoatBrainId(input.slug) ||
     typeof input.name !== "string" ||
     typeof input.description !== "string" ||
-    !isGoatWorkflowTrigger(input.trigger) ||
     !Array.isArray(input.steps) ||
     !input.steps.every(isGoatWorkflowStep) ||
     (input.status !== "draft" && input.status !== "active")
   ) {
     return { ok: false, message: "Invalid workflow details." };
-  }
-  if (input.trigger !== "manual") {
-    return { ok: false, message: "That trigger isn't available yet." };
   }
   const gate = await requireWorkspaceAdmin();
   if (!gate.ok) return gate;
@@ -78,10 +73,6 @@ export async function updateGoatWorkflowAction(input: {
     revalidatePath(`/workflows/${input.slug}`);
   }
   return result;
-}
-
-function isGoatWorkflowTrigger(value: unknown): value is GoatWorkflowTrigger {
-  return value === "manual" || value === "slack" || value === "linear" || value === "schedule";
 }
 
 function isGoatWorkflowStep(value: unknown): value is GoatWorkflowStep {

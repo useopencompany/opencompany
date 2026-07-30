@@ -21,7 +21,7 @@ import {
 import { createGoatTaskForUser } from "@/lib/tasks";
 import {
   DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
-  type GoatWorkflowModelToken,
+  goatWorkflowModelSelection,
   isGoatWorkflowModelToken,
 } from "@/lib/workflow-model-options";
 import {
@@ -36,19 +36,9 @@ export type GoatWorkflowEngineSelection = {
   model: AgentModelId;
 };
 
-// The token → engine/model mapping for the shared option list in
-// workflow-model-options.ts (kept there so the client editor can render it).
-const GOAT_WORKFLOW_MODEL_MENTIONS: Record<GoatWorkflowModelToken, GoatWorkflowEngineSelection> = {
-  codex: { engine: "codex", model: "openai/gpt-5.5" },
-  "kimi-k2.6": { engine: "opencompany", model: "moonshotai/kimi-k2.6" },
-  "kimi-k3": { engine: "opencompany", model: "moonshotai/kimi-k3" },
-  "glm-5.2": { engine: "opencompany", model: "zai/glm-5.2" },
-  "sonnet-5": { engine: "opencompany", model: "anthropic/claude-sonnet-5" },
-  "gpt-5.5": { engine: "opencompany", model: "openai/gpt-5.5" },
-};
-
-const DEFAULT_GOAT_WORKFLOW_SELECTION: GoatWorkflowEngineSelection =
-  GOAT_WORKFLOW_MODEL_MENTIONS[DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN];
+const DEFAULT_GOAT_WORKFLOW_SELECTION: GoatWorkflowEngineSelection = goatWorkflowModelSelection(
+  DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
+);
 
 // The token must end alphanumeric so trailing punctuation ("run @sonnet-5.")
 // stays out of the capture while inner dots ("@kimi-k2.6") still match.
@@ -65,14 +55,14 @@ export function resolveGoatWorkflowStepSelection(
         `This workflow step's model "${selectedToken}" is not available. Pick a model in the workflow editor.`,
       );
     }
-    return GOAT_WORKFLOW_MODEL_MENTIONS[selectedToken];
+    return goatWorkflowModelSelection(selectedToken);
   }
 
   const selected = new Map<string, GoatWorkflowEngineSelection>();
   for (const match of step.instructions.matchAll(WORKFLOW_MENTION_TOKEN_PATTERN)) {
     const token = (match[2] ?? "").toLowerCase();
     if (!isGoatWorkflowModelToken(token)) continue;
-    selected.set(token, GOAT_WORKFLOW_MODEL_MENTIONS[token]);
+    selected.set(token, goatWorkflowModelSelection(token));
   }
   if (selected.size > 1) {
     throw new GoatWorkflowMentionError(

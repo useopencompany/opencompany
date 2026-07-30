@@ -7,10 +7,9 @@ import type { GoatIntegrationProvider } from "@opencompany/db/goat-schema";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 
-// Shared Google OAuth access for the runner: the agent tool surface
-// (goat-google-tools) and the Gmail ingestion workers all authenticate through
-// the same stored-credential + refresh stack, so needs_reauth marking and
-// refresh-token rotation behave identically everywhere.
+// Shared Google OAuth access for the runner's Gmail and Drive ingestion
+// workers. Keeping one stored-credential + refresh stack ensures needs_reauth
+// marking and refresh-token rotation behave identically everywhere.
 
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const REFRESH_SKEW_MS = 60_000;

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  goatWorkflowStepsWithLegacyFallback,
-  renderStepsAsMarkdown,
-  validateGoatWorkflowFields,
-} from "@/lib/workflows";
+import { goatWorkflowStepsWithLegacyFallback, validateGoatWorkflowFields } from "@/lib/workflows";
 
 const validStep = {
   id: "step-1",
@@ -18,7 +14,6 @@ describe("validateGoatWorkflowFields", () => {
       validateGoatWorkflowFields({
         name: "Workflow",
         description: "",
-        trigger: "manual",
         steps: [],
       }),
     ).toMatch(/at least one/i);
@@ -26,7 +21,6 @@ describe("validateGoatWorkflowFields", () => {
       validateGoatWorkflowFields({
         name: "Workflow",
         description: "",
-        trigger: "manual",
         steps: Array.from({ length: 21 }, (_, index) => ({
           ...validStep,
           id: `step-${index}`,
@@ -40,7 +34,6 @@ describe("validateGoatWorkflowFields", () => {
       validateGoatWorkflowFields({
         name: "Workflow",
         description: "",
-        trigger: "manual",
         steps: [{ ...validStep, title: "x".repeat(121) }],
       }),
     ).toMatch(/titles/);
@@ -48,7 +41,6 @@ describe("validateGoatWorkflowFields", () => {
       validateGoatWorkflowFields({
         name: "Workflow",
         description: "",
-        trigger: "manual",
         steps: [{ ...validStep, instructions: "x".repeat(20_001) }],
       }),
     ).toMatch(/20,000/);
@@ -56,7 +48,6 @@ describe("validateGoatWorkflowFields", () => {
       validateGoatWorkflowFields({
         name: "Workflow",
         description: "",
-        trigger: "manual",
         steps: [{ ...validStep, model: "future-model" }],
       }),
     ).toMatch(/model/);
@@ -64,7 +55,6 @@ describe("validateGoatWorkflowFields", () => {
       validateGoatWorkflowFields({
         name: "Workflow",
         description: "",
-        trigger: "manual",
         steps: [validStep, { ...validStep }],
       }),
     ).toMatch(/unique/);
@@ -75,7 +65,6 @@ describe("validateGoatWorkflowFields", () => {
       validateGoatWorkflowFields({
         name: "Workflow",
         description: "",
-        trigger: "manual",
         steps: [{ ...validStep, instructions: " " }],
         status: "active",
       }),
@@ -84,7 +73,6 @@ describe("validateGoatWorkflowFields", () => {
       validateGoatWorkflowFields({
         name: "Workflow",
         description: "",
-        trigger: "manual",
         steps: [
           { ...validStep, instructions: " " },
           { ...validStep, id: "step-2" },
@@ -96,7 +84,6 @@ describe("validateGoatWorkflowFields", () => {
       validateGoatWorkflowFields({
         name: "Workflow",
         description: "",
-        trigger: "manual",
         steps: [validStep, { ...validStep, id: "step-2" }],
         status: "active",
       }),
@@ -134,7 +121,7 @@ describe("goatWorkflowStepsWithLegacyFallback", () => {
     ).toEqual([]);
   });
 
-  it("prefers a newer legacy write when mixed-version columns disagree", () => {
+  it("prefers native steps when legacy columns disagree", () => {
     expect(
       goatWorkflowStepsWithLegacyFallback({
         slug: "weekly-update",
@@ -142,14 +129,7 @@ describe("goatWorkflowStepsWithLegacyFallback", () => {
         model: "sonnet-5",
         instructions: "Edited by an older web pod.",
       }),
-    ).toEqual([
-      {
-        id: "step-weekly-update",
-        title: "",
-        model: "sonnet-5",
-        instructions: "Edited by an older web pod.",
-      },
-    ]);
+    ).toEqual([validStep]);
   });
 
   it("preserves a model-only legacy draft", () => {
@@ -170,35 +150,14 @@ describe("goatWorkflowStepsWithLegacyFallback", () => {
     ]);
   });
 
-  it("keeps native steps when their dual-written legacy mirror agrees", () => {
+  it("keeps native steps when legacy columns contain their old mirror", () => {
     expect(
       goatWorkflowStepsWithLegacyFallback({
         slug: "weekly-update",
         steps: [validStep],
         model: validStep.model,
-        instructions: renderStepsAsMarkdown([validStep]),
+        instructions: "## 1. Research\n\nCollect the source material.",
       }),
     ).toEqual([validStep]);
-  });
-});
-
-describe("renderStepsAsMarkdown", () => {
-  it("renders readable numbered sections for legacy runners", () => {
-    expect(
-      renderStepsAsMarkdown([
-        validStep,
-        { ...validStep, id: "step-2", title: "", instructions: "Draft the result." },
-      ]),
-    ).toBe(
-      [
-        "## 1. Research",
-        "",
-        "Collect the source material.",
-        "",
-        "## 2. Step 2",
-        "",
-        "Draft the result.",
-      ].join("\n"),
-    );
   });
 });

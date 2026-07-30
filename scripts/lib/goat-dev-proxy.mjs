@@ -5,7 +5,7 @@ import { createServer, request as httpRequest } from "node:http";
 import { connect } from "node:net";
 
 const LOCAL_HOST = "127.0.0.1";
-const RUNNER_PATH_PREFIXES = ["/broker/", "/goat/runtime", "/goat/tools/"];
+const RUNNER_PATH_PREFIXES = ["/broker/", "/goat/runtime"];
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "keep-alive",

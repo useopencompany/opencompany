@@ -103,7 +103,7 @@ These are the root commands a contributor is expected to run directly:
 | `bun run setup:stripe` | Complete local Stripe billing setup: load restricted Goat values from Infisical when available, reuse or create the OpenCompany Pro test Price, generate the reconciliation secret, and refresh the Goat app env. |
 | `bun run env:pull` | Merge shared Infisical dev values into `.env.local` without replacing local database settings. |
 | `bun run dev` | Start the full local stack with the Turbo TUI: web, runner, Inngest, Stripe webhooks, a local Durable Streams server (auto-sets `DURABLE_STREAMS_URL`), and ngrok when available. |
-| `bun run dev:goat` | Start the Goat experiment app plus the runner with stream output and the same local Durable Streams/ngrok wrapper. Goat runs internally on port 3002 by default and is exposed through Caddy at `https://localhost:3443` when Caddy is installed. If those ports are occupied in a Conductor workspace, the command automatically falls back to that workspace's allocated port range so parallel workspaces cannot terminate each other. When ngrok is available, it also exposes one public URL through a local proxy so E2B Goat tasks can reach runner `/goat/tools/*` and `/broker/*` callbacks. Run `bun run setup` first so Electric, Caddy, and `apps/goat/.env.local` are ready. Use `bun run dev:goat:tui` only when you specifically want Turbo's interactive TUI. |
+| `bun run dev:goat` | Start the Goat experiment app plus the runner with stream output and the same local Durable Streams/ngrok wrapper. Goat runs internally on port 3002 by default and is exposed through Caddy at `https://localhost:3443` when Caddy is installed. If those ports are occupied in a Conductor workspace, the command automatically falls back to that workspace's allocated port range so parallel workspaces cannot terminate each other. When ngrok is available, it also exposes one public URL through a local proxy so E2B coding sandboxes can reach runner `/broker/*` callbacks. Run `bun run setup` first so Electric, Caddy, and `apps/goat/.env.local` are ready. Use `bun run dev:goat:tui` only when you specifically want Turbo's interactive TUI. |
 | `bun run dev:stream` | Start the same full local stack with streaming logs instead of the Turbo TUI. |
 | `bun run dev:logs` | Read the latest local dev logs from `.context/logs/dev-turbo.json`; use `-- --source runner`, `-- --source web`, `-- --errors`, `-- --grep <text>`, or `-- --follow`. |
 | `bun run dev:web` | Start only the Next.js web app. |
@@ -149,7 +149,7 @@ If you want setup to launch the dev server after migrations, run `bun run setup:
 `bun run dev` also attempts to start ngrok before the app when the local ngrok CLI is authenticated.
 That gives integrations such as GitHub a public callback URL without a separate command. In Goat
 mode, the wrapper exposes a local proxy through ngrok and injects `RUNNER_LLM_BROKER_PUBLIC_URL`
-into the runner process so sandboxed Goat Gmail/Calendar tools can call back to `/goat/tools/*`.
+into the runner process so sandboxed coding agents can call back to `/broker/*`.
 `bun run dev:goat` also starts Caddy when available and prints the local HTTPS URL to open so
 Electric shape requests use HTTP/2. The URL is normally `https://localhost:3443`; when those ports
 are occupied, a Conductor workspace falls back to its isolated port range. Set

@@ -3,7 +3,6 @@ import { getDb } from "@opencompany/db/client";
 import {
   type GoatWorkflowStatus,
   type GoatWorkflowStep,
-  type GoatWorkflowTrigger,
   goatWorkflows,
 } from "@opencompany/db/goat-schema";
 import {
@@ -28,7 +27,6 @@ export type GoatWorkspaceWorkflow = {
   id: string;
   name: string;
   description: string;
-  trigger: GoatWorkflowTrigger;
   steps: GoatWorkflowStep[];
 };
 
@@ -143,7 +141,6 @@ export async function getGoatWorkflow(
       instructions: goatWorkflows.instructions,
       model: goatWorkflows.model,
       steps: goatWorkflows.steps,
-      trigger: goatWorkflows.trigger,
       status: goatWorkflows.status,
     })
     .from(goatWorkflows)
@@ -160,7 +157,6 @@ export async function getGoatWorkflow(
     id: row.slug,
     name: row.name,
     description: row.description,
-    trigger: row.trigger,
     steps: goatWorkflowStepsWithLegacyFallback(row),
     status: row.status,
   };
@@ -193,7 +189,6 @@ export async function resolveGoatWorkflowMention(input: {
 export function validateGoatWorkflowFields(input: {
   name: string;
   description: string;
-  trigger: GoatWorkflowTrigger;
   steps: GoatWorkflowStep[];
   status?: GoatWorkflowStatus;
 }): string | null {
@@ -242,7 +237,6 @@ export async function createGoatWorkflow(input: {
   const invalid = validateGoatWorkflowFields({
     name: input.name,
     description: input.description ?? "",
-    trigger: "manual",
     steps,
   });
   if (invalid) return { ok: false, message: invalid };
@@ -257,7 +251,6 @@ export async function createGoatWorkflow(input: {
     instructions: "",
     model: "",
     steps,
-    trigger: "manual",
     status: "draft",
     createdByWorkosId: input.createdByWorkosId,
   });
@@ -269,7 +262,6 @@ export async function updateGoatWorkflow(input: {
   slug: string;
   name: string;
   description: string;
-  trigger: GoatWorkflowTrigger;
   steps: GoatWorkflowStep[];
   status: GoatWorkflowStatus;
 }): Promise<GoatWorkflowMutationResult> {
@@ -288,11 +280,6 @@ export async function updateGoatWorkflow(input: {
       name: input.name.trim(),
       description: input.description.trim(),
       steps,
-      trigger: input.trigger,
-      // Keep these legacy columns coherent for one release so an older runner
-      // or rolled-back web pod still executes a readable single-step workflow.
-      instructions: renderStepsAsMarkdown(steps),
-      model: steps[0]?.model ?? "",
       status: input.status,
       updatedAt: new Date(),
     })
@@ -314,21 +301,8 @@ export function goatWorkflowStepsWithLegacyFallback(input: {
   instructions: string;
   model: string;
 }): GoatWorkflowStep[] {
-  const legacyFieldsAreEmpty = !input.instructions.trim() && !input.model.trim();
-  const nativeStepsAreEmpty = input.steps.every(
-    (step) => !step.instructions.trim() && !step.model.trim() && !step.title.trim(),
-  );
-  const legacyMirrorMatches =
-    input.steps.length > 0 &&
-    renderStepsAsMarkdown(input.steps) === input.instructions &&
-    (input.steps[0]?.model ?? "") === input.model;
-  if (
-    input.steps.length > 0 &&
-    (legacyMirrorMatches || (legacyFieldsAreEmpty && nativeStepsAreEmpty))
-  ) {
-    return input.steps;
-  }
-  if (legacyFieldsAreEmpty && input.steps.length === 0) return [];
+  if (input.steps.length > 0) return input.steps;
+  if (!input.instructions.trim() && !input.model.trim()) return [];
   return [
     {
       id: `step-${input.slug.slice(0, 64)}`,
@@ -337,15 +311,6 @@ export function goatWorkflowStepsWithLegacyFallback(input: {
       instructions: input.instructions,
     },
   ];
-}
-
-export function renderStepsAsMarkdown(steps: readonly GoatWorkflowStep[]): string {
-  return steps
-    .map((step, index) => {
-      const title = step.title.trim() || `Step ${index + 1}`;
-      return [`## ${index + 1}. ${title}`, "", step.instructions].join("\n").trimEnd();
-    })
-    .join("\n\n");
 }
 
 export async function archiveGoatWorkflow(input: {

@@ -22,4 +22,14 @@ describe("Goat model options", () => {
     expect(normalizeGoatModel("deepseek/deepseek-v4-pro")).toBe("deepseek/deepseek-v4-pro");
     expect(goatModelContextWindowTokens("deepseek/deepseek-v4-pro")).toBe(1_000_000);
   });
+
+  it("preserves the GLM model used by workflow tasks", () => {
+    expect(GOAT_MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "zai/glm-5.2",
+        label: "GLM 5.2",
+      }),
+    );
+    expect(normalizeGoatModel("zai/glm-5.2")).toBe("zai/glm-5.2");
+  });
 });

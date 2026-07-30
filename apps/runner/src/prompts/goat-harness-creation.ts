@@ -1,3 +1,4 @@
+import { type AgentModelDefinition, getAgentModelDefinition } from "@opencompany/agent-runtime";
 import type {
   GoatHarnessEngine,
   GoatHarnessSpec,
@@ -5,9 +6,7 @@ import type {
   GoatTaskToolName,
 } from "@opencompany/db/goat-schema";
 
-export type GoatHarnessModelOption = {
-  id: GoatHarnessSpec["model"];
-  label: string;
+export type GoatHarnessModelOption = AgentModelDefinition & {
   guidance: string;
   default?: boolean;
 };
@@ -40,38 +39,43 @@ export type GoatHarnessSkillOption = {
   guidance: string;
 };
 
-export const GOAT_HARNESS_MODEL_OPTIONS = [
+const GOAT_HARNESS_MODEL_CONFIG = [
   {
     id: "moonshotai/kimi-k2.6",
-    label: "Kimi K2.6",
     guidance:
       "Default. Use for most tasks, deep web research, multi-source reports, ordinary tool work, and cost-conscious long-horizon execution.",
     default: true,
   },
   {
     id: "moonshotai/kimi-k3",
-    label: "Kimi K3",
     guidance:
       "Premium Kimi. Use when the user requests Kimi K3, needs the largest Kimi context window, or explicitly prioritizes frontier Kimi reasoning over cost.",
   },
   {
     id: "zai/glm-5.2",
-    label: "GLM 5.2",
     guidance:
       "Use for deep research or analysis that likely needs very large context, long source-set synthesis, or stronger structured reasoning than the default while staying cost-conscious.",
   },
   {
     id: "anthropic/claude-sonnet-5",
-    label: "Claude Sonnet 5",
     guidance:
       "Premium fallback. Use when the user asks for Claude/Sonnet, explicitly prioritizes maximum quality over cost, or needs premium polished writing/editorial judgment, vision, or file-input strengths. Do not choose merely because research is deep.",
   },
   {
     id: "openai/gpt-5.5",
-    label: "GPT 5.5",
     guidance: "Use for coding-related work, sharper analysis, and deeper thinking.",
   },
-] as const satisfies readonly GoatHarnessModelOption[];
+] as const satisfies readonly {
+  id: GoatHarnessSpec["model"];
+  guidance: string;
+  default?: boolean;
+}[];
+
+export const GOAT_HARNESS_MODEL_OPTIONS: readonly GoatHarnessModelOption[] =
+  GOAT_HARNESS_MODEL_CONFIG.map((option) => ({
+    ...requireAgentModelDefinition(option.id),
+    ...option,
+  }));
 
 export const GOAT_HARNESS_SKILL_OPTIONS = [
   {
@@ -87,6 +91,14 @@ export const GOAT_HARNESS_SKILL_OPTIONS = [
       "Use for founder, startup strategy, product, MVP, users, growth, fundraising, hiring, or prioritization tasks that benefit from a YC-style office-hours loop.",
   },
 ] as const satisfies readonly GoatHarnessSkillOption[];
+
+function requireAgentModelDefinition(modelId: GoatHarnessSpec["model"]) {
+  const model = getAgentModelDefinition(modelId);
+  if (!model) {
+    throw new Error(`Harness model "${modelId}" is missing from the agent model catalog.`);
+  }
+  return model;
+}
 
 function promptBlock(name: string, lines: readonly string[]) {
   return [`<${name}>`, ...lines, `</${name}>`].join("\n");
