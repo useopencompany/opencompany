@@ -317,8 +317,7 @@ E2B hosts.
 The sidebar is available only for persistent Codex and Claude Code chats. Foreground OpenCompany
 chat, background tasks, scheduled runs, and tool sandboxes do not receive it. Opening the panel
 alone does not wake a sleeping sandbox; selecting Preview or Terminal does. The terminal uses an
-engine-neutral tmux session, and the UI warns with the active engine's name when a turn may edit the
-same directory concurrently.
+engine-neutral tmux session.
 
 Claude Code turns run the Claude CLI in the Claude-specific working directory and resume its saved
 session id after runner handoffs. Codex execution has additional app-server, Plan mode, interaction,

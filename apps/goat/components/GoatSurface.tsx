@@ -2396,7 +2396,6 @@ export function GoatSurface({
             chatSessionId={activeEngineChat.chatSessionId}
             sandboxStatus={codexSandboxStatus}
             engineLabel={CLOUD_CODING_ENGINE_CONFIG[activeEngineChat.engine].label}
-            engineIsRunning={engineRunning || engineSubmitting}
             onExpandedChange={setWorkspacePanelExpanded}
             onRequestFocusReturn={() => workspaceToggleButtonRef.current?.focus()}
           />
