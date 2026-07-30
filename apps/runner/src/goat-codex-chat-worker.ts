@@ -3,6 +3,7 @@ import {
   type GoatCodexChatTurn,
   type GoatCodexChatTurnSettings,
   goatCodexChatSessions,
+  goatTasks,
 } from "@opencompany/db/goat-schema";
 import { GOAT_METRICS, recordGoatHistogram } from "@opencompany/goat-observability";
 import { captureException, createLogger } from "@opencompany/observability";
@@ -17,7 +18,6 @@ import {
   GoatCodexChatRetryableInfrastructureError,
 } from "./goat-codex-chat-errors";
 import { runGoatOpenCompanyChatTurn } from "./goat-opencompany-chat";
-import { loadGoatTaskTurnContext } from "./goat-task-turn";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
 
@@ -164,9 +164,19 @@ export async function runClaimedTurn(
   const leaseOwner = turn.leaseOwner;
   if (!leaseId || !leaseOwner) throw new Error(`Claimed turn ${turn.id} is missing its lease.`);
 
-  const [session] = await getDb()
-    .select()
+  const [claimedSession] = await getDb()
+    .select({
+      session: goatCodexChatSessions,
+      task: goatTasks,
+    })
     .from(goatCodexChatSessions)
+    .leftJoin(
+      goatTasks,
+      and(
+        eq(goatTasks.sessionId, goatCodexChatSessions.chatSessionId),
+        eq(goatTasks.userWorkosId, turn.userWorkosId),
+      ),
+    )
     .where(
       and(
         eq(goatCodexChatSessions.id, turn.codexChatSessionId),
@@ -174,8 +184,11 @@ export async function runClaimedTurn(
       ),
     )
     .limit(1);
-  if (!session) throw new Error(`Codex chat session ${turn.codexChatSessionId} not found.`);
-  const taskContext = await loadGoatTaskTurnContext({ turn, session });
+  if (!claimedSession) {
+    throw new Error(`Codex chat session ${turn.codexChatSessionId} not found.`);
+  }
+  const { session, task } = claimedSession;
+  const taskContext = task ? { task, harnessSpec: task.harnessSpec } : null;
 
   if (turn.attempts === 1) {
     const queueStartedAt =

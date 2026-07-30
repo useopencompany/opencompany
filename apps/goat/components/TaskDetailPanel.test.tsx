@@ -77,6 +77,7 @@ describe("TaskDetailPanel", () => {
     expect(mocks.surfaceProps?.taskConversation).toMatchObject({
       taskId: "goat_task_1",
       status: "succeeded",
+      sessionBacked: true,
     });
     expect(mocks.surfaceProps).toMatchObject({
       taskSpawningEnabled: true,
@@ -94,6 +95,7 @@ function task() {
     name: "Morning workflow",
     prompt: "Run the morning workflow",
     model: "openai/gpt-5.4-mini",
+    sessionId: "goat_chat_task_1",
     status: "succeeded" as const,
     stage: "completed" as const,
     result: "The workflow is complete.",

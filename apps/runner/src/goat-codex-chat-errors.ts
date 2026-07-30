@@ -5,6 +5,16 @@ export class GoatCodexChatLeaseLostError extends Error {
   }
 }
 
+// A task can be canceled after its durable turn is claimed but before the engine starts. This is
+// distinct from losing the turn lease: the current worker still owns the turn and must settle it
+// immediately instead of leaving it running until lease expiry.
+export class GoatTaskTurnCanceledError extends Error {
+  constructor() {
+    super("Goat task turn was canceled.");
+    this.name = "GoatTaskTurnCanceledError";
+  }
+}
+
 // Transient provider failures before Codex starts must preserve the durable user turn. The worker
 // catches this error and defers the same leased row with backoff instead of projecting a failed
 // assistant message.

@@ -119,7 +119,6 @@ export async function createGoatTaskSession(
           ${now},
           ${assistantCreatedAt}
         FROM enabled_user AS "user"
-        CROSS JOIN resolved_workspace AS workspace
         RETURNING id, user_workos_id
       ),
       created_task AS (
@@ -223,14 +222,13 @@ export async function createGoatTaskSession(
           ${engine},
           ${runtimeModel},
           (SELECT id FROM resolved_brain),
-          workspace.workspace_id,
+          (SELECT workspace_id FROM resolved_workspace),
           ${engine === "codex" ? GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION : null},
           ${turnId},
           'queued',
           ${now},
           ${now}
         FROM created_task AS task
-        CROSS JOIN resolved_workspace AS workspace
         RETURNING id
       ),
       inserted_turn AS (

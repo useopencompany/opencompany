@@ -1,9 +1,11 @@
-import type { GoatHarnessSpec, GoatTask } from "@opencompany/db/goat-schema";
+import type { GoatCodexChatTurn, GoatHarnessSpec, GoatTask } from "@opencompany/db/goat-schema";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { GoatTaskTurnCanceledError } from "./goat-codex-chat-errors";
 import {
   buildGoatTaskTurnCompletion,
   type GoatTaskTurnContext,
+  markGoatTaskTurnRunning,
   settleGoatDurableTurn,
 } from "./goat-task-turn";
 
@@ -78,6 +80,21 @@ describe("session-backed task turns", () => {
     });
   });
 
+  it("classifies a canceled task as an interrupt while the turn lease is still held", async () => {
+    mocks.execute.mockResolvedValueOnce({ rows: [{ outcome: "canceled" }] });
+
+    await expect(
+      markGoatTaskTurnRunning({
+        context: context(workflowSpec()),
+        turn: durableTurn(),
+      }),
+    ).rejects.toBeInstanceOf(GoatTaskTurnCanceledError);
+
+    const statement = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]).sql;
+    expect(statement).toContain("task.status = 'canceled'");
+    expect(statement).toContain("EXISTS (");
+  });
+
   it("settles the current lease, projects the task, queues the next step, and dedupes notification", async () => {
     const completion = buildGoatTaskTurnCompletion({
       context: context(workflowSpec()),
@@ -108,11 +125,44 @@ describe("session-backed task turns", () => {
     expect(statement).toContain("INSERT INTO goat.chat_messages");
     expect(statement).toContain("INSERT INTO goat.codex_chat_turns");
     expect(statement).toContain("UPDATE goat.codex_chat_sessions AS runtime");
+    expect(statement).toContain("task.status IN ('queued', 'running')");
+    expect(statement).toContain("SELECT next.id");
+    expect(statement).toContain("FROM next_turn AS next");
+    expect(statement).toContain("NOT EXISTS (SELECT 1 FROM next_turn)");
     expect(statement).toContain("existing.debug_trace->'taskNotification'->>'taskId'");
     expect(statement).not.toContain("goat.task_messages");
     expect(statement).not.toContain("goat.task_events");
   });
 });
+
+function durableTurn(): GoatCodexChatTurn {
+  const now = new Date("2026-07-30T09:00:00.000Z");
+  return {
+    id: "turn_1",
+    userWorkosId: "user_1",
+    codexChatSessionId: "runtime_1",
+    chatSessionId: "goat_chat_task_1",
+    userMessageId: "user_message_1",
+    assistantMessageId: "assistant_message_1",
+    codexTurnId: null,
+    status: "running",
+    prompt: "Ship the requested change.",
+    settings: {},
+    error: null,
+    interruptRequestedAt: null,
+    attempts: 1,
+    recoveryAttempts: 0,
+    engineRecoveryRequired: false,
+    engineTurnBaselineIds: null,
+    leaseId: "lease_1",
+    leaseOwner: "runner_1",
+    leaseExpiresAt: new Date(now.getTime() + 300_000),
+    runAfter: null,
+    completedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 function workflowSpec(): GoatHarnessSpec {
   return {

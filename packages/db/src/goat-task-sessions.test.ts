@@ -61,9 +61,33 @@ describe("Goat task sessions", () => {
     expect(query.sql).toContain("INSERT INTO goat.codex_chat_turns");
     expect(query.sql).not.toContain("goat.task_messages");
     expect(query.sql).not.toContain("goat.task_events");
+    expect(query.sql).not.toContain("CROSS JOIN resolved_workspace");
+    expect(query.sql).toContain("(SELECT workspace_id FROM resolved_workspace)");
     expect(query.sql).toContain("'task'");
     expect(query.params).toContain("workspace_1");
     expect(query.params).toContain("brain_1");
+  });
+
+  it("does not require workspace membership to create a scheduled task session", async () => {
+    const execute = vi.fn(async (_query: SQL) => [taskRow()]);
+
+    await expect(
+      createGoatTaskSession(
+        {
+          userWorkosId: "user_1",
+          prompt: "Research the market.",
+          name: "Market research",
+          harnessSpec,
+          now: new Date("2026-07-30T09:00:00.000Z"),
+        },
+        { execute },
+      ),
+    ).resolves.toMatchObject({ id: "goat_task_1" });
+
+    const query = rendered(execute.mock.calls[0]?.[0]);
+    expect(query.sql).not.toContain("CROSS JOIN resolved_workspace");
+    expect(query.sql).toContain("(SELECT workspace_id FROM resolved_workspace)");
+    expect(query.params).toContain(null);
   });
 
   it("continues a terminal task by appending native chat messages and a turn", async () => {

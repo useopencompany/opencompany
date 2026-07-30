@@ -44,7 +44,7 @@ export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunView
               taskId: run.task.id,
               status: run.task.status,
               startedAtMs: taskActivityStartedAtMs(run),
-              sessionBacked: Boolean(run.chat),
+              sessionBacked: Boolean(run.task.sessionId),
             }}
           />
         );

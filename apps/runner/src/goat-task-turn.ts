@@ -12,7 +12,6 @@ import {
   type GoatHarnessSpec,
   type GoatTask,
   type GoatTaskReportedOutcome,
-  goatTasks,
 } from "@opencompany/db/goat-schema";
 import {
   UPDATE_TASK_STATUS_TOOL_DESCRIPTION,
@@ -26,11 +25,11 @@ import {
 } from "@opencompany/goat-observability";
 import * as ai from "ai";
 import { createGateway, jsonSchema, type LanguageModelUsage } from "ai";
-import { and, eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { createGoatBrainMarkdownReportForTask } from "./goat-brain";
-import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
+import { GoatCodexChatLeaseLostError, GoatTaskTurnCanceledError } from "./goat-codex-chat-errors";
 import { getGoatAvailableGitHubRepositoryNamesForRunner } from "./goat-harness-planner";
 import { normalizeGoatTaskToolNames } from "./goat-task-tool-names";
 import { rowsFromExecute } from "./sql-exec";
@@ -68,46 +67,42 @@ type GoatTaskNextTurn = {
   assistantDebugTrace: Record<string, unknown>;
 };
 
-export async function loadGoatTaskTurnContext(input: {
-  turn: GoatCodexChatTurn;
-  session: GoatCodexChatSession;
-}): Promise<GoatTaskTurnContext | null> {
-  const [task] = await getDb()
-    .select()
-    .from(goatTasks)
-    .where(
-      and(
-        eq(goatTasks.sessionId, input.session.chatSessionId),
-        eq(goatTasks.userWorkosId, input.turn.userWorkosId),
-      ),
-    )
-    .limit(1);
-  return task ? { task, harnessSpec: task.harnessSpec } : null;
-}
-
 export async function markGoatTaskTurnRunning(input: {
   context: GoatTaskTurnContext;
   turn: GoatCodexChatTurn;
   stage?: "planning" | "running";
 }) {
   const result = await getDb().execute(sql`
-    UPDATE goat.tasks AS task
-    SET status = 'running',
-        stage = ${input.stage ?? "running"},
-        result = NULL,
-        error = NULL,
-        reported_outcome = NULL,
-        outcome_comment = NULL,
-        attempts = CASE WHEN task.status = 'queued' THEN task.attempts + 1 ELSE task.attempts END,
-        updated_at = ${new Date()}
+    WITH updated_task AS (
+      UPDATE goat.tasks AS task
+      SET status = 'running',
+          stage = ${input.stage ?? "running"},
+          result = NULL,
+          error = NULL,
+          reported_outcome = NULL,
+          outcome_comment = NULL,
+          attempts = CASE WHEN task.status = 'queued' THEN task.attempts + 1 ELSE task.attempts END,
+          updated_at = ${new Date()}
+      WHERE task.id = ${input.context.task.id}
+        AND task.session_id = ${input.turn.chatSessionId}
+        AND task.user_workos_id = ${input.turn.userWorkosId}
+        AND task.status IN ('queued', 'running')
+        AND EXISTS (${turnLeaseSubquery(input.turn)})
+      RETURNING task.id
+    )
+    SELECT 'updated'::text AS outcome
+    FROM updated_task
+    UNION ALL
+    SELECT 'canceled'::text AS outcome
+    FROM goat.tasks AS task
     WHERE task.id = ${input.context.task.id}
       AND task.session_id = ${input.turn.chatSessionId}
       AND task.user_workos_id = ${input.turn.userWorkosId}
-      AND task.status IN ('queued', 'running')
+      AND task.status = 'canceled'
       AND EXISTS (${turnLeaseSubquery(input.turn)})
-    RETURNING task.id
+    LIMIT 1
   `);
-  assertRowsChanged(result);
+  assertTaskMutationSucceeded(result);
 }
 
 export async function prepareGoatCodexTaskTurn(input: {
@@ -180,15 +175,28 @@ export async function prepareGoatCodexTaskTurn(input: {
         AND runtime.engine = 'codex'
         AND EXISTS (SELECT 1 FROM updated_task)
       RETURNING runtime.chat_session_id
+    ),
+    updated_chat AS (
+      UPDATE goat.chat_sessions AS chat
+      SET model = ${harnessSpec.model},
+          updated_at = ${now}
+      FROM updated_runtime AS runtime
+      WHERE chat.id = runtime.chat_session_id
+      RETURNING chat.id
     )
-    UPDATE goat.chat_sessions AS chat
-    SET model = ${harnessSpec.model},
-        updated_at = ${now}
-    FROM updated_runtime AS runtime
-    WHERE chat.id = runtime.chat_session_id
-    RETURNING chat.id
+    SELECT 'updated'::text AS outcome
+    FROM updated_chat
+    UNION ALL
+    SELECT 'canceled'::text AS outcome
+    FROM goat.tasks AS task
+    WHERE task.id = ${task.id}
+      AND task.session_id = ${input.turn.chatSessionId}
+      AND task.user_workos_id = ${input.turn.userWorkosId}
+      AND task.status = 'canceled'
+      AND EXISTS (${turnLeaseSubquery(input.turn)})
+    LIMIT 1
   `);
-  assertRowsChanged(result);
+  assertTaskMutationSucceeded(result);
   return {
     task: {
       ...task,
@@ -276,6 +284,9 @@ export async function closeGoatCodexTaskTurn(input: {
     });
     return readTaskOutcome(call?.input);
   } catch (error) {
+    if (input.signal.aborted) {
+      throw input.signal.reason instanceof Error ? input.signal.reason : error;
+    }
     console.warn("Goat Codex task closer failed; the task completes without a reported outcome.", {
       event: "goat.codex_task_closer_failed",
       task_id: input.context.task.id,
@@ -288,12 +299,14 @@ export async function closeGoatCodexTaskTurn(input: {
 export async function finalizeGoatTaskResult(input: {
   context: GoatTaskTurnContext;
   assistantContent: string;
+  turnId?: string | undefined;
 }) {
   const content = input.assistantContent.trim();
   if (input.context.harnessSpec.resultMode !== "brain_markdown_report") return content;
   const artifact = await createGoatBrainMarkdownReportForTask({
     userWorkosId: input.context.task.userWorkosId,
     taskId: input.context.task.id,
+    taskTurnId: input.turnId,
     title: input.context.task.name,
     markdown: content,
   });
@@ -484,6 +497,7 @@ export async function settleGoatDurableTurn(input: {
       WHERE task.id = ${completion?.taskId ?? null}
         AND task.session_id = ${target.chatSessionId}
         AND task.user_workos_id = ${target.userWorkosId}
+        AND task.status IN ('queued', 'running')
         AND EXISTS (SELECT 1 FROM settled_turn)
       RETURNING task.*
     ),
@@ -551,15 +565,21 @@ export async function settleGoatDurableTurn(input: {
       RETURNING id
     ),
     next_queued_turn AS (
-      SELECT queued.id
-      FROM goat.codex_chat_turns AS queued
-      WHERE queued.codex_chat_session_id = ${target.codexChatSessionId}
-        AND queued.user_workos_id = ${target.userWorkosId}
-        AND queued.status = 'queued'
-        AND (queued.run_after IS NULL OR queued.run_after <= ${input.completedAt})
-        AND EXISTS (SELECT 1 FROM settled_turn)
-      ORDER BY queued.created_at ASC, queued.id ASC
-      LIMIT 1
+      SELECT next.id
+      FROM next_turn AS next
+      UNION ALL
+      (
+        SELECT queued.id
+        FROM goat.codex_chat_turns AS queued
+        WHERE queued.codex_chat_session_id = ${target.codexChatSessionId}
+          AND queued.user_workos_id = ${target.userWorkosId}
+          AND queued.status = 'queued'
+          AND (queued.run_after IS NULL OR queued.run_after <= ${input.completedAt})
+          AND EXISTS (SELECT 1 FROM settled_turn)
+          AND NOT EXISTS (SELECT 1 FROM next_turn)
+        ORDER BY queued.created_at ASC, queued.id ASC
+        LIMIT 1
+      )
     ),
     updated_runtime AS (
       UPDATE goat.codex_chat_sessions AS runtime
@@ -835,4 +855,11 @@ function assertRowsChanged(result: unknown) {
   if (rowsFromExecute(result).length === 0) {
     throw new GoatCodexChatLeaseLostError();
   }
+}
+
+function assertTaskMutationSucceeded(result: unknown) {
+  const row = rowsFromExecute<{ outcome: "updated" | "canceled" }>(result)[0];
+  if (row?.outcome === "updated") return;
+  if (row?.outcome === "canceled") throw new GoatTaskTurnCanceledError();
+  throw new GoatCodexChatLeaseLostError();
 }

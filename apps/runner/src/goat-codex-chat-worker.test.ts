@@ -22,8 +22,9 @@ const dbMock = vi.hoisted(() => {
     execute: vi.fn(),
     select: vi.fn(() => db),
     from: vi.fn(() => db),
+    leftJoin: vi.fn(() => db),
     where: vi.fn(() => db),
-    limit: vi.fn(async () => sessionRows),
+    limit: vi.fn(async () => sessionRows.map((session) => ({ session, task: null }))),
   };
   return db;
 });
@@ -258,6 +259,8 @@ describe("runClaimedTurn", () => {
       expect.objectContaining({ turn: expect.objectContaining({ attempts: 1 }) }),
     );
     expect(input).not.toHaveProperty("recovery");
+    expect(dbMock.select).toHaveBeenCalledOnce();
+    expect(dbMock.leftJoin).toHaveBeenCalledOnce();
     expect(telemetry.recordGoatHistogram).toHaveBeenCalledWith(
       "goat.codex_chat.queue_wait_ms",
       5_000,

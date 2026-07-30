@@ -129,6 +129,7 @@ export function createDbGoatChatShareStore(
           and(
             eq(goatChatSessions.id, input.chatSessionId),
             eq(goatChatSessions.userWorkosId, input.userWorkosId),
+            eq(goatChatSessions.kind, "chat"),
           ),
         )
         .limit(1);
@@ -156,6 +157,7 @@ export function createDbGoatChatShareStore(
           and(
             eq(goatChatShares.chatSessionId, input.chatSessionId),
             eq(goatChatSessions.userWorkosId, input.userWorkosId),
+            eq(goatChatSessions.kind, "chat"),
           ),
         )
         .limit(1);
@@ -190,7 +192,7 @@ export function createDbGoatChatShareStore(
         })
         .from(goatChatShares)
         .innerJoin(goatChatSessions, eq(goatChatShares.chatSessionId, goatChatSessions.id))
-        .where(eq(goatChatShares.id, shareId))
+        .where(and(eq(goatChatShares.id, shareId), eq(goatChatSessions.kind, "chat")))
         .limit(1);
       return result ?? null;
     },

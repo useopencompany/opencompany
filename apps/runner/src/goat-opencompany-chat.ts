@@ -50,7 +50,11 @@ import { asc, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { runGoatTaskBrainRead } from "./goat-codex-brain-tool";
-import { GoatCodexChatHandoffError, GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
+import {
+  GoatCodexChatHandoffError,
+  GoatCodexChatLeaseLostError,
+  GoatTaskTurnCanceledError,
+} from "./goat-codex-chat-errors";
 import {
   createGoatOpenCompanyChatProjector,
   GoatOpenCompanyChatInterruptedError,
@@ -210,7 +214,10 @@ export async function runGoatOpenCompanyChatTurn(input: {
     if (effectiveError instanceof GoatCodexChatHandoffError) {
       return "handed_off";
     }
-    if (effectiveError instanceof GoatOpenCompanyChatInterruptedError) {
+    if (
+      effectiveError instanceof GoatOpenCompanyChatInterruptedError ||
+      effectiveError instanceof GoatTaskTurnCanceledError
+    ) {
       await projector.interrupted(
         projection,
         input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : null,
@@ -892,6 +899,7 @@ function recognizedAbortError(value: unknown): value is Error {
   return (
     value instanceof GoatCodexChatHandoffError ||
     value instanceof GoatOpenCompanyChatInterruptedError ||
+    value instanceof GoatTaskTurnCanceledError ||
     value instanceof GoatCodexChatLeaseLostError
   );
 }

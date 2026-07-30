@@ -42,6 +42,7 @@ import {
   GoatCodexChatHandoffError,
   GoatCodexChatLeaseLostError,
   GoatCodexChatRetryableInfrastructureError,
+  GoatTaskTurnCanceledError,
 } from "./goat-codex-chat-errors";
 import {
   createGoatCodexChatProjector,
@@ -169,7 +170,10 @@ export async function runGoatCodexChatTurn(input: {
         throw effectiveError;
       }
       const projector = await bareProjector();
-      if (effectiveError instanceof GoatCodexChatInterruptedError) {
+      if (
+        effectiveError instanceof GoatCodexChatInterruptedError ||
+        effectiveError instanceof GoatTaskTurnCanceledError
+      ) {
         await projector.interrupted(buildGoatTaskTerminalProjection(taskContext));
       } else {
         await projector.fail(errorMessage(effectiveError), {
@@ -525,19 +529,38 @@ export async function runGoatCodexChatTurn(input: {
       if (!rawResult) {
         throw new Error("Goat task completed without a final assistant message.");
       }
+      const closerController = new AbortController();
+      const closerAbortTimer = setInterval(() => {
+        void checkAbort().catch((error) => {
+          if (!closerController.signal.aborted) closerController.abort(error);
+        });
+      }, INTERACTION_POLL_INTERVAL_MS);
+      closerAbortTimer.unref?.();
+      let reported;
+      try {
+        await checkAbort();
+        reported = await closeGoatCodexTaskTurn({
+          context: taskContext,
+          finalContent: rawResult,
+          env,
+          session,
+          turn,
+          signal: closerController.signal,
+        });
+        if (closerController.signal.aborted) throw closerController.signal.reason;
+        await checkAbort();
+      } finally {
+        clearInterval(closerAbortTimer);
+      }
+
+      // Artifact creation is the success tail's point of no return. Once it starts, persist the
+      // matching turn projection under the still-held lease even if shutdown begins, so recovery
+      // cannot replay the artifact write. The turn id also dedupes a replay after a hard crash.
       const finalResult = await finalizeGoatTaskResult({
         context: taskContext,
         assistantContent: rawResult,
+        turnId: turn.id,
       });
-      const reported = await closeGoatCodexTaskTurn({
-        context: taskContext,
-        finalContent: rawResult,
-        env,
-        session,
-        turn,
-        signal: new AbortController().signal,
-      });
-      await checkAbort();
       await projector.finalize(
         { ...summary, result: finalResult },
         {
