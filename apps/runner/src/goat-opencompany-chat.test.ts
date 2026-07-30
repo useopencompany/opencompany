@@ -71,8 +71,16 @@ describe("consumeGoatOpenCompanyChatStream", () => {
             raw: undefined,
           },
         },
-        { type: "text-end", id: "text_1" },
-        { type: "reasoning-end", id: "reasoning_1" },
+        {
+          type: "text-end",
+          id: "text_1",
+          providerMetadata: { gateway: { textId: "text_final" } },
+        },
+        {
+          type: "reasoning-end",
+          id: "reasoning_1",
+          providerMetadata: { gateway: { reasoningId: "reasoning_final" } },
+        },
         {
           type: "finish",
           finishReason: "stop",
@@ -103,8 +111,18 @@ describe("consumeGoatOpenCompanyChatStream", () => {
       finishReason: "stop",
       usage: { totalTokens: 165 },
       parts: [
-        { type: "text", text: "Hello world", state: "done" },
-        { type: "reasoning", text: "Checking context", state: "done" },
+        {
+          type: "text",
+          text: "Hello world",
+          state: "done",
+          providerMetadata: { gateway: { textId: "text_final" } },
+        },
+        {
+          type: "reasoning",
+          text: "Checking context",
+          state: "done",
+          providerMetadata: { gateway: { reasoningId: "reasoning_final" } },
+        },
         {
           type: "tool-goat_brain",
           toolCallId: "tool_1",

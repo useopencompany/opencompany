@@ -287,13 +287,18 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             ...existing,
             text: `${typeof existing?.text === "string" ? existing.text : ""}${text}`,
             state: "streaming",
+            ...providerMetadataFrom(part),
           });
           await flush(false);
         }
       } else if (part.type === "text-end") {
         const index = textPartIndexes.get(readString(part.id) ?? "");
         if (index !== undefined) {
-          replacePart(index, { ...partAt(parts, index), state: "done" });
+          replacePart(index, {
+            ...partAt(parts, index),
+            state: "done",
+            ...providerMetadataFrom(part),
+          });
         }
       } else if (part.type === "reasoning-start") {
         const id = readString(part.id);
@@ -326,13 +331,18 @@ export async function consumeGoatOpenCompanyChatStream(input: {
             ...existing,
             text: `${typeof existing?.text === "string" ? existing.text : ""}${text}`,
             state: "streaming",
+            ...providerMetadataFrom(part),
           });
           await flush(false);
         }
       } else if (part.type === "reasoning-end") {
         const index = reasoningPartIndexes.get(readString(part.id) ?? "");
         if (index !== undefined) {
-          replacePart(index, { ...partAt(parts, index), state: "done" });
+          replacePart(index, {
+            ...partAt(parts, index),
+            state: "done",
+            ...providerMetadataFrom(part),
+          });
         }
       } else if (part.type === "tool-input-start") {
         const toolCallId = readString(part.id);
