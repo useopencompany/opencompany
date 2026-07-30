@@ -206,6 +206,7 @@ describe("terminal Goat Codex sandbox reconciliation", () => {
 
     await expect(sweepTerminalGoatCodexChatSandboxes({ idleTimeoutMs: 300_000 })).resolves.toBe(1);
 
+    expect(sqlText(dbMock.execute.mock.calls[0]?.[0])).toContain("sandbox_id IS NOT NULL");
     expect(sandboxMocks.armSandboxIdleTimeoutById).toHaveBeenCalledWith("sbx_1", 300_000);
     expect(sqlText(dbMock.execute.mock.calls[1]?.[0])).toContain("sandbox_timeout_armed_at");
   });
