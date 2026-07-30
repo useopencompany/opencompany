@@ -1,4 +1,6 @@
 import { CODEX_COMMAND_TOOL_PART_TYPE, type CodexUiMessagePart } from "@opencompany/agent-runtime";
+import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
+import type { GoatTask } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import {
@@ -324,6 +326,88 @@ describe("runGoatCodexChatTurn", () => {
       expect.objectContaining({
         skillFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
         skills: [
+          {
+            name: "coding-work",
+            path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
+          },
+        ],
+      }),
+    );
+  });
+
+  it("materializes and invokes only the current workflow step skills for durable tasks", async () => {
+    dbMocks.execute.mockResolvedValue({ rows: [{ id: "updated", outcome: "updated" }] });
+    dbMocks.selectRows.push(
+      [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
+      [],
+      [],
+      [
+        {
+          skillId: "coding-work",
+          activatedMessageId: "goat_msg_user_previous",
+          name: "Coding work",
+          description: "An older interactive snapshot.",
+          instructions: "Use the older interactive instructions.",
+          activatedAt: new Date("2026-07-10T11:00:00Z"),
+        },
+        {
+          skillId: "chat-skill",
+          activatedMessageId: "goat_msg_user_1",
+          name: "Chat skill",
+          description: "A skill activated on this message.",
+          instructions: "Apply the current chat instructions.",
+          activatedAt: new Date("2026-07-10T12:00:00Z"),
+        },
+      ],
+    );
+    appServerMocks.runCodexAppServerTurn.mockResolvedValueOnce({
+      sessionId: "thread_existing",
+      status: "failed",
+      result: "",
+      error: "Expected test stop.",
+      usage: null,
+      goal: null,
+    });
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    const harnessSpec = workflowTaskHarnessSpec();
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      taskContext: {
+        task: workflowTask(harnessSpec),
+        harnessSpec,
+      },
+      env: env(),
+    });
+
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        {
+          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
+          data: expect.stringContaining("Use the immutable workflow instructions."),
+        },
+        {
+          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/chat-skill/SKILL.md",
+          data: expect.stringContaining("Apply the current chat instructions."),
+        },
+      ]),
+    );
+    expect(sandbox.files.write).not.toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/research-work/SKILL.md",
+        }),
+      ]),
+    );
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skills: [
+          {
+            name: "chat-skill",
+            path: "/home/user/opencompany-goat/codex-chat/.agents/skills/chat-skill/SKILL.md",
+          },
           {
             name: "coding-work",
             path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
@@ -970,6 +1054,97 @@ function codexTurn() {
     createdAt: now,
     updatedAt: now,
   } as const;
+}
+
+function workflowTaskHarnessSpec(): GoatWorkflowHarnessSpec {
+  return {
+    schemaVersion: "goat.harness.v1",
+    engine: "codex",
+    model: "openai/gpt-5.5",
+    systemPrompt: "Implement and verify the change.",
+    systemBlocks: ["Implement and verify the change."],
+    initialUserMessage: "Ship the requested change.",
+    tools: [],
+    skills: [],
+    maxModelSteps: 16,
+    resultMode: "assistant_final",
+    workflow: {
+      id: "workflow_1",
+      workspaceId: "workspace_1",
+      skillIds: ["research-work", "coding-work"],
+      currentStepIndex: 1,
+      completedStepCount: 1,
+      steps: [
+        {
+          index: 0,
+          title: "Research",
+          engine: "opencompany",
+          model: "moonshotai/kimi-k2.6",
+          systemPrompt: "Research the change.",
+          systemBlocks: ["Research the change."],
+          skillIds: ["research-work"],
+        },
+        {
+          index: 1,
+          title: "Implement",
+          engine: "codex",
+          model: "openai/gpt-5.5",
+          systemPrompt: "Implement and verify the change.",
+          systemBlocks: ["Implement and verify the change."],
+          skillIds: ["coding-work"],
+        },
+      ],
+      skillSnapshots: [
+        {
+          id: "research-work",
+          name: "Research work",
+          description: "How to research.",
+          instructions: "Use the research instructions.",
+        },
+        {
+          id: "coding-work",
+          name: "Coding work",
+          description: "How to implement.",
+          instructions: "Use the immutable workflow instructions.",
+        },
+      ],
+    },
+  };
+}
+
+function workflowTask(harnessSpec: GoatWorkflowHarnessSpec): GoatTask {
+  const now = new Date("2026-07-10T12:00:00Z");
+  return {
+    id: "goat_task_1",
+    displayId: "TASK-1",
+    name: "Ship workflow",
+    userWorkosId: "user_1",
+    prompt: "Ship the requested change.",
+    model: harnessSpec.model,
+    sessionId: "goat_chat_1",
+    scheduleId: null,
+    scheduledFor: null,
+    status: "running",
+    stage: "running",
+    result: null,
+    error: null,
+    workflowId: "workflow_1",
+    workflowBrainRef: null,
+    reportedOutcome: null,
+    outcomeComment: null,
+    harnessSpec,
+    debugTrace: {},
+    codexEngineSessionId: null,
+    sandboxId: null,
+    attempts: 1,
+    nextRunAt: now,
+    leaseId: null,
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    archivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
