@@ -1,6 +1,6 @@
 "use server";
 
-import { createHash, randomInt } from "node:crypto";
+import { randomInt } from "node:crypto";
 import {
   consumeGoatImessageChallenge,
   getGoatImessagePairingChallenge,
@@ -15,7 +15,9 @@ import type { GoatImessageProviderState } from "@/lib/integration-state";
 import {
   connectGoatImessageIntegration,
   getGoatImessageIntegrationState,
+  hashGoatImessagePairingCode,
   normalizeImessagePhoneE164,
+  verifyGoatImessagePairingCode,
 } from "@/lib/integrations/imessage";
 
 const CODE_TTL_MS = 10 * 60 * 1000;
@@ -27,10 +29,6 @@ export type ImessagePairingActionResult = { ok: true } | { ok: false; error: str
 export type ImessageConfirmActionResult =
   | { ok: true; state: GoatImessageProviderState }
   | { ok: false; error: string };
-
-function hashPairingCode(code: string): string {
-  return createHash("sha256").update(code).digest("hex");
-}
 
 export async function startImessagePairingAction(
   phone: string,
@@ -68,7 +66,11 @@ export async function startImessagePairingAction(
     await upsertGoatImessagePairingChallenge({
       userWorkosId: user.workosUserId,
       phoneE164,
-      codeHash: hashPairingCode(code),
+      codeHash: hashGoatImessagePairingCode({
+        code,
+        userWorkosId: user.workosUserId,
+        phoneE164,
+      }),
       expiresAt: new Date(Date.now() + CODE_TTL_MS),
     });
 
@@ -112,7 +114,14 @@ export async function confirmImessagePairingAction(
     if (challenge.attemptCount >= MAX_CONFIRM_ATTEMPTS) {
       return { ok: false, error: "Too many attempts. Request a new code." };
     }
-    if (hashPairingCode(trimmed) !== challenge.codeHash) {
+    if (
+      !verifyGoatImessagePairingCode({
+        code: trimmed,
+        userWorkosId: user.workosUserId,
+        phoneE164: challenge.phoneE164,
+        expectedHash: challenge.codeHash,
+      })
+    ) {
       await incrementGoatImessageChallengeAttempts(challenge.id);
       const remaining = MAX_CONFIRM_ATTEMPTS - challenge.attemptCount - 1;
       return {

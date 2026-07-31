@@ -9,6 +9,11 @@ import { and, desc, eq, ne, sql } from "drizzle-orm";
 import type { GoatImessageProviderState } from "@/lib/integration-state";
 import { captureGoatIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
+export {
+  hashGoatImessagePairingCode,
+  verifyGoatImessagePairingCode,
+} from "@/lib/integrations/imessage-pairing-code";
+
 // Deliberately naive (no libphonenumber): strip common separators, require
 // E.164. The pairing code sent to the number is the real validator — a typo'd
 // number simply never confirms.

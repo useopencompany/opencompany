@@ -3,7 +3,7 @@ import type { GoatImessageSendSource } from "@opencompany/db/goat-schema";
 import { resolveGoatImessageProvider } from "./provider";
 
 const DEFAULT_DAILY_SEND_CAP = 30;
-const MAX_MESSAGE_LENGTH = 1000;
+const MAX_MESSAGE_LENGTH = 500;
 
 export type SendUserMessageResult = { ok: true; delivered: true } | { ok: false; error: string };
 
