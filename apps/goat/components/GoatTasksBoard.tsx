@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@opencompany/ui/components/select";
 import { toast } from "@opencompany/ui/components/sonner";
+import { GitHubIcon } from "@opencompany/ui/icons";
 import { Archive, ArrowUpRight, LayoutGrid, ListTodo, Loader2, Rows3 } from "lucide-react";
 import Link from "next/link";
 import { type KeyboardEvent, type ReactNode, useMemo, useState, useTransition } from "react";
@@ -26,6 +27,7 @@ import {
 } from "@/components/GoatRoutes";
 import type { GoatTaskView } from "@/components/GoatSurface";
 import { formatUsdMicros } from "@/lib/cost-format";
+import { extractGitHubPullRequestUrl } from "@/lib/pull-request-link";
 import {
   formatGoatStartedAt,
   formatGoatTaskDuration,
@@ -567,6 +569,9 @@ function TaskBoardSheet({
     sourceLabel: taskSourceLabel(task, workflowNames),
     durationLabel,
   });
+  const pullRequestUrl = terminal
+    ? extractGitHubPullRequestUrl(task.result, task.outcomeComment)
+    : null;
 
   const archiveTask = () => {
     if (!terminal) return;
@@ -711,6 +716,21 @@ function TaskBoardSheet({
                       : "—"}
                 </span>
               </PropertyRow>
+
+              {pullRequestUrl ? (
+                <PropertyRow label="Pull request">
+                  <a
+                    href={pullRequestUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:text-ink-muted"
+                  >
+                    <GitHubIcon size={13} />
+                    View PR
+                    <ArrowUpRight size={12} strokeWidth={1.75} />
+                  </a>
+                </PropertyRow>
+              ) : null}
             </div>
           </aside>
         </div>
