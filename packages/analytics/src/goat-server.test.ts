@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { captureGoatServerEvent } from "./goat-server";
+import { captureGoatServerEvent, captureGoatTaskSpawned } from "./goat-server";
 import { captureServerEvent } from "./server";
 
 const posthog = vi.hoisted(() => ({
@@ -110,6 +110,43 @@ describe("PostHog server analytics", () => {
 
     expect(posthog.constructor).not.toHaveBeenCalled();
     expect(posthog.capture).not.toHaveBeenCalled();
+  });
+
+  it("captures task spawn events with dashboard-safe attributes", async () => {
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+
+    await captureGoatTaskSpawned({
+      userWorkosId: "user_123",
+      workspaceId: "workspace_123",
+      taskId: "goat_task_123",
+      displayId: "TASK-123",
+      engine: "codex",
+      model: "openai/gpt-5.5-codex",
+      workflowId: "ship-feature",
+      trigger: "schedule",
+    });
+
+    expect(posthog.capture).toHaveBeenCalledWith({
+      distinctId: "user_123",
+      event: "task_spawned",
+      properties: {
+        workspace_id: "workspace_123",
+        task_id: "goat_task_123",
+        display_id: "TASK-123",
+        task_kind: "scheduled_workflow",
+        task_origin: "workflow",
+        task_trigger: "schedule",
+        engine: "codex",
+        model: "openai/gpt-5.5-codex",
+        has_workflow: true,
+        has_schedule: true,
+        workflow_id: "ship-feature",
+        $set: {
+          workspace_id: "workspace_123",
+        },
+      },
+    });
   });
 
   it("keeps legacy web events on the legacy project configuration", async () => {

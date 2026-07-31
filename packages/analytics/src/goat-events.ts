@@ -1,5 +1,9 @@
 // Goat's product analytics are deliberately small. A new chat is derived from
 // chat_message_sent.is_first_message instead of emitting a second event for the same action.
+export type GoatTaskSpawnKind = "adhoc" | "workflow" | "scheduled_task" | "scheduled_workflow";
+export type GoatTaskSpawnOrigin = "adhoc" | "workflow";
+export type GoatTaskSpawnTrigger = "manual" | "schedule";
+
 export type GoatAnalyticsEventPropertiesByName = {
   app_opened: {
     workspace_id: string;
@@ -14,6 +18,20 @@ export type GoatAnalyticsEventPropertiesByName = {
     engine: "opencompany" | "codex" | "claude_code";
     model: string;
     message_length: number;
+  };
+  task_spawned: {
+    workspace_id?: string;
+    task_id: string;
+    display_id?: string;
+    task_kind: GoatTaskSpawnKind;
+    task_origin: GoatTaskSpawnOrigin;
+    task_trigger: GoatTaskSpawnTrigger;
+    engine: "opencompany" | "codex" | "claude_code";
+    model: string;
+    has_workflow: boolean;
+    has_schedule: boolean;
+    workflow_id?: string;
+    schedule_id?: string;
   };
   integration_added: {
     workspace_id?: string;
@@ -70,6 +88,24 @@ export const goatAnalyticsEvents = {
       "engine",
       "model",
       "message_length",
+    ],
+  },
+  task_spawned: {
+    name: "task_spawned",
+    description: "A durable Goat task was created and queued.",
+    safeProperties: [
+      "workspace_id",
+      "task_id",
+      "display_id",
+      "task_kind",
+      "task_origin",
+      "task_trigger",
+      "engine",
+      "model",
+      "has_workflow",
+      "has_schedule",
+      "workflow_id",
+      "schedule_id",
     ],
   },
   integration_added: {
