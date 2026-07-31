@@ -1356,11 +1356,6 @@ export function GoatSurface({
 
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
-      if (pendingAttachments.length > 0) {
-        toast.error("Attachments are not supported when starting a workflow task yet.");
-        return;
-      }
-
       clearError();
       setInput("");
       setMentionToken(null);
@@ -1370,9 +1365,11 @@ export function GoatSurface({
       void startGoatWorkflowTask({
         workflow: workflowMention,
         description: prompt,
+        ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
       })
         .then(({ task }) => {
           if (!mountedRef.current) return;
+          composerAttachments.clearAttachments();
           router.refresh();
           toast.success(`Started ${task.name} in the background.`);
         })
@@ -2962,17 +2959,17 @@ function QuickChatComposer({
 
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
-      if (pendingAttachments.length > 0) {
-        toast.error("Attachments are not supported when starting a workflow task yet.");
-        return;
-      }
-
       setIsSubmitting(true);
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
+      composerAttachments.clearAttachments();
       onSubmitted();
-      void startGoatWorkflowTask({ workflow: workflowMention, description: prompt })
+      void startGoatWorkflowTask({
+        workflow: workflowMention,
+        description: prompt,
+        ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
+      })
         .then(({ task }) => {
           // Not gated on mountedRef: the dialog (and this component) has already
           // closed by the time this resolves — router.refresh()/toast are global.
@@ -3959,6 +3956,7 @@ async function startGoatAdHocTask(input: { description: string; model: string; e
 async function startGoatWorkflowTask(input: {
   workflow: Extract<GoatChatMention, { kind: "workflow" }>;
   description: string;
+  attachments?: GoatChatUiAttachment[];
 }) {
   const response = await fetch("/api/workflows", {
     method: "POST",

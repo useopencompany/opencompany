@@ -1,4 +1,4 @@
-import type { GoatChatMessage } from "@opencompany/db/goat-schema";
+import type { GoatChatMessage, GoatChatMessageAttachment } from "@opencompany/db/goat-schema";
 import type { GoatStoredChatMessage } from "@opencompany/goat-agent/chat-ui";
 import type { LanguageModelUsage } from "ai";
 import { describe, expect, it, vi } from "vitest";
@@ -248,6 +248,57 @@ describe("goatOpenCompanyModelMessagesFromStored", () => {
     expect(JSON.stringify(modelMessages)).toContain("Launch is Friday.");
     expect(JSON.stringify(modelMessages)).not.toContain("later queued turn");
   });
+
+  it("adds extracted attachment text to user messages", async () => {
+    const messages = [
+      storedMessage({
+        id: "user_1",
+        role: "user",
+        content: "Review the attached report.",
+        attachments: [attachment],
+        attachmentTexts: { [attachment.id]: "Revenue was up 18% in Q2." },
+      }),
+    ];
+
+    const modelMessages = await goatOpenCompanyModelMessagesFromStored(messages, "user_1", {
+      modelId: "anthropic/claude-sonnet-5",
+    });
+
+    expect(JSON.stringify(modelMessages)).toContain("report.docx");
+    expect(JSON.stringify(modelMessages)).toContain("Revenue was up 18% in Q2.");
+  });
+
+  it("dedupes copied workflow attachments during OpenCompany replay", async () => {
+    const messages = [
+      storedMessage({
+        id: "user_1",
+        role: "user",
+        content: "Review the attached report.",
+        attachments: [attachment],
+        attachmentTexts: { [attachment.id]: "Revenue was up 18% in Q2." },
+      }),
+      storedMessage({
+        id: "assistant_1",
+        role: "assistant",
+        content: "The first step finished.",
+      }),
+      storedMessage({
+        id: "user_2",
+        role: "user",
+        content: "Continue the workflow.",
+        attachments: [attachment],
+        attachmentTexts: { [attachment.id]: "Revenue was up 18% in Q2." },
+      }),
+    ];
+
+    const modelMessages = await goatOpenCompanyModelMessagesFromStored(messages, "user_2", {
+      modelId: "anthropic/claude-sonnet-5",
+    });
+    const serialized = JSON.stringify(modelMessages);
+
+    expect(serialized.match(/report\.docx/g)).toHaveLength(1);
+    expect(serialized.match(/Revenue was up 18% in Q2\./g)).toHaveLength(1);
+  });
 });
 
 async function* streamParts(
@@ -260,7 +311,7 @@ async function* streamParts(
 
 function storedMessage(
   input: Pick<GoatChatMessage, "id" | "role" | "content"> &
-    Partial<Pick<GoatChatMessage, "debugTrace">>,
+    Partial<Pick<GoatChatMessage, "debugTrace" | "attachments" | "attachmentTexts">>,
 ): GoatStoredChatMessage {
   return {
     id: input.id,
@@ -269,8 +320,8 @@ function storedMessage(
     content: input.content,
     taskId: null,
     debugTrace: input.debugTrace ?? null,
-    attachments: null,
-    attachmentTexts: null,
+    attachments: input.attachments ?? null,
+    attachmentTexts: input.attachmentTexts ?? null,
     createdAt: new Date(),
     updatedAt: new Date(),
     taskDisplayId: null,
@@ -279,3 +330,13 @@ function storedMessage(
     taskStatus: null,
   };
 }
+
+const attachment: GoatChatMessageAttachment = {
+  id: "goat_chat_att_1",
+  kind: "docx",
+  mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  filename: "report.docx",
+  sizeBytes: 1024,
+  blobPathname: "goat-chat/user_1/report.docx",
+  blobUrl: "https://blob.test/goat-chat/user_1/report.docx",
+};

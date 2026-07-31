@@ -7,7 +7,7 @@ import {
 import type { SQL } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { getDb } from "./client";
-import type { GoatHarnessSpec, GoatTask } from "./goat-schema";
+import type { GoatChatMessageAttachment, GoatHarnessSpec, GoatTask } from "./goat-schema";
 
 type GoatTaskSessionDb = {
   execute(query: SQL): Promise<unknown>;
@@ -24,6 +24,8 @@ export type CreateGoatTaskSessionInput = {
   scheduledFor?: Date | null;
   workflowId?: string | null;
   workflowBrainRef?: string | null;
+  attachments?: GoatChatMessageAttachment[] | null;
+  attachmentTexts?: Record<string, string> | null;
   now?: Date;
 };
 
@@ -59,6 +61,8 @@ export async function createGoatTaskSession(
     input.workspaceId?.trim() || harnessSpec.workflow?.workspaceId?.trim() || null;
   const requestedBrainRef = input.brainRef?.trim() || null;
   const initialUserMessage = harnessSpec.initialUserMessage.trim() || input.prompt;
+  const attachments = input.attachments ?? [];
+  const attachmentTexts = input.attachmentTexts ?? null;
   const settings = turnSettingsFromHarness(harnessSpec);
   const assistantDebugTrace = emptyAssistantDebugTrace(engine, runtimeModel);
 
@@ -166,6 +170,8 @@ export async function createGoatTaskSession(
           session_id,
           role,
           content,
+          attachments,
+          attachment_texts,
           created_at,
           updated_at
         )
@@ -174,6 +180,8 @@ export async function createGoatTaskSession(
           task.session_id,
           'user',
           ${initialUserMessage},
+          ${attachmentsJsonbValue(attachments)}::jsonb,
+          ${attachmentTextsJsonbValue(attachmentTexts)}::jsonb,
           ${now},
           ${now}
         FROM created_task AS task
@@ -491,6 +499,16 @@ function runtimeModelNameForHarness(engine: GoatHarnessSpec["engine"], model: st
   if (engine === "codex") return codexCliModelNameForModelId(model);
   if (engine === "claude_code") return claudeCodeCliModelNameForModelId(model);
   return model;
+}
+
+function attachmentsJsonbValue(attachments: GoatChatMessageAttachment[]) {
+  return attachments.length > 0 ? JSON.stringify(attachments) : null;
+}
+
+function attachmentTextsJsonbValue(attachmentTexts: Record<string, string> | null) {
+  return attachmentTexts && Object.keys(attachmentTexts).length > 0
+    ? JSON.stringify(attachmentTexts)
+    : null;
 }
 
 function emptyAssistantDebugTrace(engine: GoatHarnessSpec["engine"], model: string) {

@@ -1,6 +1,7 @@
-import { AGENT_MODEL_CATALOG } from "@opencompany/agent-runtime";
+import { AGENT_MODEL_CATALOG, modelSupportsAttachments } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import {
+  type GoatChatMessageAttachment,
   type GoatCodexChatSession,
   type GoatCodexChatTurn,
   goatChatMessages,
@@ -23,6 +24,7 @@ import {
 } from "@opencompany/goat-agent/chat-agent";
 import type {
   GoatChatActionCatalog,
+  GoatChatUiMessage,
   GoatStoredChatMessage,
   WebFetchToolOutput,
   WebSearchToolOutput,
@@ -47,6 +49,7 @@ import {
   stepCountIs,
 } from "ai";
 import { asc, eq } from "drizzle-orm";
+import { downloadBlobBytes } from "./attachment-hydration";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { runGoatTaskBrainRead } from "./goat-codex-brain-tool";
@@ -144,6 +147,8 @@ export async function runGoatOpenCompanyChatTurn(input: {
     const messages = await loadGoatOpenCompanyChatModelMessages({
       chatSessionId: session.chatSessionId,
       currentUserMessageId: turn.userMessageId,
+      modelId: runtime.model,
+      blobToken: env.blobReadWriteToken,
     });
     throwIfAborted(generationController.signal);
     await projector.started();
@@ -540,6 +545,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
 export async function goatOpenCompanyModelMessagesFromStored(
   storedMessages: readonly GoatStoredChatMessage[],
   currentUserMessageId: string,
+  options?: { modelId?: string | undefined; blobToken?: string | undefined },
 ) {
   const currentIndex = storedMessages.findIndex(
     (message) => message.id === currentUserMessageId && message.role === "user",
@@ -547,14 +553,23 @@ export async function goatOpenCompanyModelMessagesFromStored(
   if (currentIndex < 0) {
     throw new Error(`OpenCompany chat user message ${currentUserMessageId} was not found.`);
   }
+  const replayMessages = storedMessages.slice(0, currentIndex + 1);
+  const uiMessages = replayMessages.map((message) => toGoatChatUiMessage(message));
   return convertToModelMessages(
-    storedMessages.slice(0, currentIndex + 1).map((message) => toGoatChatUiMessage(message)),
+    await hydrateGoatOpenCompanyAttachmentParts({
+      uiMessages,
+      storedMessages: replayMessages,
+      modelId: options?.modelId,
+      blobToken: options?.blobToken,
+    }),
   );
 }
 
 async function loadGoatOpenCompanyChatModelMessages(input: {
   chatSessionId: string;
   currentUserMessageId: string;
+  modelId: string;
+  blobToken: string | undefined;
 }) {
   const rows = await getDb()
     .select({
@@ -579,7 +594,115 @@ async function loadGoatOpenCompanyChatModelMessages(input: {
     taskPrompt: null,
     taskStatus: null,
   }));
-  return goatOpenCompanyModelMessagesFromStored(storedMessages, input.currentUserMessageId);
+  return goatOpenCompanyModelMessagesFromStored(storedMessages, input.currentUserMessageId, {
+    modelId: input.modelId,
+    blobToken: input.blobToken,
+  });
+}
+
+async function hydrateGoatOpenCompanyAttachmentParts(input: {
+  uiMessages: GoatChatUiMessage[];
+  storedMessages: readonly Pick<
+    GoatStoredChatMessage,
+    "id" | "role" | "attachments" | "attachmentTexts"
+  >[];
+  modelId: string | undefined;
+  blobToken: string | undefined;
+}): Promise<GoatChatUiMessage[]> {
+  const attachmentsByMessageId = new Map<
+    string,
+    {
+      attachments: GoatChatMessageAttachment[];
+      attachmentTexts: Record<string, string> | null;
+    }
+  >();
+  const seenAttachmentIds = new Set<string>();
+  for (const message of input.storedMessages) {
+    if (message.role !== "user" || !message.attachments?.length) continue;
+    const attachments = message.attachments.filter((attachment) => {
+      if (seenAttachmentIds.has(attachment.id)) return false;
+      seenAttachmentIds.add(attachment.id);
+      return true;
+    });
+    if (attachments.length > 0) {
+      attachmentsByMessageId.set(message.id, {
+        attachments,
+        attachmentTexts: message.attachmentTexts,
+      });
+    }
+  }
+  if (attachmentsByMessageId.size === 0) return input.uiMessages;
+
+  const capabilities = input.modelId
+    ? modelSupportsAttachments(input.modelId)
+    : { images: false, pdf: false };
+  return Promise.all(
+    input.uiMessages.map(async (message) => {
+      const stored = message.role === "user" ? attachmentsByMessageId.get(message.id) : undefined;
+      if (!stored?.attachments?.length) return message;
+
+      const parts: GoatChatUiMessage["parts"] = [...message.parts];
+      for (const attachment of stored.attachments) {
+        parts.push(
+          ...(await openCompanyAttachmentToParts({
+            attachment,
+            attachmentTexts: stored.attachmentTexts,
+            capabilities,
+            blobToken: input.blobToken,
+          })),
+        );
+      }
+      return { ...message, parts };
+    }),
+  );
+}
+
+async function openCompanyAttachmentToParts(input: {
+  attachment: GoatChatMessageAttachment;
+  attachmentTexts: Record<string, string> | null;
+  capabilities: { images: boolean; pdf: boolean };
+  blobToken: string | undefined;
+}): Promise<GoatChatUiMessage["parts"]> {
+  const { attachment } = input;
+  const label = `[Attached file "${attachment.filename}" (${attachment.kind}) - attachment id: ${attachment.id}]`;
+
+  if (attachment.kind === "docx" || attachment.kind === "xlsx" || attachment.kind === "srt") {
+    const text = input.attachmentTexts?.[attachment.id];
+    return [
+      {
+        type: "text",
+        text: text
+          ? `${label}\n\n${text}`
+          : `${label} - no text could be extracted from this file.`,
+      },
+    ];
+  }
+
+  const supported =
+    attachment.kind === "image" ? input.capabilities.images : input.capabilities.pdf;
+  if (!supported) {
+    return [{ type: "text", text: `${label} - not viewable with the current model.` }];
+  }
+
+  try {
+    const bytes = await downloadBlobBytes(attachment.blobUrl, input.blobToken);
+    return [
+      { type: "text", text: label },
+      {
+        type: "file",
+        mediaType: attachment.mediaType,
+        filename: attachment.filename,
+        url: `data:${attachment.mediaType};base64,${bytes.toString("base64")}`,
+      },
+    ];
+  } catch (error) {
+    logger.warn("Durable OpenCompany chat attachment hydration failed", {
+      event: "opencompany.goat_opencompany_chat_attachment_hydration_failed",
+      kind: attachment.kind,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return [{ type: "text", text: `${label} - the file could not be loaded.` }];
+  }
 }
 
 async function resolveOpenCompanyChatRuntime(input: {

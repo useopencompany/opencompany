@@ -2,7 +2,7 @@ import { GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtim
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
-import type { GoatHarnessSpec } from "./goat-schema";
+import type { GoatChatMessageAttachment, GoatHarnessSpec } from "./goat-schema";
 import {
   createGoatTaskSession,
   enqueueGoatTaskSessionTurn,
@@ -44,6 +44,8 @@ describe("Goat task sessions", () => {
           prompt: "Research the market.",
           name: "Market research",
           harnessSpec,
+          attachments: [attachment],
+          attachmentTexts: { [attachment.id]: "Extracted report text." },
           now: new Date("2026-07-30T09:00:00.000Z"),
         },
         { execute },
@@ -58,6 +60,8 @@ describe("Goat task sessions", () => {
     expect(query.sql).toContain("INSERT INTO goat.chat_sessions");
     expect(query.sql).toContain("INSERT INTO goat.tasks");
     expect(query.sql).toContain("INSERT INTO goat.chat_messages");
+    expect(query.sql).toContain("attachments");
+    expect(query.sql).toContain("attachment_texts");
     expect(query.sql).toContain("INSERT INTO goat.codex_chat_sessions");
     expect(query.sql).toContain("INSERT INTO goat.codex_chat_turns");
     expect(query.sql).not.toContain("goat.task_messages");
@@ -67,6 +71,8 @@ describe("Goat task sessions", () => {
     expect(query.sql).toContain("'task'");
     expect(query.params).toContain("workspace_1");
     expect(query.params).toContain("brain_1");
+    expect(query.params).toContain(JSON.stringify([attachment]));
+    expect(query.params).toContain(JSON.stringify({ [attachment.id]: "Extracted report text." }));
   });
 
   it("does not require workspace membership to create a scheduled task session", async () => {
@@ -154,6 +160,16 @@ const claudeCodeHarnessSpec: GoatHarnessSpec = {
   ...harnessSpec,
   engine: "claude_code",
   model: "anthropic/claude-sonnet-5",
+};
+
+const attachment: GoatChatMessageAttachment = {
+  id: "goat_chat_att_1",
+  kind: "docx",
+  mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  filename: "report.docx",
+  sizeBytes: 1024,
+  blobPathname: "goat-chat/user_1/report.docx",
+  blobUrl: "https://blob.test/goat-chat/user_1/report.docx",
 };
 
 function taskRow(spec: GoatHarnessSpec = harnessSpec) {

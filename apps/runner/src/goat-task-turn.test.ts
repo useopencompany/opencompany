@@ -170,7 +170,12 @@ describe("session-backed task turns", () => {
     const statement = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]).sql;
     expect(statement).toContain("WITH settled_turn AS");
     expect(statement).toContain("UPDATE goat.tasks AS task");
+    expect(statement).toContain("workflow_origin_attachments AS");
     expect(statement).toContain("INSERT INTO goat.chat_messages");
+    expect(statement).toContain("attachment_texts");
+    expect(statement).toContain("origin.role = 'user'");
+    expect(statement).toContain("IN ('codex', 'claude_code')");
+    expect(statement).toContain("SELECT attachments FROM workflow_origin_attachments");
     expect(statement).toContain("INSERT INTO goat.codex_chat_turns");
     expect(statement).toContain("UPDATE goat.codex_chat_sessions AS runtime");
     expect(statement).toContain("task.status IN ('queued', 'running')");

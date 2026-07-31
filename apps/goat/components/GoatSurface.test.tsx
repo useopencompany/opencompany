@@ -1496,6 +1496,107 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("starts a selected workflow with uploaded attachments", async () => {
+    const user = userEvent.setup();
+    attachmentUploadMock.upload.mockResolvedValueOnce({
+      blobUrl: "https://blob.test/goat-chat/user_1/report.docx",
+      blobPathname: "goat-chat/user_1/report.docx",
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/skills") return Response.json({ skills: [] });
+      if (url === "/api/workflows" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_1",
+              displayId: "TASK-1",
+              name: "Morning Test",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      if (url === "/api/workflows") {
+        return Response.json({
+          workflows: [
+            {
+              id: "morning-test",
+              name: "Morning Test",
+              description: "Run the morning checks.",
+            },
+          ],
+        });
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_1",
+          title: "Existing chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [],
+        }}
+        userWorkosId="user_1"
+        taskSpawningEnabled
+      />,
+    );
+
+    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [
+          new File(["doc"], "report.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          }),
+        ],
+      },
+    });
+    await screen.findByText("report.docx");
+    await screen.findByText("DOCX");
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "#");
+    await user.click(await screen.findByRole("option", { name: /Morning Test/i }));
+    await user.type(textarea, "summarize this report");
+    await user.click(screen.getByRole("button", { name: "Start task" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      workflow: {
+        kind: "workflow",
+        id: "morning-test",
+      },
+      description: "#morning-test summarize this report",
+      attachments: [
+        expect.objectContaining({
+          kind: "docx",
+          mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          filename: "report.docx",
+          blobUrl: "https://blob.test/goat-chat/user_1/report.docx",
+          blobPathname: "goat-chat/user_1/report.docx",
+        }),
+      ],
+    });
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByText("report.docx")).toBeNull());
+  });
+
   it("offers workflow mentions when Codex is selected in the main composer", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
