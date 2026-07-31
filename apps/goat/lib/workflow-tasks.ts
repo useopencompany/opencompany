@@ -198,6 +198,36 @@ export async function createGoatTaskFromWorkflow(input: {
   });
   // resolveGoatWorkflowMention throws when workspaceId is null, so it is set here.
   const workspaceId = input.workspaceId as string;
+  const prepared = await prepareGoatWorkflowRunForUser({
+    userWorkosId: input.userWorkosId,
+    workspaceId,
+    workflow,
+    description: input.description,
+  });
+
+  return createGoatTaskForUser({
+    userWorkosId: input.userWorkosId,
+    workspaceId,
+    prompt: prepared.description,
+    model: prepared.stepSelections[0]!.model,
+    name: workflow.name,
+    harnessSpec: prepared.harnessSpec,
+    // `workflowId` holds the workspace-scoped workflow slug.
+    workflowId: workflow.id,
+  });
+}
+
+export async function prepareGoatWorkflowRunForUser(input: {
+  userWorkosId: string;
+  workspaceId: string;
+  workflow: GoatWorkspaceWorkflow;
+  description: string;
+}): Promise<{
+  description: string;
+  stepSelections: GoatWorkflowEngineSelection[];
+  harnessSpec: GoatWorkflowHarnessSpec;
+}> {
+  const { workflow } = input;
   const stepSelections = workflow.steps.map(resolveGoatWorkflowStepSelection);
   const hasCodexStep = stepSelections.some((selection) => selection.engine === "codex");
   const hasClaudeCodeStep = stepSelections.some((selection) => selection.engine === "claude_code");
@@ -220,7 +250,7 @@ export async function createGoatTaskFromWorkflow(input: {
     ).values(),
   ];
   const skills = await resolveGoatSkillMentions({
-    workspaceId,
+    workspaceId: input.workspaceId,
     mentions: skillRefs,
   });
   const tools = await getGoatAvailableHarnessTools(input.userWorkosId);
@@ -228,22 +258,13 @@ export async function createGoatTaskFromWorkflow(input: {
 
   const harnessSpec = compileGoatWorkflowHarnessSpec({
     workflow,
-    workspaceId,
+    workspaceId: input.workspaceId,
     skills,
     tools,
     description,
   });
 
-  return createGoatTaskForUser({
-    userWorkosId: input.userWorkosId,
-    workspaceId,
-    prompt: description,
-    model: stepSelections[0]!.model,
-    name: workflow.name,
-    harnessSpec,
-    // `workflowId` holds the workspace-scoped workflow slug.
-    workflowId: workflow.id,
-  });
+  return { description, stepSelections, harnessSpec };
 }
 
 // Chat- and trigger-created workflow tasks share this: the task is created instantly with the

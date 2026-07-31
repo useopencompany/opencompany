@@ -121,7 +121,90 @@ describe("sweepDueGoatTaskSchedules", () => {
     ).resolves.toEqual({ checked: 1, created: 0 });
 
     expect(sqlTextFromExecuteCall(execute, 2)).toContain("UPDATE goat.task_schedules");
-    expect(execute).toHaveBeenCalledTimes(4);
+    expect(execute).toHaveBeenCalledTimes(5);
+  });
+
+  it("creates a workflow task for a due workflow schedule", async () => {
+    const workflowHarnessSpec: GoatHarnessSpec = {
+      ...harnessSpec,
+      initialUserMessage: "Task: Weekly update\n\nDraft the weekday update.",
+      workflow: {
+        id: "weekly-update",
+        workspaceId: "workspace_1",
+        skillIds: [],
+        steps: [],
+        currentStepIndex: 0,
+        completedStepCount: 0,
+      },
+    };
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "goat_workflow_1",
+          workspaceId: "workspace_1",
+          slug: "weekly-update",
+          userWorkosId: "user_1",
+          name: "Weekly update",
+          cron: "0 9 * * *",
+          timezone: "UTC",
+          prompt: "Draft the weekday update.",
+          scheduleHarnessSpec: workflowHarnessSpec,
+          nextRunAt: new Date("2026-06-01T09:00:00.000Z"),
+        },
+      ])
+      .mockResolvedValueOnce([{ id: "goat_workflow_schedule_run_1" }])
+      .mockResolvedValueOnce([
+        {
+          id: "goat_task_1",
+          displayId: "TASK-1",
+          name: "Weekly update",
+          userWorkosId: "user_1",
+          prompt: "Draft the weekday update.",
+          model: workflowHarnessSpec.model,
+          sessionId: "goat_chat_1",
+          scheduleId: null,
+          scheduledFor: new Date("2026-06-03T09:00:00.000Z"),
+          status: "queued",
+          stage: "queued",
+          result: null,
+          error: null,
+          workflowId: "weekly-update",
+          workflowBrainRef: null,
+          reportedOutcome: null,
+          outcomeComment: null,
+          harnessSpec: workflowHarnessSpec,
+          debugTrace: {},
+          codexEngineSessionId: null,
+          sandboxId: null,
+          attempts: 0,
+          nextRunAt: new Date("2026-06-03T12:00:00.000Z"),
+          leaseId: null,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          archivedAt: null,
+          createdAt: new Date("2026-06-03T12:00:00.000Z"),
+          updatedAt: new Date("2026-06-03T12:00:00.000Z"),
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.transaction.mockImplementation(async (callback) => callback({ execute }));
+
+    const onTaskCreated = vi.fn();
+    await expect(
+      sweepDueGoatTaskSchedules({
+        now: new Date("2026-06-03T12:00:00.000Z"),
+        onTaskCreated,
+      }),
+    ).resolves.toEqual({ checked: 1, created: 1 });
+
+    expect(onTaskCreated).toHaveBeenCalledOnce();
+    expect(sqlTextFromExecuteCall(execute, 1)).toContain("FROM goat.workflows");
+    expect(sqlTextFromExecuteCall(execute, 3)).toContain("INSERT INTO goat.chat_sessions");
+    expect(sqlTextFromExecuteCall(execute, 3)).toContain("workflow_id");
+    expect(sqlTextFromExecuteCall(execute, 4)).toContain("UPDATE goat.workflow_schedule_runs");
   });
 });
 

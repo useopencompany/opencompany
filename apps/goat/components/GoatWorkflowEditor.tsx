@@ -3,8 +3,10 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import {
   ArrowLeft,
+  CalendarClock,
   Check,
   ChevronDown,
+  Clock,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -21,6 +23,11 @@ import {
   DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
   GOAT_WORKFLOW_MODEL_OPTIONS,
 } from "@/lib/workflow-model-options";
+import {
+  DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON,
+  DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
+  DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE,
+} from "@/lib/workflow-schedule-defaults";
 import type { GoatWorkflowDetail } from "@/lib/workflows";
 
 const AUTOSAVE_DELAY_MS = 1200;
@@ -28,7 +35,12 @@ const MAX_WORKFLOW_STEPS = 20;
 
 type WorkflowStatus = GoatWorkflowDetail["status"];
 type WorkflowStep = GoatWorkflowDetail["steps"][number];
-type WorkflowDraft = Pick<GoatWorkflowDetail, "name" | "description" | "status" | "steps">;
+type WorkflowTriggerDraft =
+  | { type: "manual" }
+  | { type: "schedule"; cron: string; timezone: string; prompt: string };
+type WorkflowDraft = Pick<GoatWorkflowDetail, "name" | "description" | "status" | "steps"> & {
+  trigger: WorkflowTriggerDraft;
+};
 type SaveState = "saved" | "saving" | "error";
 
 const DEFAULT_MODEL_LABEL =
@@ -90,6 +102,7 @@ export function GoatWorkflowEditor({
           description: snapshot.description,
           steps: snapshot.steps,
           status: snapshot.status,
+          trigger: snapshot.trigger,
         });
       } catch {
         result = { ok: false, message: "The workflow could not be saved. Try again." };
@@ -231,6 +244,12 @@ export function GoatWorkflowEditor({
               />
             </div>
           </header>
+
+          <TriggerSection
+            trigger={draft.trigger}
+            canEdit={canEdit}
+            onChange={(trigger) => patch({ trigger })}
+          />
 
           <div className="flex flex-col gap-3">
             <SectionLabel>Steps</SectionLabel>
@@ -406,6 +425,131 @@ function StatusDot({ status }: { status: WorkflowStatus }) {
       aria-hidden="true"
       className={`h-1.5 w-1.5 rounded-full ${status === "active" ? "bg-success" : "bg-ink-faint"}`}
     />
+  );
+}
+
+function TriggerSection({
+  trigger,
+  canEdit,
+  onChange,
+}: {
+  trigger: WorkflowTriggerDraft;
+  canEdit: boolean;
+  onChange: (trigger: WorkflowTriggerDraft) => void;
+}) {
+  const setManual = () => onChange({ type: "manual" });
+  const setSchedule = () =>
+    onChange(
+      trigger.type === "schedule"
+        ? trigger
+        : {
+            type: "schedule",
+            cron: DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON,
+            timezone: DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE,
+            prompt: DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
+          },
+    );
+  const updateSchedule = (
+    partial: Partial<Extract<WorkflowTriggerDraft, { type: "schedule" }>>,
+  ) => {
+    if (trigger.type !== "schedule") return;
+    onChange({ ...trigger, ...partial });
+  };
+
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionLabel>Trigger</SectionLabel>
+      <div className="rounded-xl border border-border bg-surface px-3.5 py-3">
+        <div
+          className="inline-flex w-fit rounded-lg border border-border bg-canvas p-1"
+          role="radiogroup"
+          aria-label="Workflow trigger"
+        >
+          <TriggerModeButton
+            icon={Clock}
+            label="Manual"
+            selected={trigger.type === "manual"}
+            disabled={!canEdit}
+            onSelect={setManual}
+          />
+          <TriggerModeButton
+            icon={CalendarClock}
+            label="On a schedule"
+            selected={trigger.type === "schedule"}
+            disabled={!canEdit}
+            onSelect={setSchedule}
+          />
+        </div>
+
+        {trigger.type === "schedule" ? (
+          <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
+            <label className="flex min-w-0 flex-col gap-1.5">
+              <span className="text-[12px] font-medium text-ink-subtle">Cron</span>
+              <input
+                value={trigger.cron}
+                readOnly={!canEdit}
+                onChange={(event) => updateSchedule({ cron: event.target.value })}
+                placeholder={DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON}
+                className="h-8 rounded-lg border border-border bg-canvas px-2.5 font-mono text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+              />
+            </label>
+            <label className="flex min-w-0 flex-col gap-1.5">
+              <span className="text-[12px] font-medium text-ink-subtle">Timezone</span>
+              <input
+                value={trigger.timezone}
+                readOnly={!canEdit}
+                onChange={(event) => updateSchedule({ timezone: event.target.value })}
+                placeholder={DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE}
+                className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+              />
+            </label>
+            <label className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">
+              <span className="text-[12px] font-medium text-ink-subtle">Task request</span>
+              <textarea
+                value={trigger.prompt}
+                readOnly={!canEdit}
+                onChange={(event) => updateSchedule({ prompt: event.target.value })}
+                rows={3}
+                placeholder={DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT}
+                className="min-h-20 resize-y rounded-lg border border-border bg-canvas px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+              />
+            </label>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function TriggerModeButton({
+  icon: Icon,
+  label,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  icon: typeof Clock;
+  label: string;
+  selected: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      disabled={disabled}
+      onClick={onSelect}
+      className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default ${
+        selected
+          ? "bg-surface text-ink shadow-[0_1px_2px_rgba(15,15,15,0.08)]"
+          : "text-ink-subtle hover:bg-surface-hover hover:text-ink"
+      }`}
+    >
+      <Icon size={13} strokeWidth={1.9} />
+      {label}
+    </button>
   );
 }
 
@@ -653,6 +797,15 @@ function workflowDraft(workflow: GoatWorkflowDetail): WorkflowDraft {
     description: workflow.description,
     status: workflow.status,
     steps: workflow.steps,
+    trigger:
+      workflow.trigger.type === "schedule"
+        ? {
+            type: "schedule",
+            cron: workflow.trigger.cron,
+            timezone: workflow.trigger.timezone,
+            prompt: workflow.trigger.prompt,
+          }
+        : { type: "manual" },
   };
 }
 

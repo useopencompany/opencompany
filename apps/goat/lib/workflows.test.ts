@@ -55,6 +55,8 @@ describe("createGoatWorkflow", () => {
         description: "Summarize the week.",
         instructions: "",
         model: "",
+        trigger: "manual",
+        scheduleEnabled: false,
         status: "active",
         createdByWorkosId: "user_1",
       }),
@@ -153,6 +155,35 @@ describe("validateGoatWorkflowFields", () => {
         status: "active",
       }),
     ).toBeNull();
+  });
+
+  it("validates schedule triggers", () => {
+    expect(
+      validateGoatWorkflowFields({
+        name: "Workflow",
+        description: "",
+        steps: [validStep],
+        trigger: {
+          type: "schedule",
+          cron: "30 8 * * 1-5",
+          timezone: "America/New_York",
+          prompt: "Run the weekday workflow.",
+        },
+      }),
+    ).toBeNull();
+    expect(
+      validateGoatWorkflowFields({
+        name: "Workflow",
+        description: "",
+        steps: [validStep],
+        trigger: {
+          type: "schedule",
+          cron: "0 0 9 * * *",
+          timezone: "UTC",
+          prompt: "Run it.",
+        },
+      }),
+    ).toMatch(/cron/i);
   });
 });
 
