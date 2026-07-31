@@ -13,9 +13,22 @@ import {
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
 }));
+const analyticsMocks = vi.hoisted(() => ({
+  captureGoatLlmUsageRecorded: vi.fn(async () => undefined),
+  captureGoatModelSpendRecorded: vi.fn(async () => undefined),
+  captureGoatServerEvent: vi.fn(async () => undefined),
+}));
 
 vi.mock("./db", () => ({
   getDb: () => ({ execute: mocks.execute }),
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatLlmUsageRecorded: analyticsMocks.captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded: analyticsMocks.captureGoatModelSpendRecorded,
+  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+  goatAnalyticsUsageSourceForEngine: (engine: "opencompany" | "codex" | "claude_code") =>
+    engine === "opencompany" ? "owned_platform" : "external_harness",
 }));
 
 describe("session-backed task turns", () => {
@@ -196,6 +209,7 @@ describe("session-backed task turns", () => {
     await settleGoatDurableTurn({
       target: {
         userWorkosId: "user_1",
+        workspaceId: "workspace_1",
         codexChatSessionId: "runtime_1",
         chatSessionId: "goat_chat_task_1",
         turnId: "turn_1",
@@ -243,6 +257,7 @@ describe("session-backed task turns", () => {
     await settleGoatDurableTurn({
       target: {
         userWorkosId: "user_1",
+        workspaceId: "workspace_1",
         codexChatSessionId: "runtime_1",
         chatSessionId: "goat_chat_task_1",
         turnId: "turn_1",
@@ -276,6 +291,19 @@ describe("session-backed task turns", () => {
     expect(statement).toContain("existing.debug_trace->'taskNotification'->>'taskId'");
     expect(statement).not.toContain("goat.task_messages");
     expect(statement).not.toContain("goat.task_events");
+    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+      "chat_message_sent",
+      "user_1",
+      {
+        workspace_id: "workspace_1",
+        session_id: "goat_chat_task_1",
+        is_first_message: false,
+        engine: "codex",
+        usage_source: "external_harness",
+        model: completion.nextTurn?.chatModel,
+        message_length: completion.nextTurn?.prompt.length,
+      },
+    );
   });
 });
 

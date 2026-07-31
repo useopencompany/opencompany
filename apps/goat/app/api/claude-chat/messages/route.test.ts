@@ -138,6 +138,7 @@ describe("POST /api/claude-chat/messages", () => {
         session_id: "goat_chat_1",
         is_first_message: true,
         engine: "claude_code",
+        usage_source: "external_harness",
         model: "anthropic/claude-opus-4.8",
         message_length: 14,
       },

@@ -165,6 +165,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
   const initialParts = await loadCodexChatAssistantMessageParts(turn.assistantMessageId);
   const projectorTarget = {
     userWorkosId: turn.userWorkosId,
+    workspaceId: session.workspaceId,
     codexChatSessionId: session.id,
     chatSessionId: session.chatSessionId,
     turnId: turn.id,

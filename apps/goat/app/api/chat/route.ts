@@ -1712,6 +1712,7 @@ async function recordChatModelCost(input: {
     messageId: input.userMessageId,
     modelProvider: "vercel-ai-gateway",
     model: input.model,
+    engine: "opencompany",
     inputTokens: usage.inputTokens,
     inputNoCacheTokens: usage.inputNoCacheTokens,
     inputCacheReadTokens: usage.inputCacheReadTokens,

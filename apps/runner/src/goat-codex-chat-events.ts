@@ -35,6 +35,7 @@ const PERSISTED_EVENT_TYPES = new Set<GoatCodexChatEventType>(
 
 export type GoatCodexChatProjectorTarget = {
   userWorkosId: string;
+  workspaceId?: string | null;
   codexChatSessionId: string;
   chatSessionId: string;
   turnId: string;
