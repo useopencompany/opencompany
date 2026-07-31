@@ -44,6 +44,12 @@ import type { GoatCapabilityTurnState, GoatResolvedActionCatalog } from "@/lib/a
 import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
+import {
+  browserProfilesAvailable,
+  createAgentSession,
+  endAgentSession,
+  listConnectedBrowserProfilesForUser,
+} from "@/lib/browser-profiles";
 import { MANAGED_CAPABILITY_ACTIONS_BY_ID } from "@/lib/capabilities/catalog";
 import { evaluateManagedCapabilityApproval } from "@/lib/capabilities/execute";
 import {
@@ -677,12 +683,34 @@ export async function POST(request: Request): Promise<Response> {
   };
 
   let browserToolSession: ChatBrowserToolSession | null = null;
+  let connectedBrowserProfiles: Awaited<ReturnType<typeof listConnectedBrowserProfilesForUser>> =
+    [];
   if (turn.session.engine === "opencompany" && !requestedEngine) {
+    connectedBrowserProfiles = browserProfilesAvailable()
+      ? await listConnectedBrowserProfilesForUser(context.user.workosUserId)
+      : [];
     const { createChatBrowserToolSession } = await import("@/lib/sandbox/browser-tools");
     browserToolSession = createChatBrowserToolSession({
       chatSessionId: turn.session.id,
       userWorkosId: context.user.workosUserId,
       signal: generationSignal,
+      ...(connectedBrowserProfiles.length > 0
+        ? {
+            createBrowserProfileAgentSession: (profileId) =>
+              createAgentSession({
+                userWorkosId: context.user.workosUserId,
+                profileId,
+                chatSessionId: turn.session.id,
+                userMessageId: turn.usageUserMessageId,
+              }),
+            endBrowserProfileAgentSession: (session) =>
+              endAgentSession({
+                userWorkosId: context.user.workosUserId,
+                profileId: session.profile.id,
+                sessionId: session.sessionId,
+              }),
+          }
+        : {}),
     });
   }
   const maxChatSteps = browserToolSession
@@ -691,6 +719,7 @@ export async function POST(request: Request): Promise<Response> {
   let browserUsagePromise: Promise<void> | null = null;
   const recordBrowserSandboxUsage = () => {
     browserUsagePromise ??= (async () => {
+      await browserToolSession?.endActiveProfile?.();
       const usage = browserToolSession?.getUsage();
       if (!usage) return;
       await getDb()
@@ -727,6 +756,34 @@ export async function POST(request: Request): Promise<Response> {
     latestUserMessage: turn.userMessageContent,
     ...(requestedEngine ? { requestedEngine } : {}),
     ...(browserToolSession ? { browserTools: browserToolSession.execute } : {}),
+    ...(browserToolSession && connectedBrowserProfiles.length > 0
+      ? {
+          browserProfiles: {
+            profiles: connectedBrowserProfiles,
+            useProfile: async (call) => {
+              const profile = connectedBrowserProfiles.find((entry) => entry.name === call.profile);
+              if (!profile) {
+                return {
+                  ok: false,
+                  error: `Unknown browser profile ${JSON.stringify(call.profile)}.`,
+                };
+              }
+              const result = await browserToolSession.useProfile({
+                profileId: profile.id,
+              });
+              if (!result.profile) return result;
+              return {
+                ...result,
+                profile: {
+                  id: result.profile.id,
+                  name: result.profile.name,
+                  siteHost: result.profile.siteHost,
+                },
+              };
+            },
+          },
+        }
+      : {}),
     // goat_brain is read-only for everyone (recall/inspect). The only write path
     // in chat is save_to_brain, which is available to every workspace member
     // with an active brain and enqueues the durable ingestion agent.

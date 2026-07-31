@@ -163,7 +163,11 @@ export function GoatSettingsRoute() {
   );
 }
 
-export function GoatIntegrationsSettingsRoute() {
+export function GoatIntegrationsSettingsRoute({
+  browserProfilesEnabled = false,
+}: {
+  browserProfilesEnabled?: boolean;
+}) {
   const { integrations, workspace } = useGoatAppData();
 
   return (
@@ -171,7 +175,11 @@ export function GoatIntegrationsSettingsRoute() {
       title="Integrations"
       description="Connect the tools Goat can read from and act on."
     >
-      <IntegrationRows integrations={integrations} isWorkspaceAdmin={workspace.role === "admin"} />
+      <IntegrationRows
+        integrations={integrations}
+        isWorkspaceAdmin={workspace.role === "admin"}
+        browserProfilesEnabled={browserProfilesEnabled}
+      />
     </GoatSettingsContent>
   );
 }
@@ -688,14 +696,17 @@ function BetaFeatureSwitch({
 function IntegrationRows({
   integrations,
   isWorkspaceAdmin,
+  browserProfilesEnabled,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  browserProfilesEnabled: boolean;
 }) {
   return (
     <SettingsIntegrationsPanel
       initialIntegrations={integrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
+      browserProfilesEnabled={browserProfilesEnabled}
     />
   );
 }
