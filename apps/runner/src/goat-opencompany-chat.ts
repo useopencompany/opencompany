@@ -65,6 +65,7 @@ import {
 import {
   buildGoatTaskTerminalProjection,
   buildGoatTaskTurnCompletion,
+  closeGoatTaskTurn,
   type GoatTaskTurnContext,
   markGoatTaskTurnRunning,
 } from "./goat-task-turn";
@@ -186,17 +187,28 @@ export async function runGoatOpenCompanyChatTurn(input: {
       },
     });
     await abortWatcher.checkNow();
-    await abortWatcher.stop();
     projection = withCompletedResponseFallback(projection);
-    const taskOutcome = runtime.getTaskOutcome();
+    const taskResult = projectionText(projection);
+    const taskOutcome = input.taskContext
+      ? await closeGoatTaskTurn({
+          context: input.taskContext,
+          finalContent: taskResult,
+          env,
+          session,
+          turn,
+          signal: generationController.signal,
+        })
+      : null;
+    await abortWatcher.checkNow();
+    await abortWatcher.stop();
     await projector.completed(
       projection,
       input.taskContext
         ? buildGoatTaskTurnCompletion({
             context: input.taskContext,
-            result: projectionText(projection),
-            reportedOutcome: taskOutcome.reportedOutcome,
-            outcomeComment: taskOutcome.outcomeComment,
+            result: taskResult,
+            reportedOutcome: taskOutcome?.reportedOutcome,
+            outcomeComment: taskOutcome?.outcomeComment,
           })
         : null,
     );
@@ -644,8 +656,6 @@ async function resolveOpenCompanyChatRuntime(input: {
 
   const currentDate = new Date();
   const exaApiKey = env.exaApiKey?.trim();
-  let reportedOutcome: "done" | "needs_attention" | null = null;
-  let outcomeComment: string | null = null;
   const toolContext = createOpenCompanyChatToolContext({
     model,
     latestUserMessage: turn.prompt,
@@ -717,10 +727,6 @@ async function resolveOpenCompanyChatRuntime(input: {
       : {}),
     ...(taskContext
       ? {
-          updateTaskStatus: async (outcome) => {
-            reportedOutcome = outcome.status;
-            outcomeComment = outcome.comment.trim().slice(0, 200);
-          },
           limits: {
             webSearchCallsPerTurn: 20,
             webFetchCallsPerTurn: 20,
@@ -769,7 +775,6 @@ async function resolveOpenCompanyChatRuntime(input: {
     maxSteps: taskContext
       ? Math.max(1, taskContext.harnessSpec.maxModelSteps || OPENCOMPANY_CHAT_MAX_STEPS)
       : OPENCOMPANY_CHAT_MAX_STEPS,
-    getTaskOutcome: () => ({ reportedOutcome, outcomeComment }),
   };
 }
 

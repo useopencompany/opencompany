@@ -55,7 +55,7 @@ import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./goat-coding-workspace-r
 import {
   buildGoatTaskTerminalProjection,
   buildGoatTaskTurnCompletion,
-  closeGoatCodexTaskTurn,
+  closeGoatTaskTurn,
   finalizeGoatTaskResult,
   type GoatTaskTurnContext,
   prepareGoatCodexTaskTurn,
@@ -540,7 +540,7 @@ export async function runGoatCodexChatTurn(input: {
       let reported;
       try {
         await checkAbort();
-        reported = await closeGoatCodexTaskTurn({
+        reported = await closeGoatTaskTurn({
           context: taskContext,
           finalContent: rawResult,
           env,

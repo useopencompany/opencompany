@@ -136,7 +136,7 @@ export async function prepareGoatCodexTaskTurn(input: {
     signal: input.signal,
   });
   if (planned.usage) {
-    await recordGoatCodexTaskGatewayUsage({
+    await recordGoatTaskGatewayUsage({
       context: input.context,
       session: input.session,
       turn: input.turn,
@@ -211,7 +211,7 @@ export async function prepareGoatCodexTaskTurn(input: {
   };
 }
 
-export async function closeGoatCodexTaskTurn(input: {
+export async function closeGoatTaskTurn(input: {
   context: GoatTaskTurnContext;
   finalContent: string;
   env: RunnerEnv;
@@ -274,7 +274,7 @@ export async function closeGoatCodexTaskTurn(input: {
       ),
     });
     const call = result.toolCalls.find((toolCall) => toolCall.toolName === "update_task_status");
-    await recordGoatCodexTaskGatewayUsage({
+    await recordGoatTaskGatewayUsage({
       context: input.context,
       session: input.session,
       turn: input.turn,
@@ -287,8 +287,8 @@ export async function closeGoatCodexTaskTurn(input: {
     if (input.signal.aborted) {
       throw input.signal.reason instanceof Error ? input.signal.reason : error;
     }
-    console.warn("Goat Codex task closer failed; the task completes without a reported outcome.", {
-      event: "goat.codex_task_closer_failed",
+    console.warn("Goat task closer failed; the task completes without a reported outcome.", {
+      event: "goat.task_closer_failed",
       task_id: input.context.task.id,
       error,
     });
@@ -720,7 +720,7 @@ function goatWorkflowStepHandoffContent(input: {
   previousResult: string;
 }) {
   const heading = `Step ${input.stepIndex + 1}/${input.stepCount} — ${input.title.trim() || "Untitled step"}`;
-  if (input.engine !== "codex" || !input.previousResult.trim()) return heading;
+  if (!input.previousResult.trim()) return heading;
   return [
     heading,
     "",
@@ -755,7 +755,7 @@ function readTaskOutcome(value: unknown): {
   };
 }
 
-async function recordGoatCodexTaskGatewayUsage(input: {
+async function recordGoatTaskGatewayUsage(input: {
   context: GoatTaskTurnContext;
   session: GoatCodexChatSession;
   turn: GoatCodexChatTurn;
@@ -777,7 +777,7 @@ async function recordGoatCodexTaskGatewayUsage(input: {
     "goat.model": input.model,
     "goat.surface": "task",
     "goat.stage": input.phase,
-    "goat.engine": "codex",
+    "goat.engine": input.context.harnessSpec.engine,
   };
   recordGoatModelCost({ costUsdMicros: cost.totalCostUsdMicros, attributes });
   if (inputTokens) {

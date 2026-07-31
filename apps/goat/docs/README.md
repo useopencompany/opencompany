@@ -590,14 +590,14 @@ Entry points:
 - `apps/runner/src/goat-task-turn.ts`
 - `packages/goat-agent/src/chat-agent.ts`
 
-Task mode adds only the autonomous `TASK_SYSTEM_BLOCK`, the untrusted-content safety block, raised
-headless call limits, and the shared `update_task_status` tool to an OpenCompany turn. All other
-prompt, message, tool, streaming, credit, and usage behavior is the standard chat adapter.
+Task mode adds only the autonomous `TASK_SYSTEM_BLOCK`, the untrusted-content safety block, and
+raised headless call limits to an OpenCompany turn. All other prompt, message, tool, streaming,
+credit, and usage behavior is the standard chat adapter.
 
-Codex tasks use the standard persistent Codex turn adapter while preserving planner-produced
-repository and pull-request configuration, task reasoning/goal settings, Markdown report
-materialization, and the small closer model that reports the final task outcome. The closer reuses
-the shared `update_task_status` schema.
+Task turns use their standard engine adapters while preserving planner-produced repository and
+pull-request configuration, task reasoning/goal settings, and Markdown report materialization. A
+small closer model reports the final task outcome for both OpenCompany and Codex turns, reusing the
+shared `update_task_status` schema without exposing that tool to normal step execution.
 
 Workflows are sequences of ordinary durable turns. When a step reports `done`, settlement
 atomically appends the next step's handoff user message and assistant placeholder, enqueues the next
