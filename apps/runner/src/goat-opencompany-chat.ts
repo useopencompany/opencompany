@@ -104,6 +104,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
       codexChatSessionId: session.id,
       chatSessionId: session.chatSessionId,
       turnId: turn.id,
+      taskId: input.taskContext?.task.id ?? null,
       userMessageId: turn.userMessageId,
       assistantMessageId: turn.assistantMessageId,
       workspaceId: session.workspaceId,

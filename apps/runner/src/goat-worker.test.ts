@@ -26,6 +26,14 @@ const telemetry = vi.hoisted(() => ({
   ),
 }));
 
+const analytics = vi.hoisted(() => ({
+  captureLlmUsage: vi.fn(async () => undefined),
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatLlmUsageRecorded: analytics.captureLlmUsage,
+}));
+
 vi.mock("@opencompany/goat-observability", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/goat-observability")>();
   return {
@@ -266,6 +274,28 @@ describe("runClaimedGoatTask", () => {
         "goat.surface": "task",
       },
     });
+    expect(analytics.captureLlmUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distinctId: "user_1",
+        workspaceId: "workspace_1",
+        surface: "task",
+        stage: "execution",
+        sessionId: null,
+        messageId: "assistant_msg_1",
+        taskId: "goat_task_1",
+        stepIndex: 0,
+        modelProvider: "vercel-ai-gateway",
+        model: "openai/gpt-5.4-mini",
+        inputTokens: 1_000,
+        inputNoCacheTokens: 1_000,
+        inputCacheReadTokens: 0,
+        inputCacheWriteTokens: 0,
+        outputTokens: 100,
+        outputTextTokens: 100,
+        outputReasoningTokens: 0,
+        totalTokens: 1_100,
+      }),
+    );
     expect(store.recordToolUsage).toHaveBeenCalledWith(
       expect.objectContaining({
         toolCallId: "call_search",

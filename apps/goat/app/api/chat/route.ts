@@ -2,6 +2,7 @@ import {
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
 } from "@opencompany/agent-runtime";
+import { captureGoatLlmUsageRecorded } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
@@ -1682,13 +1683,14 @@ async function recordChatModelCost(input: {
   stage?: "generation" | "routing";
 }) {
   if (!input.usage) return;
+  const usage = normalizeChatModelUsage(input.usage);
   const cost = calculateModelUsageCost({
     modelName: input.model,
-    inputTokens: readUsageNumber(input.usage.inputTokens),
-    inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
-    inputCacheReadTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheReadTokens),
-    inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
-    outputTokens: readUsageNumber(input.usage.outputTokens),
+    inputTokens: usage.inputTokens,
+    inputNoCacheTokens: usage.inputNoCacheTokens,
+    inputCacheReadTokens: usage.inputCacheReadTokens,
+    inputCacheWriteTokens: usage.inputCacheWriteTokens,
+    outputTokens: usage.outputTokens,
   });
   recordGoatModelCost({
     costUsdMicros: cost.totalCostUsdMicros,
@@ -1697,6 +1699,28 @@ async function recordChatModelCost(input: {
       "goat.surface": "chat",
       "goat.stage": input.stage ?? "generation",
     },
+  });
+  await captureGoatLlmUsageRecorded({
+    distinctId: input.userWorkosId,
+    workspaceId: input.workspaceId,
+    surface: "chat",
+    stage: input.stage ?? "generation",
+    sessionId: input.chatSessionId,
+    messageId: input.userMessageId,
+    modelProvider: "vercel-ai-gateway",
+    model: input.model,
+    inputTokens: usage.inputTokens,
+    inputNoCacheTokens: usage.inputNoCacheTokens,
+    inputCacheReadTokens: usage.inputCacheReadTokens,
+    inputCacheWriteTokens: usage.inputCacheWriteTokens,
+    outputTokens: usage.outputTokens,
+    outputTextTokens: usage.outputTextTokens,
+    outputReasoningTokens: usage.outputReasoningTokens,
+    totalTokens: usage.totalTokens,
+    providerCostUsdMicros: cost.providerCostUsdMicros,
+    platformFeeUsdMicros: cost.platformFeeUsdMicros,
+    chargedCostUsdMicros: cost.totalCostUsdMicros,
+    billable: cost.billable,
   });
   // Usage-based chat: debit the turn's total cost (provider + platform fee)
   // from the workspace credits. Unknown/variable-priced models compute to
@@ -1726,6 +1750,34 @@ async function recordChatModelCost(input: {
       error,
     });
   }
+}
+
+function normalizeChatModelUsage(usage: LanguageModelUsage) {
+  const inputTokens = readUsageNumber(usage.inputTokens);
+  const inputCacheReadTokens = readUsageNumber(
+    usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens,
+  );
+  const inputCacheWriteTokens = readUsageNumber(usage.inputTokenDetails?.cacheWriteTokens);
+  const inputNoCacheTokens =
+    readUsageNumber(usage.inputTokenDetails?.noCacheTokens) ||
+    Math.max(0, inputTokens - inputCacheReadTokens - inputCacheWriteTokens);
+  const outputTokens = readUsageNumber(usage.outputTokens);
+  const outputReasoningTokens = readUsageNumber(
+    usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens,
+  );
+  const outputTextTokens =
+    readUsageNumber(usage.outputTokenDetails?.textTokens) ||
+    Math.max(0, outputTokens - outputReasoningTokens);
+  return {
+    inputTokens,
+    inputNoCacheTokens,
+    inputCacheReadTokens,
+    inputCacheWriteTokens,
+    outputTokens,
+    outputTextTokens,
+    outputReasoningTokens,
+    totalTokens: readUsageNumber(usage.totalTokens) || inputTokens + outputTokens,
+  };
 }
 
 function readUsageNumber(value: number | undefined) {
