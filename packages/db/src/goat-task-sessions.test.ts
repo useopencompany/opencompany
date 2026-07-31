@@ -1,3 +1,4 @@
+import { GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
@@ -90,6 +91,33 @@ describe("Goat task sessions", () => {
     expect(query.params).toContain(null);
   });
 
+  it("creates Claude Code task sessions with the CLI model and sandbox host-tool contract", async () => {
+    const execute = vi.fn(async (_query: SQL) => [taskRow(claudeCodeHarnessSpec)]);
+
+    await expect(
+      createGoatTaskSession(
+        {
+          userWorkosId: "user_1",
+          workspaceId: "workspace_1",
+          prompt: "Fix the workflow.",
+          name: "Fix workflow",
+          harnessSpec: claudeCodeHarnessSpec,
+          now: new Date("2026-07-30T09:00:00.000Z"),
+        },
+        { execute },
+      ),
+    ).resolves.toMatchObject({
+      id: "goat_task_1",
+      model: "anthropic/claude-sonnet-5",
+    });
+
+    const query = rendered(execute.mock.calls[0]?.[0]);
+    expect(query.params).toContain("claude_code");
+    expect(query.params).toContain("anthropic/claude-sonnet-5");
+    expect(query.params).toContain("claude-sonnet-5");
+    expect(query.params).toContain(GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION);
+  });
+
   it("continues a terminal task by appending native chat messages and a turn", async () => {
     const execute = vi.fn(async (_query: SQL) => [
       { id: "goat_chat_msg_1", task_id: "goat_task_1" },
@@ -122,7 +150,13 @@ function rendered(query: SQL | undefined) {
   return new PgDialect().sqlToQuery(query!);
 }
 
-function taskRow() {
+const claudeCodeHarnessSpec: GoatHarnessSpec = {
+  ...harnessSpec,
+  engine: "claude_code",
+  model: "anthropic/claude-sonnet-5",
+};
+
+function taskRow(spec: GoatHarnessSpec = harnessSpec) {
   const now = new Date("2026-07-30T09:00:00.000Z");
   return {
     id: "goat_task_1",
@@ -130,7 +164,7 @@ function taskRow() {
     name: "Market research",
     userWorkosId: "user_1",
     prompt: "Research the market.",
-    model: harnessSpec.model,
+    model: spec.model,
     sessionId: "goat_chat_1",
     scheduleId: null,
     scheduledFor: null,
@@ -142,7 +176,7 @@ function taskRow() {
     workflowBrainRef: null,
     reportedOutcome: null,
     outcomeComment: null,
-    harnessSpec,
+    harnessSpec: spec,
     debugTrace: {},
     codexEngineSessionId: null,
     sandboxId: null,

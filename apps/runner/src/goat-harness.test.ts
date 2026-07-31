@@ -1,6 +1,6 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
-import type { GoatHarnessSpec, goatTasks } from "@opencompany/db/goat-schema";
+import type { GoatHarnessEngine, GoatHarnessSpec, goatTasks } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import {
@@ -710,9 +710,12 @@ describe("executeGoatWorkflowStepsTask", () => {
     });
   });
 
-  it("embeds the prior result in a Codex handoff", async () => {
+  it.each([
+    "codex",
+    "claude_code",
+  ] as const)("embeds the prior result in a %s handoff", async (engine) => {
     const sink = createSink();
-    const spec = workflowHarnessSpec(["opencompany", "codex"]);
+    const spec = workflowHarnessSpec(["opencompany", engine]);
     const runStep = vi.fn(
       async (input: GoatTaskExecutorInput): Promise<GoatTaskExecutorResult> =>
         stepResult(input, runStep.mock.calls.length === 1 ? "Evidence from step one." : "Done."),
@@ -1243,12 +1246,13 @@ function createSink(): GoatTaskRunSink {
 }
 
 function workflowHarnessSpec(
-  engines: Array<"opencompany" | "codex">,
+  engines: GoatHarnessEngine[],
   currentStepIndex = 0,
   completedStepCount = currentStepIndex,
 ): GoatHarnessSpec {
   const steps = engines.map((engine, index) => {
-    const stepModel = engine === "codex" ? gptModel : model;
+    const stepModel =
+      engine === "codex" ? gptModel : engine === "claude_code" ? claudeModel : model;
     return {
       index,
       title: `Title ${index + 1}`,

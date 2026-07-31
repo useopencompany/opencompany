@@ -13,8 +13,10 @@ import {
   markGoatClaudeCodeCredentialNeedsReauth,
   markGoatClaudeCodeCredentialValidated,
 } from "@opencompany/db/goat-claude-code-auth";
+import { getGoatWorkflowHarnessSkillSnapshots } from "@opencompany/db/goat-harness";
 import type { GoatCodexChatSession, GoatCodexChatTurn } from "@opencompany/db/goat-schema";
-import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
+import { TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK } from "@opencompany/goat-agent/chat-agent";
+import { type GoatBrainSkill, serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import {
@@ -43,7 +45,11 @@ import {
   summarizeCodexChatRecoveryProgress,
   updateCodexChatSessionIfLeaseHeld,
 } from "./goat-codex-chat";
-import { GoatCodexChatHandoffError, GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
+import {
+  GoatCodexChatHandoffError,
+  GoatCodexChatLeaseLostError,
+  GoatTaskTurnCanceledError,
+} from "./goat-codex-chat-errors";
 import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
@@ -57,6 +63,14 @@ import {
   scheduledWakeupFromTurnSettings,
 } from "./goat-codex-chat-wakeup";
 import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./goat-coding-workspace-runtime";
+import {
+  buildGoatTaskTerminalProjection,
+  buildGoatTaskTurnCompletion,
+  closeGoatTaskTurn,
+  finalizeGoatTaskResult,
+  type GoatTaskTurnContext,
+  markGoatTaskTurnRunning,
+} from "./goat-task-turn";
 import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
@@ -69,6 +83,7 @@ import { materializeCodexSkillSnapshotsForSession } from "./skills";
 const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory;
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";
 const CLAUDE_CHAT_HANDOFF_TIMEOUT_MS = 10 * 60 * 1000;
+const CLAUDE_TASK_ABORT_POLL_INTERVAL_MS = 500;
 
 // Claude Code recovery re-runs `claude --resume` against the persisted sandbox. Fence off any CLI
 // process left over from the prior attempt before touching the checkout so recovery runs are
@@ -135,6 +150,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
   turn: GoatCodexChatTurn;
   session: GoatCodexChatSession;
   env: RunnerEnv;
+  taskContext?: GoatTaskTurnContext | undefined;
   recovery?: { reason: "lease_reclaimed" };
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
@@ -165,9 +181,62 @@ export async function runGoatClaudeCodeChatTurn(input: {
       initialParts,
     });
 
+  if (turn.interruptRequestedAt) {
+    await bareProjector().interrupted(
+      input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : undefined,
+    );
+    return "settled";
+  }
+
+  const taskContext = input.taskContext;
+  if (taskContext) {
+    const taskController = new AbortController();
+    const checkTaskAbort = createTurnAbortCheck({
+      turnId: turn.id,
+      leaseId,
+      leaseOwner,
+      ...(shouldAbort ? { shouldAbort } : {}),
+    });
+    const taskAbortTimer = setInterval(() => {
+      void checkTaskAbort().catch((error) => {
+        if (!taskController.signal.aborted) taskController.abort(error);
+      });
+    }, CLAUDE_TASK_ABORT_POLL_INTERVAL_MS);
+    taskAbortTimer.unref?.();
+    try {
+      await checkTaskAbort();
+      await markGoatTaskTurnRunning({ context: taskContext, turn });
+      await checkTaskAbort();
+    } catch (error) {
+      const effectiveError = taskController.signal.aborted ? taskController.signal.reason : error;
+      if (
+        effectiveError instanceof GoatCodexChatHandoffError ||
+        effectiveError instanceof GoatCodexChatLeaseLostError
+      ) {
+        throw effectiveError;
+      }
+      if (
+        effectiveError instanceof GoatCodexChatInterruptedError ||
+        effectiveError instanceof GoatTaskTurnCanceledError
+      ) {
+        await bareProjector().interrupted(buildGoatTaskTerminalProjection(taskContext));
+      } else {
+        await bareProjector().fail(errorMessage(effectiveError), {
+          taskCompletion: buildGoatTaskTerminalProjection(taskContext),
+        });
+      }
+      return "settled";
+    } finally {
+      clearInterval(taskAbortTimer);
+    }
+  }
+
   const auth = await loadGoatClaudeCodeAuth(turn.userWorkosId);
   if (!auth) {
-    await bareProjector().fail(GOAT_CLAUDE_CODE_CHAT_REAUTH_MESSAGE, { sessionStatus: "failed" });
+    await bareProjector().fail(GOAT_CLAUDE_CODE_CHAT_REAUTH_MESSAGE, {
+      sessionStatus: "failed",
+      ...(taskContext ? { taskCompletion: buildGoatTaskTerminalProjection(taskContext) } : {}),
+    });
     return "settled";
   }
 
@@ -192,6 +261,9 @@ export async function runGoatClaudeCodeChatTurn(input: {
   } catch (error) {
     await bareProjector().fail(
       `Claude Code sandbox could not be started: ${errorMessage(error)}. Send your message again to retry.`,
+      {
+        ...(taskContext ? { taskCompletion: buildGoatTaskTerminalProjection(taskContext) } : {}),
+      },
     );
     return "settled";
   }
@@ -288,30 +360,30 @@ export async function runGoatClaudeCodeChatTurn(input: {
     checkExternalAbort();
     executionStage = "load_skills";
     const sessionSkills = await loadGoatCodexChatSessionSkills(turn);
+    const turnSkills = resolveGoatClaudeTurnSkills({
+      sessionSkills,
+      userMessageId: turn.userMessageId,
+      ...(taskContext ? { taskContext } : {}),
+    });
     checkExternalAbort();
     executionStage = "materialize_skills";
     await materializeCodexSkillSnapshotsForSession({
       sandbox,
       codexWorkRoot: CLAUDE_CHAT_WORKDIR,
-      skills: sessionSkills.map((skill) => ({
-        id: skill.skillId,
+      skills: turnSkills.snapshots.map((skill) => ({
+        id: skill.id,
         files: [
           {
             path: "SKILL.md",
-            content: serializeGoatBrainSkillMarkdown({
-              id: skill.skillId,
-              name: skill.name,
-              description: skill.description,
-              instructions: skill.instructions,
-            }),
+            content: serializeGoatBrainSkillMarkdown(skill),
           },
         ],
       })),
     });
     checkExternalAbort();
-    const invokedSkillPaths = sessionSkills
-      .filter((skill) => skill.activatedMessageId === turn.userMessageId)
-      .map((skill) => `${CLAUDE_CHAT_WORKDIR}/.agents/skills/${skill.skillId}/SKILL.md`);
+    const invokedSkillPaths = turnSkills.invokedSkillIds.map(
+      (skillId) => `${CLAUDE_CHAT_WORKDIR}/.agents/skills/${skillId}/SKILL.md`,
+    );
     executionStage = "materialize_attachments";
     const materializedAttachments = await materializeGoatCodexChatAttachments({
       sandbox,
@@ -331,6 +403,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
           previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
           attachmentPaths: materializedAttachments.paths,
           skillPaths: invokedSkillPaths,
+          taskContext,
         })
       : buildClaudeChatTask({
           prompt: turn.prompt,
@@ -339,6 +412,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
           repositoryBootstrapPrompt: repositoryBootstrap.promptFragment,
           attachmentPaths: materializedAttachments.paths,
           skillPaths: invokedSkillPaths,
+          taskContext,
         });
     const promptPath = `${CLAUDE_CHAT_PROMPTS_ROOT}/prompt-${turn.id}.txt`;
     await sandbox.files.write(promptPath, task);
@@ -503,7 +577,60 @@ export async function runGoatClaudeCodeChatTurn(input: {
       }
     }
     executionStage = "finalize";
-    await projector.finalize(toCodexAppServerSummary(summary));
+    const appServerSummary = toCodexAppServerSummary(summary);
+    if (taskContext && summary.status === "success") {
+      const rawResult = summary.result?.trim() ?? "";
+      if (!rawResult) {
+        throw new Error("Goat task completed without a final assistant message.");
+      }
+      const closerController = new AbortController();
+      const closerAbortTimer = setInterval(() => {
+        void checkAbort().catch((error) => {
+          if (!closerController.signal.aborted) closerController.abort(error);
+        });
+      }, CLAUDE_TASK_ABORT_POLL_INTERVAL_MS);
+      closerAbortTimer.unref?.();
+      let reported;
+      try {
+        await checkAbort();
+        reported = await closeGoatTaskTurn({
+          context: taskContext,
+          finalContent: rawResult,
+          env,
+          session,
+          turn,
+          signal: closerController.signal,
+        });
+        if (closerController.signal.aborted) throw closerController.signal.reason;
+        await checkAbort();
+      } finally {
+        clearInterval(closerAbortTimer);
+      }
+
+      const finalResult = await finalizeGoatTaskResult({
+        context: taskContext,
+        assistantContent: rawResult,
+        turnId: turn.id,
+      });
+      await projector.finalize(
+        { ...appServerSummary, result: finalResult },
+        {
+          replacementContent: finalResult,
+          taskCompletion: buildGoatTaskTurnCompletion({
+            context: taskContext,
+            result: finalResult,
+            reportedOutcome: reported?.reportedOutcome,
+            outcomeComment: reported?.outcomeComment,
+          }),
+        },
+      );
+    } else if (taskContext) {
+      await projector.finalize(appServerSummary, {
+        taskCompletion: buildGoatTaskTerminalProjection(taskContext),
+      });
+    } else {
+      await projector.finalize(appServerSummary);
+    }
     if (summary.status === "success" && outcome === "settled" && scheduledWakeup) {
       try {
         await enqueueGoatCodexChatWakeup({
@@ -537,7 +664,9 @@ export async function runGoatClaudeCodeChatTurn(input: {
       // turn and reruns it with the recovery prompt against the persisted sandbox.
       outcome = "handed_off";
     } else if (effectiveError instanceof GoatCodexChatInterruptedError) {
-      await projector.interrupted();
+      await projector.interrupted(
+        taskContext ? buildGoatTaskTerminalProjection(taskContext) : undefined,
+      );
     } else if (effectiveError instanceof GoatCodexChatLeaseLostError) {
       leaseLost = true;
       throw effectiveError;
@@ -553,7 +682,9 @@ export async function runGoatClaudeCodeChatTurn(input: {
         error_name: effectiveError instanceof Error ? effectiveError.name : typeof effectiveError,
         error: message,
       });
-      await projector.fail(message);
+      await projector.fail(message, {
+        ...(taskContext ? { taskCompletion: buildGoatTaskTerminalProjection(taskContext) } : {}),
+      });
     }
   } finally {
     // The sandbox outlives the turn so the next message reuses warm files and the
@@ -684,6 +815,7 @@ function buildClaudeChatTask(input: {
   repositoryBootstrapPrompt: string;
   attachmentPaths: string[];
   skillPaths: string[];
+  taskContext?: GoatTaskTurnContext | undefined;
 }) {
   return [
     "You are Claude Code running in a persistent cloud sandbox for an ongoing chat with a user.",
@@ -693,6 +825,7 @@ function buildClaudeChatTask(input: {
       : null,
     input.actionsAvailable ? CLAUDE_CHAT_ACTIONS_PROMPT : null,
     input.repositoryBootstrapPrompt || null,
+    ...claudeBackgroundTaskPromptLines(input.taskContext),
     "Answer conversationally. Run commands or edit files only when the message calls for it, and keep replies concise unless the user asks for detail.",
     CLAUDE_CHAT_SCHEDULE_WAKEUP_CONTRACT,
     ...claudeChatSkillPromptLines(input.skillPaths),
@@ -714,6 +847,7 @@ function buildClaudeChatRecoveryTask(input: {
   previousProgress: string;
   attachmentPaths: string[];
   skillPaths: string[];
+  taskContext?: GoatTaskTurnContext | undefined;
 }) {
   return [
     "You are Claude Code running in a persistent cloud sandbox for an ongoing chat with a user.",
@@ -724,6 +858,7 @@ function buildClaudeChatRecoveryTask(input: {
       : null,
     input.actionsAvailable ? CLAUDE_CHAT_ACTIONS_PROMPT : null,
     input.repositoryBootstrapPrompt || null,
+    ...claudeBackgroundTaskPromptLines(input.taskContext),
     "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",
     CLAUDE_CHAT_SCHEDULE_WAKEUP_CONTRACT,
     ...claudeChatSkillPromptLines(input.skillPaths),
@@ -739,6 +874,58 @@ function buildClaudeChatRecoveryTask(input: {
   ]
     .filter((line) => line !== null)
     .join("\n");
+}
+
+type GoatCodexChatSessionSkill = Awaited<ReturnType<typeof loadGoatCodexChatSessionSkills>>[number];
+
+function resolveGoatClaudeTurnSkills(input: {
+  sessionSkills: readonly GoatCodexChatSessionSkill[];
+  userMessageId: string;
+  taskContext?: GoatTaskTurnContext | undefined;
+}): { snapshots: GoatBrainSkill[]; invokedSkillIds: string[] } {
+  const snapshots = new Map<string, GoatBrainSkill>();
+  const invokedSkillIds = new Set<string>();
+  for (const skill of input.sessionSkills) {
+    snapshots.set(skill.skillId, {
+      id: skill.skillId,
+      name: skill.name,
+      description: skill.description,
+      instructions: skill.instructions,
+    });
+    if (skill.activatedMessageId === input.userMessageId) {
+      invokedSkillIds.add(skill.skillId);
+    }
+  }
+
+  const workflowSkills = input.taskContext
+    ? (getGoatWorkflowHarnessSkillSnapshots(input.taskContext.harnessSpec) ?? [])
+    : [];
+  for (const skill of workflowSkills) {
+    snapshots.set(skill.id, skill);
+    invokedSkillIds.add(skill.id);
+  }
+  return { snapshots: [...snapshots.values()], invokedSkillIds: [...invokedSkillIds] };
+}
+
+function claudeBackgroundTaskPromptLines(context: GoatTaskTurnContext | undefined) {
+  if (!context) return [];
+  const codex = context.harnessSpec.codex;
+  return [
+    "",
+    "<background_task_run>",
+    "You are running autonomously as a background task. There is no interactive user to answer questions or approve steps. Work to completion with the tools available, then give a concise final result.",
+    TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
+    context.harnessSpec.systemPrompt.trim() || null,
+    codex?.repository
+      ? `The planner selected GitHub repository ${codex.repository}. Work in that repository unless the task itself clearly requires otherwise.`
+      : null,
+    codex?.createPullRequest === true
+      ? "The planner determined that this task should finish by opening a pull request. Verify the work and open the pull request before reporting completion."
+      : codex?.createPullRequest === false
+        ? "Do not open a pull request unless the task explicitly asks for one."
+        : null,
+    "</background_task_run>",
+  ].filter((line): line is string => line !== null);
 }
 
 function claudeChatSkillPromptLines(skillPaths: string[]) {

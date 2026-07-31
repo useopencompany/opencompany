@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
   GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
 } from "@opencompany/agent-runtime";
@@ -50,8 +51,7 @@ export async function createGoatTaskSession(
   const assistantCreatedAt = new Date(now.getTime() + 1);
   const harnessSpec = input.harnessSpec;
   const engine = harnessSpec.engine;
-  const runtimeModel =
-    engine === "codex" ? codexCliModelNameForModelId(harnessSpec.model) : harnessSpec.model;
+  const runtimeModel = runtimeModelNameForHarness(engine, harnessSpec.model);
   if (!runtimeModel) {
     throw new Error(`Unsupported ${engine} task model: ${harnessSpec.model}`);
   }
@@ -223,7 +223,7 @@ export async function createGoatTaskSession(
           ${runtimeModel},
           (SELECT id FROM resolved_brain),
           (SELECT workspace_id FROM resolved_workspace),
-          ${engine === "codex" ? GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION : null},
+          ${engine === "opencompany" ? null : GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION},
           ${turnId},
           'queued',
           ${now},
@@ -485,6 +485,12 @@ function turnSettingsFromHarness(harnessSpec: GoatHarnessSpec) {
     ...(codex?.reasoningEffort ? { reasoningEffort: codex.reasoningEffort } : {}),
     ...(codex?.goalMode ? { goalMode: codex.goalMode } : {}),
   };
+}
+
+function runtimeModelNameForHarness(engine: GoatHarnessSpec["engine"], model: string) {
+  if (engine === "codex") return codexCliModelNameForModelId(model);
+  if (engine === "claude_code") return claudeCodeCliModelNameForModelId(model);
+  return model;
 }
 
 function emptyAssistantDebugTrace(engine: GoatHarnessSpec["engine"], model: string) {

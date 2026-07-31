@@ -42,6 +42,13 @@ const GOAT_WORKFLOW_MODEL_CONFIG = [
     label: "Codex",
     hint: "Cloud coding agent (needs Codex connected)",
   },
+  {
+    token: "claude-code",
+    engine: "claude_code",
+    modelId: "anthropic/claude-sonnet-5",
+    label: "Claude Code",
+    hint: "Cloud coding agent (needs Claude Code connected)",
+  },
 ] as const satisfies readonly {
   token: string;
   engine: GoatHarnessEngine;

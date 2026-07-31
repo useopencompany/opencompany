@@ -1,3 +1,4 @@
+import { GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
 import type { GoatCodexChatTurn, GoatHarnessSpec, GoatTask } from "@opencompany/db/goat-schema";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -67,6 +68,31 @@ describe("session-backed task turns", () => {
 
     expect(completion.nextTurn).toMatchObject({
       engine: "opencompany",
+      prompt: expect.stringContaining("Step 2/2 — Implement"),
+    });
+    expect(completion.nextTurn?.prompt).toContain("<previous_step_result>");
+    expect(completion.nextTurn?.prompt).toContain("Repository audit complete.");
+  });
+
+  it("turns a completed workflow step into a Claude Code durable turn", () => {
+    const spec = workflowSpec();
+    spec.workflow!.steps![1] = {
+      ...spec.workflow!.steps![1]!,
+      engine: "claude_code",
+      model: "anthropic/claude-sonnet-5",
+    };
+    const completion = buildGoatTaskTurnCompletion({
+      context: context(spec),
+      result: "Repository audit complete.",
+      reportedOutcome: "done",
+      outcomeComment: "The repository is ready.",
+    });
+
+    expect(completion.nextTurn).toMatchObject({
+      engine: "claude_code",
+      chatModel: "anthropic/claude-sonnet-5",
+      runtimeModel: "claude-sonnet-5",
+      hostToolContractVersion: GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
       prompt: expect.stringContaining("Step 2/2 — Implement"),
     });
     expect(completion.nextTurn?.prompt).toContain("<previous_step_result>");

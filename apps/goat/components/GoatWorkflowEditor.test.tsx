@@ -157,6 +157,20 @@ describe("GoatWorkflowEditor", () => {
     expect(screen.queryByRole("button", { name: "Remove step 1" })).not.toBeInTheDocument();
   });
 
+  it("offers Claude Code as a workflow step model option", async () => {
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Model:/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Claude Code/ }));
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        steps: [expect.objectContaining({ id: "step-1", model: "claude-code" })],
+      }),
+    );
+  });
+
   it("archives from the editor menu", async () => {
     render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 

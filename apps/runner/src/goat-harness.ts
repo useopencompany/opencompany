@@ -424,7 +424,7 @@ function goatWorkflowStepHandoffContent(input: {
 }) {
   const title = input.step.title.trim() || "Untitled step";
   const heading = `${goatWorkflowStepHandoffPrefix(input.stepIndex, input.stepCount)} ${title}`;
-  if (input.step.engine !== "codex" || !input.previousResult) return heading;
+  if (!isSandboxedWorkflowEngine(input.step.engine) || !input.previousResult) return heading;
   return [
     heading,
     "",
@@ -434,6 +434,10 @@ function goatWorkflowStepHandoffContent(input: {
     input.previousResult,
     "</previous_step_result>",
   ].join("\n");
+}
+
+function isSandboxedWorkflowEngine(engine: GoatHarnessSpec["engine"]) {
+  return engine === "codex" || engine === "claude_code";
 }
 
 function latestGoatAssistantResult(messages: readonly GoatTaskConversationMessage[]) {
