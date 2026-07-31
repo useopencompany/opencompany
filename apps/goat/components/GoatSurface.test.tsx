@@ -1466,7 +1466,7 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     const textarea = screen.getByPlaceholderText("Reply...");
-    await user.type(textarea, "#morning");
+    await user.type(textarea, "#");
     await user.click(await screen.findByRole("option", { name: /Morning Test/i }));
     const selectedWorkflowMention = screen.getByTestId("selected-workflow-mention");
     expect(selectedWorkflowMention).toHaveTextContent("#morning-test");
@@ -1494,6 +1494,91 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+    expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers workflow mentions when Codex is selected in the main composer", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/skills") return Response.json({ skills: [] });
+      if (url === "/api/workflows" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_1",
+              displayId: "TASK-1",
+              name: "Morning Test",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      if (url === "/api/workflows") {
+        return Response.json({
+          workflows: [
+            {
+              id: "morning-test",
+              name: "Morning Test",
+              description: "Run the morning checks.",
+            },
+          ],
+        });
+      }
+      return Response.json({
+        ok: true,
+        sessionId: requestChatSessionId(init, "goat_chat_codex_1"),
+        userMessageId: "goat_chat_msg_codex_user",
+        assistantMessageId: "goat_chat_msg_codex_assistant",
+        mode: "started",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+        userWorkosId="user_1"
+        taskSpawningEnabled
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(textarea, "#");
+    const workflowOption = await screen.findByRole("option", { name: /Morning Test/i });
+    expect(screen.queryByRole("option", { name: /Ad-hoc task/i })).not.toBeInTheDocument();
+    await user.click(workflowOption);
+
+    await user.type(textarea, "run today's checks");
+    await user.click(screen.getByRole("button", { name: "Start task" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      workflow: {
+        kind: "workflow",
+        id: "morning-test",
+      },
+      description: "#morning-test run today's checks",
+    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/codex-chat/messages")).toBe(
+      false,
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue("");
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
@@ -2340,6 +2425,94 @@ describe("GoatSurface chat streaming UI", () => {
     // Never adopted into the visible thread and never navigated to.
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("offers workflow mentions when Codex is selected in Cmd+K compose", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/skills") return Response.json({ skills: [] });
+      if (url === "/api/workflows" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_1",
+              displayId: "TASK-1",
+              name: "Morning Test",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      if (url === "/api/workflows") {
+        return Response.json({
+          workflows: [
+            {
+              id: "morning-test",
+              name: "Morning Test",
+              description: "Run the morning checks.",
+            },
+          ],
+        });
+      }
+      return Response.json({
+        ok: true,
+        sessionId: requestChatSessionId(init, "goat_chat_codex_1"),
+        userMessageId: "goat_chat_msg_codex_user",
+        assistantMessageId: "goat_chat_msg_codex_assistant",
+        mode: "started",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+        userWorkosId="user_1"
+        taskSpawningEnabled
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+
+    const quickComposerInput = within(dialog).getByPlaceholderText(
+      "Ask Goat anything, or describe a task...",
+    );
+    await user.type(quickComposerInput, "#");
+    const workflowOption = await within(dialog).findByRole("option", { name: /Morning Test/i });
+    expect(within(dialog).queryByRole("option", { name: /Ad-hoc task/i })).not.toBeInTheDocument();
+    await user.click(workflowOption);
+    await user.type(quickComposerInput, "run today's checks");
+    await user.click(within(dialog).getByRole("button", { name: "Start task" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      workflow: {
+        kind: "workflow",
+        id: "morning-test",
+      },
+      description: "#morning-test run today's checks",
+    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/codex-chat/messages")).toBe(
+      false,
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
