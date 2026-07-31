@@ -253,10 +253,13 @@ export async function executeGoatWorkflowStepsTask(
       await input.sink.updateCodexEngineSessionId(null);
     }
 
+    const { codex: _previousCodexConfig, ...workflowHarnessSpecWithoutCodex } = workflowHarnessSpec;
+    const stepCodexConfig = codexConfigForWorkflowStep(workflowHarnessSpec.codex, step);
     const stepSpec: GoatHarnessSpec = {
-      ...workflowHarnessSpec,
+      ...workflowHarnessSpecWithoutCodex,
       engine: step.engine,
       model: step.model,
+      ...(stepCodexConfig ? { codex: stepCodexConfig } : {}),
       systemPrompt: step.systemPrompt,
       systemBlocks: step.systemBlocks,
       workflow: {
@@ -438,6 +441,19 @@ function goatWorkflowStepHandoffContent(input: {
 
 function isSandboxedWorkflowEngine(engine: GoatHarnessSpec["engine"]) {
   return engine === "codex" || engine === "claude_code";
+}
+
+function codexConfigForWorkflowStep(
+  base: GoatHarnessSpec["codex"],
+  step: GoatHarnessWorkflowStep,
+): GoatHarnessSpec["codex"] {
+  const { reasoningEffort: baseReasoningEffort, ...rest } = base ?? {};
+  const reasoningEffort = step.reasoningEffort ?? baseReasoningEffort;
+  const next = {
+    ...rest,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 function latestGoatAssistantResult(messages: readonly GoatTaskConversationMessage[]) {

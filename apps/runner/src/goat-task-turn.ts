@@ -15,6 +15,7 @@ import {
   type GoatCodexChatSessionStatus,
   type GoatCodexChatTurn,
   type GoatHarnessSpec,
+  type GoatHarnessWorkflowStep,
   type GoatTask,
   type GoatTaskReportedOutcome,
 } from "@opencompany/db/goat-schema";
@@ -365,10 +366,13 @@ export function buildGoatTaskTurnCompletion(input: {
     // outcome blocks the sequence. A missing closer/tool outcome must not
     // strand a multi-step workflow after an otherwise successful turn.
     if (reportedOutcome !== "needs_attention" && nextStep) {
+      const { codex: _previousCodexConfig, ...harnessSpecWithoutCodex } = harnessSpec;
+      const nextStepCodexConfig = codexConfigForWorkflowStep(harnessSpec.codex, nextStep);
       const nextHarnessSpec: GoatHarnessSpec = {
-        ...harnessSpec,
+        ...harnessSpecWithoutCodex,
         engine: nextStep.engine,
         model: nextStep.model,
+        ...(nextStepCodexConfig ? { codex: nextStepCodexConfig } : {}),
         systemPrompt: nextStep.systemPrompt,
         systemBlocks: nextStep.systemBlocks,
         workflow: {
@@ -746,6 +750,19 @@ function runtimeModelNameForHarness(engine: GoatHarnessSpec["engine"], model: st
   if (engine === "codex") return codexCliModelNameForModelId(model);
   if (engine === "claude_code") return claudeCodeCliModelNameForModelId(model);
   return model;
+}
+
+function codexConfigForWorkflowStep(
+  base: GoatHarnessSpec["codex"],
+  step: GoatHarnessWorkflowStep,
+): GoatHarnessSpec["codex"] | undefined {
+  const { reasoningEffort: baseReasoningEffort, ...rest } = base ?? {};
+  const reasoningEffort = step.reasoningEffort ?? baseReasoningEffort;
+  const next = {
+    ...rest,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 function goatWorkflowStepHandoffContent(input: {

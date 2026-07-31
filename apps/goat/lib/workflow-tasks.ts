@@ -36,20 +36,24 @@ import {
 export type GoatWorkflowEngineSelection = {
   engine: GoatHarnessEngine;
   model: AgentModelId;
+  reasoningEffort?: GoatWorkflowStep["reasoningEffort"];
 };
 
-const DEFAULT_GOAT_WORKFLOW_SELECTION: GoatWorkflowEngineSelection = goatWorkflowModelSelection(
-  DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
-);
+const DEFAULT_GOAT_WORKFLOW_SELECTION: GoatWorkflowEngineSelection = goatWorkflowModelSelection({
+  model: DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
+});
 
 // The token must end alphanumeric so trailing punctuation ("run @sonnet-5.")
 // stays out of the capture while inner dots ("@kimi-k2.6") still match.
 const WORKFLOW_MENTION_TOKEN_PATTERN = /(^|\s)@([a-z0-9](?:[a-z0-9./-]*[a-z0-9])?)/gi;
 const WORKFLOW_SKILL_MENTION_PATTERN = /(^|\s)@skill\/([a-z0-9][a-z0-9-]{0,79})(?![a-z0-9-])/gi;
 
-export function resolveGoatWorkflowStepSelection(
-  step: Pick<GoatWorkflowStep, "model" | "instructions">,
-): GoatWorkflowEngineSelection {
+export function resolveGoatWorkflowStepSelection(step: {
+  model: string;
+  runtimeModel?: unknown;
+  reasoningEffort?: unknown;
+  instructions: string;
+}): GoatWorkflowEngineSelection {
   const selectedToken = step.model.trim().toLowerCase();
   if (selectedToken) {
     if (!isGoatWorkflowModelToken(selectedToken)) {
@@ -57,14 +61,18 @@ export function resolveGoatWorkflowStepSelection(
         `This workflow step's model "${selectedToken}" is not available. Pick a model in the workflow editor.`,
       );
     }
-    return goatWorkflowModelSelection(selectedToken);
+    return goatWorkflowModelSelection({
+      model: selectedToken,
+      runtimeModel: step.runtimeModel,
+      reasoningEffort: step.reasoningEffort,
+    });
   }
 
   const selected = new Map<string, GoatWorkflowEngineSelection>();
   for (const match of step.instructions.matchAll(WORKFLOW_MENTION_TOKEN_PATTERN)) {
     const token = (match[2] ?? "").toLowerCase();
     if (!isGoatWorkflowModelToken(token)) continue;
-    selected.set(token, goatWorkflowModelSelection(token));
+    selected.set(token, goatWorkflowModelSelection({ model: token }));
   }
   if (selected.size > 1) {
     throw new GoatWorkflowMentionError(
@@ -79,10 +87,14 @@ export function resolveGoatWorkflowStepSelection(
 // Retained as a compatibility name for callers that parse one legacy step.
 export function parseGoatWorkflowEngineSelection(step: {
   model?: string;
+  runtimeModel?: unknown;
+  reasoningEffort?: unknown;
   instructions: string;
 }): GoatWorkflowEngineSelection {
   return resolveGoatWorkflowStepSelection({
     model: step.model ?? "",
+    runtimeModel: step.runtimeModel,
+    reasoningEffort: step.reasoningEffort,
     instructions: step.instructions,
   });
 }
@@ -141,6 +153,7 @@ export function compileGoatWorkflowHarnessSpec(input: {
       title: step.title,
       engine: selection.engine,
       model: selection.model,
+      ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
       systemPrompt,
       systemBlocks: [systemPrompt],
       skillIds: stepSkills.map((skill) => skill.id),
@@ -159,6 +172,7 @@ export function compileGoatWorkflowHarnessSpec(input: {
     // Mirror step 0 so an older runner degrades to executing the first step.
     engine: firstStep.engine,
     model: firstStep.model,
+    ...(firstStep.reasoningEffort ? { codex: { reasoningEffort: firstStep.reasoningEffort } } : {}),
     systemPrompt: firstStep.systemPrompt,
     systemBlocks: firstStep.systemBlocks,
     initialUserMessage: [`Task: ${input.workflow.name}`, "", input.description].join("\n"),
