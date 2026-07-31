@@ -17,6 +17,7 @@ import {
   GoatCodexChatLeaseLostError,
   GoatCodexChatRetryableInfrastructureError,
 } from "./goat-codex-chat-errors";
+import { settledGoatCodingSandboxIdleTimeoutMs } from "./goat-coding-sandbox-lifecycle";
 import { runGoatOpenCompanyChatTurn } from "./goat-opencompany-chat";
 import { armSandboxActiveTimeoutById, armSandboxIdleTimeoutById } from "./sandbox";
 import { rowsFromExecute } from "./sql-exec";
@@ -400,15 +401,18 @@ export async function sweepTerminalGoatCodexChatSandboxes(input: {
   limit?: number;
 }) {
   const result = await getDb().execute(sql`
-    SELECT id, sandbox_id, updated_at
-    FROM goat.codex_chat_sessions
-    WHERE sandbox_id IS NOT NULL
-      AND status IN ('idle', 'failed', 'interrupted', 'closed')
+    SELECT runtime.id, runtime.sandbox_id, runtime.updated_at, chat.kind AS chat_kind
+    FROM goat.codex_chat_sessions AS runtime
+    INNER JOIN goat.chat_sessions AS chat
+      ON chat.id = runtime.chat_session_id
+     AND chat.user_workos_id = runtime.user_workos_id
+    WHERE runtime.sandbox_id IS NOT NULL
+      AND runtime.status IN ('idle', 'failed', 'interrupted', 'closed')
       AND (
-        sandbox_timeout_armed_at IS NULL
-        OR sandbox_timeout_armed_at < updated_at
+        runtime.sandbox_timeout_armed_at IS NULL
+        OR runtime.sandbox_timeout_armed_at < runtime.updated_at
       )
-    ORDER BY updated_at ASC, id ASC
+    ORDER BY runtime.updated_at ASC, runtime.id ASC
     LIMIT ${Math.max(1, input.limit ?? 25)}
   `);
   let reconciled = 0;
@@ -416,9 +420,16 @@ export async function sweepTerminalGoatCodexChatSandboxes(input: {
     id: string;
     sandbox_id: string;
     updated_at: Date | string;
+    chat_kind: string;
   }>(result)) {
     try {
-      const armed = await armSandboxIdleTimeoutById(row.sandbox_id, input.idleTimeoutMs);
+      const armed = await armSandboxIdleTimeoutById(
+        row.sandbox_id,
+        settledGoatCodingSandboxIdleTimeoutMs({
+          configuredIdleTimeoutMs: input.idleTimeoutMs,
+          taskSession: row.chat_kind === "task",
+        }),
+      );
       const now = new Date();
       const marked = await getDb().execute(sql`
         UPDATE goat.codex_chat_sessions

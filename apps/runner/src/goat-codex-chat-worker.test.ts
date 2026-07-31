@@ -199,6 +199,7 @@ describe("terminal Goat Codex sandbox reconciliation", () => {
             id: "session_1",
             sandbox_id: "sbx_1",
             updated_at: "2026-07-10T12:00:00.000Z",
+            chat_kind: "chat",
           },
         ],
       })
@@ -212,6 +213,32 @@ describe("terminal Goat Codex sandbox reconciliation", () => {
     expect(sqlText(dbMock.execute.mock.calls[1]?.[0])).toContain("sandbox_timeout_armed_at");
   });
 
+  it("caps terminal task sandbox reconciliation at 5 minutes", async () => {
+    vi.clearAllMocks();
+    dbMock.execute
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: "session_1",
+            sandbox_id: "sbx_1",
+            updated_at: "2026-07-10T12:00:00.000Z",
+            chat_kind: "task",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: "session_1" }] });
+    sandboxMocks.armSandboxIdleTimeoutById.mockResolvedValueOnce(true);
+
+    await expect(
+      sweepTerminalGoatCodexChatSandboxes({ idleTimeoutMs: 30 * 60 * 1000 }),
+    ).resolves.toBe(1);
+
+    expect(sqlText(dbMock.execute.mock.calls[0]?.[0])).toContain(
+      "INNER JOIN goat.chat_sessions AS chat",
+    );
+    expect(sandboxMocks.armSandboxIdleTimeoutById).toHaveBeenCalledWith("sbx_1", 300_000);
+  });
+
   it("restores the active timeout when a new turn wins the reconciliation race", async () => {
     vi.clearAllMocks();
     dbMock.execute
@@ -221,6 +248,7 @@ describe("terminal Goat Codex sandbox reconciliation", () => {
             id: "session_1",
             sandbox_id: "sbx_1",
             updated_at: "2026-07-10T12:00:00.000Z",
+            chat_kind: "chat",
           },
         ],
       })
