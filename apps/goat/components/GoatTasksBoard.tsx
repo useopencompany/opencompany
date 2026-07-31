@@ -845,7 +845,11 @@ function TaskStatusDot({ task, className = "" }: { task: GoatTaskView; className
 }
 
 function taskSourceLabel(task: GoatTaskView, workflowNames: Record<string, string>): string {
-  if (task.workflowId) return workflowNames[task.workflowId] ?? `#${task.workflowId}`;
+  if (task.workflowId) {
+    const workflowName = workflowNames[task.workflowId]?.trim();
+    if (!workflowName) return `#${task.workflowId}`;
+    return workflowName.startsWith("#") ? workflowName : `#${workflowName}`;
+  }
   if (task.scheduleId) return "Scheduled";
   return "Ad-hoc";
 }
