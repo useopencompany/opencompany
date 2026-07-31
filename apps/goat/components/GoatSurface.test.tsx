@@ -1866,7 +1866,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Compare the latest pricing.")).toBeInTheDocument();
   });
 
-  it("projects Cloud Codex sessions into Tasks without duplicating them in Chats", () => {
+  it("keeps Codex and Claude Code sessions in Chats while Tasks show real tasks", () => {
     const { container } = render(
       <GoatSurface
         taskSpawningEnabled
@@ -1890,6 +1890,12 @@ describe("GoatSurface chat streaming UI", () => {
         initialChat={null}
         recentChats={[
           codexChatSummary({ id: "codex_1", title: "Fix deployment" }),
+          codexChatSummary({
+            id: "claude_1",
+            title: "Update docs",
+            engine: "claude_code",
+            preview: "Claude is updating the docs.",
+          }),
           {
             id: "chat_1",
             title: "Market research",
@@ -1906,19 +1912,20 @@ describe("GoatSurface chat streaming UI", () => {
     const chatsSection = screen.getByRole("heading", { name: "Chats" }).closest("section");
     expect(tasksSection).not.toBeNull();
     expect(chatsSection).not.toBeNull();
-    expect(within(tasksSection!).getByRole("link", { name: /Fix deployment/ })).toHaveAttribute(
-      "href",
-      "/chat/codex_1",
-    );
     expect(within(tasksSection!).getByRole("link", { name: /Prepare report/ })).toHaveAttribute(
       "href",
       "/tasks/TASK-1",
     );
-    expect(within(tasksSection!).getByText("Codex · Ready")).toBeInTheDocument();
-    expect(
-      within(tasksSection!).getByRole("img", { name: "Codex task status: Ready" }),
-    ).toHaveClass("bg-success");
-    expect(within(chatsSection!).queryByText("Fix deployment")).not.toBeInTheDocument();
+    expect(within(tasksSection!).queryByText("Fix deployment")).not.toBeInTheDocument();
+    expect(within(tasksSection!).queryByText("Update docs")).not.toBeInTheDocument();
+    expect(within(chatsSection!).getByRole("link", { name: /Fix deployment/ })).toHaveAttribute(
+      "href",
+      "/chat/codex_1",
+    );
+    expect(within(chatsSection!).getByRole("link", { name: /Update docs/ })).toHaveAttribute(
+      "href",
+      "/chat/claude_1",
+    );
     expect(within(chatsSection!).getByText("Market research")).toBeInTheDocument();
     expect(
       within(container)
@@ -1928,7 +1935,7 @@ describe("GoatSurface chat streaming UI", () => {
     ).toEqual(["Tasks", "Chats", "Routines"]);
   });
 
-  it("shows Cloud Codex tasks when background task spawning is disabled", () => {
+  it("shows Codex chats in Chats when background task spawning is disabled", () => {
     render(
       <GoatSurface
         tasks={[]}
@@ -1938,86 +1945,12 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Tasks" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Tasks" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Chats" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Codex task/ })).toHaveAttribute(
       "href",
       "/chat/goat_chat_codex_1",
     );
-  });
-
-  it("renders every Cloud Codex task status with text and an accessible dot", () => {
-    render(
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        recentChats={[
-          codexChatSummary({ id: "queued", title: "Queued task", status: "queued" }),
-          codexChatSummary({ id: "starting", title: "Starting task", status: "starting" }),
-          codexChatSummary({ id: "running", title: "Working task", status: "running" }),
-          codexChatSummary({ id: "ready", title: "Ready task", status: "idle" }),
-          codexChatSummary({
-            id: "error",
-            title: "Failed task",
-            status: "idle",
-            error: "The repository could not be cloned.",
-          }),
-          codexChatSummary({ id: "failed", title: "Failed runtime", status: "failed" }),
-          codexChatSummary({ id: "stopped", title: "Stopped task", status: "interrupted" }),
-          codexChatSummary({ id: "connecting", title: "Connecting task", status: null }),
-          codexChatSummary({ id: "closed", title: "Closed task", status: "closed" }),
-        ]}
-      />,
-    );
-
-    for (const label of ["Queued", "Starting", "Working", "Ready", "Stopped", "Connecting"]) {
-      expect(screen.getByRole("img", { name: `Codex task status: ${label}` })).toBeInTheDocument();
-      expect(screen.getByText(new RegExp(`Codex · ${label}`))).toBeInTheDocument();
-    }
-    expect(screen.getAllByRole("img", { name: "Codex task status: Needs attention" })).toHaveLength(
-      2,
-    );
-    expect(screen.getByText(/The repository could not be cloned/)).toBeInTheDocument();
-    expect(screen.queryByText("Closed task")).not.toBeInTheDocument();
-  });
-
-  it("updates a Cloud Codex task from Working to Ready without a route refresh", () => {
-    const renderSurface = (status: GoatCodexRuntimeView["status"]) => (
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        recentChats={[codexChatSummary({ status })]}
-      />
-    );
-    const { rerender } = render(renderSurface("running"));
-
-    expect(screen.getByRole("img", { name: "Codex task status: Working" })).toBeInTheDocument();
-    rerender(renderSurface("idle"));
-    expect(screen.getByRole("img", { name: "Codex task status: Ready" })).toBeInTheDocument();
-    expect(routerMock.refresh).not.toHaveBeenCalled();
-  });
-
-  it("labels Claude Code sandbox chats as Claude Code, not Codex", () => {
-    render(
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        recentChats={[
-          codexChatSummary({
-            id: "goat_chat_claude_1",
-            title: "Claude task",
-            engine: "claude_code",
-            status: "idle",
-          }),
-        ]}
-      />,
-    );
-
-    expect(screen.getByText("Claude Code · Ready")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Claude Code task status: Ready" })).toBeInTheDocument();
-    expect(screen.queryByText(/Codex · /)).not.toBeInTheDocument();
   });
 
   it("renders coding workspaces only for persistent Codex and Claude Code chats", () => {
@@ -2067,7 +2000,7 @@ describe("GoatSurface chat streaming UI", () => {
     backgroundTask.unmount();
   });
 
-  it("keeps active and pinned Codex tasks visible and sorts active work first", () => {
+  it("keeps active and pinned coding chats visible outside the recent window", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
     try {
@@ -2106,11 +2039,13 @@ describe("GoatSurface chat streaming UI", () => {
         />,
       );
 
-      const tasksSection = screen.getByRole("heading", { name: "Tasks" }).closest("section");
-      const links = within(tasksSection!).getAllByRole("link");
-      expect(links[0]).toHaveTextContent("Old but working");
-      expect(within(tasksSection!).getByText("Pinned ready")).toBeInTheDocument();
-      expect(within(tasksSection!).queryByText("Old hidden")).not.toBeInTheDocument();
+      const chatsSection = screen.getByRole("heading", { name: "Chats" }).closest("section");
+      expect(chatsSection).not.toBeNull();
+      expect(within(chatsSection!).getByText("Recent ready")).toBeInTheDocument();
+      expect(within(chatsSection!).getByText("Old but working")).toBeInTheDocument();
+      expect(within(chatsSection!).getByText("Pinned ready")).toBeInTheDocument();
+      expect(within(chatsSection!).queryByText("Old hidden")).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Tasks" })).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
