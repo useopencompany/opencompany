@@ -1268,6 +1268,20 @@
       "when": 1785497032820,
       "tag": "0180_goat_workflow_schedule_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 181,
+      "version": "7",
+      "when": 1785497032821,
+      "tag": "0181_goat_chat_last_seen_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 182,
+      "version": "7",
+      "when": 1785497032822,
+      "tag": "0182_goat_tasks_workspace_public",
+      "breakpoints": true
     }
   ]
 }

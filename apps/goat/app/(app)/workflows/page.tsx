@@ -9,5 +9,5 @@ export default async function WorkflowsPage() {
   }
 
   const workflows = await listGoatWorkflows(context.workspace.id);
-  return <GoatWorkflowsRoute workflows={workflows} canEdit={context.role === "admin"} />;
+  return <GoatWorkflowsRoute workflows={workflows} canEdit />;
 }

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { currentGoatUser } from "@/lib/auth";
 import {
   closeGoatChatSessionForUser,
+  markGoatChatSessionSeenForUser,
   reopenGoatChatSessionForUser,
   setGoatChatSessionPinnedForUser,
 } from "@/lib/chat";
@@ -142,6 +143,23 @@ export async function setGoatChatPinnedAction(
   if (!updated) {
     return { ok: false, error: pinned ? "Could not pin that chat." : "Could not unpin that chat." };
   }
+
+  revalidatePath("/");
+  return { ok: true, error: null };
+}
+
+export async function markGoatChatSeenAction(
+  sessionId: string | null,
+): Promise<CloseGoatChatResult> {
+  const trimmed = sessionId?.trim();
+  if (!trimmed) return { ok: true, error: null };
+
+  const { user } = await currentGoatUser();
+  const updated = await markGoatChatSessionSeenForUser({
+    userWorkosId: user.workosUserId,
+    sessionId: trimmed,
+  });
+  if (!updated) return { ok: false, error: "Could not mark that chat as seen." };
 
   revalidatePath("/");
   return { ok: true, error: null };

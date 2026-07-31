@@ -423,13 +423,16 @@ async function createFirstCodexChatTurn(input: {
 
   await getDb().execute(sql`
     WITH created_chat AS (
-      INSERT INTO goat.chat_sessions (id, user_workos_id, title, model, engine, created_at, updated_at)
+      INSERT INTO goat.chat_sessions (
+        id, user_workos_id, title, model, engine, last_seen_at, created_at, updated_at
+      )
       VALUES (
         ${chatSessionId},
         ${input.userWorkosId},
         ${title},
         ${input.modelId},
         ${input.engine},
+        ${now},
         ${now},
         ${assistantCreatedAt}
       )

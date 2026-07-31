@@ -17,16 +17,13 @@ import {
   validateGoatWorkflowFields,
 } from "@/lib/workflows";
 
-// Authoring workflows is a workspace-admin mutation, mirroring the old
-// Brain-folder authoring gate (manual content was admin-only).
-async function requireWorkspaceAdmin(): Promise<
+// Workflows are workspace-public for now: every member can author the shared
+// automation catalog, and every member can invoke it.
+async function requireWorkspaceMember(): Promise<
   { ok: false; message: string } | { ok: true; workspaceId: string; userWorkosId: string }
 > {
   const context = await currentGoatUser({ optional: true });
   if (!context) return { ok: false, message: "You must be signed in." };
-  if (context.role !== "admin") {
-    return { ok: false, message: "Only workspace admins can edit workflows." };
-  }
   return { ok: true, workspaceId: context.workspace.id, userWorkosId: context.user.workosUserId };
 }
 
@@ -41,7 +38,7 @@ export async function createGoatWorkflowAction(input: {
   ) {
     return { ok: false, message: "Invalid workflow details." };
   }
-  const gate = await requireWorkspaceAdmin();
+  const gate = await requireWorkspaceMember();
   if (!gate.ok) return gate;
   const result = await createGoatWorkflow({
     workspaceId: gate.workspaceId,
@@ -73,7 +70,7 @@ export async function updateGoatWorkflowAction(input: {
   ) {
     return { ok: false, message: "Invalid workflow details." };
   }
-  const gate = await requireWorkspaceAdmin();
+  const gate = await requireWorkspaceMember();
   if (!gate.ok) return gate;
 
   const invalid = validateGoatWorkflowFields(input);
@@ -150,7 +147,7 @@ export async function archiveGoatWorkflowAction(input: {
   if (!input || !isValidGoatBrainId(input.slug)) {
     return { ok: false, message: "Invalid workflow." };
   }
-  const gate = await requireWorkspaceAdmin();
+  const gate = await requireWorkspaceMember();
   if (!gate.ok) return gate;
   const result = await archiveGoatWorkflow({ workspaceId: gate.workspaceId, slug: input.slug });
   if (result.ok) revalidatePath("/workflows");

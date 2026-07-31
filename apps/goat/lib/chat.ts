@@ -21,6 +21,7 @@ import { currentGoatUser } from "@/lib/auth";
 import {
   applyApprovalResponsesToStoredParts,
   compareGoatChatMessageOrder,
+  deriveGoatChatState,
   dismissPendingApprovalsInStoredParts,
   GOAT_PINNED_CHAT_LIMIT,
   type GoatChatSessionView,
@@ -89,6 +90,11 @@ export type GoatChatStore = {
     attachmentTexts?: Record<string, string> | null;
   }): Promise<GoatChatMessage>;
   touchSession(input: { sessionId: string; now: Date }): Promise<void>;
+  markSessionSeen(input: {
+    userWorkosId: string;
+    sessionId: string;
+    seenAt: Date;
+  }): Promise<boolean>;
   closeSession(input: { userWorkosId: string; sessionId: string; now: Date }): Promise<boolean>;
   reopenSession(input: { userWorkosId: string; sessionId: string; now: Date }): Promise<boolean>;
   setSessionPinned(input: {
@@ -155,6 +161,48 @@ export async function loadGoatChatSessionByIdForUser(
     loadCodexRuntimeForChatSession({
       store,
       userWorkosId: input.userWorkosId,
+      session,
+    }),
+  ]);
+  return toChatSessionView(session, messages, codexComposerSettings, codexRuntime);
+}
+
+export async function loadGoatTaskChatSessionByIdForWorkspace(
+  input: { workspaceId: string; sessionId: string },
+  store: GoatChatStore = createDbGoatChatStore(),
+): Promise<GoatChatSessionView | null> {
+  const [row] = await getDb()
+    .select({ session: goatChatSessions })
+    .from(goatChatSessions)
+    .innerJoin(
+      goatCodexChatSessions,
+      and(
+        eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
+        eq(goatCodexChatSessions.userWorkosId, goatChatSessions.userWorkosId),
+      ),
+    )
+    .where(
+      and(
+        eq(goatChatSessions.id, input.sessionId),
+        eq(goatChatSessions.kind, "task"),
+        isNull(goatChatSessions.closedAt),
+        eq(goatCodexChatSessions.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  const session = row?.session ?? null;
+  if (!session) return null;
+
+  const [messages, codexComposerSettings, codexRuntime] = await Promise.all([
+    store.listMessages(session.id),
+    loadCodexComposerSettingsForChatSession({
+      store,
+      userWorkosId: session.userWorkosId,
+      session,
+    }),
+    loadCodexRuntimeForChatSession({
+      store,
+      userWorkosId: session.userWorkosId,
       session,
     }),
   ]);
@@ -424,6 +472,17 @@ export async function setGoatChatSessionPinnedForUser(
   });
 }
 
+export async function markGoatChatSessionSeenForUser(
+  input: { userWorkosId: string; sessionId: string },
+  store: GoatChatStore = createDbGoatChatStore(),
+) {
+  return store.markSessionSeen({
+    userWorkosId: input.userWorkosId,
+    sessionId: input.sessionId,
+    seenAt: new Date(),
+  });
+}
+
 type GoatChatDb = ReturnType<typeof getDb>;
 
 export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
@@ -525,6 +584,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
           userWorkosId: input.userWorkosId,
           title: input.title,
           model: input.model,
+          lastSeenAt: now,
           createdAt: now,
           updatedAt: now,
         })
@@ -640,6 +700,24 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
         .where(eq(goatChatSessions.id, input.sessionId));
     },
 
+    async markSessionSeen(input) {
+      const [session] = await db
+        .update(goatChatSessions)
+        .set({
+          lastSeenAt: sql`GREATEST(COALESCE(${goatChatSessions.lastSeenAt}, '-infinity'::timestamptz), ${input.seenAt})`,
+        })
+        .where(
+          and(
+            eq(goatChatSessions.id, input.sessionId),
+            eq(goatChatSessions.userWorkosId, input.userWorkosId),
+            eq(goatChatSessions.kind, "chat"),
+            isNull(goatChatSessions.closedAt),
+          ),
+        )
+        .returning({ id: goatChatSessions.id });
+      return Boolean(session);
+    },
+
     async closeSession(input) {
       const [session] = await db
         .update(goatChatSessions)
@@ -753,6 +831,12 @@ function toChatSummaryView(
     codexRuntime,
     preview: previewFromMessages(messages),
     updatedAt: session.updatedAt.toISOString(),
+    lastSeenAt: session.lastSeenAt?.toISOString() ?? null,
+    state: deriveGoatChatState({
+      updatedAt: session.updatedAt.toISOString(),
+      lastSeenAt: session.lastSeenAt?.toISOString() ?? null,
+      codexRuntime,
+    }),
     pinnedAt: session.pinnedAt?.toISOString() ?? null,
   };
 }
@@ -780,8 +864,6 @@ async function loadCodexRuntimeForChatSession(input: {
   userWorkosId: string;
   session: GoatChatSession;
 }) {
-  // Claude Code chats share the codex_chat_sessions runtime rows.
-  if (input.session.engine !== "codex" && input.session.engine !== "claude_code") return null;
   return (
     (await input.store.loadCodexRuntime?.({
       userWorkosId: input.userWorkosId,

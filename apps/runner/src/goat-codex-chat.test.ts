@@ -504,6 +504,42 @@ describe("runGoatCodexChatTurn", () => {
     expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
   });
 
+  it("caps finished durable task sandbox parking at 5 minutes", async () => {
+    dbMocks.execute.mockResolvedValue({ rows: [{ id: "updated", outcome: "updated" }] });
+    dbMocks.selectRows.push(
+      [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
+      [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
+      [],
+      [],
+    );
+    appServerMocks.runCodexAppServerTurn.mockResolvedValueOnce({
+      sessionId: "thread_existing",
+      status: "failed",
+      result: "",
+      error: "Expected test stop.",
+      usage: null,
+      goal: null,
+    });
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    const harnessSpec = workflowTaskHarnessSpec();
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      taskContext: {
+        task: workflowTask(harnessSpec),
+        harnessSpec,
+      },
+      env: env({ goatCodexChatIdleTimeoutMs: 30 * 60 * 1000 }),
+    });
+
+    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({ idleTimeoutMs: 30 * 60 * 1000 }),
+    );
+    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
+  });
+
   it("preserves the turn when sandbox acquisition fails transiently", async () => {
     dbMocks.selectRows.push([]);
     const capacity = new Error("500: Failed to place sandbox");
@@ -1173,6 +1209,7 @@ function workflowTask(harnessSpec: GoatWorkflowHarnessSpec): GoatTask {
     displayId: "TASK-1",
     name: "Ship workflow",
     userWorkosId: "user_1",
+    workspaceId: "workspace_1",
     prompt: "Ship the requested change.",
     model: harnessSpec.model,
     sessionId: "goat_chat_1",

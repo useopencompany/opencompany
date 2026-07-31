@@ -62,6 +62,7 @@ import {
   persistGoatCodexChatScheduledWakeup,
   scheduledWakeupFromTurnSettings,
 } from "./goat-codex-chat-wakeup";
+import { settledGoatCodingSandboxIdleTimeoutMs } from "./goat-coding-sandbox-lifecycle";
 import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./goat-coding-workspace-runtime";
 import {
   buildGoatTaskTerminalProjection,
@@ -692,7 +693,10 @@ export async function runGoatClaudeCodeChatTurn(input: {
     const idleTimeoutMs =
       outcome === "handed_off"
         ? Math.max(CLAUDE_CHAT_HANDOFF_TIMEOUT_MS, env.jobLeaseTtlMs * 2)
-        : env.goatCodexChatIdleTimeoutMs;
+        : settledGoatCodingSandboxIdleTimeoutMs({
+            configuredIdleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
+            taskSession: Boolean(taskContext),
+          });
     try {
       if (
         !leaseLost &&

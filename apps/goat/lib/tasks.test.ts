@@ -1,3 +1,5 @@
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
@@ -44,6 +46,7 @@ vi.mock("next/cache", () => ({
 beforeEach(() => {
   vi.mocked(currentGoatUser).mockResolvedValue({
     user: { workosUserId: "user_1" },
+    workspace: { id: "workspace_1" },
   } as never);
 });
 
@@ -270,7 +273,7 @@ describe("cancelGoatTaskAction", () => {
     mocks.select.mockReturnValue({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
-          limit: vi.fn(async () => [{ sessionId: "goat_chat_task_1" }]),
+          limit: vi.fn(async () => [{ sessionId: "goat_chat_task_1", userWorkosId: "user_1" }]),
         })),
       })),
     });
@@ -359,7 +362,7 @@ describe("continueGoatTaskAction", () => {
     mocks.select.mockReturnValue({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
-          limit: vi.fn(async () => [{ sessionId: "goat_chat_task_1" }]),
+          limit: vi.fn(async () => [{ sessionId: "goat_chat_task_1", userWorkosId: "user_1" }]),
         })),
       })),
     });
@@ -387,6 +390,33 @@ describe("continueGoatTaskAction", () => {
     expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
   });
 
+  it("continues a session-backed task owned by another workspace member", async () => {
+    vi.mocked(currentGoatUser).mockResolvedValue({
+      user: { workosUserId: "member_2" },
+      workspace: { id: "workspace_1" },
+    } as never);
+    mocks.select.mockReturnValue({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => [{ sessionId: "goat_chat_task_1", userWorkosId: "owner_1" }]),
+        })),
+      })),
+    });
+    mocks.execute.mockResolvedValueOnce([{ id: "goat_chat_msg_1", task_id: "goat_task_1" }]);
+
+    await expect(
+      continueGoatTaskAction("goat_task_1", "Check the afternoon too."),
+    ).resolves.toEqual({
+      ok: true,
+      error: null,
+      messageId: "goat_chat_msg_1",
+    });
+
+    const query = renderedExecuteCall(0);
+    expect(query.params).toContain("owner_1");
+    expect(query.params).not.toContain("member_2");
+  });
+
   it("does not append another turn while the task is active or inaccessible", async () => {
     mocks.execute.mockResolvedValueOnce([]);
 
@@ -409,14 +439,11 @@ describe("continueGoatTaskAction", () => {
 });
 
 function sqlTextFromExecuteCall(callIndex: number) {
-  const query = mocks.execute.mock.calls[callIndex]?.[0] as
-    | { queryChunks?: Array<string | { value?: string[] }> }
-    | undefined;
-  return (
-    query?.queryChunks
-      ?.map((chunk) =>
-        typeof chunk === "string" ? "?" : ((chunk?.value ?? []) as string[]).join(""),
-      )
-      .join("") ?? ""
-  );
+  return renderedExecuteCall(callIndex).sql;
+}
+
+function renderedExecuteCall(callIndex: number) {
+  const query = mocks.execute.mock.calls[callIndex]?.[0] as SQL | undefined;
+  expect(query).toBeDefined();
+  return new PgDialect().sqlToQuery(query!);
 }

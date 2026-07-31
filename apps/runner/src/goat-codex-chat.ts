@@ -51,6 +51,7 @@ import {
   createGoatCodexChatProjector,
   loadCodexChatAssistantMessageParts,
 } from "./goat-codex-chat-events";
+import { settledGoatCodingSandboxIdleTimeoutMs } from "./goat-coding-sandbox-lifecycle";
 import { GOAT_CODING_WORKSPACE_SANDBOX_NETWORK } from "./goat-coding-workspace-runtime";
 import {
   buildGoatTaskTerminalProjection,
@@ -651,7 +652,13 @@ export async function runGoatCodexChatTurn(input: {
           await armSandboxActiveTimeoutById(sandbox.sandboxId);
         }
       } else if (!leaseLost) {
-        const armed = await armSandboxIdleTimeout(sandbox, env.goatCodexChatIdleTimeoutMs);
+        const armed = await armSandboxIdleTimeout(
+          sandbox,
+          settledGoatCodingSandboxIdleTimeoutMs({
+            configuredIdleTimeoutMs: env.goatCodexChatIdleTimeoutMs,
+            taskSession: Boolean(taskContext),
+          }),
+        );
         if (armed) {
           await markCodexChatSandboxTimeoutArmed({
             sessionId: session.id,
