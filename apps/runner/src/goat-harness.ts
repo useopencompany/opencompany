@@ -446,7 +446,8 @@ function isSandboxedWorkflowEngine(engine: GoatHarnessSpec["engine"]) {
 function codexConfigForWorkflowStep(
   base: GoatHarnessSpec["codex"],
   step: GoatHarnessWorkflowStep,
-): GoatHarnessSpec["codex"] {
+): GoatHarnessSpec["codex"] | undefined {
+  if (!isSandboxedWorkflowEngine(step.engine)) return undefined;
   const { reasoningEffort: baseReasoningEffort, ...rest } = base ?? {};
   const reasoningEffort = step.reasoningEffort ?? baseReasoningEffort;
   const next = {

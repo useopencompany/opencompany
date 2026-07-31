@@ -756,6 +756,7 @@ function codexConfigForWorkflowStep(
   base: GoatHarnessSpec["codex"],
   step: GoatHarnessWorkflowStep,
 ): GoatHarnessSpec["codex"] | undefined {
+  if (step.engine !== "codex" && step.engine !== "claude_code") return undefined;
   const { reasoningEffort: baseReasoningEffort, ...rest } = base ?? {};
   const reasoningEffort = step.reasoningEffort ?? baseReasoningEffort;
   const next = {

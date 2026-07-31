@@ -737,6 +737,30 @@ describe("executeGoatWorkflowStepsTask", () => {
     ]);
   });
 
+  it("drops stale cloud-coding config when the next workflow step is OpenCompany", async () => {
+    const sink = createSink();
+    const spec = workflowHarnessSpec(["codex", "opencompany"]);
+    spec.codex = { repository: "octo/repo", reasoningEffort: "high" };
+    spec.workflow!.steps![0] = {
+      ...spec.workflow!.steps![0]!,
+      reasoningEffort: "low",
+    };
+    const runStep = vi.fn(async (input: GoatTaskExecutorInput): Promise<GoatTaskExecutorResult> => {
+      return stepResult(input, `Result ${runStep.mock.calls.length}`);
+    });
+
+    await executeGoatWorkflowStepsTask(workflowExecutorInput(spec, sink), runStep);
+
+    expect(runStep.mock.calls.map(([input]) => input.task.harnessSpec.engine)).toEqual([
+      "codex",
+      "opencompany",
+    ]);
+    expect(
+      runStep.mock.calls.map(([input]) => input.task.harnessSpec.codex?.reasoningEffort),
+    ).toEqual(["low", undefined]);
+    expect(runStep.mock.calls[1]?.[0].task.harnessSpec.codex).toBeUndefined();
+  });
+
   it.each([
     "codex",
     "claude_code",

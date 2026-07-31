@@ -65,6 +65,7 @@ describe("session-backed task turns", () => {
 
   it("passes the previous step result as an explicit handoff to OpenCompany steps", () => {
     const spec = workflowSpec();
+    spec.codex = { repository: "octo/repo", reasoningEffort: "low" };
     const nextStep = spec.workflow?.steps?.[1];
     if (!nextStep) throw new Error("Expected workflow fixture to have a second step.");
     nextStep.engine = "opencompany";
@@ -81,6 +82,8 @@ describe("session-backed task turns", () => {
       engine: "opencompany",
       prompt: expect.stringContaining("Step 2/2 — Implement"),
     });
+    expect(completion.harnessSpec.codex).toBeUndefined();
+    expect(completion.nextTurn?.settings).toEqual({});
     expect(completion.nextTurn?.prompt).toContain("<previous_step_result>");
     expect(completion.nextTurn?.prompt).toContain("Repository audit complete.");
   });
