@@ -86,6 +86,33 @@ describe("TaskDetailPanel", () => {
       userWorkosId: "user_1",
     });
   });
+
+  it("uses the task name over a stale workflow chat title", () => {
+    const run = buildGoatHarnessRun({
+      task: {
+        ...task(),
+        name: "Acme interview follow-up",
+        sessionId: "goat_chat_task_1",
+      },
+      messages: [],
+      events: [],
+      chat: {
+        id: "goat_chat_task_1",
+        title: "Customer interview synthesis",
+        model: "openai/gpt-5.4-mini",
+        engine: "opencompany",
+        messages: [],
+      },
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    expect(screen.getByTestId("goat-surface")).toHaveTextContent("Acme interview follow-up");
+    expect(mocks.surfaceProps?.initialChat).toMatchObject({
+      id: "goat_chat_task_1",
+      title: "Acme interview follow-up",
+    });
+  });
 });
 
 function task() {

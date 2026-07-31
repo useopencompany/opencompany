@@ -7,7 +7,7 @@ import type {
   GoatTaskToolName,
   GoatWorkflowStep,
 } from "@opencompany/db/goat-schema";
-import { goatTasks } from "@opencompany/db/goat-schema";
+import { goatChatSessions, goatTasks } from "@opencompany/db/goat-schema";
 import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
 import { and, eq } from "drizzle-orm";
 import { generateGoatChatTitle } from "@/lib/chat-title";
@@ -258,10 +258,24 @@ export async function generateGoatWorkflowTaskTitle(input: {
       userWorkosId: input.userWorkosId,
     });
     if (!title || title === input.workflowName) return;
-    await getDb()
+    const now = new Date();
+    const db = getDb();
+    const [task] = await db
       .update(goatTasks)
-      .set({ name: title, updatedAt: new Date() })
-      .where(and(eq(goatTasks.id, input.taskId), eq(goatTasks.userWorkosId, input.userWorkosId)));
+      .set({ name: title, updatedAt: now })
+      .where(and(eq(goatTasks.id, input.taskId), eq(goatTasks.userWorkosId, input.userWorkosId)))
+      .returning({ sessionId: goatTasks.sessionId });
+    if (!task?.sessionId) return;
+    await db
+      .update(goatChatSessions)
+      .set({ title, updatedAt: now })
+      .where(
+        and(
+          eq(goatChatSessions.id, task.sessionId),
+          eq(goatChatSessions.userWorkosId, input.userWorkosId),
+          eq(goatChatSessions.kind, "task"),
+        ),
+      );
   } catch {
     // Keep the workflow-name fallback; a missing pretty title is not worth failing anything.
   }
