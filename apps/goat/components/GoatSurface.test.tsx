@@ -334,7 +334,7 @@ describe("GoatSurface chat streaming UI", () => {
   it("uses the chat stop control for an active workflow task", async () => {
     const user = userEvent.setup();
 
-    render(
+    const { rerender } = render(
       <GoatSurface
         tasks={[]}
         defaultModel={DEFAULT_GOAT_MODEL}
@@ -369,6 +369,77 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(cancelGoatTaskAction).toHaveBeenCalledWith("goat_task_1");
     expect(chatMock.stop).not.toHaveBeenCalled();
+    expect(screen.getByRole("status", { name: "Stopping task…" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stopping task" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+
+    rerender(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_task_1",
+          title: "Morning workflow",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          messages: [
+            {
+              id: "task_user_1",
+              role: "user",
+              parts: [{ type: "text", text: "Run the morning workflow" }],
+            },
+          ],
+          codexRuntime: {
+            status: "interrupted",
+            error: null,
+            updatedAt: new Date().toISOString(),
+          },
+        }}
+        taskConversation={{
+          taskId: "goat_task_1",
+          status: "canceled",
+          startedAtMs: Date.now(),
+        }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: "Stopping task…" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
+  });
+
+  it("restores the task stop control when cancellation fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(cancelGoatTaskAction).mockResolvedValueOnce({
+      ok: false,
+      error: "Could not stop task.",
+    });
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_task_1",
+          title: "Morning workflow",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "goat_task_1",
+          status: "running",
+          startedAtMs: Date.now(),
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Stop response" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument(),
+    );
   });
 
   it("consumes the onboarding kickoff and sends it once through main chat", async () => {

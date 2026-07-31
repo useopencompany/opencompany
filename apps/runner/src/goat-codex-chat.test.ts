@@ -6,6 +6,8 @@ import type { CodexAppServerRequest } from "./codex-app-server";
 import type { RunnerEnv } from "./env";
 import {
   claimCodexChatRecovery,
+  createTurnAbortCheck,
+  GoatCodexChatInterruptedError,
   runGoatCodexChatTurn,
   summarizeCodexChatRecoveryProgress,
 } from "./goat-codex-chat";
@@ -108,6 +110,48 @@ vi.mock("./repo-bootstrap", () => ({
   loadGoatRepositoryBootstrap: repoBootstrapMocks.loadGoatRepositoryBootstrap,
   stageGoatRepositoryBootstrap: repoBootstrapMocks.stageGoatRepositoryBootstrap,
 }));
+
+describe("createTurnAbortCheck", () => {
+  beforeEach(() => {
+    dbMocks.selectRows.length = 0;
+  });
+
+  it("prioritizes a durable user interrupt over a concurrent runner handoff", async () => {
+    dbMocks.selectRows.push([
+      {
+        interruptRequestedAt: new Date("2026-07-10T12:00:01.000Z"),
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+    ]);
+    const checkAbort = createTurnAbortCheck({
+      turnId: "turn_1",
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+      shouldAbort: () => new GoatCodexChatHandoffError(),
+    });
+
+    await expect(checkAbort()).rejects.toBeInstanceOf(GoatCodexChatInterruptedError);
+  });
+
+  it("still hands off when the durable turn has no interrupt request", async () => {
+    dbMocks.selectRows.push([
+      {
+        interruptRequestedAt: null,
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+    ]);
+    const checkAbort = createTurnAbortCheck({
+      turnId: "turn_1",
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+      shouldAbort: () => new GoatCodexChatHandoffError(),
+    });
+
+    await expect(checkAbort()).rejects.toBeInstanceOf(GoatCodexChatHandoffError);
+  });
+});
 
 describe("runGoatCodexChatTurn", () => {
   beforeEach(() => {
