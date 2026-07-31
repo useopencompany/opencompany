@@ -120,12 +120,14 @@ runner prompt, creates a task chat session with the selected model, and keeps th
 in place. Both `#task` and saved workflow mentions require the **Tasks & Workflows** preference and
 currently reject attachments.
 
-Workflow runs remain grouped under **Tasks**, but task detail renders the same `GoatSurface` as a
-normal chat. Session-backed tasks render their native `goat.chat_messages` and subscribe to the
-same session and durable-turn state as cloud chats. The standard reply composer appends a user
-message and durable turn on that session, preserving its complete message and tool context. The
-normal chat stop control interrupts the active turn. Rows created before the session cutover retain
-a read-only compatibility projection from `goat.task_messages`.
+Workflow runs and `#task` ad-hoc runs remain grouped under **Tasks**, but task detail renders the
+same `GoatSurface` as a normal chat. User-triggered Codex and Claude Code sessions remain ordinary
+Chats unless they are backed by a `goat.tasks` row. Session-backed tasks render their native
+`goat.chat_messages` and subscribe to the same session and durable-turn state as cloud chats. The
+standard reply composer appends a user message and durable turn on that session, preserving its
+complete message and tool context. The normal chat stop control interrupts the active turn. Rows
+created before the session cutover retain a read-only compatibility projection from
+`goat.task_messages`.
 
 Normal main chat can also discover workspace skills progressively. When the catalog is non-empty, the
 system prompt advertises only that a skill source exists; `list_skills` searches safe id, name, and
@@ -456,11 +458,10 @@ clear stored answer bodies after settling the UI, including answers to questions
 Pending dynamic host-tool calls also force a guarded recovery, since their result belongs to the
 runner proxy connection that received the original request.
 
-On the Goat home, open persistent Codex and Claude Code sessions are projected into the unified
-Tasks section alongside background `goat.tasks`. This is a live UI projection of the chat-backed
-session and its `goat.codex_chat_sessions` runtime state, not a copied task row: selecting it still
-opens `/chat/<session-id>`, pinning and archiving keep their chat semantics, and the sidebar
-continues to show it in conversation history.
+On the Goat home, persistent Codex and Claude Code sessions stay in the Chats section because they
+are user-triggered chat sessions. The Tasks section is reserved for real `goat.tasks` rows created
+from `#task`, workflow, or schedule entry points. Selecting a coding chat still opens
+`/chat/<session-id>`, while selecting a task opens `/tasks/<display-id>`.
 
 ## Task Creation
 

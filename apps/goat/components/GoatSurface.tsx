@@ -303,10 +303,6 @@ export type GoatTaskConversation = {
   sessionBacked?: boolean;
 };
 
-type GoatHomeTaskItem =
-  | { kind: "background"; task: GoatTaskView }
-  | { kind: "codex"; chat: GoatChatSummaryView };
-
 export function GoatSurface({
   tasks,
   schedules = [],
@@ -475,10 +471,7 @@ export function GoatSurface({
   >(() => new Map());
   const [, startArchiveTransition] = useTransition();
   const homeChats = useMemo(
-    () =>
-      visibleHomeChats(recentChats, optimisticallyArchivedChatIds).filter(
-        (chat) => chat.engine !== "codex",
-      ),
+    () => visibleHomeChats(recentChats, optimisticallyArchivedChatIds),
     [optimisticallyArchivedChatIds, recentChats],
   );
   const homeSchedules = useMemo(
@@ -489,17 +482,9 @@ export function GoatSurface({
     () =>
       visibleHomeTasks({
         tasks: taskSpawningEnabled ? tasks : [],
-        chats: recentChats,
         optimisticallyArchivedTaskIds: optimisticallyArchivedIds,
-        optimisticallyArchivedChatIds,
       }),
-    [
-      optimisticallyArchivedChatIds,
-      optimisticallyArchivedIds,
-      recentChats,
-      taskSpawningEnabled,
-      tasks,
-    ],
+    [optimisticallyArchivedIds, taskSpawningEnabled, tasks],
   );
   const hasHomeActivity = homeTasks.length > 0 || homeChats.length > 0 || homeSchedules.length > 0;
   const homeGreetingName = userName.trim() || "there";
@@ -2001,12 +1986,7 @@ export function GoatSurface({
                         <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
                           Tasks
                         </h2>
-                        <HomeTaskRows
-                          items={homeTasks}
-                          onArchiveTask={archiveTask}
-                          onArchiveChat={archiveChat}
-                          onSelectChat={openChat}
-                        />
+                        <HomeTaskRows items={homeTasks} onArchiveTask={archiveTask} />
                       </section>
                     ) : null}
 
@@ -3333,8 +3313,21 @@ function visibleHomeChats(
 ) {
   return chats
     .filter((chat) => !optimisticallyArchivedChatIds.has(chat.id))
-    .filter((chat) => isRecentGoatHomeActivity(chat.updatedAt))
+    .filter(
+      (chat) =>
+        Boolean(chat.pinnedAt) ||
+        isCodingChatActive(chat) ||
+        isRecentGoatHomeActivity(chat.updatedAt),
+    )
     .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
+function isCodingChatActive(chat: GoatChatSummaryView) {
+  return (
+    chat.codexRuntime?.status === "queued" ||
+    chat.codexRuntime?.status === "starting" ||
+    chat.codexRuntime?.status === "running"
+  );
 }
 
 function visibleHomeSchedules(schedules: readonly GoatTaskScheduleView[]) {
@@ -3345,61 +3338,29 @@ function visibleHomeSchedules(schedules: readonly GoatTaskScheduleView[]) {
 
 function visibleHomeTasks(input: {
   tasks: readonly GoatTaskView[];
-  chats: readonly GoatChatSummaryView[];
   optimisticallyArchivedTaskIds: ReadonlySet<string>;
-  optimisticallyArchivedChatIds: ReadonlySet<string>;
-}): GoatHomeTaskItem[] {
-  const backgroundItems: GoatHomeTaskItem[] = input.tasks
+}): GoatTaskView[] {
+  return input.tasks
     .filter(
       (task) =>
         !input.optimisticallyArchivedTaskIds.has(task.id) &&
         !task.archivedAt &&
         (isBackgroundTaskActive(task) || isRecentGoatHomeActivity(task.createdAt)),
     )
-    .map((task) => ({ kind: "background", task }));
-  const codexItems: GoatHomeTaskItem[] = input.chats
-    .filter(
-      (chat) =>
-        (chat.engine === "codex" || chat.engine === "claude_code") &&
-        !input.optimisticallyArchivedChatIds.has(chat.id) &&
-        chat.codexRuntime?.status !== "closed" &&
-        (Boolean(chat.pinnedAt) ||
-          isCodexTaskActive(chat) ||
-          isRecentGoatHomeActivity(chat.updatedAt)),
-    )
-    .map((chat) => ({ kind: "codex", chat }));
-
-  return [...backgroundItems, ...codexItems].toSorted((left, right) => {
-    const activeDifference = Number(isHomeTaskActive(right)) - Number(isHomeTaskActive(left));
-    if (activeDifference !== 0) return activeDifference;
-    return homeTaskUpdatedAtMs(right) - homeTaskUpdatedAtMs(left);
-  });
-}
-
-function isHomeTaskActive(item: GoatHomeTaskItem) {
-  return item.kind === "background"
-    ? isBackgroundTaskActive(item.task)
-    : isCodexTaskActive(item.chat);
+    .toSorted((left, right) => {
+      const activeDifference =
+        Number(isBackgroundTaskActive(right)) - Number(isBackgroundTaskActive(left));
+      if (activeDifference !== 0) return activeDifference;
+      return taskUpdatedAtMs(right) - taskUpdatedAtMs(left);
+    });
 }
 
 function isBackgroundTaskActive(task: GoatTaskView) {
   return task.status === "queued" || task.status === "running";
 }
 
-function isCodexTaskActive(chat: GoatChatSummaryView) {
-  return (
-    chat.codexRuntime?.status === "queued" ||
-    chat.codexRuntime?.status === "starting" ||
-    chat.codexRuntime?.status === "running"
-  );
-}
-
-function homeTaskUpdatedAtMs(item: GoatHomeTaskItem) {
-  const value =
-    item.kind === "background"
-      ? item.task.updatedAt
-      : (item.chat.codexRuntime?.updatedAt ?? item.chat.updatedAt);
-  const timestamp = new Date(value).getTime();
+function taskUpdatedAtMs(task: GoatTaskView) {
+  const timestamp = new Date(task.updatedAt).getTime();
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
@@ -4960,26 +4921,11 @@ function formatScheduleNextRun(value: string) {
 function HomeTaskRows({
   items,
   onArchiveTask,
-  onArchiveChat,
-  onSelectChat,
 }: {
-  items: readonly GoatHomeTaskItem[];
+  items: readonly GoatTaskView[];
   onArchiveTask: (task: GoatTaskView) => void;
-  onArchiveChat: (chat: GoatChatSummaryView) => void;
-  onSelectChat: (chat: GoatChatSummaryView) => void;
 }) {
-  return items.map((item) =>
-    item.kind === "background" ? (
-      <ResultRow key={item.task.id} task={item.task} onArchive={onArchiveTask} />
-    ) : (
-      <CodexTaskRow
-        key={item.chat.id}
-        chat={item.chat}
-        onArchive={onArchiveChat}
-        onSelect={onSelectChat}
-      />
-    ),
-  );
+  return items.map((task) => <ResultRow key={task.id} task={task} onArchive={onArchiveTask} />);
 }
 
 function taskRowToView(row: GoatTaskRow): GoatTaskView {
@@ -5075,71 +5021,6 @@ function ResultRow({
           title="Archive"
           onClick={() => onArchive(task)}
           className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md bg-surface-hover text-ink-subtle opacity-0 transition-[background-color,color,opacity] duration-150 hover:bg-surface-muted hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/result:opacity-100 group-focus-within/result:opacity-100"
-        >
-          <Archive size={14} strokeWidth={2} />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function CodexTaskRow({
-  chat,
-  onArchive,
-  onSelect,
-}: {
-  chat: GoatChatSummaryView;
-  onArchive: (chat: GoatChatSummaryView) => void;
-  onSelect: (chat: GoatChatSummaryView) => void;
-}) {
-  const router = useRouter();
-  const meta = codexRuntimeMeta(chat.codexRuntime ?? null);
-  const engineLabel = codexEngineLabel(chat.engine);
-  const href = chatHref(chat.id);
-  const prefetchChat = () => router.prefetch(href);
-  const updatedAt = chat.codexRuntime?.updatedAt ?? chat.updatedAt;
-  const canArchive = !isCodexTaskActive(chat);
-  const errorPreview =
-    meta.kind === "needs-attention" ? firstLine(chat.codexRuntime?.error ?? null) : null;
-
-  return (
-    <div className="group/task relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
-      <Link
-        href={href}
-        prefetch
-        onMouseEnter={prefetchChat}
-        onFocus={prefetchChat}
-        onTouchStart={prefetchChat}
-        onClick={() => onSelect(chat)}
-        className="flex min-h-10 min-w-0 flex-1 items-center gap-3 rounded-md py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        <span
-          role="img"
-          aria-label={`${engineLabel} task status: ${meta.label}`}
-          className={cn("size-2.5 shrink-0 rounded-full", meta.dotClass)}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-[14px] font-medium leading-tight text-ink">
-              {chat.title}
-            </span>
-            <span className="shrink-0 text-[12px] leading-tight text-ink-faint transition-opacity duration-150 group-hover/task:opacity-0 group-focus-within/task:opacity-0">
-              {formatRelativeTime(updatedAt)}
-            </span>
-          </div>
-          <p className={cn("truncate text-[12.5px] leading-4", meta.textClass)}>
-            {engineLabel} · {meta.label}
-            {errorPreview ? ` · ${errorPreview}` : ""}
-          </p>
-        </div>
-      </Link>
-      {canArchive ? (
-        <button
-          type="button"
-          aria-label={`Archive ${chat.title}`}
-          title="Archive"
-          onClick={() => onArchive(chat)}
-          className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md bg-surface-hover text-ink-subtle opacity-0 transition-[background-color,color,opacity] duration-150 hover:bg-surface-muted hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/task:opacity-100 group-focus-within/task:opacity-100"
         >
           <Archive size={14} strokeWidth={2} />
         </button>
