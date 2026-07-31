@@ -3824,7 +3824,7 @@ function renderComposerInputOverlay(
         }
         className={
           range.kind === "workflow" || range.kind === "task"
-            ? "rounded-sm bg-ink/15 font-medium text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.15)]"
+            ? "rounded-sm bg-ink/15 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.15)]"
             : "rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]"
         }
       >

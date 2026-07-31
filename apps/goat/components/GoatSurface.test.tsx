@@ -1468,6 +1468,10 @@ describe("GoatSurface chat streaming UI", () => {
     const textarea = screen.getByPlaceholderText("Reply...");
     await user.type(textarea, "#morning");
     await user.click(await screen.findByRole("option", { name: /Morning Test/i }));
+    const selectedWorkflowMention = screen.getByTestId("selected-workflow-mention");
+    expect(selectedWorkflowMention).toHaveTextContent("#morning-test");
+    expect(selectedWorkflowMention).not.toHaveClass("px-1");
+    expect(selectedWorkflowMention).not.toHaveClass("font-medium");
     await user.type(textarea, "run today's checks");
     await user.click(screen.getByRole("button", { name: "Start task" }));
 
@@ -1533,7 +1537,10 @@ describe("GoatSurface chat streaming UI", () => {
     const textarea = screen.getByPlaceholderText("Reply...");
     await user.type(textarea, "#task research our three closest competitors");
 
-    expect(screen.getByTestId("selected-task-mention")).toHaveTextContent("#task");
+    const selectedTaskMention = screen.getByTestId("selected-task-mention");
+    expect(selectedTaskMention).toHaveTextContent("#task");
+    expect(selectedTaskMention).not.toHaveClass("px-1");
+    expect(selectedTaskMention).not.toHaveClass("font-medium");
     expect(screen.getByTestId("ad-hoc-task-hint")).toHaveTextContent(
       "Sending starts this as an ad-hoc background task.",
     );
