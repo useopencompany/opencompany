@@ -341,7 +341,7 @@ describe("GoatSurface chat streaming UI", () => {
           id: "goat_task_1",
           title: "Morning workflow",
           model: DEFAULT_GOAT_MODEL,
-          engine: "opencompany",
+          engine: "codex",
           messages: [
             {
               id: "task_user_1",
@@ -349,6 +349,11 @@ describe("GoatSurface chat streaming UI", () => {
               parts: [{ type: "text", text: "Run the morning workflow" }],
             },
           ],
+          codexRuntime: {
+            status: "running",
+            error: null,
+            updatedAt: new Date().toISOString(),
+          },
         }}
         taskConversation={{
           taskId: "goat_task_1",
@@ -358,6 +363,7 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
+    expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Stop response" }));
 
     expect(cancelGoatTaskAction).toHaveBeenCalledWith("goat_task_1");
