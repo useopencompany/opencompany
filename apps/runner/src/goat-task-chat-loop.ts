@@ -1,3 +1,4 @@
+import { resolveGoatImessageDelivery } from "@opencompany/db/goat-imessage";
 import type { GoatHarnessSpec, GoatTaskToolName, goatTasks } from "@opencompany/db/goat-schema";
 import {
   DEFAULT_GOAT_BRAIN_SLUG,
@@ -21,6 +22,8 @@ import type {
 } from "@opencompany/goat-agent/chat-ui";
 import { executeGoatChatExaFetch } from "@opencompany/goat-agent/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@opencompany/goat-agent/chat-web-search";
+import { resolveGoatImessageProvider } from "@opencompany/goat-agent/imessage/provider";
+import { createGoatSendUserMessageRunner } from "@opencompany/goat-agent/imessage/send-user-message";
 import { createOpenCompanyChatSystemPrompt } from "@opencompany/goat-agent/prompts";
 import {
   createGoatGatewayAttribution,
@@ -166,6 +169,11 @@ async function runGoatTaskChatLoopInner(input: {
     })),
   };
 
+  const imessageDelivery =
+    resolveGoatImessageProvider() !== null
+      ? await resolveGoatImessageDelivery(task.userWorkosId, db).catch(() => null)
+      : null;
+
   const toolContext = createOpenCompanyChatToolContext({
     model: harnessSpec.model,
     latestUserMessage: userMessage,
@@ -174,6 +182,17 @@ async function runGoatTaskChatLoopInner(input: {
       webFetchCallsPerTurn: TASK_WEB_FETCH_CALLS_PER_TURN,
       actionCallsPerTurn: TASK_ACTION_CALLS_PER_TURN,
     },
+    ...(imessageDelivery
+      ? {
+          sendUserMessage: createGoatSendUserMessageRunner({
+            userWorkosId: task.userWorkosId,
+            phoneE164: imessageDelivery.phoneE164,
+            source: "task",
+            chatSessionId: `goat-task:${task.id}`,
+            signal: input.signal,
+          }),
+        }
+      : {}),
     ...(brain
       ? {
           runBrainCli: (toolInput) =>

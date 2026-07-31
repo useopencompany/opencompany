@@ -84,7 +84,8 @@ export type GoatIntegrationProvider =
   | "attio"
   | "stripe"
   | "latitude"
-  | "posthog";
+  | "posthog"
+  | "imessage";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear, PostHog) are always personal. Installation-bound
@@ -104,6 +105,8 @@ export function isWorkspaceOwnedGoatIntegrationProvider(provider: GoatIntegratio
   ).includes(provider);
 }
 export type GoatIntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
+export type GoatImessageSendSource = "chat" | "task" | "pairing";
+export type GoatImessageSendStatus = "sent" | "failed";
 export type GoatIntegrationCredentialKind = "oauth_token" | "webhook_secret" | "api_key";
 export type GoatIntegrationCredentialEncryptedPayload = EncryptedPayload;
 export type GoatBrowserProfileStatus =
@@ -577,6 +580,7 @@ export const goatUsers = goat.table(
     taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
+    imessageEnabled: boolean("imessage_enabled").notNull().default(false),
     // Board vs list layout for the Tasks page; persisted per user across devices.
     taskViewMode: text("task_view_mode").notNull().default("board").$type<GoatTaskViewMode>(),
     preferredMcpClient: text("preferred_mcp_client").$type<GoatMcpClient>(),
@@ -1445,7 +1449,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'imessage')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1494,7 +1498,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'imessage')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1548,11 +1552,65 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'imessage')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
       sql`${table.status} IN ('available', 'permission_lost', 'archived', 'sync_failed')`,
+    ),
+  }),
+);
+
+// Pending iMessage pairing verification. One active challenge per user,
+// upserted on resend. Lives outside the Electric-synced integrations table so
+// the code hash never reaches clients.
+export const goatImessagePairingChallenges = goat.table(
+  "imessage_pairing_challenges",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    phoneE164: text("phone_e164").notNull(),
+    // sha256 hex of the 6-digit code; the plaintext is only ever in the sent message.
+    codeHash: text("code_hash").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userIdx: uniqueIndex("goat_imessage_pairing_challenges_user_idx").on(table.userWorkosId),
+  }),
+);
+
+// Audit log of outbound iMessages; doubles as the per-user daily rate-limit
+// counter for the send_user_message tool.
+export const goatImessageSends = goat.table(
+  "imessage_sends",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    source: text("source").$type<GoatImessageSendSource>().notNull(),
+    chatSessionId: text("chat_session_id"),
+    status: text("status").$type<GoatImessageSendStatus>().notNull(),
+    errorReason: text("error_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userCreatedIdx: index("goat_imessage_sends_user_created_idx").on(
+      table.userWorkosId,
+      table.createdAt,
+    ),
+    sourceCheck: check(
+      "goat_imessage_sends_source_check",
+      sql`${table.source} IN ('chat', 'task', 'pairing')`,
+    ),
+    statusCheck: check(
+      "goat_imessage_sends_status_check",
+      sql`${table.status} IN ('sent', 'failed')`,
     ),
   }),
 );

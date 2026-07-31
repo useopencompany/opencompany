@@ -19,6 +19,7 @@ import { getGoatFathomIntegrationState } from "@/lib/integrations/fathom";
 import { getGoatGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoatGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGoatGranolaIntegrationState } from "@/lib/integrations/granola";
+import { getGoatImessageIntegrationState } from "@/lib/integrations/imessage";
 import { getGoatJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getGoatLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 import { getGoatPersonalAccounts } from "@/lib/integrations/personal-accounts";
@@ -46,6 +47,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     fathom,
     attio,
     stripe,
+    imessage,
     codex,
     claudeCode,
     workspaceMembers,
@@ -64,6 +66,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatFathomIntegrationState(user.workosUserId),
     getGoatAttioIntegrationState(user.workosUserId),
     getGoatStripeIntegrationState(workspace.id),
+    getGoatImessageIntegrationState(user.workosUserId),
     loadCurrentGoatCodexAuthSettings(),
     loadCurrentGoatClaudeCodeAuthSettings(),
     listGoatWorkspaceMembers(workspace.id),
@@ -130,6 +133,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       fathom,
       attio,
       stripe,
+      imessage,
       personalAccounts,
       codex: {
         provider: "codex",
@@ -198,6 +202,7 @@ function buildIntegrationState(input: {
   fathom: GoatIntegrationState["fathom"];
   attio: GoatIntegrationState["attio"];
   stripe: GoatIntegrationState["stripe"];
+  imessage: GoatIntegrationState["imessage"];
   personalAccounts: GoatIntegrationState["personalAccounts"];
   codex: GoatCodexProviderState;
   claudeCode: GoatClaudeCodeProviderState;
@@ -215,6 +220,7 @@ function buildIntegrationState(input: {
     fathom: input.fathom,
     attio: input.attio,
     stripe: input.stripe,
+    imessage: input.imessage,
     codex: input.codex,
     claude_code: input.claudeCode,
     personalAccounts: input.personalAccounts,

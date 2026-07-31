@@ -1,5 +1,6 @@
 import { AGENT_MODEL_CATALOG, modelSupportsAttachments } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { resolveGoatImessageDelivery } from "@opencompany/db/goat-imessage";
 import {
   type GoatChatMessageAttachment,
   type GoatCodexChatSession,
@@ -32,6 +33,8 @@ import type {
 import { toGoatChatUiMessage } from "@opencompany/goat-agent/chat-ui";
 import { executeGoatChatExaFetch } from "@opencompany/goat-agent/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@opencompany/goat-agent/chat-web-search";
+import { resolveGoatImessageProvider } from "@opencompany/goat-agent/imessage/provider";
+import { createGoatSendUserMessageRunner } from "@opencompany/goat-agent/imessage/send-user-message";
 import { createOpenCompanyChatSystemPrompt } from "@opencompany/goat-agent/prompts";
 import {
   createGoatGatewayAttribution,
@@ -780,9 +783,24 @@ async function resolveOpenCompanyChatRuntime(input: {
 
   const currentDate = new Date();
   const exaApiKey = env.exaApiKey?.trim();
+  const imessageDelivery =
+    resolveGoatImessageProvider() !== null
+      ? await resolveGoatImessageDelivery(turn.userWorkosId, getDb()).catch(() => null)
+      : null;
   const toolContext = createOpenCompanyChatToolContext({
     model,
     latestUserMessage: turn.prompt,
+    ...(imessageDelivery
+      ? {
+          sendUserMessage: createGoatSendUserMessageRunner({
+            userWorkosId: turn.userWorkosId,
+            phoneE164: imessageDelivery.phoneE164,
+            source: "task",
+            chatSessionId: session.chatSessionId,
+            signal,
+          }),
+        }
+      : {}),
     ...(brain
       ? {
           runBrainCli: (toolInput) =>

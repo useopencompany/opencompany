@@ -47,6 +47,7 @@ import {
   type GoatCodexProviderState,
   type GoatGitHubProviderState,
   type GoatGoogleProviderState,
+  type GoatImessageProviderState,
   type GoatIntegrationAccountView,
   type GoatIntegrationState,
   type GoatJamieProviderState,
@@ -76,7 +77,8 @@ type IntegrationMetaKey =
   | "posthog"
   | "stripe"
   | "codex"
-  | "claude_code";
+  | "claude_code"
+  | "imessage";
 
 type IntegrationMeta = {
   label: string;
@@ -185,15 +187,25 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: AnthropicIcon,
     tileClass: "bg-[#CC785C] text-white",
   },
+  imessage: {
+    label: "iMessage",
+    description: "Get important updates from Goat as texts on your phone.",
+    monogram: "iM",
+    tileClass: "bg-[#34C759] text-white",
+  },
 };
 
 export function SettingsIntegrationsPanel({
   initialIntegrations,
   isWorkspaceAdmin,
+  imessageEnabled = false,
   browserProfilesEnabled = false,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  // The iMessage card only exists for users who turned the beta flag on in
+  // Preferences; pairing state alone must not surface it.
+  imessageEnabled?: boolean;
   browserProfilesEnabled?: boolean;
 }) {
   const hydrated = useHydrated();
@@ -204,12 +216,14 @@ export function SettingsIntegrationsPanel({
         <IntegrationCards
           integrations={initialIntegrations}
           isWorkspaceAdmin={isWorkspaceAdmin}
+          imessageEnabled={imessageEnabled}
           browserProfilesEnabled={browserProfilesEnabled}
         />
       ) : (
         <LiveSettingsIntegrations
           initialIntegrations={initialIntegrations}
           isWorkspaceAdmin={isWorkspaceAdmin}
+          imessageEnabled={imessageEnabled}
           browserProfilesEnabled={browserProfilesEnabled}
         />
       )}
@@ -251,10 +265,12 @@ function IntegrationSetupFeedback() {
 function LiveSettingsIntegrations({
   initialIntegrations,
   isWorkspaceAdmin,
+  imessageEnabled,
   browserProfilesEnabled,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
@@ -281,6 +297,7 @@ function LiveSettingsIntegrations({
     <IntegrationCards
       integrations={integrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
+      imessageEnabled={imessageEnabled}
       browserProfilesEnabled={browserProfilesEnabled}
     />
   );
@@ -329,21 +346,24 @@ function countWorkspaceConnected(integrations: GoatIntegrationState) {
   );
 }
 
-function countPersonalConnected(integrations: GoatIntegrationState) {
+function countPersonalConnected(integrations: GoatIntegrationState, includeImessage: boolean) {
   return (
     countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS) +
     (integrations.codex.connected ? 1 : 0) +
-    (integrations.claude_code.connected ? 1 : 0)
+    (integrations.claude_code.connected ? 1 : 0) +
+    (includeImessage && integrations.imessage.connected ? 1 : 0)
   );
 }
 
 function IntegrationCards({
   integrations,
   isWorkspaceAdmin,
+  imessageEnabled,
   browserProfilesEnabled,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  imessageEnabled: boolean;
   browserProfilesEnabled: boolean;
 }) {
   const [scope, setScope] = useState<IntegrationScope>("workspace");
@@ -354,7 +374,7 @@ function IntegrationCards({
         scope={scope}
         onScopeChange={setScope}
         workspaceCount={countWorkspaceConnected(integrations)}
-        personalCount={countPersonalConnected(integrations)}
+        personalCount={countPersonalConnected(integrations, imessageEnabled)}
       />
       {scope === "workspace" ? (
         <section className="flex flex-col gap-3">
@@ -415,6 +435,9 @@ function IntegrationCards({
             />
             <CodexIntegrationCard integration={integrations.codex} />
             <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
+            {imessageEnabled ? (
+              <IMessageIntegrationCard integration={integrations.imessage} />
+            ) : null}
             {browserProfilesEnabled ? <BrowserProfilesCard /> : null}
           </div>
         </section>
@@ -1420,6 +1443,31 @@ function ClaudeCodeIntegrationCard({ integration }: { integration: GoatClaudeCod
   );
 }
 
+function IMessageIntegrationCard({ integration }: { integration: GoatImessageProviderState }) {
+  return (
+    <IntegrationCard
+      meta={INTEGRATION_META.imessage}
+      footer={
+        integration.connected ? (
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <ConnectedStatus />
+              {integration.phoneE164 ? (
+                <span className="truncate text-[12px] leading-4 text-ink-subtle">
+                  · {integration.phoneE164}
+                </span>
+              ) : null}
+            </div>
+            <ConnectLink href="/settings/imessage" label="Manage" />
+          </div>
+        ) : (
+          <ConnectLink href="/settings/imessage" label="Set up" />
+        )
+      }
+    />
+  );
+}
+
 function integrationStatus(
   integration:
     | GoatGoogleProviderState
@@ -1451,6 +1499,7 @@ function integrationConnectHref(provider: Exclude<IntegrationMetaKey, "codex">) 
   if (provider === "github")
     return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "jamie") return "/settings/jamie";
+  if (provider === "imessage") return "/settings/imessage";
   if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
   if (provider === "attio") return "/settings/attio";
