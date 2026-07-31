@@ -1464,6 +1464,12 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(textarea, "#");
     await user.click(await screen.findByRole("option", { name: /Morning Test/i }));
     expect(textarea).toHaveValue("#morning-test ");
+    const overlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(overlay?.querySelectorAll('[data-goat-chat-mention="workflow"]')).toHaveLength(1);
+    expect(overlay).toHaveTextContent("#morning-test");
+    expect(textarea).toHaveClass("text-transparent");
     await user.type(textarea, "run today's checks");
     await user.type(textarea, "{Enter}");
 
@@ -1773,10 +1779,19 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(await screen.findByRole("option", { name: /writing work/i }));
 
     expect(textarea).toHaveValue("@skill/coding-work then @skill/writing-work ");
-    expect(textarea.parentElement?.querySelector('[aria-hidden="true"]')).toBeNull();
+    const overlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(overlay?.querySelectorAll('[data-goat-chat-mention="skill"]')).toHaveLength(2);
+    expect(overlay).toHaveTextContent("@skill/coding-work then @skill/writing-work");
+    expect(textarea).toHaveClass("text-transparent");
 
     fireEvent.change(textarea, { target: { value: "@skill/coding-work then continue" } });
     expect(textarea).toHaveValue("@skill/coding-work then continue");
+    const reconciledOverlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(reconciledOverlay?.querySelectorAll('[data-goat-chat-mention="skill"]')).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({

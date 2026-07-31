@@ -69,6 +69,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   type Dispatch,
   type FormEvent,
+  type RefObject,
   type SetStateAction,
   useCallback,
   useEffect,
@@ -184,6 +185,8 @@ const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
 const CODEX_SANDBOX_STATUS_POLL_INTERVAL_MS = 30_000;
 const CODEX_MENTION: GoatChatMention = { kind: "engine", id: "codex" };
 const CLOUD_CODEX_ATTACHMENT_CAPABILITIES = { images: true, pdf: true } as const;
+const COMPOSER_MENTION_CHIP_CLASS =
+  "rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]";
 
 type ActiveMentionToken = {
   start: number;
@@ -341,6 +344,7 @@ export function GoatSurface({
   const pathname = usePathname();
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputOverlayRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const workspacePanelRef = useRef<CodingWorkspacePanelHandle>(null);
   const workspaceToggleButtonRef = useRef<HTMLButtonElement>(null);
@@ -1047,10 +1051,12 @@ export function GoatSurface({
     if (!el) return;
     if (input.length === 0) {
       el.style.height = "";
+      if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = 0;
       return;
     }
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+    if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = el.scrollTop;
   }, [input]);
 
   useLayoutEffect(() => {
@@ -2325,6 +2331,11 @@ export function GoatSurface({
                 ) : null}
                 <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
                   <div className="relative min-w-0 flex-1 self-center">
+                    {renderComposerInputOverlay({
+                      value: input,
+                      mentions: activeSelectedMentions,
+                      overlayRef: inputOverlayRef,
+                    })}
                     <textarea
                       ref={inputRef}
                       rows={1}
@@ -2348,6 +2359,11 @@ export function GoatSurface({
                       }
                       onKeyDown={onKeyDown}
                       onPaste={onInputPaste}
+                      onScroll={(event) => {
+                        if (inputOverlayRef.current) {
+                          inputOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
+                        }
+                      }}
                       onSelect={(event) =>
                         updateMentionToken(
                           event.currentTarget.value,
@@ -2355,7 +2371,11 @@ export function GoatSurface({
                         )
                       }
                       disabled={backgroundTaskSubmitting}
-                      className="block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+                      className={cn(
+                        "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
+                        composerInputHasMentionHighlights(input, activeSelectedMentions) &&
+                          "text-transparent caret-ink",
+                      )}
                       style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                       maxLength={10_000}
                     />
@@ -2517,6 +2537,7 @@ function QuickChatComposer({
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputOverlayRef = useRef<HTMLDivElement>(null);
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
@@ -2666,10 +2687,12 @@ function QuickChatComposer({
     if (!el) return;
     if (input.length === 0) {
       el.style.height = "";
+      if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = 0;
       return;
     }
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+    if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = el.scrollTop;
   }, [input]);
 
   useLayoutEffect(() => {
@@ -3161,6 +3184,11 @@ function QuickChatComposer({
           ) : null}
           <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
             <div className="relative min-w-0 flex-1 self-center">
+              {renderComposerInputOverlay({
+                value: input,
+                mentions: activeSelectedMentions,
+                overlayRef: inputOverlayRef,
+              })}
               <textarea
                 ref={inputRef}
                 rows={1}
@@ -3175,11 +3203,20 @@ function QuickChatComposer({
                 }
                 onKeyDown={onKeyDown}
                 onPaste={onInputPaste}
+                onScroll={(event) => {
+                  if (inputOverlayRef.current) {
+                    inputOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
+                  }
+                }}
                 onSelect={(event) =>
                   updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
                 }
                 disabled={isSubmitting}
-                className="block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+                className={cn(
+                  "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
+                  composerInputHasMentionHighlights(input, activeSelectedMentions) &&
+                    "text-transparent caret-ink",
+                )}
                 style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                 maxLength={10_000}
               />
@@ -3627,6 +3664,91 @@ function goatChatMentionToken(mention: GoatChatMention) {
 function goatChatMentionIsVisible(value: string, mention: GoatChatMention) {
   const token = escapeRegExp(goatChatMentionToken(mention));
   return new RegExp(`(^|\\s)${token}(?=\\s|$)`, "i").test(value);
+}
+
+type ComposerMentionHighlight = Extract<GoatChatMention, { kind: "skill" | "workflow" }>;
+
+type ComposerMentionHighlightRange = {
+  start: number;
+  end: number;
+  mention: ComposerMentionHighlight;
+};
+
+function composerInputHasMentionHighlights(value: string, mentions: readonly GoatChatMention[]) {
+  return composerMentionHighlightRanges(value, mentions).length > 0;
+}
+
+function renderComposerInputOverlay({
+  value,
+  mentions,
+  overlayRef,
+}: {
+  value: string;
+  mentions: readonly GoatChatMention[];
+  overlayRef: RefObject<HTMLDivElement | null>;
+}) {
+  const ranges = composerMentionHighlightRanges(value, mentions);
+  if (ranges.length === 0) return null;
+
+  let offset = 0;
+  const parts = ranges.flatMap((range, index) => {
+    const plain = value.slice(offset, range.start);
+    const chip = (
+      <span
+        key={`mention-${range.start}-${range.end}-${index}`}
+        data-goat-chat-mention={range.mention.kind}
+        className={COMPOSER_MENTION_CHIP_CLASS}
+      >
+        {value.slice(range.start, range.end)}
+      </span>
+    );
+    offset = range.end;
+    return plain ? [plain, chip] : [chip];
+  });
+  const tail = value.slice(offset);
+  if (tail) parts.push(tail);
+
+  return (
+    <div
+      ref={overlayRef}
+      aria-hidden="true"
+      data-testid="composer-mention-overlay"
+      className="pointer-events-none absolute inset-0 z-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
+    >
+      {parts}
+    </div>
+  );
+}
+
+function composerMentionHighlightRanges(
+  value: string,
+  mentions: readonly GoatChatMention[],
+): ComposerMentionHighlightRange[] {
+  if (!value) return [];
+  const candidates = mentions
+    .filter(
+      (mention): mention is ComposerMentionHighlight =>
+        mention.kind === "skill" || mention.kind === "workflow",
+    )
+    .flatMap((mention) => {
+      const token = escapeRegExp(goatChatMentionToken(mention));
+      const pattern = new RegExp(`(^|\\s)${token}(?=\\s|$)`, "gi");
+      return [...value.matchAll(pattern)].flatMap((match) => {
+        if (typeof match.index !== "number") return [];
+        const leading = match[1] ?? "";
+        const start = match.index + leading.length;
+        return [{ start, end: start + match[0].length - leading.length, mention }];
+      });
+    })
+    .toSorted((left, right) => left.start - right.start || left.end - right.end);
+
+  const ranges: ComposerMentionHighlightRange[] = [];
+  for (const candidate of candidates) {
+    const previous = ranges.at(-1);
+    if (previous && candidate.start < previous.end) continue;
+    ranges.push(candidate);
+  }
+  return ranges;
 }
 
 function skillMentionIdsFromText(value: string) {
