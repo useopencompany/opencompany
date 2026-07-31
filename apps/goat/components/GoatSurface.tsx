@@ -703,8 +703,9 @@ export function GoatSurface({
       creditBalance.balanceUsdMicros > 0 &&
       creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
   );
-  const workflowMentionsEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
-  const selectedAdHocTask = workflowMentionsEnabled && hasGoatAdHocTaskToken(input);
+  const workflowMentionsEnabled = taskSpawningEnabled && !activeTaskConversation;
+  const adHocTaskMentionEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
+  const selectedAdHocTask = adHocTaskMentionEnabled && hasGoatAdHocTaskToken(input);
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
@@ -722,6 +723,7 @@ export function GoatSurface({
     claudeCodeConnected,
     skillsEnabled: !activeTaskConversation,
     workflowsEnabled: workflowMentionsEnabled,
+    adHocTaskEnabled: adHocTaskMentionEnabled,
   });
   const selectedWorkflowMention = selectedAdHocTask
     ? null
@@ -1282,7 +1284,7 @@ export function GoatSurface({
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
 
-    if (workflowMentionsEnabled && hasGoatAdHocTaskToken(prompt)) {
+    if (adHocTaskMentionEnabled && hasGoatAdHocTaskToken(prompt)) {
       const description = descriptionFromGoatAdHocTaskPrompt(prompt);
       if (!description) {
         toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
@@ -2553,8 +2555,9 @@ function QuickChatComposer({
       ? "claude_code"
       : null;
   const isEngineChat = selectedEngine !== null;
-  const workflowMentionsEnabled = taskSpawningEnabled && !selectedEngine;
-  const selectedAdHocTask = workflowMentionsEnabled && hasGoatAdHocTaskToken(input);
+  const workflowMentionsEnabled = taskSpawningEnabled;
+  const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
+  const selectedAdHocTask = adHocTaskMentionEnabled && hasGoatAdHocTaskToken(input);
   const outOfCredits = Boolean(
     creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
   );
@@ -2577,6 +2580,7 @@ function QuickChatComposer({
     claudeCodeConnected,
     skillsEnabled: true,
     workflowsEnabled: workflowMentionsEnabled,
+    adHocTaskEnabled: adHocTaskMentionEnabled,
   });
   const selectedWorkflowMention = selectedAdHocTask
     ? null
@@ -2888,7 +2892,7 @@ function QuickChatComposer({
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
 
-    if (workflowMentionsEnabled && hasGoatAdHocTaskToken(prompt)) {
+    if (adHocTaskMentionEnabled && hasGoatAdHocTaskToken(prompt)) {
       const description = descriptionFromGoatAdHocTaskPrompt(prompt);
       if (!description) {
         toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
@@ -3710,6 +3714,7 @@ function buildMentionOptions(input: {
   claudeCodeConnected: boolean;
   skillsEnabled: boolean;
   workflowsEnabled: boolean;
+  adHocTaskEnabled: boolean;
 }): MentionOption[] {
   if (!input.token) return [];
   const query = input.token.query;
@@ -3717,13 +3722,13 @@ function buildMentionOptions(input: {
   // "#" is the task sigil: it starts either the reserved ad-hoc task or one
   // saved workflow as a background task instead of a foreground chat turn.
   if (input.token.sigil === "#") {
-    if (!input.workflowsEnabled) return [];
+    if (!input.workflowsEnabled && !input.adHocTaskEnabled) return [];
     const hasSelectedWorkflow = input.selectedMentions.some(
       (mention) => mention.kind === "workflow",
     );
     if (hasSelectedWorkflow) return [];
     const options: MentionOption[] = [];
-    if (!query || "task ad-hoc background".includes(query)) {
+    if (input.adHocTaskEnabled && (!query || "task ad-hoc background".includes(query))) {
       options.push({
         kind: "task",
         token: GOAT_AD_HOC_TASK_TOKEN,
@@ -3731,17 +3736,19 @@ function buildMentionOptions(input: {
         description: "Run this request in the background",
       });
     }
-    for (const workflow of input.workflows) {
-      if (workflow.id === GOAT_AD_HOC_TASK_ID) continue;
-      const haystack = `${workflow.id} ${workflow.name} ${workflow.description}`.toLowerCase();
-      if (query && !haystack.includes(query)) continue;
-      options.push({
-        kind: "workflow",
-        token: `#${workflow.id}`,
-        label: workflow.name,
-        description: workflow.description,
-        mention: { kind: "workflow", id: workflow.id },
-      });
+    if (input.workflowsEnabled) {
+      for (const workflow of input.workflows) {
+        if (workflow.id === GOAT_AD_HOC_TASK_ID) continue;
+        const haystack = `${workflow.id} ${workflow.name} ${workflow.description}`.toLowerCase();
+        if (query && !haystack.includes(query)) continue;
+        options.push({
+          kind: "workflow",
+          token: `#${workflow.id}`,
+          label: workflow.name,
+          description: workflow.description,
+          mention: { kind: "workflow", id: workflow.id },
+        });
+      }
     }
     return options;
   }
