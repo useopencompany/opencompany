@@ -221,9 +221,6 @@ export function validateGoatWorkflowFields(input: {
       return "That workflow model is not available.";
     }
   }
-  if (input.status === "active" && input.steps.some((step) => !step.instructions.trim())) {
-    return "Add instructions to every workflow step before making it active.";
-  }
   return null;
 }
 
@@ -251,7 +248,7 @@ export async function createGoatWorkflow(input: {
     instructions: "",
     model: "",
     steps,
-    status: "draft",
+    status: "active",
     createdByWorkosId: input.createdByWorkosId,
   });
   return { ok: true, slug };

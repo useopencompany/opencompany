@@ -1,5 +1,23 @@
-import { describe, expect, it } from "vitest";
-import { goatWorkflowStepsWithLegacyFallback, validateGoatWorkflowFields } from "@/lib/workflows";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createGoatWorkflow,
+  goatWorkflowStepsWithLegacyFallback,
+  validateGoatWorkflowFields,
+} from "@/lib/workflows";
+
+const dbMocks = vi.hoisted(() => ({
+  existingWorkflowRows: [] as Array<{ slug: string }>,
+  insert: vi.fn(),
+  insertValues: vi.fn(),
+  select: vi.fn(),
+}));
+
+vi.mock("@opencompany/db/client", () => ({
+  getDb: () => ({
+    insert: dbMocks.insert,
+    select: dbMocks.select,
+  }),
+}));
 
 const validStep = {
   id: "step-1",
@@ -7,6 +25,53 @@ const validStep = {
   model: "kimi-k2.6",
   instructions: "Collect the source material.",
 };
+
+beforeEach(() => {
+  dbMocks.existingWorkflowRows = [];
+  dbMocks.insert.mockReset();
+  dbMocks.insertValues.mockReset();
+  dbMocks.select.mockReset();
+  dbMocks.insert.mockReturnValue({ values: dbMocks.insertValues });
+  dbMocks.insertValues.mockResolvedValue(undefined);
+  dbMocks.select.mockImplementation(() => createSelectBuilder(dbMocks.existingWorkflowRows));
+});
+
+describe("createGoatWorkflow", () => {
+  it("creates new workflows as active by default", async () => {
+    await expect(
+      createGoatWorkflow({
+        workspaceId: "workspace_1",
+        createdByWorkosId: "user_1",
+        name: "Weekly update",
+        description: "Summarize the week.",
+      }),
+    ).resolves.toEqual({ ok: true, slug: "weekly-update" });
+
+    expect(dbMocks.insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace_1",
+        slug: "weekly-update",
+        name: "Weekly update",
+        description: "Summarize the week.",
+        instructions: "",
+        model: "",
+        status: "active",
+        createdByWorkosId: "user_1",
+      }),
+    );
+    expect(dbMocks.insertValues.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        steps: [
+          expect.objectContaining({
+            title: "",
+            model: "",
+            instructions: "",
+          }),
+        ],
+      }),
+    );
+  });
+});
 
 describe("validateGoatWorkflowFields", () => {
   it("requires between one and twenty steps", () => {
@@ -60,7 +125,7 @@ describe("validateGoatWorkflowFields", () => {
     ).toMatch(/unique/);
   });
 
-  it("requires every step to have instructions before activation", () => {
+  it("allows active workflows to be edited before every step has instructions", () => {
     expect(
       validateGoatWorkflowFields({
         name: "Workflow",
@@ -68,7 +133,7 @@ describe("validateGoatWorkflowFields", () => {
         steps: [{ ...validStep, instructions: " " }],
         status: "active",
       }),
-    ).toMatch(/instructions/);
+    ).toBeNull();
     expect(
       validateGoatWorkflowFields({
         name: "Workflow",
@@ -79,7 +144,7 @@ describe("validateGoatWorkflowFields", () => {
         ],
         status: "active",
       }),
-    ).toMatch(/every workflow step/i);
+    ).toBeNull();
     expect(
       validateGoatWorkflowFields({
         name: "Workflow",
@@ -161,3 +226,15 @@ describe("goatWorkflowStepsWithLegacyFallback", () => {
     ).toEqual([validStep]);
   });
 });
+
+function createSelectBuilder(rows: Array<{ slug: string }>) {
+  const builder = {
+    from: vi.fn(() => builder),
+    where: vi.fn(() => builder),
+    then: <TResult1 = Array<{ slug: string }>, TResult2 = never>(
+      onfulfilled?: ((value: Array<{ slug: string }>) => TResult1 | PromiseLike<TResult1>) | null,
+      onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+    ) => Promise.resolve(rows).then(onfulfilled, onrejected),
+  };
+  return builder;
+}
