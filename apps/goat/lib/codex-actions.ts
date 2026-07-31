@@ -13,7 +13,7 @@ import {
 import { and, eq, inArray } from "drizzle-orm";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import { executeGoatAction } from "@/lib/actions/execute";
-import type { GoatResolvedActionCatalog } from "@/lib/actions/types";
+import type { GoatCapabilityTurnState, GoatResolvedActionCatalog } from "@/lib/actions/types";
 
 type GoatCodexActionContext = {
   userWorkosId: string;
@@ -26,6 +26,7 @@ type GoatCodexActionDependencies = {
   loadContext: (request: GoatCodexActionGatewayRequest) => Promise<GoatCodexActionContext | null>;
   resolveCatalog: typeof resolveGoatActionCatalog;
   executeAction: typeof executeGoatAction;
+  getCapabilityTurnState: (request: GoatCodexActionGatewayRequest) => GoatCapabilityTurnState;
   now: () => Date;
 };
 
@@ -33,8 +34,15 @@ const defaultDependencies: GoatCodexActionDependencies = {
   loadContext: loadGoatCodexActionContext,
   resolveCatalog: resolveGoatActionCatalog,
   executeAction: executeGoatAction,
+  getCapabilityTurnState: getGoatCodexActionCapabilityTurnState,
   now: () => new Date(),
 };
+
+const GOAT_CODEX_ACTION_CAPABILITY_STATE_TTL_MS = 6 * 60 * 60 * 1000;
+const goatCodexActionCapabilityTurnStates = new Map<
+  string,
+  { expiresAt: number; state: GoatCapabilityTurnState }
+>();
 
 export async function executeGoatCodexActionGateway(input: {
   request: GoatCodexActionGatewayRequest;
@@ -43,15 +51,12 @@ export async function executeGoatCodexActionGateway(input: {
 }): Promise<GoatCodexActionGatewayResponse> {
   const dependencies = { ...defaultDependencies, ...input.dependencies };
   if (isGoatChatActionsKilled()) {
-    return gatewayError("disabled", "Integration actions are temporarily disabled.");
+    return gatewayError("disabled", "Actions are temporarily disabled.");
   }
 
   const context = await dependencies.loadContext(input.request);
   if (!context) {
-    return gatewayError(
-      "not_permitted",
-      "This Codex turn can no longer access integration actions.",
-    );
+    return gatewayError("not_permitted", "This Codex turn can no longer access actions.");
   }
 
   let catalog: GoatResolvedActionCatalog;
@@ -63,7 +68,7 @@ export async function executeGoatCodexActionGateway(input: {
       }),
     );
   } catch {
-    return gatewayError("internal", "The integration action catalog could not be loaded.");
+    return gatewayError("internal", "The action catalog could not be loaded.");
   }
 
   if (input.request.operation === "list") {
@@ -71,8 +76,9 @@ export async function executeGoatCodexActionGateway(input: {
     if (!sourceId) {
       return {
         ok: true,
-        sources: catalog.providers.map(({ id, label, description }) => ({
+        sources: catalog.providers.map(({ id, kind, label, description }) => ({
           id,
+          kind: kind ?? "integration",
           label,
           description,
         })),
@@ -90,6 +96,7 @@ export async function executeGoatCodexActionGateway(input: {
       ok: true,
       source: {
         id: source.id,
+        kind: source.kind ?? "integration",
         label: source.label,
         description: source.description,
       },
@@ -125,6 +132,7 @@ export async function executeGoatCodexActionGateway(input: {
     workspaceId: context.workspaceId,
     chatSessionId: context.chatSessionId,
     toolCallId: input.request.toolCallId,
+    capabilityTurnState: dependencies.getCapabilityTurnState(input.request),
     signal: input.signal,
     currentDate: dependencies.now(),
     userTimezone: context.userTimezone,
@@ -132,20 +140,48 @@ export async function executeGoatCodexActionGateway(input: {
 }
 
 function readOnlyCatalog(catalog: GoatResolvedActionCatalog): GoatResolvedActionCatalog {
-  const integrationSourceIds = new Set(
-    catalog.providers.filter((source) => source.kind !== "managed").map((source) => source.id),
-  );
+  const sourceIds = new Set(catalog.providers.map((source) => source.id));
   const actions = catalog.actions.filter(
     (action) =>
       action.capability === "read" &&
       action.permissionMode === "on" &&
-      integrationSourceIds.has(action.provider),
+      sourceIds.has(action.provider),
   );
   const activeSourceIds = new Set(actions.map((action) => action.provider));
   return {
-    providers: catalog.providers.filter((source) => activeSourceIds.has(source.id)),
+    providers: catalog.providers
+      .filter((source) => activeSourceIds.has(source.id))
+      .map((source) => ({ ...source, kind: source.kind ?? "integration" })),
     actions,
   };
+}
+
+function getGoatCodexActionCapabilityTurnState(
+  request: GoatCodexActionGatewayRequest,
+): GoatCapabilityTurnState {
+  const now = Date.now();
+  for (const [key, entry] of goatCodexActionCapabilityTurnStates) {
+    if (entry.expiresAt <= now) goatCodexActionCapabilityTurnStates.delete(key);
+  }
+
+  const key = `${request.codexChatSessionId}:${request.codexChatTurnId}`;
+  const existing = goatCodexActionCapabilityTurnStates.get(key);
+  if (existing) {
+    existing.expiresAt = now + GOAT_CODEX_ACTION_CAPABILITY_STATE_TTL_MS;
+    return existing.state;
+  }
+
+  const state: GoatCapabilityTurnState = {
+    quotedTotalUsdMicros: 0,
+    admittedToolCallIds: [],
+    quotesByToolCallId: new Map(),
+    asyncRunsStarted: 0,
+  };
+  goatCodexActionCapabilityTurnStates.set(key, {
+    expiresAt: now + GOAT_CODEX_ACTION_CAPABILITY_STATE_TTL_MS,
+    state,
+  });
+  return state;
 }
 
 async function loadGoatCodexActionContext(

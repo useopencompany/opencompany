@@ -17,6 +17,7 @@ export function isGoatCodexActionHostToolContractVersion(
 
 export type GoatCodexActionSource = {
   id: string;
+  kind?: "integration" | "managed";
   label: string;
   description: string;
 };
