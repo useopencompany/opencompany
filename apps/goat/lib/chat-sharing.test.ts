@@ -251,6 +251,7 @@ function createStore({ messages = [] }: { messages?: GoatStoredChatMessage[] } =
     kind: "chat",
     closedAt: null,
     pinnedAt: null,
+    lastSeenAt: createdAt,
     createdAt,
     updatedAt: createdAt,
   };

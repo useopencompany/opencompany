@@ -16,6 +16,7 @@ import {
   type GoatChatUiMessage,
   listRecentGoatChatsForUser,
   loadGoatChatSessionByIdForUser,
+  markGoatChatSessionSeenForUser,
   persistGoatChatAssistantMessage,
   setGoatChatSessionPinnedForUser,
   textFromGoatChatUiMessage,
@@ -541,6 +542,53 @@ describe("Goat chat history helpers", () => {
     }
   });
 
+  it("derives done unseen and done seen from the session seen marker", async () => {
+    vi.useFakeTimers();
+    const { store } = createInMemoryChatStore();
+    try {
+      vi.setSystemTime(new Date("2026-07-04T12:00:00.000Z"));
+      const turn = await createGoatChatUserTurn(
+        { userWorkosId: "user_1", prompt: "hello", model: DEFAULT_GOAT_MODEL },
+        store,
+      );
+
+      vi.setSystemTime(new Date("2026-07-04T12:01:00.000Z"));
+      await persistGoatChatAssistantMessage(
+        {
+          sessionId: turn.session.id,
+          content: "Done.",
+        },
+        store,
+      );
+
+      const unseen = await listRecentGoatChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
+      expect(unseen[0]).toMatchObject({
+        id: turn.session.id,
+        state: "done_unseen",
+        lastSeenAt: "2026-07-04T12:00:00.000Z",
+        updatedAt: "2026-07-04T12:01:00.000Z",
+      });
+
+      vi.setSystemTime(new Date("2026-07-04T12:02:00.000Z"));
+      await expect(
+        markGoatChatSessionSeenForUser(
+          { userWorkosId: "user_1", sessionId: turn.session.id },
+          store,
+        ),
+      ).resolves.toBe(true);
+
+      const seen = await listRecentGoatChatsForUser({ userWorkosId: "user_1", limit: 8 }, store);
+      expect(seen[0]).toMatchObject({
+        id: turn.session.id,
+        state: "done_seen",
+        lastSeenAt: "2026-07-04T12:02:00.000Z",
+        updatedAt: "2026-07-04T12:01:00.000Z",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps pinned chats listed even outside the recency window until unpinned", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T12:30:00.000Z"));
@@ -700,6 +748,7 @@ describe("Goat chat history helpers", () => {
       kind: "task",
       closedAt: null,
       pinnedAt: null,
+      lastSeenAt: createdAt,
       createdAt,
       updatedAt: createdAt,
     });
@@ -748,6 +797,7 @@ describe("Goat chat history helpers", () => {
         kind: "chat",
         closedAt: null,
         pinnedAt: null,
+        lastSeenAt: now,
         createdAt: now,
         updatedAt: now,
       });
@@ -810,6 +860,7 @@ describe("Goat chat history helpers", () => {
       kind: "chat",
       closedAt: null,
       pinnedAt: null,
+      lastSeenAt: now,
       createdAt: now,
       updatedAt: now,
     });
@@ -892,6 +943,7 @@ function createInMemoryChatStore(
         kind: "chat",
         closedAt: null,
         pinnedAt: null,
+        lastSeenAt: now,
         createdAt: now,
         updatedAt: now,
       };
@@ -956,6 +1008,21 @@ function createInMemoryChatStore(
       if (session) {
         session.updatedAt = input.now;
       }
+    },
+
+    async markSessionSeen(input) {
+      const session = sessions.find(
+        (item) =>
+          item.id === input.sessionId &&
+          item.userWorkosId === input.userWorkosId &&
+          item.kind === "chat" &&
+          !item.closedAt,
+      );
+      if (!session) return false;
+      if (!session.lastSeenAt || session.lastSeenAt.getTime() < input.seenAt.getTime()) {
+        session.lastSeenAt = input.seenAt;
+      }
+      return true;
     },
 
     async closeSession(input) {

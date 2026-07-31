@@ -589,6 +589,8 @@ export type GoatCodexRuntimeView = {
   updatedAt: string;
 };
 
+export type GoatChatState = "working" | "done_unseen" | "done_seen";
+
 export type GoatChatSummaryView = {
   id: string;
   title: string;
@@ -596,13 +598,46 @@ export type GoatChatSummaryView = {
   engine?: GoatChatEngine;
   codexComposerSettings?: GoatCodexComposerSettingsView | null;
   codexRuntime?: GoatCodexRuntimeView | null;
+  state?: GoatChatState;
   preview: string;
   updatedAt: string;
+  lastSeenAt?: string | null;
   pinnedAt?: string | null;
   archived?: boolean;
 };
 
 export const GOAT_PINNED_CHAT_LIMIT = 20;
+
+export function deriveGoatChatState(input: {
+  updatedAt: string;
+  lastSeenAt?: string | null;
+  codexRuntime?: { status?: string | null } | null;
+}): GoatChatState {
+  if (isGoatChatRuntimeActive(input.codexRuntime)) return "working";
+  if (!input.lastSeenAt) return "done_unseen";
+
+  const lastSeenAt = Date.parse(input.lastSeenAt);
+  const updatedAt = Date.parse(input.updatedAt);
+  if (!Number.isFinite(lastSeenAt) || !Number.isFinite(updatedAt)) return "done_unseen";
+  return lastSeenAt >= updatedAt ? "done_seen" : "done_unseen";
+}
+
+export function goatChatSummaryState(
+  chat: Pick<GoatChatSummaryView, "codexRuntime" | "lastSeenAt" | "state" | "updatedAt">,
+): GoatChatState {
+  if (isGoatChatRuntimeActive(chat.codexRuntime)) return "working";
+  if (chat.state) return chat.state;
+  if (chat.lastSeenAt === undefined) return "done_seen";
+  return deriveGoatChatState(chat);
+}
+
+export function isGoatChatRuntimeActive(
+  runtime: { status?: string | null } | null | undefined,
+): boolean {
+  return (
+    runtime?.status === "queued" || runtime?.status === "starting" || runtime?.status === "running"
+  );
+}
 
 export type GoatStoredChatMessage = Pick<
   GoatChatMessage,

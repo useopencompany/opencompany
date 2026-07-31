@@ -102,7 +102,11 @@ import {
   GOAT_AD_HOC_TASK_TOKEN,
   hasGoatAdHocTaskToken,
 } from "@/lib/ad-hoc-task";
-import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
+import {
+  closeGoatChatSessionAction,
+  markGoatChatSeenAction,
+  reopenGoatChatSessionAction,
+} from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import {
   AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES,
@@ -115,6 +119,7 @@ import {
   subscribeLastGoatChatSelection,
 } from "@/lib/chat-composer-selection";
 import { GOAT_HOME_NAVIGATION_EVENT, newOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
+import { setLocalGoatChatState, useLocalGoatChatStates } from "@/lib/chat-session-state";
 import {
   compareGoatChatMessageOrder,
   type GoatChatMention,
@@ -125,6 +130,7 @@ import {
   type GoatChatUiMessage,
   type GoatCodexRuntimeView,
   type GoatStoredChatMessage,
+  goatChatSummaryState,
   textFromGoatChatUiMessage,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
@@ -362,6 +368,7 @@ export function GoatSurface({
   const onboardingKickoffPromptRef = useRef<string | null>(null);
   const activeTurnStartedAtRef = useRef<number | null>(null);
   const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
+  const lastSeenMarkRef = useRef<string | null>(null);
   const wasAgentWorkingRef = useRef(false);
   const optimisticAttachmentPreviewUrlsRef = useRef<ReadonlyMap<string, string[]>>(new Map());
   const persistedMessageIdsRef = useRef<ReadonlySet<string>>(new Set());
@@ -476,9 +483,10 @@ export function GoatSurface({
     ReadonlyMap<string, number>
   >(() => new Map());
   const [, startArchiveTransition] = useTransition();
+  const localChatStates = useLocalGoatChatStates();
   const homeChats = useMemo(
-    () => visibleHomeChats(recentChats, optimisticallyArchivedChatIds),
-    [optimisticallyArchivedChatIds, recentChats],
+    () => visibleHomeChats(recentChats, optimisticallyArchivedChatIds, localChatStates),
+    [localChatStates, optimisticallyArchivedChatIds, recentChats],
   );
   const homeSchedules = useMemo(
     () => (taskSpawningEnabled ? visibleHomeSchedules(schedules) : []),
@@ -893,6 +901,38 @@ export function GoatSurface({
   const activeChatSummary = chatSessionId
     ? (recentChats.find((chat) => chat.id === chatSessionId) ?? null)
     : null;
+  useEffect(() => {
+    if (!chatSessionId || persistedChatSessionId !== chatSessionId) return;
+    const state = isAgentWorking ? "working" : mode === "chat" ? "done_seen" : null;
+    setLocalGoatChatState(chatSessionId, state);
+    return () => setLocalGoatChatState(chatSessionId, null);
+  }, [chatSessionId, isAgentWorking, mode, persistedChatSessionId]);
+
+  useEffect(() => {
+    if (
+      mode !== "chat" ||
+      isAgentWorking ||
+      !chatSessionId ||
+      persistedChatSessionId !== chatSessionId
+    ) {
+      return;
+    }
+
+    const markKey = `${chatSessionId}:${
+      activeChatSummary?.updatedAt ?? latestAssistantMessageId ?? chatMessages.length
+    }`;
+    if (lastSeenMarkRef.current === markKey) return;
+    lastSeenMarkRef.current = markKey;
+    void markGoatChatSeenAction(chatSessionId).catch(() => undefined);
+  }, [
+    activeChatSummary?.updatedAt,
+    chatMessages.length,
+    chatSessionId,
+    isAgentWorking,
+    latestAssistantMessageId,
+    mode,
+    persistedChatSessionId,
+  ]);
   const activeChatTitle =
     activeChatSummary?.title ??
     (initialChat?.id === chatSessionId ? initialChat.title : null) ??
@@ -2027,6 +2067,7 @@ export function GoatSurface({
                         </h2>
                         <ChatHistoryList
                           chats={homeChats}
+                          localChatStates={localChatStates}
                           onSelect={openChat}
                           onArchive={archiveChat}
                         />
@@ -3344,24 +3385,25 @@ function chatHref(sessionId: string) {
 function visibleHomeChats(
   chats: readonly GoatChatSummaryView[],
   optimisticallyArchivedChatIds: ReadonlySet<string>,
+  localChatStates: ReadonlyMap<string, ReturnType<typeof goatChatSummaryState>>,
 ) {
   return chats
     .filter((chat) => !optimisticallyArchivedChatIds.has(chat.id))
     .filter(
       (chat) =>
         Boolean(chat.pinnedAt) ||
-        isCodingChatActive(chat) ||
+        isHomeChatStateVisible(chat, localChatStates.get(chat.id) ?? null) ||
         isRecentGoatHomeActivity(chat.updatedAt),
     )
     .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
-function isCodingChatActive(chat: GoatChatSummaryView) {
-  return (
-    chat.codexRuntime?.status === "queued" ||
-    chat.codexRuntime?.status === "starting" ||
-    chat.codexRuntime?.status === "running"
-  );
+function isHomeChatStateVisible(
+  chat: GoatChatSummaryView,
+  localState: ReturnType<typeof goatChatSummaryState> | null,
+) {
+  const state = localState ?? goatChatSummaryState(chat);
+  return state === "working" || state === "done_unseen";
 }
 
 function visibleHomeSchedules(schedules: readonly GoatTaskScheduleView[]) {
@@ -4713,10 +4755,12 @@ function LiveChatTaskSubscriber({
 
 function ChatHistoryList({
   chats,
+  localChatStates,
   onSelect,
   onArchive,
 }: {
   chats: readonly GoatChatSummaryView[];
+  localChatStates: ReadonlyMap<string, ReturnType<typeof goatChatSummaryState>>;
   onSelect: (chat: GoatChatSummaryView) => void;
   onArchive: (chat: GoatChatSummaryView) => void;
 }) {
@@ -4741,10 +4785,9 @@ function ChatHistoryList({
               onClick={() => onSelect(chat)}
               className="flex min-h-10 min-w-0 flex-1 items-center gap-3 rounded-md py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
             >
-              <Clock
-                size={15}
-                strokeWidth={2}
-                className="shrink-0 text-ink-subtle group-hover/chat:text-ink-muted"
+              <HomeChatStateIndicator
+                chat={chat}
+                localState={localChatStates.get(chat.id) ?? null}
               />
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-baseline gap-2">
@@ -4771,6 +4814,45 @@ function ChatHistoryList({
         );
       })}
     </div>
+  );
+}
+
+function HomeChatStateIndicator({
+  chat,
+  localState,
+}: {
+  chat: GoatChatSummaryView;
+  localState: ReturnType<typeof goatChatSummaryState> | null;
+}) {
+  const state = localState ?? goatChatSummaryState(chat);
+  if (state === "working") {
+    return (
+      <LoaderCircle
+        aria-hidden="true"
+        data-testid="home-chat-working"
+        size={15}
+        strokeWidth={2}
+        className="shrink-0 animate-spin text-ink-subtle group-hover/chat:text-ink-muted"
+      />
+    );
+  }
+  if (state === "done_unseen") {
+    return (
+      <span
+        aria-hidden="true"
+        data-testid="home-chat-unseen"
+        className="h-2 w-2 shrink-0 rounded-full bg-info"
+      />
+    );
+  }
+  return (
+    <CheckCircle2
+      aria-hidden="true"
+      data-testid="home-chat-seen"
+      size={15}
+      strokeWidth={2}
+      className="shrink-0 text-success"
+    />
   );
 }
 

@@ -63,6 +63,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/chat-actions", () => ({
   closeGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
+  markGoatChatSeenAction: vi.fn(async () => ({ ok: true, error: null })),
 }));
 
 // Server action module; importing it for real drags authkit into jsdom.
@@ -2060,6 +2061,55 @@ describe("GoatSurface chat streaming UI", () => {
     const chatLink = screen.getByRole("link", { name: /Market research/ });
     expect(chatLink).toHaveAttribute("href", "/chat/chat_1");
     expect(screen.getByText("Compare the latest pricing.")).toBeInTheDocument();
+  });
+
+  it("renders home chat state indicators", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        recentChats={[
+          codexChatSummary({
+            id: "working_chat",
+            title: "Working chat",
+            status: "running",
+          }),
+          {
+            id: "unseen_chat",
+            title: "Done unseen",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Ready to review.",
+            updatedAt: currentTimestamp(),
+            state: "done_unseen",
+          },
+          {
+            id: "seen_chat",
+            title: "Done seen",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Already opened.",
+            updatedAt: currentTimestamp(),
+            state: "done_seen",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /Working chat/ })).toHaveAttribute(
+      "href",
+      "/chat/working_chat",
+    );
+    expect(screen.getByRole("link", { name: /Done unseen/ })).toHaveAttribute(
+      "href",
+      "/chat/unseen_chat",
+    );
+    expect(screen.getByRole("link", { name: /Done seen/ })).toHaveAttribute(
+      "href",
+      "/chat/seen_chat",
+    );
+    expect(screen.getByTestId("home-chat-working")).toBeInTheDocument();
+    expect(screen.getByTestId("home-chat-unseen")).toBeInTheDocument();
+    expect(screen.getByTestId("home-chat-seen")).toBeInTheDocument();
   });
 
   it("keeps Codex and Claude Code sessions in Chats while Tasks show real tasks", () => {
