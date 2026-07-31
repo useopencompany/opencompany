@@ -122,6 +122,45 @@ describe("resolveGoatCodexChatWorkerConcurrency", () => {
 });
 
 describe("Goat Codex chat worker shutdown", () => {
+  it("lets active turns finish during the drain window without handing them off", async () => {
+    vi.clearAllMocks();
+    let claimed = false;
+    dbMock.execute.mockImplementation(async (query) => {
+      if (sqlText(query).includes("WITH candidate AS")) {
+        if (claimed) return { rows: [] };
+        claimed = true;
+        return { rows: [claimedTurnRow()] };
+      }
+      return { rows: [{ id: "updated" }] };
+    });
+    sessionRows.length = 0;
+    sessionRows.push(session());
+    let finishTurn: (() => void) | undefined;
+    chatMocks.runGoatCodexChatTurn.mockImplementationOnce(
+      () =>
+        new Promise<"settled">((resolve) => {
+          finishTurn = () => resolve("settled");
+        }),
+    );
+    const onHandoff = vi.fn();
+    const worker = startGoatCodexChatWorker(env(), { concurrency: 1, pollIntervalMs: 50 });
+
+    await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledOnce());
+    const stopping = worker.stop({
+      handoffAfterMs: 1_000,
+      postHandoffWaitMs: 1_000,
+      onHandoff,
+    });
+    finishTurn?.();
+    await stopping;
+
+    expect(onHandoff).not.toHaveBeenCalled();
+    expect(worker.activeCount()).toBe(0);
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("SET lease_id = NULL")),
+    ).toBe(false);
+  });
+
   it("bounds shutdown and hands active turns to the next worker", async () => {
     vi.clearAllMocks();
     let claimed = false;
