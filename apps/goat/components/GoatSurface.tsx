@@ -275,6 +275,15 @@ function engineChatKindFromChat(
   return null;
 }
 
+function chatModelSelectionFromEngineMention(
+  mention: GoatChatMention | null | undefined,
+): GoatChatModelSelection | null {
+  if (!mention || mention.kind !== "engine") return null;
+  if (mention.id === "codex") return CODEX_PICKER_VALUE;
+  if (mention.id === "claude") return CLAUDE_PICKER_VALUE;
+  return null;
+}
+
 // Cloud coding-CLI chats (Codex + Claude Code) share the same home card and status
 // indicator; only the display label differs by engine. Defaults to "Codex" so the
 // shared surface stays labeled for any non-Claude engine that reaches it.
@@ -413,11 +422,11 @@ export function GoatSurface({
   });
   // The remembered selection is a Home default. Opening or reserving a session sets the override
   // so cross-tab preference updates apply only to the next chat.
-  const chatModel = chatModelOverride ?? rememberedChatModel;
+  const baseChatModel = chatModelOverride ?? rememberedChatModel;
   const initialCodexComposerUiState = initialChat
     ? codexComposerUiStateForChat(initialChat)
     : defaultCodexComposerUiState(
-        chatModel === CLAUDE_PICKER_VALUE
+        baseChatModel === CLAUDE_PICKER_VALUE
           ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT
           : DEFAULT_CODEX_CHAT_REASONING_EFFORT,
       );
@@ -504,6 +513,20 @@ export function GoatSurface({
   const homeGreetingName = userName.trim() || "there";
   const activeTaskConversation =
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
+  const workflowMentionsEnabled = taskSpawningEnabled && !activeTaskConversation;
+  const activeSelectedMentions = selectedMentions.filter((mention) => {
+    if (!goatChatMentionIsVisible(input, mention)) return false;
+    if (mention.kind === "engine") {
+      return mention.id === "claude" ? claudeCodeConnected : codexConnected;
+    }
+    if (mention.kind === "workflow") return workflowMentionsEnabled;
+    return !activeTaskConversation;
+  });
+  const chatModel =
+    chatModelSelectionFromEngineMention(
+      activeSelectedMentions.find((mention) => mention.kind === "engine"),
+    ) ?? baseChatModel;
+  const isAutoChatModel = chatModel === AUTO_GOAT_MODEL_SELECTION;
 
   const beginActiveTurn = useCallback((assistantMessageId: string | null = null) => {
     const startedAtMs = Date.now();
@@ -550,7 +573,7 @@ export function GoatSurface({
 
   const adoptResolvedAutoModel = useCallback(
     (message: GoatChatUiMessage) => {
-      if (chatModel !== AUTO_GOAT_MODEL_SELECTION) return;
+      if (!isAutoChatModel) return;
       const metadata = message.metadata;
       if (
         !metadata?.model ||
@@ -561,7 +584,7 @@ export function GoatSurface({
       }
       setChatModelOverride(normalizeGoatModel(metadata.model));
     },
-    [chatModel, setChatModelOverride],
+    [isAutoChatModel, setChatModelOverride],
   );
 
   const trackOptimisticAttachmentPreviews = useCallback(
@@ -717,17 +740,8 @@ export function GoatSurface({
       creditBalance.balanceUsdMicros > 0 &&
       creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
   );
-  const workflowMentionsEnabled = taskSpawningEnabled && !activeTaskConversation;
   const adHocTaskMentionEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
   const selectedAdHocTask = adHocTaskMentionEnabled && hasGoatAdHocTaskToken(input);
-  const activeSelectedMentions = selectedMentions.filter((mention) => {
-    if (!goatChatMentionIsVisible(input, mention)) return false;
-    if (mention.kind === "engine") {
-      return mention.id === "claude" ? claudeCodeConnected : codexConnected;
-    }
-    if (mention.kind === "workflow") return workflowMentionsEnabled;
-    return !activeTaskConversation;
-  });
   const mentionOptions = buildMentionOptions({
     token: mentionToken,
     skills: skillCatalog,
@@ -756,7 +770,7 @@ export function GoatSurface({
     enabled: attachmentsEnabled && !engineSubmitting && !newChatCommandOpen,
     ...(activeEngine === "codex" || activeEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
-      : chatModel === AUTO_GOAT_MODEL_SELECTION
+      : isAutoChatModel
         ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
   });
@@ -819,14 +833,14 @@ export function GoatSurface({
     return overlay.length > 0 ? [...base, ...overlay] : base;
   }, [messages, persistedMessages, status]);
   useEffect(() => {
-    if (chatModel !== AUTO_GOAT_MODEL_SELECTION) return;
+    if (!isAutoChatModel) return;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
       if (message?.role !== "assistant") continue;
       adoptResolvedAutoModel(message);
       break;
     }
-  }, [adoptResolvedAutoModel, chatModel, messages]);
+  }, [adoptResolvedAutoModel, isAutoChatModel, messages]);
   const latestAssistantMessageId = useMemo(() => {
     for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
       if (chatMessages[index]?.role === "assistant") return chatMessages[index]?.id ?? null;
@@ -1797,7 +1811,7 @@ export function GoatSurface({
       }
     }
 
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && (!event.shiftKey || mode === "home")) {
       event.preventDefault();
       if (!isAgentWorking && !backgroundTaskSubmitting) formRef.current?.requestSubmit();
     }
@@ -1929,6 +1943,16 @@ export function GoatSurface({
     }
     setSelectedMentions((current) => {
       if (option.mention.kind === "engine") {
+        const modelSelection = chatModelSelectionFromEngineMention(option.mention);
+        if (modelSelection === CODEX_PICKER_VALUE && chatModel !== CODEX_PICKER_VALUE) {
+          setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+        } else if (modelSelection === CLAUDE_PICKER_VALUE && chatModel !== CLAUDE_PICKER_VALUE) {
+          setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+          setCodexPlanModeEnabled(false);
+          setCodexGoalModeEnabled(false);
+          setCodexGoalObjective("");
+          setCodexGoalTokenBudget("");
+        }
         return [...current.filter((mention) => mention.kind !== "engine"), option.mention];
       }
       if (option.mention.kind === "workflow") {
@@ -2470,6 +2494,9 @@ export function GoatSurface({
                   <GoatModelPicker
                     value={chatModel}
                     onChange={(model) => {
+                      setSelectedMentions((current) =>
+                        current.filter((mention) => mention.kind !== "engine"),
+                      );
                       setChatModelOverride(model);
                       persistLastGoatChatSelection(userWorkosId, model);
                       if (model === CODEX_PICKER_VALUE && model !== chatModel) {
@@ -2605,7 +2632,7 @@ function QuickChatComposer({
     () => normalizeGoatModel(defaultModel),
   );
   const [chatModelOverride, setChatModelOverride] = useState<GoatChatModelSelection | null>(null);
-  const chatModel = chatModelOverride ?? rememberedChatModel;
+  const baseChatModel = chatModelOverride ?? rememberedChatModel;
   const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
     normalizeCodexChatModelId(undefined),
   );
@@ -2620,22 +2647,7 @@ function QuickChatComposer({
   const [codexGoalObjective, setCodexGoalObjective] = useState("");
   const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState("");
 
-  const isCodexMode = chatModel === CODEX_PICKER_VALUE;
-  const isClaudeMode = chatModel === CLAUDE_PICKER_VALUE;
-  const selectedEngine: GoatEngineChatKind | null = isCodexMode
-    ? "codex"
-    : isClaudeMode
-      ? "claude_code"
-      : null;
-  const isEngineChat = selectedEngine !== null;
   const workflowMentionsEnabled = taskSpawningEnabled;
-  const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
-  const selectedAdHocTask = adHocTaskMentionEnabled && hasGoatAdHocTaskToken(input);
-  const outOfCredits = Boolean(
-    creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
-  );
-  const chatSendBlocked = outOfCredits && !isEngineChat;
-
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
@@ -2644,6 +2656,25 @@ function QuickChatComposer({
     if (mention.kind === "workflow") return workflowMentionsEnabled;
     return true;
   });
+  const chatModel =
+    chatModelSelectionFromEngineMention(
+      activeSelectedMentions.find((mention) => mention.kind === "engine"),
+    ) ?? baseChatModel;
+  const isCodexMode = chatModel === CODEX_PICKER_VALUE;
+  const isClaudeMode = chatModel === CLAUDE_PICKER_VALUE;
+  const selectedEngine: GoatEngineChatKind | null = isCodexMode
+    ? "codex"
+    : isClaudeMode
+      ? "claude_code"
+      : null;
+  const isEngineChat = selectedEngine !== null;
+  const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
+  const selectedAdHocTask = adHocTaskMentionEnabled && hasGoatAdHocTaskToken(input);
+  const outOfCredits = Boolean(
+    creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
+  );
+  const chatSendBlocked = outOfCredits && !isEngineChat;
+
   const mentionOptions = buildMentionOptions({
     token: mentionToken,
     skills: skillCatalog,
@@ -2774,6 +2805,16 @@ function QuickChatComposer({
     }
     setSelectedMentions((current) => {
       if (option.mention.kind === "engine") {
+        const modelSelection = chatModelSelectionFromEngineMention(option.mention);
+        if (modelSelection === CODEX_PICKER_VALUE && chatModel !== CODEX_PICKER_VALUE) {
+          setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+        } else if (modelSelection === CLAUDE_PICKER_VALUE && chatModel !== CLAUDE_PICKER_VALUE) {
+          setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+          setCodexPlanModeEnabled(false);
+          setCodexGoalModeEnabled(false);
+          setCodexGoalObjective("");
+          setCodexGoalTokenBudget("");
+        }
         return [...current.filter((mention) => mention.kind !== "engine"), option.mention];
       }
       if (option.mention.kind === "workflow") {
@@ -3306,6 +3347,9 @@ function QuickChatComposer({
                 // Deliberately not persisted via persistLastGoatChatSelection: this picker
                 // only applies to this one quick-compose chat, not the app-wide "last used
                 // model" default the main composer reads on its next fresh session.
+                setSelectedMentions((current) =>
+                  current.filter((mention) => mention.kind !== "engine"),
+                );
                 setChatModelOverride(model);
                 if (model === CODEX_PICKER_VALUE && model !== chatModel) {
                   setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);

@@ -422,6 +422,26 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
+  it("submits Shift+Enter from the main composer as a foreground chat", async () => {
+    const user = userEvent.setup();
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start now");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+
+    await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
+    const optimisticHref = historyMock.replaceState.mock.calls[0]?.[2];
+    expect(optimisticHref).toMatch(/^\/chat\/goat_chat_/);
+    expect(chatMock.preparedRequestBodies[0]).toMatchObject({
+      sessionId: null,
+      newSessionId: String(optimisticHref).slice("/chat/".length),
+      model: DEFAULT_GOAT_MODEL,
+    });
+    expect(screen.getByPlaceholderText("Reply...")).toBeInTheDocument();
+    expect(screen.queryByText("welcome back, there")).not.toBeInTheDocument();
+    expect(routerMock.push).not.toHaveBeenCalled();
+  });
+
   it("keeps the reserved detail URL and reuses its id when the first send is retried", async () => {
     const user = userEvent.setup();
     chatMock.sendError = new Error("network failed");
@@ -1383,8 +1403,23 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
-  it("shows the Codex mention menu and submits selected mention metadata", async () => {
+  it("uses @codex as a one-shot model selection without changing the remembered model", async () => {
     const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: requestChatSessionId(init, "goat_chat_codex_1"),
+          userMessageId: "goat_chat_msg_codex_user",
+          assistantMessageId: "goat_chat_msg_codex_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.localStorage.setItem("opencompany-goat-main-chat-selection:user_1", DEFAULT_GOAT_MODEL);
 
     render(
       <GoatSurface
@@ -1392,24 +1427,47 @@ describe("GoatSurface chat streaming UI", () => {
         defaultModel={DEFAULT_GOAT_MODEL}
         initialChat={null}
         codexConnected
+        userWorkosId="user_1"
       />,
     );
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
     await user.type(textarea, "@");
 
     expect(screen.getByRole("listbox", { name: "Mention menu" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     expect(textarea).toHaveValue("@codex ");
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
+    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" })).toBeInTheDocument();
 
     await user.type(textarea, "check repo access");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(chatMock.sendMessage).toHaveBeenCalledWith({
-      text: "@codex check repo access",
-      metadata: { mentions: [{ kind: "engine", id: "codex" }] },
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
+    const body = JSON.parse(String((init as RequestInit).body));
+    expect(body).toMatchObject({
+      newSessionId: expect.stringMatching(/^goat_chat_/),
+      message: {
+        role: "user",
+        parts: [{ type: "text", text: "@codex check repo access" }],
+      },
+      model: "openai/gpt-5.6-sol",
     });
+    expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
+      DEFAULT_GOAT_MODEL,
+    );
+
+    await user.keyboard("{Escape}");
+    await nextAnimationFrame();
+
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
   });
 
   it("starts a selected workflow in the background without creating a chat turn", async () => {
