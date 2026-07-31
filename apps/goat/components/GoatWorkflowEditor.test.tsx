@@ -175,11 +175,12 @@ describe("GoatWorkflowEditor", () => {
     );
   });
 
-  it("saves an on-a-schedule trigger", async () => {
+  it("saves an on-a-schedule trigger using the friendly schedule builder", async () => {
     render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
     fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
-    fireEvent.change(screen.getByLabelText("Cron"), { target: { value: "30 8 * * 1-5" } });
+    expect(screen.getByLabelText("Frequency")).toHaveValue("weekdays");
+    fireEvent.change(screen.getByLabelText("At"), { target: { value: "08:30" } });
     fireEvent.change(screen.getByLabelText("Timezone"), {
       target: { value: "America/New_York" },
     });
@@ -195,6 +196,52 @@ describe("GoatWorkflowEditor", () => {
           cron: "30 8 * * 1-5",
           timezone: "America/New_York",
           prompt: "Draft the weekday update.",
+        },
+      }),
+    );
+  });
+
+  it("switches the frequency preset and updates the cron accordingly", async () => {
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
+    fireEvent.change(screen.getByLabelText("Frequency"), { target: { value: "hours" } });
+    fireEvent.change(screen.getByLabelText("Every"), { target: { value: "6" } });
+    fireEvent.change(screen.getByLabelText("Task request"), {
+      target: { value: "Check for updates." },
+    });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: {
+          type: "schedule",
+          cron: "0 0,6,12,18 * * *",
+          timezone: "UTC",
+          prompt: "Check for updates.",
+        },
+      }),
+    );
+  });
+
+  it("saves a custom cron expression via the advanced option", async () => {
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
+    fireEvent.change(screen.getByLabelText("Frequency"), { target: { value: "custom" } });
+    fireEvent.change(screen.getByLabelText("Cron"), { target: { value: "13 9 1 * *" } });
+    fireEvent.change(screen.getByLabelText("Task request"), {
+      target: { value: "Run the monthly report." },
+    });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: {
+          type: "schedule",
+          cron: "13 9 1 * *",
+          timezone: "UTC",
+          prompt: "Run the monthly report.",
         },
       }),
     );
