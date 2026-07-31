@@ -2513,7 +2513,7 @@ export const goatWorkflows = goat.table(
     model: text("model").notNull().default(""),
     steps: jsonb("steps").$type<GoatWorkflowStep[]>().notNull().default(sql`'[]'::jsonb`),
     trigger: text("trigger").$type<GoatWorkflowTrigger>().notNull().default("manual"),
-    status: text("status").$type<GoatWorkflowStatus>().notNull().default("draft"),
+    status: text("status").$type<GoatWorkflowStatus>().notNull().default("active"),
     createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
       onDelete: "set null",
     }),

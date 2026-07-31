@@ -1247,6 +1247,13 @@
       "when": 1785409200001,
       "tag": "0177_goat_task_chat_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 178,
+      "version": "7",
+      "when": 1785478174557,
+      "tag": "0178_goat_workflow_default_active",
+      "breakpoints": true
     }
   ]
 }
