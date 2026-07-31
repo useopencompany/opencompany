@@ -2684,10 +2684,10 @@ export const goatTasks = goat.table(
       table.archivedAt,
       table.createdAt,
     ),
-    workspaceArchivedUpdatedIdx: index("goat_tasks_workspace_archived_updated_idx").on(
+    workspaceArchivedCreatedAtIdx: index("goat_tasks_workspace_archived_created_at_idx").on(
       table.workspaceId,
       table.archivedAt,
-      table.updatedAt,
+      table.createdAt,
     ),
     statusNextRunAtIdx: index("goat_tasks_status_next_run_at_idx").on(
       table.status,

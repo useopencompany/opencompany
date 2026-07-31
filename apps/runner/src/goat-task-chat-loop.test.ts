@@ -326,6 +326,7 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     displayId: "TASK-1",
     name: "Research Marseille",
     userWorkosId: "user_1",
+    workspaceId: "workspace_1",
     prompt: "Do the thing.",
     model,
     sessionId: null,

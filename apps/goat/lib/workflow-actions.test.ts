@@ -92,6 +92,8 @@ describe("workflow actions", () => {
       description: "",
       steps: [step],
       status: "active",
+      scheduleHarnessSpec: null,
+      scheduleUserWorkosId: null,
     });
     expect(cacheMocks.revalidatePath).toHaveBeenCalledWith("/workflows/weekly-update");
   });

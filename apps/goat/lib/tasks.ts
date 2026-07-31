@@ -683,7 +683,27 @@ export async function createGoatTaskForUser(input: {
   const modelMessage = { role: "user", content: input.prompt };
   const task = rowsFromExecute<GoatTaskRow>(
     await getDb().execute(sql`
-      WITH created_task AS (
+      WITH enabled_user AS MATERIALIZED (
+        SELECT "user".workos_user_id
+        FROM goat.users AS "user"
+        WHERE "user".workos_user_id = ${input.userWorkosId}
+          AND "user".task_spawning_enabled = true
+        FOR UPDATE OF "user"
+      ),
+      resolved_workspace AS MATERIALIZED (
+        SELECT member.workspace_id
+        FROM goat.workspace_members AS member
+        INNER JOIN enabled_user AS "user"
+          ON "user".workos_user_id = member.user_workos_id
+        WHERE ${input.workspaceId ?? null}::text IS NULL
+           OR member.workspace_id = ${input.workspaceId ?? null}
+        ORDER BY
+          CASE WHEN member.workspace_id = ${input.workspaceId ?? null} THEN 0 ELSE 1 END,
+          member.created_at ASC,
+          member.workspace_id ASC
+        LIMIT 1
+      ),
+      created_task AS (
         INSERT INTO goat.tasks (
           id,
           name,
@@ -705,8 +725,8 @@ export async function createGoatTaskForUser(input: {
         SELECT
           ${id},
           ${name},
-          ${input.userWorkosId},
-          ${input.workspaceId ?? null},
+          "user".workos_user_id,
+          (SELECT workspace_id FROM resolved_workspace),
           ${input.prompt},
           ${harnessSpec.model},
           ${input.scheduleId ?? null},
@@ -719,9 +739,9 @@ export async function createGoatTaskForUser(input: {
           ${now},
           ${now},
           ${JSON.stringify(harnessSpec)}::jsonb
-        FROM goat.users AS "user"
-        WHERE "user".workos_user_id = ${input.userWorkosId}
-          AND "user".task_spawning_enabled = true
+        FROM enabled_user AS "user"
+        WHERE ${input.workspaceId ?? null}::text IS NULL
+           OR EXISTS (SELECT 1 FROM resolved_workspace)
         RETURNING *
       ),
       inserted_user_message AS (
