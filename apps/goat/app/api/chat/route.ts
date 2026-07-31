@@ -10,7 +10,13 @@ import {
   cancelGoatCapabilityRunByToolCall,
 } from "@opencompany/db/goat-capabilities";
 import { hasPositiveGoatCreditBalance, recordGoatCreditDebit } from "@opencompany/db/goat-credits";
+import {
+  type GoatImessageDelivery,
+  resolveGoatImessageDelivery,
+} from "@opencompany/db/goat-imessage";
 import { type GoatChatMessageDebugTrace, goatChatSandboxUsage } from "@opencompany/db/goat-schema";
+import { resolveGoatImessageProvider } from "@opencompany/goat-agent/imessage/provider";
+import { createGoatSendUserMessageRunner } from "@opencompany/goat-agent/imessage/send-user-message";
 import {
   createGoatGatewayAttribution,
   GOAT_METRICS,
@@ -311,47 +317,57 @@ export async function POST(request: Request): Promise<Response> {
   // delegated work.
   const actionsEnabled = !requestedEngine && !isGoatChatActionsKilled();
   const emptyCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
-  const [actionCatalog, skillCatalog, workflowCatalog, modelRouting] = await Promise.all([
-    actionsEnabled
-      ? resolveGoatActionCatalog({
-          userWorkosId: context.user.workosUserId,
-          workspaceId: context.workspace.id,
-        }).catch((error) => {
-          logger.warn("Goat chat action catalog resolution failed", {
-            event: "goat.chat_action_catalog_resolution_failed",
-            error,
-          });
-          return emptyCatalog;
-        })
-      : Promise.resolve(emptyCatalog),
-    !requestedEngine
-      ? listGoatSkillCatalog(context.workspace.id).catch((error) => {
-          logger.warn("Goat chat skill catalog resolution failed", {
-            event: "goat.chat_skill_catalog_resolution_failed",
-            error,
-          });
-          return [];
-        })
-      : Promise.resolve([]),
-    !requestedEngine && context.user.taskSpawningEnabled
-      ? listGoatWorkflowCatalog(context.workspace.id).catch((error) => {
-          logger.warn("Goat chat workflow catalog resolution failed", {
-            event: "goat.chat_workflow_catalog_resolution_failed",
-            error,
-          });
-          return [];
-        })
-      : Promise.resolve([]),
-    autoModelRequested && userInput
-      ? resolveAutoGoatModel({
-          prompt: userInput.prompt,
-          attachments,
-          gatewayApiKey,
-          userWorkosId: context.user.workosUserId,
-          workspaceId: context.workspace.id,
-        })
-      : Promise.resolve<GoatChatModelRoutingResult | null>(null),
-  ]);
+  const [actionCatalog, skillCatalog, workflowCatalog, modelRouting, imessageDelivery] =
+    await Promise.all([
+      actionsEnabled
+        ? resolveGoatActionCatalog({
+            userWorkosId: context.user.workosUserId,
+            workspaceId: context.workspace.id,
+          }).catch((error) => {
+            logger.warn("Goat chat action catalog resolution failed", {
+              event: "goat.chat_action_catalog_resolution_failed",
+              error,
+            });
+            return emptyCatalog;
+          })
+        : Promise.resolve(emptyCatalog),
+      !requestedEngine
+        ? listGoatSkillCatalog(context.workspace.id).catch((error) => {
+            logger.warn("Goat chat skill catalog resolution failed", {
+              event: "goat.chat_skill_catalog_resolution_failed",
+              error,
+            });
+            return [];
+          })
+        : Promise.resolve([]),
+      !requestedEngine && context.user.taskSpawningEnabled
+        ? listGoatWorkflowCatalog(context.workspace.id).catch((error) => {
+            logger.warn("Goat chat workflow catalog resolution failed", {
+              event: "goat.chat_workflow_catalog_resolution_failed",
+              error,
+            });
+            return [];
+          })
+        : Promise.resolve([]),
+      autoModelRequested && userInput
+        ? resolveAutoGoatModel({
+            prompt: userInput.prompt,
+            attachments,
+            gatewayApiKey,
+            userWorkosId: context.user.workosUserId,
+            workspaceId: context.workspace.id,
+          })
+        : Promise.resolve<GoatChatModelRoutingResult | null>(null),
+      !requestedEngine && resolveGoatImessageProvider() !== null
+        ? resolveGoatImessageDelivery(context.user.workosUserId).catch((error) => {
+            logger.warn("Goat chat iMessage delivery resolution failed", {
+              event: "goat.chat_imessage_delivery_resolution_failed",
+              error,
+            });
+            return null;
+          })
+        : Promise.resolve<GoatImessageDelivery | null>(null),
+    ]);
   if (modelRouting && userInput) {
     userInput = { ...userInput, model: modelRouting.model };
   }
@@ -723,6 +739,17 @@ export async function POST(request: Request): Promise<Response> {
     latestUserMessage: turn.userMessageContent,
     ...(requestedEngine ? { requestedEngine } : {}),
     ...(browserToolSession ? { browserTools: browserToolSession.execute } : {}),
+    ...(imessageDelivery
+      ? {
+          sendUserMessage: createGoatSendUserMessageRunner({
+            userWorkosId: context.user.workosUserId,
+            phoneE164: imessageDelivery.phoneE164,
+            source: "chat",
+            chatSessionId: turn.session.id,
+            signal: generationSignal,
+          }),
+        }
+      : {}),
     // goat_brain is read-only for everyone (recall/inspect). The only write path
     // in chat is save_to_brain, which is available to every workspace member
     // with an active brain and enqueues the durable ingestion agent.

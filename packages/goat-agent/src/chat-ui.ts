@@ -58,6 +58,8 @@ export const LIST_ACTIONS_TOOL_NAME = "list_actions";
 export const LIST_ACTIONS_TOOL_PART_TYPE = `tool-${LIST_ACTIONS_TOOL_NAME}` as const;
 export const USE_ACTION_TOOL_NAME = "use_action";
 export const USE_ACTION_TOOL_PART_TYPE = `tool-${USE_ACTION_TOOL_NAME}` as const;
+export const SEND_USER_MESSAGE_TOOL_NAME = "send_user_message";
+export const SEND_USER_MESSAGE_TOOL_PART_TYPE = `tool-${SEND_USER_MESSAGE_TOOL_NAME}` as const;
 export const LIST_SKILLS_TOOL_NAME = "list_skills";
 export const LIST_SKILLS_TOOL_PART_TYPE = `tool-${LIST_SKILLS_TOOL_NAME}` as const;
 export const USE_SKILL_TOOL_NAME = "use_skill";
@@ -316,6 +318,14 @@ export type SaveToBrainToolOutput =
       error: string;
     };
 
+export type SendUserMessageToolInput = {
+  message: string;
+};
+
+export type SendUserMessageToolOutput =
+  | { ok: true; delivered: true }
+  | { ok: false; error: string };
+
 export type WebSearchToolInput = {
   query: string;
   recencyDays?: 7 | 30 | 90;
@@ -502,6 +512,10 @@ export type GoatChatTools = {
   use_action: {
     input: UseActionToolInput;
     output: UseActionToolOutput;
+  };
+  send_user_message: {
+    input: SendUserMessageToolInput;
+    output: SendUserMessageToolOutput;
   };
   list_skills: {
     input: ListSkillsToolInput;

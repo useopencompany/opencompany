@@ -1282,6 +1282,13 @@
       "when": 1785497032822,
       "tag": "0182_goat_tasks_workspace_public",
       "breakpoints": true
+    },
+    {
+      "idx": 183,
+      "version": "7",
+      "when": 1785497032823,
+      "tag": "0183_goat_imessage_integration",
+      "breakpoints": true
     }
   ]
 }

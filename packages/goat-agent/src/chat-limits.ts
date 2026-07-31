@@ -1,3 +1,4 @@
 export const MAX_BROWSER_CALLS_PER_TURN = 12;
 export const MAX_WEB_FETCH_CALLS_PER_TURN = 4;
 export const MAX_WEB_SEARCH_CALLS_PER_TURN = 4;
+export const MAX_SEND_USER_MESSAGE_CALLS_PER_TURN = 3;

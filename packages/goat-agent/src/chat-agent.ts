@@ -32,6 +32,7 @@ import {
 } from "./brain-surface";
 import {
   MAX_BROWSER_CALLS_PER_TURN,
+  MAX_SEND_USER_MESSAGE_CALLS_PER_TURN,
   MAX_WEB_FETCH_CALLS_PER_TURN,
   MAX_WEB_SEARCH_CALLS_PER_TURN,
 } from "./chat-limits";
@@ -62,6 +63,9 @@ import {
   SCHEDULE_TASK_TOOL_NAME,
   type ScheduleTaskToolInput,
   type ScheduleTaskToolOutput,
+  SEND_USER_MESSAGE_TOOL_NAME,
+  type SendUserMessageToolInput,
+  type SendUserMessageToolOutput,
   START_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
   type StartTaskToolInput,
@@ -82,6 +86,7 @@ import {
   type WebSearchToolOutput,
 } from "./chat-ui";
 import { normalizePublicWebUrl } from "./chat-web-fetch";
+import type { SendUserMessageRunner } from "./imessage/send-user-message";
 import {
   BROWSER_CHAT_CALL_LIMIT_DESCRIPTION,
   BROWSER_CHAT_TOOL_DESCRIPTIONS,
@@ -107,6 +112,8 @@ import {
   SCHEDULE_TASK_SOURCE_DESCRIPTION,
   SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
   SCHEDULE_TASK_TOOL_DESCRIPTION,
+  SEND_USER_MESSAGE_MESSAGE_DESCRIPTION,
+  SEND_USER_MESSAGE_TOOL_DESCRIPTION,
   START_TASK_ENGINE_DESCRIPTION,
   START_TASK_NAME_DESCRIPTION,
   START_TASK_PROMPT_DESCRIPTION,
@@ -306,6 +313,7 @@ export async function runOpenCompanyChatAgent(input: {
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
+  sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
   browserTools?: BrowserToolRunner;
@@ -359,6 +367,7 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
+    ...(input.sendUserMessage ? { sendUserMessage: input.sendUserMessage } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
     ...(input.browserTools ? { browserTools: input.browserTools } : {}),
@@ -453,6 +462,7 @@ export function createOpenCompanyChatToolContext(input: {
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
+  sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
   browserTools?: BrowserToolRunner;
@@ -714,6 +724,40 @@ export function createOpenCompanyChatToolContext(input: {
         });
         if (output.ok) capturedByKey.set(key, output);
         return output;
+      },
+    });
+  }
+
+  const sendUserMessage = input.sendUserMessage;
+  if (sendUserMessage) {
+    let sendUserMessageCallCount = 0;
+    tools[SEND_USER_MESSAGE_TOOL_NAME] = tool<SendUserMessageToolInput, SendUserMessageToolOutput>({
+      description: SEND_USER_MESSAGE_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<SendUserMessageToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          message: {
+            type: "string",
+            description: SEND_USER_MESSAGE_MESSAGE_DESCRIPTION,
+          },
+        },
+        required: ["message"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        const message = typeof args.message === "string" ? args.message.trim() : "";
+        if (!message) {
+          return { ok: false, error: "send_user_message needs a non-empty message." };
+        }
+        sendUserMessageCallCount += 1;
+        if (sendUserMessageCallCount > MAX_SEND_USER_MESSAGE_CALLS_PER_TURN) {
+          return {
+            ok: false,
+            error: `send_user_message limit reached for this turn (${MAX_SEND_USER_MESSAGE_CALLS_PER_TURN}). Not sent.`,
+          };
+        }
+        return sendUserMessage(message);
       },
     });
   }

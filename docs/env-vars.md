@@ -218,6 +218,11 @@ Set these in the separate Vercel project for Goat:
 | `REDIS_URL` (or `KV_URL`) | No | Enables resumable Goat chat streams (`resumable-stream`): refreshes reattach to in-flight turns, disconnects no longer cancel generation, and the stop button cancels via `/api/chat/[sessionId]/stop`. Without it, chat still works; a mid-stream disconnect persists the partial response instead. |
 | `GOAT_CHAT_ACTIONS_KILL_SWITCH` | No | Set to `true` to globally disable Goat chat actions (the `list_actions`/`use_action` tools over Attio, Slack, Gmail, Google Calendar, Google Drive, Linear, PostHog, and other supported connections) for everyone, without a deploy rollback. Chat actions are otherwise on by default for connected integrations. |
 | `GOAT_CHAT_SANDBOX_IMAGE` | Recommended with browser sandbox | Complete Vercel Container Registry image reference built from `apps/goat/sandbox-image`. Without it, the first browser use provisions `agent-browser` and Chromium in a stock Node 24 sandbox. See `docs/goat-chat-sandbox.md`. |
+| `LINQ_API_TOKEN` / `LINQ_FROM_NUMBER` | iMessage only | Linq Partner API credentials used to send pairing codes and one-way iMessage notifications. Store both in Infisical `prod` + `/goat` and `/runner`; the tool stays unavailable when either value is missing. |
+| `LINQ_API_BASE_URL` | No | Optional Linq API origin override. Leave unset for the production Linq endpoint. |
+| `GOAT_IMESSAGE_PROVIDER` | Local development only | Set to `log` to exercise pairing and notifications without contacting Linq. Pairing codes are written to server logs; do not enable this provider in hosted environments. |
+| `GOAT_IMESSAGE_KILL_SWITCH` | No | Set to `true` in both Goat and runner environments to stop new iMessage sends without a rollback. |
+| `GOAT_IMESSAGE_DAILY_CAP` | No | Maximum audited iMessage sends per user in a rolling 24-hour window. Defaults to `30`. Keep the value aligned between Goat and runner. |
 | `MONID_API_KEY` | Yes | Server-only API key for Goat’s curated managed social and lead capabilities. Store it in Infisical `prod` + `/goat`; it must never reach the browser or runner. |
 | `GOAT_MANAGED_CAPABILITIES_KILL_SWITCH` | No | Set to `true` to remove all managed social and lead capabilities from new chat turns without disabling connected-integration actions. Already-started runs continue through billing reconciliation. |
 | `GOAT_DISABLED_MANAGED_CAPABILITY_ACTIONS` | No | Comma-separated exact managed action ids (for example `x.search_posts,linkedin.list_comments`) to remove individual reviewed endpoints from new chat turns. Execution also fails closed if a stale catalog attempts a disabled action. |
@@ -391,6 +396,11 @@ Set these in the Render `opencompany-runner` service.
 | `GOAT_OBSERVABILITY_ENABLED` | No | Enables Goat task OpenTelemetry traces and metrics from the runner when `true`, `1`, `on`, or `yes`. |
 | `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` | Required with Goat OTel | OTLP HTTP base endpoint for SigNoz. The package appends `/v1/traces` and `/v1/metrics`. |
 | `GOAT_OTEL_EXPORTER_OTLP_HEADERS` | SigNoz Cloud only | Comma-separated OTLP headers, usually `signoz-ingestion-key=<key>`. |
+| `LINQ_API_TOKEN` / `LINQ_FROM_NUMBER` | iMessage only | Same Linq Partner API credentials as the Goat app. Store both in Infisical `prod` + `/runner`; task notifications stay unavailable when either value is missing. |
+| `LINQ_API_BASE_URL` | No | Optional Linq API origin override. Leave unset for the production Linq endpoint. |
+| `GOAT_IMESSAGE_PROVIDER` | Local development only | Set to `log` only when locally exercising task notifications without contacting Linq. Do not enable it on the hosted runner. |
+| `GOAT_IMESSAGE_KILL_SWITCH` | No | Set to `true` in both runner and Goat environments to stop new iMessage sends without a rollback. |
+| `GOAT_IMESSAGE_DAILY_CAP` | No | Maximum audited iMessage sends per user in a rolling 24-hour window. Defaults to `30`; keep it aligned with Goat. |
 | `BRAINTRUST_ENABLED` | No | Enables Braintrust runner tracing when set to `true`, `1`, `on`, or `yes`. |
 | `BRAINTRUST_API_KEY` | Required with `BRAINTRUST_ENABLED` | Braintrust API key for runner traces. |
 | `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |

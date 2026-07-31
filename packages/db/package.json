@@ -88,6 +88,10 @@
       "types": "./src/goat-granola.ts",
       "default": "./src/goat-granola.ts"
     },
+    "./goat-imessage": {
+      "types": "./src/goat-imessage.ts",
+      "default": "./src/goat-imessage.ts"
+    },
     "./goat-fathom": {
       "types": "./src/goat-fathom.ts",
       "default": "./src/goat-fathom.ts"
