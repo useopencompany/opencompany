@@ -489,22 +489,15 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
-  it("keeps the painted composer overlay aligned with textarea scrolling", async () => {
+  it("renders composer input as native textarea text", async () => {
     const user = userEvent.setup();
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "@codex inspect this long prompt");
-    const overlay = textarea.previousElementSibling as HTMLDivElement | null;
-    expect(overlay).toHaveAttribute("aria-hidden", "true");
-
-    textarea.scrollTop = 48;
-    fireEvent.scroll(textarea);
-    expect(overlay?.scrollTop).toBe(48);
-
-    textarea.scrollTop = 72;
-    await user.type(textarea, " after resizing");
-    expect(overlay?.scrollTop).toBe(72);
+    expect(textarea).toHaveClass("text-ink");
+    expect(textarea).not.toHaveClass("text-transparent");
+    expect(textarea.parentElement?.querySelector('[aria-hidden="true"]')).toBeNull();
   });
 
   it("selects from the active goat model list and sends the chosen model", async () => {
@@ -1408,10 +1401,6 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     expect(textarea).toHaveValue("@codex ");
-    const selectedMention = screen.getByTestId("selected-codex-mention");
-    expect(selectedMention).toHaveTextContent("@codex");
-    expect(selectedMention).not.toHaveClass("px-1");
-    expect(selectedMention).not.toHaveClass("font-medium");
 
     await user.type(textarea, "check repo access");
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -1474,10 +1463,7 @@ describe("GoatSurface chat streaming UI", () => {
     const textarea = screen.getByPlaceholderText("Reply...");
     await user.type(textarea, "#");
     await user.click(await screen.findByRole("option", { name: /Morning Test/i }));
-    const selectedWorkflowMention = screen.getByTestId("selected-workflow-mention");
-    expect(selectedWorkflowMention).toHaveTextContent("#morning-test");
-    expect(selectedWorkflowMention).not.toHaveClass("px-1");
-    expect(selectedWorkflowMention).not.toHaveClass("font-medium");
+    expect(textarea).toHaveValue("#morning-test ");
     await user.type(textarea, "run today's checks");
     await user.click(screen.getByRole("button", { name: "Start task" }));
 
@@ -1628,10 +1614,7 @@ describe("GoatSurface chat streaming UI", () => {
     const textarea = screen.getByPlaceholderText("Reply...");
     await user.type(textarea, "#task research our three closest competitors");
 
-    const selectedTaskMention = screen.getByTestId("selected-task-mention");
-    expect(selectedTaskMention).toHaveTextContent("#task");
-    expect(selectedTaskMention).not.toHaveClass("px-1");
-    expect(selectedTaskMention).not.toHaveClass("font-medium");
+    expect(textarea).toHaveValue("#task research our three closest competitors");
     expect(screen.getByTestId("ad-hoc-task-hint")).toHaveTextContent(
       "Sending starts this as an ad-hoc background task.",
     );
@@ -1716,7 +1699,6 @@ describe("GoatSurface chat streaming UI", () => {
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "@codex check repo access");
-    expect(screen.queryByTestId("selected-codex-mention")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
@@ -1741,7 +1723,6 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     await user.clear(textarea);
     await user.type(textarea, "check repo access");
-    expect(screen.queryByTestId("selected-codex-mention")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
@@ -1789,11 +1770,11 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(textarea, "then @skill/writing");
     await user.click(await screen.findByRole("option", { name: /writing work/i }));
 
-    expect(screen.getAllByTestId("selected-skill-mention")).toHaveLength(2);
     expect(textarea).toHaveValue("@skill/coding-work then @skill/writing-work ");
+    expect(textarea.parentElement?.querySelector('[aria-hidden="true"]')).toBeNull();
 
     fireEvent.change(textarea, { target: { value: "@skill/coding-work then continue" } });
-    expect(screen.getAllByTestId("selected-skill-mention")).toHaveLength(1);
+    expect(textarea).toHaveValue("@skill/coding-work then continue");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
@@ -1848,7 +1829,6 @@ describe("GoatSurface chat streaming UI", () => {
     });
 
     expect(textarea).toHaveValue(pastedText);
-    expect(await screen.findAllByTestId("selected-skill-mention")).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: "Send message" }));
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
