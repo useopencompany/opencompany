@@ -2,7 +2,7 @@ import { GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtim
 import type { GoatCodexChatTurn, GoatHarnessSpec, GoatTask } from "@opencompany/db/goat-schema";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GoatTaskTurnCanceledError } from "./goat-codex-chat-errors";
+import { GoatTaskTurnTerminalError } from "./goat-codex-chat-errors";
 import {
   buildGoatTaskTurnCompletion,
   type GoatTaskTurnContext,
@@ -13,9 +13,22 @@ import {
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
 }));
+const analyticsMocks = vi.hoisted(() => ({
+  captureGoatLlmUsageRecorded: vi.fn(async () => undefined),
+  captureGoatModelSpendRecorded: vi.fn(async () => undefined),
+  captureGoatServerEvent: vi.fn(async () => undefined),
+}));
 
 vi.mock("./db", () => ({
   getDb: () => ({ execute: mocks.execute }),
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatLlmUsageRecorded: analyticsMocks.captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded: analyticsMocks.captureGoatModelSpendRecorded,
+  captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
+  goatAnalyticsUsageSourceForEngine: (engine: "opencompany" | "codex" | "claude_code") =>
+    engine === "opencompany" ? "owned_platform" : "external_harness",
 }));
 
 describe("session-backed task turns", () => {
@@ -25,8 +38,14 @@ describe("session-backed task turns", () => {
   });
 
   it("turns a completed workflow step into the next engine-specific durable turn", () => {
+    const spec = workflowSpec();
+    spec.codex = { repository: "octo/repo", reasoningEffort: "low" };
+    spec.workflow!.steps![1] = {
+      ...spec.workflow!.steps![1]!,
+      reasoningEffort: "xhigh",
+    };
     const completion = buildGoatTaskTurnCompletion({
-      context: context(workflowSpec()),
+      context: context(spec),
       result: "Repository audit complete.",
       reportedOutcome: "done",
       outcomeComment: "The repository is ready.",
@@ -35,6 +54,10 @@ describe("session-backed task turns", () => {
     expect(completion.harnessSpec).toMatchObject({
       engine: "codex",
       model: "openai/gpt-5.5",
+      codex: {
+        repository: "octo/repo",
+        reasoningEffort: "xhigh",
+      },
       workflow: {
         currentStepIndex: 1,
         completedStepCount: 1,
@@ -47,6 +70,7 @@ describe("session-backed task turns", () => {
     expect(completion.nextTurn).toMatchObject({
       engine: "codex",
       chatModel: "openai/gpt-5.5",
+      settings: { reasoningEffort: "xhigh" },
       prompt: expect.stringContaining("Step 2/2 — Implement"),
     });
     expect(completion.nextTurn?.prompt).toContain("Repository audit complete.");
@@ -54,6 +78,7 @@ describe("session-backed task turns", () => {
 
   it("passes the previous step result as an explicit handoff to OpenCompany steps", () => {
     const spec = workflowSpec();
+    spec.codex = { repository: "octo/repo", reasoningEffort: "low" };
     const nextStep = spec.workflow?.steps?.[1];
     if (!nextStep) throw new Error("Expected workflow fixture to have a second step.");
     nextStep.engine = "opencompany";
@@ -70,6 +95,8 @@ describe("session-backed task turns", () => {
       engine: "opencompany",
       prompt: expect.stringContaining("Step 2/2 — Implement"),
     });
+    expect(completion.harnessSpec.codex).toBeUndefined();
+    expect(completion.nextTurn?.settings).toEqual({});
     expect(completion.nextTurn?.prompt).toContain("<previous_step_result>");
     expect(completion.nextTurn?.prompt).toContain("Repository audit complete.");
   });
@@ -80,6 +107,7 @@ describe("session-backed task turns", () => {
       ...spec.workflow!.steps![1]!,
       engine: "claude_code",
       model: "anthropic/claude-sonnet-5",
+      reasoningEffort: "medium",
     };
     const completion = buildGoatTaskTurnCompletion({
       context: context(spec),
@@ -93,6 +121,7 @@ describe("session-backed task turns", () => {
       chatModel: "anthropic/claude-sonnet-5",
       runtimeModel: "claude-sonnet-5",
       hostToolContractVersion: GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
+      settings: { reasoningEffort: "medium" },
       prompt: expect.stringContaining("Step 2/2 — Implement"),
     });
     expect(completion.nextTurn?.prompt).toContain("<previous_step_result>");
@@ -128,18 +157,92 @@ describe("session-backed task turns", () => {
     });
   });
 
-  it("classifies a canceled task as an interrupt while the turn lease is still held", async () => {
-    mocks.execute.mockResolvedValueOnce({ rows: [{ outcome: "canceled" }] });
+  it("queues a scheduled task check-in instead of finalizing the task", async () => {
+    const now = new Date("2026-07-30T09:30:00.000Z");
+    const spec = workflowSpec();
+    spec.engine = "claude_code";
+    spec.model = "anthropic/claude-sonnet-5";
+    spec.workflow!.steps![0] = {
+      ...spec.workflow!.steps![0]!,
+      engine: "claude_code",
+      model: "anthropic/claude-sonnet-5",
+    };
+    const completion = buildGoatTaskTurnCompletion({
+      context: context(spec),
+      result: "PR opened; CI is still running.",
+      reportedOutcome: "needs_attention",
+      outcomeComment: "Waiting for CI.",
+      scheduledWakeup: {
+        wakeup: {
+          delaySeconds: 600,
+          reason: "Wait for CI",
+          prompt: "Inspect PR #42.",
+        },
+        parentSettings: {
+          reasoningEffort: "high",
+          scheduledWakeup: {
+            delaySeconds: 600,
+            reason: "Wait for CI",
+            prompt: "Inspect PR #42.",
+          },
+        },
+        now,
+      },
+    });
+
+    expect(completion.nextTurn).toMatchObject({
+      engine: "claude_code",
+      userMessageContent: "Scheduled check-in: Wait for CI",
+      userMessageDebugTrace: {
+        scheduledWakeup: {
+          reason: "Wait for CI",
+          dueAt: "2026-07-30T09:40:00.000Z",
+        },
+      },
+      runAfter: new Date("2026-07-30T09:40:00.000Z"),
+      settings: { reasoningEffort: "high", wakeupChain: 1 },
+      prompt: expect.stringContaining("Inspect PR #42."),
+    });
+    expect(completion.nextTurn?.prompt).toContain("Automated scheduled wakeup");
+    expect(completion.nextTurn?.settings).not.toHaveProperty("scheduledWakeup");
+
+    await settleGoatDurableTurn({
+      target: {
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        codexChatSessionId: "runtime_1",
+        chatSessionId: "goat_chat_task_1",
+        turnId: "turn_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+      turnStatus: "completed",
+      sessionStatus: "idle",
+      error: null,
+      completedAt: now,
+      taskCompletion: completion,
+    });
+
+    const query = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]);
+    expect(query.sql).toContain("run_after");
+    expect(query.sql).toContain("debug_trace");
+    expect(query.params).toContain("Scheduled check-in: Wait for CI");
+    expect(query.params).toContainEqual(new Date("2026-07-30T09:40:00.000Z"));
+    expect(query.params).toContain('{"reasoningEffort":"high","wakeupChain":1}');
+  });
+
+  it("classifies an already-terminal task as an interrupt while the turn lease is held", async () => {
+    mocks.execute.mockResolvedValueOnce({ rows: [{ outcome: "terminal" }] });
 
     await expect(
       markGoatTaskTurnRunning({
         context: context(workflowSpec()),
         turn: durableTurn(),
       }),
-    ).rejects.toBeInstanceOf(GoatTaskTurnCanceledError);
+    ).rejects.toBeInstanceOf(GoatTaskTurnTerminalError);
 
     const statement = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]?.[0]).sql;
-    expect(statement).toContain("task.status = 'canceled'");
+    expect(statement).toContain("task.status IN ('succeeded', 'failed', 'canceled')");
     expect(statement).toContain("EXISTS (");
   });
 
@@ -154,6 +257,7 @@ describe("session-backed task turns", () => {
     await settleGoatDurableTurn({
       target: {
         userWorkosId: "user_1",
+        workspaceId: "workspace_1",
         codexChatSessionId: "runtime_1",
         chatSessionId: "goat_chat_task_1",
         turnId: "turn_1",
@@ -172,11 +276,13 @@ describe("session-backed task turns", () => {
     expect(statement).toContain("UPDATE goat.tasks AS task");
     expect(statement).toContain("workflow_origin_attachments AS");
     expect(statement).toContain("INSERT INTO goat.chat_messages");
+    expect(statement).toContain("debug_trace");
     expect(statement).toContain("attachment_texts");
     expect(statement).toContain("origin.role = 'user'");
     expect(statement).toContain("IN ('codex', 'claude_code')");
     expect(statement).toContain("SELECT attachments FROM workflow_origin_attachments");
     expect(statement).toContain("INSERT INTO goat.codex_chat_turns");
+    expect(statement).toContain("run_after");
     expect(statement).toContain("UPDATE goat.codex_chat_sessions AS runtime");
     expect(statement).toContain("task.status IN ('queued', 'running')");
     expect(statement).toContain("SELECT next.id");
@@ -185,6 +291,19 @@ describe("session-backed task turns", () => {
     expect(statement).toContain("existing.debug_trace->'taskNotification'->>'taskId'");
     expect(statement).not.toContain("goat.task_messages");
     expect(statement).not.toContain("goat.task_events");
+    expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
+      "chat_message_sent",
+      "user_1",
+      {
+        workspace_id: "workspace_1",
+        session_id: "goat_chat_task_1",
+        is_first_message: false,
+        engine: "codex",
+        usage_source: "external_harness",
+        model: completion.nextTurn?.chatModel,
+        message_length: completion.nextTurn?.prompt.length,
+      },
+    );
   });
 });
 

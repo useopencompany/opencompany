@@ -6,6 +6,8 @@ const dbMock = vi.hoisted(() => ({
   execute: vi.fn(),
 }));
 const usageMocks = vi.hoisted(() => ({
+  captureModelSpend: vi.fn(async () => undefined),
+  captureLlmUsage: vi.fn(async () => undefined),
   recordCreditDebit: vi.fn(async () => ({ ok: true })),
   recordModelCost: vi.fn(),
   recordModelUsageTokens: vi.fn(),
@@ -17,6 +19,11 @@ vi.mock("./db", () => ({
 
 vi.mock("@opencompany/db/goat-credits", () => ({
   recordGoatCreditDebit: usageMocks.recordCreditDebit,
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatModelSpendRecorded: usageMocks.captureModelSpend,
+  captureGoatLlmUsageRecorded: usageMocks.captureLlmUsage,
 }));
 
 vi.mock("@opencompany/goat-observability", () => ({
@@ -104,6 +111,41 @@ describe("createGoatOpenCompanyChatProjector", () => {
         source: "chat_model_usage",
         idempotencyKey: "chat:user_message_1:durable:turn_1:step:2",
         chatSessionId: "goat_chat_1",
+      }),
+    );
+    expect(usageMocks.captureLlmUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distinctId: "user_1",
+        workspaceId: "workspace_1",
+        surface: "chat",
+        stage: "generation",
+        sessionId: "goat_chat_1",
+        messageId: "user_message_1",
+        turnId: "turn_1",
+        stepIndex: 2,
+        modelProvider: "vercel-ai-gateway",
+        model: "anthropic/claude-sonnet-5",
+        inputTokens: 1_000,
+        inputNoCacheTokens: 900,
+        inputCacheReadTokens: 100,
+        inputCacheWriteTokens: 0,
+        outputTokens: 200,
+        outputTextTokens: 200,
+        outputReasoningTokens: 0,
+        totalTokens: 1_200,
+      }),
+    );
+    expect(usageMocks.captureModelSpend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        billingSource: "chat_model_usage",
+        surface: "chat",
+        stage: "generation",
+        engine: "opencompany",
+        model: "anthropic/claude-sonnet-5",
+        chatSessionId: "goat_chat_1",
+        messageId: "user_message_1",
       }),
     );
   });

@@ -59,7 +59,7 @@ import { runGoatTaskBrainRead } from "./goat-codex-brain-tool";
 import {
   GoatCodexChatHandoffError,
   GoatCodexChatLeaseLostError,
-  GoatTaskTurnCanceledError,
+  GoatTaskTurnTerminalError,
 } from "./goat-codex-chat-errors";
 import {
   createGoatOpenCompanyChatProjector,
@@ -107,6 +107,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
       codexChatSessionId: session.id,
       chatSessionId: session.chatSessionId,
       turnId: turn.id,
+      taskId: input.taskContext?.task.id ?? null,
       userMessageId: turn.userMessageId,
       assistantMessageId: turn.assistantMessageId,
       workspaceId: session.workspaceId,
@@ -236,7 +237,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
     }
     if (
       effectiveError instanceof GoatOpenCompanyChatInterruptedError ||
-      effectiveError instanceof GoatTaskTurnCanceledError
+      effectiveError instanceof GoatTaskTurnTerminalError
     ) {
       await projector.interrupted(
         projection,
@@ -1045,7 +1046,7 @@ function recognizedAbortError(value: unknown): value is Error {
   return (
     value instanceof GoatCodexChatHandoffError ||
     value instanceof GoatOpenCompanyChatInterruptedError ||
-    value instanceof GoatTaskTurnCanceledError ||
+    value instanceof GoatTaskTurnTerminalError ||
     value instanceof GoatCodexChatLeaseLostError
   );
 }

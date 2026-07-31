@@ -10,6 +10,11 @@ import {
 import { createLogger } from "@opencompany/observability";
 import { put } from "@vercel/blob";
 import {
+  type BrowserProfileAgentSession,
+  browserProfilesKilled,
+  type ConnectedBrowserProfile,
+} from "@/lib/browser-profiles";
+import {
   goatChatScreenshotBlobPath,
   goatChatScreenshotFilename,
   goatChatScreenshotUrl,
@@ -49,13 +54,25 @@ export type ChatBrowserSandboxUsage = {
 
 export type ChatBrowserToolSession = {
   execute(input: { name: BrowserToolName; args: unknown }): Promise<BrowserToolOutput>;
+  useProfile(input: { profileId: string }): Promise<BrowserProfileUseOutput>;
+  endActiveProfile(): Promise<void>;
   getUsage(): ChatBrowserSandboxUsage | null;
+};
+
+export type BrowserProfileUseOutput = {
+  ok: boolean;
+  profile?: ConnectedBrowserProfile;
+  liveViewUrl?: string;
+  message?: string;
+  error?: string;
 };
 
 export function createChatBrowserToolSession(input: {
   chatSessionId: string;
   userWorkosId: string;
   signal: AbortSignal;
+  createBrowserProfileAgentSession?: (profileId: string) => Promise<BrowserProfileAgentSession>;
+  endBrowserProfileAgentSession?: (session: BrowserProfileAgentSession) => Promise<void>;
 }): ChatBrowserToolSession {
   const browserSessionId = goatChatSandboxName(input.chatSessionId);
   const budget = createBrowserObservationBudget();
@@ -64,6 +81,9 @@ export function createChatBrowserToolSession(input: {
   let startedAt: Date | null = null;
   let commandCount = 0;
   let queue = Promise.resolve();
+  let activeProfileSession: BrowserProfileAgentSession | null = null;
+  let activeProfileEndPromise: Promise<void> | null = null;
+  let lastKnownUrl = "";
 
   const getSandbox = () => {
     startedAt ??= new Date();
@@ -89,6 +109,62 @@ export function createChatBrowserToolSession(input: {
     return pending;
   };
 
+  const useProfile = async ({
+    profileId,
+  }: {
+    profileId: string;
+  }): Promise<BrowserProfileUseOutput> => {
+    if (!input.createBrowserProfileAgentSession) {
+      return {
+        ok: false,
+        error: "Authenticated browser profiles are not configured.",
+      };
+    }
+    if (activeProfileSession) {
+      return {
+        ok: false,
+        error: `The ${activeProfileSession.profile.name} browser profile is already active.`,
+      };
+    }
+    try {
+      activeProfileSession = await input.createBrowserProfileAgentSession(profileId);
+      lastKnownUrl = `https://${activeProfileSession.profile.siteHost}/`;
+      return {
+        ok: true,
+        profile: activeProfileSession.profile,
+        liveViewUrl: activeProfileSession.liveViewPath,
+        message: `Authenticated browser profile active for ${activeProfileSession.profile.siteHost}.`,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not start browser profile session.",
+      };
+    }
+  };
+
+  const endActiveProfile = async () => {
+    if (!activeProfileSession || !input.endBrowserProfileAgentSession) return;
+    if (!activeProfileEndPromise) {
+      const session = activeProfileSession;
+      activeProfileSession = null;
+      activeProfileEndPromise = input
+        .endBrowserProfileAgentSession(session)
+        .catch((error) => {
+          logger.warn("Goat browser profile session cleanup failed", {
+            event: "goat.browser_profile_session_cleanup_failed",
+            chat_session_id: input.chatSessionId,
+            profile_id: session.profile.id,
+            error,
+          });
+        })
+        .finally(() => {
+          activeProfileEndPromise = null;
+        });
+    }
+    await activeProfileEndPromise;
+  };
+
   const executeBrowserTool = async ({
     name,
     args,
@@ -97,6 +173,14 @@ export function createChatBrowserToolSession(input: {
     args: unknown;
   }): Promise<BrowserToolOutput> => {
     const activeSandbox = await getSandbox();
+    if (activeProfileSession && browserProfilesKilled()) {
+      await endActiveProfile();
+      return {
+        ok: false,
+        command: name,
+        error: "Authenticated browser profiles are temporarily disabled.",
+      };
+    }
     const screenshotFilename =
       name === "browser_screenshot" ? goatChatScreenshotFilename() : undefined;
     const screenshotPath = screenshotFilename
@@ -106,18 +190,29 @@ export function createChatBrowserToolSession(input: {
       name,
       args,
       browserSessionId,
+      activeProfileSession,
+      lastKnownUrl,
       ...(screenshotPath ? { screenshotPath } : {}),
       signal: input.signal,
       onCommand: () => {
         commandCount += 1;
       },
     });
+    if (commandOutput.ok && typeof commandOutput.output === "string") {
+      if (name === "browser_open") {
+        const record = asRecord(args);
+        lastKnownUrl = readOptionalString(record, "url") || lastKnownUrl;
+      } else if (name === "browser_get" && readOptionalString(asRecord(args), "target") === "url") {
+        lastKnownUrl = commandOutput.output.trim() || lastKnownUrl;
+      }
+    }
 
     const modelOutput = modelFacingBrowserOutput({
       name,
       output: commandOutput,
       budget,
     }) as BrowserToolOutput;
+    if (name === "browser_close") await endActiveProfile();
     if (!commandOutput.ok) return modelOutput;
 
     if (name === "browser_screenshot" && screenshotFilename && screenshotPath) {
@@ -173,6 +268,8 @@ export function createChatBrowserToolSession(input: {
         name: "browser_snapshot",
         args: {},
         browserSessionId,
+        activeProfileSession,
+        lastKnownUrl,
         signal: input.signal,
         onCommand: () => {
           commandCount += 1;
@@ -194,6 +291,8 @@ export function createChatBrowserToolSession(input: {
 
   return {
     execute,
+    useProfile,
+    endActiveProfile,
     getUsage: () => {
       if (!sandbox || !startedAt) return null;
       const endedAt = new Date();
@@ -233,11 +332,25 @@ async function executeBrowserCommand(
     name: BrowserToolName;
     args: unknown;
     browserSessionId: string;
+    activeProfileSession: BrowserProfileAgentSession | null;
+    lastKnownUrl: string;
     screenshotPath?: string;
     signal: AbortSignal;
     onCommand: () => void;
   },
 ): Promise<BrowserToolOutput> {
+  const profile = input.activeProfileSession?.profile;
+  if (
+    profile &&
+    browserActionRequiresIrreversibleApproval(input.name, input.args, input.lastKnownUrl)
+  ) {
+    return {
+      ok: false,
+      command: input.name,
+      error:
+        "This looks like an irreversible browser action. Retry the action with irreversible=true and a user-facing summary so it can be approved first.",
+    };
+  }
   if (input.name === "browser_read") {
     return executeBrowserRead(sandbox, input);
   }
@@ -246,6 +359,12 @@ async function executeBrowserCommand(
     args: input.args,
     sessionId: input.browserSessionId,
     actionPolicyPath: GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH,
+    ...(input.activeProfileSession
+      ? {
+          cdpUrl: input.activeProfileSession.connectUrl,
+          allowedHosts: input.activeProfileSession.profile.allowedHosts,
+        }
+      : {}),
     ...(input.screenshotPath ? { screenshotPath: input.screenshotPath } : {}),
   });
   return runBrowserArgv(sandbox, input.name, argv, input.signal, input.onCommand);
@@ -256,6 +375,8 @@ async function executeBrowserRead(
   input: {
     args: unknown;
     browserSessionId: string;
+    activeProfileSession: BrowserProfileAgentSession | null;
+    lastKnownUrl: string;
     signal: AbortSignal;
     onCommand: () => void;
   },
@@ -268,6 +389,12 @@ async function executeBrowserRead(
       args: { url: readHttpUrl(record, "url", "browser_read url") },
       sessionId: input.browserSessionId,
       actionPolicyPath: GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH,
+      ...(input.activeProfileSession
+        ? {
+            cdpUrl: input.activeProfileSession.connectUrl,
+            allowedHosts: input.activeProfileSession.profile.allowedHosts,
+          }
+        : {}),
     });
     const opened = await runBrowserArgv(
       sandbox,
@@ -284,6 +411,12 @@ async function executeBrowserRead(
     args: input.args,
     sessionId: input.browserSessionId,
     actionPolicyPath: GOAT_CHAT_SANDBOX_ACTION_POLICY_PATH,
+    ...(input.activeProfileSession
+      ? {
+          cdpUrl: input.activeProfileSession.connectUrl,
+          allowedHosts: input.activeProfileSession.profile.allowedHosts,
+        }
+      : {}),
   });
   const output = await runBrowserArgv(
     sandbox,
@@ -302,6 +435,18 @@ async function executeBrowserRead(
       .filter((line) => line.toLowerCase().includes(filter.toLowerCase()))
       .join("\n"),
   };
+}
+
+function browserActionRequiresIrreversibleApproval(
+  name: BrowserToolName,
+  args: unknown,
+  lastKnownUrl: string,
+) {
+  if (name !== "browser_click" && name !== "browser_find") return false;
+  const record = asRecord(args);
+  if (record.irreversible === true) return false;
+  if (name === "browser_find" && readOptionalString(record, "action") !== "click") return false;
+  return /checkout|payment|billing|order|confirm/i.test(lastKnownUrl);
 }
 
 async function runBrowserArgv(

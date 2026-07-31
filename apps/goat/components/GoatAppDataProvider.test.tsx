@@ -112,6 +112,73 @@ describe("GoatAppDataProvider", () => {
     // engines) which rendered as the null-runtime "Connecting" label.
     expect(screen.getByTestId("recent").textContent).toBe("claude_code:idle");
   });
+
+  it("keeps same-workspace live data during a server data refresh", () => {
+    const now = new Date().toISOString();
+    const chatRow = {
+      id: "goat_chat_live",
+      user_workos_id: "user_1",
+      title: "Live chat",
+      model: "anthropic/claude-sonnet-5",
+      engine: "opencompany" as const,
+      kind: "chat" as const,
+      closed_at: null,
+      pinned_at: null,
+      last_seen_at: now,
+      created_at: now,
+      updated_at: now,
+    };
+    const perCollection = [
+      { data: [], isLoading: false },
+      { data: [], isLoading: false },
+      { data: [chatRow], isLoading: false },
+      { data: [], isLoading: false },
+      { data: [], isLoading: true },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(() => {
+      const result = perCollection[call % perCollection.length] ?? { data: [], isLoading: false };
+      call += 1;
+      return result;
+    });
+
+    const observations: string[] = [];
+    const { rerender } = render(
+      <GoatAppDataProvider initialData={initialData()}>
+        <RecentChatTitleProbe onRender={(value) => observations.push(value)} />
+      </GoatAppDataProvider>,
+    );
+
+    expect(screen.getByTestId("recent").textContent).toBe("Live chat");
+    observations.length = 0;
+
+    rerender(
+      <GoatAppDataProvider
+        initialData={{
+          ...initialData(),
+          recentChats: [
+            {
+              id: "goat_chat_server",
+              title: "Server refresh",
+              model: "anthropic/claude-sonnet-5",
+              engine: "opencompany",
+              codexComposerSettings: null,
+              codexRuntime: null,
+              preview: "Stale server snapshot",
+              updatedAt: now,
+              lastSeenAt: now,
+              pinnedAt: null,
+            },
+          ],
+        }}
+      >
+        <RecentChatTitleProbe onRender={(value) => observations.push(value)} />
+      </GoatAppDataProvider>,
+    );
+
+    expect(screen.getByTestId("recent").textContent).toBe("Live chat");
+    expect(observations).not.toContain("Server refresh");
+  });
 });
 
 function RecentChatsProbe() {
@@ -122,6 +189,13 @@ function RecentChatsProbe() {
       {chat ? `${chat.engine}:${chat.codexRuntime?.status ?? "null"}` : "empty"}
     </div>
   );
+}
+
+function RecentChatTitleProbe({ onRender }: { onRender: (value: string) => void }) {
+  const data = useGoatAppData();
+  const title = data.recentChats[0]?.title ?? "empty";
+  onRender(title);
+  return <div data-testid="recent">{title}</div>;
 }
 
 function DataProbe() {

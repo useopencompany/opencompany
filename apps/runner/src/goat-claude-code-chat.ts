@@ -48,7 +48,7 @@ import {
 import {
   GoatCodexChatHandoffError,
   GoatCodexChatLeaseLostError,
-  GoatTaskTurnCanceledError,
+  GoatTaskTurnTerminalError,
 } from "./goat-codex-chat-errors";
 import {
   createGoatCodexChatProjector,
@@ -165,6 +165,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
   const initialParts = await loadCodexChatAssistantMessageParts(turn.assistantMessageId);
   const projectorTarget = {
     userWorkosId: turn.userWorkosId,
+    workspaceId: session.workspaceId,
     codexChatSessionId: session.id,
     chatSessionId: session.chatSessionId,
     turnId: turn.id,
@@ -218,7 +219,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
       }
       if (
         effectiveError instanceof GoatCodexChatInterruptedError ||
-        effectiveError instanceof GoatTaskTurnCanceledError
+        effectiveError instanceof GoatTaskTurnTerminalError
       ) {
         await bareProjector().interrupted(buildGoatTaskTerminalProjection(taskContext));
       } else {
@@ -315,10 +316,12 @@ export async function runGoatClaudeCodeChatTurn(input: {
     normalizeEvent: normalizer.normalize,
   });
 
-  const checkExternalAbort = () => {
-    const abort = shouldAbort?.();
-    if (abort) throw abort;
-  };
+  const checkAbort = createTurnAbortCheck({
+    turnId: turn.id,
+    leaseId,
+    leaseOwner,
+    ...(shouldAbort ? { shouldAbort } : {}),
+  });
 
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
@@ -327,13 +330,13 @@ export async function runGoatClaudeCodeChatTurn(input: {
   let scheduledWakeup = scheduledWakeupFromTurnSettings(turn.settings);
   let executionStage = "load_attachments";
   try {
-    checkExternalAbort();
+    await checkAbort();
     if (!sandboxReplaced) {
       // Fence the reused checkout before any preparation writes. After a hard runner death,
       // the prior CLI can still be editing files until this process is explicitly killed.
       executionStage = "kill_leftover_turn_processes";
       await killLeftoverClaudeTurnProcesses(sandbox);
-      checkExternalAbort();
+      await checkAbort();
     }
     if (input.recovery) {
       executionStage = "claim_recovery";
@@ -346,19 +349,19 @@ export async function runGoatClaudeCodeChatTurn(input: {
       });
     }
     const attachments = await loadGoatCodexChatAttachments(turn);
-    checkExternalAbort();
+    await checkAbort();
     executionStage = "prepare_directories";
     await sandbox.commands.run(
       `mkdir -p ${shellQuote(CLAUDE_CHAT_WORKDIR)} ${shellQuote(CLAUDE_CHAT_PROMPTS_ROOT)}`,
       { timeoutMs: 30_000 },
     );
-    checkExternalAbort();
+    await checkAbort();
     executionStage = "stage_repository_configs";
     await stageGoatRepositoryBootstrap({ sandbox, bootstrap: repositoryBootstrap });
-    checkExternalAbort();
+    await checkAbort();
     executionStage = "ensure_claude";
     await ensureClaudeInstalled(sandbox);
-    checkExternalAbort();
+    await checkAbort();
     executionStage = "load_skills";
     const sessionSkills = await loadGoatCodexChatSessionSkills(turn);
     const turnSkills = resolveGoatClaudeTurnSkills({
@@ -366,7 +369,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
       userMessageId: turn.userMessageId,
       ...(taskContext ? { taskContext } : {}),
     });
-    checkExternalAbort();
+    await checkAbort();
     executionStage = "materialize_skills";
     await materializeCodexSkillSnapshotsForSession({
       sandbox,
@@ -381,7 +384,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
         ],
       })),
     });
-    checkExternalAbort();
+    await checkAbort();
     const invokedSkillPaths = turnSkills.invokedSkillIds.map(
       (skillId) => `${CLAUDE_CHAT_WORKDIR}/.agents/skills/${skillId}/SKILL.md`,
     );
@@ -392,7 +395,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
       attachments,
       blobToken: env.blobReadWriteToken,
     });
-    checkExternalAbort();
+    await checkAbort();
 
     executionStage = "write_prompt";
     const task = input.recovery
@@ -417,7 +420,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
         });
     const promptPath = `${CLAUDE_CHAT_PROMPTS_ROOT}/prompt-${turn.id}.txt`;
     await sandbox.files.write(promptPath, task);
-    checkExternalAbort();
+    await checkAbort();
 
     executionStage = "write_mcp_config";
     const mcpConfigPath = actionGatewayTicket
@@ -428,14 +431,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
           ticket: actionGatewayTicket,
         })
       : null;
-    checkExternalAbort();
-
-    const checkAbort = createTurnAbortCheck({
-      turnId: turn.id,
-      leaseId,
-      leaseOwner,
-      ...(shouldAbort ? { shouldAbort } : {}),
-    });
+    await checkAbort();
     let sessionIdPersisted = false;
     const persistEngineSessionId = async () => {
       const engineSessionId = normalizer.sessionId();
@@ -622,6 +618,14 @@ export async function runGoatClaudeCodeChatTurn(input: {
             result: finalResult,
             reportedOutcome: reported?.reportedOutcome,
             outcomeComment: reported?.outcomeComment,
+            ...(scheduledWakeup
+              ? {
+                  scheduledWakeup: {
+                    wakeup: scheduledWakeup,
+                    parentSettings: turn.settings,
+                  },
+                }
+              : {}),
           }),
         },
       );
@@ -632,7 +636,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
     } else {
       await projector.finalize(appServerSummary);
     }
-    if (summary.status === "success" && outcome === "settled" && scheduledWakeup) {
+    if (summary.status === "success" && outcome === "settled" && scheduledWakeup && !taskContext) {
       try {
         await enqueueGoatCodexChatWakeup({
           parentTurn: turn,

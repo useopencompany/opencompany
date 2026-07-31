@@ -60,6 +60,11 @@ const taskMocks = vi.hoisted(() => ({
   markGoatTaskTurnRunning: vi.fn(),
 }));
 
+const wakeupMocks = vi.hoisted(() => ({
+  enqueueGoatCodexChatWakeup: vi.fn(),
+  persistGoatCodexChatScheduledWakeup: vi.fn(),
+}));
+
 vi.mock("@opencompany/db/goat-claude-code-auth", () => ({
   loadGoatClaudeCodeCredential: authMocks.loadGoatClaudeCodeCredential,
   markGoatClaudeCodeCredentialNeedsReauth: authMocks.markGoatClaudeCodeCredentialNeedsReauth,
@@ -111,10 +116,10 @@ vi.mock("./goat-codex-chat-events", () => ({
 }));
 
 vi.mock("./goat-codex-chat-wakeup", () => ({
-  enqueueGoatCodexChatWakeup: vi.fn(),
+  enqueueGoatCodexChatWakeup: wakeupMocks.enqueueGoatCodexChatWakeup,
   GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS: 3_600,
   GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS: 60,
-  persistGoatCodexChatScheduledWakeup: vi.fn(),
+  persistGoatCodexChatScheduledWakeup: wakeupMocks.persistGoatCodexChatScheduledWakeup,
   scheduledWakeupFromTurnSettings: () => null,
 }));
 
@@ -279,6 +284,81 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     );
     expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
     expect(sandboxMocks.armSandboxActiveTimeoutById).not.toHaveBeenCalled();
+  });
+
+  it("projects a task wakeup as the next durable task turn", async () => {
+    const harnessSpec = harnessSpecForClaudeTask();
+    const turn = claudeTurn({ settings: { reasoningEffort: "high" } });
+    const completion = { taskId: "goat_task_1", nextTurn: { id: "next_turn" } };
+    taskMocks.closeGoatTaskTurn.mockResolvedValueOnce({
+      reportedOutcome: "needs_attention",
+      outcomeComment: "Waiting for CI.",
+    });
+    taskMocks.finalizeGoatTaskResult.mockResolvedValueOnce("PR opened; CI is running.");
+    taskMocks.buildGoatTaskTurnCompletion.mockReturnValueOnce(completion);
+    eventMocks.createGoatCodexChatProjector.mockImplementationOnce(
+      (input: { normalizeEvent?: (event: unknown) => unknown }) => ({
+        push: vi.fn(async (events: unknown[]) => {
+          for (const event of events) input.normalizeEvent?.(event);
+        }),
+        finalize: vi.fn(async () => undefined),
+        fail: vi.fn(async () => undefined),
+        interrupted: vi.fn(async () => undefined),
+      }),
+    );
+    cliMocks.runClaudeCodeCliProcess.mockImplementationOnce(
+      async (input: { onEvent: (event: unknown) => Promise<void> }) => {
+        await input.onEvent(
+          assistantEvent([
+            {
+              type: "tool_use",
+              name: "ScheduleWakeup",
+              input: {
+                delay_seconds: 600,
+                reason: "Wait for CI",
+                prompt: "Inspect PR #42.",
+              },
+            },
+          ]),
+        );
+        await input.onEvent({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "PR opened; CI is running.",
+          session_id: "claude_thread_1",
+          usage: { input_tokens: 10, output_tokens: 20 },
+        });
+        return { exitCode: 0, timedOut: false, killed: false, stderrTail: "" };
+      },
+    );
+
+    await expect(
+      runGoatClaudeCodeChatTurn({
+        turn,
+        session: claudeSession(),
+        taskContext: {
+          task: taskForHarness(harnessSpec),
+          harnessSpec,
+        },
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(taskMocks.buildGoatTaskTurnCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scheduledWakeup: {
+          wakeup: {
+            delaySeconds: 600,
+            reason: "Wait for CI",
+            prompt: "Inspect PR #42.",
+          },
+          parentSettings: { reasoningEffort: "high" },
+        },
+      }),
+    );
+    expect(wakeupMocks.persistGoatCodexChatScheduledWakeup).toHaveBeenCalledOnce();
+    expect(wakeupMocks.enqueueGoatCodexChatWakeup).not.toHaveBeenCalled();
   });
 });
 

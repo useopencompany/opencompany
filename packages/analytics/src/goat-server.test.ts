@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { captureGoatServerEvent, captureGoatTaskSpawned } from "./goat-server";
+import {
+  captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded,
+  captureGoatServerEvent,
+  captureGoatTaskSpawned,
+} from "./goat-server";
 import { captureServerEvent } from "./server";
 
 const posthog = vi.hoisted(() => ({
@@ -43,6 +48,7 @@ describe("PostHog server analytics", () => {
         session_id: "session_123",
         is_first_message: true,
         engine: "opencompany",
+        usage_source: "owned_platform",
         model: "openai/gpt-5.5",
         message_length: 42,
       },
@@ -70,6 +76,7 @@ describe("PostHog server analytics", () => {
         session_id: "session_123",
         is_first_message: true,
         engine: "opencompany",
+        usage_source: "owned_platform",
         model: "openai/gpt-5.5",
         message_length: 42,
         $set: {
@@ -93,6 +100,7 @@ describe("PostHog server analytics", () => {
           session_id: "session_123",
           is_first_message: true,
           engine: "opencompany",
+          usage_source: "owned_platform",
           model: "openai/gpt-5.5",
           message_length: 42,
           $set: ["workspace_id", "email", "first_name", "last_name", "name"],
@@ -147,6 +155,132 @@ describe("PostHog server analytics", () => {
         },
       },
     });
+  });
+
+  it("captures LLM usage with dashboard-friendly model and token properties", async () => {
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+
+    await captureGoatLlmUsageRecorded({
+      distinctId: "user_123",
+      workspaceId: "workspace_123",
+      surface: "task",
+      stage: "execution",
+      sessionId: "goat_chat_123",
+      messageId: "goat_chat_msg_123",
+      taskId: "goat_task_123",
+      turnId: "goat_codex_chat_turn_123",
+      stepIndex: 2,
+      modelProvider: "vercel-ai-gateway",
+      model: "openai/gpt-5.5",
+      responseModel: "openai/gpt-5.5-2026-07-01",
+      engine: "codex",
+      inputTokens: 100,
+      inputNoCacheTokens: 80,
+      inputCacheReadTokens: 20,
+      inputCacheWriteTokens: 0,
+      outputTokens: 25,
+      outputTextTokens: 20,
+      outputReasoningTokens: 5,
+      totalTokens: 125,
+      providerCostUsdMicros: 1200,
+      platformFeeUsdMicros: 240,
+      chargedCostUsdMicros: 1440,
+      billable: true,
+      finishReason: "stop",
+    });
+
+    expect(posthog.capture).toHaveBeenCalledWith({
+      distinctId: "user_123",
+      event: "llm_usage_recorded",
+      properties: {
+        workspace_id: "workspace_123",
+        surface: "task",
+        stage: "execution",
+        session_id: "goat_chat_123",
+        message_id: "goat_chat_msg_123",
+        task_id: "goat_task_123",
+        turn_id: "goat_codex_chat_turn_123",
+        step_index: 2,
+        model_provider: "vercel-ai-gateway",
+        model: "openai/gpt-5.5",
+        response_model: "openai/gpt-5.5-2026-07-01",
+        engine: "codex",
+        usage_source: "external_harness",
+        input_tokens: 100,
+        input_no_cache_tokens: 80,
+        input_cache_read_tokens: 20,
+        input_cache_write_tokens: 0,
+        output_tokens: 25,
+        output_text_tokens: 20,
+        output_reasoning_tokens: 5,
+        total_tokens: 125,
+        provider_cost_usd_micros: 1200,
+        platform_fee_usd_micros: 240,
+        charged_cost_usd_micros: 1440,
+        billable: true,
+        finish_reason: "stop",
+      },
+    });
+  });
+
+  it("captures model spend with sum-ready micros properties", async () => {
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+
+    await captureGoatModelSpendRecorded({
+      userWorkosId: "user_123",
+      workspaceId: "workspace_123",
+      billingSource: "chat_model_usage",
+      surface: "chat",
+      model: "openai/gpt-5.5",
+      stage: "generation",
+      engine: "opencompany",
+      providerCostUsdMicros: 10_000.2,
+      platformFeeUsdMicros: 2_000,
+      totalCostUsdMicros: 12_000,
+      ledgerId: 42,
+      chatSessionId: "goat_chat_123",
+    });
+
+    expect(posthog.capture).toHaveBeenCalledWith({
+      distinctId: "user_123",
+      event: "model_spend_recorded",
+      properties: {
+        user_id: "user_123",
+        workspace_id: "workspace_123",
+        billing_source: "chat_model_usage",
+        surface: "chat",
+        model: "openai/gpt-5.5",
+        stage: "generation",
+        engine: "opencompany",
+        usage_source: "owned_platform",
+        provider_cost_usd_micros: 10_000,
+        platform_fee_usd_micros: 2_000,
+        total_cost_usd_micros: 12_000,
+        model_cost_usd_micros: 10_000,
+        ledger_id: 42,
+        chat_session_id: "goat_chat_123",
+      },
+    });
+  });
+
+  it("does not capture model spend when the model cost is zero", async () => {
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+
+    await captureGoatModelSpendRecorded({
+      userWorkosId: "user_123",
+      billingSource: "ingest_model_usage",
+      surface: "brain_ingest",
+      model: "anthropic/claude-sonnet-5",
+      providerCostUsdMicros: 1_000,
+      platformFeeUsdMicros: 200,
+      totalCostUsdMicros: 1_200,
+      modelCostUsdMicros: 0,
+    });
+
+    expect(posthog.capture).not.toHaveBeenCalled();
   });
 
   it("keeps legacy web events on the legacy project configuration", async () => {

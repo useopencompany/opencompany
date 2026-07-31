@@ -45,7 +45,7 @@ import {
   GoatCodexChatHandoffError,
   GoatCodexChatLeaseLostError,
   GoatCodexChatRetryableInfrastructureError,
-  GoatTaskTurnCanceledError,
+  GoatTaskTurnTerminalError,
 } from "./goat-codex-chat-errors";
 import {
   createGoatCodexChatProjector,
@@ -113,6 +113,7 @@ export async function runGoatCodexChatTurn(input: {
     createGoatCodexChatProjector({
       target: {
         userWorkosId: turn.userWorkosId,
+        workspaceId: session.workspaceId,
         codexChatSessionId: session.id,
         chatSessionId: session.chatSessionId,
         turnId: turn.id,
@@ -176,7 +177,7 @@ export async function runGoatCodexChatTurn(input: {
       const projector = await bareProjector();
       if (
         effectiveError instanceof GoatCodexChatInterruptedError ||
-        effectiveError instanceof GoatTaskTurnCanceledError
+        effectiveError instanceof GoatTaskTurnTerminalError
       ) {
         await projector.interrupted(buildGoatTaskTerminalProjection(taskContext));
       } else {
@@ -261,6 +262,7 @@ export async function runGoatCodexChatTurn(input: {
   const projector = createGoatCodexChatProjector({
     target: {
       userWorkosId: turn.userWorkosId,
+      workspaceId: session.workspaceId,
       codexChatSessionId: session.id,
       chatSessionId: session.chatSessionId,
       turnId: turn.id,
@@ -1075,23 +1077,40 @@ export function createTurnAbortCheck(input: {
   let lastCheckedAt = 0;
   return async () => {
     const externalAbort = input.shouldAbort?.();
-    if (externalAbort) throw externalAbort;
     const now = Date.now();
-    if (now - lastCheckedAt < INTERRUPT_POLL_INTERVAL_MS) return;
+    // A shutdown handoff is local and recoverable, while a user interrupt is durable intent.
+    // Force a database check when a local abort appears so a concurrent stop request wins instead
+    // of waiting for the replacement runner to reclaim and settle the turn.
+    if (!externalAbort && now - lastCheckedAt < INTERRUPT_POLL_INTERVAL_MS) return;
     lastCheckedAt = now;
-    const [row] = await getDb()
-      .select({
-        interruptRequestedAt: goatCodexChatTurns.interruptRequestedAt,
-        leaseId: goatCodexChatTurns.leaseId,
-        leaseOwner: goatCodexChatTurns.leaseOwner,
-      })
-      .from(goatCodexChatTurns)
-      .where(eq(goatCodexChatTurns.id, input.turnId))
-      .limit(1);
+    let row:
+      | {
+          interruptRequestedAt: Date | null;
+          leaseId: string | null;
+          leaseOwner: string | null;
+        }
+      | undefined;
+    try {
+      [row] = await getDb()
+        .select({
+          interruptRequestedAt: goatCodexChatTurns.interruptRequestedAt,
+          leaseId: goatCodexChatTurns.leaseId,
+          leaseOwner: goatCodexChatTurns.leaseOwner,
+        })
+        .from(goatCodexChatTurns)
+        .where(eq(goatCodexChatTurns.id, input.turnId))
+        .limit(1);
+    } catch (error) {
+      // Shutdown must remain bounded when the database cannot be consulted. The replacement runner
+      // will read the durable interrupt when it reclaims the turn.
+      if (externalAbort) throw externalAbort;
+      throw error;
+    }
     if (!row || row.leaseId !== input.leaseId || row.leaseOwner !== input.leaseOwner) {
       throw new GoatCodexChatLeaseLostError();
     }
     if (row.interruptRequestedAt) throw new GoatCodexChatInterruptedError();
+    if (externalAbort) throw externalAbort;
   };
 }
 

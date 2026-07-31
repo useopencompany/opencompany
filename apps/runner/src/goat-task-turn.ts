@@ -4,13 +4,21 @@ import {
   codexCliModelNameForModelId,
   GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
 } from "@opencompany/agent-runtime";
+import {
+  captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded,
+  captureGoatServerEvent,
+  goatAnalyticsUsageSourceForEngine,
+} from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import {
   type GoatCodexChatSession,
   type GoatCodexChatSessionStatus,
   type GoatCodexChatTurn,
+  type GoatCodexChatTurnSettings,
   type GoatHarnessSpec,
+  type GoatHarnessWorkflowStep,
   type GoatTask,
   type GoatTaskReportedOutcome,
 } from "@opencompany/db/goat-schema";
@@ -30,7 +38,11 @@ import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { createGoatBrainMarkdownReportForTask } from "./goat-brain";
-import { GoatCodexChatLeaseLostError, GoatTaskTurnCanceledError } from "./goat-codex-chat-errors";
+import { GoatCodexChatLeaseLostError, GoatTaskTurnTerminalError } from "./goat-codex-chat-errors";
+import {
+  type GoatCodexChatScheduledWakeup,
+  prepareGoatCodexChatScheduledWakeup,
+} from "./goat-codex-chat-wakeup";
 import { getGoatAvailableGitHubRepositoryNamesForRunner } from "./goat-harness-planner";
 import { normalizeGoatTaskToolNames } from "./goat-task-tool-names";
 import { rowsFromExecute } from "./sql-exec";
@@ -59,12 +71,15 @@ type GoatTaskNextTurn = {
   userMessageId: string;
   assistantMessageId: string;
   prompt: string;
+  userMessageContent?: string;
+  userMessageDebugTrace?: Record<string, unknown>;
+  runAfter?: Date;
   harnessSpec: GoatHarnessSpec;
   engine: GoatHarnessSpec["engine"];
   chatModel: string;
   runtimeModel: string;
   hostToolContractVersion: string | null;
-  settings: Record<string, unknown>;
+  settings: GoatCodexChatTurnSettings;
   assistantDebugTrace: Record<string, unknown>;
 };
 
@@ -94,12 +109,12 @@ export async function markGoatTaskTurnRunning(input: {
     SELECT 'updated'::text AS outcome
     FROM updated_task
     UNION ALL
-    SELECT 'canceled'::text AS outcome
+    SELECT 'terminal'::text AS outcome
     FROM goat.tasks AS task
     WHERE task.id = ${input.context.task.id}
       AND task.session_id = ${input.turn.chatSessionId}
       AND task.user_workos_id = ${input.turn.userWorkosId}
-      AND task.status = 'canceled'
+      AND task.status IN ('succeeded', 'failed', 'canceled')
       AND EXISTS (${turnLeaseSubquery(input.turn)})
     LIMIT 1
   `);
@@ -188,12 +203,12 @@ export async function prepareGoatCodexTaskTurn(input: {
     SELECT 'updated'::text AS outcome
     FROM updated_chat
     UNION ALL
-    SELECT 'canceled'::text AS outcome
+    SELECT 'terminal'::text AS outcome
     FROM goat.tasks AS task
     WHERE task.id = ${task.id}
       AND task.session_id = ${input.turn.chatSessionId}
       AND task.user_workos_id = ${input.turn.userWorkosId}
-      AND task.status = 'canceled'
+      AND task.status IN ('succeeded', 'failed', 'canceled')
       AND EXISTS (${turnLeaseSubquery(input.turn)})
     LIMIT 1
   `);
@@ -323,9 +338,23 @@ export function buildGoatTaskTurnCompletion(input: {
   result: string;
   reportedOutcome?: GoatTaskReportedOutcome | null | undefined;
   outcomeComment?: string | null | undefined;
+  scheduledWakeup?:
+    | {
+        wakeup: GoatCodexChatScheduledWakeup;
+        parentSettings: GoatCodexChatTurnSettings;
+        now?: Date;
+      }
+    | undefined;
 }): GoatTaskTurnCompletion {
   const workflow = input.context.harnessSpec.workflow;
   const reportedOutcome = input.reportedOutcome ?? null;
+  const preparedScheduledWakeup = input.scheduledWakeup
+    ? prepareGoatCodexChatScheduledWakeup({
+        parentSettings: input.scheduledWakeup.parentSettings,
+        wakeup: input.scheduledWakeup.wakeup,
+        ...(input.scheduledWakeup.now ? { now: input.scheduledWakeup.now } : {}),
+      })
+    : null;
   let outcomeComment =
     input.outcomeComment?.trim().slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH) || null;
   let harnessSpec = input.context.harnessSpec;
@@ -360,11 +389,14 @@ export function buildGoatTaskTurnCompletion(input: {
     // Match the legacy workflow runner: only an explicit needs_attention
     // outcome blocks the sequence. A missing closer/tool outcome must not
     // strand a multi-step workflow after an otherwise successful turn.
-    if (reportedOutcome !== "needs_attention" && nextStep) {
+    if (reportedOutcome !== "needs_attention" && nextStep && !preparedScheduledWakeup) {
+      const { codex: _previousCodexConfig, ...harnessSpecWithoutCodex } = harnessSpec;
+      const nextStepCodexConfig = codexConfigForWorkflowStep(harnessSpec.codex, nextStep);
       const nextHarnessSpec: GoatHarnessSpec = {
-        ...harnessSpec,
+        ...harnessSpecWithoutCodex,
         engine: nextStep.engine,
         model: nextStep.model,
+        ...(nextStepCodexConfig ? { codex: nextStepCodexConfig } : {}),
         systemPrompt: nextStep.systemPrompt,
         systemBlocks: nextStep.systemBlocks,
         workflow: {
@@ -383,6 +415,17 @@ export function buildGoatTaskTurnCompletion(input: {
       });
       harnessSpec = nextHarnessSpec;
     }
+  }
+
+  if (preparedScheduledWakeup) {
+    nextTurn = createNextTaskTurn({
+      harnessSpec,
+      prompt: preparedScheduledWakeup.prompt,
+      userMessageContent: preparedScheduledWakeup.userMessageContent,
+      userMessageDebugTrace: preparedScheduledWakeup.userDebugTrace,
+      runAfter: preparedScheduledWakeup.dueAt,
+      settings: preparedScheduledWakeup.settings,
+    });
   }
 
   return {
@@ -415,6 +458,7 @@ export function buildGoatTaskTerminalProjection(
 export async function settleGoatDurableTurn(input: {
   target: {
     userWorkosId: string;
+    workspaceId?: string | null;
     codexChatSessionId: string;
     chatSessionId: string;
     turnId: string;
@@ -516,6 +560,7 @@ export async function settleGoatDurableTurn(input: {
         session_id,
         role,
         content,
+        debug_trace,
         attachments,
         attachment_texts,
         created_at,
@@ -525,7 +570,8 @@ export async function settleGoatDurableTurn(input: {
         ${next?.userMessageId ?? null},
         task.session_id,
         'user',
-        ${next?.prompt ?? null},
+        ${next?.userMessageContent ?? next?.prompt ?? null},
+        ${next?.userMessageDebugTrace ? JSON.stringify(next.userMessageDebugTrace) : null}::jsonb,
         CASE
           WHEN ${next?.engine ?? null}::text IN ('codex', 'claude_code')
             THEN (SELECT attachments FROM workflow_origin_attachments)
@@ -569,6 +615,7 @@ export async function settleGoatDurableTurn(input: {
         status,
         prompt,
         settings,
+        run_after,
         created_at,
         updated_at
       )
@@ -582,6 +629,7 @@ export async function settleGoatDurableTurn(input: {
         'queued',
         ${next?.prompt ?? null},
         ${next ? JSON.stringify(next.settings) : null}::jsonb,
+        ${next?.runAfter ?? null},
         ${new Date(input.completedAt.getTime() + 2)},
         ${new Date(input.completedAt.getTime() + 2)}
       FROM projected_task AS task
@@ -695,11 +743,38 @@ export async function settleGoatDurableTurn(input: {
     WHERE EXISTS (SELECT 1 FROM updated_task_chat)
   `);
   assertRowsChanged(result);
+  await captureWorkflowHandoffChatMessageSent({ target, next });
+}
+
+async function captureWorkflowHandoffChatMessageSent(input: {
+  target: {
+    userWorkosId: string;
+    workspaceId?: string | null;
+    chatSessionId: string;
+  };
+  next: GoatTaskNextTurn | null;
+}) {
+  const workspaceId = input.target.workspaceId?.trim();
+  if (!workspaceId || !input.next) return;
+  const messageContent = input.next.userMessageContent ?? input.next.prompt;
+  await captureGoatServerEvent("chat_message_sent", input.target.userWorkosId, {
+    workspace_id: workspaceId,
+    session_id: input.target.chatSessionId,
+    is_first_message: false,
+    engine: input.next.engine,
+    usage_source: goatAnalyticsUsageSourceForEngine(input.next.engine),
+    model: input.next.chatModel,
+    message_length: messageContent.length,
+  });
 }
 
 function createNextTaskTurn(input: {
   harnessSpec: GoatHarnessSpec;
   prompt: string;
+  userMessageContent?: string;
+  userMessageDebugTrace?: Record<string, unknown>;
+  runAfter?: Date;
+  settings?: GoatCodexChatTurnSettings;
 }): GoatTaskNextTurn {
   const runtimeModel = runtimeModelNameForHarness(
     input.harnessSpec.engine,
@@ -715,13 +790,16 @@ function createNextTaskTurn(input: {
     userMessageId: `goat_chat_msg_${randomUUID()}`,
     assistantMessageId: `goat_chat_msg_${randomUUID()}`,
     prompt: input.prompt,
+    ...(input.userMessageContent ? { userMessageContent: input.userMessageContent } : {}),
+    ...(input.userMessageDebugTrace ? { userMessageDebugTrace: input.userMessageDebugTrace } : {}),
+    ...(input.runAfter ? { runAfter: input.runAfter } : {}),
     harnessSpec: input.harnessSpec,
     engine: input.harnessSpec.engine,
     chatModel: input.harnessSpec.model,
     runtimeModel,
     hostToolContractVersion:
       input.harnessSpec.engine === "opencompany" ? null : GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
-    settings: {
+    settings: input.settings ?? {
       ...(input.harnessSpec.codex?.reasoningEffort
         ? { reasoningEffort: input.harnessSpec.codex.reasoningEffort }
         : {}),
@@ -742,6 +820,20 @@ function runtimeModelNameForHarness(engine: GoatHarnessSpec["engine"], model: st
   if (engine === "codex") return codexCliModelNameForModelId(model);
   if (engine === "claude_code") return claudeCodeCliModelNameForModelId(model);
   return model;
+}
+
+function codexConfigForWorkflowStep(
+  base: GoatHarnessSpec["codex"],
+  step: GoatHarnessWorkflowStep,
+): GoatHarnessSpec["codex"] | undefined {
+  if (step.engine !== "codex" && step.engine !== "claude_code") return undefined;
+  const { reasoningEffort: baseReasoningEffort, ...rest } = base ?? {};
+  const reasoningEffort = step.reasoningEffort ?? baseReasoningEffort;
+  const next = {
+    ...rest,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 function goatWorkflowStepHandoffContent(input: {
@@ -821,10 +913,37 @@ async function recordGoatTaskGatewayUsage(input: {
   if (totalTokens) {
     recordGoatModelUsageTokens({ tokens: totalTokens, direction: "total", attributes });
   }
+  await captureGoatLlmUsageRecorded({
+    distinctId: input.context.task.userWorkosId,
+    workspaceId: input.session.workspaceId,
+    surface: "task",
+    stage: input.phase,
+    sessionId: input.session.chatSessionId,
+    messageId: input.turn.userMessageId,
+    taskId: input.context.task.id,
+    turnId: input.turn.id,
+    modelProvider: "vercel-ai-gateway",
+    model: input.model,
+    engine: input.session.engine,
+    inputTokens,
+    inputNoCacheTokens: positiveUsage(input.usage.inputTokenDetails?.noCacheTokens),
+    inputCacheReadTokens: positiveUsage(input.usage.inputTokenDetails?.cacheReadTokens),
+    inputCacheWriteTokens: positiveUsage(input.usage.inputTokenDetails?.cacheWriteTokens),
+    outputTokens,
+    outputTextTokens:
+      positiveUsage(input.usage.outputTokenDetails?.textTokens) ||
+      Math.max(0, outputTokens - positiveUsage(input.usage.outputTokenDetails?.reasoningTokens)),
+    outputReasoningTokens: positiveUsage(input.usage.outputTokenDetails?.reasoningTokens),
+    totalTokens: totalTokens || inputTokens + outputTokens,
+    providerCostUsdMicros: cost.providerCostUsdMicros,
+    platformFeeUsdMicros: cost.platformFeeUsdMicros,
+    chargedCostUsdMicros: cost.totalCostUsdMicros,
+    billable: cost.billable,
+  });
 
   if (!cost.billable || !input.session.workspaceId) return;
   try {
-    await recordGoatCreditDebit({
+    const debit = await recordGoatCreditDebit({
       workspaceId: input.session.workspaceId,
       userWorkosId: input.context.task.userWorkosId,
       source: "chat_model_usage",
@@ -842,6 +961,25 @@ async function recordGoatTaskGatewayUsage(input: {
       },
       db: getDb(),
     });
+    if (debit.ok) {
+      await captureGoatModelSpendRecorded({
+        userWorkosId: input.context.task.userWorkosId,
+        workspaceId: input.session.workspaceId,
+        billingSource: "chat_model_usage",
+        surface: "task",
+        model: input.model,
+        stage: input.phase,
+        engine: input.session.engine,
+        providerCostUsdMicros: cost.providerCostUsdMicros,
+        platformFeeUsdMicros: cost.platformFeeUsdMicros,
+        totalCostUsdMicros: cost.totalCostUsdMicros,
+        modelCostUsdMicros: cost.providerCostUsdMicros,
+        ledgerId: debit.ledgerId,
+        chatSessionId: input.session.chatSessionId,
+        taskId: input.context.task.id,
+        messageId: input.turn.userMessageId,
+      });
+    }
   } catch (error) {
     console.warn("Goat Codex task Gateway credit debit failed.", {
       event: "goat.codex_task_gateway_credit_debit_failed",
@@ -889,8 +1027,8 @@ function assertRowsChanged(result: unknown) {
 }
 
 function assertTaskMutationSucceeded(result: unknown) {
-  const row = rowsFromExecute<{ outcome: "updated" | "canceled" }>(result)[0];
+  const row = rowsFromExecute<{ outcome: "updated" | "terminal" }>(result)[0];
   if (row?.outcome === "updated") return;
-  if (row?.outcome === "canceled") throw new GoatTaskTurnCanceledError();
+  if (row?.outcome === "terminal") throw new GoatTaskTurnTerminalError();
   throw new GoatCodexChatLeaseLostError();
 }

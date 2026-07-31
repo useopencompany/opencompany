@@ -32,9 +32,53 @@ describe("browser command translation", () => {
       "https://example.com/search?q=mouse",
     ]);
 
-    expect(buildBrowserToolArgv({ ...base, name: "browser_snapshot", args: {} }).slice(-5)).toEqual(
-      ["snapshot", "-i", "-c", "-d", "5"],
-    );
+    expect(
+      buildBrowserToolArgv({
+        ...base,
+        name: "browser_snapshot",
+        args: {},
+      }).slice(-5),
+    ).toEqual(["snapshot", "-i", "-c", "-d", "5"]);
+  });
+
+  it("threads CDP sessions and blocks profile navigation outside allowed hosts", () => {
+    expect(
+      buildBrowserToolArgv({
+        ...base,
+        name: "browser_open",
+        args: { url: "https://app.notion.so/workspace" },
+        cdpUrl: "wss://browserbase.example/session",
+        allowedHosts: ["notion.so", "accounts.google.com"],
+      }),
+    ).toEqual([
+      "--session",
+      "goat-task-1",
+      "--content-boundaries",
+      "--max-output",
+      "20000",
+      "--action-policy",
+      "/tmp/policy.json",
+      "--cdp",
+      "wss://browserbase.example/session",
+      "open",
+      "https://app.notion.so/workspace",
+    ]);
+
+    expect(() =>
+      buildBrowserToolArgv({
+        ...base,
+        name: "browser_open",
+        args: { url: "https://notion.so.evil.example/" },
+        allowedHosts: ["notion.so"],
+      }),
+    ).toThrow("outside the active browser profile's allowed domains");
+    expect(() =>
+      buildBrowserReadArgv({
+        ...base,
+        args: { url: "https://example.com" },
+        allowedHosts: ["notion.so"],
+      }),
+    ).toThrow("outside the active browser profile's allowed domains");
   });
 
   it("builds get, find, scroll, native read, and explicit screenshot paths", () => {
@@ -49,7 +93,13 @@ describe("browser command translation", () => {
       buildBrowserToolArgv({
         ...base,
         name: "browser_find",
-        args: { by: "label", value: "Search", action: "type", text: "SSD", exact: true },
+        args: {
+          by: "label",
+          value: "Search",
+          action: "type",
+          text: "SSD",
+          exact: true,
+        },
       }).slice(-6),
     ).toEqual(["find", "label", "Search", "type", "SSD", "--exact"]);
     expect(
@@ -62,7 +112,11 @@ describe("browser command translation", () => {
     expect(
       buildBrowserReadArgv({
         ...base,
-        args: { url: "https://example.com/docs", filter: "auth", outline: true },
+        args: {
+          url: "https://example.com/docs",
+          filter: "auth",
+          outline: true,
+        },
       }).slice(-5),
     ).toEqual(["read", "https://example.com/docs", "--filter", "auth", "--outline"]);
     expect(
@@ -130,7 +184,11 @@ describe("browser observation budgets", () => {
     expect(output.compacted).toBe(true);
     expect(String(output.output)).toContain("Browser output compacted");
 
-    const confirmation = { ok: true, command: "browser_click", output: "✓ Done".repeat(5000) };
+    const confirmation = {
+      ok: true,
+      command: "browser_click",
+      output: "✓ Done".repeat(5000),
+    };
     expect(
       modelFacingBrowserOutput({
         name: "browser_click",

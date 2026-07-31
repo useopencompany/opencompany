@@ -4,11 +4,18 @@ import { createGoatCodexChatProjector } from "./goat-codex-chat-events";
 
 const mocks = vi.hoisted(() => ({
   captureException: vi.fn(),
+  createLogger: vi.fn(() => ({
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+  })),
   execute: vi.fn(),
 }));
 
 vi.mock("@opencompany/observability", () => ({
   captureException: mocks.captureException,
+  createLogger: mocks.createLogger,
 }));
 
 vi.mock("./db", () => ({

@@ -166,7 +166,11 @@ export function GoatSettingsRoute() {
   );
 }
 
-export function GoatIntegrationsSettingsRoute() {
+export function GoatIntegrationsSettingsRoute({
+  browserProfilesEnabled = false,
+}: {
+  browserProfilesEnabled?: boolean;
+}) {
   const { featureFlags, integrations, workspace } = useGoatAppData();
 
   return (
@@ -178,6 +182,7 @@ export function GoatIntegrationsSettingsRoute() {
         integrations={integrations}
         isWorkspaceAdmin={workspace.role === "admin"}
         imessageEnabled={featureFlags.imessage}
+        browserProfilesEnabled={browserProfilesEnabled}
       />
     </GoatSettingsContent>
   );
@@ -727,16 +732,19 @@ function IntegrationRows({
   integrations,
   isWorkspaceAdmin,
   imessageEnabled,
+  browserProfilesEnabled,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
   imessageEnabled: boolean;
+  browserProfilesEnabled: boolean;
 }) {
   return (
     <SettingsIntegrationsPanel
       initialIntegrations={integrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
       imessageEnabled={imessageEnabled}
+      browserProfilesEnabled={browserProfilesEnabled}
     />
   );
 }

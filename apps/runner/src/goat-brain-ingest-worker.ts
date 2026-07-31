@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
+import {
+  captureGoatModelSpendRecorded,
+  captureGoatServerEvent,
+} from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost, calculatePlatformFeeUsdMicros } from "@opencompany/billing";
 import { releasePendingGoatIngestionReservations } from "@opencompany/db/goat-billing";
 import {
@@ -998,15 +1001,16 @@ async function debitIngestModelCost(
     const trace = normalizeGoatBrainIngestTrace(result.trace);
     if (!trace) return;
     const budget = trace.budget;
+    const modelCostUsdMicros = budget?.modelCostUsdMicros ?? 0;
     const providerCostUsdMicros =
-      (budget?.modelCostUsdMicros ?? 0) +
+      modelCostUsdMicros +
       (budget?.brainQueryCostUsdMicros ?? 0) +
       (budget?.webSearchCostUsdMicros ?? 0);
     if (!Number.isFinite(providerCostUsdMicros) || providerCostUsdMicros <= 0) {
       return;
     }
     const platformFeeUsdMicros = calculatePlatformFeeUsdMicros(providerCostUsdMicros);
-    await recordGoatCreditDebit({
+    const debit = await recordGoatCreditDebit({
       workspaceId: job.workspaceId,
       userWorkosId: job.userWorkosId,
       source: "ingest_model_usage",
@@ -1019,7 +1023,7 @@ async function debitIngestModelCost(
         kind: "ingest_model_usage",
         model: trace.model,
         attempt: job.attempts,
-        modelCostUsdMicros: budget?.modelCostUsdMicros ?? 0,
+        modelCostUsdMicros,
         brainQueryCostUsdMicros: budget?.brainQueryCostUsdMicros ?? 0,
         webSearchCostUsdMicros: budget?.webSearchCostUsdMicros ?? 0,
         usage: trace.usage,
@@ -1035,6 +1039,21 @@ async function debitIngestModelCost(
           : {}),
       },
     });
+    if (debit.ok) {
+      await captureGoatModelSpendRecorded({
+        userWorkosId: job.userWorkosId,
+        workspaceId: job.workspaceId,
+        billingSource: "ingest_model_usage",
+        surface: "brain_ingest",
+        model: trace.model,
+        providerCostUsdMicros,
+        platformFeeUsdMicros,
+        totalCostUsdMicros: providerCostUsdMicros + platformFeeUsdMicros,
+        modelCostUsdMicros,
+        ledgerId: debit.ledgerId,
+        ingestJobId: job.id,
+      });
+    }
   } catch (error) {
     // A debit failure must never fail (or retry) the ingest job itself.
     logger.warn("Goat Brain ingest model debit failed", {

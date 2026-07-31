@@ -37,8 +37,12 @@ import {
   MAX_WEB_SEARCH_CALLS_PER_TURN,
 } from "./chat-limits";
 import {
+  BROWSER_USE_PROFILE_TOOL_NAME,
+  type BrowserProfileCatalogItem,
   type BrowserToolInput,
   type BrowserToolOutput,
+  type BrowserUseProfileToolInput,
+  type BrowserUseProfileToolOutput,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
@@ -90,6 +94,9 @@ import type { SendUserMessageRunner } from "./imessage/send-user-message";
 import {
   BROWSER_CHAT_CALL_LIMIT_DESCRIPTION,
   BROWSER_CHAT_TOOL_DESCRIPTIONS,
+  BROWSER_USE_PROFILE_PROFILE_DESCRIPTION,
+  BROWSER_USE_PROFILE_REASON_DESCRIPTION,
+  BROWSER_USE_PROFILE_TOOL_DESCRIPTION,
   createOpenCompanyChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
@@ -317,6 +324,10 @@ export async function runOpenCompanyChatAgent(input: {
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
   browserTools?: BrowserToolRunner;
+  browserProfiles?: {
+    profiles: readonly BrowserProfileCatalogItem[];
+    useProfile: (input: BrowserUseProfileToolInput) => Promise<BrowserUseProfileToolOutput>;
+  };
   actions?: ActionDispatcher;
   skills?: SkillDispatcher;
   workflows?: WorkflowDispatcher;
@@ -466,6 +477,10 @@ export function createOpenCompanyChatToolContext(input: {
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
   browserTools?: BrowserToolRunner;
+  browserProfiles?: {
+    profiles: readonly BrowserProfileCatalogItem[];
+    useProfile: (input: BrowserUseProfileToolInput) => Promise<BrowserUseProfileToolOutput>;
+  };
   actions?: ActionDispatcher;
   skills?: SkillDispatcher;
   workflows?: WorkflowDispatcher;
@@ -984,9 +999,49 @@ export function createOpenCompanyChatToolContext(input: {
 
   const browserTools = input.browserTools;
   if (browserTools) {
+    const browserProfiles = input.browserProfiles;
+    if (browserProfiles && browserProfiles.profiles.length > 0) {
+      const profileNames = browserProfiles.profiles.map((profile) => profile.name);
+      tools[BROWSER_USE_PROFILE_TOOL_NAME] = tool<
+        BrowserUseProfileToolInput,
+        BrowserUseProfileToolOutput
+      >({
+        description: BROWSER_USE_PROFILE_TOOL_DESCRIPTION,
+        needsApproval: async () => true,
+        inputSchema: jsonSchema<BrowserUseProfileToolInput>({
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            profile: {
+              type: "string",
+              enum: profileNames,
+              description: BROWSER_USE_PROFILE_PROFILE_DESCRIPTION,
+            },
+            reason: {
+              type: "string",
+              description: BROWSER_USE_PROFILE_REASON_DESCRIPTION,
+            },
+          },
+          required: ["profile", "reason"],
+        }),
+        execute: async (args) => {
+          visibleToolActivity = true;
+          return browserProfiles.useProfile(args);
+        },
+      });
+    }
+
     for (const name of BROWSER_TOOL_NAMES) {
       tools[name] = tool<BrowserToolInput, BrowserToolOutput>({
         description: `${BROWSER_CHAT_TOOL_DESCRIPTIONS[name]} ${BROWSER_CHAT_CALL_LIMIT_DESCRIPTION}`,
+        needsApproval: async (args) => {
+          if (name !== "browser_click" && name !== "browser_find") return false;
+          const record =
+            args && typeof args === "object" && !Array.isArray(args)
+              ? (args as Record<string, unknown>)
+              : {};
+          return record.irreversible === true;
+        },
         inputSchema: jsonSchema<BrowserToolInput>(
           BROWSER_TOOL_INPUT_SCHEMAS[name] as Parameters<typeof jsonSchema>[0],
         ),

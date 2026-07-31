@@ -20,6 +20,20 @@ export type GoatCodexChatScheduledWakeup = {
   prompt: string;
 };
 
+export type PreparedGoatCodexChatScheduledWakeup = {
+  dueAt: Date;
+  prompt: string;
+  settings: GoatCodexChatTurnSettings;
+  userDebugTrace: {
+    scheduledWakeup: {
+      reason: string;
+      dueAt: string;
+    };
+  };
+  userMessageContent: string;
+  wakeupChain: number;
+};
+
 type WakeupParentTurn = Pick<
   GoatCodexChatTurn,
   "id" | "userWorkosId" | "codexChatSessionId" | "chatSessionId" | "createdAt" | "settings"
@@ -36,43 +50,26 @@ export async function enqueueGoatCodexChatWakeup(input: {
   wakeup: GoatCodexChatScheduledWakeup;
   now?: Date;
 }): Promise<"enqueued" | "chain_capped" | "superseded"> {
-  const wakeupChain = validWakeupChain(input.parentTurn.settings) + 1;
-  if (wakeupChain > GOAT_CODEX_CHAT_WAKEUP_MAX_CHAIN) {
+  const prepared = prepareGoatCodexChatScheduledWakeup({
+    parentSettings: input.parentTurn.settings,
+    wakeup: input.wakeup,
+    ...(input.now ? { now: input.now } : {}),
+  });
+  if (!prepared) {
     logger.info("Claude Code scheduled wakeup chain reached its cap", {
       event: "opencompany.goat_claude_chat_wakeup_chain_capped",
       turn_id: input.parentTurn.id,
       codex_chat_session_id: input.parentTurn.codexChatSessionId,
-      wakeup_chain: wakeupChain,
+      wakeup_chain: validWakeupChain(input.parentTurn.settings) + 1,
     });
     return "chain_capped";
   }
 
   const now = input.now ?? new Date();
-  const delaySeconds = Math.min(
-    GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
-    Math.max(GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS, input.wakeup.delaySeconds),
-  );
-  const dueAt = new Date(now.getTime() + delaySeconds * 1_000);
   const assistantCreatedAt = nextGoatChatMessageCreatedAt(now);
   const userMessageId = `goat_chat_msg_${randomUUID()}`;
   const assistantMessageId = `goat_chat_msg_${randomUUID()}`;
   const turnId = `goat_codex_chat_turn_${randomUUID()}`;
-  const settings: GoatCodexChatTurnSettings = {
-    ...input.parentTurn.settings,
-    wakeupChain,
-  };
-  delete settings.scheduledWakeup;
-  const reason = input.wakeup.reason.trim();
-  const prompt = buildScheduledWakeupPrompt({
-    reason,
-    prompt: input.wakeup.prompt.trim(),
-  });
-  const userDebugTrace = {
-    scheduledWakeup: {
-      reason,
-      dueAt: dueAt.toISOString(),
-    },
-  };
 
   const result = await getDb().execute(sql`
     WITH eligible_session AS MATERIALIZED (
@@ -84,6 +81,7 @@ export async function enqueueGoatCodexChatWakeup(input: {
         AND engine_session.user_workos_id = ${input.parentTurn.userWorkosId}
         AND engine_session.chat_session_id = ${input.parentTurn.chatSessionId}
         AND engine_session.status = 'idle'
+        AND chat_session.kind = 'chat'
         AND chat_session.closed_at IS NULL
       FOR UPDATE OF engine_session, chat_session
     ),
@@ -112,8 +110,8 @@ export async function enqueueGoatCodexChatWakeup(input: {
         ${userMessageId},
         ${input.parentTurn.chatSessionId},
         'user',
-        ${`Scheduled check-in: ${reason}`},
-        ${JSON.stringify(userDebugTrace)}::jsonb,
+        ${prepared.userMessageContent},
+        ${JSON.stringify(prepared.userDebugTrace)}::jsonb,
         ${now},
         ${now}
       FROM eligible_parent
@@ -148,9 +146,9 @@ export async function enqueueGoatCodexChatWakeup(input: {
         inserted_user_message.id,
         inserted_assistant_message.id,
         'queued',
-        ${prompt},
-        ${JSON.stringify(settings)}::jsonb,
-        ${dueAt},
+        ${prepared.prompt},
+        ${JSON.stringify(prepared.settings)}::jsonb,
+        ${prepared.dueAt},
         ${now},
         ${now}
       FROM eligible_parent
@@ -162,6 +160,45 @@ export async function enqueueGoatCodexChatWakeup(input: {
   `);
 
   return rowsFromExecute<{ id: string }>(result).length > 0 ? "enqueued" : "superseded";
+}
+
+export function prepareGoatCodexChatScheduledWakeup(input: {
+  parentSettings: GoatCodexChatTurnSettings;
+  wakeup: GoatCodexChatScheduledWakeup;
+  now?: Date;
+}): PreparedGoatCodexChatScheduledWakeup | null {
+  const wakeupChain = validWakeupChain(input.parentSettings) + 1;
+  if (wakeupChain > GOAT_CODEX_CHAT_WAKEUP_MAX_CHAIN) return null;
+
+  const now = input.now ?? new Date();
+  const delaySeconds = Math.min(
+    GOAT_CODEX_CHAT_WAKEUP_MAX_DELAY_SECONDS,
+    Math.max(GOAT_CODEX_CHAT_WAKEUP_MIN_DELAY_SECONDS, input.wakeup.delaySeconds),
+  );
+  const dueAt = new Date(now.getTime() + delaySeconds * 1_000);
+  const reason = input.wakeup.reason.trim();
+  const settings: GoatCodexChatTurnSettings = {
+    ...input.parentSettings,
+    wakeupChain,
+  };
+  delete settings.scheduledWakeup;
+
+  return {
+    dueAt,
+    prompt: buildScheduledWakeupPrompt({
+      reason,
+      prompt: input.wakeup.prompt.trim(),
+    }),
+    settings,
+    userDebugTrace: {
+      scheduledWakeup: {
+        reason,
+        dueAt: dueAt.toISOString(),
+      },
+    },
+    userMessageContent: `Scheduled check-in: ${reason}`,
+    wakeupChain,
+  };
 }
 
 export async function persistGoatCodexChatScheduledWakeup(input: {
