@@ -914,11 +914,18 @@ describe("executeGoatWorkflowStepsTask", () => {
 
 describe("executeGoatTask", () => {
   it("runs opencompany tasks as a hidden main-chat run and records the reported outcome", async () => {
+    aiMock.generateText.mockResolvedValueOnce({
+      toolCalls: [
+        {
+          toolName: "update_task_status",
+          input: { status: "needs_attention", comment: "Couldn't verify one source." },
+        },
+      ],
+      usage: { inputTokens: 8, outputTokens: 3, totalTokens: 11 },
+    });
     goatChatLoopMock.runGoatTaskChatLoop.mockResolvedValueOnce({
       assistantContent: "Here is the answer.",
       usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
-      reportedOutcome: "needs_attention",
-      outcomeComment: "Couldn't verify one source.",
     });
     const sink = createSink();
 

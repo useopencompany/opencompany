@@ -117,7 +117,7 @@ export function compileGoatWorkflowHarnessSpec(input: {
       ...(input.workflow.description
         ? [`Workflow description: ${input.workflow.description}`]
         : []),
-      "Complete this step using the prior workflow transcript as context. Work autonomously; there is no interactive user in this run.",
+      "Complete this step using the task request plus explicit handoff artifacts from prior steps. Work autonomously; there is no interactive user in this run.",
       "",
       "<workflow_step_instructions>",
       step.instructions,

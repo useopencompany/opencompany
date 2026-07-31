@@ -51,6 +51,28 @@ describe("session-backed task turns", () => {
     expect(completion.nextTurn?.prompt).toContain("Repository audit complete.");
   });
 
+  it("passes the previous step result as an explicit handoff to OpenCompany steps", () => {
+    const spec = workflowSpec();
+    const nextStep = spec.workflow?.steps?.[1];
+    if (!nextStep) throw new Error("Expected workflow fixture to have a second step.");
+    nextStep.engine = "opencompany";
+    nextStep.model = "moonshotai/kimi-k2.6";
+
+    const completion = buildGoatTaskTurnCompletion({
+      context: context(spec),
+      result: "Repository audit complete.",
+      reportedOutcome: "done",
+      outcomeComment: "The repository is ready.",
+    });
+
+    expect(completion.nextTurn).toMatchObject({
+      engine: "opencompany",
+      prompt: expect.stringContaining("Step 2/2 — Implement"),
+    });
+    expect(completion.nextTurn?.prompt).toContain("<previous_step_result>");
+    expect(completion.nextTurn?.prompt).toContain("Repository audit complete.");
+  });
+
   it("halts a workflow on needs_attention and labels the blocking step", () => {
     const completion = buildGoatTaskTurnCompletion({
       context: context(workflowSpec()),

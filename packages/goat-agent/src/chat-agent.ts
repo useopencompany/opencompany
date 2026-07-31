@@ -141,10 +141,9 @@ export const OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX = 16;
 export const MAX_LIST_SKILL_RESULTS = 20;
 const MAX_ACTION_PROVIDER_FAILURES_PER_TURN = 2;
 
-// Task-only tool. It exists only when the caller injects an `updateTaskStatus`
-// runner (the runner's task executor does; interactive chat and the Slack bot
-// never do), so it never appears in a normal chat turn. It lets a background
-// run report its own user-facing outcome instead of a separate closer LLM call.
+// Task-only tool. It exists only when a caller explicitly injects an
+// `updateTaskStatus` runner. Normal background task execution does not expose
+// it; task closers use the same schema to write the user-facing outcome.
 export const UPDATE_TASK_STATUS_TOOL_NAME = "update_task_status";
 export type GoatTaskReportedStatus = "done" | "needs_attention";
 export type UpdateTaskStatusToolInput = {
@@ -182,7 +181,7 @@ export const UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA: JSONSchema7 = {
 export const TASK_SYSTEM_BLOCK = [
   "<background_task_run>",
   "You are running as an autonomous background task. There is no interactive user to answer questions or approve steps — work to completion with the tools available.",
-  'When you have finished, call update_task_status exactly once to report the outcome ("done" or "needs_attention"), then write your final result as your last message.',
+  "When you have finished, write your final result as your last message. The task runner will decide the user-facing task status and card comment after your run finishes.",
   "</background_task_run>",
 ].join("\n");
 export const TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK =
