@@ -277,6 +277,7 @@ describe("runClaimedGoatTask", () => {
     expect(analytics.captureGoatModelSpendRecorded).toHaveBeenCalledWith(
       expect.objectContaining({
         userWorkosId: "user_1",
+        workspaceId: "workspace_1",
         billingSource: "task_model_usage",
         surface: "task",
         model: "openai/gpt-5.4-mini",

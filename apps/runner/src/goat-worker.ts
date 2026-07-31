@@ -1286,7 +1286,8 @@ export async function runClaimedGoatTask(input: {
             if (calculatedCost.providerCostUsdMicros > 0) {
               await captureGoatModelSpendRecorded({
                 userWorkosId: input.task.userWorkosId,
-                workspaceId: input.task.harnessSpec.workflow?.workspaceId ?? null,
+                workspaceId:
+                  input.task.workspaceId ?? input.task.harnessSpec.workflow?.workspaceId ?? null,
                 billingSource: "task_model_usage",
                 surface: "task",
                 model: usageInput.modelName,
