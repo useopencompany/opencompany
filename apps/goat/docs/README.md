@@ -455,6 +455,7 @@ interactions so stale cards cannot answer dead proxy connections. Cloud executio
 `approvalPolicy: "never"` inside the isolated workspace-write sandbox; unexpected command or file
 approval requests are declined rather than surfaced as misleading UI. Terminal and recovered turns
 clear stored answer bodies after settling the UI, including answers to questions marked secret.
+Native permission-escalation requests return an empty grant set for the same fail-closed reason.
 Pending dynamic host-tool calls also force a guarded recovery, since their result belongs to the
 runner proxy connection that received the original request.
 

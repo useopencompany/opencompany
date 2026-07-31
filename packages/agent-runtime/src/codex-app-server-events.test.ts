@@ -126,6 +126,42 @@ describe("normalizeCodexAppServerEvent", () => {
 
     expect(
       normalizeCodexAppServerEvent({
+        method: "turn/plan/updated",
+        params: {
+          threadId: "thread_1",
+          turnId: "turn_1",
+          explanation: "Tracking the implementation plan.",
+          plan: [
+            { step: "Inspect the renderer", status: "completed" },
+            { step: "Patch native plan support", status: "inProgress" },
+            { step: "Run focused tests", status: "pending" },
+          ],
+        },
+      })[0],
+    ).toMatchObject({
+      type: "plan.updated",
+      payload: {
+        threadId: "thread_1",
+        turnId: "turn_1",
+        itemId: "turn-plan:turn_1",
+        source: "turn_plan",
+        status: "running",
+        text: [
+          "Tracking the implementation plan.",
+          "[x] Inspect the renderer",
+          "[~] Patch native plan support",
+          "[ ] Run focused tests",
+        ].join("\n"),
+        plan: [
+          { step: "Inspect the renderer", status: "completed" },
+          { step: "Patch native plan support", status: "inProgress" },
+          { step: "Run focused tests", status: "pending" },
+        ],
+      },
+    });
+
+    expect(
+      normalizeCodexAppServerEvent({
         method: "thread/goal/updated",
         params: {
           goal: {

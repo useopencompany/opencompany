@@ -264,6 +264,7 @@ export function offerCodexPlanImplementation(
       part.state !== "output-available" ||
       !isRecord(part.output) ||
       readString(part.output.status) !== "completed" ||
+      readString(part.output.source) === "turn_plan" ||
       !readString(part.output.text)?.trim()
     ) {
       continue;
@@ -769,15 +770,19 @@ function webSearchStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatu
 function planStatusPart(event: CodexAppServerNormalizedEvent): CodexUiStatusPartPayload {
   const text = readString(event.payload.text) ?? "";
   const completed = readString(event.payload.status) === "completed";
+  const source = readString(event.payload.source);
+  const plan = Array.isArray(event.payload.plan) ? event.payload.plan : null;
+  const sourcePayload = source ? { source } : {};
+  const planPayload = plan ? { plan } : {};
   return completed
     ? {
         state: "output-available",
-        input: { label: "Plan" },
-        output: { status: "completed", text },
+        input: { label: "Plan", ...sourcePayload, ...planPayload },
+        output: { status: "completed", text, ...sourcePayload, ...planPayload },
       }
     : {
         state: "input-available",
-        input: { label: "Plan", text },
+        input: { label: "Plan", text, ...sourcePayload, ...planPayload },
       };
 }
 

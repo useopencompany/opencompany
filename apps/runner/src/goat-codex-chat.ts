@@ -482,6 +482,9 @@ export async function runGoatCodexChatTurn(input: {
         if (request.method === "item/fileChange/requestApproval") {
           return { decision: "decline" };
         }
+        if (request.method === "item/permissions/requestApproval") {
+          return { permissions: [] };
+        }
         if (request.method !== "item/tool/requestUserInput") {
           throw new Error(`Unsupported Codex app-server request: ${request.method}`);
         }
