@@ -341,7 +341,6 @@ export function GoatSurface({
   const pathname = usePathname();
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const inputOverlayRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const workspacePanelRef = useRef<CodingWorkspacePanelHandle>(null);
   const workspaceToggleButtonRef = useRef<HTMLButtonElement>(null);
@@ -1042,16 +1041,6 @@ export function GoatSurface({
     return () => window.removeEventListener(GOAT_HOME_NAVIGATION_EVENT, handleHomeNavigation);
   }, [clearComposerAttachments, openChat]);
 
-  // The visible composer text is painted by an overlay div behind the transparent
-  // textarea; once the textarea scrolls past its max height the overlay must follow
-  // its scroll position or the painted text freezes while the caret keeps moving.
-  const syncInputOverlayScroll = useCallback(() => {
-    const overlay = inputOverlayRef.current;
-    const el = inputRef.current;
-    if (!overlay || !el) return;
-    overlay.scrollTop = el.scrollTop;
-  }, []);
-
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -1061,8 +1050,7 @@ export function GoatSurface({
     }
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-    syncInputOverlayScroll();
-  }, [input, syncInputOverlayScroll]);
+  }, [input]);
 
   useLayoutEffect(() => {
     const caret = pendingInputCaretRef.current;
@@ -2302,19 +2290,6 @@ export function GoatSurface({
                 ) : null}
                 <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
                   <div className="relative min-w-0 flex-1 self-center">
-                    {input ? (
-                      <div
-                        ref={inputOverlayRef}
-                        aria-hidden="true"
-                        className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
-                      >
-                        {renderComposerInputOverlay(
-                          input,
-                          activeSelectedMentions,
-                          selectedAdHocTask,
-                        )}
-                      </div>
-                    ) : null}
                     <textarea
                       ref={inputRef}
                       rows={1}
@@ -2337,7 +2312,6 @@ export function GoatSurface({
                         )
                       }
                       onKeyDown={onKeyDown}
-                      onScroll={syncInputOverlayScroll}
                       onPaste={onInputPaste}
                       onSelect={(event) =>
                         updateMentionToken(
@@ -2346,7 +2320,7 @@ export function GoatSurface({
                         )
                       }
                       disabled={backgroundTaskSubmitting}
-                      className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                      className="block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
                       style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                       maxLength={10_000}
                     />
@@ -2508,7 +2482,6 @@ function QuickChatComposer({
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const inputOverlayRef = useRef<HTMLDivElement>(null);
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
@@ -2653,13 +2626,6 @@ function QuickChatComposer({
     };
   }, [skillMentionMenuOpen, workflowMentionsEnabled]);
 
-  const syncInputOverlayScroll = useCallback(() => {
-    const overlay = inputOverlayRef.current;
-    const el = inputRef.current;
-    if (!overlay || !el) return;
-    overlay.scrollTop = el.scrollTop;
-  }, []);
-
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -2669,8 +2635,7 @@ function QuickChatComposer({
     }
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-    syncInputOverlayScroll();
-  }, [input, syncInputOverlayScroll]);
+  }, [input]);
 
   useLayoutEffect(() => {
     const caret = pendingInputCaretRef.current;
@@ -3161,15 +3126,6 @@ function QuickChatComposer({
           ) : null}
           <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
             <div className="relative min-w-0 flex-1 self-center">
-              {input ? (
-                <div
-                  ref={inputOverlayRef}
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
-                >
-                  {renderComposerInputOverlay(input, activeSelectedMentions, selectedAdHocTask)}
-                </div>
-              ) : null}
               <textarea
                 ref={inputRef}
                 rows={1}
@@ -3183,13 +3139,12 @@ function QuickChatComposer({
                   updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
                 }
                 onKeyDown={onKeyDown}
-                onScroll={syncInputOverlayScroll}
                 onPaste={onInputPaste}
                 onSelect={(event) =>
                   updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
                 }
                 disabled={isSubmitting}
-                className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                className="block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
                 style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                 maxLength={10_000}
               />
@@ -3784,75 +3739,6 @@ function buildMentionOptions(input: {
     });
   }
   return options;
-}
-
-function renderComposerInputOverlay(
-  value: string,
-  mentions: GoatChatMention[],
-  includeAdHocTask = false,
-) {
-  const mentionRanges = mentions.flatMap((mention) => {
-    const token = goatChatMentionToken(mention);
-    const match = new RegExp(`(^|\\s)(${escapeRegExp(token)})(?=\\s|$)`, "i").exec(value);
-    if (!match || match.index === undefined) return [];
-    const start = match.index + (match[1]?.length ?? 0);
-    return [{ start, end: start + (match[2]?.length ?? token.length), kind: mention.kind }];
-  });
-  const taskMatch = includeAdHocTask
-    ? new RegExp(`(^|\\s)(${escapeRegExp(GOAT_AD_HOC_TASK_TOKEN)})(?=\\s|$)`, "i").exec(value)
-    : null;
-  const taskRanges =
-    taskMatch?.index === undefined
-      ? []
-      : [
-          {
-            start: taskMatch.index + (taskMatch[1]?.length ?? 0),
-            end:
-              taskMatch.index +
-              (taskMatch[1]?.length ?? 0) +
-              (taskMatch[2]?.length ?? GOAT_AD_HOC_TASK_TOKEN.length),
-            kind: "task" as const,
-          },
-        ];
-  const ranges = [...mentionRanges, ...taskRanges].toSorted(
-    (left, right) => left.start - right.start,
-  );
-  if (ranges.length === 0) return value;
-
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  for (const range of ranges) {
-    parts.push(value.slice(cursor, range.start));
-    parts.push(
-      <span
-        key={`${range.start}:${range.end}`}
-        data-testid={
-          range.kind === "engine"
-            ? "selected-codex-mention"
-            : range.kind === "task"
-              ? "selected-task-mention"
-              : range.kind === "workflow"
-                ? "selected-workflow-mention"
-                : "selected-skill-mention"
-        }
-        className={
-          range.kind === "workflow" || range.kind === "task"
-            ? "rounded-sm bg-ink/15 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.15)]"
-            : "rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]"
-        }
-      >
-        {value.slice(range.start, range.end)}
-      </span>,
-    );
-    cursor = range.end;
-  }
-  parts.push(value.slice(cursor));
-  return (
-    <>
-      {/* Keep inline metrics identical to the textarea; paint-only styles preserve caret alignment. */}
-      {parts}
-    </>
-  );
 }
 
 function isGoatSkillCatalogItem(value: unknown): value is GoatSkillCatalogItem {
