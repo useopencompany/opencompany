@@ -67,6 +67,7 @@ describe("GoatAppDataProvider", () => {
       engine: "claude_code" as const,
       closed_at: null,
       pinned_at: null,
+      last_seen_at: now,
       created_at: now,
       updated_at: now,
     };

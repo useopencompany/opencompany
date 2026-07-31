@@ -3046,6 +3046,7 @@ export const goatChatSessions = goat.table(
     kind: text("kind").$type<GoatChatSessionKind>().notNull().default("chat"),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     pinnedAt: timestamp("pinned_at", { withTimezone: true }),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

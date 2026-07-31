@@ -26,7 +26,8 @@ import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
 import { GoatSidebarFeedback } from "@/components/GoatSidebarFeedback";
 import { closeGoatChatSessionAction, setGoatChatPinnedAction } from "@/lib/chat-actions";
 import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
-import type { GoatChatSummaryView } from "@/lib/chat-ui";
+import { useLocalGoatChatStates } from "@/lib/chat-session-state";
+import { type GoatChatSummaryView, goatChatSummaryState } from "@/lib/chat-ui";
 import { createGoatWorkspaceAction, switchGoatWorkspaceAction } from "@/lib/workspace-actions";
 
 function GoatIcon({ className }: { className?: string }) {
@@ -241,6 +242,7 @@ function GoatSidebarRecentChats() {
   const pathname = usePathname();
   const router = useRouter();
   const [, startTransition] = useTransition();
+  const localChatStates = useLocalGoatChatStates();
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const [pinningIds, setPinningIds] = useState<Set<string>>(() => new Set());
   const [pinOverrides, setPinOverrides] = useState<Map<string, boolean>>(() => new Map());
@@ -324,6 +326,7 @@ function GoatSidebarRecentChats() {
         chat={chat}
         href={href}
         active={pathname === href}
+        localState={localChatStates.get(chat.id) ?? null}
         pinned={pinned}
         archiving={archivingId === chat.id}
         pinning={pinningIds.has(chat.id)}
@@ -381,6 +384,7 @@ function GoatSidebarChatRow({
   chat,
   href,
   active,
+  localState,
   pinned,
   archiving,
   pinning,
@@ -391,6 +395,7 @@ function GoatSidebarChatRow({
   chat: GoatChatSummaryView;
   href: string;
   active: boolean;
+  localState: ReturnType<typeof goatChatSummaryState> | null;
   pinned: boolean;
   archiving: boolean;
   pinning: boolean;
@@ -398,6 +403,7 @@ function GoatSidebarChatRow({
   onTogglePin: () => void;
   onArchive: () => void;
 }) {
+  const state = resolveSidebarChatState({ chat, active, localState });
   return (
     <div
       className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
@@ -410,8 +416,9 @@ function GoatSidebarChatRow({
         onMouseEnter={onPrefetch}
         onFocus={onPrefetch}
         aria-current={active ? "page" : undefined}
-        className="flex min-w-0 flex-1 items-center rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
+        <SidebarChatStateIndicator state={state} />
         <span className="truncate tracking-[-0.005em]">{chat.title}</span>
       </Link>
       <button
@@ -453,6 +460,45 @@ function GoatSidebarChatRow({
       </button>
     </div>
   );
+}
+
+function resolveSidebarChatState(input: {
+  chat: GoatChatSummaryView;
+  active: boolean;
+  localState: ReturnType<typeof goatChatSummaryState> | null;
+}) {
+  if (input.localState === "working") return "working";
+  if (input.active) return activeSidebarChatState(input.chat);
+  return input.localState ?? goatChatSummaryState(input.chat);
+}
+
+function activeSidebarChatState(chat: GoatChatSummaryView) {
+  const state = goatChatSummaryState(chat);
+  return state === "working" ? "working" : "done_seen";
+}
+
+function SidebarChatStateIndicator({ state }: { state: ReturnType<typeof goatChatSummaryState> }) {
+  if (state === "working") {
+    return (
+      <Loader2
+        aria-hidden="true"
+        data-testid="sidebar-chat-working"
+        size={10}
+        strokeWidth={2}
+        className="shrink-0 animate-spin text-ink-subtle"
+      />
+    );
+  }
+  if (state === "done_unseen") {
+    return (
+      <span
+        aria-hidden="true"
+        data-testid="sidebar-chat-unseen"
+        className="h-1.5 w-1.5 shrink-0 rounded-full bg-info"
+      />
+    );
+  }
+  return null;
 }
 
 function chatHref(sessionId: string) {
