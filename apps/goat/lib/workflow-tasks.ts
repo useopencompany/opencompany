@@ -11,6 +11,7 @@ import { goatChatSessions, goatTasks } from "@opencompany/db/goat-schema";
 import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
 import { and, eq } from "drizzle-orm";
 import { generateGoatChatTitle } from "@/lib/chat-title";
+import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
 import {
@@ -148,7 +149,9 @@ export function compileGoatWorkflowHarnessSpec(input: {
   if (!firstStep) {
     throw new GoatWorkflowMentionError("This workflow has no steps to run.");
   }
-  const hasCodexStep = steps.some((step) => step.engine === "codex");
+  const hasSandboxStep = steps.some(
+    (step) => step.engine === "codex" || step.engine === "claude_code",
+  );
 
   return {
     schemaVersion: "goat.harness.v1",
@@ -169,7 +172,7 @@ export function compileGoatWorkflowHarnessSpec(input: {
       steps,
       currentStepIndex: 0,
       completedStepCount: 0,
-      ...(hasCodexStep
+      ...(hasSandboxStep
         ? {
             skillSnapshots: input.skills.map((skill) => ({
               id: skill.id,
@@ -196,12 +199,16 @@ export async function createGoatTaskFromWorkflow(input: {
   // resolveGoatWorkflowMention throws when workspaceId is null, so it is set here.
   const workspaceId = input.workspaceId as string;
   const stepSelections = workflow.steps.map(resolveGoatWorkflowStepSelection);
-  if (
-    stepSelections.some((selection) => selection.engine === "codex") &&
-    !(await isGoatCodexConnectedForUser(input.userWorkosId))
-  ) {
+  const hasCodexStep = stepSelections.some((selection) => selection.engine === "codex");
+  const hasClaudeCodeStep = stepSelections.some((selection) => selection.engine === "claude_code");
+  if (hasCodexStep && !(await isGoatCodexConnectedForUser(input.userWorkosId))) {
     throw new GoatWorkflowMentionError(
       `Workflow "#${workflow.id}" uses Codex, but Codex is not connected. Connect Codex in Settings first.`,
+    );
+  }
+  if (hasClaudeCodeStep && !(await isGoatClaudeCodeConnectedForUser(input.userWorkosId))) {
+    throw new GoatWorkflowMentionError(
+      `Workflow "#${workflow.id}" uses Claude Code, but Claude Code is not connected. Connect Claude Code in Settings first.`,
     );
   }
 

@@ -1254,6 +1254,13 @@
       "when": 1785478174557,
       "tag": "0178_goat_workflow_default_active",
       "breakpoints": true
+    },
+    {
+      "idx": 179,
+      "version": "7",
+      "when": 1785479476341,
+      "tag": "0179_workflow_claude_code_engine",
+      "breakpoints": true
     }
   ]
 }

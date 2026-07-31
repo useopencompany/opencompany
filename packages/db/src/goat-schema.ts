@@ -52,7 +52,7 @@ export type GoatWorkflowStep = {
 };
 export type GoatSkillStatus = "draft" | "active";
 
-export type GoatHarnessEngine = "opencompany" | "codex";
+export type GoatHarnessEngine = "opencompany" | "codex" | "claude_code";
 
 export type GoatTaskStage =
   | "queued"

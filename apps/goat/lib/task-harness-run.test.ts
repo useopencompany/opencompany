@@ -275,6 +275,28 @@ describe("buildGoatHarnessRun", () => {
     });
   });
 
+  it("preserves the Claude Code harness engine in run details", () => {
+    const run = buildGoatHarnessRun({
+      task: task({
+        harnessSpec: {
+          schemaVersion: "goat.harness.v1",
+          engine: "claude_code",
+          model: "anthropic/claude-sonnet-5",
+          systemPrompt: "Use Claude Code.",
+          initialUserMessage: "Fix tests.",
+          tools: ["exa_search"],
+          skills: [],
+          maxModelSteps: 8,
+          resultMode: "assistant_final",
+        },
+      }),
+      messages: [],
+      events: [],
+    });
+
+    expect(run.task.engine).toBe("claude_code");
+  });
+
   it("summarizes the models used by model usage rows", () => {
     const run = buildGoatHarnessRun({
       task: task({ model: "openai/gpt-5.4-mini" }),

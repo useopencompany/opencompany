@@ -5,6 +5,7 @@ import { generateGoatChatTitle } from "@/lib/chat-title";
 
 const mocks = vi.hoisted(() => ({
   createGoatTaskForUser: vi.fn(),
+  isGoatClaudeCodeConnectedForUser: vi.fn(),
   isGoatCodexConnectedForUser: vi.fn(),
   getGoatAvailableHarnessTools: vi.fn(),
   resolveGoatSkillMentions: vi.fn(),
@@ -12,6 +13,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/tasks", () => ({ createGoatTaskForUser: mocks.createGoatTaskForUser }));
+vi.mock("@/lib/claude-code-auth", () => ({
+  isGoatClaudeCodeConnectedForUser: mocks.isGoatClaudeCodeConnectedForUser,
+}));
 vi.mock("@/lib/codex-auth", () => ({
   isGoatCodexConnectedForUser: mocks.isGoatCodexConnectedForUser,
 }));
@@ -36,6 +40,7 @@ const {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.isGoatClaudeCodeConnectedForUser.mockResolvedValue(true);
   mocks.isGoatCodexConnectedForUser.mockResolvedValue(true);
   mocks.getGoatAvailableHarnessTools.mockResolvedValue(["exa_search"]);
   mocks.resolveGoatSkillMentions.mockResolvedValue([]);
@@ -70,6 +75,18 @@ describe("resolveGoatWorkflowStepSelection", () => {
     ).toEqual({
       engine: "codex",
       model: "openai/gpt-5.5",
+    });
+  });
+
+  it("uses Claude Code when the step selects the Claude Code sandbox", () => {
+    expect(
+      resolveGoatWorkflowStepSelection({
+        model: "claude-code",
+        instructions: "Fix the bug.",
+      }),
+    ).toEqual({
+      engine: "claude_code",
+      model: "anthropic/claude-sonnet-5",
     });
   });
 
@@ -113,7 +130,7 @@ describe("compileGoatWorkflowHarnessSpec", () => {
           {
             id: "step-2",
             title: "Implement",
-            model: "codex",
+            model: "claude-code",
             instructions: "Apply the findings with @skill/coding-work.",
           },
         ],
@@ -165,8 +182,8 @@ describe("compileGoatWorkflowHarnessSpec", () => {
     expect(spec.workflow?.steps?.[1]).toMatchObject({
       index: 1,
       title: "Implement",
-      engine: "codex",
-      model: "openai/gpt-5.5",
+      engine: "claude_code",
+      model: "anthropic/claude-sonnet-5",
       skillIds: ["coding-work"],
     });
     expect(spec.workflow?.steps?.[1]?.systemPrompt).not.toContain("<workflow_skills>");
@@ -220,6 +237,41 @@ describe("createGoatTaskFromWorkflow", () => {
     ).rejects.toThrow(/uses Codex/);
 
     expect(mocks.isGoatCodexConnectedForUser).toHaveBeenCalledWith("user_1");
+    expect(mocks.createGoatTaskForUser).not.toHaveBeenCalled();
+  });
+
+  it("requires Claude Code connectivity when any workflow step uses Claude Code", async () => {
+    mocks.resolveGoatWorkflowMention.mockResolvedValue({
+      id: "mixed-workflow",
+      name: "Mixed workflow",
+      description: "",
+      steps: [
+        {
+          id: "step-1",
+          title: "Research",
+          model: "kimi-k2.6",
+          instructions: "Research.",
+        },
+        {
+          id: "step-2",
+          title: "Code",
+          model: "claude-code",
+          instructions: "Implement.",
+        },
+      ],
+    });
+    mocks.isGoatClaudeCodeConnectedForUser.mockResolvedValue(false);
+
+    await expect(
+      createGoatTaskFromWorkflow({
+        userWorkosId: "user_1",
+        workspaceId: "ws_1",
+        mention: { id: "mixed-workflow" },
+        description: "Run it",
+      }),
+    ).rejects.toThrow(/uses Claude Code/);
+
+    expect(mocks.isGoatClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
     expect(mocks.createGoatTaskForUser).not.toHaveBeenCalled();
   });
 

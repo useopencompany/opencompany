@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
   GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
 } from "@opencompany/agent-runtime";
@@ -377,7 +378,6 @@ export function buildGoatTaskTurnCompletion(input: {
           stepIndex: currentStepIndex + 1,
           stepCount: workflow.steps.length,
           title: nextStep.title,
-          engine: nextStep.engine,
           previousResult: input.result,
         }),
       });
@@ -675,10 +675,10 @@ function createNextTaskTurn(input: {
   harnessSpec: GoatHarnessSpec;
   prompt: string;
 }): GoatTaskNextTurn {
-  const runtimeModel =
-    input.harnessSpec.engine === "codex"
-      ? codexCliModelNameForModelId(input.harnessSpec.model)
-      : input.harnessSpec.model;
+  const runtimeModel = runtimeModelNameForHarness(
+    input.harnessSpec.engine,
+    input.harnessSpec.model,
+  );
   if (!runtimeModel) {
     throw new Error(
       `Unsupported ${input.harnessSpec.engine} workflow model: ${input.harnessSpec.model}`,
@@ -694,7 +694,7 @@ function createNextTaskTurn(input: {
     chatModel: input.harnessSpec.model,
     runtimeModel,
     hostToolContractVersion:
-      input.harnessSpec.engine === "codex" ? GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION : null,
+      input.harnessSpec.engine === "opencompany" ? null : GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
     settings: {
       ...(input.harnessSpec.codex?.reasoningEffort
         ? { reasoningEffort: input.harnessSpec.codex.reasoningEffort }
@@ -712,11 +712,16 @@ function createNextTaskTurn(input: {
   };
 }
 
+function runtimeModelNameForHarness(engine: GoatHarnessSpec["engine"], model: string) {
+  if (engine === "codex") return codexCliModelNameForModelId(model);
+  if (engine === "claude_code") return claudeCodeCliModelNameForModelId(model);
+  return model;
+}
+
 function goatWorkflowStepHandoffContent(input: {
   stepIndex: number;
   stepCount: number;
   title: string;
-  engine: GoatHarnessSpec["engine"];
   previousResult: string;
 }) {
   const heading = `Step ${input.stepIndex + 1}/${input.stepCount} — ${input.title.trim() || "Untitled step"}`;
@@ -777,7 +782,7 @@ async function recordGoatTaskGatewayUsage(input: {
     "goat.model": input.model,
     "goat.surface": "task",
     "goat.stage": input.phase,
-    "goat.engine": input.context.harnessSpec.engine,
+    "goat.engine": input.session.engine,
   };
   recordGoatModelCost({ costUsdMicros: cost.totalCostUsdMicros, attributes });
   if (inputTokens) {
@@ -804,7 +809,7 @@ async function recordGoatTaskGatewayUsage(input: {
       totalCostUsdMicros: cost.totalCostUsdMicros,
       costBasis: cost.costBasis,
       metadata: {
-        engine: "codex",
+        engine: input.session.engine,
         taskId: input.context.task.id,
         turnId: input.turn.id,
         phase: input.phase,
