@@ -62,6 +62,8 @@ export const LIST_SKILLS_TOOL_NAME = "list_skills";
 export const LIST_SKILLS_TOOL_PART_TYPE = `tool-${LIST_SKILLS_TOOL_NAME}` as const;
 export const USE_SKILL_TOOL_NAME = "use_skill";
 export const USE_SKILL_TOOL_PART_TYPE = `tool-${USE_SKILL_TOOL_NAME}` as const;
+export const BROWSER_USE_PROFILE_TOOL_NAME = "browser_use_profile";
+export const BROWSER_USE_PROFILE_TOOL_PART_TYPE = `tool-${BROWSER_USE_PROFILE_TOOL_NAME}` as const;
 export const BROWSER_OPEN_TOOL_PART_TYPE = "tool-browser_open";
 export const BROWSER_SNAPSHOT_TOOL_PART_TYPE = "tool-browser_snapshot";
 export const BROWSER_CLICK_TOOL_PART_TYPE = "tool-browser_click";
@@ -85,6 +87,25 @@ export type BrowserToolOutput = {
   compacted?: boolean;
   originalOutputChars?: number;
   browserObservationBudget?: Record<string, number>;
+  error?: string;
+};
+
+export type BrowserProfileCatalogItem = {
+  id: string;
+  name: string;
+  siteHost: string;
+};
+
+export type BrowserUseProfileToolInput = {
+  profile: string;
+  reason: string;
+};
+
+export type BrowserUseProfileToolOutput = {
+  ok: boolean;
+  profile?: BrowserProfileCatalogItem;
+  liveViewUrl?: string;
+  message?: string;
   error?: string;
 };
 
