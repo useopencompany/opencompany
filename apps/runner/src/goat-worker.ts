@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { captureGoatModelSpendRecorded } from "@opencompany/analytics/goat/server";
+import {
+  captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded,
+} from "@opencompany/analytics/goat/server";
 import {
   calculateHostedToolUsageCost,
   calculateModelUsageCost,
@@ -1283,6 +1286,36 @@ export async function runClaimedGoatTask(input: {
                 "goat.surface": "task",
               },
             });
+            await captureGoatLlmUsageRecorded({
+              distinctId: input.task.userWorkosId,
+              workspaceId:
+                input.task.workspaceId ?? input.task.harnessSpec.workflow?.workspaceId ?? null,
+              surface: "task",
+              stage: usageInput.phase,
+              sessionId: input.task.sessionId,
+              messageId: usageInput.messageId,
+              taskId: input.task.id,
+              stepIndex: usageInput.stepIndex,
+              modelProvider: usageInput.modelProvider,
+              model: usageInput.modelName,
+              responseModel: usageInput.responseModelId,
+              inputTokens: usage.inputTokens,
+              inputNoCacheTokens: usage.inputNoCacheTokens,
+              inputCacheReadTokens: usage.inputCacheReadTokens,
+              inputCacheWriteTokens: usage.inputCacheWriteTokens,
+              outputTokens: usage.outputTokens,
+              outputTextTokens: usage.outputTextTokens,
+              outputReasoningTokens: usage.outputReasoningTokens,
+              totalTokens: usage.totalTokens,
+              providerCostUsdMicros: calculatedCost.providerCostUsdMicros,
+              platformFeeUsdMicros: calculatedCost.platformFeeUsdMicros,
+              chargedCostUsdMicros: calculatedCost.totalCostUsdMicros,
+              billable:
+                "billable" in calculatedCost && typeof calculatedCost.billable === "boolean"
+                  ? calculatedCost.billable
+                  : calculatedCost.totalCostUsdMicros > 0,
+              finishReason: usageInput.finishReason,
+            });
             if (calculatedCost.providerCostUsdMicros > 0) {
               await captureGoatModelSpendRecorded({
                 userWorkosId: input.task.userWorkosId,
@@ -1661,6 +1694,7 @@ const goatTaskColumnsSql = sql`
   task.display_id AS "displayId",
   task.name,
   task.user_workos_id AS "userWorkosId",
+  task.workspace_id AS "workspaceId",
   task.prompt,
   task.model,
   task.session_id AS "sessionId",

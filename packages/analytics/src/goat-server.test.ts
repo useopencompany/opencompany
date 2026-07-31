@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { captureGoatModelSpendRecorded, captureGoatServerEvent } from "./goat-server";
+import {
+  captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded,
+  captureGoatServerEvent,
+  captureGoatTaskSpawned,
+} from "./goat-server";
 import { captureServerEvent } from "./server";
 
 const posthog = vi.hoisted(() => ({
@@ -110,6 +115,107 @@ describe("PostHog server analytics", () => {
 
     expect(posthog.constructor).not.toHaveBeenCalled();
     expect(posthog.capture).not.toHaveBeenCalled();
+  });
+
+  it("captures task spawn events with dashboard-safe attributes", async () => {
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+
+    await captureGoatTaskSpawned({
+      userWorkosId: "user_123",
+      workspaceId: "workspace_123",
+      taskId: "goat_task_123",
+      displayId: "TASK-123",
+      engine: "codex",
+      model: "openai/gpt-5.5-codex",
+      workflowId: "ship-feature",
+      trigger: "schedule",
+    });
+
+    expect(posthog.capture).toHaveBeenCalledWith({
+      distinctId: "user_123",
+      event: "task_spawned",
+      properties: {
+        workspace_id: "workspace_123",
+        task_id: "goat_task_123",
+        display_id: "TASK-123",
+        task_kind: "scheduled_workflow",
+        task_origin: "workflow",
+        task_trigger: "schedule",
+        engine: "codex",
+        model: "openai/gpt-5.5-codex",
+        has_workflow: true,
+        has_schedule: true,
+        workflow_id: "ship-feature",
+        $set: {
+          workspace_id: "workspace_123",
+        },
+      },
+    });
+  });
+
+  it("captures LLM usage with dashboard-friendly model and token properties", async () => {
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+
+    await captureGoatLlmUsageRecorded({
+      distinctId: "user_123",
+      workspaceId: "workspace_123",
+      surface: "task",
+      stage: "execution",
+      sessionId: "goat_chat_123",
+      messageId: "goat_chat_msg_123",
+      taskId: "goat_task_123",
+      turnId: "goat_codex_chat_turn_123",
+      stepIndex: 2,
+      modelProvider: "vercel-ai-gateway",
+      model: "openai/gpt-5.5",
+      responseModel: "openai/gpt-5.5-2026-07-01",
+      inputTokens: 100,
+      inputNoCacheTokens: 80,
+      inputCacheReadTokens: 20,
+      inputCacheWriteTokens: 0,
+      outputTokens: 25,
+      outputTextTokens: 20,
+      outputReasoningTokens: 5,
+      totalTokens: 125,
+      providerCostUsdMicros: 1200,
+      platformFeeUsdMicros: 240,
+      chargedCostUsdMicros: 1440,
+      billable: true,
+      finishReason: "stop",
+    });
+
+    expect(posthog.capture).toHaveBeenCalledWith({
+      distinctId: "user_123",
+      event: "llm_usage_recorded",
+      properties: {
+        workspace_id: "workspace_123",
+        surface: "task",
+        stage: "execution",
+        session_id: "goat_chat_123",
+        message_id: "goat_chat_msg_123",
+        task_id: "goat_task_123",
+        turn_id: "goat_codex_chat_turn_123",
+        step_index: 2,
+        model_provider: "vercel-ai-gateway",
+        model: "openai/gpt-5.5",
+        response_model: "openai/gpt-5.5-2026-07-01",
+        input_tokens: 100,
+        input_no_cache_tokens: 80,
+        input_cache_read_tokens: 20,
+        input_cache_write_tokens: 0,
+        output_tokens: 25,
+        output_text_tokens: 20,
+        output_reasoning_tokens: 5,
+        total_tokens: 125,
+        provider_cost_usd_micros: 1200,
+        platform_fee_usd_micros: 240,
+        charged_cost_usd_micros: 1440,
+        billable: true,
+        finish_reason: "stop",
+      },
+    });
   });
 
   it("captures model spend with sum-ready micros properties", async () => {

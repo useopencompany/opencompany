@@ -1,5 +1,9 @@
 // Goat's product analytics are deliberately small. A new chat is derived from
 // chat_message_sent.is_first_message instead of emitting a second event for the same action.
+export type GoatTaskSpawnKind = "adhoc" | "workflow" | "scheduled_task" | "scheduled_workflow";
+export type GoatTaskSpawnOrigin = "adhoc" | "workflow";
+export type GoatTaskSpawnTrigger = "manual" | "schedule";
+
 export type GoatAnalyticsEventPropertiesByName = {
   app_opened: {
     workspace_id: string;
@@ -14,6 +18,51 @@ export type GoatAnalyticsEventPropertiesByName = {
     engine: "opencompany" | "codex" | "claude_code";
     model: string;
     message_length: number;
+    selection_mode?: "manual" | "auto";
+    routing_tier?: "standard" | "frontier";
+    routing_reason?: string;
+    routing_outcome?: string;
+    routing_duration_ms?: number;
+  };
+  llm_usage_recorded: {
+    workspace_id?: string;
+    surface: "chat" | "task";
+    stage: "generation" | "routing" | "planner" | "execution" | "closer";
+    session_id?: string;
+    message_id?: string;
+    task_id?: string;
+    turn_id?: string;
+    step_index?: number;
+    model_provider: string;
+    model: string;
+    response_model?: string;
+    input_tokens: number;
+    input_no_cache_tokens: number;
+    input_cache_read_tokens: number;
+    input_cache_write_tokens: number;
+    output_tokens: number;
+    output_text_tokens: number;
+    output_reasoning_tokens: number;
+    total_tokens: number;
+    provider_cost_usd_micros: number;
+    platform_fee_usd_micros: number;
+    charged_cost_usd_micros: number;
+    billable: boolean;
+    finish_reason?: string;
+  };
+  task_spawned: {
+    workspace_id?: string;
+    task_id: string;
+    display_id?: string;
+    task_kind: GoatTaskSpawnKind;
+    task_origin: GoatTaskSpawnOrigin;
+    task_trigger: GoatTaskSpawnTrigger;
+    engine: "opencompany" | "codex" | "claude_code";
+    model: string;
+    has_workflow: boolean;
+    has_schedule: boolean;
+    workflow_id?: string;
+    schedule_id?: string;
   };
   integration_added: {
     workspace_id?: string;
@@ -88,6 +137,59 @@ export const goatAnalyticsEvents = {
       "engine",
       "model",
       "message_length",
+      "selection_mode",
+      "routing_tier",
+      "routing_reason",
+      "routing_outcome",
+      "routing_duration_ms",
+    ],
+  },
+  llm_usage_recorded: {
+    name: "llm_usage_recorded",
+    description: "A Goat LLM call reported token and cost usage.",
+    safeProperties: [
+      "workspace_id",
+      "surface",
+      "stage",
+      "session_id",
+      "message_id",
+      "task_id",
+      "turn_id",
+      "step_index",
+      "model_provider",
+      "model",
+      "response_model",
+      "input_tokens",
+      "input_no_cache_tokens",
+      "input_cache_read_tokens",
+      "input_cache_write_tokens",
+      "output_tokens",
+      "output_text_tokens",
+      "output_reasoning_tokens",
+      "total_tokens",
+      "provider_cost_usd_micros",
+      "platform_fee_usd_micros",
+      "charged_cost_usd_micros",
+      "billable",
+      "finish_reason",
+    ],
+  },
+  task_spawned: {
+    name: "task_spawned",
+    description: "A durable Goat task was created and queued.",
+    safeProperties: [
+      "workspace_id",
+      "task_id",
+      "display_id",
+      "task_kind",
+      "task_origin",
+      "task_trigger",
+      "engine",
+      "model",
+      "has_workflow",
+      "has_schedule",
+      "workflow_id",
+      "schedule_id",
     ],
   },
   integration_added: {

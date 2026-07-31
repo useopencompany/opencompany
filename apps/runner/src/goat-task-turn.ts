@@ -4,7 +4,10 @@ import {
   codexCliModelNameForModelId,
   GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
 } from "@opencompany/agent-runtime";
-import { captureGoatModelSpendRecorded } from "@opencompany/analytics/goat/server";
+import {
+  captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded,
+} from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import {
@@ -822,6 +825,32 @@ async function recordGoatTaskGatewayUsage(input: {
   if (totalTokens) {
     recordGoatModelUsageTokens({ tokens: totalTokens, direction: "total", attributes });
   }
+  await captureGoatLlmUsageRecorded({
+    distinctId: input.context.task.userWorkosId,
+    workspaceId: input.session.workspaceId,
+    surface: "task",
+    stage: input.phase,
+    sessionId: input.session.chatSessionId,
+    messageId: input.turn.userMessageId,
+    taskId: input.context.task.id,
+    turnId: input.turn.id,
+    modelProvider: "vercel-ai-gateway",
+    model: input.model,
+    inputTokens,
+    inputNoCacheTokens: positiveUsage(input.usage.inputTokenDetails?.noCacheTokens),
+    inputCacheReadTokens: positiveUsage(input.usage.inputTokenDetails?.cacheReadTokens),
+    inputCacheWriteTokens: positiveUsage(input.usage.inputTokenDetails?.cacheWriteTokens),
+    outputTokens,
+    outputTextTokens:
+      positiveUsage(input.usage.outputTokenDetails?.textTokens) ||
+      Math.max(0, outputTokens - positiveUsage(input.usage.outputTokenDetails?.reasoningTokens)),
+    outputReasoningTokens: positiveUsage(input.usage.outputTokenDetails?.reasoningTokens),
+    totalTokens: totalTokens || inputTokens + outputTokens,
+    providerCostUsdMicros: cost.providerCostUsdMicros,
+    platformFeeUsdMicros: cost.platformFeeUsdMicros,
+    chargedCostUsdMicros: cost.totalCostUsdMicros,
+    billable: cost.billable,
+  });
 
   if (!cost.billable || !input.session.workspaceId) return;
   try {

@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  type AgentSchedulePreset,
+  cronForSchedulePreset,
+  SUPPORTED_HOUR_INTERVALS,
+  schedulePresetFromCron,
+  scheduleSummary,
+} from "@opencompany/agent-runtime";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import {
   ArrowLeft,
@@ -18,6 +25,7 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import type { GoatSkillCatalogItem } from "@/lib/skills";
+import { supportedTimezones, timezoneLabel } from "@/lib/timezones";
 import { archiveGoatWorkflowAction, updateGoatWorkflowAction } from "@/lib/workflow-actions";
 import {
   DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
@@ -482,28 +490,15 @@ function TriggerSection({
         </div>
 
         {trigger.type === "schedule" ? (
-          <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
+          <div className="mt-3 flex flex-col gap-3">
+            <ScheduleFrequencyBuilder
+              cron={trigger.cron}
+              timezone={trigger.timezone}
+              canEdit={canEdit}
+              onCronChange={(cron) => updateSchedule({ cron })}
+              onTimezoneChange={(timezone) => updateSchedule({ timezone })}
+            />
             <label className="flex min-w-0 flex-col gap-1.5">
-              <span className="text-[12px] font-medium text-ink-subtle">Cron</span>
-              <input
-                value={trigger.cron}
-                readOnly={!canEdit}
-                onChange={(event) => updateSchedule({ cron: event.target.value })}
-                placeholder={DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON}
-                className="h-8 rounded-lg border border-border bg-canvas px-2.5 font-mono text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
-              />
-            </label>
-            <label className="flex min-w-0 flex-col gap-1.5">
-              <span className="text-[12px] font-medium text-ink-subtle">Timezone</span>
-              <input
-                value={trigger.timezone}
-                readOnly={!canEdit}
-                onChange={(event) => updateSchedule({ timezone: event.target.value })}
-                placeholder={DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE}
-                className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
-              />
-            </label>
-            <label className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">
               <span className="text-[12px] font-medium text-ink-subtle">Task request</span>
               <textarea
                 value={trigger.prompt}
@@ -519,6 +514,237 @@ function TriggerSection({
       </div>
     </section>
   );
+}
+
+type ScheduleFrequency = AgentSchedulePreset["kind"] | "custom";
+
+const SCHEDULE_FREQUENCY_OPTIONS: { value: ScheduleFrequency; label: string }[] = [
+  { value: "minutes", label: "Every few minutes" },
+  { value: "hours", label: "Every few hours" },
+  { value: "daily", label: "Every day" },
+  { value: "weekdays", label: "Every weekday (Mon–Fri)" },
+  { value: "weekly", label: "Every week" },
+  { value: "custom", label: "Custom (cron expression)" },
+];
+
+const SCHEDULE_WEEKDAY_OPTIONS = [
+  { value: 0, label: "Sunday" },
+  { value: 1, label: "Monday" },
+  { value: 2, label: "Tuesday" },
+  { value: 3, label: "Wednesday" },
+  { value: 4, label: "Thursday" },
+  { value: 5, label: "Friday" },
+  { value: 6, label: "Saturday" },
+];
+
+function ScheduleFrequencyBuilder({
+  cron,
+  timezone,
+  canEdit,
+  onCronChange,
+  onTimezoneChange,
+}: {
+  cron: string;
+  timezone: string;
+  canEdit: boolean;
+  onCronChange: (cron: string) => void;
+  onTimezoneChange: (timezone: string) => void;
+}) {
+  const preset = schedulePresetFromCron(cron);
+  const [customOverride, setCustomOverride] = useState(false);
+  const frequency: ScheduleFrequency = customOverride ? "custom" : (preset?.kind ?? "custom");
+
+  const applyFrequency = (next: ScheduleFrequency) => {
+    if (next === "custom") {
+      setCustomOverride(true);
+      return;
+    }
+    setCustomOverride(false);
+    onCronChange(cronForSchedulePreset(defaultSchedulePreset(next, preset)));
+  };
+
+  const hour = preset && "hour" in preset ? preset.hour : 9;
+  const minute = preset && "minute" in preset ? preset.minute : 0;
+  const dayOfWeek = preset?.kind === "weekly" ? preset.dayOfWeek : 1;
+  const interval =
+    preset?.kind === "minutes"
+      ? preset.interval
+      : preset?.kind === "hours"
+        ? preset.interval
+        : null;
+
+  const setTime = (value: string) => {
+    if (!preset || preset.kind === "minutes" || preset.kind === "hours") return;
+    const [nextHour, nextMinute] = parseTimeValue(value);
+    onCronChange(
+      cronForSchedulePreset(
+        preset.kind === "weekly"
+          ? { kind: "weekly", dayOfWeek: preset.dayOfWeek, hour: nextHour, minute: nextMinute }
+          : { kind: preset.kind, hour: nextHour, minute: nextMinute },
+      ),
+    );
+  };
+
+  const setDayOfWeek = (value: number) => {
+    onCronChange(cronForSchedulePreset({ kind: "weekly", dayOfWeek: value, hour, minute }));
+  };
+
+  const setInterval = (value: number) => {
+    if (frequency !== "minutes" && frequency !== "hours") return;
+    onCronChange(cronForSchedulePreset({ kind: frequency, interval: value }));
+  };
+
+  const summaryText = scheduleSummary({ cron, timezone });
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
+        <label className="flex min-w-0 flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-subtle">Frequency</span>
+          <select
+            value={frequency}
+            disabled={!canEdit}
+            onChange={(event) => applyFrequency(event.target.value as ScheduleFrequency)}
+            className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+          >
+            {SCHEDULE_FREQUENCY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex min-w-0 flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-subtle">Timezone</span>
+          <select
+            value={timezone}
+            disabled={!canEdit}
+            onChange={(event) => onTimezoneChange(event.target.value)}
+            className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+          >
+            {timezoneOptions(timezone).map((option) => (
+              <option key={option} value={option}>
+                {timezoneLabel(option)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {frequency === "minutes" || frequency === "hours" ? (
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-ink-subtle">Every</span>
+            {frequency === "hours" ? (
+              <select
+                value={interval ?? 1}
+                disabled={!canEdit}
+                onChange={(event) => setInterval(Number.parseInt(event.target.value, 10))}
+                className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+              >
+                {SUPPORTED_HOUR_INTERVALS.map((value) => (
+                  <option key={value} value={value}>
+                    {value} {value === 1 ? "hour" : "hours"}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="number"
+                min={1}
+                max={59}
+                value={interval ?? 15}
+                readOnly={!canEdit}
+                onChange={(event) => setInterval(Number.parseInt(event.target.value, 10) || 1)}
+                className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+              />
+            )}
+          </label>
+        ) : null}
+
+        {frequency === "weekly" ? (
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-ink-subtle">Day</span>
+            <select
+              value={dayOfWeek}
+              disabled={!canEdit}
+              onChange={(event) => setDayOfWeek(Number.parseInt(event.target.value, 10))}
+              className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+            >
+              {SCHEDULE_WEEKDAY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        {frequency === "daily" || frequency === "weekdays" || frequency === "weekly" ? (
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-ink-subtle">At</span>
+            <input
+              type="time"
+              value={formatTimeValue(hour, minute)}
+              readOnly={!canEdit}
+              onChange={(event) => setTime(event.target.value)}
+              className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+            />
+          </label>
+        ) : null}
+
+        {frequency === "custom" ? (
+          <label className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">
+            <span className="text-[12px] font-medium text-ink-subtle">Cron</span>
+            <input
+              value={cron}
+              readOnly={!canEdit}
+              onChange={(event) => onCronChange(event.target.value)}
+              placeholder={DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON}
+              className="h-8 rounded-lg border border-border bg-canvas px-2.5 font-mono text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+            />
+          </label>
+        ) : null}
+      </div>
+
+      <p className="text-[12px] text-ink-subtle">
+        {summaryText === "Unsupported schedule"
+          ? `Enter a 5-field cron expression, e.g. "${DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON}".`
+          : `Runs ${summaryText.toLowerCase()} · ${timezone}`}
+      </p>
+    </div>
+  );
+}
+
+function timezoneOptions(current: string) {
+  const options = supportedTimezones();
+  return options.includes(current) ? options : [current, ...options];
+}
+
+function formatTimeValue(hour: number, minute: number) {
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function parseTimeValue(value: string): [number, number] {
+  const [hour, minute] = value.split(":").map((part) => Number.parseInt(part, 10));
+  return [Number.isFinite(hour) ? hour! : 9, Number.isFinite(minute) ? minute! : 0];
+}
+
+function defaultSchedulePreset(
+  kind: Exclude<ScheduleFrequency, "custom">,
+  previous: AgentSchedulePreset | null,
+): AgentSchedulePreset {
+  const hour = previous && "hour" in previous ? previous.hour : 9;
+  const minute = previous && "minute" in previous ? previous.minute : 0;
+  const dayOfWeek = previous?.kind === "weekly" ? previous.dayOfWeek : 1;
+
+  if (kind === "minutes") {
+    return { kind, interval: previous?.kind === "minutes" ? previous.interval : 15 };
+  }
+  if (kind === "hours") {
+    return { kind, interval: previous?.kind === "hours" ? previous.interval : 1 };
+  }
+  if (kind === "weekly") return { kind, hour, minute, dayOfWeek };
+  return { kind, hour, minute };
 }
 
 function TriggerModeButton({

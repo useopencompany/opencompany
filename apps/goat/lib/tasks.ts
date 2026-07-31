@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { captureGoatTaskSpawned } from "@opencompany/analytics/goat/server";
 import { getDb } from "@opencompany/db/client";
 import type {
   GoatChatMessageAttachment,
@@ -24,6 +25,7 @@ import {
   goatTaskSessionExecutionEnabled,
 } from "@opencompany/db/goat-task-sessions";
 import { and, asc, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { after } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { goatHomeActivityCutoff } from "@/lib/home-activity";
@@ -667,6 +669,7 @@ export async function createGoatTaskForUser(input: {
       }
       throw error;
     }
+    captureGoatTaskSpawnedAfterResponse(task, input.workspaceId ?? null);
     await triggerGoatCodexChatWake().catch((error) => {
       console.warn("Goat durable task wake failed; the turn remains queued for polling.", {
         event: "goat.durable_task_created_wake_failed",
@@ -818,6 +821,8 @@ export async function createGoatTaskForUser(input: {
     throw new Error("Unable to create Goat task.");
   }
 
+  captureGoatTaskSpawnedAfterResponse(task, input.workspaceId ?? null);
+
   try {
     await triggerGoatTaskRun(id, {
       task_id: id,
@@ -832,6 +837,31 @@ export async function createGoatTaskForUser(input: {
   }
 
   return task;
+}
+
+function captureGoatTaskSpawnedAfterResponse(
+  task: GoatTask,
+  workspaceId: string | null | undefined,
+) {
+  after(
+    captureGoatTaskSpawned({
+      userWorkosId: task.userWorkosId,
+      workspaceId: workspaceId ?? task.harnessSpec.workflow?.workspaceId ?? null,
+      taskId: task.id,
+      displayId: task.displayId,
+      engine: task.harnessSpec.engine,
+      model: task.model,
+      workflowId: task.workflowId,
+      scheduleId: task.scheduleId,
+      trigger: "manual",
+    }).catch((error) => {
+      console.warn("Goat task spawn analytics failed.", {
+        event: "goat.task_spawned_analytics_failed",
+        task_id: task.id,
+        error,
+      });
+    }),
+  );
 }
 
 async function cancelSessionBackedGoatTask(input: {
