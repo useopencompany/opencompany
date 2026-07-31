@@ -143,15 +143,29 @@ export async function heartbeatGoatCodexChatTurn(input: {
   leaseTtlMs: number;
 }) {
   const now = new Date();
+  const renewedLeaseExpiresAt = new Date(now.getTime() + input.leaseTtlMs);
+  const interruptedLeaseExpiresAt = new Date(now.getTime() - 1);
   const result = await getDb().execute(sql`
-    UPDATE goat.codex_chat_turns
-    SET lease_expires_at = ${new Date(now.getTime() + input.leaseTtlMs)},
-        updated_at = ${now}
-    WHERE id = ${input.turnId}
-      AND lease_id = ${input.leaseId}
-      AND lease_owner = ${input.leaseOwner}
-      AND status = 'running'
-    RETURNING id
+    WITH heartbeat AS (
+      UPDATE goat.codex_chat_turns
+      SET lease_id = CASE WHEN interrupt_requested_at IS NULL THEN lease_id ELSE NULL END,
+          lease_owner = CASE WHEN interrupt_requested_at IS NULL THEN lease_owner ELSE NULL END,
+          lease_expires_at = CASE
+            WHEN interrupt_requested_at IS NULL THEN ${renewedLeaseExpiresAt}
+            WHEN lease_expires_at IS NULL OR lease_expires_at > ${interruptedLeaseExpiresAt}
+              THEN ${interruptedLeaseExpiresAt}
+            ELSE lease_expires_at
+          END,
+          updated_at = ${now}
+      WHERE id = ${input.turnId}
+        AND lease_id = ${input.leaseId}
+        AND lease_owner = ${input.leaseOwner}
+        AND status = 'running'
+      RETURNING id, interrupt_requested_at
+    )
+    SELECT id
+    FROM heartbeat
+    WHERE interrupt_requested_at IS NULL
   `);
   return rowsFromExecute<{ id: string }>(result).length > 0;
 }
@@ -224,9 +238,14 @@ export async function runClaimedTurn(
   }
 
   let heartbeatAbort: GoatCodexChatLeaseLostError | null = null;
+  let rejectHeartbeatAbort: ((error: GoatCodexChatLeaseLostError) => void) | null = null;
+  const heartbeatAbortPromise = new Promise<never>((_, reject) => {
+    rejectHeartbeatAbort = reject;
+  });
   const markHeartbeatLost = (error: unknown) => {
     if (heartbeatAbort) return;
     heartbeatAbort = new GoatCodexChatLeaseLostError();
+    rejectHeartbeatAbort?.(heartbeatAbort);
     captureException(error, {
       event: "opencompany.goat_codex_chat_heartbeat_failed",
       turn_id: turn.id,
@@ -254,8 +273,11 @@ export async function runClaimedTurn(
   );
   let handedOff = false;
   let retryableError: GoatCodexChatRetryableInfrastructureError | null = null;
+  let runPromise: Promise<
+    "settled" | "handed_off" | { retryableError: GoatCodexChatRetryableInfrastructureError } | void
+  > | null = null;
   try {
-    try {
+    runPromise = (async () => {
       const turnInput = {
         turn,
         session,
@@ -271,18 +293,25 @@ export async function runClaimedTurn(
           : session.engine === "claude_code"
             ? await runGoatClaudeCodeChatTurn(turnInput)
             : await runGoatCodexChatTurn(turnInput);
-      handedOff = outcome === "handed_off";
-    } catch (error) {
+      return outcome;
+    })().catch((error) => {
       if (error instanceof GoatCodexChatHandoffError) {
-        handedOff = true;
+        return "handed_off" as const;
       } else if (error instanceof GoatCodexChatRetryableInfrastructureError) {
-        retryableError = error;
+        return { retryableError: error };
       } else {
         throw error;
       }
+    });
+    const outcome = await Promise.race([runPromise, heartbeatAbortPromise]);
+    if (outcome && typeof outcome === "object") {
+      retryableError = outcome.retryableError;
+    } else {
+      handedOff = outcome === "handed_off";
     }
   } finally {
     clearInterval(heartbeat);
+    if (heartbeatAbort) void runPromise?.catch(() => undefined);
   }
   if (retryableError) {
     const retryAt = goatCodexChatRetryAt(new Date(), turn.attempts);
