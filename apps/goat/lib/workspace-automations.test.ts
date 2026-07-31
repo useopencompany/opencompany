@@ -10,7 +10,6 @@ import {
   GoatWorkflowMentionError,
   listGoatWorkflowCatalog,
   resolveGoatWorkflowMention,
-  validateGoatWorkflowFields,
 } from "@/lib/workflows";
 
 const pgDialect = new PgDialect();
@@ -45,6 +44,29 @@ describe("workspace automation lifecycle", () => {
         model: "",
         steps: [],
         status: "draft",
+      },
+    ]);
+    const db = { select: vi.fn(() => builder) };
+
+    await expect(
+      resolveGoatWorkflowMention({
+        workspaceId: "workspace_1",
+        mention: { id: "launch-brief" },
+        db: db as never,
+      }),
+    ).rejects.toBeInstanceOf(GoatWorkflowMentionError);
+  });
+
+  it("refuses to fire an active workflow before it has runnable instructions", async () => {
+    const builder = createSelectBuilder([
+      {
+        slug: "launch-brief",
+        name: "Launch brief",
+        description: "Prepare the brief",
+        instructions: "",
+        model: "",
+        steps: [{ id: "step-1", title: "", model: "", instructions: "" }],
+        status: "active",
       },
     ]);
     const db = { select: vi.fn(() => builder) };
@@ -96,15 +118,7 @@ describe("workspace automation lifecycle", () => {
     expect(renderQuery(resolveBuilder.whereValue).params).toContain("active");
   });
 
-  it("requires instructions before an automation can become active", () => {
-    expect(
-      validateGoatWorkflowFields({
-        name: "Launch brief",
-        description: "",
-        steps: [{ id: "step-1", title: "", model: "", instructions: "  " }],
-        status: "active",
-      }),
-    ).toMatch(/instructions/);
+  it("requires instructions before a skill can become active", () => {
     expect(
       validateGoatSkillFields({
         name: "Legal review",

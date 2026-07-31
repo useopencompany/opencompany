@@ -29,6 +29,22 @@ export function ThinkingIndicator({
   );
 }
 
+export function PendingActivityIndicator({ label }: { label: string }) {
+  return (
+    <div className="flex justify-start">
+      <div
+        role="status"
+        aria-live="polite"
+        aria-label={label}
+        className="-ml-1 inline-flex items-center gap-2 rounded-md px-1 py-0.5 text-[12px] font-medium leading-5 text-ink-muted"
+      >
+        <ActivityGlyph />
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 export function TurnDuration({ durationMs }: { durationMs: number }) {
   return (
     <div className="flex justify-start">

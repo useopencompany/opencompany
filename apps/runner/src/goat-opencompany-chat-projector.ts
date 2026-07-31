@@ -1,3 +1,7 @@
+import {
+  captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded,
+} from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
@@ -43,6 +47,7 @@ export function createGoatOpenCompanyChatProjector(input: {
     codexChatSessionId: string;
     chatSessionId: string;
     turnId: string;
+    taskId?: string | null;
     userMessageId: string;
     assistantMessageId: string;
     workspaceId: string | null;
@@ -131,6 +136,7 @@ export function createGoatOpenCompanyChatProjector(input: {
         workspaceId: target.workspaceId,
         userWorkosId: target.userWorkosId,
         chatSessionId: target.chatSessionId,
+        taskId: target.taskId,
         userMessageId: target.userMessageId,
         turnId: target.turnId,
         stepIndex: input.stepIndex,
@@ -222,6 +228,7 @@ async function recordOpenCompanyChatModelCost(input: {
   workspaceId: string | null;
   userWorkosId: string;
   chatSessionId: string;
+  taskId?: string | null | undefined;
   userMessageId: string;
   turnId: string;
   stepIndex: number;
@@ -249,10 +256,38 @@ async function recordOpenCompanyChatModelCost(input: {
     "goat.model": input.model,
     "goat.engine": "opencompany",
   });
+  await captureGoatLlmUsageRecorded({
+    distinctId: input.userWorkosId,
+    workspaceId: input.workspaceId,
+    surface: input.taskId ? "task" : "chat",
+    stage: "generation",
+    sessionId: input.chatSessionId,
+    messageId: input.userMessageId,
+    taskId: input.taskId,
+    turnId: input.turnId,
+    stepIndex: input.stepIndex,
+    modelProvider: "vercel-ai-gateway",
+    model: input.model,
+    engine: "opencompany",
+    inputTokens,
+    inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
+    inputCacheReadTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheReadTokens),
+    inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
+    outputTokens,
+    outputTextTokens:
+      readUsageNumber(input.usage.outputTokenDetails?.textTokens) ||
+      Math.max(0, outputTokens - readUsageNumber(input.usage.outputTokenDetails?.reasoningTokens)),
+    outputReasoningTokens: readUsageNumber(input.usage.outputTokenDetails?.reasoningTokens),
+    totalTokens: readUsageNumber(input.usage.totalTokens) || inputTokens + outputTokens,
+    providerCostUsdMicros: cost.providerCostUsdMicros,
+    platformFeeUsdMicros: cost.platformFeeUsdMicros,
+    chargedCostUsdMicros: cost.totalCostUsdMicros,
+    billable: cost.billable,
+  });
 
   if (!cost.billable || !input.workspaceId) return;
   try {
-    await recordGoatCreditDebit({
+    const debit = await recordGoatCreditDebit({
       workspaceId: input.workspaceId,
       userWorkosId: input.userWorkosId,
       source: "chat_model_usage",
@@ -269,6 +304,24 @@ async function recordOpenCompanyChatModelCost(input: {
       },
       db: getDb(),
     });
+    if (debit.ok) {
+      await captureGoatModelSpendRecorded({
+        userWorkosId: input.userWorkosId,
+        workspaceId: input.workspaceId,
+        billingSource: "chat_model_usage",
+        surface: "chat",
+        model: input.model,
+        stage: "generation",
+        engine: "opencompany",
+        providerCostUsdMicros: cost.providerCostUsdMicros,
+        platformFeeUsdMicros: cost.platformFeeUsdMicros,
+        totalCostUsdMicros: cost.totalCostUsdMicros,
+        modelCostUsdMicros: cost.providerCostUsdMicros,
+        ledgerId: debit.ledgerId,
+        chatSessionId: input.chatSessionId,
+        messageId: input.userMessageId,
+      });
+    }
   } catch (error) {
     logger.warn("Durable OpenCompany chat credit debit failed", {
       event: "opencompany.goat_opencompany_chat_credit_debit_failed",

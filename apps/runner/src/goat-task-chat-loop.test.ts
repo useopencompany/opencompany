@@ -161,16 +161,7 @@ describe("runGoatTaskChatLoop", () => {
     );
   });
 
-  it("captures the reported outcome from the injected update_task_status runner", async () => {
-    // Simulate the model calling update_task_status by invoking the runner the
-    // loop injects into createOpenCompanyChatToolContext.
-    toolContextMock.createOpenCompanyChatToolContext.mockImplementationOnce(
-      (input: { updateTaskStatus?: (i: { status: string; comment: string }) => Promise<void> }) => {
-        // The injected runner sets the outcome synchronously (no await in its body).
-        void input.updateTaskStatus?.({ status: "needs_attention", comment: "Needs review." });
-        return { tools: {}, repairToolCall: undefined };
-      },
-    );
+  it("does not expose task outcome reporting to the execution model", async () => {
     aiMock.streamText.mockReturnValueOnce({
       fullStream: streamParts({
         type: "finish-step",
@@ -188,8 +179,13 @@ describe("runGoatTaskChatLoop", () => {
       assistantMessageId: "assistant_msg_1",
     });
 
-    expect(result.reportedOutcome).toBe("needs_attention");
-    expect(result.outcomeComment).toBe("Needs review.");
+    expect(result).toEqual({
+      assistantContent: "Summary.",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+    });
+    expect(toolContextMock.createOpenCompanyChatToolContext).toHaveBeenCalledWith(
+      expect.not.objectContaining({ updateTaskStatus: expect.any(Function) }),
+    );
   });
 
   it("replays prior task turns and treats the latest reply as the active user message", async () => {
@@ -330,6 +326,7 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     displayId: "TASK-1",
     name: "Research Marseille",
     userWorkosId: "user_1",
+    workspaceId: "workspace_1",
     prompt: "Do the thing.",
     model,
     sessionId: null,

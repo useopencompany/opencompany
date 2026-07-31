@@ -8,13 +8,17 @@ import {
   type ReactNode,
   useCallback,
   useContext,
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   useSyncExternalStore,
 } from "react";
 import type { GoatTaskView } from "@/components/GoatSurface";
-import { GOAT_PINNED_CHAT_LIMIT, type GoatChatSummaryView } from "@/lib/chat-ui";
+import {
+  deriveGoatChatState,
+  GOAT_PINNED_CHAT_LIMIT,
+  type GoatChatSummaryView,
+} from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
@@ -28,11 +32,10 @@ import {
 } from "@/lib/task-collections";
 import type { GoatTaskScheduleView } from "@/lib/task-schedules";
 
-// Codex and Claude Code chats both persist their runtime in goat.codex_chat_sessions,
-// so home/archived cards must attach codexRuntime for either engine. Attaching it only
-// for "codex" leaves Claude cards stuck on the null-runtime "Connecting" label.
-function hasCodexChatRuntime(engine: GoatChatSessionRow["engine"]): boolean {
-  return engine === "codex" || engine === "claude_code";
+// Durable background chats for every engine persist runtime in goat.codex_chat_sessions.
+// The name is historical: OpenCompany, Codex, and Claude Code all use it now.
+function hasDurableChatRuntime(engine: GoatChatSessionRow["engine"]): boolean {
+  return engine === "opencompany" || engine === "codex" || engine === "claude_code";
 }
 
 type GoatUserView = {
@@ -123,7 +126,13 @@ export function GoatAppDataProvider({
     (value: GoatAppData) => setLiveSnapshot({ initialData, value }),
     [initialData],
   );
-  const value = liveSnapshot?.initialData === initialData ? liveSnapshot.value : initialValue;
+  const liveSnapshotMatchesScope =
+    liveSnapshot?.value.user.workosUserId === initialData.user.workosUserId &&
+    liveSnapshot.value.workspace.id === initialData.workspace.id;
+  const value =
+    liveSnapshot?.initialData === initialData || liveSnapshotMatchesScope
+      ? liveSnapshot.value
+      : initialValue;
 
   return (
     <GoatAppDataContext.Provider value={value}>
@@ -225,24 +234,31 @@ function GoatAppLiveDataSubscriptions({
     const toSummary = (row: GoatChatSessionRow) => {
       const initial = initialById.get(row.id);
       const liveCodexRuntime = codexRuntimeByChatId.get(row.id);
+      const codexRuntime = hasDurableChatRuntime(row.engine)
+        ? (liveCodexRuntime ?? initial?.codexRuntime ?? null)
+        : null;
       return {
         id: row.id,
         title: row.title,
         model: row.model as AgentModelId,
         engine: row.engine,
         codexComposerSettings: initial?.codexComposerSettings ?? null,
-        codexRuntime: hasCodexChatRuntime(row.engine)
-          ? (liveCodexRuntime ?? initial?.codexRuntime ?? null)
-          : null,
+        codexRuntime,
+        state: deriveGoatChatState({
+          updatedAt: row.updated_at,
+          lastSeenAt: row.last_seen_at,
+          codexRuntime,
+        }),
         preview: initial?.preview ?? "No messages yet.",
         updatedAt: row.updated_at,
+        lastSeenAt: row.last_seen_at,
         pinnedAt: row.pinned_at,
       };
     };
     const openRows = ((chatSessionRows ?? []) as GoatChatSessionRow[]).filter(
       (row) => !row.closed_at && row.kind !== "task",
     );
-    const activeCodexChatIds = new Set(
+    const activeRuntimeChatIds = new Set(
       ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[])
         .filter(
           (row) => row.status === "queued" || row.status === "starting" || row.status === "running",
@@ -258,21 +274,21 @@ function GoatAppLiveDataSubscriptions({
       )
       .slice(0, GOAT_PINNED_CHAT_LIMIT)
       .map(toSummary);
-    const activeCodex = openRows
-      .filter((row) => !row.pinned_at && activeCodexChatIds.has(row.id))
+    const activeRuntime = openRows
+      .filter((row) => !row.pinned_at && activeRuntimeChatIds.has(row.id))
       .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
       .map(toSummary);
     const recent = openRows
       .filter(
         (row) =>
           !row.pinned_at &&
-          !activeCodexChatIds.has(row.id) &&
+          !activeRuntimeChatIds.has(row.id) &&
           isRecentGoatHomeActivity(row.updated_at),
       )
       .toSorted((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
       .slice(0, 8)
       .map(toSummary);
-    return [...pinned, ...activeCodex, ...recent];
+    return [...pinned, ...activeRuntime, ...recent];
   }, [chatSessionRows, chatsLoading, codexChatSessionRows, initialData.recentChats]);
 
   const archivedChats = useMemo<GoatChatSummaryView[]>(() => {
@@ -292,11 +308,13 @@ function GoatAppLiveDataSubscriptions({
         model: row.model as AgentModelId,
         engine: row.engine,
         codexComposerSettings: null,
-        codexRuntime: hasCodexChatRuntime(row.engine)
+        codexRuntime: hasDurableChatRuntime(row.engine)
           ? (codexRuntimeByChatId.get(row.id) ?? null)
           : null,
+        state: "done_seen",
         preview: "Archived",
         updatedAt: row.updated_at,
+        lastSeenAt: row.last_seen_at,
         pinnedAt: null,
         archived: true,
       }));
@@ -346,7 +364,9 @@ function GoatAppLiveDataSubscriptions({
   // TanStack DB currently has no server snapshot for useLiveQuery. Keep its
   // subscriptions in this post-hydration bridge while the outer provider
   // serves the server snapshot immediately, without remounting app children.
-  useEffect(() => onData(value), [onData, value]);
+  // Push refreshed live data before paint so same-scope router refreshes do not
+  // briefly repaint the sidebar from the server snapshot.
+  useLayoutEffect(() => onData(value), [onData, value]);
   return null;
 }
 

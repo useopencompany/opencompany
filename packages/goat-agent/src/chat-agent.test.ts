@@ -15,7 +15,7 @@ describe("update_task_status tool gating", () => {
     expect(UPDATE_TASK_STATUS_TOOL_NAME in context.tools).toBe(false);
   });
 
-  it("is present only when an updateTaskStatus runner is injected (task run)", async () => {
+  it("is present only when an updateTaskStatus runner is explicitly injected", async () => {
     const calls: Array<{ status: string; comment: string }> = [];
     const context = createOpenCompanyChatToolContext({
       model,

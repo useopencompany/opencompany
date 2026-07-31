@@ -69,6 +69,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   type Dispatch,
   type FormEvent,
+  type RefObject,
   type SetStateAction,
   useCallback,
   useEffect,
@@ -90,7 +91,7 @@ import {
 } from "@/components/chat/ChatComposerAttachments";
 import { ChatShareButton } from "@/components/chat/ChatShareButton";
 import { MessageBubble } from "@/components/chat/MessageBubble";
-import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
+import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useGoatCreditBalance } from "@/components/chat/useGoatCreditBalance";
@@ -101,7 +102,11 @@ import {
   GOAT_AD_HOC_TASK_TOKEN,
   hasGoatAdHocTaskToken,
 } from "@/lib/ad-hoc-task";
-import { closeGoatChatSessionAction, reopenGoatChatSessionAction } from "@/lib/chat-actions";
+import {
+  closeGoatChatSessionAction,
+  markGoatChatSeenAction,
+  reopenGoatChatSessionAction,
+} from "@/lib/chat-actions";
 import { GOAT_CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import {
   AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES,
@@ -114,6 +119,7 @@ import {
   subscribeLastGoatChatSelection,
 } from "@/lib/chat-composer-selection";
 import { GOAT_HOME_NAVIGATION_EVENT, newOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
+import { setLocalGoatChatState, useLocalGoatChatStates } from "@/lib/chat-session-state";
 import {
   compareGoatChatMessageOrder,
   type GoatChatMention,
@@ -124,6 +130,7 @@ import {
   type GoatChatUiMessage,
   type GoatCodexRuntimeView,
   type GoatStoredChatMessage,
+  goatChatSummaryState,
   textFromGoatChatUiMessage,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
@@ -184,6 +191,8 @@ const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
 const CODEX_SANDBOX_STATUS_POLL_INTERVAL_MS = 30_000;
 const CODEX_MENTION: GoatChatMention = { kind: "engine", id: "codex" };
 const CLOUD_CODEX_ATTACHMENT_CAPABILITIES = { images: true, pdf: true } as const;
+const COMPOSER_MENTION_CHIP_CLASS =
+  "rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]";
 
 type ActiveMentionToken = {
   start: number;
@@ -266,6 +275,15 @@ function engineChatKindFromChat(
   return null;
 }
 
+function chatModelSelectionFromEngineMention(
+  mention: GoatChatMention | null | undefined,
+): GoatChatModelSelection | null {
+  if (!mention || mention.kind !== "engine") return null;
+  if (mention.id === "codex") return CODEX_PICKER_VALUE;
+  if (mention.id === "claude") return CLAUDE_PICKER_VALUE;
+  return null;
+}
+
 // Cloud coding-CLI chats (Codex + Claude Code) share the same home card and status
 // indicator; only the display label differs by engine. Defaults to "Codex" so the
 // shared surface stays labeled for any non-Claude engine that reaches it.
@@ -302,10 +320,6 @@ export type GoatTaskConversation = {
   startedAtMs: number;
   sessionBacked?: boolean;
 };
-
-type GoatHomeTaskItem =
-  | { kind: "background"; task: GoatTaskView }
-  | { kind: "codex"; chat: GoatChatSummaryView };
 
 export function GoatSurface({
   tasks,
@@ -358,10 +372,12 @@ export function GoatSurface({
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const pendingProgrammaticPromptRef = useRef<string | null>(null);
+  const backgroundTaskFocusOriginRef = useRef<Element | null>(null);
   const onboardingKickoffReadRef = useRef(false);
   const onboardingKickoffPromptRef = useRef<string | null>(null);
   const activeTurnStartedAtRef = useRef<number | null>(null);
   const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
+  const lastSeenMarkRef = useRef<string | null>(null);
   const wasAgentWorkingRef = useRef(false);
   const optimisticAttachmentPreviewUrlsRef = useRef<ReadonlyMap<string, string[]>>(new Map());
   const persistedMessageIdsRef = useRef<ReadonlySet<string>>(new Set());
@@ -406,11 +422,11 @@ export function GoatSurface({
   });
   // The remembered selection is a Home default. Opening or reserving a session sets the override
   // so cross-tab preference updates apply only to the next chat.
-  const chatModel = chatModelOverride ?? rememberedChatModel;
+  const baseChatModel = chatModelOverride ?? rememberedChatModel;
   const initialCodexComposerUiState = initialChat
     ? codexComposerUiStateForChat(initialChat)
     : defaultCodexComposerUiState(
-        chatModel === CLAUDE_PICKER_VALUE
+        baseChatModel === CLAUDE_PICKER_VALUE
           ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT
           : DEFAULT_CODEX_CHAT_REASONING_EFFORT,
       );
@@ -452,10 +468,13 @@ export function GoatSurface({
   const [codexRuntime, setCodexRuntime] = useState<GoatCodexRuntimeView | null>(
     initialChat?.codexRuntime ?? null,
   );
-  const [engineRunning, setEngineRunning] = useState(false);
+  const [engineRunning, setEngineRunning] = useState(() =>
+    isCodexRuntimeActive(initialChat?.codexRuntime),
+  );
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
   const [taskMessageSubmitting, setTaskMessageSubmitting] = useState(false);
+  const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [restoringChatId, setRestoringChatId] = useState<string | null>(null);
@@ -474,12 +493,10 @@ export function GoatSurface({
     ReadonlyMap<string, number>
   >(() => new Map());
   const [, startArchiveTransition] = useTransition();
+  const localChatStates = useLocalGoatChatStates();
   const homeChats = useMemo(
-    () =>
-      visibleHomeChats(recentChats, optimisticallyArchivedChatIds).filter(
-        (chat) => chat.engine !== "codex",
-      ),
-    [optimisticallyArchivedChatIds, recentChats],
+    () => visibleHomeChats(recentChats, optimisticallyArchivedChatIds, localChatStates),
+    [localChatStates, optimisticallyArchivedChatIds, recentChats],
   );
   const homeSchedules = useMemo(
     () => (taskSpawningEnabled ? visibleHomeSchedules(schedules) : []),
@@ -489,22 +506,43 @@ export function GoatSurface({
     () =>
       visibleHomeTasks({
         tasks: taskSpawningEnabled ? tasks : [],
-        chats: recentChats,
         optimisticallyArchivedTaskIds: optimisticallyArchivedIds,
-        optimisticallyArchivedChatIds,
       }),
-    [
-      optimisticallyArchivedChatIds,
-      optimisticallyArchivedIds,
-      recentChats,
-      taskSpawningEnabled,
-      tasks,
-    ],
+    [optimisticallyArchivedIds, taskSpawningEnabled, tasks],
   );
   const hasHomeActivity = homeTasks.length > 0 || homeChats.length > 0 || homeSchedules.length > 0;
   const homeGreetingName = userName.trim() || "there";
   const activeTaskConversation =
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
+  const workflowMentionsEnabled = taskSpawningEnabled && !activeTaskConversation;
+  const activeSelectedMentions = selectedMentions.filter((mention) => {
+    if (!goatChatMentionIsVisible(input, mention)) return false;
+    if (mention.kind === "engine") {
+      return mention.id === "claude" ? claudeCodeConnected : codexConnected;
+    }
+    if (mention.kind === "workflow") return workflowMentionsEnabled;
+    return !activeTaskConversation;
+  });
+  const chatModel =
+    chatModelSelectionFromEngineMention(
+      activeSelectedMentions.find((mention) => mention.kind === "engine"),
+    ) ?? baseChatModel;
+  const isAutoChatModel = chatModel === AUTO_GOAT_MODEL_SELECTION;
+  const activeTaskId = activeTaskConversation?.taskId ?? null;
+  const activeTaskStatus = activeTaskConversation?.status ?? null;
+  const isTaskConversationStopping = Boolean(
+    activeTaskId &&
+      stoppingTaskId === activeTaskId &&
+      (activeTaskStatus === "queued" || activeTaskStatus === "running"),
+  );
+
+  if (
+    stoppingTaskId &&
+    (taskConversation?.taskId !== stoppingTaskId ||
+      (taskConversation.status !== "queued" && taskConversation.status !== "running"))
+  ) {
+    setStoppingTaskId(null);
+  }
 
   const beginActiveTurn = useCallback((assistantMessageId: string | null = null) => {
     const startedAtMs = Date.now();
@@ -551,7 +589,7 @@ export function GoatSurface({
 
   const adoptResolvedAutoModel = useCallback(
     (message: GoatChatUiMessage) => {
-      if (chatModel !== AUTO_GOAT_MODEL_SELECTION) return;
+      if (!isAutoChatModel) return;
       const metadata = message.metadata;
       if (
         !metadata?.model ||
@@ -562,7 +600,7 @@ export function GoatSurface({
       }
       setChatModelOverride(normalizeGoatModel(metadata.model));
     },
-    [chatModel, setChatModelOverride],
+    [isAutoChatModel, setChatModelOverride],
   );
 
   const trackOptimisticAttachmentPreviews = useCallback(
@@ -718,16 +756,8 @@ export function GoatSurface({
       creditBalance.balanceUsdMicros > 0 &&
       creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
   );
-  const workflowMentionsEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
-  const selectedAdHocTask = workflowMentionsEnabled && hasGoatAdHocTaskToken(input);
-  const activeSelectedMentions = selectedMentions.filter((mention) => {
-    if (!goatChatMentionIsVisible(input, mention)) return false;
-    if (mention.kind === "engine") {
-      return mention.id === "claude" ? claudeCodeConnected : codexConnected;
-    }
-    if (mention.kind === "workflow") return workflowMentionsEnabled;
-    return !activeTaskConversation;
-  });
+  const adHocTaskMentionEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
+  const selectedAdHocTask = adHocTaskMentionEnabled && hasGoatAdHocTaskToken(input);
   const mentionOptions = buildMentionOptions({
     token: mentionToken,
     skills: skillCatalog,
@@ -737,6 +767,7 @@ export function GoatSurface({
     claudeCodeConnected,
     skillsEnabled: !activeTaskConversation,
     workflowsEnabled: workflowMentionsEnabled,
+    adHocTaskEnabled: adHocTaskMentionEnabled,
   });
   const selectedWorkflowMention = selectedAdHocTask
     ? null
@@ -755,7 +786,7 @@ export function GoatSurface({
     enabled: attachmentsEnabled && !engineSubmitting && !newChatCommandOpen,
     ...(activeEngine === "codex" || activeEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
-      : chatModel === AUTO_GOAT_MODEL_SELECTION
+      : isAutoChatModel
         ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
   });
@@ -818,14 +849,14 @@ export function GoatSurface({
     return overlay.length > 0 ? [...base, ...overlay] : base;
   }, [messages, persistedMessages, status]);
   useEffect(() => {
-    if (chatModel !== AUTO_GOAT_MODEL_SELECTION) return;
+    if (!isAutoChatModel) return;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
       if (message?.role !== "assistant") continue;
       adoptResolvedAutoModel(message);
       break;
     }
-  }, [adoptResolvedAutoModel, chatModel, messages]);
+  }, [adoptResolvedAutoModel, isAutoChatModel, messages]);
   const latestAssistantMessageId = useMemo(() => {
     for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
       if (chatMessages[index]?.role === "assistant") return chatMessages[index]?.id ?? null;
@@ -836,6 +867,7 @@ export function GoatSurface({
   const isEngineWorking = isEngineChat && (engineRunning || engineSubmitting);
   const isTaskConversationWorking = Boolean(
     activeTaskConversation &&
+      !isTaskConversationStopping &&
       (activeTaskConversation.status === "queued" ||
         activeTaskConversation.status === "running" ||
         taskMessageSubmitting),
@@ -854,6 +886,7 @@ export function GoatSurface({
     backendActivelyStreaming && lastRenderedChatMessage?.role === "assistant"
       ? lastRenderedChatMessage.id
       : null;
+  const isInteractionPending = isAgentWorking || isTaskConversationStopping;
   const latestActiveTurnStartedAtMs = useMemo(
     () => latestChatTurnStartedAtMs(chatMessages),
     [chatMessages],
@@ -913,6 +946,38 @@ export function GoatSurface({
   const activeChatSummary = chatSessionId
     ? (recentChats.find((chat) => chat.id === chatSessionId) ?? null)
     : null;
+  useEffect(() => {
+    if (!chatSessionId || persistedChatSessionId !== chatSessionId) return;
+    const state = isAgentWorking ? "working" : mode === "chat" ? "done_seen" : null;
+    setLocalGoatChatState(chatSessionId, state);
+    return () => setLocalGoatChatState(chatSessionId, null);
+  }, [chatSessionId, isAgentWorking, mode, persistedChatSessionId]);
+
+  useEffect(() => {
+    if (
+      mode !== "chat" ||
+      isAgentWorking ||
+      !chatSessionId ||
+      persistedChatSessionId !== chatSessionId
+    ) {
+      return;
+    }
+
+    const markKey = `${chatSessionId}:${
+      activeChatSummary?.updatedAt ?? latestAssistantMessageId ?? chatMessages.length
+    }`;
+    if (lastSeenMarkRef.current === markKey) return;
+    lastSeenMarkRef.current = markKey;
+    void markGoatChatSeenAction(chatSessionId).catch(() => undefined);
+  }, [
+    activeChatSummary?.updatedAt,
+    chatMessages.length,
+    chatSessionId,
+    isAgentWorking,
+    latestAssistantMessageId,
+    mode,
+    persistedChatSessionId,
+  ]);
   const activeChatTitle =
     activeChatSummary?.title ??
     (initialChat?.id === chatSessionId ? initialChat.title : null) ??
@@ -1009,7 +1074,7 @@ export function GoatSurface({
           ? (chat?.codexRuntime ?? null)
           : null,
       );
-      setEngineRunning(false);
+      setEngineRunning(isCodexRuntimeActive(chat?.codexRuntime));
       clearActiveTurn();
       setOptimisticTurnDurations(new Map());
       setMessages([]);
@@ -1066,27 +1131,18 @@ export function GoatSurface({
     return () => window.removeEventListener(GOAT_HOME_NAVIGATION_EVENT, handleHomeNavigation);
   }, [clearComposerAttachments, openChat]);
 
-  // The visible composer text is painted by an overlay div behind the transparent
-  // textarea; once the textarea scrolls past its max height the overlay must follow
-  // its scroll position or the painted text freezes while the caret keeps moving.
-  const syncInputOverlayScroll = useCallback(() => {
-    const overlay = inputOverlayRef.current;
-    const el = inputRef.current;
-    if (!overlay || !el) return;
-    overlay.scrollTop = el.scrollTop;
-  }, []);
-
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     if (input.length === 0) {
       el.style.height = "";
+      if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = 0;
       return;
     }
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-    syncInputOverlayScroll();
-  }, [input, syncInputOverlayScroll]);
+    if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = el.scrollTop;
+  }, [input]);
 
   useLayoutEffect(() => {
     const caret = pendingInputCaretRef.current;
@@ -1191,6 +1247,34 @@ export function GoatSurface({
     setChatSearchQuery("");
   }, []);
 
+  const prepareMainComposerFocusRestoreAfterBackgroundTask = () => {
+    const activeElement = document.activeElement;
+    backgroundTaskFocusOriginRef.current =
+      activeElement &&
+      (activeElement === inputRef.current || Boolean(formRef.current?.contains(activeElement)))
+        ? activeElement
+        : null;
+  };
+
+  const refocusMainComposerAfterBackgroundTask = () => {
+    requestAnimationFrame(() => {
+      if (!mountedRef.current) return;
+      const focusOrigin = backgroundTaskFocusOriginRef.current;
+      backgroundTaskFocusOriginRef.current = null;
+      if (!focusOrigin) return;
+      const activeElement = document.activeElement;
+      if (
+        activeElement &&
+        activeElement !== document.body &&
+        activeElement !== focusOrigin &&
+        activeElement !== inputRef.current
+      ) {
+        return;
+      }
+      inputRef.current?.focus({ preventScroll: true });
+    });
+  };
+
   const jumpToChat = useCallback(
     (chat: GoatChatSummaryView) => {
       closeCommandPalette();
@@ -1223,7 +1307,7 @@ export function GoatSurface({
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isAgentWorking || backgroundTaskSubmitting) return;
+    if (isInteractionPending || backgroundTaskSubmitting) return;
     if (chatSendBlocked) {
       toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
@@ -1310,7 +1394,7 @@ export function GoatSurface({
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
 
-    if (workflowMentionsEnabled && hasGoatAdHocTaskToken(prompt)) {
+    if (adHocTaskMentionEnabled && hasGoatAdHocTaskToken(prompt)) {
       const description = descriptionFromGoatAdHocTaskPrompt(prompt);
       if (!description) {
         toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
@@ -1325,6 +1409,7 @@ export function GoatSurface({
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
+      prepareMainComposerFocusRestoreAfterBackgroundTask();
       setBackgroundTaskSubmitting(true);
       void startGoatAdHocTask({
         description: prompt,
@@ -1347,29 +1432,29 @@ export function GoatSurface({
           );
         })
         .finally(() => {
-          if (mountedRef.current) setBackgroundTaskSubmitting(false);
+          if (!mountedRef.current) return;
+          setBackgroundTaskSubmitting(false);
+          refocusMainComposerAfterBackgroundTask();
         });
       return;
     }
 
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
-      if (pendingAttachments.length > 0) {
-        toast.error("Attachments are not supported when starting a workflow task yet.");
-        return;
-      }
-
       clearError();
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
+      prepareMainComposerFocusRestoreAfterBackgroundTask();
       setBackgroundTaskSubmitting(true);
       void startGoatWorkflowTask({
         workflow: workflowMention,
         description: prompt,
+        ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
       })
         .then(({ task }) => {
           if (!mountedRef.current) return;
+          composerAttachments.clearAttachments();
           router.refresh();
           toast.success(`Started ${task.name} in the background.`);
         })
@@ -1382,7 +1467,9 @@ export function GoatSurface({
           );
         })
         .finally(() => {
-          if (mountedRef.current) setBackgroundTaskSubmitting(false);
+          if (!mountedRef.current) return;
+          setBackgroundTaskSubmitting(false);
+          refocusMainComposerAfterBackgroundTask();
         });
       return;
     }
@@ -1677,12 +1764,23 @@ export function GoatSurface({
 
   const stopGeneration = useCallback(() => {
     if (activeTaskConversation) {
+      if (isTaskConversationStopping) return;
+      const taskId = activeTaskConversation.taskId;
       setTaskMessageSubmitting(false);
-      void cancelGoatTaskAction(activeTaskConversation.taskId)
+      setStoppingTaskId(taskId);
+      void cancelGoatTaskAction(taskId)
         .then((result) => {
-          if (!result.ok) toast.error(result.error ?? "Could not stop that task.");
+          if (result.ok) {
+            router.refresh();
+            return;
+          }
+          setStoppingTaskId((current) => (current === taskId ? null : current));
+          toast.error(result.error ?? "Could not stop that task.");
         })
-        .catch(() => toast.error("Could not stop that task."));
+        .catch(() => {
+          setStoppingTaskId((current) => (current === taskId ? null : current));
+          toast.error("Could not stop that task.");
+        });
       return;
     }
 
@@ -1714,7 +1812,16 @@ export function GoatSurface({
       }
     }
     void stop();
-  }, [activeEngineChat, activeTaskConversation, chatResumeEnabled, chatSessionId, messages, stop]);
+  }, [
+    activeEngineChat,
+    activeTaskConversation,
+    chatResumeEnabled,
+    chatSessionId,
+    isTaskConversationStopping,
+    messages,
+    router,
+    stop,
+  ]);
 
   useEffect(() => {
     if (mode !== "chat") return;
@@ -1755,9 +1862,9 @@ export function GoatSurface({
       }
     }
 
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && (!event.shiftKey || mode === "home")) {
       event.preventDefault();
-      if (!isAgentWorking && !backgroundTaskSubmitting) formRef.current?.requestSubmit();
+      if (!isInteractionPending && !backgroundTaskSubmitting) formRef.current?.requestSubmit();
     }
   };
 
@@ -1887,6 +1994,16 @@ export function GoatSurface({
     }
     setSelectedMentions((current) => {
       if (option.mention.kind === "engine") {
+        const modelSelection = chatModelSelectionFromEngineMention(option.mention);
+        if (modelSelection === CODEX_PICKER_VALUE && chatModel !== CODEX_PICKER_VALUE) {
+          setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+        } else if (modelSelection === CLAUDE_PICKER_VALUE && chatModel !== CLAUDE_PICKER_VALUE) {
+          setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+          setCodexPlanModeEnabled(false);
+          setCodexGoalModeEnabled(false);
+          setCodexGoalObjective("");
+          setCodexGoalTokenBudget("");
+        }
         return [...current.filter((mention) => mention.kind !== "engine"), option.mention];
       }
       if (option.mention.kind === "workflow") {
@@ -2014,12 +2131,7 @@ export function GoatSurface({
                         <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
                           Tasks
                         </h2>
-                        <HomeTaskRows
-                          items={homeTasks}
-                          onArchiveTask={archiveTask}
-                          onArchiveChat={archiveChat}
-                          onSelectChat={openChat}
-                        />
+                        <HomeTaskRows items={homeTasks} onArchiveTask={archiveTask} />
                       </section>
                     ) : null}
 
@@ -2030,6 +2142,7 @@ export function GoatSurface({
                         </h2>
                         <ChatHistoryList
                           chats={homeChats}
+                          localChatStates={localChatStates}
                           onSelect={openChat}
                           onArchive={archiveChat}
                         />
@@ -2076,7 +2189,11 @@ export function GoatSurface({
                           engine={activeEngineChat.engine}
                           runtime={codexRuntime}
                           optimisticStatus={
-                            engineSubmitting ? "starting" : engineRunning ? "running" : null
+                            engineSubmitting
+                              ? "starting"
+                              : engineRunning && !isCodexRuntimeActive(codexRuntime)
+                                ? "running"
+                                : null
                           }
                           sandboxStatus={codexSandboxStatus}
                         />
@@ -2137,7 +2254,9 @@ export function GoatSurface({
                       isStreaming={message.id === activeStreamingAssistantMessageId}
                     />
                   ))}
-                  {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
+                  {isTaskConversationStopping ? (
+                    <PendingActivityIndicator label="Stopping task…" />
+                  ) : isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
                     <ThinkingIndicator
                       startedAtMs={activeTurnTimerStartedAtMs}
                       label={
@@ -2328,19 +2447,11 @@ export function GoatSurface({
                 ) : null}
                 <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
                   <div className="relative min-w-0 flex-1 self-center">
-                    {input ? (
-                      <div
-                        ref={inputOverlayRef}
-                        aria-hidden="true"
-                        className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
-                      >
-                        {renderComposerInputOverlay(
-                          input,
-                          activeSelectedMentions,
-                          selectedAdHocTask,
-                        )}
-                      </div>
-                    ) : null}
+                    {renderComposerInputOverlay({
+                      value: input,
+                      mentions: activeSelectedMentions,
+                      overlayRef: inputOverlayRef,
+                    })}
                     <textarea
                       ref={inputRef}
                       rows={1}
@@ -2363,8 +2474,12 @@ export function GoatSurface({
                         )
                       }
                       onKeyDown={onKeyDown}
-                      onScroll={syncInputOverlayScroll}
                       onPaste={onInputPaste}
+                      onScroll={(event) => {
+                        if (inputOverlayRef.current) {
+                          inputOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
+                        }
+                      }}
                       onSelect={(event) =>
                         updateMentionToken(
                           event.currentTarget.value,
@@ -2372,12 +2487,16 @@ export function GoatSurface({
                         )
                       }
                       disabled={backgroundTaskSubmitting}
-                      className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                      className={cn(
+                        "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
+                        composerInputHasMentionHighlights(input, activeSelectedMentions) &&
+                          "text-transparent caret-ink",
+                      )}
                       style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                       maxLength={10_000}
                     />
                   </div>
-                  {isEngineChat && engineRunning ? (
+                  {isEngineChat && engineRunning && !activeTaskConversation ? (
                     <EngineStopButton
                       label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
                       onStop={stopGeneration}
@@ -2396,6 +2515,7 @@ export function GoatSurface({
                       chatSendBlocked
                     }
                     isGenerating={isGenerating || isTaskConversationWorking}
+                    isStopping={isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />
@@ -2429,6 +2549,9 @@ export function GoatSurface({
                   <GoatModelPicker
                     value={chatModel}
                     onChange={(model) => {
+                      setSelectedMentions((current) =>
+                        current.filter((mention) => mention.kind !== "engine"),
+                      );
                       setChatModelOverride(model);
                       persistLastGoatChatSelection(userWorkosId, model);
                       if (model === CODEX_PICKER_VALUE && model !== chatModel) {
@@ -2564,7 +2687,7 @@ function QuickChatComposer({
     () => normalizeGoatModel(defaultModel),
   );
   const [chatModelOverride, setChatModelOverride] = useState<GoatChatModelSelection | null>(null);
-  const chatModel = chatModelOverride ?? rememberedChatModel;
+  const baseChatModel = chatModelOverride ?? rememberedChatModel;
   const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
     normalizeCodexChatModelId(undefined),
   );
@@ -2579,21 +2702,7 @@ function QuickChatComposer({
   const [codexGoalObjective, setCodexGoalObjective] = useState("");
   const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState("");
 
-  const isCodexMode = chatModel === CODEX_PICKER_VALUE;
-  const isClaudeMode = chatModel === CLAUDE_PICKER_VALUE;
-  const selectedEngine: GoatEngineChatKind | null = isCodexMode
-    ? "codex"
-    : isClaudeMode
-      ? "claude_code"
-      : null;
-  const isEngineChat = selectedEngine !== null;
-  const workflowMentionsEnabled = taskSpawningEnabled && !selectedEngine;
-  const selectedAdHocTask = workflowMentionsEnabled && hasGoatAdHocTaskToken(input);
-  const outOfCredits = Boolean(
-    creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
-  );
-  const chatSendBlocked = outOfCredits && !isEngineChat;
-
+  const workflowMentionsEnabled = taskSpawningEnabled;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
@@ -2602,6 +2711,25 @@ function QuickChatComposer({
     if (mention.kind === "workflow") return workflowMentionsEnabled;
     return true;
   });
+  const chatModel =
+    chatModelSelectionFromEngineMention(
+      activeSelectedMentions.find((mention) => mention.kind === "engine"),
+    ) ?? baseChatModel;
+  const isCodexMode = chatModel === CODEX_PICKER_VALUE;
+  const isClaudeMode = chatModel === CLAUDE_PICKER_VALUE;
+  const selectedEngine: GoatEngineChatKind | null = isCodexMode
+    ? "codex"
+    : isClaudeMode
+      ? "claude_code"
+      : null;
+  const isEngineChat = selectedEngine !== null;
+  const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
+  const selectedAdHocTask = adHocTaskMentionEnabled && hasGoatAdHocTaskToken(input);
+  const outOfCredits = Boolean(
+    creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
+  );
+  const chatSendBlocked = outOfCredits && !isEngineChat;
+
   const mentionOptions = buildMentionOptions({
     token: mentionToken,
     skills: skillCatalog,
@@ -2611,6 +2739,7 @@ function QuickChatComposer({
     claudeCodeConnected,
     skillsEnabled: true,
     workflowsEnabled: workflowMentionsEnabled,
+    adHocTaskEnabled: adHocTaskMentionEnabled,
   });
   const selectedWorkflowMention = selectedAdHocTask
     ? null
@@ -2677,24 +2806,18 @@ function QuickChatComposer({
     };
   }, [skillMentionMenuOpen, workflowMentionsEnabled]);
 
-  const syncInputOverlayScroll = useCallback(() => {
-    const overlay = inputOverlayRef.current;
-    const el = inputRef.current;
-    if (!overlay || !el) return;
-    overlay.scrollTop = el.scrollTop;
-  }, []);
-
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     if (input.length === 0) {
       el.style.height = "";
+      if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = 0;
       return;
     }
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-    syncInputOverlayScroll();
-  }, [input, syncInputOverlayScroll]);
+    if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = el.scrollTop;
+  }, [input]);
 
   useLayoutEffect(() => {
     const caret = pendingInputCaretRef.current;
@@ -2737,6 +2860,16 @@ function QuickChatComposer({
     }
     setSelectedMentions((current) => {
       if (option.mention.kind === "engine") {
+        const modelSelection = chatModelSelectionFromEngineMention(option.mention);
+        if (modelSelection === CODEX_PICKER_VALUE && chatModel !== CODEX_PICKER_VALUE) {
+          setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+        } else if (modelSelection === CLAUDE_PICKER_VALUE && chatModel !== CLAUDE_PICKER_VALUE) {
+          setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+          setCodexPlanModeEnabled(false);
+          setCodexGoalModeEnabled(false);
+          setCodexGoalObjective("");
+          setCodexGoalTokenBudget("");
+        }
         return [...current.filter((mention) => mention.kind !== "engine"), option.mention];
       }
       if (option.mention.kind === "workflow") {
@@ -2922,7 +3055,7 @@ function QuickChatComposer({
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
 
-    if (workflowMentionsEnabled && hasGoatAdHocTaskToken(prompt)) {
+    if (adHocTaskMentionEnabled && hasGoatAdHocTaskToken(prompt)) {
       const description = descriptionFromGoatAdHocTaskPrompt(prompt);
       if (!description) {
         toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
@@ -2963,17 +3096,17 @@ function QuickChatComposer({
 
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
-      if (pendingAttachments.length > 0) {
-        toast.error("Attachments are not supported when starting a workflow task yet.");
-        return;
-      }
-
       setIsSubmitting(true);
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
+      composerAttachments.clearAttachments();
       onSubmitted();
-      void startGoatWorkflowTask({ workflow: workflowMention, description: prompt })
+      void startGoatWorkflowTask({
+        workflow: workflowMention,
+        description: prompt,
+        ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
+      })
         .then(({ task }) => {
           // Not gated on mountedRef: the dialog (and this component) has already
           // closed by the time this resolves — router.refresh()/toast are global.
@@ -3185,15 +3318,11 @@ function QuickChatComposer({
           ) : null}
           <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
             <div className="relative min-w-0 flex-1 self-center">
-              {input ? (
-                <div
-                  ref={inputOverlayRef}
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
-                >
-                  {renderComposerInputOverlay(input, activeSelectedMentions, selectedAdHocTask)}
-                </div>
-              ) : null}
+              {renderComposerInputOverlay({
+                value: input,
+                mentions: activeSelectedMentions,
+                overlayRef: inputOverlayRef,
+              })}
               <textarea
                 ref={inputRef}
                 rows={1}
@@ -3207,13 +3336,21 @@ function QuickChatComposer({
                   updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
                 }
                 onKeyDown={onKeyDown}
-                onScroll={syncInputOverlayScroll}
                 onPaste={onInputPaste}
+                onScroll={(event) => {
+                  if (inputOverlayRef.current) {
+                    inputOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
+                  }
+                }}
                 onSelect={(event) =>
                   updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
                 }
                 disabled={isSubmitting}
-                className="relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-transparent caret-ink outline-none placeholder:text-ink-subtle"
+                className={cn(
+                  "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
+                  composerInputHasMentionHighlights(input, activeSelectedMentions) &&
+                    "text-transparent caret-ink",
+                )}
                 style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
                 maxLength={10_000}
               />
@@ -3265,6 +3402,9 @@ function QuickChatComposer({
                 // Deliberately not persisted via persistLastGoatChatSelection: this picker
                 // only applies to this one quick-compose chat, not the app-wide "last used
                 // model" default the main composer reads on its next fresh session.
+                setSelectedMentions((current) =>
+                  current.filter((mention) => mention.kind !== "engine"),
+                );
                 setChatModelOverride(model);
                 if (model === CODEX_PICKER_VALUE && model !== chatModel) {
                   setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
@@ -3344,11 +3484,25 @@ function chatHref(sessionId: string) {
 function visibleHomeChats(
   chats: readonly GoatChatSummaryView[],
   optimisticallyArchivedChatIds: ReadonlySet<string>,
+  localChatStates: ReadonlyMap<string, ReturnType<typeof goatChatSummaryState>>,
 ) {
   return chats
     .filter((chat) => !optimisticallyArchivedChatIds.has(chat.id))
-    .filter((chat) => isRecentGoatHomeActivity(chat.updatedAt))
+    .filter(
+      (chat) =>
+        Boolean(chat.pinnedAt) ||
+        isHomeChatStateVisible(chat, localChatStates.get(chat.id) ?? null) ||
+        isRecentGoatHomeActivity(chat.updatedAt),
+    )
     .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
+function isHomeChatStateVisible(
+  chat: GoatChatSummaryView,
+  localState: ReturnType<typeof goatChatSummaryState> | null,
+) {
+  const state = localState ?? goatChatSummaryState(chat);
+  return state === "working" || state === "done_unseen";
 }
 
 function visibleHomeSchedules(schedules: readonly GoatTaskScheduleView[]) {
@@ -3359,61 +3513,29 @@ function visibleHomeSchedules(schedules: readonly GoatTaskScheduleView[]) {
 
 function visibleHomeTasks(input: {
   tasks: readonly GoatTaskView[];
-  chats: readonly GoatChatSummaryView[];
   optimisticallyArchivedTaskIds: ReadonlySet<string>;
-  optimisticallyArchivedChatIds: ReadonlySet<string>;
-}): GoatHomeTaskItem[] {
-  const backgroundItems: GoatHomeTaskItem[] = input.tasks
+}): GoatTaskView[] {
+  return input.tasks
     .filter(
       (task) =>
         !input.optimisticallyArchivedTaskIds.has(task.id) &&
         !task.archivedAt &&
         (isBackgroundTaskActive(task) || isRecentGoatHomeActivity(task.createdAt)),
     )
-    .map((task) => ({ kind: "background", task }));
-  const codexItems: GoatHomeTaskItem[] = input.chats
-    .filter(
-      (chat) =>
-        (chat.engine === "codex" || chat.engine === "claude_code") &&
-        !input.optimisticallyArchivedChatIds.has(chat.id) &&
-        chat.codexRuntime?.status !== "closed" &&
-        (Boolean(chat.pinnedAt) ||
-          isCodexTaskActive(chat) ||
-          isRecentGoatHomeActivity(chat.updatedAt)),
-    )
-    .map((chat) => ({ kind: "codex", chat }));
-
-  return [...backgroundItems, ...codexItems].toSorted((left, right) => {
-    const activeDifference = Number(isHomeTaskActive(right)) - Number(isHomeTaskActive(left));
-    if (activeDifference !== 0) return activeDifference;
-    return homeTaskUpdatedAtMs(right) - homeTaskUpdatedAtMs(left);
-  });
-}
-
-function isHomeTaskActive(item: GoatHomeTaskItem) {
-  return item.kind === "background"
-    ? isBackgroundTaskActive(item.task)
-    : isCodexTaskActive(item.chat);
+    .toSorted((left, right) => {
+      const activeDifference =
+        Number(isBackgroundTaskActive(right)) - Number(isBackgroundTaskActive(left));
+      if (activeDifference !== 0) return activeDifference;
+      return taskUpdatedAtMs(right) - taskUpdatedAtMs(left);
+    });
 }
 
 function isBackgroundTaskActive(task: GoatTaskView) {
   return task.status === "queued" || task.status === "running";
 }
 
-function isCodexTaskActive(chat: GoatChatSummaryView) {
-  return (
-    chat.codexRuntime?.status === "queued" ||
-    chat.codexRuntime?.status === "starting" ||
-    chat.codexRuntime?.status === "running"
-  );
-}
-
-function homeTaskUpdatedAtMs(item: GoatHomeTaskItem) {
-  const value =
-    item.kind === "background"
-      ? item.task.updatedAt
-      : (item.chat.codexRuntime?.updatedAt ?? item.chat.updatedAt);
-  const timestamp = new Date(value).getTime();
+function taskUpdatedAtMs(task: GoatTaskView) {
+  const timestamp = new Date(task.updatedAt).getTime();
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
@@ -3682,6 +3804,91 @@ function goatChatMentionIsVisible(value: string, mention: GoatChatMention) {
   return new RegExp(`(^|\\s)${token}(?=\\s|$)`, "i").test(value);
 }
 
+type ComposerMentionHighlight = Extract<GoatChatMention, { kind: "skill" | "workflow" }>;
+
+type ComposerMentionHighlightRange = {
+  start: number;
+  end: number;
+  mention: ComposerMentionHighlight;
+};
+
+function composerInputHasMentionHighlights(value: string, mentions: readonly GoatChatMention[]) {
+  return composerMentionHighlightRanges(value, mentions).length > 0;
+}
+
+function renderComposerInputOverlay({
+  value,
+  mentions,
+  overlayRef,
+}: {
+  value: string;
+  mentions: readonly GoatChatMention[];
+  overlayRef: RefObject<HTMLDivElement | null>;
+}) {
+  const ranges = composerMentionHighlightRanges(value, mentions);
+  if (ranges.length === 0) return null;
+
+  let offset = 0;
+  const parts = ranges.flatMap((range, index) => {
+    const plain = value.slice(offset, range.start);
+    const chip = (
+      <span
+        key={`mention-${range.start}-${range.end}-${index}`}
+        data-goat-chat-mention={range.mention.kind}
+        className={COMPOSER_MENTION_CHIP_CLASS}
+      >
+        {value.slice(range.start, range.end)}
+      </span>
+    );
+    offset = range.end;
+    return plain ? [plain, chip] : [chip];
+  });
+  const tail = value.slice(offset);
+  if (tail) parts.push(tail);
+
+  return (
+    <div
+      ref={overlayRef}
+      aria-hidden="true"
+      data-testid="composer-mention-overlay"
+      className="pointer-events-none absolute inset-0 z-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
+    >
+      {parts}
+    </div>
+  );
+}
+
+function composerMentionHighlightRanges(
+  value: string,
+  mentions: readonly GoatChatMention[],
+): ComposerMentionHighlightRange[] {
+  if (!value) return [];
+  const candidates = mentions
+    .filter(
+      (mention): mention is ComposerMentionHighlight =>
+        mention.kind === "skill" || mention.kind === "workflow",
+    )
+    .flatMap((mention) => {
+      const token = escapeRegExp(goatChatMentionToken(mention));
+      const pattern = new RegExp(`(^|\\s)${token}(?=\\s|$)`, "gi");
+      return [...value.matchAll(pattern)].flatMap((match) => {
+        if (typeof match.index !== "number") return [];
+        const leading = match[1] ?? "";
+        const start = match.index + leading.length;
+        return [{ start, end: start + match[0].length - leading.length, mention }];
+      });
+    })
+    .toSorted((left, right) => left.start - right.start || left.end - right.end);
+
+  const ranges: ComposerMentionHighlightRange[] = [];
+  for (const candidate of candidates) {
+    const previous = ranges.at(-1);
+    if (previous && candidate.start < previous.end) continue;
+    ranges.push(candidate);
+  }
+  return ranges;
+}
+
 function skillMentionIdsFromText(value: string) {
   const ids = new Set<string>();
   for (const match of value.matchAll(/(^|\s)@skill\/([a-z0-9][a-z0-9-]{0,79})(?=\s|$)/gi)) {
@@ -3763,6 +3970,7 @@ function buildMentionOptions(input: {
   claudeCodeConnected: boolean;
   skillsEnabled: boolean;
   workflowsEnabled: boolean;
+  adHocTaskEnabled: boolean;
 }): MentionOption[] {
   if (!input.token) return [];
   const query = input.token.query;
@@ -3770,13 +3978,13 @@ function buildMentionOptions(input: {
   // "#" is the task sigil: it starts either the reserved ad-hoc task or one
   // saved workflow as a background task instead of a foreground chat turn.
   if (input.token.sigil === "#") {
-    if (!input.workflowsEnabled) return [];
+    if (!input.workflowsEnabled && !input.adHocTaskEnabled) return [];
     const hasSelectedWorkflow = input.selectedMentions.some(
       (mention) => mention.kind === "workflow",
     );
     if (hasSelectedWorkflow) return [];
     const options: MentionOption[] = [];
-    if (!query || "task ad-hoc background".includes(query)) {
+    if (input.adHocTaskEnabled && (!query || "task ad-hoc background".includes(query))) {
       options.push({
         kind: "task",
         token: GOAT_AD_HOC_TASK_TOKEN,
@@ -3784,17 +3992,19 @@ function buildMentionOptions(input: {
         description: "Run this request in the background",
       });
     }
-    for (const workflow of input.workflows) {
-      if (workflow.id === GOAT_AD_HOC_TASK_ID) continue;
-      const haystack = `${workflow.id} ${workflow.name} ${workflow.description}`.toLowerCase();
-      if (query && !haystack.includes(query)) continue;
-      options.push({
-        kind: "workflow",
-        token: `#${workflow.id}`,
-        label: workflow.name,
-        description: workflow.description,
-        mention: { kind: "workflow", id: workflow.id },
-      });
+    if (input.workflowsEnabled) {
+      for (const workflow of input.workflows) {
+        if (workflow.id === GOAT_AD_HOC_TASK_ID) continue;
+        const haystack = `${workflow.id} ${workflow.name} ${workflow.description}`.toLowerCase();
+        if (query && !haystack.includes(query)) continue;
+        options.push({
+          kind: "workflow",
+          token: `#${workflow.id}`,
+          label: workflow.name,
+          description: workflow.description,
+          mention: { kind: "workflow", id: workflow.id },
+        });
+      }
     }
     return options;
   }
@@ -3824,75 +4034,6 @@ function buildMentionOptions(input: {
     });
   }
   return options;
-}
-
-function renderComposerInputOverlay(
-  value: string,
-  mentions: GoatChatMention[],
-  includeAdHocTask = false,
-) {
-  const mentionRanges = mentions.flatMap((mention) => {
-    const token = goatChatMentionToken(mention);
-    const match = new RegExp(`(^|\\s)(${escapeRegExp(token)})(?=\\s|$)`, "i").exec(value);
-    if (!match || match.index === undefined) return [];
-    const start = match.index + (match[1]?.length ?? 0);
-    return [{ start, end: start + (match[2]?.length ?? token.length), kind: mention.kind }];
-  });
-  const taskMatch = includeAdHocTask
-    ? new RegExp(`(^|\\s)(${escapeRegExp(GOAT_AD_HOC_TASK_TOKEN)})(?=\\s|$)`, "i").exec(value)
-    : null;
-  const taskRanges =
-    taskMatch?.index === undefined
-      ? []
-      : [
-          {
-            start: taskMatch.index + (taskMatch[1]?.length ?? 0),
-            end:
-              taskMatch.index +
-              (taskMatch[1]?.length ?? 0) +
-              (taskMatch[2]?.length ?? GOAT_AD_HOC_TASK_TOKEN.length),
-            kind: "task" as const,
-          },
-        ];
-  const ranges = [...mentionRanges, ...taskRanges].toSorted(
-    (left, right) => left.start - right.start,
-  );
-  if (ranges.length === 0) return value;
-
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  for (const range of ranges) {
-    parts.push(value.slice(cursor, range.start));
-    parts.push(
-      <span
-        key={`${range.start}:${range.end}`}
-        data-testid={
-          range.kind === "engine"
-            ? "selected-codex-mention"
-            : range.kind === "task"
-              ? "selected-task-mention"
-              : range.kind === "workflow"
-                ? "selected-workflow-mention"
-                : "selected-skill-mention"
-        }
-        className={
-          range.kind === "workflow" || range.kind === "task"
-            ? "rounded-sm bg-ink/15 font-medium text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.15)]"
-            : "rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]"
-        }
-      >
-        {value.slice(range.start, range.end)}
-      </span>,
-    );
-    cursor = range.end;
-  }
-  parts.push(value.slice(cursor));
-  return (
-    <>
-      {/* Keep inline metrics identical to the textarea; paint-only styles preserve caret alignment. */}
-      {parts}
-    </>
-  );
 }
 
 function isGoatSkillCatalogItem(value: unknown): value is GoatSkillCatalogItem {
@@ -3956,6 +4097,7 @@ async function startGoatAdHocTask(input: { description: string; model: string; e
 async function startGoatWorkflowTask(input: {
   workflow: Extract<GoatChatMention, { kind: "workflow" }>;
   description: string;
+  attachments?: GoatChatUiAttachment[];
 }) {
   const response = await fetch("/api/workflows", {
     method: "POST",
@@ -4472,6 +4614,12 @@ function codexRuntimeMeta(runtime: GoatCodexRuntimeView | null): CodexRuntimeMet
   };
 }
 
+function isCodexRuntimeActive(runtime: { status?: string | null } | null | undefined) {
+  return (
+    runtime?.status === "queued" || runtime?.status === "starting" || runtime?.status === "running"
+  );
+}
+
 function CodexSessionStatusIndicator({
   engine,
   runtime,
@@ -4630,7 +4778,7 @@ function LiveCodexChatSessionStatusSubscriber({
           }
         : null,
     );
-    setRunning(status === "queued" || status === "starting" || status === "running");
+    setRunning(isCodexRuntimeActive(row));
   }, [isLoading, row, setRunning, setRuntime, status]);
 
   useEffect(() => {
@@ -4706,10 +4854,12 @@ function LiveChatTaskSubscriber({
 
 function ChatHistoryList({
   chats,
+  localChatStates,
   onSelect,
   onArchive,
 }: {
   chats: readonly GoatChatSummaryView[];
+  localChatStates: ReadonlyMap<string, ReturnType<typeof goatChatSummaryState>>;
   onSelect: (chat: GoatChatSummaryView) => void;
   onArchive: (chat: GoatChatSummaryView) => void;
 }) {
@@ -4734,10 +4884,9 @@ function ChatHistoryList({
               onClick={() => onSelect(chat)}
               className="flex min-h-10 min-w-0 flex-1 items-center gap-3 rounded-md py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
             >
-              <Clock
-                size={15}
-                strokeWidth={2}
-                className="shrink-0 text-ink-subtle group-hover/chat:text-ink-muted"
+              <HomeChatStateIndicator
+                chat={chat}
+                localState={localChatStates.get(chat.id) ?? null}
               />
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-baseline gap-2">
@@ -4764,6 +4913,45 @@ function ChatHistoryList({
         );
       })}
     </div>
+  );
+}
+
+function HomeChatStateIndicator({
+  chat,
+  localState,
+}: {
+  chat: GoatChatSummaryView;
+  localState: ReturnType<typeof goatChatSummaryState> | null;
+}) {
+  const state = localState ?? goatChatSummaryState(chat);
+  if (state === "working") {
+    return (
+      <LoaderCircle
+        aria-hidden="true"
+        data-testid="home-chat-working"
+        size={15}
+        strokeWidth={2}
+        className="shrink-0 animate-spin text-ink-subtle group-hover/chat:text-ink-muted"
+      />
+    );
+  }
+  if (state === "done_unseen") {
+    return (
+      <span
+        aria-hidden="true"
+        data-testid="home-chat-unseen"
+        className="h-2 w-2 shrink-0 rounded-full bg-info"
+      />
+    );
+  }
+  return (
+    <CheckCircle2
+      aria-hidden="true"
+      data-testid="home-chat-seen"
+      size={15}
+      strokeWidth={2}
+      className="shrink-0 text-success"
+    />
   );
 }
 
@@ -4974,26 +5162,11 @@ function formatScheduleNextRun(value: string) {
 function HomeTaskRows({
   items,
   onArchiveTask,
-  onArchiveChat,
-  onSelectChat,
 }: {
-  items: readonly GoatHomeTaskItem[];
+  items: readonly GoatTaskView[];
   onArchiveTask: (task: GoatTaskView) => void;
-  onArchiveChat: (chat: GoatChatSummaryView) => void;
-  onSelectChat: (chat: GoatChatSummaryView) => void;
 }) {
-  return items.map((item) =>
-    item.kind === "background" ? (
-      <ResultRow key={item.task.id} task={item.task} onArchive={onArchiveTask} />
-    ) : (
-      <CodexTaskRow
-        key={item.chat.id}
-        chat={item.chat}
-        onArchive={onArchiveChat}
-        onSelect={onSelectChat}
-      />
-    ),
-  );
+  return items.map((task) => <ResultRow key={task.id} task={task} onArchive={onArchiveTask} />);
 }
 
 function taskRowToView(row: GoatTaskRow): GoatTaskView {
@@ -5089,71 +5262,6 @@ function ResultRow({
           title="Archive"
           onClick={() => onArchive(task)}
           className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md bg-surface-hover text-ink-subtle opacity-0 transition-[background-color,color,opacity] duration-150 hover:bg-surface-muted hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/result:opacity-100 group-focus-within/result:opacity-100"
-        >
-          <Archive size={14} strokeWidth={2} />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function CodexTaskRow({
-  chat,
-  onArchive,
-  onSelect,
-}: {
-  chat: GoatChatSummaryView;
-  onArchive: (chat: GoatChatSummaryView) => void;
-  onSelect: (chat: GoatChatSummaryView) => void;
-}) {
-  const router = useRouter();
-  const meta = codexRuntimeMeta(chat.codexRuntime ?? null);
-  const engineLabel = codexEngineLabel(chat.engine);
-  const href = chatHref(chat.id);
-  const prefetchChat = () => router.prefetch(href);
-  const updatedAt = chat.codexRuntime?.updatedAt ?? chat.updatedAt;
-  const canArchive = !isCodexTaskActive(chat);
-  const errorPreview =
-    meta.kind === "needs-attention" ? firstLine(chat.codexRuntime?.error ?? null) : null;
-
-  return (
-    <div className="group/task relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
-      <Link
-        href={href}
-        prefetch
-        onMouseEnter={prefetchChat}
-        onFocus={prefetchChat}
-        onTouchStart={prefetchChat}
-        onClick={() => onSelect(chat)}
-        className="flex min-h-10 min-w-0 flex-1 items-center gap-3 rounded-md py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        <span
-          role="img"
-          aria-label={`${engineLabel} task status: ${meta.label}`}
-          className={cn("size-2.5 shrink-0 rounded-full", meta.dotClass)}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-[14px] font-medium leading-tight text-ink">
-              {chat.title}
-            </span>
-            <span className="shrink-0 text-[12px] leading-tight text-ink-faint transition-opacity duration-150 group-hover/task:opacity-0 group-focus-within/task:opacity-0">
-              {formatRelativeTime(updatedAt)}
-            </span>
-          </div>
-          <p className={cn("truncate text-[12.5px] leading-4", meta.textClass)}>
-            {engineLabel} · {meta.label}
-            {errorPreview ? ` · ${errorPreview}` : ""}
-          </p>
-        </div>
-      </Link>
-      {canArchive ? (
-        <button
-          type="button"
-          aria-label={`Archive ${chat.title}`}
-          title="Archive"
-          onClick={() => onArchive(chat)}
-          className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md bg-surface-hover text-ink-subtle opacity-0 transition-[background-color,color,opacity] duration-150 hover:bg-surface-muted hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/task:opacity-100 group-focus-within/task:opacity-100"
         >
           <Archive size={14} strokeWidth={2} />
         </button>
@@ -5410,14 +5518,30 @@ function modelProviderLabel(id: string) {
 function SubmitButton({
   disabled,
   isGenerating,
+  isStopping = false,
   startsTask = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
+  isStopping?: boolean;
   startsTask?: boolean;
   onStop: () => void;
 }) {
+  if (isStopping) {
+    return (
+      <button
+        type="button"
+        aria-label="Stopping task"
+        title="Stopping task"
+        disabled
+        className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas opacity-60"
+      >
+        <LoaderCircle size={13} strokeWidth={2.2} className="animate-spin" />
+      </button>
+    );
+  }
+
   if (isGenerating) {
     return (
       <button

@@ -53,6 +53,7 @@ const workflow = {
   name: "Weekly update",
   description: "Summarize the week.",
   status: "draft" as const,
+  trigger: { type: "manual" as const },
   steps: [
     {
       id: "step-1",
@@ -92,6 +93,7 @@ describe("GoatWorkflowEditor", () => {
       description: "Summarize the week.",
       steps: workflow.steps,
       status: "draft",
+      trigger: { type: "manual" },
     });
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
@@ -121,6 +123,7 @@ describe("GoatWorkflowEditor", () => {
     expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
       expect.objectContaining({
         steps: [expect.objectContaining({ id: "step-1", title: "Final edit" })],
+        trigger: { type: "manual" },
       }),
     );
   });
@@ -155,6 +158,152 @@ describe("GoatWorkflowEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove step 2" }));
     expect(screen.queryByLabelText("Step 2 name")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remove step 1" })).not.toBeInTheDocument();
+  });
+
+  it("renders markdown lists in read-only workflow steps", () => {
+    render(
+      <GoatWorkflowEditor
+        workflow={{
+          ...workflow,
+          steps: [
+            {
+              ...workflow.steps[0]!,
+              instructions:
+                "- Gather customer notes\n- Summarize risks\n\n1. Draft the update\n2. Flag blockers",
+            },
+          ],
+        }}
+        canEdit={false}
+        skillCatalog={[]}
+      />,
+    );
+
+    expect(screen.getByText("Gather customer notes").closest("li")).toBeInTheDocument();
+    expect(screen.getByText("Summarize risks").closest("li")).toBeInTheDocument();
+    expect(screen.getByText("Draft the update").closest("li")).toBeInTheDocument();
+    expect(screen.getByText("Flag blockers").closest("li")).toBeInTheDocument();
+  });
+
+  it("offers Claude Code as a workflow step model option", async () => {
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Runtime:/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Claude Code/ }));
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        steps: [
+          expect.objectContaining({
+            id: "step-1",
+            model: "claude-code",
+            runtimeModel: "anthropic/claude-sonnet-5",
+            reasoningEffort: "high",
+          }),
+        ],
+        trigger: { type: "manual" },
+      }),
+    );
+  });
+
+  it("saves the concrete Codex model and effort for coding steps", async () => {
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Runtime:/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Codex/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Codex model:/ }));
+    fireEvent.click(screen.getByRole("button", { name: /GPT 5\.6 Luna/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Effort:/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Medium effort/ }));
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        steps: [
+          expect.objectContaining({
+            id: "step-1",
+            model: "codex",
+            runtimeModel: "openai/gpt-5.6-luna",
+            reasoningEffort: "medium",
+          }),
+        ],
+        trigger: { type: "manual" },
+      }),
+    );
+  });
+
+  it("saves an on-a-schedule trigger using the friendly schedule builder", async () => {
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
+    expect(screen.getByLabelText("Frequency")).toHaveValue("weekdays");
+    fireEvent.change(screen.getByLabelText("At"), { target: { value: "08:30" } });
+    fireEvent.change(screen.getByLabelText("Timezone"), {
+      target: { value: "America/New_York" },
+    });
+    fireEvent.change(screen.getByLabelText("Task request"), {
+      target: { value: "Draft the weekday update." },
+    });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: {
+          type: "schedule",
+          cron: "30 8 * * 1-5",
+          timezone: "America/New_York",
+          prompt: "Draft the weekday update.",
+        },
+      }),
+    );
+  });
+
+  it("switches the frequency preset and updates the cron accordingly", async () => {
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
+    fireEvent.change(screen.getByLabelText("Frequency"), { target: { value: "hours" } });
+    fireEvent.change(screen.getByLabelText("Every"), { target: { value: "6" } });
+    fireEvent.change(screen.getByLabelText("Task request"), {
+      target: { value: "Check for updates." },
+    });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: {
+          type: "schedule",
+          cron: "0 0,6,12,18 * * *",
+          timezone: "UTC",
+          prompt: "Check for updates.",
+        },
+      }),
+    );
+  });
+
+  it("saves a custom cron expression via the advanced option", async () => {
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
+    fireEvent.change(screen.getByLabelText("Frequency"), { target: { value: "custom" } });
+    fireEvent.change(screen.getByLabelText("Cron"), { target: { value: "13 9 1 * *" } });
+    fireEvent.change(screen.getByLabelText("Task request"), {
+      target: { value: "Run the monthly report." },
+    });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: {
+          type: "schedule",
+          cron: "13 9 1 * *",
+          timezone: "UTC",
+          prompt: "Run the monthly report.",
+        },
+      }),
+    );
   });
 
   it("archives from the editor menu", async () => {

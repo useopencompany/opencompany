@@ -1,7 +1,7 @@
 import { getDb } from "@opencompany/db/client";
-import { goatChatSessions } from "@opencompany/db/goat-schema";
+import { goatChatSessions, goatCodexChatSessions } from "@opencompany/db/goat-schema";
 import { getGoatBrainAccess } from "@opencompany/db/goat-workspaces";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
   buildGoatElectricOriginUrl,
@@ -34,6 +34,7 @@ export async function GET(request: Request): Promise<Response> {
   const authorizedChatSessionId = await authorizeChatSessionShape({
     requestUrl,
     userWorkosId: context.user.workosUserId,
+    workspaceId: context.workspace.id,
   });
   const authorizedBrainRef = await authorizeBrainShape({
     requestUrl,
@@ -75,9 +76,10 @@ export async function GET(request: Request): Promise<Response> {
   });
 }
 
-async function authorizeChatSessionShape(input: {
+export async function authorizeChatSessionShape(input: {
   requestUrl: URL;
   userWorkosId: string;
+  workspaceId: string;
 }): Promise<string | null> {
   const sessionId =
     goatElectricChatMessagesSessionId(input.requestUrl) ??
@@ -87,11 +89,27 @@ async function authorizeChatSessionShape(input: {
   const [session] = await getDb()
     .select({ id: goatChatSessions.id })
     .from(goatChatSessions)
+    .leftJoin(
+      goatCodexChatSessions,
+      and(
+        eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
+        eq(goatCodexChatSessions.userWorkosId, goatChatSessions.userWorkosId),
+      ),
+    )
     .where(
       and(
         eq(goatChatSessions.id, sessionId),
-        eq(goatChatSessions.userWorkosId, input.userWorkosId),
         isNull(goatChatSessions.closedAt),
+        or(
+          and(
+            eq(goatChatSessions.kind, "chat"),
+            eq(goatChatSessions.userWorkosId, input.userWorkosId),
+          ),
+          and(
+            eq(goatChatSessions.kind, "task"),
+            eq(goatCodexChatSessions.workspaceId, input.workspaceId),
+          ),
+        ),
       ),
     )
     .limit(1);

@@ -253,10 +253,13 @@ export async function executeGoatWorkflowStepsTask(
       await input.sink.updateCodexEngineSessionId(null);
     }
 
+    const { codex: _previousCodexConfig, ...workflowHarnessSpecWithoutCodex } = workflowHarnessSpec;
+    const stepCodexConfig = codexConfigForWorkflowStep(workflowHarnessSpec.codex, step);
     const stepSpec: GoatHarnessSpec = {
-      ...workflowHarnessSpec,
+      ...workflowHarnessSpecWithoutCodex,
       engine: step.engine,
       model: step.model,
+      ...(stepCodexConfig ? { codex: stepCodexConfig } : {}),
       systemPrompt: step.systemPrompt,
       systemBlocks: step.systemBlocks,
       workflow: {
@@ -424,7 +427,7 @@ function goatWorkflowStepHandoffContent(input: {
 }) {
   const title = input.step.title.trim() || "Untitled step";
   const heading = `${goatWorkflowStepHandoffPrefix(input.stepIndex, input.stepCount)} ${title}`;
-  if (input.step.engine !== "codex" || !input.previousResult) return heading;
+  if (!isSandboxedWorkflowEngine(input.step.engine) || !input.previousResult) return heading;
   return [
     heading,
     "",
@@ -434,6 +437,24 @@ function goatWorkflowStepHandoffContent(input: {
     input.previousResult,
     "</previous_step_result>",
   ].join("\n");
+}
+
+function isSandboxedWorkflowEngine(engine: GoatHarnessSpec["engine"]) {
+  return engine === "codex" || engine === "claude_code";
+}
+
+function codexConfigForWorkflowStep(
+  base: GoatHarnessSpec["codex"],
+  step: GoatHarnessWorkflowStep,
+): GoatHarnessSpec["codex"] | undefined {
+  if (!isSandboxedWorkflowEngine(step.engine)) return undefined;
+  const { reasoningEffort: baseReasoningEffort, ...rest } = base ?? {};
+  const reasoningEffort = step.reasoningEffort ?? baseReasoningEffort;
+  const next = {
+    ...rest,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 function latestGoatAssistantResult(messages: readonly GoatTaskConversationMessage[]) {
@@ -459,8 +480,8 @@ function prefixGoatWorkflowStepOutcome(
 
 // Opencompany-engine task = a hidden main-chat run. No planner: the task's
 // harnessSpec carries engine/model (+ optional workflow systemBlocks); the shared
-// chat loop resolves its own tools (brain read, web, integration actions) fresh at
-// run time and self-reports its outcome via the update_task_status tool.
+// chat loop resolves its own tools (brain read, web, integration actions) fresh
+// at run time. A separate closer reports the user-facing task outcome.
 async function executeGoatOpenCompanyTaskInner(
   input: GoatTaskExecutorInput,
 ): Promise<GoatTaskExecutorResult> {
@@ -514,21 +535,18 @@ async function executeGoatOpenCompanyTaskInner(
       messageId: assistant.id,
       payload: { role: "assistant", usage: result.usage },
     });
-    if (result.reportedOutcome) {
-      await input.sink.appendEvent({
-        type: "task.status",
-        payload: {
-          reportedOutcome: result.reportedOutcome,
-          outcomeComment: result.outcomeComment ?? "",
-        },
-      });
-    }
+    const outcome = await runGoatTaskCloser({
+      env: input.env,
+      task: input.task,
+      finalContent,
+      sink: input.sink,
+      signal: input.signal,
+    });
     return {
       result: finalContent,
       harnessSpec,
       debugTrace,
-      ...(result.reportedOutcome ? { reportedOutcome: result.reportedOutcome } : {}),
-      ...(result.outcomeComment ? { outcomeComment: result.outcomeComment } : {}),
+      ...(outcome ?? {}),
     };
   } catch (error) {
     await markAssistantMessageFailedBestEffort(input.sink, assistant.id, errorMessage(error));
@@ -667,22 +685,20 @@ async function executeGoatCodexTaskInner(
       },
     });
 
-    const workflowOutcome = input.task.workflowId
-      ? await runGoatWorkflowTaskCloser({
-          env: input.env,
-          task: input.task,
-          finalContent: taskResult,
-          sink: input.sink,
-          signal: input.signal,
-        })
-      : null;
+    const taskOutcome = await runGoatTaskCloser({
+      env: input.env,
+      task: input.task,
+      finalContent: taskResult,
+      sink: input.sink,
+      signal: input.signal,
+    });
 
     return {
       result: taskResult,
       harnessSpec,
       debugTrace: planned.debugTrace,
       ...(artifact ? { artifact } : {}),
-      ...(workflowOutcome ?? {}),
+      ...(taskOutcome ?? {}),
     };
   } catch (error) {
     await markAssistantMessageFailedBestEffort(input.sink, assistant.id, errorMessage(error));
@@ -690,24 +706,24 @@ async function executeGoatCodexTaskInner(
   }
 }
 
-const GOAT_WORKFLOW_CLOSER_MODEL = "openai/gpt-5.4-mini";
-const GOAT_WORKFLOW_OUTCOME_COMMENT_MAX_LENGTH = 200;
+const GOAT_TASK_CLOSER_MODEL = "openai/gpt-5.4-mini";
+const GOAT_TASK_OUTCOME_COMMENT_MAX_LENGTH = 200;
 
-type GoatWorkflowTaskOutcome = {
+type GoatTaskOutcome = {
   reportedOutcome: GoatTaskReportedOutcome;
   outcomeComment: string;
 };
 
-// Post-run closer for Codex workflow tasks, which cannot call Goat tools to
-// report their own status. Any failure here degrades to a null outcome
+// Post-run closer for background tasks. Normal execution does not write the
+// user-facing task status/comment directly. Any failure here degrades to a null outcome
 // (displayed as done) rather than failing the task.
-async function runGoatWorkflowTaskCloser(input: {
+async function runGoatTaskCloser(input: {
   env: RunnerEnv;
   task: GoatTask;
   finalContent: string;
   sink: GoatTaskRunSink;
   signal: AbortSignal;
-}): Promise<GoatWorkflowTaskOutcome | null> {
+}): Promise<GoatTaskOutcome | null> {
   try {
     const workflow = input.task.harnessSpec.workflow;
     const currentStepIndex = workflow?.currentStepIndex ?? 0;
@@ -725,12 +741,12 @@ async function runGoatWorkflowTaskCloser(input: {
     const result = await withGoatSpan(
       GOAT_SPANS.taskComplete,
       {
-        "goat.model": GOAT_WORKFLOW_CLOSER_MODEL,
+        "goat.model": GOAT_TASK_CLOSER_MODEL,
         "goat.workflow_closer": true,
       },
       () =>
         generateText({
-          model: gateway(GOAT_WORKFLOW_CLOSER_MODEL),
+          model: gateway(GOAT_TASK_CLOSER_MODEL),
           system: currentStep
             ? 'You close out one finished step in a sequential background workflow. Judge whether the current step\'s own instructions were completed (status "done") or whether the user should look at it (status "needs_attention": blockers, errors, questions, or an incomplete current step). Do not mark it needs_attention merely because later workflow steps remain. Always call update_task_status exactly once.'
             : 'You close out finished background workflow tasks. Decide whether the result is complete (status "done") or whether the user should look at it (status "needs_attention": partial results, blockers, errors, questions, or anything the task explicitly wants reviewed). Always call update_task_status exactly once.',
@@ -781,11 +797,11 @@ async function runGoatWorkflowTaskCloser(input: {
       phase: "execution",
       stepIndex: 0,
       modelProvider: "vercel-ai-gateway",
-      modelName: GOAT_WORKFLOW_CLOSER_MODEL,
+      modelName: GOAT_TASK_CLOSER_MODEL,
       usage: result.usage,
     });
     const call = result.toolCalls.find((toolCall) => toolCall.toolName === "update_task_status");
-    const outcome = readGoatWorkflowTaskOutcome(call?.input);
+    const outcome = readGoatTaskOutcome(call?.input);
     if (!outcome) return null;
     await input.sink.appendEvent({
       type: "task.status",
@@ -796,8 +812,8 @@ async function runGoatWorkflowTaskCloser(input: {
     });
     return outcome;
   } catch (error) {
-    console.warn("Goat workflow closer failed; task completes without a reported outcome.", {
-      event: "goat.workflow_closer_failed",
+    console.warn("Goat task closer failed; task completes without a reported outcome.", {
+      event: "goat.task_closer_failed",
       task_id: input.task.id,
       error: errorMessage(error),
     });
@@ -805,7 +821,7 @@ async function runGoatWorkflowTaskCloser(input: {
   }
 }
 
-function readGoatWorkflowTaskOutcome(value: unknown): GoatWorkflowTaskOutcome | null {
+function readGoatTaskOutcome(value: unknown): GoatTaskOutcome | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Record<string, unknown>;
   const status = candidate.status;
@@ -813,7 +829,7 @@ function readGoatWorkflowTaskOutcome(value: unknown): GoatWorkflowTaskOutcome | 
   const comment = typeof candidate.comment === "string" ? candidate.comment.trim() : "";
   return {
     reportedOutcome: status,
-    outcomeComment: comment.slice(0, GOAT_WORKFLOW_OUTCOME_COMMENT_MAX_LENGTH),
+    outcomeComment: comment.slice(0, GOAT_TASK_OUTCOME_COMMENT_MAX_LENGTH),
   };
 }
 

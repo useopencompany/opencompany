@@ -1,6 +1,6 @@
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
-import type { GoatHarnessSpec, goatTasks } from "@opencompany/db/goat-schema";
+import type { GoatHarnessEngine, GoatHarnessSpec, goatTasks } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
 import {
@@ -710,9 +710,63 @@ describe("executeGoatWorkflowStepsTask", () => {
     });
   });
 
-  it("embeds the prior result in a Codex handoff", async () => {
+  it("refreshes the active cloud-coding effort for each workflow step", async () => {
     const sink = createSink();
-    const spec = workflowHarnessSpec(["opencompany", "codex"]);
+    const spec = workflowHarnessSpec(["codex", "codex"]);
+    spec.codex = { repository: "octo/repo", reasoningEffort: "high" };
+    spec.workflow!.steps![0] = {
+      ...spec.workflow!.steps![0]!,
+      reasoningEffort: "low",
+    };
+    spec.workflow!.steps![1] = {
+      ...spec.workflow!.steps![1]!,
+      reasoningEffort: "xhigh",
+    };
+    const runStep = vi.fn(async (input: GoatTaskExecutorInput): Promise<GoatTaskExecutorResult> => {
+      return stepResult(input, `Result ${runStep.mock.calls.length}`);
+    });
+
+    await executeGoatWorkflowStepsTask(workflowExecutorInput(spec, sink), runStep);
+
+    expect(
+      runStep.mock.calls.map(([input]) => input.task.harnessSpec.codex?.reasoningEffort),
+    ).toEqual(["low", "xhigh"]);
+    expect(runStep.mock.calls.map(([input]) => input.task.harnessSpec.codex?.repository)).toEqual([
+      "octo/repo",
+      "octo/repo",
+    ]);
+  });
+
+  it("drops stale cloud-coding config when the next workflow step is OpenCompany", async () => {
+    const sink = createSink();
+    const spec = workflowHarnessSpec(["codex", "opencompany"]);
+    spec.codex = { repository: "octo/repo", reasoningEffort: "high" };
+    spec.workflow!.steps![0] = {
+      ...spec.workflow!.steps![0]!,
+      reasoningEffort: "low",
+    };
+    const runStep = vi.fn(async (input: GoatTaskExecutorInput): Promise<GoatTaskExecutorResult> => {
+      return stepResult(input, `Result ${runStep.mock.calls.length}`);
+    });
+
+    await executeGoatWorkflowStepsTask(workflowExecutorInput(spec, sink), runStep);
+
+    expect(runStep.mock.calls.map(([input]) => input.task.harnessSpec.engine)).toEqual([
+      "codex",
+      "opencompany",
+    ]);
+    expect(
+      runStep.mock.calls.map(([input]) => input.task.harnessSpec.codex?.reasoningEffort),
+    ).toEqual(["low", undefined]);
+    expect(runStep.mock.calls[1]?.[0].task.harnessSpec.codex).toBeUndefined();
+  });
+
+  it.each([
+    "codex",
+    "claude_code",
+  ] as const)("embeds the prior result in a %s handoff", async (engine) => {
+    const sink = createSink();
+    const spec = workflowHarnessSpec(["opencompany", engine]);
     const runStep = vi.fn(
       async (input: GoatTaskExecutorInput): Promise<GoatTaskExecutorResult> =>
         stepResult(input, runStep.mock.calls.length === 1 ? "Evidence from step one." : "Done."),
@@ -914,11 +968,18 @@ describe("executeGoatWorkflowStepsTask", () => {
 
 describe("executeGoatTask", () => {
   it("runs opencompany tasks as a hidden main-chat run and records the reported outcome", async () => {
+    aiMock.generateText.mockResolvedValueOnce({
+      toolCalls: [
+        {
+          toolName: "update_task_status",
+          input: { status: "needs_attention", comment: "Couldn't verify one source." },
+        },
+      ],
+      usage: { inputTokens: 8, outputTokens: 3, totalTokens: 11 },
+    });
     goatChatLoopMock.runGoatTaskChatLoop.mockResolvedValueOnce({
       assistantContent: "Here is the answer.",
       usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
-      reportedOutcome: "needs_attention",
-      outcomeComment: "Couldn't verify one source.",
     });
     const sink = createSink();
 
@@ -1236,12 +1297,13 @@ function createSink(): GoatTaskRunSink {
 }
 
 function workflowHarnessSpec(
-  engines: Array<"opencompany" | "codex">,
+  engines: GoatHarnessEngine[],
   currentStepIndex = 0,
   completedStepCount = currentStepIndex,
 ): GoatHarnessSpec {
   const steps = engines.map((engine, index) => {
-    const stepModel = engine === "codex" ? gptModel : model;
+    const stepModel =
+      engine === "codex" ? gptModel : engine === "claude_code" ? claudeModel : model;
     return {
       index,
       title: `Title ${index + 1}`,
@@ -1301,6 +1363,7 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     displayId: "TASK-1",
     name: "Research Marseille",
     userWorkosId: "user_1",
+    workspaceId: "workspace_1",
     prompt: "Research Marseille.",
     model,
     sessionId: null,

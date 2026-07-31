@@ -46,7 +46,11 @@ export const BROWSER_TOOL_INPUT_SCHEMAS = {
   browser_click: {
     type: "object",
     additionalProperties: false,
-    properties: { ref: { type: "string" } },
+    properties: {
+      ref: { type: "string" },
+      irreversible: { type: "boolean" },
+      summary: { type: "string" },
+    },
     required: ["ref"],
   },
   browser_fill: {
@@ -63,7 +67,10 @@ export const BROWSER_TOOL_INPUT_SCHEMAS = {
       ref: { type: "string" },
       text: { type: "string" },
       urlPattern: { type: "string" },
-      loadState: { type: "string", enum: ["load", "domcontentloaded", "networkidle"] },
+      loadState: {
+        type: "string",
+        enum: ["load", "domcontentloaded", "networkidle"],
+      },
     },
   },
   browser_read: {
@@ -79,7 +86,10 @@ export const BROWSER_TOOL_INPUT_SCHEMAS = {
     type: "object",
     additionalProperties: false,
     properties: {
-      target: { type: "string", enum: ["url", "title", "text", "value", "attr", "count"] },
+      target: {
+        type: "string",
+        enum: ["url", "title", "text", "value", "attr", "count"],
+      },
       ref: { type: "string" },
       selector: { type: "string" },
       attribute: { type: "string" },
@@ -114,6 +124,8 @@ export const BROWSER_TOOL_INPUT_SCHEMAS = {
       name: { type: "string" },
       exact: { type: "boolean" },
       index: { type: "number", minimum: 0, maximum: 10000 },
+      irreversible: { type: "boolean" },
+      summary: { type: "string" },
     },
     required: ["by", "value", "action"],
   },

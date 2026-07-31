@@ -9,6 +9,7 @@ import {
 import {
   claimNextGoatCodexChatTurn,
   goatCodexChatRetryAt,
+  heartbeatGoatCodexChatTurn,
   resolveGoatCodexChatWorkerConcurrency,
   runClaimedTurn,
   startGoatCodexChatWorker,
@@ -111,6 +112,56 @@ describe("claimNextGoatCodexChatTurn", () => {
   });
 });
 
+describe("heartbeatGoatCodexChatTurn", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("renews a running turn only while no durable interrupt is requested", async () => {
+    dbMock.execute.mockResolvedValueOnce({ rows: [{ id: "goat_codex_chat_turn_1" }] });
+
+    await expect(
+      heartbeatGoatCodexChatTurn({
+        turnId: "goat_codex_chat_turn_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        leaseTtlMs: 300_000,
+      }),
+    ).resolves.toBe(true);
+
+    const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
+    expect(statement).toContain(
+      "SET lease_id = CASE WHEN interrupt_requested_at IS NULL THEN lease_id ELSE NULL END",
+    );
+    expect(statement).toContain(
+      "lease_owner = CASE WHEN interrupt_requested_at IS NULL THEN lease_owner ELSE NULL END",
+    );
+    expect(statement).toContain("WITH heartbeat AS");
+    expect(statement).toContain("WHEN interrupt_requested_at IS NULL THEN");
+    expect(statement).toContain("WHERE interrupt_requested_at IS NULL");
+  });
+
+  it("expires the current lease and reports ownership lost after a durable interrupt", async () => {
+    dbMock.execute.mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      heartbeatGoatCodexChatTurn({
+        turnId: "goat_codex_chat_turn_1",
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+        leaseTtlMs: 300_000,
+      }),
+    ).resolves.toBe(false);
+
+    const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
+    expect(statement).toContain("ELSE NULL END");
+    expect(statement).toContain("WHEN lease_expires_at IS NULL OR lease_expires_at >");
+    expect(statement).toContain("ELSE lease_expires_at");
+    expect(statement).toContain("SELECT id");
+    expect(statement).toContain("WHERE interrupt_requested_at IS NULL");
+  });
+});
+
 describe("resolveGoatCodexChatWorkerConcurrency", () => {
   it("uses the runner-wide concurrency by default", () => {
     expect(resolveGoatCodexChatWorkerConcurrency({ workerConcurrency: 40 })).toBe(40);
@@ -122,6 +173,138 @@ describe("resolveGoatCodexChatWorkerConcurrency", () => {
 });
 
 describe("Goat Codex chat worker shutdown", () => {
+  it("reclaims an interrupted silent turn and then runs the queued successor", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T09:00:00.000Z"));
+    const claimedTurnIds: string[] = [];
+    let firstClaimed = false;
+    let interruptHeartbeatObserved = false;
+    let interruptedTurnReclaimed = false;
+    let successorClaimed = false;
+    dbMock.execute.mockImplementation(async (query) => {
+      const statement = sqlText(query);
+      if (statement.includes("WITH candidate AS")) {
+        if (!firstClaimed) {
+          firstClaimed = true;
+          const row = claimedTurnRow();
+          claimedTurnIds.push(row.id);
+          return { rows: [row] };
+        }
+        if (!interruptHeartbeatObserved) return { rows: [] };
+        if (!interruptedTurnReclaimed) {
+          interruptedTurnReclaimed = true;
+          const row = {
+            ...claimedTurnRow(),
+            attempts: 2,
+            lease_id: "lease_2",
+            interrupt_requested_at: "2026-07-10T09:00:05.000Z",
+          };
+          claimedTurnIds.push(row.id);
+          return { rows: [row] };
+        }
+        if (!successorClaimed) {
+          successorClaimed = true;
+          const row = {
+            ...claimedTurnRow(),
+            id: "goat_codex_chat_turn_2",
+            user_message_id: "goat_chat_msg_user_2",
+            assistant_message_id: "goat_chat_msg_assistant_2",
+            codex_turn_id: null,
+            lease_id: "lease_3",
+            interrupt_requested_at: null,
+            created_at: "2026-07-10T09:00:01.000Z",
+          };
+          claimedTurnIds.push(row.id);
+          return { rows: [row] };
+        }
+        return { rows: [] };
+      }
+      if (statement.includes("WITH heartbeat AS")) {
+        interruptHeartbeatObserved = true;
+        return { rows: [] };
+      }
+      return { rows: [{ id: "updated" }] };
+    });
+    sessionRows.length = 0;
+    sessionRows.push(session());
+    let releaseSilentTurn: (() => void) | undefined;
+    chatMocks.runGoatCodexChatTurn
+      .mockImplementationOnce(
+        () =>
+          new Promise<"settled">((resolve) => {
+            releaseSilentTurn = () => resolve("settled");
+          }),
+      )
+      .mockResolvedValue("settled");
+
+    const worker = startGoatCodexChatWorker(env({ jobLeaseTtlMs: 15_000 }), {
+      concurrency: 1,
+      pollIntervalMs: 50,
+    });
+
+    try {
+      await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(5_050);
+      await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledTimes(3));
+
+      expect(claimedTurnIds).toEqual([
+        "goat_codex_chat_turn_1",
+        "goat_codex_chat_turn_1",
+        "goat_codex_chat_turn_2",
+      ]);
+      expect(chatMocks.runGoatCodexChatTurn.mock.calls[1]?.[0]).toMatchObject({
+        turn: expect.objectContaining({
+          id: "goat_codex_chat_turn_1",
+          attempts: 2,
+          interruptRequestedAt: new Date("2026-07-10T09:00:05.000Z"),
+        }),
+      });
+    } finally {
+      releaseSilentTurn?.();
+      await worker.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets active turns finish during the drain window without handing them off", async () => {
+    vi.clearAllMocks();
+    let claimed = false;
+    dbMock.execute.mockImplementation(async (query) => {
+      if (sqlText(query).includes("WITH candidate AS")) {
+        if (claimed) return { rows: [] };
+        claimed = true;
+        return { rows: [claimedTurnRow()] };
+      }
+      return { rows: [{ id: "updated" }] };
+    });
+    sessionRows.length = 0;
+    sessionRows.push(session());
+    let finishTurn: (() => void) | undefined;
+    chatMocks.runGoatCodexChatTurn.mockImplementationOnce(
+      () =>
+        new Promise<"settled">((resolve) => {
+          finishTurn = () => resolve("settled");
+        }),
+    );
+    const onHandoff = vi.fn();
+    const worker = startGoatCodexChatWorker(env(), { concurrency: 1, pollIntervalMs: 50 });
+
+    await vi.waitFor(() => expect(chatMocks.runGoatCodexChatTurn).toHaveBeenCalledOnce());
+    const stopping = worker.stop({
+      handoffAfterMs: 1_000,
+      postHandoffWaitMs: 1_000,
+      onHandoff,
+    });
+    finishTurn?.();
+    await stopping;
+
+    expect(onHandoff).not.toHaveBeenCalled();
+    expect(worker.activeCount()).toBe(0);
+    expect(
+      dbMock.execute.mock.calls.some(([query]) => sqlText(query).includes("SET lease_id = NULL")),
+    ).toBe(false);
+  });
+
   it("bounds shutdown and hands active turns to the next worker", async () => {
     vi.clearAllMocks();
     let claimed = false;
@@ -199,6 +382,7 @@ describe("terminal Goat Codex sandbox reconciliation", () => {
             id: "session_1",
             sandbox_id: "sbx_1",
             updated_at: "2026-07-10T12:00:00.000Z",
+            chat_kind: "chat",
           },
         ],
       })
@@ -212,6 +396,32 @@ describe("terminal Goat Codex sandbox reconciliation", () => {
     expect(sqlText(dbMock.execute.mock.calls[1]?.[0])).toContain("sandbox_timeout_armed_at");
   });
 
+  it("caps terminal task sandbox reconciliation at 5 minutes", async () => {
+    vi.clearAllMocks();
+    dbMock.execute
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: "session_1",
+            sandbox_id: "sbx_1",
+            updated_at: "2026-07-10T12:00:00.000Z",
+            chat_kind: "task",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: "session_1" }] });
+    sandboxMocks.armSandboxIdleTimeoutById.mockResolvedValueOnce(true);
+
+    await expect(
+      sweepTerminalGoatCodexChatSandboxes({ idleTimeoutMs: 30 * 60 * 1000 }),
+    ).resolves.toBe(1);
+
+    expect(sqlText(dbMock.execute.mock.calls[0]?.[0])).toContain(
+      "INNER JOIN goat.chat_sessions AS chat",
+    );
+    expect(sandboxMocks.armSandboxIdleTimeoutById).toHaveBeenCalledWith("sbx_1", 300_000);
+  });
+
   it("restores the active timeout when a new turn wins the reconciliation race", async () => {
     vi.clearAllMocks();
     dbMock.execute
@@ -221,6 +431,7 @@ describe("terminal Goat Codex sandbox reconciliation", () => {
             id: "session_1",
             sandbox_id: "sbx_1",
             updated_at: "2026-07-10T12:00:00.000Z",
+            chat_kind: "chat",
           },
         ],
       })
@@ -324,9 +535,7 @@ describe("runClaimedTurn", () => {
     sessionRows.length = 0;
     sessionRows.push(session({ engine: "opencompany", model: "anthropic/claude-sonnet-5" }));
     dbMock.execute.mockImplementation(async (query) =>
-      sqlText(query).includes("SET lease_expires_at")
-        ? { rows: [] }
-        : { rows: [{ id: "updated" }] },
+      sqlText(query).includes("WITH heartbeat AS") ? { rows: [] } : { rows: [{ id: "updated" }] },
     );
     chatMocks.runGoatOpenCompanyChatTurn.mockImplementationOnce(
       (input) =>

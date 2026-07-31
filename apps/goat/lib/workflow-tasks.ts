@@ -2,15 +2,17 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
 import type {
+  GoatChatMessageAttachment,
   GoatHarnessEngine,
   GoatTask,
   GoatTaskToolName,
   GoatWorkflowStep,
 } from "@opencompany/db/goat-schema";
-import { goatTasks } from "@opencompany/db/goat-schema";
+import { goatChatSessions, goatTasks } from "@opencompany/db/goat-schema";
 import { serializeGoatBrainSkillMarkdown } from "@opencompany/goat-brain";
 import { and, eq } from "drizzle-orm";
 import { generateGoatChatTitle } from "@/lib/chat-title";
+import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
 import {
@@ -34,20 +36,24 @@ import {
 export type GoatWorkflowEngineSelection = {
   engine: GoatHarnessEngine;
   model: AgentModelId;
+  reasoningEffort?: GoatWorkflowStep["reasoningEffort"];
 };
 
-const DEFAULT_GOAT_WORKFLOW_SELECTION: GoatWorkflowEngineSelection = goatWorkflowModelSelection(
-  DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
-);
+const DEFAULT_GOAT_WORKFLOW_SELECTION: GoatWorkflowEngineSelection = goatWorkflowModelSelection({
+  model: DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
+});
 
 // The token must end alphanumeric so trailing punctuation ("run @sonnet-5.")
 // stays out of the capture while inner dots ("@kimi-k2.6") still match.
 const WORKFLOW_MENTION_TOKEN_PATTERN = /(^|\s)@([a-z0-9](?:[a-z0-9./-]*[a-z0-9])?)/gi;
 const WORKFLOW_SKILL_MENTION_PATTERN = /(^|\s)@skill\/([a-z0-9][a-z0-9-]{0,79})(?![a-z0-9-])/gi;
 
-export function resolveGoatWorkflowStepSelection(
-  step: Pick<GoatWorkflowStep, "model" | "instructions">,
-): GoatWorkflowEngineSelection {
+export function resolveGoatWorkflowStepSelection(step: {
+  model: string;
+  runtimeModel?: unknown;
+  reasoningEffort?: unknown;
+  instructions: string;
+}): GoatWorkflowEngineSelection {
   const selectedToken = step.model.trim().toLowerCase();
   if (selectedToken) {
     if (!isGoatWorkflowModelToken(selectedToken)) {
@@ -55,14 +61,18 @@ export function resolveGoatWorkflowStepSelection(
         `This workflow step's model "${selectedToken}" is not available. Pick a model in the workflow editor.`,
       );
     }
-    return goatWorkflowModelSelection(selectedToken);
+    return goatWorkflowModelSelection({
+      model: selectedToken,
+      runtimeModel: step.runtimeModel,
+      reasoningEffort: step.reasoningEffort,
+    });
   }
 
   const selected = new Map<string, GoatWorkflowEngineSelection>();
   for (const match of step.instructions.matchAll(WORKFLOW_MENTION_TOKEN_PATTERN)) {
     const token = (match[2] ?? "").toLowerCase();
     if (!isGoatWorkflowModelToken(token)) continue;
-    selected.set(token, goatWorkflowModelSelection(token));
+    selected.set(token, goatWorkflowModelSelection({ model: token }));
   }
   if (selected.size > 1) {
     throw new GoatWorkflowMentionError(
@@ -77,10 +87,14 @@ export function resolveGoatWorkflowStepSelection(
 // Retained as a compatibility name for callers that parse one legacy step.
 export function parseGoatWorkflowEngineSelection(step: {
   model?: string;
+  runtimeModel?: unknown;
+  reasoningEffort?: unknown;
   instructions: string;
 }): GoatWorkflowEngineSelection {
   return resolveGoatWorkflowStepSelection({
     model: step.model ?? "",
+    runtimeModel: step.runtimeModel,
+    reasoningEffort: step.reasoningEffort,
     instructions: step.instructions,
   });
 }
@@ -117,7 +131,7 @@ export function compileGoatWorkflowHarnessSpec(input: {
       ...(input.workflow.description
         ? [`Workflow description: ${input.workflow.description}`]
         : []),
-      "Complete this step using the prior workflow transcript as context. Work autonomously; there is no interactive user in this run.",
+      "Complete this step using the task request plus explicit handoff artifacts from prior steps. Work autonomously; there is no interactive user in this run.",
       "",
       "<workflow_step_instructions>",
       step.instructions,
@@ -139,6 +153,7 @@ export function compileGoatWorkflowHarnessSpec(input: {
       title: step.title,
       engine: selection.engine,
       model: selection.model,
+      ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
       systemPrompt,
       systemBlocks: [systemPrompt],
       skillIds: stepSkills.map((skill) => skill.id),
@@ -148,13 +163,16 @@ export function compileGoatWorkflowHarnessSpec(input: {
   if (!firstStep) {
     throw new GoatWorkflowMentionError("This workflow has no steps to run.");
   }
-  const hasCodexStep = steps.some((step) => step.engine === "codex");
+  const hasSandboxStep = steps.some(
+    (step) => step.engine === "codex" || step.engine === "claude_code",
+  );
 
   return {
     schemaVersion: "goat.harness.v1",
     // Mirror step 0 so an older runner degrades to executing the first step.
     engine: firstStep.engine,
     model: firstStep.model,
+    ...(firstStep.reasoningEffort ? { codex: { reasoningEffort: firstStep.reasoningEffort } } : {}),
     systemPrompt: firstStep.systemPrompt,
     systemBlocks: firstStep.systemBlocks,
     initialUserMessage: [`Task: ${input.workflow.name}`, "", input.description].join("\n"),
@@ -169,7 +187,7 @@ export function compileGoatWorkflowHarnessSpec(input: {
       steps,
       currentStepIndex: 0,
       completedStepCount: 0,
-      ...(hasCodexStep
+      ...(hasSandboxStep
         ? {
             skillSnapshots: input.skills.map((skill) => ({
               id: skill.id,
@@ -188,6 +206,8 @@ export async function createGoatTaskFromWorkflow(input: {
   workspaceId: string | null;
   mention: GoatWorkflowMentionRef;
   description: string;
+  attachments?: GoatChatMessageAttachment[];
+  attachmentTexts?: Record<string, string> | null;
 }): Promise<GoatTask> {
   const workflow = await resolveGoatWorkflowMention({
     workspaceId: input.workspaceId,
@@ -195,13 +215,49 @@ export async function createGoatTaskFromWorkflow(input: {
   });
   // resolveGoatWorkflowMention throws when workspaceId is null, so it is set here.
   const workspaceId = input.workspaceId as string;
+  const prepared = await prepareGoatWorkflowRunForUser({
+    userWorkosId: input.userWorkosId,
+    workspaceId,
+    workflow,
+    description: input.description,
+  });
+
+  return createGoatTaskForUser({
+    userWorkosId: input.userWorkosId,
+    workspaceId,
+    prompt: prepared.description,
+    model: prepared.stepSelections[0]!.model,
+    name: workflow.name,
+    harnessSpec: prepared.harnessSpec,
+    ...(input.attachments ? { attachments: input.attachments } : {}),
+    ...(input.attachmentTexts !== undefined ? { attachmentTexts: input.attachmentTexts } : {}),
+    // `workflowId` holds the workspace-scoped workflow slug.
+    workflowId: workflow.id,
+  });
+}
+
+export async function prepareGoatWorkflowRunForUser(input: {
+  userWorkosId: string;
+  workspaceId: string;
+  workflow: GoatWorkspaceWorkflow;
+  description: string;
+}): Promise<{
+  description: string;
+  stepSelections: GoatWorkflowEngineSelection[];
+  harnessSpec: GoatWorkflowHarnessSpec;
+}> {
+  const { workflow } = input;
   const stepSelections = workflow.steps.map(resolveGoatWorkflowStepSelection);
-  if (
-    stepSelections.some((selection) => selection.engine === "codex") &&
-    !(await isGoatCodexConnectedForUser(input.userWorkosId))
-  ) {
+  const hasCodexStep = stepSelections.some((selection) => selection.engine === "codex");
+  const hasClaudeCodeStep = stepSelections.some((selection) => selection.engine === "claude_code");
+  if (hasCodexStep && !(await isGoatCodexConnectedForUser(input.userWorkosId))) {
     throw new GoatWorkflowMentionError(
       `Workflow "#${workflow.id}" uses Codex, but Codex is not connected. Connect Codex in Settings first.`,
+    );
+  }
+  if (hasClaudeCodeStep && !(await isGoatClaudeCodeConnectedForUser(input.userWorkosId))) {
+    throw new GoatWorkflowMentionError(
+      `Workflow "#${workflow.id}" uses Claude Code, but Claude Code is not connected. Connect Claude Code in Settings first.`,
     );
   }
 
@@ -213,7 +269,7 @@ export async function createGoatTaskFromWorkflow(input: {
     ).values(),
   ];
   const skills = await resolveGoatSkillMentions({
-    workspaceId,
+    workspaceId: input.workspaceId,
     mentions: skillRefs,
   });
   const tools = await getGoatAvailableHarnessTools(input.userWorkosId);
@@ -221,22 +277,13 @@ export async function createGoatTaskFromWorkflow(input: {
 
   const harnessSpec = compileGoatWorkflowHarnessSpec({
     workflow,
-    workspaceId,
+    workspaceId: input.workspaceId,
     skills,
     tools,
     description,
   });
 
-  return createGoatTaskForUser({
-    userWorkosId: input.userWorkosId,
-    workspaceId,
-    prompt: description,
-    model: stepSelections[0]!.model,
-    name: workflow.name,
-    harnessSpec,
-    // `workflowId` holds the workspace-scoped workflow slug.
-    workflowId: workflow.id,
-  });
+  return { description, stepSelections, harnessSpec };
 }
 
 // Chat- and trigger-created workflow tasks share this: the task is created instantly with the
@@ -258,10 +305,24 @@ export async function generateGoatWorkflowTaskTitle(input: {
       userWorkosId: input.userWorkosId,
     });
     if (!title || title === input.workflowName) return;
-    await getDb()
+    const now = new Date();
+    const db = getDb();
+    const [task] = await db
       .update(goatTasks)
-      .set({ name: title, updatedAt: new Date() })
-      .where(and(eq(goatTasks.id, input.taskId), eq(goatTasks.userWorkosId, input.userWorkosId)));
+      .set({ name: title, updatedAt: now })
+      .where(and(eq(goatTasks.id, input.taskId), eq(goatTasks.userWorkosId, input.userWorkosId)))
+      .returning({ sessionId: goatTasks.sessionId });
+    if (!task?.sessionId) return;
+    await db
+      .update(goatChatSessions)
+      .set({ title, updatedAt: now })
+      .where(
+        and(
+          eq(goatChatSessions.id, task.sessionId),
+          eq(goatChatSessions.userWorkosId, input.userWorkosId),
+          eq(goatChatSessions.kind, "task"),
+        ),
+      );
   } catch {
     // Keep the workflow-name fallback; a missing pretty title is not worth failing anything.
   }

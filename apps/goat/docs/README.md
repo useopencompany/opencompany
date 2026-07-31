@@ -120,12 +120,14 @@ runner prompt, creates a task chat session with the selected model, and keeps th
 in place. Both `#task` and saved workflow mentions require the **Tasks & Workflows** preference and
 currently reject attachments.
 
-Workflow runs remain grouped under **Tasks**, but task detail renders the same `GoatSurface` as a
-normal chat. Session-backed tasks render their native `goat.chat_messages` and subscribe to the
-same session and durable-turn state as cloud chats. The standard reply composer appends a user
-message and durable turn on that session, preserving its complete message and tool context. The
-normal chat stop control interrupts the active turn. Rows created before the session cutover retain
-a read-only compatibility projection from `goat.task_messages`.
+Workflow runs and `#task` ad-hoc runs remain grouped under **Tasks**, but task detail renders the
+same `GoatSurface` as a normal chat. User-triggered Codex and Claude Code sessions remain ordinary
+Chats unless they are backed by a `goat.tasks` row. Session-backed tasks render their native
+`goat.chat_messages` and subscribe to the same session and durable-turn state as cloud chats. The
+standard reply composer appends a user message and durable turn on that session, preserving its
+complete message and tool context. The normal chat stop control interrupts the active turn. Rows
+created before the session cutover retain a read-only compatibility projection from
+`goat.task_messages`.
 
 Normal main chat can also discover workspace skills progressively. When the catalog is non-empty, the
 system prompt advertises only that a skill source exists; `list_skills` searches safe id, name, and
@@ -371,9 +373,10 @@ visible to the model rather than merely path-referenced. Keeping uploads outside
 directory prevents them from appearing in repository changes.
 
 The Codex app-server daemon runs behind its Unix-socket control transport inside E2B and outlives
-the runner-side proxy. A runner shutdown detaches that proxy, keeps the sandbox on its active
-timeout, releases the delivery lease, and lets the next worker `thread/resume` the same stored Codex
-turn id. The reconnect reconciles completed
+the runner-side proxy. A runner shutdown stops new claims and gives the active turn up to four
+minutes to finish on the existing proxy. If it is still running, shutdown detaches the proxy, keeps
+the sandbox on its active timeout, releases the delivery lease, and lets the next worker
+`thread/resume` the same stored Codex turn id. The reconnect reconciles completed
 items and a terminal turn that landed while no runner was attached; stable per-item event keys make
 that replay idempotent. Lease claims count infrastructure ownership changes, while
 `recovery_attempts` increments only when the original Codex turn is missing or was interrupted and
@@ -453,14 +456,14 @@ interactions so stale cards cannot answer dead proxy connections. Cloud executio
 `approvalPolicy: "never"` inside the isolated workspace-write sandbox; unexpected command or file
 approval requests are declined rather than surfaced as misleading UI. Terminal and recovered turns
 clear stored answer bodies after settling the UI, including answers to questions marked secret.
+Native permission-escalation requests return an empty grant set for the same fail-closed reason.
 Pending dynamic host-tool calls also force a guarded recovery, since their result belongs to the
 runner proxy connection that received the original request.
 
-On the Goat home, open persistent Codex and Claude Code sessions are projected into the unified
-Tasks section alongside background `goat.tasks`. This is a live UI projection of the chat-backed
-session and its `goat.codex_chat_sessions` runtime state, not a copied task row: selecting it still
-opens `/chat/<session-id>`, pinning and archiving keep their chat semantics, and the sidebar
-continues to show it in conversation history.
+On the Goat home, persistent Codex and Claude Code sessions stay in the Chats section because they
+are user-triggered chat sessions. The Tasks section is reserved for real `goat.tasks` rows created
+from `#task`, workflow, or schedule entry points. Selecting a coding chat still opens
+`/chat/<session-id>`, while selecting a task opens `/tasks/<display-id>`.
 
 ## Task Creation
 
@@ -589,14 +592,14 @@ Entry points:
 - `apps/runner/src/goat-task-turn.ts`
 - `packages/goat-agent/src/chat-agent.ts`
 
-Task mode adds only the autonomous `TASK_SYSTEM_BLOCK`, the untrusted-content safety block, raised
-headless call limits, and the shared `update_task_status` tool to an OpenCompany turn. All other
-prompt, message, tool, streaming, credit, and usage behavior is the standard chat adapter.
+Task mode adds only the autonomous `TASK_SYSTEM_BLOCK`, the untrusted-content safety block, and
+raised headless call limits to an OpenCompany turn. All other prompt, message, tool, streaming,
+credit, and usage behavior is the standard chat adapter.
 
-Codex tasks use the standard persistent Codex turn adapter while preserving planner-produced
-repository and pull-request configuration, task reasoning/goal settings, Markdown report
-materialization, and the small closer model that reports the final task outcome. The closer reuses
-the shared `update_task_status` schema.
+Task turns use their standard engine adapters while preserving planner-produced repository and
+pull-request configuration, task reasoning/goal settings, and Markdown report materialization. A
+small closer model reports the final task outcome for both OpenCompany and Codex turns, reusing the
+shared `update_task_status` schema without exposing that tool to normal step execution.
 
 Workflows are sequences of ordinary durable turns. When a step reports `done`, settlement
 atomically appends the next step's handoff user message and assistant placeholder, enqueues the next

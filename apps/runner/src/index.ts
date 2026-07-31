@@ -50,17 +50,12 @@ const logger = createLogger({
   service: "opencompany-runner",
   runtime: "index",
 });
-// Shutdown budget. Render sends SIGTERM on deploy and SIGKILLs after
-// `maxShutdownDelaySeconds` (300s, render.yaml). An interrupted turn is non-retryable —
-// the job layer treats post-lease failures as terminal (see MessageTurnFailedError) and
-// the user has to resend — so we drain in-flight runs for most of the grace window: turns
-// that finish within it continue seamlessly across the deploy. The split below leaves
-// ~60s after the interrupt fires for the interrupt writes, the aborted jobs' unwinding
-// (bounded below), the stream flush, and the pool close to land before the hard kill.
-const RENDER_SHUTDOWN_INTERRUPT_AFTER_MS = 240_000;
-const RENDER_SHUTDOWN_POST_INTERRUPT_WAIT_MS = 30_000;
-const GOAT_CODEX_CHAT_HANDOFF_AFTER_MS = 5_000;
-const GOAT_CODEX_CHAT_POST_HANDOFF_WAIT_MS = 30_000;
+// Render sends SIGTERM on deploy and SIGKILLs after `maxShutdownDelaySeconds` (300s,
+// render.yaml). Workers stop claiming immediately, then active runner jobs and durable Goat Codex
+// turns get most of that window to finish in place. The remaining minute covers interruption or
+// handoff, stream/telemetry flushes, and closing the DB pool before Render's hard kill.
+const RENDER_SHUTDOWN_DRAIN_MS = 240_000;
+const RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS = 30_000;
 
 initializeExceptionReporting();
 registerGoatNodeObservability({ serviceName: "opencompany-runner-goat" });
@@ -190,8 +185,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     // telemetry.
     void Promise.allSettled([
       jobWorker.stop({
-        interruptAfterMs: RENDER_SHUTDOWN_INTERRUPT_AFTER_MS,
-        postInterruptWaitMs: RENDER_SHUTDOWN_POST_INTERRUPT_WAIT_MS,
+        interruptAfterMs: RENDER_SHUTDOWN_DRAIN_MS,
+        postInterruptWaitMs: RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS,
         onInterrupt: async () => {
           logger.warn("Runner shutdown interrupting runs", {
             event: "opencompany.runner_shutdown_interrupting_runs",
@@ -208,8 +203,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       goatTaskScheduleWorker?.stop() ?? Promise.resolve(),
       goatTaskWorker?.stop() ?? Promise.resolve(),
       goatCodexChatWorker?.stop({
-        handoffAfterMs: GOAT_CODEX_CHAT_HANDOFF_AFTER_MS,
-        postHandoffWaitMs: GOAT_CODEX_CHAT_POST_HANDOFF_WAIT_MS,
+        handoffAfterMs: RENDER_SHUTDOWN_DRAIN_MS,
+        postHandoffWaitMs: RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS,
         onHandoff: (activeCount) => {
           logger.info("Runner shutdown handing off Goat Codex chat turns", {
             event: "opencompany.runner_shutdown_handing_off_goat_codex_chat",

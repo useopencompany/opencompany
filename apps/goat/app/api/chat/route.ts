@@ -2,6 +2,10 @@ import {
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
 } from "@opencompany/agent-runtime";
+import {
+  captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded,
+} from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
@@ -10,7 +14,13 @@ import {
   cancelGoatCapabilityRunByToolCall,
 } from "@opencompany/db/goat-capabilities";
 import { hasPositiveGoatCreditBalance, recordGoatCreditDebit } from "@opencompany/db/goat-credits";
+import {
+  type GoatImessageDelivery,
+  resolveGoatImessageDelivery,
+} from "@opencompany/db/goat-imessage";
 import { type GoatChatMessageDebugTrace, goatChatSandboxUsage } from "@opencompany/db/goat-schema";
+import { resolveGoatImessageProvider } from "@opencompany/goat-agent/imessage/provider";
+import { createGoatSendUserMessageRunner } from "@opencompany/goat-agent/imessage/send-user-message";
 import {
   createGoatGatewayAttribution,
   GOAT_METRICS,
@@ -40,6 +50,12 @@ import type { GoatCapabilityTurnState, GoatResolvedActionCatalog } from "@/lib/a
 import { maybeTriggerGoatAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToGoatBrainInbox } from "@/lib/brain-capture";
 import { runGoatBrainToolForUser } from "@/lib/brain-cli";
+import {
+  browserProfilesAvailable,
+  createAgentSession,
+  endAgentSession,
+  listConnectedBrowserProfilesForUser,
+} from "@/lib/browser-profiles";
 import { MANAGED_CAPABILITY_ACTIONS_BY_ID } from "@/lib/capabilities/catalog";
 import { evaluateManagedCapabilityApproval } from "@/lib/capabilities/execute";
 import {
@@ -311,47 +327,57 @@ export async function POST(request: Request): Promise<Response> {
   // delegated work.
   const actionsEnabled = !requestedEngine && !isGoatChatActionsKilled();
   const emptyCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
-  const [actionCatalog, skillCatalog, workflowCatalog, modelRouting] = await Promise.all([
-    actionsEnabled
-      ? resolveGoatActionCatalog({
-          userWorkosId: context.user.workosUserId,
-          workspaceId: context.workspace.id,
-        }).catch((error) => {
-          logger.warn("Goat chat action catalog resolution failed", {
-            event: "goat.chat_action_catalog_resolution_failed",
-            error,
-          });
-          return emptyCatalog;
-        })
-      : Promise.resolve(emptyCatalog),
-    !requestedEngine
-      ? listGoatSkillCatalog(context.workspace.id).catch((error) => {
-          logger.warn("Goat chat skill catalog resolution failed", {
-            event: "goat.chat_skill_catalog_resolution_failed",
-            error,
-          });
-          return [];
-        })
-      : Promise.resolve([]),
-    !requestedEngine && context.user.taskSpawningEnabled
-      ? listGoatWorkflowCatalog(context.workspace.id).catch((error) => {
-          logger.warn("Goat chat workflow catalog resolution failed", {
-            event: "goat.chat_workflow_catalog_resolution_failed",
-            error,
-          });
-          return [];
-        })
-      : Promise.resolve([]),
-    autoModelRequested && userInput
-      ? resolveAutoGoatModel({
-          prompt: userInput.prompt,
-          attachments,
-          gatewayApiKey,
-          userWorkosId: context.user.workosUserId,
-          workspaceId: context.workspace.id,
-        })
-      : Promise.resolve<GoatChatModelRoutingResult | null>(null),
-  ]);
+  const [actionCatalog, skillCatalog, workflowCatalog, modelRouting, imessageDelivery] =
+    await Promise.all([
+      actionsEnabled
+        ? resolveGoatActionCatalog({
+            userWorkosId: context.user.workosUserId,
+            workspaceId: context.workspace.id,
+          }).catch((error) => {
+            logger.warn("Goat chat action catalog resolution failed", {
+              event: "goat.chat_action_catalog_resolution_failed",
+              error,
+            });
+            return emptyCatalog;
+          })
+        : Promise.resolve(emptyCatalog),
+      !requestedEngine
+        ? listGoatSkillCatalog(context.workspace.id).catch((error) => {
+            logger.warn("Goat chat skill catalog resolution failed", {
+              event: "goat.chat_skill_catalog_resolution_failed",
+              error,
+            });
+            return [];
+          })
+        : Promise.resolve([]),
+      !requestedEngine && context.user.taskSpawningEnabled
+        ? listGoatWorkflowCatalog(context.workspace.id).catch((error) => {
+            logger.warn("Goat chat workflow catalog resolution failed", {
+              event: "goat.chat_workflow_catalog_resolution_failed",
+              error,
+            });
+            return [];
+          })
+        : Promise.resolve([]),
+      autoModelRequested && userInput
+        ? resolveAutoGoatModel({
+            prompt: userInput.prompt,
+            attachments,
+            gatewayApiKey,
+            userWorkosId: context.user.workosUserId,
+            workspaceId: context.workspace.id,
+          })
+        : Promise.resolve<GoatChatModelRoutingResult | null>(null),
+      !requestedEngine && resolveGoatImessageProvider() !== null
+        ? resolveGoatImessageDelivery(context.user.workosUserId).catch((error) => {
+            logger.warn("Goat chat iMessage delivery resolution failed", {
+              event: "goat.chat_imessage_delivery_resolution_failed",
+              error,
+            });
+            return null;
+          })
+        : Promise.resolve<GoatImessageDelivery | null>(null),
+    ]);
   if (modelRouting && userInput) {
     userInput = { ...userInput, model: modelRouting.model };
   }
@@ -673,12 +699,34 @@ export async function POST(request: Request): Promise<Response> {
   };
 
   let browserToolSession: ChatBrowserToolSession | null = null;
+  let connectedBrowserProfiles: Awaited<ReturnType<typeof listConnectedBrowserProfilesForUser>> =
+    [];
   if (turn.session.engine === "opencompany" && !requestedEngine) {
+    connectedBrowserProfiles = browserProfilesAvailable()
+      ? await listConnectedBrowserProfilesForUser(context.user.workosUserId)
+      : [];
     const { createChatBrowserToolSession } = await import("@/lib/sandbox/browser-tools");
     browserToolSession = createChatBrowserToolSession({
       chatSessionId: turn.session.id,
       userWorkosId: context.user.workosUserId,
       signal: generationSignal,
+      ...(connectedBrowserProfiles.length > 0
+        ? {
+            createBrowserProfileAgentSession: (profileId) =>
+              createAgentSession({
+                userWorkosId: context.user.workosUserId,
+                profileId,
+                chatSessionId: turn.session.id,
+                userMessageId: turn.usageUserMessageId,
+              }),
+            endBrowserProfileAgentSession: (session) =>
+              endAgentSession({
+                userWorkosId: context.user.workosUserId,
+                profileId: session.profile.id,
+                sessionId: session.sessionId,
+              }),
+          }
+        : {}),
     });
   }
   const maxChatSteps = browserToolSession
@@ -687,6 +735,7 @@ export async function POST(request: Request): Promise<Response> {
   let browserUsagePromise: Promise<void> | null = null;
   const recordBrowserSandboxUsage = () => {
     browserUsagePromise ??= (async () => {
+      await browserToolSession?.endActiveProfile?.();
       const usage = browserToolSession?.getUsage();
       if (!usage) return;
       await getDb()
@@ -723,6 +772,45 @@ export async function POST(request: Request): Promise<Response> {
     latestUserMessage: turn.userMessageContent,
     ...(requestedEngine ? { requestedEngine } : {}),
     ...(browserToolSession ? { browserTools: browserToolSession.execute } : {}),
+    ...(imessageDelivery
+      ? {
+          sendUserMessage: createGoatSendUserMessageRunner({
+            userWorkosId: context.user.workosUserId,
+            phoneE164: imessageDelivery.phoneE164,
+            source: "chat",
+            chatSessionId: turn.session.id,
+            signal: generationSignal,
+          }),
+        }
+      : {}),
+    ...(browserToolSession && connectedBrowserProfiles.length > 0
+      ? {
+          browserProfiles: {
+            profiles: connectedBrowserProfiles,
+            useProfile: async (call) => {
+              const profile = connectedBrowserProfiles.find((entry) => entry.name === call.profile);
+              if (!profile) {
+                return {
+                  ok: false,
+                  error: `Unknown browser profile ${JSON.stringify(call.profile)}.`,
+                };
+              }
+              const result = await browserToolSession.useProfile({
+                profileId: profile.id,
+              });
+              if (!result.profile) return result;
+              return {
+                ...result,
+                profile: {
+                  id: result.profile.id,
+                  name: result.profile.name,
+                  siteHost: result.profile.siteHost,
+                },
+              };
+            },
+          },
+        }
+      : {}),
     // goat_brain is read-only for everyone (recall/inspect). The only write path
     // in chat is save_to_brain, which is available to every workspace member
     // with an active brain and enqueues the durable ingestion agent.
@@ -1682,13 +1770,14 @@ async function recordChatModelCost(input: {
   stage?: "generation" | "routing";
 }) {
   if (!input.usage) return;
+  const usage = normalizeChatModelUsage(input.usage);
   const cost = calculateModelUsageCost({
     modelName: input.model,
-    inputTokens: readUsageNumber(input.usage.inputTokens),
-    inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
-    inputCacheReadTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheReadTokens),
-    inputCacheWriteTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheWriteTokens),
-    outputTokens: readUsageNumber(input.usage.outputTokens),
+    inputTokens: usage.inputTokens,
+    inputNoCacheTokens: usage.inputNoCacheTokens,
+    inputCacheReadTokens: usage.inputCacheReadTokens,
+    inputCacheWriteTokens: usage.inputCacheWriteTokens,
+    outputTokens: usage.outputTokens,
   });
   recordGoatModelCost({
     costUsdMicros: cost.totalCostUsdMicros,
@@ -1698,13 +1787,36 @@ async function recordChatModelCost(input: {
       "goat.stage": input.stage ?? "generation",
     },
   });
+  await captureGoatLlmUsageRecorded({
+    distinctId: input.userWorkosId,
+    workspaceId: input.workspaceId,
+    surface: "chat",
+    stage: input.stage ?? "generation",
+    sessionId: input.chatSessionId,
+    messageId: input.userMessageId,
+    modelProvider: "vercel-ai-gateway",
+    model: input.model,
+    engine: "opencompany",
+    inputTokens: usage.inputTokens,
+    inputNoCacheTokens: usage.inputNoCacheTokens,
+    inputCacheReadTokens: usage.inputCacheReadTokens,
+    inputCacheWriteTokens: usage.inputCacheWriteTokens,
+    outputTokens: usage.outputTokens,
+    outputTextTokens: usage.outputTextTokens,
+    outputReasoningTokens: usage.outputReasoningTokens,
+    totalTokens: usage.totalTokens,
+    providerCostUsdMicros: cost.providerCostUsdMicros,
+    platformFeeUsdMicros: cost.platformFeeUsdMicros,
+    chargedCostUsdMicros: cost.totalCostUsdMicros,
+    billable: cost.billable,
+  });
   // Usage-based chat: debit the turn's total cost (provider + platform fee)
   // from the workspace credits. Unknown/variable-priced models compute to
   // billable=false and debit nothing. The user-message id dedupes stream
   // resume/replay paths. A debit failure must never fail the turn.
   if (!cost.billable) return;
   try {
-    await recordGoatCreditDebit({
+    const debit = await recordGoatCreditDebit({
       workspaceId: input.workspaceId,
       userWorkosId: input.userWorkosId,
       source: "chat_model_usage",
@@ -1715,6 +1827,24 @@ async function recordChatModelCost(input: {
       totalCostUsdMicros: cost.totalCostUsdMicros,
       costBasis: cost.costBasis,
     });
+    if (debit.ok) {
+      await captureGoatModelSpendRecorded({
+        userWorkosId: input.userWorkosId,
+        workspaceId: input.workspaceId,
+        billingSource: "chat_model_usage",
+        surface: "chat",
+        model: input.model,
+        stage: input.stage ?? "generation",
+        engine: "opencompany",
+        providerCostUsdMicros: cost.providerCostUsdMicros,
+        platformFeeUsdMicros: cost.platformFeeUsdMicros,
+        totalCostUsdMicros: cost.totalCostUsdMicros,
+        modelCostUsdMicros: cost.providerCostUsdMicros,
+        ledgerId: debit.ledgerId,
+        chatSessionId: input.chatSessionId,
+        messageId: input.userMessageId,
+      });
+    }
     // Fire-and-forget: charge the saved card when the balance dropped below
     // the auto-refill threshold. The cron sweep covers runner-side debits.
     void maybeTriggerGoatAutoRefill(input.workspaceId);
@@ -1726,6 +1856,34 @@ async function recordChatModelCost(input: {
       error,
     });
   }
+}
+
+function normalizeChatModelUsage(usage: LanguageModelUsage) {
+  const inputTokens = readUsageNumber(usage.inputTokens);
+  const inputCacheReadTokens = readUsageNumber(
+    usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens,
+  );
+  const inputCacheWriteTokens = readUsageNumber(usage.inputTokenDetails?.cacheWriteTokens);
+  const inputNoCacheTokens =
+    readUsageNumber(usage.inputTokenDetails?.noCacheTokens) ||
+    Math.max(0, inputTokens - inputCacheReadTokens - inputCacheWriteTokens);
+  const outputTokens = readUsageNumber(usage.outputTokens);
+  const outputReasoningTokens = readUsageNumber(
+    usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens,
+  );
+  const outputTextTokens =
+    readUsageNumber(usage.outputTokenDetails?.textTokens) ||
+    Math.max(0, outputTokens - outputReasoningTokens);
+  return {
+    inputTokens,
+    inputNoCacheTokens,
+    inputCacheReadTokens,
+    inputCacheWriteTokens,
+    outputTokens,
+    outputTextTokens,
+    outputReasoningTokens,
+    totalTokens: readUsageNumber(usage.totalTokens) || inputTokens + outputTokens,
+  };
 }
 
 function readUsageNumber(value: number | undefined) {

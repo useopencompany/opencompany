@@ -140,6 +140,7 @@ function taskFromInitialRun(run: GoatHarnessRunViewModel): GoatTaskRow {
     display_id: run.task.displayId,
     name: run.task.name,
     user_workos_id: "",
+    workspace_id: null,
     prompt: run.task.prompt,
     model: run.task.model,
     session_id: run.task.sessionId,

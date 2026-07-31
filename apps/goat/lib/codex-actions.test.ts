@@ -24,11 +24,11 @@ describe("executeGoatCodexActionGateway", () => {
     vi.unstubAllEnvs();
   });
 
-  it("lists only connected, permission-on integration reads", async () => {
+  it("lists connected integration reads and enabled managed capability reads", async () => {
     const readAction = createReadAction();
     const catalog: GoatResolvedActionCatalog = {
       providers: [
-        { id: "gmail", kind: "integration", label: "Gmail", description: "Email" },
+        { id: "gmail", label: "Gmail", description: "Email" },
         { id: "slack", kind: "integration", label: "Slack", description: "Messages" },
         { id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" },
       ],
@@ -63,7 +63,10 @@ describe("executeGoatCodexActionGateway", () => {
 
     expect(response).toEqual({
       ok: true,
-      sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
+      sources: [
+        { id: "gmail", kind: "integration", label: "Gmail", description: "Email" },
+        { id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" },
+      ],
     });
   });
 
@@ -107,6 +110,55 @@ describe("executeGoatCodexActionGateway", () => {
     );
   });
 
+  it("shares managed capability turn state across calls in the same Codex turn", async () => {
+    const managedAction = createReadAction("linkedin.search_posts", "linkedin");
+    managedAction.execute = vi.fn(async (_params, actionContext) => {
+      const turnState = actionContext.capabilityTurnState;
+      if (!turnState) throw new Error("Missing capability turn state");
+      turnState.quotedTotalUsdMicros += 10;
+      return { quotedTotalUsdMicros: turnState.quotedTotalUsdMicros };
+    });
+    const catalog: GoatResolvedActionCatalog = {
+      providers: [{ id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" }],
+      actions: [managedAction],
+    };
+    const request = {
+      operation: "execute" as const,
+      codexChatSessionId: "codex_session_state",
+      codexChatTurnId: "codex_turn_state",
+      action: "linkedin.search_posts",
+      params: { query: "founders" },
+      toolCallId: "call_1",
+    };
+    const dependencies = {
+      loadContext: vi.fn(async () => context),
+      resolveCatalog: vi.fn(async () => catalog),
+      now: () => new Date("2026-07-28T12:00:00.000Z"),
+    };
+
+    const first = await executeGoatCodexActionGateway({
+      request,
+      signal: new AbortController().signal,
+      dependencies,
+    });
+    const second = await executeGoatCodexActionGateway({
+      request: { ...request, toolCallId: "call_2" },
+      signal: new AbortController().signal,
+      dependencies,
+    });
+
+    expect(first).toEqual({
+      ok: true,
+      action: "linkedin.search_posts",
+      result: { quotedTotalUsdMicros: 10 },
+    });
+    expect(second).toEqual({
+      ok: true,
+      action: "linkedin.search_posts",
+      result: { quotedTotalUsdMicros: 20 },
+    });
+  });
+
   it("fails closed when the turn no longer authorizes access", async () => {
     const resolveCatalog = vi.fn();
     const response = await executeGoatCodexActionGateway({
@@ -126,10 +178,13 @@ describe("executeGoatCodexActionGateway", () => {
   });
 });
 
-function createReadAction(): ResolvedGoatAction {
+function createReadAction(
+  id = "gmail.search",
+  provider: ResolvedGoatAction["provider"] = "gmail",
+): ResolvedGoatAction {
   return {
-    id: "gmail.search",
-    provider: "gmail",
+    id,
+    provider,
     capability: "read",
     description: "Search Gmail.",
     params: { type: "object" },

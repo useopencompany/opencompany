@@ -20,6 +20,7 @@ import {
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
+import { ExternalLink, Globe2, Loader2, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useHydrated } from "@/components/useHydrated";
@@ -46,6 +47,7 @@ import {
   type GoatCodexProviderState,
   type GoatGitHubProviderState,
   type GoatGoogleProviderState,
+  type GoatImessageProviderState,
   type GoatIntegrationAccountView,
   type GoatIntegrationState,
   type GoatJamieProviderState,
@@ -75,7 +77,8 @@ type IntegrationMetaKey =
   | "posthog"
   | "stripe"
   | "codex"
-  | "claude_code";
+  | "claude_code"
+  | "imessage";
 
 type IntegrationMeta = {
   label: string;
@@ -184,25 +187,44 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: AnthropicIcon,
     tileClass: "bg-[#CC785C] text-white",
   },
+  imessage: {
+    label: "iMessage",
+    description: "Get important updates from Goat as texts on your phone.",
+    monogram: "iM",
+    tileClass: "bg-[#34C759] text-white",
+  },
 };
 
 export function SettingsIntegrationsPanel({
   initialIntegrations,
   isWorkspaceAdmin,
+  imessageEnabled = false,
+  browserProfilesEnabled = false,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  // The iMessage card only exists for users who turned the beta flag on in
+  // Preferences; pairing state alone must not surface it.
+  imessageEnabled?: boolean;
+  browserProfilesEnabled?: boolean;
 }) {
   const hydrated = useHydrated();
   return (
     <>
       <IntegrationSetupFeedback />
       {!hydrated ? (
-        <IntegrationCards integrations={initialIntegrations} isWorkspaceAdmin={isWorkspaceAdmin} />
+        <IntegrationCards
+          integrations={initialIntegrations}
+          isWorkspaceAdmin={isWorkspaceAdmin}
+          imessageEnabled={imessageEnabled}
+          browserProfilesEnabled={browserProfilesEnabled}
+        />
       ) : (
         <LiveSettingsIntegrations
           initialIntegrations={initialIntegrations}
           isWorkspaceAdmin={isWorkspaceAdmin}
+          imessageEnabled={imessageEnabled}
+          browserProfilesEnabled={browserProfilesEnabled}
         />
       )}
     </>
@@ -243,9 +265,13 @@ function IntegrationSetupFeedback() {
 function LiveSettingsIntegrations({
   initialIntegrations,
   isWorkspaceAdmin,
+  imessageEnabled,
+  browserProfilesEnabled,
 }: {
   initialIntegrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  imessageEnabled: boolean;
+  browserProfilesEnabled: boolean;
 }) {
   const collections = useMemo(() => createGoatCollections(), []);
   const { data: rows, isLoading } = useLiveQuery((q) =>
@@ -267,7 +293,14 @@ function LiveSettingsIntegrations({
     };
   }, [initialIntegrations, isLoading, rows]);
 
-  return <IntegrationCards integrations={integrations} isWorkspaceAdmin={isWorkspaceAdmin} />;
+  return (
+    <IntegrationCards
+      integrations={integrations}
+      isWorkspaceAdmin={isWorkspaceAdmin}
+      imessageEnabled={imessageEnabled}
+      browserProfilesEnabled={browserProfilesEnabled}
+    />
+  );
 }
 
 type IntegrationScope = "workspace" | "personal";
@@ -313,20 +346,25 @@ function countWorkspaceConnected(integrations: GoatIntegrationState) {
   );
 }
 
-function countPersonalConnected(integrations: GoatIntegrationState) {
+function countPersonalConnected(integrations: GoatIntegrationState, includeImessage: boolean) {
   return (
     countConnectedAccounts(integrations, PERSONAL_ACCOUNT_PROVIDERS) +
     (integrations.codex.connected ? 1 : 0) +
-    (integrations.claude_code.connected ? 1 : 0)
+    (integrations.claude_code.connected ? 1 : 0) +
+    (includeImessage && integrations.imessage.connected ? 1 : 0)
   );
 }
 
 function IntegrationCards({
   integrations,
   isWorkspaceAdmin,
+  imessageEnabled,
+  browserProfilesEnabled,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  imessageEnabled: boolean;
+  browserProfilesEnabled: boolean;
 }) {
   const [scope, setScope] = useState<IntegrationScope>("workspace");
 
@@ -336,7 +374,7 @@ function IntegrationCards({
         scope={scope}
         onScopeChange={setScope}
         workspaceCount={countWorkspaceConnected(integrations)}
-        personalCount={countPersonalConnected(integrations)}
+        personalCount={countPersonalConnected(integrations, imessageEnabled)}
       />
       {scope === "workspace" ? (
         <section className="flex flex-col gap-3">
@@ -397,9 +435,258 @@ function IntegrationCards({
             />
             <CodexIntegrationCard integration={integrations.codex} />
             <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
+            {imessageEnabled ? (
+              <IMessageIntegrationCard integration={integrations.imessage} />
+            ) : null}
+            {browserProfilesEnabled ? <BrowserProfilesCard /> : null}
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+type BrowserProfileView = {
+  id: string;
+  name: string;
+  siteHost: string;
+  status: "pending_login" | "connected" | "needs_reauth" | "disconnected";
+  active: boolean;
+};
+
+type LoginSessionView = {
+  profileId: string;
+  sessionId: string;
+  liveViewUrl: string;
+};
+
+function BrowserProfilesCard() {
+  const [profiles, setProfiles] = useState<BrowserProfileView[]>([]);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [loginSession, setLoginSession] = useState<LoginSessionView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const refresh = async () => {
+    const response = await fetch("/api/browser-profiles", {
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error("Could not load browser profiles.");
+    const payload = (await response.json()) as {
+      profiles?: BrowserProfileView[];
+    };
+    setProfiles(payload.profiles ?? []);
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refresh().catch((err) => setError(err instanceof Error ? err.message : "Load failed."));
+  }, []);
+
+  const createAndLogin = () => {
+    setError(null);
+    startTransition(async () => {
+      try {
+        const created = await fetch("/api/browser-profiles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, url }),
+        });
+        const createdPayload = (await created.json()) as {
+          profile?: BrowserProfileView;
+          error?: string;
+        };
+        if (!created.ok || !createdPayload.profile) {
+          throw new Error(createdPayload.error ?? "Could not create browser profile.");
+        }
+        setName("");
+        setUrl("");
+        await startLogin(createdPayload.profile.id);
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not connect browser profile.");
+      }
+    });
+  };
+
+  const startLogin = async (profileId: string) => {
+    const response = await fetch(`/api/browser-profiles/${profileId}/login-session`, {
+      method: "POST",
+    });
+    const payload = (await response.json()) as {
+      sessionId?: string;
+      liveViewUrl?: string;
+      error?: string;
+    };
+    if (!response.ok || !payload.sessionId || !payload.liveViewUrl) {
+      throw new Error(payload.error ?? "Could not start login session.");
+    }
+    setLoginSession({
+      profileId,
+      sessionId: payload.sessionId,
+      liveViewUrl: payload.liveViewUrl,
+    });
+  };
+
+  const completeLogin = () => {
+    if (!loginSession) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        const response = await fetch(
+          `/api/browser-profiles/${loginSession.profileId}/complete-login`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId: loginSession.sessionId }),
+          },
+        );
+        if (!response.ok) {
+          const payload = (await response.json()) as { error?: string };
+          throw new Error(payload.error ?? "Could not complete login.");
+        }
+        setLoginSession(null);
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not complete login.");
+      }
+    });
+  };
+
+  const deleteProfile = (profileId: string) => {
+    setError(null);
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/browser-profiles/${profileId}`, {
+          method: "DELETE",
+        });
+        if (!response.ok) {
+          const payload = (await response.json()) as { error?: string };
+          throw new Error(payload.error ?? "Could not delete browser profile.");
+        }
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not delete browser profile.");
+      }
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-5 shadow-sm sm:col-span-2">
+      <div className="flex items-start gap-4">
+        <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[#0F766E] text-white">
+          <Globe2 size={24} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[15px] font-semibold leading-tight text-ink">Browser profiles</div>
+          <p className="mt-1 text-[13px] leading-5 text-ink-subtle">
+            Saved login sessions for authenticated browser tasks.
+          </p>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto]">
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Profile name"
+          className="h-9 rounded-lg border border-border bg-canvas px-3 text-[13px] text-ink outline-none focus:border-ink/30"
+        />
+        <input
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="https://example.com"
+          className="h-9 rounded-lg border border-border bg-canvas px-3 text-[13px] text-ink outline-none focus:border-ink/30"
+        />
+        <button
+          type="button"
+          onClick={createAndLogin}
+          disabled={isPending}
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-ink px-3 text-[13px] font-medium text-canvas disabled:opacity-60"
+        >
+          {isPending ? <Loader2 size={14} className="animate-spin" /> : null}
+          Connect
+        </button>
+      </div>
+      {profiles.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          {profiles.map((profile) => (
+            <div
+              key={profile.id}
+              className="flex min-w-0 items-center gap-2 rounded-lg border border-border/70 px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[12px] font-medium leading-4 text-ink">
+                  {profile.name}
+                </div>
+                <div className="truncate text-[12px] leading-4 text-ink-subtle">
+                  {profile.siteHost}
+                </div>
+              </div>
+              <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
+                {profile.active ? "Active" : profile.status.replace("_", " ")}
+              </span>
+              {profile.status === "connected" ? null : (
+                <button
+                  type="button"
+                  onClick={() =>
+                    startTransition(() =>
+                      startLogin(profile.id).catch((err) =>
+                        setError(err instanceof Error ? err.message : "Could not start login."),
+                      ),
+                    )
+                  }
+                  disabled={isPending}
+                  className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+                >
+                  Reconnect
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => deleteProfile(profile.id)}
+                disabled={isPending}
+                aria-label={`Delete ${profile.name}`}
+                className="inline-flex size-7 items-center justify-center rounded-full text-ink-subtle hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {loginSession ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-border bg-canvas p-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[13px] font-medium text-ink">Login handoff</span>
+            <a
+              href={loginSession.liveViewUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-[12px] font-medium text-ink-subtle hover:text-ink"
+            >
+              Open
+              <ExternalLink size={13} />
+            </a>
+          </div>
+          <iframe
+            src={loginSession.liveViewUrl}
+            className="h-[420px] w-full rounded-lg border border-border bg-surface"
+            title="Browser profile login"
+          />
+          <div>
+            <button
+              type="button"
+              onClick={completeLogin}
+              disabled={isPending}
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-ink px-3 text-[13px] font-medium text-canvas disabled:opacity-60"
+            >
+              I&apos;m logged in
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
     </div>
   );
 }
@@ -641,7 +928,9 @@ function IntegrationProviderGroupCard({
 function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountView }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [confirming, setConfirming] = useState<{ affectedBrainSourceCount: number } | null>(null);
+  const [confirming, setConfirming] = useState<{
+    affectedBrainSourceCount: number;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const identity =
     account.provider === "slack"
@@ -676,7 +965,9 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
         return;
       }
       if (usage.affectedBrainSourceCount > 0) {
-        setConfirming({ affectedBrainSourceCount: usage.affectedBrainSourceCount });
+        setConfirming({
+          affectedBrainSourceCount: usage.affectedBrainSourceCount,
+        });
         return;
       }
       const result = await disconnectGoatIntegrationAccountAction(account.integrationId);
@@ -808,7 +1099,10 @@ function CapabilityModeRows({
   );
 }
 
-const CAPABILITY_MODE_OPTIONS: Array<{ mode: GoatCapabilityMode; label: string }> = [
+const CAPABILITY_MODE_OPTIONS: Array<{
+  mode: GoatCapabilityMode;
+  label: string;
+}> = [
   { mode: "on", label: "On" },
   { mode: "ask", label: "Ask" },
   { mode: "off", label: "Off" },
@@ -1149,6 +1443,31 @@ function ClaudeCodeIntegrationCard({ integration }: { integration: GoatClaudeCod
   );
 }
 
+function IMessageIntegrationCard({ integration }: { integration: GoatImessageProviderState }) {
+  return (
+    <IntegrationCard
+      meta={INTEGRATION_META.imessage}
+      footer={
+        integration.connected ? (
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <ConnectedStatus />
+              {integration.phoneE164 ? (
+                <span className="truncate text-[12px] leading-4 text-ink-subtle">
+                  · {integration.phoneE164}
+                </span>
+              ) : null}
+            </div>
+            <ConnectLink href="/settings/imessage" label="Manage" />
+          </div>
+        ) : (
+          <ConnectLink href="/settings/imessage" label="Set up" />
+        )
+      }
+    />
+  );
+}
+
 function integrationStatus(
   integration:
     | GoatGoogleProviderState
@@ -1180,6 +1499,7 @@ function integrationConnectHref(provider: Exclude<IntegrationMetaKey, "codex">) 
   if (provider === "github")
     return "/api/integrations/github/start?returnTo=/settings/integrations";
   if (provider === "jamie") return "/settings/jamie";
+  if (provider === "imessage") return "/settings/imessage";
   if (provider === "granola") return "/settings/granola";
   if (provider === "fathom") return "/settings/fathom";
   if (provider === "attio") return "/settings/attio";

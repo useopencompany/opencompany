@@ -144,7 +144,7 @@ describe("GoatTasksBoardRoute", () => {
     expect(
       within(screen.getByRole("region", { name: "Canceled" })).getByText("Cancel old campaign"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Launch Brief")).toBeInTheDocument();
+    expect(screen.getByText("#Launch Brief")).toBeInTheDocument();
     expect(screen.getByText("Scheduled")).toBeInTheDocument();
     expect(screen.getAllByText("Ad-hoc")).toHaveLength(2);
     expect(screen.queryByText("Archived task")).not.toBeInTheDocument();
@@ -177,7 +177,7 @@ describe("GoatTasksBoardRoute", () => {
     expect(within(sheet).getByText("Write a concise launch brief.")).toBeInTheDocument();
     expect(within(sheet).getByText("Completed")).toBeInTheDocument();
     expect(within(sheet).getByText("The launch brief is ready.")).toBeInTheDocument();
-    expect(within(sheet).getByText("Launch Brief")).toBeInTheDocument();
+    expect(within(sheet).getByText("#Launch Brief")).toBeInTheDocument();
     expect(within(sheet).getByText("$0.1234")).toBeInTheDocument();
     expect(within(sheet).getByText("3m 12s")).toBeInTheDocument();
     expect(within(sheet).getByRole("link", { name: "View run" })).toHaveAttribute(
@@ -398,6 +398,7 @@ function taskRow(
     display_id: overrides.display_id ?? `TASK-${overrides.id}`,
     name: overrides.name,
     user_workos_id: "user_1",
+    workspace_id: overrides.workspace_id ?? "workspace_1",
     prompt: overrides.prompt ?? "Do the task.",
     model: "openai/gpt-5.2",
     session_id: overrides.session_id ?? null,

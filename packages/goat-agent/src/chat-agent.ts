@@ -32,12 +32,17 @@ import {
 } from "./brain-surface";
 import {
   MAX_BROWSER_CALLS_PER_TURN,
+  MAX_SEND_USER_MESSAGE_CALLS_PER_TURN,
   MAX_WEB_FETCH_CALLS_PER_TURN,
   MAX_WEB_SEARCH_CALLS_PER_TURN,
 } from "./chat-limits";
 import {
+  BROWSER_USE_PROFILE_TOOL_NAME,
+  type BrowserProfileCatalogItem,
   type BrowserToolInput,
   type BrowserToolOutput,
+  type BrowserUseProfileToolInput,
+  type BrowserUseProfileToolOutput,
   DELETE_TASK_SCHEDULE_TOOL_NAME,
   type DeleteTaskScheduleToolInput,
   type DeleteTaskScheduleToolOutput,
@@ -62,6 +67,9 @@ import {
   SCHEDULE_TASK_TOOL_NAME,
   type ScheduleTaskToolInput,
   type ScheduleTaskToolOutput,
+  SEND_USER_MESSAGE_TOOL_NAME,
+  type SendUserMessageToolInput,
+  type SendUserMessageToolOutput,
   START_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
   type StartTaskToolInput,
@@ -82,9 +90,13 @@ import {
   type WebSearchToolOutput,
 } from "./chat-ui";
 import { normalizePublicWebUrl } from "./chat-web-fetch";
+import type { SendUserMessageRunner } from "./imessage/send-user-message";
 import {
   BROWSER_CHAT_CALL_LIMIT_DESCRIPTION,
   BROWSER_CHAT_TOOL_DESCRIPTIONS,
+  BROWSER_USE_PROFILE_PROFILE_DESCRIPTION,
+  BROWSER_USE_PROFILE_REASON_DESCRIPTION,
+  BROWSER_USE_PROFILE_TOOL_DESCRIPTION,
   createOpenCompanyChatSystemPrompt,
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
@@ -107,6 +119,8 @@ import {
   SCHEDULE_TASK_SOURCE_DESCRIPTION,
   SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
   SCHEDULE_TASK_TOOL_DESCRIPTION,
+  SEND_USER_MESSAGE_MESSAGE_DESCRIPTION,
+  SEND_USER_MESSAGE_TOOL_DESCRIPTION,
   START_TASK_ENGINE_DESCRIPTION,
   START_TASK_NAME_DESCRIPTION,
   START_TASK_PROMPT_DESCRIPTION,
@@ -141,10 +155,9 @@ export const OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX = 16;
 export const MAX_LIST_SKILL_RESULTS = 20;
 const MAX_ACTION_PROVIDER_FAILURES_PER_TURN = 2;
 
-// Task-only tool. It exists only when the caller injects an `updateTaskStatus`
-// runner (the runner's task executor does; interactive chat and the Slack bot
-// never do), so it never appears in a normal chat turn. It lets a background
-// run report its own user-facing outcome instead of a separate closer LLM call.
+// Task-only tool. It exists only when a caller explicitly injects an
+// `updateTaskStatus` runner. Normal background task execution does not expose
+// it; task closers use the same schema to write the user-facing outcome.
 export const UPDATE_TASK_STATUS_TOOL_NAME = "update_task_status";
 export type GoatTaskReportedStatus = "done" | "needs_attention";
 export type UpdateTaskStatusToolInput = {
@@ -182,7 +195,7 @@ export const UPDATE_TASK_STATUS_TOOL_INPUT_JSON_SCHEMA: JSONSchema7 = {
 export const TASK_SYSTEM_BLOCK = [
   "<background_task_run>",
   "You are running as an autonomous background task. There is no interactive user to answer questions or approve steps — work to completion with the tools available.",
-  'When you have finished, call update_task_status exactly once to report the outcome ("done" or "needs_attention"), then write your final result as your last message.',
+  "When you have finished, write your final result as your last message. The task runner will decide the user-facing task status and card comment after your run finishes.",
   "</background_task_run>",
 ].join("\n");
 export const TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK =
@@ -307,9 +320,14 @@ export async function runOpenCompanyChatAgent(input: {
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
+  sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
   browserTools?: BrowserToolRunner;
+  browserProfiles?: {
+    profiles: readonly BrowserProfileCatalogItem[];
+    useProfile: (input: BrowserUseProfileToolInput) => Promise<BrowserUseProfileToolOutput>;
+  };
   actions?: ActionDispatcher;
   skills?: SkillDispatcher;
   workflows?: WorkflowDispatcher;
@@ -360,6 +378,7 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
+    ...(input.sendUserMessage ? { sendUserMessage: input.sendUserMessage } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
     ...(input.browserTools ? { browserTools: input.browserTools } : {}),
@@ -454,9 +473,14 @@ export function createOpenCompanyChatToolContext(input: {
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
+  sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
   browserTools?: BrowserToolRunner;
+  browserProfiles?: {
+    profiles: readonly BrowserProfileCatalogItem[];
+    useProfile: (input: BrowserUseProfileToolInput) => Promise<BrowserUseProfileToolOutput>;
+  };
   actions?: ActionDispatcher;
   skills?: SkillDispatcher;
   workflows?: WorkflowDispatcher;
@@ -719,6 +743,40 @@ export function createOpenCompanyChatToolContext(input: {
     });
   }
 
+  const sendUserMessage = input.sendUserMessage;
+  if (sendUserMessage) {
+    let sendUserMessageCallCount = 0;
+    tools[SEND_USER_MESSAGE_TOOL_NAME] = tool<SendUserMessageToolInput, SendUserMessageToolOutput>({
+      description: SEND_USER_MESSAGE_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<SendUserMessageToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          message: {
+            type: "string",
+            description: SEND_USER_MESSAGE_MESSAGE_DESCRIPTION,
+          },
+        },
+        required: ["message"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        const message = typeof args.message === "string" ? args.message.trim() : "";
+        if (!message) {
+          return { ok: false, error: "send_user_message needs a non-empty message." };
+        }
+        sendUserMessageCallCount += 1;
+        if (sendUserMessageCallCount > MAX_SEND_USER_MESSAGE_CALLS_PER_TURN) {
+          return {
+            ok: false,
+            error: `send_user_message limit reached for this turn (${MAX_SEND_USER_MESSAGE_CALLS_PER_TURN}). Not sent.`,
+          };
+        }
+        return sendUserMessage(message);
+      },
+    });
+  }
+
   if (input.scheduleTask) {
     tools[SCHEDULE_TASK_TOOL_NAME] = tool<ScheduleTaskToolInput, ScheduleTaskToolOutput>({
       description: SCHEDULE_TASK_TOOL_DESCRIPTION,
@@ -941,9 +999,49 @@ export function createOpenCompanyChatToolContext(input: {
 
   const browserTools = input.browserTools;
   if (browserTools) {
+    const browserProfiles = input.browserProfiles;
+    if (browserProfiles && browserProfiles.profiles.length > 0) {
+      const profileNames = browserProfiles.profiles.map((profile) => profile.name);
+      tools[BROWSER_USE_PROFILE_TOOL_NAME] = tool<
+        BrowserUseProfileToolInput,
+        BrowserUseProfileToolOutput
+      >({
+        description: BROWSER_USE_PROFILE_TOOL_DESCRIPTION,
+        needsApproval: async () => true,
+        inputSchema: jsonSchema<BrowserUseProfileToolInput>({
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            profile: {
+              type: "string",
+              enum: profileNames,
+              description: BROWSER_USE_PROFILE_PROFILE_DESCRIPTION,
+            },
+            reason: {
+              type: "string",
+              description: BROWSER_USE_PROFILE_REASON_DESCRIPTION,
+            },
+          },
+          required: ["profile", "reason"],
+        }),
+        execute: async (args) => {
+          visibleToolActivity = true;
+          return browserProfiles.useProfile(args);
+        },
+      });
+    }
+
     for (const name of BROWSER_TOOL_NAMES) {
       tools[name] = tool<BrowserToolInput, BrowserToolOutput>({
         description: `${BROWSER_CHAT_TOOL_DESCRIPTIONS[name]} ${BROWSER_CHAT_CALL_LIMIT_DESCRIPTION}`,
+        needsApproval: async (args) => {
+          if (name !== "browser_click" && name !== "browser_find") return false;
+          const record =
+            args && typeof args === "object" && !Array.isArray(args)
+              ? (args as Record<string, unknown>)
+              : {};
+          return record.irreversible === true;
+        },
         inputSchema: jsonSchema<BrowserToolInput>(
           BROWSER_TOOL_INPUT_SCHEMAS[name] as Parameters<typeof jsonSchema>[0],
         ),

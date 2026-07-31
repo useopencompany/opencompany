@@ -47,12 +47,16 @@ export type GoatWorkflowTrigger = "manual" | "slack" | "linear" | "schedule";
 export type GoatWorkflowStep = {
   id: string;
   title: string;
+  // Workflow editor runtime token (e.g. "kimi-k2.6", "codex", "claude-code").
   model: string;
+  // Concrete cloud-coding model selected when `model` is "codex" or "claude-code".
+  runtimeModel?: AgentModelId;
+  reasoningEffort?: CodexReasoningEffort;
   instructions: string;
 };
 export type GoatSkillStatus = "draft" | "active";
 
-export type GoatHarnessEngine = "opencompany" | "codex";
+export type GoatHarnessEngine = "opencompany" | "codex" | "claude_code";
 
 export type GoatTaskStage =
   | "queued"
@@ -80,7 +84,8 @@ export type GoatIntegrationProvider =
   | "attio"
   | "stripe"
   | "latitude"
-  | "posthog";
+  | "posthog"
+  | "imessage";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear, PostHog) are always personal. Installation-bound
@@ -100,8 +105,15 @@ export function isWorkspaceOwnedGoatIntegrationProvider(provider: GoatIntegratio
   ).includes(provider);
 }
 export type GoatIntegrationStatus = "connected" | "needs_reauth" | "sync_failed" | "disconnected";
+export type GoatImessageSendSource = "chat" | "task" | "pairing";
+export type GoatImessageSendStatus = "sent" | "failed";
 export type GoatIntegrationCredentialKind = "oauth_token" | "webhook_secret" | "api_key";
 export type GoatIntegrationCredentialEncryptedPayload = EncryptedPayload;
+export type GoatBrowserProfileStatus =
+  | "pending_login"
+  | "connected"
+  | "needs_reauth"
+  | "disconnected";
 export type GoatCodexCredentialStatus = "connected" | "needs_reauth";
 export type GoatCodexDeviceAuthFlowStatus =
   | "pending"
@@ -268,6 +280,7 @@ export type GoatHarnessWorkflowStep = {
   title: string;
   engine: GoatHarnessEngine;
   model: AgentModelId;
+  reasoningEffort?: CodexReasoningEffort;
   systemPrompt: string;
   systemBlocks: string[];
   skillIds: string[];
@@ -567,6 +580,7 @@ export const goatUsers = goat.table(
     taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
+    imessageEnabled: boolean("imessage_enabled").notNull().default(false),
     // Board vs list layout for the Tasks page; persisted per user across devices.
     taskViewMode: text("task_view_mode").notNull().default("board").$type<GoatTaskViewMode>(),
     preferredMcpClient: text("preferred_mcp_client").$type<GoatMcpClient>(),
@@ -1435,7 +1449,7 @@ export const goatIntegrations = goat.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'imessage')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1484,7 +1498,7 @@ export const goatIntegrationCredentials = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'imessage')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1538,11 +1552,65 @@ export const goatIntegrationResources = goat.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'imessage')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
       sql`${table.status} IN ('available', 'permission_lost', 'archived', 'sync_failed')`,
+    ),
+  }),
+);
+
+// Pending iMessage pairing verification. One active challenge per user,
+// upserted on resend. Lives outside the Electric-synced integrations table so
+// the code hash never reaches clients.
+export const goatImessagePairingChallenges = goat.table(
+  "imessage_pairing_challenges",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    phoneE164: text("phone_e164").notNull(),
+    // sha256 hex of the 6-digit code; the plaintext is only ever in the sent message.
+    codeHash: text("code_hash").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userIdx: uniqueIndex("goat_imessage_pairing_challenges_user_idx").on(table.userWorkosId),
+  }),
+);
+
+// Audit log of outbound iMessages; doubles as the per-user daily rate-limit
+// counter for the send_user_message tool.
+export const goatImessageSends = goat.table(
+  "imessage_sends",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    source: text("source").$type<GoatImessageSendSource>().notNull(),
+    chatSessionId: text("chat_session_id"),
+    status: text("status").$type<GoatImessageSendStatus>().notNull(),
+    errorReason: text("error_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userCreatedIdx: index("goat_imessage_sends_user_created_idx").on(
+      table.userWorkosId,
+      table.createdAt,
+    ),
+    sourceCheck: check(
+      "goat_imessage_sends_source_check",
+      sql`${table.source} IN ('chat', 'task', 'pairing')`,
+    ),
+    statusCheck: check(
+      "goat_imessage_sends_status_check",
+      sql`${table.status} IN ('sent', 'failed')`,
     ),
   }),
 );
@@ -2513,7 +2581,17 @@ export const goatWorkflows = goat.table(
     model: text("model").notNull().default(""),
     steps: jsonb("steps").$type<GoatWorkflowStep[]>().notNull().default(sql`'[]'::jsonb`),
     trigger: text("trigger").$type<GoatWorkflowTrigger>().notNull().default("manual"),
-    status: text("status").$type<GoatWorkflowStatus>().notNull().default("draft"),
+    scheduleCron: text("schedule_cron"),
+    scheduleTimezone: text("schedule_timezone").notNull().default("UTC"),
+    schedulePrompt: text("schedule_prompt").notNull().default(""),
+    scheduleUserWorkosId: text("schedule_user_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    scheduleHarnessSpec: jsonb("schedule_harness_spec").$type<GoatHarnessSpec | null>(),
+    scheduleEnabled: boolean("schedule_enabled").notNull().default(false),
+    scheduleLastRunAt: timestamp("schedule_last_run_at", { withTimezone: true }),
+    scheduleNextRunAt: timestamp("schedule_next_run_at", { withTimezone: true }),
+    status: text("status").$type<GoatWorkflowStatus>().notNull().default("active"),
     createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
       onDelete: "set null",
     }),
@@ -2532,6 +2610,11 @@ export const goatWorkflows = goat.table(
       table.archivedAt,
       table.updatedAt,
     ),
+    scheduleDueIdx: index("goat_workflows_schedule_due_idx")
+      .on(table.scheduleEnabled, table.scheduleNextRunAt)
+      .where(
+        sql`${table.trigger} = 'schedule' AND ${table.status} = 'active' AND ${table.archivedAt} IS NULL`,
+      ),
     statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
     triggerCheck: check(
       "goat_workflows_trigger_check",
@@ -2622,6 +2705,9 @@ export const goatTasks = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
+      onDelete: "set null",
+    }),
     prompt: text("prompt").notNull(),
     model: text("model").$type<AgentModelId>().notNull(),
     sessionId: text("session_id").references(() => goatChatSessions.id, {
@@ -2663,6 +2749,11 @@ export const goatTasks = goat.table(
     ),
     userArchivedCreatedAtIdx: index("goat_tasks_user_archived_created_at_idx").on(
       table.userWorkosId,
+      table.archivedAt,
+      table.createdAt,
+    ),
+    workspaceArchivedCreatedAtIdx: index("goat_tasks_workspace_archived_created_at_idx").on(
+      table.workspaceId,
       table.archivedAt,
       table.createdAt,
     ),
@@ -2721,6 +2812,49 @@ export const goatTaskScheduleRuns = goat.table(
     taskIdx: index("goat_task_schedule_runs_task_idx").on(table.taskId),
     statusCheck: check(
       "goat_task_schedule_runs_status_check",
+      sql`${table.status} IN ('pending', 'created', 'failed')`,
+    ),
+  }),
+);
+
+export const goatWorkflowScheduleRuns = goat.table(
+  "workflow_schedule_runs",
+  {
+    id: text("id").primaryKey(),
+    workflowId: text("workflow_id")
+      .notNull()
+      .references(() => goatWorkflows.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    taskId: text("task_id").references(() => goatTasks.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").$type<GoatTaskScheduleRunStatus>().notNull().default("pending"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workflowForIdx: uniqueIndex("goat_workflow_schedule_runs_workflow_for_idx").on(
+      table.workflowId,
+      table.scheduledFor,
+    ),
+    workspaceCreatedIdx: index("goat_workflow_schedule_runs_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    userCreatedIdx: index("goat_workflow_schedule_runs_user_created_idx").on(
+      table.userWorkosId,
+      table.createdAt,
+    ),
+    taskIdx: index("goat_workflow_schedule_runs_task_idx").on(table.taskId),
+    statusCheck: check(
+      "goat_workflow_schedule_runs_status_check",
       sql`${table.status} IN ('pending', 'created', 'failed')`,
     ),
   }),
@@ -2988,6 +3122,7 @@ export const goatChatSessions = goat.table(
     kind: text("kind").$type<GoatChatSessionKind>().notNull().default("chat"),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     pinnedAt: timestamp("pinned_at", { withTimezone: true }),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -3207,6 +3342,96 @@ export const goatChatSandboxUsage = goat.table(
     ),
     userMessageIdx: index("goat_chat_sandbox_usage_user_message_idx").on(table.userMessageId),
     sandboxIdx: index("goat_chat_sandbox_usage_sandbox_idx").on(table.sandboxId),
+  }),
+);
+
+export const goatBrowserProfiles = goat.table(
+  "browser_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    siteHost: text("site_host").notNull(),
+    allowedHosts: jsonb("allowed_hosts").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    status: text("status").$type<GoatBrowserProfileStatus>().notNull().default("pending_login"),
+    encryptedBrowserbaseContextId: jsonb("encrypted_browserbase_context_id")
+      .$type<GoatIntegrationCredentialEncryptedPayload>()
+      .notNull(),
+    encryptionKeyVersion: integer("encryption_key_version").notNull(),
+    activeSessionId: text("active_session_id"),
+    lastLoginSessionId: text("last_login_session_id"),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userStatusIdx: index("goat_browser_profiles_user_status_idx").on(
+      table.userWorkosId,
+      table.status,
+    ),
+    userHostNameIdx: uniqueIndex("goat_browser_profiles_user_host_name_idx").on(
+      table.userWorkosId,
+      table.siteHost,
+      table.name,
+    ),
+    activeSessionIdx: index("goat_browser_profiles_active_session_idx").on(table.activeSessionId),
+    statusCheck: check(
+      "goat_browser_profiles_status_check",
+      sql`${table.status} IN ('pending_login', 'connected', 'needs_reauth', 'disconnected')`,
+    ),
+  }),
+);
+
+export const goatBrowserProfileSessions = goat.table(
+  "browser_profile_sessions",
+  {
+    id: serial("id").primaryKey(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => goatBrowserProfiles.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    chatSessionId: text("chat_session_id").references(() => goatChatSessions.id, {
+      onDelete: "set null",
+    }),
+    userMessageId: text("user_message_id").references(() => goatChatMessages.id, {
+      onDelete: "set null",
+    }),
+    browserbaseSessionId: text("browserbase_session_id").notNull(),
+    kind: text("kind").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    durationMs: integer("duration_ms").notNull().default(0),
+    rawMetrics: jsonb("raw_metrics")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    costBasis: jsonb("cost_basis")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    profileCreatedIdx: index("goat_browser_profile_sessions_profile_created_idx").on(
+      table.profileId,
+      table.createdAt,
+    ),
+    userChatCreatedIdx: index("goat_browser_profile_sessions_user_chat_created_idx").on(
+      table.userWorkosId,
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    browserbaseSessionIdx: index("goat_browser_profile_sessions_browserbase_session_idx").on(
+      table.browserbaseSessionId,
+    ),
+    kindCheck: check(
+      "goat_browser_profile_sessions_kind_check",
+      sql`${table.kind} IN ('login', 'agent')`,
+    ),
   }),
 );
 
@@ -3591,6 +3816,8 @@ export const goatUsersRelations = relations(goatUsers, ({ many }) => ({
   taskSandboxUsage: many(goatTaskSandboxUsage),
   chatSessions: many(goatChatSessions),
   chatSandboxUsage: many(goatChatSandboxUsage),
+  browserProfiles: many(goatBrowserProfiles),
+  browserProfileSessions: many(goatBrowserProfileSessions),
   capabilityRuns: many(goatCapabilityRuns),
   capabilityOverrides: many(goatWorkspaceCapabilities),
   integrations: many(goatIntegrations),
@@ -3942,6 +4169,10 @@ export const goatTasksRelations = relations(goatTasks, ({ one, many }) => ({
     fields: [goatTasks.userWorkosId],
     references: [goatUsers.workosUserId],
   }),
+  workspace: one(goatWorkspaces, {
+    fields: [goatTasks.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
   session: one(goatChatSessions, {
     fields: [goatTasks.sessionId],
     references: [goatChatSessions.id],
@@ -3957,6 +4188,7 @@ export const goatTasksRelations = relations(goatTasks, ({ one, many }) => ({
   sandboxUsage: many(goatTaskSandboxUsage),
   chatMessages: many(goatChatMessages),
   scheduleRuns: many(goatTaskScheduleRuns),
+  workflowScheduleRuns: many(goatWorkflowScheduleRuns),
 }));
 
 export const goatTaskSchedulesRelations = relations(goatTaskSchedules, ({ one, many }) => ({
@@ -3979,6 +4211,25 @@ export const goatTaskScheduleRunsRelations = relations(goatTaskScheduleRuns, ({ 
   }),
   task: one(goatTasks, {
     fields: [goatTaskScheduleRuns.taskId],
+    references: [goatTasks.id],
+  }),
+}));
+
+export const goatWorkflowScheduleRunsRelations = relations(goatWorkflowScheduleRuns, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatWorkflowScheduleRuns.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  workspace: one(goatWorkspaces, {
+    fields: [goatWorkflowScheduleRuns.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
+  workflow: one(goatWorkflows, {
+    fields: [goatWorkflowScheduleRuns.workflowId],
+    references: [goatWorkflows.id],
+  }),
+  task: one(goatTasks, {
+    fields: [goatWorkflowScheduleRuns.taskId],
     references: [goatTasks.id],
   }),
 }));
@@ -4066,6 +4317,7 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
   task: one(goatTasks),
   messages: many(goatChatMessages),
   sandboxUsage: many(goatChatSandboxUsage),
+  browserProfileSessions: many(goatBrowserProfileSessions),
   skills: many(goatChatSessionSkills),
   brainToolRuns: many(goatBrainToolRuns),
   capabilityRuns: many(goatCapabilityRuns),
@@ -4121,6 +4373,36 @@ export const goatChatSandboxUsageRelations = relations(goatChatSandboxUsage, ({ 
   }),
 }));
 
+export const goatBrowserProfilesRelations = relations(goatBrowserProfiles, ({ one, many }) => ({
+  user: one(goatUsers, {
+    fields: [goatBrowserProfiles.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  sessions: many(goatBrowserProfileSessions),
+}));
+
+export const goatBrowserProfileSessionsRelations = relations(
+  goatBrowserProfileSessions,
+  ({ one }) => ({
+    profile: one(goatBrowserProfiles, {
+      fields: [goatBrowserProfileSessions.profileId],
+      references: [goatBrowserProfiles.id],
+    }),
+    user: one(goatUsers, {
+      fields: [goatBrowserProfileSessions.userWorkosId],
+      references: [goatUsers.workosUserId],
+    }),
+    chatSession: one(goatChatSessions, {
+      fields: [goatBrowserProfileSessions.chatSessionId],
+      references: [goatChatSessions.id],
+    }),
+    userMessage: one(goatChatMessages, {
+      fields: [goatBrowserProfileSessions.userMessageId],
+      references: [goatChatMessages.id],
+    }),
+  }),
+);
+
 export const goatChatSessionSkillsRelations = relations(goatChatSessionSkills, ({ one }) => ({
   session: one(goatChatSessions, {
     fields: [goatChatSessionSkills.chatSessionId],
@@ -4167,6 +4449,7 @@ export type GoatClaudeCodeCredential = typeof goatClaudeCodeCredentials.$inferSe
 export type GoatCodexDeviceAuthFlow = typeof goatCodexDeviceAuthFlows.$inferSelect;
 export type GoatTaskSchedule = typeof goatTaskSchedules.$inferSelect;
 export type GoatTaskScheduleRun = typeof goatTaskScheduleRuns.$inferSelect;
+export type GoatWorkflowScheduleRun = typeof goatWorkflowScheduleRuns.$inferSelect;
 export type GoatTask = typeof goatTasks.$inferSelect;
 export type GoatTaskMessage = typeof goatTaskMessages.$inferSelect;
 export type GoatTaskEvent = typeof goatTaskEvents.$inferSelect;
@@ -4178,6 +4461,8 @@ export type GoatChatShare = typeof goatChatShares.$inferSelect;
 export type GoatCapabilityRun = typeof goatCapabilityRuns.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
 export type GoatChatSandboxUsage = typeof goatChatSandboxUsage.$inferSelect;
+export type GoatBrowserProfile = typeof goatBrowserProfiles.$inferSelect;
+export type GoatBrowserProfileSession = typeof goatBrowserProfileSessions.$inferSelect;
 export type GoatChatSessionSkill = typeof goatChatSessionSkills.$inferSelect;
 export type GoatWorkflow = typeof goatWorkflows.$inferSelect;
 export type GoatSkill = typeof goatSkills.$inferSelect;

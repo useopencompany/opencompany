@@ -95,12 +95,11 @@ const LINEAR_LIST_ISSUES_PARAMS: JSONSchema7 = {
 };
 
 const MAX_LINEAR_ISSUE_TITLE_CHARS = 255;
-const MAX_LINEAR_ISSUE_DESCRIPTION_CHARS = 25_000;
+const MAX_LINEAR_MARKDOWN_BODY_CHARS = 249_999;
 const MAX_LINEAR_SELECTOR_CHARS = 500;
 const MAX_LINEAR_PARENT_ID_CHARS = 100;
 const MAX_LINEAR_LABELS = 25;
 const MAX_LINEAR_LABEL_CHARS = 100;
-const MAX_LINEAR_COMMENT_BODY_CHARS = 25_000;
 
 const LINEAR_CREATE_ISSUE_PARAMS: JSONSchema7 = {
   type: "object",
@@ -123,7 +122,7 @@ const LINEAR_CREATE_ISSUE_PARAMS: JSONSchema7 = {
     description: {
       type: "string",
       minLength: 1,
-      maxLength: MAX_LINEAR_ISSUE_DESCRIPTION_CHARS,
+      maxLength: MAX_LINEAR_MARKDOWN_BODY_CHARS,
       description: "Optional Markdown issue description.",
     },
     assignee: {
@@ -194,7 +193,7 @@ const LINEAR_UPDATE_ISSUE_PARAMS: JSONSchema7 = {
     },
     description: {
       type: "string",
-      maxLength: MAX_LINEAR_ISSUE_DESCRIPTION_CHARS,
+      maxLength: MAX_LINEAR_MARKDOWN_BODY_CHARS,
       description: "Replacement Markdown issue description. Use an empty string to clear it.",
     },
     assignee: {
@@ -254,7 +253,7 @@ const LINEAR_CREATE_COMMENT_PARAMS: JSONSchema7 = {
     body: {
       type: "string",
       minLength: 1,
-      maxLength: MAX_LINEAR_COMMENT_BODY_CHARS,
+      maxLength: MAX_LINEAR_MARKDOWN_BODY_CHARS,
       description: "Markdown comment body.",
     },
   },
@@ -652,7 +651,7 @@ export function normalizeLinearCreateIssueInput(input: unknown): Record<string, 
     team: requiredBoundedString(input, "team", MAX_LINEAR_SELECTOR_CHARS),
   };
   for (const [key, maxChars] of [
-    ["description", MAX_LINEAR_ISSUE_DESCRIPTION_CHARS],
+    ["description", MAX_LINEAR_MARKDOWN_BODY_CHARS],
     ["assignee", MAX_LINEAR_SELECTOR_CHARS],
     ["state", MAX_LINEAR_SELECTOR_CHARS],
     ["project", MAX_LINEAR_SELECTOR_CHARS],
@@ -693,7 +692,7 @@ export function normalizeLinearUpdateIssueInput(input: unknown): Record<string, 
     normalized.description = boundedStringAllowingEmpty(
       input.description,
       "description",
-      MAX_LINEAR_ISSUE_DESCRIPTION_CHARS,
+      MAX_LINEAR_MARKDOWN_BODY_CHARS,
     );
   }
   if (input.assignee === null) {
@@ -727,7 +726,7 @@ export function normalizeLinearCreateCommentInput(input: unknown): Record<string
   assertOnlyKnownParams(input, LINEAR_CREATE_COMMENT_PARAM_KEYS);
   return {
     issueId: requiredBoundedString(input, "issueId", MAX_LINEAR_SELECTOR_CHARS),
-    body: requiredBoundedString(input, "body", MAX_LINEAR_COMMENT_BODY_CHARS),
+    body: requiredBoundedString(input, "body", MAX_LINEAR_MARKDOWN_BODY_CHARS),
   };
 }
 

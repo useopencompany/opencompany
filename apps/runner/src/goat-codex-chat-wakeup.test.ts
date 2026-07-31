@@ -41,6 +41,7 @@ describe("enqueueGoatCodexChatWakeup", () => {
     expect(statement).toContain("run_after");
     expect(statement).toContain("sibling.created_at > parent.created_at");
     expect(statement).toContain("engine_session.status = 'idle'");
+    expect(statement).toContain("chat_session.kind = 'chat'");
     expect(statement).toContain("chat_session.closed_at IS NULL");
     expect(statement).toContain("FOR UPDATE OF engine_session, chat_session");
     expect(statement).not.toContain("UPDATE goat.codex_chat_sessions");

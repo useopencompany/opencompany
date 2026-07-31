@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
+  claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
   GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
 } from "@opencompany/agent-runtime";
 import type { SQL } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { getDb } from "./client";
-import type { GoatHarnessSpec, GoatTask } from "./goat-schema";
+import type { GoatChatMessageAttachment, GoatHarnessSpec, GoatTask } from "./goat-schema";
 
 type GoatTaskSessionDb = {
   execute(query: SQL): Promise<unknown>;
@@ -23,6 +24,8 @@ export type CreateGoatTaskSessionInput = {
   scheduledFor?: Date | null;
   workflowId?: string | null;
   workflowBrainRef?: string | null;
+  attachments?: GoatChatMessageAttachment[] | null;
+  attachmentTexts?: Record<string, string> | null;
   now?: Date;
 };
 
@@ -50,8 +53,7 @@ export async function createGoatTaskSession(
   const assistantCreatedAt = new Date(now.getTime() + 1);
   const harnessSpec = input.harnessSpec;
   const engine = harnessSpec.engine;
-  const runtimeModel =
-    engine === "codex" ? codexCliModelNameForModelId(harnessSpec.model) : harnessSpec.model;
+  const runtimeModel = runtimeModelNameForHarness(engine, harnessSpec.model);
   if (!runtimeModel) {
     throw new Error(`Unsupported ${engine} task model: ${harnessSpec.model}`);
   }
@@ -59,6 +61,8 @@ export async function createGoatTaskSession(
     input.workspaceId?.trim() || harnessSpec.workflow?.workspaceId?.trim() || null;
   const requestedBrainRef = input.brainRef?.trim() || null;
   const initialUserMessage = harnessSpec.initialUserMessage.trim() || input.prompt;
+  const attachments = input.attachments ?? [];
+  const attachmentTexts = input.attachmentTexts ?? null;
   const settings = turnSettingsFromHarness(harnessSpec);
   const assistantDebugTrace = emptyAssistantDebugTrace(engine, runtimeModel);
 
@@ -126,6 +130,7 @@ export async function createGoatTaskSession(
           id,
           name,
           user_workos_id,
+          workspace_id,
           prompt,
           model,
           session_id,
@@ -144,6 +149,7 @@ export async function createGoatTaskSession(
           ${taskId},
           ${input.name},
           chat.user_workos_id,
+          (SELECT workspace_id FROM resolved_workspace),
           ${input.prompt},
           ${harnessSpec.model},
           chat.id,
@@ -166,6 +172,8 @@ export async function createGoatTaskSession(
           session_id,
           role,
           content,
+          attachments,
+          attachment_texts,
           created_at,
           updated_at
         )
@@ -174,6 +182,8 @@ export async function createGoatTaskSession(
           task.session_id,
           'user',
           ${initialUserMessage},
+          ${attachmentsJsonbValue(attachments)}::jsonb,
+          ${attachmentTextsJsonbValue(attachmentTexts)}::jsonb,
           ${now},
           ${now}
         FROM created_task AS task
@@ -223,7 +233,7 @@ export async function createGoatTaskSession(
           ${runtimeModel},
           (SELECT id FROM resolved_brain),
           (SELECT workspace_id FROM resolved_workspace),
-          ${engine === "codex" ? GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION : null},
+          ${engine === "opencompany" ? null : GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION},
           ${turnId},
           'queued',
           ${now},
@@ -268,6 +278,7 @@ export async function createGoatTaskSession(
         task.display_id AS "displayId",
         task.name AS "name",
         task.user_workos_id AS "userWorkosId",
+        task.workspace_id AS "workspaceId",
         task.prompt AS "prompt",
         task.model AS "model",
         task.session_id AS "sessionId",
@@ -485,6 +496,22 @@ function turnSettingsFromHarness(harnessSpec: GoatHarnessSpec) {
     ...(codex?.reasoningEffort ? { reasoningEffort: codex.reasoningEffort } : {}),
     ...(codex?.goalMode ? { goalMode: codex.goalMode } : {}),
   };
+}
+
+function runtimeModelNameForHarness(engine: GoatHarnessSpec["engine"], model: string) {
+  if (engine === "codex") return codexCliModelNameForModelId(model);
+  if (engine === "claude_code") return claudeCodeCliModelNameForModelId(model);
+  return model;
+}
+
+function attachmentsJsonbValue(attachments: GoatChatMessageAttachment[]) {
+  return attachments.length > 0 ? JSON.stringify(attachments) : null;
+}
+
+function attachmentTextsJsonbValue(attachmentTexts: Record<string, string> | null) {
+  return attachmentTexts && Object.keys(attachmentTexts).length > 0
+    ? JSON.stringify(attachmentTexts)
+    : null;
 }
 
 function emptyAssistantDebugTrace(engine: GoatHarnessSpec["engine"], model: string) {

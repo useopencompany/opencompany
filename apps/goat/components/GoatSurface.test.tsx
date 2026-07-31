@@ -64,6 +64,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/chat-actions", () => ({
   closeGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
+  markGoatChatSeenAction: vi.fn(async () => ({ ok: true, error: null })),
 }));
 
 // Server action module; importing it for real drags authkit into jsdom.
@@ -334,6 +335,88 @@ describe("GoatSurface chat streaming UI", () => {
   it("uses the chat stop control for an active workflow task", async () => {
     const user = userEvent.setup();
 
+    const { rerender } = render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_task_1",
+          title: "Morning workflow",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          messages: [
+            {
+              id: "task_user_1",
+              role: "user",
+              parts: [{ type: "text", text: "Run the morning workflow" }],
+            },
+          ],
+          codexRuntime: {
+            status: "running",
+            error: null,
+            updatedAt: new Date().toISOString(),
+          },
+        }}
+        taskConversation={{
+          taskId: "goat_task_1",
+          status: "running",
+          startedAtMs: Date.now(),
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Stop response" }));
+
+    expect(cancelGoatTaskAction).toHaveBeenCalledWith("goat_task_1");
+    expect(chatMock.stop).not.toHaveBeenCalled();
+    expect(screen.getByRole("status", { name: "Stopping task…" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stopping task" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+
+    rerender(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_task_1",
+          title: "Morning workflow",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          messages: [
+            {
+              id: "task_user_1",
+              role: "user",
+              parts: [{ type: "text", text: "Run the morning workflow" }],
+            },
+          ],
+          codexRuntime: {
+            status: "interrupted",
+            error: null,
+            updatedAt: new Date().toISOString(),
+          },
+        }}
+        taskConversation={{
+          taskId: "goat_task_1",
+          status: "canceled",
+          startedAtMs: Date.now(),
+        }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: "Stopping task…" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
+  });
+
+  it("restores the task stop control when cancellation fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(cancelGoatTaskAction).mockResolvedValueOnce({
+      ok: false,
+      error: "Could not stop task.",
+    });
+
     render(
       <GoatSurface
         tasks={[]}
@@ -342,14 +425,8 @@ describe("GoatSurface chat streaming UI", () => {
           id: "goat_task_1",
           title: "Morning workflow",
           model: DEFAULT_GOAT_MODEL,
-          engine: "opencompany",
-          messages: [
-            {
-              id: "task_user_1",
-              role: "user",
-              parts: [{ type: "text", text: "Run the morning workflow" }],
-            },
-          ],
+          engine: "codex",
+          messages: [],
         }}
         taskConversation={{
           taskId: "goat_task_1",
@@ -361,8 +438,9 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Stop response" }));
 
-    expect(cancelGoatTaskAction).toHaveBeenCalledWith("goat_task_1");
-    expect(chatMock.stop).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument(),
+    );
   });
 
   it("consumes the onboarding kickoff and sends it once through main chat", async () => {
@@ -414,6 +492,26 @@ describe("GoatSurface chat streaming UI", () => {
     });
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
+  });
+
+  it("submits Shift+Enter from the main composer as a foreground chat", async () => {
+    const user = userEvent.setup();
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start now");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+
+    await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
+    const optimisticHref = historyMock.replaceState.mock.calls[0]?.[2];
+    expect(optimisticHref).toMatch(/^\/chat\/goat_chat_/);
+    expect(chatMock.preparedRequestBodies[0]).toMatchObject({
+      sessionId: null,
+      newSessionId: String(optimisticHref).slice("/chat/".length),
+      model: DEFAULT_GOAT_MODEL,
+    });
+    expect(screen.getByPlaceholderText("Reply...")).toBeInTheDocument();
+    expect(screen.queryByText("welcome back, there")).not.toBeInTheDocument();
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 
   it("keeps the reserved detail URL and reuses its id when the first send is retried", async () => {
@@ -484,22 +582,15 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
-  it("keeps the painted composer overlay aligned with textarea scrolling", async () => {
+  it("renders composer input as native textarea text", async () => {
     const user = userEvent.setup();
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "@codex inspect this long prompt");
-    const overlay = textarea.previousElementSibling as HTMLDivElement | null;
-    expect(overlay).toHaveAttribute("aria-hidden", "true");
-
-    textarea.scrollTop = 48;
-    fireEvent.scroll(textarea);
-    expect(overlay?.scrollTop).toBe(48);
-
-    textarea.scrollTop = 72;
-    await user.type(textarea, " after resizing");
-    expect(overlay?.scrollTop).toBe(72);
+    expect(textarea).toHaveClass("text-ink");
+    expect(textarea).not.toHaveClass("text-transparent");
+    expect(textarea.parentElement?.querySelector('[aria-hidden="true"]')).toBeNull();
   });
 
   it("selects from the active goat model list and sends the chosen model", async () => {
@@ -1384,8 +1475,23 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
-  it("shows the Codex mention menu and submits selected mention metadata", async () => {
+  it("uses @codex as a one-shot model selection without changing the remembered model", async () => {
     const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: requestChatSessionId(init, "goat_chat_codex_1"),
+          userMessageId: "goat_chat_msg_codex_user",
+          assistantMessageId: "goat_chat_msg_codex_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.localStorage.setItem("opencompany-goat-main-chat-selection:user_1", DEFAULT_GOAT_MODEL);
 
     render(
       <GoatSurface
@@ -1393,28 +1499,47 @@ describe("GoatSurface chat streaming UI", () => {
         defaultModel={DEFAULT_GOAT_MODEL}
         initialChat={null}
         codexConnected
+        userWorkosId="user_1"
       />,
     );
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
     await user.type(textarea, "@");
 
     expect(screen.getByRole("listbox", { name: "Mention menu" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     expect(textarea).toHaveValue("@codex ");
-    const selectedMention = screen.getByTestId("selected-codex-mention");
-    expect(selectedMention).toHaveTextContent("@codex");
-    expect(selectedMention).not.toHaveClass("px-1");
-    expect(selectedMention).not.toHaveClass("font-medium");
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
+    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" })).toBeInTheDocument();
 
     await user.type(textarea, "check repo access");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(chatMock.sendMessage).toHaveBeenCalledWith({
-      text: "@codex check repo access",
-      metadata: { mentions: [{ kind: "engine", id: "codex" }] },
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
+    const body = JSON.parse(String((init as RequestInit).body));
+    expect(body).toMatchObject({
+      newSessionId: expect.stringMatching(/^goat_chat_/),
+      message: {
+        role: "user",
+        parts: [{ type: "text", text: "@codex check repo access" }],
+      },
+      model: "openai/gpt-5.6-sol",
     });
+    expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
+      DEFAULT_GOAT_MODEL,
+    );
+
+    await user.keyboard("{Escape}");
+    await nextAnimationFrame();
+
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
   });
 
   it("starts a selected workflow in the background without creating a chat turn", async () => {
@@ -1467,10 +1592,17 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     const textarea = screen.getByPlaceholderText("Reply...");
-    await user.type(textarea, "#morning");
+    await user.type(textarea, "#");
     await user.click(await screen.findByRole("option", { name: /Morning Test/i }));
+    expect(textarea).toHaveValue("#morning-test ");
+    const overlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(overlay?.querySelectorAll('[data-goat-chat-mention="workflow"]')).toHaveLength(1);
+    expect(overlay).toHaveTextContent("#morning-test");
+    expect(textarea).toHaveClass("text-transparent");
     await user.type(textarea, "run today's checks");
-    await user.click(screen.getByRole("button", { name: "Start task" }));
+    await user.type(textarea, "{Enter}");
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1491,6 +1623,193 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+    await waitFor(() => expect(textarea).toHaveFocus());
+    expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a selected workflow with uploaded attachments", async () => {
+    const user = userEvent.setup();
+    attachmentUploadMock.upload.mockResolvedValueOnce({
+      blobUrl: "https://blob.test/goat-chat/user_1/report.docx",
+      blobPathname: "goat-chat/user_1/report.docx",
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/skills") return Response.json({ skills: [] });
+      if (url === "/api/workflows" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_1",
+              displayId: "TASK-1",
+              name: "Morning Test",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      if (url === "/api/workflows") {
+        return Response.json({
+          workflows: [
+            {
+              id: "morning-test",
+              name: "Morning Test",
+              description: "Run the morning checks.",
+            },
+          ],
+        });
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_1",
+          title: "Existing chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [],
+        }}
+        userWorkosId="user_1"
+        taskSpawningEnabled
+      />,
+    );
+
+    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [
+          new File(["doc"], "report.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          }),
+        ],
+      },
+    });
+    await screen.findByText("report.docx");
+    await screen.findByText("DOCX");
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "#");
+    await user.click(await screen.findByRole("option", { name: /Morning Test/i }));
+    await user.type(textarea, "summarize this report");
+    await user.click(screen.getByRole("button", { name: "Start task" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      workflow: {
+        kind: "workflow",
+        id: "morning-test",
+      },
+      description: "#morning-test summarize this report",
+      attachments: [
+        expect.objectContaining({
+          kind: "docx",
+          mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          filename: "report.docx",
+          blobUrl: "https://blob.test/goat-chat/user_1/report.docx",
+          blobPathname: "goat-chat/user_1/report.docx",
+        }),
+      ],
+    });
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByText("report.docx")).toBeNull());
+  });
+
+  it("offers workflow mentions when Codex is selected in the main composer", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/skills") return Response.json({ skills: [] });
+      if (url === "/api/workflows" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_1",
+              displayId: "TASK-1",
+              name: "Morning Test",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      if (url === "/api/workflows") {
+        return Response.json({
+          workflows: [
+            {
+              id: "morning-test",
+              name: "Morning Test",
+              description: "Run the morning checks.",
+            },
+          ],
+        });
+      }
+      return Response.json({
+        ok: true,
+        sessionId: requestChatSessionId(init, "goat_chat_codex_1"),
+        userMessageId: "goat_chat_msg_codex_user",
+        assistantMessageId: "goat_chat_msg_codex_assistant",
+        mode: "started",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+        userWorkosId="user_1"
+        taskSpawningEnabled
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(textarea, "#");
+    const workflowOption = await screen.findByRole("option", { name: /Morning Test/i });
+    expect(screen.queryByRole("option", { name: /Ad-hoc task/i })).not.toBeInTheDocument();
+    await user.click(workflowOption);
+
+    await user.type(textarea, "run today's checks");
+    await user.click(screen.getByRole("button", { name: "Start task" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      workflow: {
+        kind: "workflow",
+        id: "morning-test",
+      },
+      description: "#morning-test run today's checks",
+    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/codex-chat/messages")).toBe(
+      false,
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue("");
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
@@ -1534,7 +1853,7 @@ describe("GoatSurface chat streaming UI", () => {
     const textarea = screen.getByPlaceholderText("Reply...");
     await user.type(textarea, "#task research our three closest competitors");
 
-    expect(screen.getByTestId("selected-task-mention")).toHaveTextContent("#task");
+    expect(textarea).toHaveValue("#task research our three closest competitors");
     expect(screen.getByTestId("ad-hoc-task-hint")).toHaveTextContent(
       "Sending starts this as an ad-hoc background task.",
     );
@@ -1556,6 +1875,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+    await waitFor(() => expect(textarea).toHaveFocus());
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
@@ -1619,7 +1939,6 @@ describe("GoatSurface chat streaming UI", () => {
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "@codex check repo access");
-    expect(screen.queryByTestId("selected-codex-mention")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
@@ -1644,7 +1963,6 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     await user.clear(textarea);
     await user.type(textarea, "check repo access");
-    expect(screen.queryByTestId("selected-codex-mention")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
@@ -1692,11 +2010,20 @@ describe("GoatSurface chat streaming UI", () => {
     await user.type(textarea, "then @skill/writing");
     await user.click(await screen.findByRole("option", { name: /writing work/i }));
 
-    expect(screen.getAllByTestId("selected-skill-mention")).toHaveLength(2);
     expect(textarea).toHaveValue("@skill/coding-work then @skill/writing-work ");
+    const overlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(overlay?.querySelectorAll('[data-goat-chat-mention="skill"]')).toHaveLength(2);
+    expect(overlay).toHaveTextContent("@skill/coding-work then @skill/writing-work");
+    expect(textarea).toHaveClass("text-transparent");
 
     fireEvent.change(textarea, { target: { value: "@skill/coding-work then continue" } });
-    expect(screen.getAllByTestId("selected-skill-mention")).toHaveLength(1);
+    expect(textarea).toHaveValue("@skill/coding-work then continue");
+    const reconciledOverlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(reconciledOverlay?.querySelectorAll('[data-goat-chat-mention="skill"]')).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
@@ -1751,7 +2078,6 @@ describe("GoatSurface chat streaming UI", () => {
     });
 
     expect(textarea).toHaveValue(pastedText);
-    expect(await screen.findAllByTestId("selected-skill-mention")).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: "Send message" }));
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
@@ -1867,7 +2193,56 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Compare the latest pricing.")).toBeInTheDocument();
   });
 
-  it("projects Cloud Codex sessions into Tasks without duplicating them in Chats", () => {
+  it("renders home chat state indicators", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        recentChats={[
+          codexChatSummary({
+            id: "working_chat",
+            title: "Working chat",
+            status: "running",
+          }),
+          {
+            id: "unseen_chat",
+            title: "Done unseen",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Ready to review.",
+            updatedAt: currentTimestamp(),
+            state: "done_unseen",
+          },
+          {
+            id: "seen_chat",
+            title: "Done seen",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Already opened.",
+            updatedAt: currentTimestamp(),
+            state: "done_seen",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /Working chat/ })).toHaveAttribute(
+      "href",
+      "/chat/working_chat",
+    );
+    expect(screen.getByRole("link", { name: /Done unseen/ })).toHaveAttribute(
+      "href",
+      "/chat/unseen_chat",
+    );
+    expect(screen.getByRole("link", { name: /Done seen/ })).toHaveAttribute(
+      "href",
+      "/chat/seen_chat",
+    );
+    expect(screen.getByTestId("home-chat-working")).toBeInTheDocument();
+    expect(screen.getByTestId("home-chat-unseen")).toBeInTheDocument();
+    expect(screen.getByTestId("home-chat-seen")).toBeInTheDocument();
+  });
+
+  it("keeps Codex and Claude Code sessions in Chats while Tasks show real tasks", () => {
     const { container } = render(
       <GoatSurface
         taskSpawningEnabled
@@ -1891,6 +2266,12 @@ describe("GoatSurface chat streaming UI", () => {
         initialChat={null}
         recentChats={[
           codexChatSummary({ id: "codex_1", title: "Fix deployment" }),
+          codexChatSummary({
+            id: "claude_1",
+            title: "Update docs",
+            engine: "claude_code",
+            preview: "Claude is updating the docs.",
+          }),
           {
             id: "chat_1",
             title: "Market research",
@@ -1907,19 +2288,20 @@ describe("GoatSurface chat streaming UI", () => {
     const chatsSection = screen.getByRole("heading", { name: "Chats" }).closest("section");
     expect(tasksSection).not.toBeNull();
     expect(chatsSection).not.toBeNull();
-    expect(within(tasksSection!).getByRole("link", { name: /Fix deployment/ })).toHaveAttribute(
-      "href",
-      "/chat/codex_1",
-    );
     expect(within(tasksSection!).getByRole("link", { name: /Prepare report/ })).toHaveAttribute(
       "href",
       "/tasks/TASK-1",
     );
-    expect(within(tasksSection!).getByText("Codex · Ready")).toBeInTheDocument();
-    expect(
-      within(tasksSection!).getByRole("img", { name: "Codex task status: Ready" }),
-    ).toHaveClass("bg-success");
-    expect(within(chatsSection!).queryByText("Fix deployment")).not.toBeInTheDocument();
+    expect(within(tasksSection!).queryByText("Fix deployment")).not.toBeInTheDocument();
+    expect(within(tasksSection!).queryByText("Update docs")).not.toBeInTheDocument();
+    expect(within(chatsSection!).getByRole("link", { name: /Fix deployment/ })).toHaveAttribute(
+      "href",
+      "/chat/codex_1",
+    );
+    expect(within(chatsSection!).getByRole("link", { name: /Update docs/ })).toHaveAttribute(
+      "href",
+      "/chat/claude_1",
+    );
     expect(within(chatsSection!).getByText("Market research")).toBeInTheDocument();
     expect(
       within(container)
@@ -1929,7 +2311,7 @@ describe("GoatSurface chat streaming UI", () => {
     ).toEqual(["Tasks", "Chats", "Routines"]);
   });
 
-  it("shows Cloud Codex tasks when background task spawning is disabled", () => {
+  it("shows Codex chats in Chats when background task spawning is disabled", () => {
     render(
       <GoatSurface
         tasks={[]}
@@ -1939,86 +2321,12 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Tasks" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Tasks" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Chats" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Codex task/ })).toHaveAttribute(
       "href",
       "/chat/goat_chat_codex_1",
     );
-  });
-
-  it("renders every Cloud Codex task status with text and an accessible dot", () => {
-    render(
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        recentChats={[
-          codexChatSummary({ id: "queued", title: "Queued task", status: "queued" }),
-          codexChatSummary({ id: "starting", title: "Starting task", status: "starting" }),
-          codexChatSummary({ id: "running", title: "Working task", status: "running" }),
-          codexChatSummary({ id: "ready", title: "Ready task", status: "idle" }),
-          codexChatSummary({
-            id: "error",
-            title: "Failed task",
-            status: "idle",
-            error: "The repository could not be cloned.",
-          }),
-          codexChatSummary({ id: "failed", title: "Failed runtime", status: "failed" }),
-          codexChatSummary({ id: "stopped", title: "Stopped task", status: "interrupted" }),
-          codexChatSummary({ id: "connecting", title: "Connecting task", status: null }),
-          codexChatSummary({ id: "closed", title: "Closed task", status: "closed" }),
-        ]}
-      />,
-    );
-
-    for (const label of ["Queued", "Starting", "Working", "Ready", "Stopped", "Connecting"]) {
-      expect(screen.getByRole("img", { name: `Codex task status: ${label}` })).toBeInTheDocument();
-      expect(screen.getByText(new RegExp(`Codex · ${label}`))).toBeInTheDocument();
-    }
-    expect(screen.getAllByRole("img", { name: "Codex task status: Needs attention" })).toHaveLength(
-      2,
-    );
-    expect(screen.getByText(/The repository could not be cloned/)).toBeInTheDocument();
-    expect(screen.queryByText("Closed task")).not.toBeInTheDocument();
-  });
-
-  it("updates a Cloud Codex task from Working to Ready without a route refresh", () => {
-    const renderSurface = (status: GoatCodexRuntimeView["status"]) => (
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        recentChats={[codexChatSummary({ status })]}
-      />
-    );
-    const { rerender } = render(renderSurface("running"));
-
-    expect(screen.getByRole("img", { name: "Codex task status: Working" })).toBeInTheDocument();
-    rerender(renderSurface("idle"));
-    expect(screen.getByRole("img", { name: "Codex task status: Ready" })).toBeInTheDocument();
-    expect(routerMock.refresh).not.toHaveBeenCalled();
-  });
-
-  it("labels Claude Code sandbox chats as Claude Code, not Codex", () => {
-    render(
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        recentChats={[
-          codexChatSummary({
-            id: "goat_chat_claude_1",
-            title: "Claude task",
-            engine: "claude_code",
-            status: "idle",
-          }),
-        ]}
-      />,
-    );
-
-    expect(screen.getByText("Claude Code · Ready")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Claude Code task status: Ready" })).toBeInTheDocument();
-    expect(screen.queryByText(/Codex · /)).not.toBeInTheDocument();
   });
 
   it("renders coding workspaces only for persistent Codex and Claude Code chats", () => {
@@ -2068,7 +2376,7 @@ describe("GoatSurface chat streaming UI", () => {
     backgroundTask.unmount();
   });
 
-  it("keeps active and pinned Codex tasks visible and sorts active work first", () => {
+  it("keeps active and pinned coding chats visible outside the recent window", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
     try {
@@ -2107,11 +2415,13 @@ describe("GoatSurface chat streaming UI", () => {
         />,
       );
 
-      const tasksSection = screen.getByRole("heading", { name: "Tasks" }).closest("section");
-      const links = within(tasksSection!).getAllByRole("link");
-      expect(links[0]).toHaveTextContent("Old but working");
-      expect(within(tasksSection!).getByText("Pinned ready")).toBeInTheDocument();
-      expect(within(tasksSection!).queryByText("Old hidden")).not.toBeInTheDocument();
+      const chatsSection = screen.getByRole("heading", { name: "Chats" }).closest("section");
+      expect(chatsSection).not.toBeNull();
+      expect(within(chatsSection!).getByText("Recent ready")).toBeInTheDocument();
+      expect(within(chatsSection!).getByText("Old but working")).toBeInTheDocument();
+      expect(within(chatsSection!).getByText("Pinned ready")).toBeInTheDocument();
+      expect(within(chatsSection!).queryByText("Old hidden")).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Tasks" })).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -2399,6 +2709,94 @@ describe("GoatSurface chat streaming UI", () => {
     // Never adopted into the visible thread and never navigated to.
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("offers workflow mentions when Codex is selected in Cmd+K compose", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/skills") return Response.json({ skills: [] });
+      if (url === "/api/workflows" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_1",
+              displayId: "TASK-1",
+              name: "Morning Test",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      if (url === "/api/workflows") {
+        return Response.json({
+          workflows: [
+            {
+              id: "morning-test",
+              name: "Morning Test",
+              description: "Run the morning checks.",
+            },
+          ],
+        });
+      }
+      return Response.json({
+        ok: true,
+        sessionId: requestChatSessionId(init, "goat_chat_codex_1"),
+        userMessageId: "goat_chat_msg_codex_user",
+        assistantMessageId: "goat_chat_msg_codex_assistant",
+        mode: "started",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+        userWorkosId="user_1"
+        taskSpawningEnabled
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+
+    const quickComposerInput = within(dialog).getByPlaceholderText(
+      "Ask Goat anything, or describe a task...",
+    );
+    await user.type(quickComposerInput, "#");
+    const workflowOption = await within(dialog).findByRole("option", { name: /Morning Test/i });
+    expect(within(dialog).queryByRole("option", { name: /Ad-hoc task/i })).not.toBeInTheDocument();
+    await user.click(workflowOption);
+    await user.type(quickComposerInput, "run today's checks");
+    await user.click(within(dialog).getByRole("button", { name: "Start task" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      workflow: {
+        kind: "workflow",
+        id: "morning-test",
+      },
+      description: "#morning-test run today's checks",
+    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/codex-chat/messages")).toBe(
+      false,
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

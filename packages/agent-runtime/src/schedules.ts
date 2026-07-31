@@ -16,7 +16,7 @@ const HOUR_LIST_RE = /^0 ((?:[0-9]|1[0-9]|2[0-3])(?:,(?:[0-9]|1[0-9]|2[0-3]))+) 
 const DAILY_RE = /^([0-9]|[1-5][0-9]) ([0-9]|1[0-9]|2[0-3]) \* \* \*$/;
 const WEEKDAYS_RE = /^([0-9]|[1-5][0-9]) ([0-9]|1[0-9]|2[0-3]) \* \* 1-5$/;
 const WEEKLY_RE = /^([0-9]|[1-5][0-9]) ([0-9]|1[0-9]|2[0-3]) \* \* ([0-6])$/;
-const SUPPORTED_HOUR_INTERVALS = [1, 2, 3, 4, 6, 8, 12] as const;
+export const SUPPORTED_HOUR_INTERVALS = [1, 2, 3, 4, 6, 8, 12] as const;
 
 export function cronForSchedulePreset(preset: AgentSchedulePreset) {
   if (preset.kind === "minutes") return `*/${clampInt(preset.interval, 1, 59)} * * * *`;

@@ -8,11 +8,13 @@ import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   ArrowLeft,
+  CalendarClock,
   Check,
   CircleUserRound,
   ListTodo,
   Loader2,
   Mail,
+  MessageCircle,
   Monitor,
   Moon,
   Plus,
@@ -39,6 +41,7 @@ import { GoatBrainView } from "@/components/GoatBrainView";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import { GoatSurface } from "@/components/GoatSurface";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
+import { IMessageIntegrationSetup } from "@/components/IMessageIntegrationSetup";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
@@ -61,6 +64,7 @@ import type { GoatSkillListItem, GoatWorkspaceSkill } from "@/lib/skills";
 import { buildGoatHarnessRun, type GoatHarnessRunViewModel } from "@/lib/task-harness-run";
 import {
   updateGoatAutoModelRoutingAction,
+  updateGoatImessageEnabledAction,
   updateGoatTaskSpawningAction,
 } from "@/lib/user-preferences";
 import { createGoatWorkflowAction } from "@/lib/workflow-actions";
@@ -162,15 +166,24 @@ export function GoatSettingsRoute() {
   );
 }
 
-export function GoatIntegrationsSettingsRoute() {
-  const { integrations, workspace } = useGoatAppData();
+export function GoatIntegrationsSettingsRoute({
+  browserProfilesEnabled = false,
+}: {
+  browserProfilesEnabled?: boolean;
+}) {
+  const { featureFlags, integrations, workspace } = useGoatAppData();
 
   return (
     <GoatSettingsContent
       title="Integrations"
       description="Connect the tools Goat can read from and act on."
     >
-      <IntegrationRows integrations={integrations} isWorkspaceAdmin={workspace.role === "admin"} />
+      <IntegrationRows
+        integrations={integrations}
+        isWorkspaceAdmin={workspace.role === "admin"}
+        imessageEnabled={featureFlags.imessage}
+        browserProfilesEnabled={browserProfilesEnabled}
+      />
     </GoatSettingsContent>
   );
 }
@@ -225,6 +238,13 @@ export function GoatPreferencesSettingsRoute() {
           description="Let Goat choose a model from your first message and keep it for the chat."
           checked={featureFlags.autoModelRouting}
           update={updateGoatAutoModelRoutingAction}
+        />
+        <BetaFeatureSwitch
+          icon={MessageCircle}
+          label="iMessage notifications"
+          description="Pair your phone so Goat can text you important updates over iMessage."
+          checked={featureFlags.imessage}
+          update={updateGoatImessageEnabledAction}
         />
       </section>
     </GoatSettingsContent>
@@ -360,6 +380,30 @@ export function GoatGranolaSettingsRoute() {
         initialState={integrations.granola}
         brainSourcesHref={brainSourcesHref}
       />
+    </GoatSettingsContent>
+  );
+}
+
+export function GoatIMessageSettingsRoute() {
+  const { featureFlags, integrations } = useGoatAppData();
+
+  return (
+    <GoatSettingsContent
+      title="iMessage"
+      description="Get important updates from Goat as texts on your phone."
+      backLink={{ href: "/settings/integrations", label: "Integrations" }}
+    >
+      {featureFlags.imessage ? (
+        <IMessageIntegrationSetup initialState={integrations.imessage} />
+      ) : (
+        <p className="px-2 text-[13px] leading-5 text-ink-subtle">
+          iMessage notifications are off. Enable them in{" "}
+          <Link href="/settings/preferences" prefetch className="font-medium text-ink underline">
+            Preferences
+          </Link>{" "}
+          first, then come back here to pair your phone.
+        </p>
+      )}
     </GoatSettingsContent>
   );
 }
@@ -687,14 +731,20 @@ function BetaFeatureSwitch({
 function IntegrationRows({
   integrations,
   isWorkspaceAdmin,
+  imessageEnabled,
+  browserProfilesEnabled,
 }: {
   integrations: GoatIntegrationState;
   isWorkspaceAdmin: boolean;
+  imessageEnabled: boolean;
+  browserProfilesEnabled: boolean;
 }) {
   return (
     <SettingsIntegrationsPanel
       initialIntegrations={integrations}
       isWorkspaceAdmin={isWorkspaceAdmin}
+      imessageEnabled={imessageEnabled}
+      browserProfilesEnabled={browserProfilesEnabled}
     />
   );
 }
@@ -813,6 +863,14 @@ function WorkflowListRow({ workflow }: { workflow: GoatWorkflowListItem }) {
         {workflow.description.trim() ? (
           <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
             {workflow.description}
+          </span>
+        ) : null}
+        {workflow.trigger.type === "schedule" ? (
+          <span className="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-[11.5px] leading-4 text-ink-subtle">
+            <CalendarClock size={12} strokeWidth={1.8} className="shrink-0" />
+            <span className="truncate">
+              {workflow.trigger.cron} · {workflow.trigger.timezone}
+            </span>
           </span>
         ) : null}
       </span>

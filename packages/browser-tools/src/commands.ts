@@ -7,6 +7,8 @@ type BrowserArgvInput = {
   args: unknown;
   sessionId: string;
   actionPolicyPath: string;
+  cdpUrl?: string;
+  allowedHosts?: readonly string[];
   screenshotPath?: string;
 };
 
@@ -16,7 +18,7 @@ export function buildBrowserToolArgv(input: BrowserArgvInput): string[] {
   switch (input.name) {
     case "browser_open": {
       const record = asRecord(input.args);
-      argv.push("open", readHttpUrl(record, "url", "browser_open url"));
+      argv.push("open", readHttpUrl(record, "url", "browser_open url", input.allowedHosts));
       return argv;
     }
     case "browser_snapshot": {
@@ -123,15 +125,15 @@ export function buildBrowserReadArgv(input: Omit<BrowserArgvInput, "name" | "scr
   const record = asRecord(input.args);
   const argv = [...baseArgv(input), "read"];
   const url = readOptionalString(record, "url");
-  if (url) argv.push(readHttpUrl(record, "url", "browser_read url"));
+  if (url) argv.push(readHttpUrl(record, "url", "browser_read url", input.allowedHosts));
   const filter = readOptionalString(record, "filter");
   if (filter) argv.push("--filter", filter);
   if (readOptionalBoolean(record, "outline")) argv.push("--outline");
   return argv;
 }
 
-function baseArgv(input: Pick<BrowserArgvInput, "sessionId" | "actionPolicyPath">) {
-  return [
+function baseArgv(input: Pick<BrowserArgvInput, "sessionId" | "actionPolicyPath" | "cdpUrl">) {
+  const argv = [
     "--session",
     input.sessionId,
     "--content-boundaries",
@@ -140,6 +142,8 @@ function baseArgv(input: Pick<BrowserArgvInput, "sessionId" | "actionPolicyPath"
     "--action-policy",
     input.actionPolicyPath,
   ];
+  if (input.cdpUrl) argv.push("--cdp", input.cdpUrl);
+  return argv;
 }
 
 export function asRecord(value: unknown): Record<string, unknown> {
@@ -148,7 +152,12 @@ export function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-export function readHttpUrl(record: Record<string, unknown>, key: string, label: string) {
+export function readHttpUrl(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+  allowedHosts?: readonly string[],
+) {
   const value = readRequiredString(record, key);
   let url: URL;
   try {
@@ -162,7 +171,18 @@ export function readHttpUrl(record: Record<string, unknown>, key: string, label:
   if (url.username || url.password) {
     throw new Error(`${label} must not include credentials.`);
   }
+  if (allowedHosts?.length && !urlHostAllowed(url.hostname, allowedHosts)) {
+    throw new Error(`${label} is outside the active browser profile's allowed domains.`);
+  }
   return url.toString();
+}
+
+export function urlHostAllowed(hostname: string, allowedHosts: readonly string[]) {
+  const normalized = normalizeHostname(hostname);
+  return allowedHosts.some((allowed) => {
+    const host = normalizeHostname(allowed);
+    return normalized === host || normalized.endsWith(`.${host}`);
+  });
 }
 
 export function normalizeRef(value: string) {
@@ -268,6 +288,10 @@ function readOptionalNumber(record: Record<string, unknown>, key: string) {
 function readOptionalBoolean(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === "boolean" ? value : undefined;
+}
+
+function normalizeHostname(value: string) {
+  return value.trim().toLowerCase().replace(/\.$/, "");
 }
 
 function clampInteger(value: number, min: number, max: number) {

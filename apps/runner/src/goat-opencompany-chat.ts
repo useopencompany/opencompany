@@ -1,6 +1,8 @@
-import { AGENT_MODEL_CATALOG } from "@opencompany/agent-runtime";
+import { AGENT_MODEL_CATALOG, modelSupportsAttachments } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { resolveGoatImessageDelivery } from "@opencompany/db/goat-imessage";
 import {
+  type GoatChatMessageAttachment,
   type GoatCodexChatSession,
   type GoatCodexChatTurn,
   goatChatMessages,
@@ -23,6 +25,7 @@ import {
 } from "@opencompany/goat-agent/chat-agent";
 import type {
   GoatChatActionCatalog,
+  GoatChatUiMessage,
   GoatStoredChatMessage,
   WebFetchToolOutput,
   WebSearchToolOutput,
@@ -30,6 +33,8 @@ import type {
 import { toGoatChatUiMessage } from "@opencompany/goat-agent/chat-ui";
 import { executeGoatChatExaFetch } from "@opencompany/goat-agent/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@opencompany/goat-agent/chat-web-search";
+import { resolveGoatImessageProvider } from "@opencompany/goat-agent/imessage/provider";
+import { createGoatSendUserMessageRunner } from "@opencompany/goat-agent/imessage/send-user-message";
 import { createOpenCompanyChatSystemPrompt } from "@opencompany/goat-agent/prompts";
 import {
   createGoatGatewayAttribution,
@@ -47,13 +52,14 @@ import {
   stepCountIs,
 } from "ai";
 import { asc, eq } from "drizzle-orm";
+import { downloadBlobBytes } from "./attachment-hydration";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { runGoatTaskBrainRead } from "./goat-codex-brain-tool";
 import {
   GoatCodexChatHandoffError,
   GoatCodexChatLeaseLostError,
-  GoatTaskTurnCanceledError,
+  GoatTaskTurnTerminalError,
 } from "./goat-codex-chat-errors";
 import {
   createGoatOpenCompanyChatProjector,
@@ -65,6 +71,7 @@ import {
 import {
   buildGoatTaskTerminalProjection,
   buildGoatTaskTurnCompletion,
+  closeGoatTaskTurn,
   type GoatTaskTurnContext,
   markGoatTaskTurnRunning,
 } from "./goat-task-turn";
@@ -100,6 +107,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
       codexChatSessionId: session.id,
       chatSessionId: session.chatSessionId,
       turnId: turn.id,
+      taskId: input.taskContext?.task.id ?? null,
       userMessageId: turn.userMessageId,
       assistantMessageId: turn.assistantMessageId,
       workspaceId: session.workspaceId,
@@ -143,6 +151,8 @@ export async function runGoatOpenCompanyChatTurn(input: {
     const messages = await loadGoatOpenCompanyChatModelMessages({
       chatSessionId: session.chatSessionId,
       currentUserMessageId: turn.userMessageId,
+      modelId: runtime.model,
+      blobToken: env.blobReadWriteToken,
     });
     throwIfAborted(generationController.signal);
     await projector.started();
@@ -186,17 +196,28 @@ export async function runGoatOpenCompanyChatTurn(input: {
       },
     });
     await abortWatcher.checkNow();
-    await abortWatcher.stop();
     projection = withCompletedResponseFallback(projection);
-    const taskOutcome = runtime.getTaskOutcome();
+    const taskResult = projectionText(projection);
+    const taskOutcome = input.taskContext
+      ? await closeGoatTaskTurn({
+          context: input.taskContext,
+          finalContent: taskResult,
+          env,
+          session,
+          turn,
+          signal: generationController.signal,
+        })
+      : null;
+    await abortWatcher.checkNow();
+    await abortWatcher.stop();
     await projector.completed(
       projection,
       input.taskContext
         ? buildGoatTaskTurnCompletion({
             context: input.taskContext,
-            result: projectionText(projection),
-            reportedOutcome: taskOutcome.reportedOutcome,
-            outcomeComment: taskOutcome.outcomeComment,
+            result: taskResult,
+            reportedOutcome: taskOutcome?.reportedOutcome,
+            outcomeComment: taskOutcome?.outcomeComment,
           })
         : null,
     );
@@ -216,7 +237,7 @@ export async function runGoatOpenCompanyChatTurn(input: {
     }
     if (
       effectiveError instanceof GoatOpenCompanyChatInterruptedError ||
-      effectiveError instanceof GoatTaskTurnCanceledError
+      effectiveError instanceof GoatTaskTurnTerminalError
     ) {
       await projector.interrupted(
         projection,
@@ -528,6 +549,7 @@ export async function consumeGoatOpenCompanyChatStream(input: {
 export async function goatOpenCompanyModelMessagesFromStored(
   storedMessages: readonly GoatStoredChatMessage[],
   currentUserMessageId: string,
+  options?: { modelId?: string | undefined; blobToken?: string | undefined },
 ) {
   const currentIndex = storedMessages.findIndex(
     (message) => message.id === currentUserMessageId && message.role === "user",
@@ -535,14 +557,23 @@ export async function goatOpenCompanyModelMessagesFromStored(
   if (currentIndex < 0) {
     throw new Error(`OpenCompany chat user message ${currentUserMessageId} was not found.`);
   }
+  const replayMessages = storedMessages.slice(0, currentIndex + 1);
+  const uiMessages = replayMessages.map((message) => toGoatChatUiMessage(message));
   return convertToModelMessages(
-    storedMessages.slice(0, currentIndex + 1).map((message) => toGoatChatUiMessage(message)),
+    await hydrateGoatOpenCompanyAttachmentParts({
+      uiMessages,
+      storedMessages: replayMessages,
+      modelId: options?.modelId,
+      blobToken: options?.blobToken,
+    }),
   );
 }
 
 async function loadGoatOpenCompanyChatModelMessages(input: {
   chatSessionId: string;
   currentUserMessageId: string;
+  modelId: string;
+  blobToken: string | undefined;
 }) {
   const rows = await getDb()
     .select({
@@ -567,7 +598,115 @@ async function loadGoatOpenCompanyChatModelMessages(input: {
     taskPrompt: null,
     taskStatus: null,
   }));
-  return goatOpenCompanyModelMessagesFromStored(storedMessages, input.currentUserMessageId);
+  return goatOpenCompanyModelMessagesFromStored(storedMessages, input.currentUserMessageId, {
+    modelId: input.modelId,
+    blobToken: input.blobToken,
+  });
+}
+
+async function hydrateGoatOpenCompanyAttachmentParts(input: {
+  uiMessages: GoatChatUiMessage[];
+  storedMessages: readonly Pick<
+    GoatStoredChatMessage,
+    "id" | "role" | "attachments" | "attachmentTexts"
+  >[];
+  modelId: string | undefined;
+  blobToken: string | undefined;
+}): Promise<GoatChatUiMessage[]> {
+  const attachmentsByMessageId = new Map<
+    string,
+    {
+      attachments: GoatChatMessageAttachment[];
+      attachmentTexts: Record<string, string> | null;
+    }
+  >();
+  const seenAttachmentIds = new Set<string>();
+  for (const message of input.storedMessages) {
+    if (message.role !== "user" || !message.attachments?.length) continue;
+    const attachments = message.attachments.filter((attachment) => {
+      if (seenAttachmentIds.has(attachment.id)) return false;
+      seenAttachmentIds.add(attachment.id);
+      return true;
+    });
+    if (attachments.length > 0) {
+      attachmentsByMessageId.set(message.id, {
+        attachments,
+        attachmentTexts: message.attachmentTexts,
+      });
+    }
+  }
+  if (attachmentsByMessageId.size === 0) return input.uiMessages;
+
+  const capabilities = input.modelId
+    ? modelSupportsAttachments(input.modelId)
+    : { images: false, pdf: false };
+  return Promise.all(
+    input.uiMessages.map(async (message) => {
+      const stored = message.role === "user" ? attachmentsByMessageId.get(message.id) : undefined;
+      if (!stored?.attachments?.length) return message;
+
+      const parts: GoatChatUiMessage["parts"] = [...message.parts];
+      for (const attachment of stored.attachments) {
+        parts.push(
+          ...(await openCompanyAttachmentToParts({
+            attachment,
+            attachmentTexts: stored.attachmentTexts,
+            capabilities,
+            blobToken: input.blobToken,
+          })),
+        );
+      }
+      return { ...message, parts };
+    }),
+  );
+}
+
+async function openCompanyAttachmentToParts(input: {
+  attachment: GoatChatMessageAttachment;
+  attachmentTexts: Record<string, string> | null;
+  capabilities: { images: boolean; pdf: boolean };
+  blobToken: string | undefined;
+}): Promise<GoatChatUiMessage["parts"]> {
+  const { attachment } = input;
+  const label = `[Attached file "${attachment.filename}" (${attachment.kind}) - attachment id: ${attachment.id}]`;
+
+  if (attachment.kind === "docx" || attachment.kind === "xlsx" || attachment.kind === "srt") {
+    const text = input.attachmentTexts?.[attachment.id];
+    return [
+      {
+        type: "text",
+        text: text
+          ? `${label}\n\n${text}`
+          : `${label} - no text could be extracted from this file.`,
+      },
+    ];
+  }
+
+  const supported =
+    attachment.kind === "image" ? input.capabilities.images : input.capabilities.pdf;
+  if (!supported) {
+    return [{ type: "text", text: `${label} - not viewable with the current model.` }];
+  }
+
+  try {
+    const bytes = await downloadBlobBytes(attachment.blobUrl, input.blobToken);
+    return [
+      { type: "text", text: label },
+      {
+        type: "file",
+        mediaType: attachment.mediaType,
+        filename: attachment.filename,
+        url: `data:${attachment.mediaType};base64,${bytes.toString("base64")}`,
+      },
+    ];
+  } catch (error) {
+    logger.warn("Durable OpenCompany chat attachment hydration failed", {
+      event: "opencompany.goat_opencompany_chat_attachment_hydration_failed",
+      kind: attachment.kind,
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return [{ type: "text", text: `${label} - the file could not be loaded.` }];
+  }
 }
 
 async function resolveOpenCompanyChatRuntime(input: {
@@ -644,11 +783,24 @@ async function resolveOpenCompanyChatRuntime(input: {
 
   const currentDate = new Date();
   const exaApiKey = env.exaApiKey?.trim();
-  let reportedOutcome: "done" | "needs_attention" | null = null;
-  let outcomeComment: string | null = null;
+  const imessageDelivery =
+    resolveGoatImessageProvider() !== null
+      ? await resolveGoatImessageDelivery(turn.userWorkosId, getDb()).catch(() => null)
+      : null;
   const toolContext = createOpenCompanyChatToolContext({
     model,
     latestUserMessage: turn.prompt,
+    ...(imessageDelivery
+      ? {
+          sendUserMessage: createGoatSendUserMessageRunner({
+            userWorkosId: turn.userWorkosId,
+            phoneE164: imessageDelivery.phoneE164,
+            source: "task",
+            chatSessionId: session.chatSessionId,
+            signal,
+          }),
+        }
+      : {}),
     ...(brain
       ? {
           runBrainCli: (toolInput) =>
@@ -717,10 +869,6 @@ async function resolveOpenCompanyChatRuntime(input: {
       : {}),
     ...(taskContext
       ? {
-          updateTaskStatus: async (outcome) => {
-            reportedOutcome = outcome.status;
-            outcomeComment = outcome.comment.trim().slice(0, 200);
-          },
           limits: {
             webSearchCallsPerTurn: 20,
             webFetchCallsPerTurn: 20,
@@ -769,7 +917,6 @@ async function resolveOpenCompanyChatRuntime(input: {
     maxSteps: taskContext
       ? Math.max(1, taskContext.harnessSpec.maxModelSteps || OPENCOMPANY_CHAT_MAX_STEPS)
       : OPENCOMPANY_CHAT_MAX_STEPS,
-    getTaskOutcome: () => ({ reportedOutcome, outcomeComment }),
   };
 }
 
@@ -899,7 +1046,7 @@ function recognizedAbortError(value: unknown): value is Error {
   return (
     value instanceof GoatCodexChatHandoffError ||
     value instanceof GoatOpenCompanyChatInterruptedError ||
-    value instanceof GoatTaskTurnCanceledError ||
+    value instanceof GoatTaskTurnTerminalError ||
     value instanceof GoatCodexChatLeaseLostError
   );
 }

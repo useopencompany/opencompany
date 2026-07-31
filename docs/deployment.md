@@ -191,8 +191,10 @@ Create the runner from `render.yaml`.
 - Runtime: Docker
 - Health check: `/healthz`
 - Shutdown delay: `300` seconds, Render's documented maximum. Render sends `SIGTERM` to the old
-  instance during deploys and follows with `SIGKILL` after this delay, so this is a mitigation for
-  long runner turns, not a guarantee that every Rana run can finish before a deploy cuts it off.
+  instance during deploys and follows with `SIGKILL` after this delay. The runner stops claiming
+  new work immediately and gives active jobs and Goat Codex turns up to 240 seconds to finish in
+  place before interrupting or handing them off, leaving time for bounded cleanup and telemetry
+  flushes. This is still a mitigation, not a guarantee that every long turn finishes before deploy.
 - Auto deploy: off, so GitHub Actions controls release order
 - API deploys: store `RENDER_SERVICE_ID` and `RENDER_API_KEY` in Infisical `prod` + `/release`
 

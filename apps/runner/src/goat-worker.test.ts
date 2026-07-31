@@ -26,6 +26,16 @@ const telemetry = vi.hoisted(() => ({
   ),
 }));
 
+const analytics = vi.hoisted(() => ({
+  captureGoatLlmUsageRecorded: vi.fn(async () => undefined),
+  captureGoatModelSpendRecorded: vi.fn(async () => undefined),
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatLlmUsageRecorded: analytics.captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded: analytics.captureGoatModelSpendRecorded,
+}));
+
 vi.mock("@opencompany/goat-observability", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/goat-observability")>();
   return {
@@ -266,6 +276,46 @@ describe("runClaimedGoatTask", () => {
         "goat.surface": "task",
       },
     });
+    expect(analytics.captureGoatLlmUsageRecorded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distinctId: "user_1",
+        workspaceId: "workspace_1",
+        surface: "task",
+        stage: "execution",
+        sessionId: null,
+        messageId: "assistant_msg_1",
+        taskId: "goat_task_1",
+        stepIndex: 0,
+        modelProvider: "vercel-ai-gateway",
+        model: "openai/gpt-5.4-mini",
+        engine: "opencompany",
+        inputTokens: 1_000,
+        inputNoCacheTokens: 1_000,
+        inputCacheReadTokens: 0,
+        inputCacheWriteTokens: 0,
+        outputTokens: 100,
+        outputTextTokens: 100,
+        outputReasoningTokens: 0,
+        totalTokens: 1_100,
+      }),
+    );
+    expect(analytics.captureGoatModelSpendRecorded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        billingSource: "task_model_usage",
+        surface: "task",
+        model: "openai/gpt-5.4-mini",
+        stage: "execution",
+        engine: "opencompany",
+        providerCostUsdMicros: expect.any(Number),
+        platformFeeUsdMicros: expect.any(Number),
+        totalCostUsdMicros: expect.any(Number),
+        modelCostUsdMicros: expect.any(Number),
+        taskId: "goat_task_1",
+        messageId: "assistant_msg_1",
+      }),
+    );
     expect(store.recordToolUsage).toHaveBeenCalledWith(
       expect.objectContaining({
         toolCallId: "call_search",
@@ -293,6 +343,89 @@ describe("runClaimedGoatTask", () => {
           costBasis: expect.objectContaining({ kind: "sandbox_usage" }),
         }),
       }),
+    );
+  });
+
+  const externalHarnessUsageCases: Array<
+    readonly [GoatHarnessSpec["engine"], string, GoatHarnessSpec["model"], string]
+  > = [
+    ["codex", "openai", "openai/gpt-5.2-codex", "codex_subscription"],
+    ["claude_code", "anthropic", "anthropic/claude-opus-4.8", "claude_code_subscription"],
+  ];
+
+  it.each(
+    externalHarnessUsageCases,
+  )("tags %s harness token usage with the harness engine", async (engine, modelProvider, modelName, costSource) => {
+    const store = createStore();
+    const externalHarnessSpec: GoatHarnessSpec = {
+      ...harnessSpec,
+      engine,
+      model: modelName,
+    };
+    const executor = vi.fn(async (input: GoatTaskExecutorInput) => {
+      await input.sink.recordModelUsage({
+        messageId: "assistant_msg_1",
+        phase: "execution",
+        stepIndex: 0,
+        modelProvider,
+        modelName,
+        usage: {
+          inputTokens: 2_000,
+          outputTokens: 300,
+          totalTokens: 2_300,
+          inputTokenDetails: {
+            noCacheTokens: undefined,
+            cacheReadTokens: undefined,
+            cacheWriteTokens: undefined,
+          },
+          outputTokenDetails: {
+            textTokens: undefined,
+            reasoningTokens: undefined,
+          },
+        },
+        costOverride: {
+          providerCostUsdMicros: 0,
+          platformFeeUsdMicros: 0,
+          totalCostUsdMicros: 0,
+          costBasis: { source: costSource },
+        },
+      });
+      return {
+        result: "Done.",
+        harnessSpec: externalHarnessSpec,
+        debugTrace,
+      };
+    });
+
+    await runClaimedGoatTask({
+      task: task({ harnessSpec: externalHarnessSpec }),
+      env: env(),
+      store,
+      executor,
+    });
+
+    expect(analytics.captureGoatLlmUsageRecorded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distinctId: "user_1",
+        workspaceId: "workspace_1",
+        surface: "task",
+        stage: "execution",
+        taskId: "goat_task_1",
+        messageId: "assistant_msg_1",
+        modelProvider,
+        model: modelName,
+        engine,
+        inputTokens: 2_000,
+        outputTokens: 300,
+        totalTokens: 2_300,
+        providerCostUsdMicros: 0,
+        platformFeeUsdMicros: 0,
+        chargedCostUsdMicros: 0,
+        billable: false,
+      }),
+    );
+    expect(analytics.captureGoatModelSpendRecorded).not.toHaveBeenCalledWith(
+      expect.objectContaining({ model: modelName }),
     );
   });
 
@@ -468,6 +601,7 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     displayId: "TASK-1",
     name: "Research Marseille",
     userWorkosId: "user_1",
+    workspaceId: "workspace_1",
     prompt: "Research Marseille",
     model: "openai/gpt-5.4-mini",
     sessionId: null,

@@ -33,8 +33,15 @@ const recentChatsMock = vi.hoisted(() => ({
     model: string;
     engine: string;
     codexComposerSettings: null;
+    codexRuntime?: {
+      status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
+      error: string | null;
+      updatedAt: string;
+    } | null;
+    state?: "working" | "done_unseen" | "done_seen";
     preview: string;
     updatedAt: string;
+    lastSeenAt?: string | null;
     pinnedAt: string | null;
   }>,
 }));
@@ -395,6 +402,72 @@ describe("GoatSidebar", () => {
     const recentNav = screen.getByRole("navigation", { name: "Recent chats" });
     expect(within(recentNav).getByRole("link", { name: "Recent chat" })).toBeInTheDocument();
     expect(within(recentNav).queryByRole("link", { name: "Pinned chat" })).not.toBeInTheDocument();
+  });
+
+  it("shows working and unseen chat state in recent rows", () => {
+    pathnameMock.value = "/";
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_working",
+        title: "Working chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Working",
+        updatedAt: "2026-07-14T09:00:00.000Z",
+        pinnedAt: null,
+        state: "working",
+      },
+      {
+        id: "goat_chat_unseen",
+        title: "Unread result",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Ready",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+        state: "done_unseen",
+      },
+    ];
+
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: "Working chat" })).toHaveAttribute(
+      "href",
+      "/chat/goat_chat_working",
+    );
+    expect(screen.getByRole("link", { name: "Unread result" })).toHaveAttribute(
+      "href",
+      "/chat/goat_chat_unseen",
+    );
+    expect(screen.getByTestId("sidebar-chat-working")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-chat-unseen")).toBeInTheDocument();
+  });
+
+  it("hides the unseen marker for the selected completed chat", () => {
+    pathnameMock.value = "/chat/goat_chat_unseen";
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_unseen",
+        title: "Unread result",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Ready",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+        state: "done_unseen",
+      },
+    ];
+
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: "Unread result" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
   });
 
   it("pins and unpins chats via the row toggle", async () => {

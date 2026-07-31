@@ -774,7 +774,7 @@ function normalizeTask(task: GoatTaskRunTaskInput): GoatHarnessRunViewModel["tas
 
 function readHarnessEngine(value: unknown): GoatHarnessEngine {
   const spec = readRecord(value);
-  return spec?.engine === "codex" ? "codex" : "opencompany";
+  return spec?.engine === "codex" || spec?.engine === "claude_code" ? spec.engine : "opencompany";
 }
 
 function normalizeMessage(message: GoatTaskRunMessageInput): GoatRunMessage {

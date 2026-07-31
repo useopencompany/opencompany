@@ -1,9 +1,5 @@
-import type {
-  GoatHarnessSpec,
-  GoatTaskReportedOutcome,
-  GoatTaskToolName,
-  goatTasks,
-} from "@opencompany/db/goat-schema";
+import { resolveGoatImessageDelivery } from "@opencompany/db/goat-imessage";
+import type { GoatHarnessSpec, GoatTaskToolName, goatTasks } from "@opencompany/db/goat-schema";
 import {
   DEFAULT_GOAT_BRAIN_SLUG,
   getDefaultGoatBrainForUser,
@@ -16,7 +12,6 @@ import { executeGoatAction } from "@opencompany/goat-agent/actions/execute";
 import type { GoatResolvedActionCatalog } from "@opencompany/goat-agent/actions/types";
 import {
   createOpenCompanyChatToolContext,
-  type GoatTaskReportedStatus,
   prepareOpenCompanyChatStep,
   TASK_SYSTEM_BLOCK,
 } from "@opencompany/goat-agent/chat-agent";
@@ -27,6 +22,8 @@ import type {
 } from "@opencompany/goat-agent/chat-ui";
 import { executeGoatChatExaFetch } from "@opencompany/goat-agent/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@opencompany/goat-agent/chat-web-search";
+import { resolveGoatImessageProvider } from "@opencompany/goat-agent/imessage/provider";
+import { createGoatSendUserMessageRunner } from "@opencompany/goat-agent/imessage/send-user-message";
 import { createOpenCompanyChatSystemPrompt } from "@opencompany/goat-agent/prompts";
 import {
   createGoatGatewayAttribution,
@@ -51,20 +48,16 @@ const DEFAULT_TASK_MAX_MODEL_STEPS = 16;
 const TASK_WEB_SEARCH_CALLS_PER_TURN = 20;
 const TASK_WEB_FETCH_CALLS_PER_TURN = 20;
 const TASK_ACTION_CALLS_PER_TURN = 20;
-const TASK_OUTCOME_COMMENT_MAX_LENGTH = 200;
-
 export type GoatTaskChatLoopResult = {
   assistantContent: string;
   usage?: LanguageModelUsage;
-  reportedOutcome?: GoatTaskReportedOutcome;
-  outcomeComment?: string;
 };
 
 // The opencompany-engine task executor: a hidden main-chat run. Builds the same
 // system prompt + tool context as interactive chat (brain read, web search/fetch,
-// integration actions) plus the task-only update_task_status tool, streams the
-// model turn, and writes the transcript + tool events + model usage through the
-// existing task sink so the live task UI is unchanged.
+// integration actions), streams the model turn, and writes the transcript + tool
+// events + model usage through the existing task sink so the live task UI is
+// unchanged. A separate closer writes the user-facing task outcome.
 export async function runGoatTaskChatLoop(input: {
   env: RunnerEnv;
   task: GoatTask;
@@ -176,8 +169,10 @@ async function runGoatTaskChatLoopInner(input: {
     })),
   };
 
-  let reportedOutcome: GoatTaskReportedOutcome | undefined;
-  let outcomeComment: string | undefined;
+  const imessageDelivery =
+    resolveGoatImessageProvider() !== null
+      ? await resolveGoatImessageDelivery(task.userWorkosId, db).catch(() => null)
+      : null;
 
   const toolContext = createOpenCompanyChatToolContext({
     model: harnessSpec.model,
@@ -187,6 +182,17 @@ async function runGoatTaskChatLoopInner(input: {
       webFetchCallsPerTurn: TASK_WEB_FETCH_CALLS_PER_TURN,
       actionCallsPerTurn: TASK_ACTION_CALLS_PER_TURN,
     },
+    ...(imessageDelivery
+      ? {
+          sendUserMessage: createGoatSendUserMessageRunner({
+            userWorkosId: task.userWorkosId,
+            phoneE164: imessageDelivery.phoneE164,
+            source: "task",
+            chatSessionId: `goat-task:${task.id}`,
+            signal: input.signal,
+          }),
+        }
+      : {}),
     ...(brain
       ? {
           runBrainCli: (toolInput) =>
@@ -252,10 +258,6 @@ async function runGoatTaskChatLoopInner(input: {
           },
         }
       : {}),
-    updateTaskStatus: async ({ status, comment }) => {
-      reportedOutcome = status satisfies GoatTaskReportedStatus as GoatTaskReportedOutcome;
-      outcomeComment = comment.trim().slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH);
-    },
   });
 
   const system = [
@@ -419,8 +421,6 @@ async function runGoatTaskChatLoopInner(input: {
   return {
     assistantContent,
     ...(usage ? { usage } : {}),
-    ...(reportedOutcome ? { reportedOutcome } : {}),
-    ...(outcomeComment ? { outcomeComment } : {}),
   };
 }
 

@@ -1247,6 +1247,48 @@
       "when": 1785409200001,
       "tag": "0177_goat_task_chat_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 178,
+      "version": "7",
+      "when": 1785478174557,
+      "tag": "0178_goat_workflow_default_active",
+      "breakpoints": true
+    },
+    {
+      "idx": 179,
+      "version": "7",
+      "when": 1785479476341,
+      "tag": "0179_workflow_claude_code_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 180,
+      "version": "7",
+      "when": 1785497032820,
+      "tag": "0180_goat_workflow_schedule_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 181,
+      "version": "7",
+      "when": 1785497032821,
+      "tag": "0181_goat_chat_last_seen_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 182,
+      "version": "7",
+      "when": 1785497032822,
+      "tag": "0182_goat_tasks_workspace_public",
+      "breakpoints": true
+    },
+    {
+      "idx": 183,
+      "version": "7",
+      "when": 1785497032823,
+      "tag": "0183_goat_imessage_integration",
+      "breakpoints": true
     }
   ]
 }

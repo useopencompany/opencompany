@@ -94,6 +94,15 @@ export function normalizeCodexAppServerEvent(
     ];
   }
 
+  if (method === "turn/plan/updated") {
+    return [
+      normalized("plan.updated", event, {
+        ...base,
+        ...turnPlanPayload(params, base.turnId),
+      }),
+    ];
+  }
+
   if (method === "item/started") {
     if (item?.type === "commandExecution") {
       return [
@@ -436,6 +445,63 @@ function goalPayload(params: Record<string, unknown> | null | undefined) {
     tokensUsed: typeof goal?.tokensUsed === "number" ? goal.tokensUsed : undefined,
     timeUsedSeconds: typeof goal?.timeUsedSeconds === "number" ? goal.timeUsedSeconds : undefined,
   };
+}
+
+function turnPlanPayload(
+  params: Record<string, unknown> | null | undefined,
+  turnId: string | null,
+) {
+  const plan = turnPlanEntries(params?.plan);
+  const explanation = firstString(params?.explanation);
+  return {
+    itemId: turnId ? `turn-plan:${turnId}` : undefined,
+    text: formatTurnPlanText(plan, explanation),
+    status:
+      plan.length > 0 && plan.every((entry) => entry.status === "completed")
+        ? "completed"
+        : "running",
+    source: "turn_plan",
+    ...(explanation ? { explanation } : {}),
+    ...(plan.length > 0 ? { plan } : {}),
+  };
+}
+
+function turnPlanEntries(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const entries: Array<{ step: string; status: string }> = [];
+  for (const item of value) {
+    const record = readRecord(item);
+    const step = firstString(record?.step);
+    if (!step) continue;
+    entries.push({
+      step,
+      status: normalizeTurnPlanStatus(firstString(record?.status)),
+    });
+  }
+  return entries;
+}
+
+function normalizeTurnPlanStatus(status: string | null) {
+  if (status === "completed" || status === "pending" || status === "inProgress") return status;
+  return "pending";
+}
+
+function formatTurnPlanText(
+  plan: Array<{ step: string; status: string }>,
+  explanation: string | null,
+) {
+  const lines = plan.map((entry) => `${turnPlanStatusMarker(entry.status)} ${oneLine(entry.step)}`);
+  return [explanation, ...lines].filter(Boolean).join("\n");
+}
+
+function turnPlanStatusMarker(status: string) {
+  if (status === "completed") return "[x]";
+  if (status === "inProgress") return "[~]";
+  return "[ ]";
+}
+
+function oneLine(value: string) {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function isQuestionRequest(method: string, params: Record<string, unknown> | null | undefined) {

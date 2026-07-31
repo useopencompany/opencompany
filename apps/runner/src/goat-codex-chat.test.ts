@@ -1,8 +1,13 @@
 import { CODEX_COMMAND_TOOL_PART_TYPE, type CodexUiMessagePart } from "@opencompany/agent-runtime";
+import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
+import type { GoatTask } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CodexAppServerRequest } from "./codex-app-server";
 import type { RunnerEnv } from "./env";
 import {
   claimCodexChatRecovery,
+  createTurnAbortCheck,
+  GoatCodexChatInterruptedError,
   runGoatCodexChatTurn,
   summarizeCodexChatRecoveryProgress,
 } from "./goat-codex-chat";
@@ -106,6 +111,48 @@ vi.mock("./repo-bootstrap", () => ({
   stageGoatRepositoryBootstrap: repoBootstrapMocks.stageGoatRepositoryBootstrap,
 }));
 
+describe("createTurnAbortCheck", () => {
+  beforeEach(() => {
+    dbMocks.selectRows.length = 0;
+  });
+
+  it("prioritizes a durable user interrupt over a concurrent runner handoff", async () => {
+    dbMocks.selectRows.push([
+      {
+        interruptRequestedAt: new Date("2026-07-10T12:00:01.000Z"),
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+    ]);
+    const checkAbort = createTurnAbortCheck({
+      turnId: "turn_1",
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+      shouldAbort: () => new GoatCodexChatHandoffError(),
+    });
+
+    await expect(checkAbort()).rejects.toBeInstanceOf(GoatCodexChatInterruptedError);
+  });
+
+  it("still hands off when the durable turn has no interrupt request", async () => {
+    dbMocks.selectRows.push([
+      {
+        interruptRequestedAt: null,
+        leaseId: "lease_1",
+        leaseOwner: "runner_1",
+      },
+    ]);
+    const checkAbort = createTurnAbortCheck({
+      turnId: "turn_1",
+      leaseId: "lease_1",
+      leaseOwner: "runner_1",
+      shouldAbort: () => new GoatCodexChatHandoffError(),
+    });
+
+    await expect(checkAbort()).rejects.toBeInstanceOf(GoatCodexChatHandoffError);
+  });
+});
+
 describe("runGoatCodexChatTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -152,6 +199,59 @@ describe("runGoatCodexChatTurn", () => {
       },
     );
     attachmentMocks.downloadBlobBytes.mockResolvedValue(Buffer.from("image bytes"));
+  });
+
+  it("fails closed for native Codex approval and permission requests", async () => {
+    appServerMocks.runCodexAppServerTurn.mockImplementationOnce(
+      async (input: {
+        onBeforeEngineTurnStart?: (turnIds: string[]) => Promise<void>;
+        onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
+      }) => {
+        await input.onBeforeEngineTurnStart?.(["turn_before"]);
+        expect(input.onServerRequest).toBeTypeOf("function");
+        const onServerRequest = input.onServerRequest!;
+        await expect(
+          onServerRequest({
+            id: "approval_1",
+            method: "item/commandExecution/requestApproval",
+            params: { threadId: "thread_1", turnId: "turn_1", itemId: "cmd_1" },
+          }),
+        ).resolves.toEqual({ decision: "decline" });
+        await expect(
+          onServerRequest({
+            id: "approval_2",
+            method: "item/fileChange/requestApproval",
+            params: { threadId: "thread_1", turnId: "turn_1", itemId: "patch_1" },
+          }),
+        ).resolves.toEqual({ decision: "decline" });
+        await expect(
+          onServerRequest({
+            id: "approval_3",
+            method: "item/permissions/requestApproval",
+            params: {
+              threadId: "thread_1",
+              turnId: "turn_1",
+              itemId: "permissions_1",
+              permissions: [{ type: "network" }],
+            },
+          }),
+        ).resolves.toEqual({ permissions: [] });
+        return {
+          sessionId: "thread_existing",
+          status: "success" as const,
+          result: "Done.",
+          error: null,
+          usage: null,
+          goal: null,
+        };
+      },
+    );
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      env: env(),
+    });
   });
 
   it("materializes uploaded files and passes screenshots to Codex as local images", async () => {
@@ -333,6 +433,88 @@ describe("runGoatCodexChatTurn", () => {
     );
   });
 
+  it("materializes and invokes only the current workflow step skills for durable tasks", async () => {
+    dbMocks.execute.mockResolvedValue({ rows: [{ id: "updated", outcome: "updated" }] });
+    dbMocks.selectRows.push(
+      [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
+      [],
+      [],
+      [
+        {
+          skillId: "coding-work",
+          activatedMessageId: "goat_msg_user_previous",
+          name: "Coding work",
+          description: "An older interactive snapshot.",
+          instructions: "Use the older interactive instructions.",
+          activatedAt: new Date("2026-07-10T11:00:00Z"),
+        },
+        {
+          skillId: "chat-skill",
+          activatedMessageId: "goat_msg_user_1",
+          name: "Chat skill",
+          description: "A skill activated on this message.",
+          instructions: "Apply the current chat instructions.",
+          activatedAt: new Date("2026-07-10T12:00:00Z"),
+        },
+      ],
+    );
+    appServerMocks.runCodexAppServerTurn.mockResolvedValueOnce({
+      sessionId: "thread_existing",
+      status: "failed",
+      result: "",
+      error: "Expected test stop.",
+      usage: null,
+      goal: null,
+    });
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    const harnessSpec = workflowTaskHarnessSpec();
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      taskContext: {
+        task: workflowTask(harnessSpec),
+        harnessSpec,
+      },
+      env: env(),
+    });
+
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        {
+          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
+          data: expect.stringContaining("Use the immutable workflow instructions."),
+        },
+        {
+          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/chat-skill/SKILL.md",
+          data: expect.stringContaining("Apply the current chat instructions."),
+        },
+      ]),
+    );
+    expect(sandbox.files.write).not.toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "/home/user/opencompany-goat/codex-chat/.agents/skills/research-work/SKILL.md",
+        }),
+      ]),
+    );
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skills: [
+          {
+            name: "chat-skill",
+            path: "/home/user/opencompany-goat/codex-chat/.agents/skills/chat-skill/SKILL.md",
+          },
+          {
+            name: "coding-work",
+            path: "/home/user/opencompany-goat/codex-chat/.agents/skills/coding-work/SKILL.md",
+          },
+        ],
+      }),
+    );
+  });
+
   it("reuses a stored sandbox id and rearms the 5 minute idle pause window after the turn", async () => {
     dbMocks.selectRows.push([]);
     const sandbox = fakeSandbox("sbx_existing");
@@ -363,6 +545,42 @@ describe("runGoatCodexChatTurn", () => {
       expect.stringContaining("SET engine_recovery_required = true"),
     );
     expect(statements).toContainEqual(expect.stringContaining("SET sandbox_timeout_armed_at"));
+    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
+  });
+
+  it("caps finished durable task sandbox parking at 5 minutes", async () => {
+    dbMocks.execute.mockResolvedValue({ rows: [{ id: "updated", outcome: "updated" }] });
+    dbMocks.selectRows.push(
+      [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
+      [{ interruptRequestedAt: null, leaseId: "lease_1", leaseOwner: "runner_1" }],
+      [],
+      [],
+    );
+    appServerMocks.runCodexAppServerTurn.mockResolvedValueOnce({
+      sessionId: "thread_existing",
+      status: "failed",
+      result: "",
+      error: "Expected test stop.",
+      usage: null,
+      goal: null,
+    });
+    const sandbox = fakeSandbox("sbx_existing");
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    const harnessSpec = workflowTaskHarnessSpec();
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      taskContext: {
+        task: workflowTask(harnessSpec),
+        harnessSpec,
+      },
+      env: env({ goatCodexChatIdleTimeoutMs: 30 * 60 * 1000 }),
+    });
+
+    expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({ idleTimeoutMs: 30 * 60 * 1000 }),
+    );
     expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
   });
 
@@ -731,7 +949,7 @@ describe("runGoatCodexChatTurn", () => {
     );
   });
 
-  it("registers read-only integration tools for v2 workspace-pinned sessions", async () => {
+  it("registers read-only action tools for v2 workspace-pinned sessions", async () => {
     await runGoatCodexChatTurn({
       turn: codexTurn(),
       session: {
@@ -748,7 +966,7 @@ describe("runGoatCodexChatTurn", () => {
           expect.objectContaining({ spec: expect.objectContaining({ name: "list_actions" }) }),
           expect.objectContaining({ spec: expect.objectContaining({ name: "use_action" }) }),
         ],
-        task: expect.stringContaining("Read-only integration actions are available"),
+        task: expect.stringContaining("Read-only actions are available"),
       }),
     );
   });
@@ -970,6 +1188,98 @@ function codexTurn() {
     createdAt: now,
     updatedAt: now,
   } as const;
+}
+
+function workflowTaskHarnessSpec(): GoatWorkflowHarnessSpec {
+  return {
+    schemaVersion: "goat.harness.v1",
+    engine: "codex",
+    model: "openai/gpt-5.5",
+    systemPrompt: "Implement and verify the change.",
+    systemBlocks: ["Implement and verify the change."],
+    initialUserMessage: "Ship the requested change.",
+    tools: [],
+    skills: [],
+    maxModelSteps: 16,
+    resultMode: "assistant_final",
+    workflow: {
+      id: "workflow_1",
+      workspaceId: "workspace_1",
+      skillIds: ["research-work", "coding-work"],
+      currentStepIndex: 1,
+      completedStepCount: 1,
+      steps: [
+        {
+          index: 0,
+          title: "Research",
+          engine: "opencompany",
+          model: "moonshotai/kimi-k2.6",
+          systemPrompt: "Research the change.",
+          systemBlocks: ["Research the change."],
+          skillIds: ["research-work"],
+        },
+        {
+          index: 1,
+          title: "Implement",
+          engine: "codex",
+          model: "openai/gpt-5.5",
+          systemPrompt: "Implement and verify the change.",
+          systemBlocks: ["Implement and verify the change."],
+          skillIds: ["coding-work"],
+        },
+      ],
+      skillSnapshots: [
+        {
+          id: "research-work",
+          name: "Research work",
+          description: "How to research.",
+          instructions: "Use the research instructions.",
+        },
+        {
+          id: "coding-work",
+          name: "Coding work",
+          description: "How to implement.",
+          instructions: "Use the immutable workflow instructions.",
+        },
+      ],
+    },
+  };
+}
+
+function workflowTask(harnessSpec: GoatWorkflowHarnessSpec): GoatTask {
+  const now = new Date("2026-07-10T12:00:00Z");
+  return {
+    id: "goat_task_1",
+    displayId: "TASK-1",
+    name: "Ship workflow",
+    userWorkosId: "user_1",
+    workspaceId: "workspace_1",
+    prompt: "Ship the requested change.",
+    model: harnessSpec.model,
+    sessionId: "goat_chat_1",
+    scheduleId: null,
+    scheduledFor: null,
+    status: "running",
+    stage: "running",
+    result: null,
+    error: null,
+    workflowId: "workflow_1",
+    workflowBrainRef: null,
+    reportedOutcome: null,
+    outcomeComment: null,
+    harnessSpec,
+    debugTrace: {},
+    codexEngineSessionId: null,
+    sandboxId: null,
+    attempts: 1,
+    nextRunAt: now,
+    leaseId: null,
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    archivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {

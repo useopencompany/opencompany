@@ -58,10 +58,14 @@ export const LIST_ACTIONS_TOOL_NAME = "list_actions";
 export const LIST_ACTIONS_TOOL_PART_TYPE = `tool-${LIST_ACTIONS_TOOL_NAME}` as const;
 export const USE_ACTION_TOOL_NAME = "use_action";
 export const USE_ACTION_TOOL_PART_TYPE = `tool-${USE_ACTION_TOOL_NAME}` as const;
+export const SEND_USER_MESSAGE_TOOL_NAME = "send_user_message";
+export const SEND_USER_MESSAGE_TOOL_PART_TYPE = `tool-${SEND_USER_MESSAGE_TOOL_NAME}` as const;
 export const LIST_SKILLS_TOOL_NAME = "list_skills";
 export const LIST_SKILLS_TOOL_PART_TYPE = `tool-${LIST_SKILLS_TOOL_NAME}` as const;
 export const USE_SKILL_TOOL_NAME = "use_skill";
 export const USE_SKILL_TOOL_PART_TYPE = `tool-${USE_SKILL_TOOL_NAME}` as const;
+export const BROWSER_USE_PROFILE_TOOL_NAME = "browser_use_profile";
+export const BROWSER_USE_PROFILE_TOOL_PART_TYPE = `tool-${BROWSER_USE_PROFILE_TOOL_NAME}` as const;
 export const BROWSER_OPEN_TOOL_PART_TYPE = "tool-browser_open";
 export const BROWSER_SNAPSHOT_TOOL_PART_TYPE = "tool-browser_snapshot";
 export const BROWSER_CLICK_TOOL_PART_TYPE = "tool-browser_click";
@@ -85,6 +89,25 @@ export type BrowserToolOutput = {
   compacted?: boolean;
   originalOutputChars?: number;
   browserObservationBudget?: Record<string, number>;
+  error?: string;
+};
+
+export type BrowserProfileCatalogItem = {
+  id: string;
+  name: string;
+  siteHost: string;
+};
+
+export type BrowserUseProfileToolInput = {
+  profile: string;
+  reason: string;
+};
+
+export type BrowserUseProfileToolOutput = {
+  ok: boolean;
+  profile?: BrowserProfileCatalogItem;
+  liveViewUrl?: string;
+  message?: string;
   error?: string;
 };
 
@@ -316,6 +339,14 @@ export type SaveToBrainToolOutput =
       error: string;
     };
 
+export type SendUserMessageToolInput = {
+  message: string;
+};
+
+export type SendUserMessageToolOutput =
+  | { ok: true; delivered: true }
+  | { ok: false; error: string };
+
 export type WebSearchToolInput = {
   query: string;
   recencyDays?: 7 | 30 | 90;
@@ -503,6 +534,10 @@ export type GoatChatTools = {
     input: UseActionToolInput;
     output: UseActionToolOutput;
   };
+  send_user_message: {
+    input: SendUserMessageToolInput;
+    output: SendUserMessageToolOutput;
+  };
   list_skills: {
     input: ListSkillsToolInput;
     output: ListSkillsToolOutput;
@@ -589,6 +624,8 @@ export type GoatCodexRuntimeView = {
   updatedAt: string;
 };
 
+export type GoatChatState = "working" | "done_unseen" | "done_seen";
+
 export type GoatChatSummaryView = {
   id: string;
   title: string;
@@ -596,13 +633,46 @@ export type GoatChatSummaryView = {
   engine?: GoatChatEngine;
   codexComposerSettings?: GoatCodexComposerSettingsView | null;
   codexRuntime?: GoatCodexRuntimeView | null;
+  state?: GoatChatState;
   preview: string;
   updatedAt: string;
+  lastSeenAt?: string | null;
   pinnedAt?: string | null;
   archived?: boolean;
 };
 
 export const GOAT_PINNED_CHAT_LIMIT = 20;
+
+export function deriveGoatChatState(input: {
+  updatedAt: string;
+  lastSeenAt?: string | null;
+  codexRuntime?: { status?: string | null } | null;
+}): GoatChatState {
+  if (isGoatChatRuntimeActive(input.codexRuntime)) return "working";
+  if (!input.lastSeenAt) return "done_unseen";
+
+  const lastSeenAt = Date.parse(input.lastSeenAt);
+  const updatedAt = Date.parse(input.updatedAt);
+  if (!Number.isFinite(lastSeenAt) || !Number.isFinite(updatedAt)) return "done_unseen";
+  return lastSeenAt >= updatedAt ? "done_seen" : "done_unseen";
+}
+
+export function goatChatSummaryState(
+  chat: Pick<GoatChatSummaryView, "codexRuntime" | "lastSeenAt" | "state" | "updatedAt">,
+): GoatChatState {
+  if (isGoatChatRuntimeActive(chat.codexRuntime)) return "working";
+  if (chat.state) return chat.state;
+  if (chat.lastSeenAt === undefined) return "done_seen";
+  return deriveGoatChatState(chat);
+}
+
+export function isGoatChatRuntimeActive(
+  runtime: { status?: string | null } | null | undefined,
+): boolean {
+  return (
+    runtime?.status === "queued" || runtime?.status === "starting" || runtime?.status === "running"
+  );
+}
 
 export type GoatStoredChatMessage = Pick<
   GoatChatMessage,

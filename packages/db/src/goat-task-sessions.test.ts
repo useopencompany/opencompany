@@ -1,7 +1,8 @@
+import { GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
-import type { GoatHarnessSpec } from "./goat-schema";
+import type { GoatChatMessageAttachment, GoatHarnessSpec } from "./goat-schema";
 import {
   createGoatTaskSession,
   enqueueGoatTaskSessionTurn,
@@ -43,6 +44,8 @@ describe("Goat task sessions", () => {
           prompt: "Research the market.",
           name: "Market research",
           harnessSpec,
+          attachments: [attachment],
+          attachmentTexts: { [attachment.id]: "Extracted report text." },
           now: new Date("2026-07-30T09:00:00.000Z"),
         },
         { execute },
@@ -57,6 +60,8 @@ describe("Goat task sessions", () => {
     expect(query.sql).toContain("INSERT INTO goat.chat_sessions");
     expect(query.sql).toContain("INSERT INTO goat.tasks");
     expect(query.sql).toContain("INSERT INTO goat.chat_messages");
+    expect(query.sql).toContain("attachments");
+    expect(query.sql).toContain("attachment_texts");
     expect(query.sql).toContain("INSERT INTO goat.codex_chat_sessions");
     expect(query.sql).toContain("INSERT INTO goat.codex_chat_turns");
     expect(query.sql).not.toContain("goat.task_messages");
@@ -66,6 +71,8 @@ describe("Goat task sessions", () => {
     expect(query.sql).toContain("'task'");
     expect(query.params).toContain("workspace_1");
     expect(query.params).toContain("brain_1");
+    expect(query.params).toContain(JSON.stringify([attachment]));
+    expect(query.params).toContain(JSON.stringify({ [attachment.id]: "Extracted report text." }));
   });
 
   it("does not require workspace membership to create a scheduled task session", async () => {
@@ -88,6 +95,33 @@ describe("Goat task sessions", () => {
     expect(query.sql).not.toContain("CROSS JOIN resolved_workspace");
     expect(query.sql).toContain("(SELECT workspace_id FROM resolved_workspace)");
     expect(query.params).toContain(null);
+  });
+
+  it("creates Claude Code task sessions with the CLI model and sandbox host-tool contract", async () => {
+    const execute = vi.fn(async (_query: SQL) => [taskRow(claudeCodeHarnessSpec)]);
+
+    await expect(
+      createGoatTaskSession(
+        {
+          userWorkosId: "user_1",
+          workspaceId: "workspace_1",
+          prompt: "Fix the workflow.",
+          name: "Fix workflow",
+          harnessSpec: claudeCodeHarnessSpec,
+          now: new Date("2026-07-30T09:00:00.000Z"),
+        },
+        { execute },
+      ),
+    ).resolves.toMatchObject({
+      id: "goat_task_1",
+      model: "anthropic/claude-sonnet-5",
+    });
+
+    const query = rendered(execute.mock.calls[0]?.[0]);
+    expect(query.params).toContain("claude_code");
+    expect(query.params).toContain("anthropic/claude-sonnet-5");
+    expect(query.params).toContain("claude-sonnet-5");
+    expect(query.params).toContain(GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION);
   });
 
   it("continues a terminal task by appending native chat messages and a turn", async () => {
@@ -122,15 +156,32 @@ function rendered(query: SQL | undefined) {
   return new PgDialect().sqlToQuery(query!);
 }
 
-function taskRow() {
+const claudeCodeHarnessSpec: GoatHarnessSpec = {
+  ...harnessSpec,
+  engine: "claude_code",
+  model: "anthropic/claude-sonnet-5",
+};
+
+const attachment: GoatChatMessageAttachment = {
+  id: "goat_chat_att_1",
+  kind: "docx",
+  mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  filename: "report.docx",
+  sizeBytes: 1024,
+  blobPathname: "goat-chat/user_1/report.docx",
+  blobUrl: "https://blob.test/goat-chat/user_1/report.docx",
+};
+
+function taskRow(spec: GoatHarnessSpec = harnessSpec) {
   const now = new Date("2026-07-30T09:00:00.000Z");
   return {
     id: "goat_task_1",
     displayId: "TASK-1",
     name: "Market research",
     userWorkosId: "user_1",
+    workspaceId: "workspace_1",
     prompt: "Research the market.",
-    model: harnessSpec.model,
+    model: spec.model,
     sessionId: "goat_chat_1",
     scheduleId: null,
     scheduledFor: null,
@@ -142,7 +193,7 @@ function taskRow() {
     workflowBrainRef: null,
     reportedOutcome: null,
     outcomeComment: null,
-    harnessSpec,
+    harnessSpec: spec,
     debugTrace: {},
     codexEngineSessionId: null,
     sandboxId: null,

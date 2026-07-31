@@ -1,10 +1,20 @@
 "use client";
 
+import {
+  type AgentSchedulePreset,
+  cronForSchedulePreset,
+  SUPPORTED_HOUR_INTERVALS,
+  schedulePresetFromCron,
+  scheduleSummary,
+} from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import {
   ArrowLeft,
+  CalendarClock,
   Check,
   ChevronDown,
+  Clock,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -14,13 +24,28 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { Markdown } from "@/components/Markdown";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import type { GoatSkillCatalogItem } from "@/lib/skills";
+import { supportedTimezones, timezoneLabel } from "@/lib/timezones";
 import { archiveGoatWorkflowAction, updateGoatWorkflowAction } from "@/lib/workflow-actions";
 import {
   DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
+  DEFAULT_GOAT_WORKFLOW_REASONING_EFFORT,
   GOAT_WORKFLOW_MODEL_OPTIONS,
+  GOAT_WORKFLOW_REASONING_EFFORT_OPTIONS,
+  type GoatWorkflowCloudRuntime,
+  goatWorkflowCloudModelOptions,
+  goatWorkflowRuntimeModelSupportsReasoningEffort,
+  isGoatWorkflowCloudRuntime,
+  normalizeGoatWorkflowReasoningEffort,
+  normalizeGoatWorkflowRuntimeModel,
 } from "@/lib/workflow-model-options";
+import {
+  DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON,
+  DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
+  DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE,
+} from "@/lib/workflow-schedule-defaults";
 import type { GoatWorkflowDetail } from "@/lib/workflows";
 
 const AUTOSAVE_DELAY_MS = 1200;
@@ -28,7 +53,16 @@ const MAX_WORKFLOW_STEPS = 20;
 
 type WorkflowStatus = GoatWorkflowDetail["status"];
 type WorkflowStep = GoatWorkflowDetail["steps"][number];
-type WorkflowDraft = Pick<GoatWorkflowDetail, "name" | "description" | "status" | "steps">;
+type WorkflowTriggerDraft =
+  | { type: "manual" }
+  | { type: "schedule"; cron: string; timezone: string; prompt: string };
+type WorkflowStepPatch = Partial<Omit<WorkflowStep, "runtimeModel" | "reasoningEffort">> & {
+  runtimeModel?: WorkflowStep["runtimeModel"] | undefined;
+  reasoningEffort?: WorkflowStep["reasoningEffort"] | undefined;
+};
+type WorkflowDraft = Pick<GoatWorkflowDetail, "name" | "description" | "status" | "steps"> & {
+  trigger: WorkflowTriggerDraft;
+};
 type SaveState = "saved" | "saving" | "error";
 
 const DEFAULT_MODEL_LABEL =
@@ -90,6 +124,7 @@ export function GoatWorkflowEditor({
           description: snapshot.description,
           steps: snapshot.steps,
           status: snapshot.status,
+          trigger: snapshot.trigger,
         });
       } catch {
         result = { ok: false, message: "The workflow could not be saved. Try again." };
@@ -149,11 +184,13 @@ export function GoatWorkflowEditor({
     setDraft((current) => ({ ...current, ...partial }));
   };
 
-  const updateStep = (id: string, partial: Partial<WorkflowStep>) => {
+  const updateStep = (id: string, partial: WorkflowStepPatch) => {
     if (!canEdit) return;
     setDraft((current) => ({
       ...current,
-      steps: current.steps.map((step) => (step.id === id ? { ...step, ...partial } : step)),
+      steps: current.steps.map((step) =>
+        step.id === id ? workflowStepWithPatch(step, partial) : step,
+      ),
     }));
   };
 
@@ -231,6 +268,12 @@ export function GoatWorkflowEditor({
               />
             </div>
           </header>
+
+          <TriggerSection
+            trigger={draft.trigger}
+            canEdit={canEdit}
+            onChange={(trigger) => patch({ trigger })}
+          />
 
           <div className="flex flex-col gap-3">
             <SectionLabel>Steps</SectionLabel>
@@ -409,6 +452,349 @@ function StatusDot({ status }: { status: WorkflowStatus }) {
   );
 }
 
+function TriggerSection({
+  trigger,
+  canEdit,
+  onChange,
+}: {
+  trigger: WorkflowTriggerDraft;
+  canEdit: boolean;
+  onChange: (trigger: WorkflowTriggerDraft) => void;
+}) {
+  const setManual = () => onChange({ type: "manual" });
+  const setSchedule = () =>
+    onChange(
+      trigger.type === "schedule"
+        ? trigger
+        : {
+            type: "schedule",
+            cron: DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON,
+            timezone: DEFAULT_GOAT_WORKFLOW_SCHEDULE_TIMEZONE,
+            prompt: DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
+          },
+    );
+  const updateSchedule = (
+    partial: Partial<Extract<WorkflowTriggerDraft, { type: "schedule" }>>,
+  ) => {
+    if (trigger.type !== "schedule") return;
+    onChange({ ...trigger, ...partial });
+  };
+
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionLabel>Trigger</SectionLabel>
+      <div className="rounded-xl border border-border bg-surface px-3.5 py-3">
+        <div
+          className="inline-flex w-fit rounded-lg border border-border bg-canvas p-1"
+          role="radiogroup"
+          aria-label="Workflow trigger"
+        >
+          <TriggerModeButton
+            icon={Clock}
+            label="Manual"
+            selected={trigger.type === "manual"}
+            disabled={!canEdit}
+            onSelect={setManual}
+          />
+          <TriggerModeButton
+            icon={CalendarClock}
+            label="On a schedule"
+            selected={trigger.type === "schedule"}
+            disabled={!canEdit}
+            onSelect={setSchedule}
+          />
+        </div>
+
+        {trigger.type === "schedule" ? (
+          <div className="mt-3 flex flex-col gap-3">
+            <ScheduleFrequencyBuilder
+              cron={trigger.cron}
+              timezone={trigger.timezone}
+              canEdit={canEdit}
+              onCronChange={(cron) => updateSchedule({ cron })}
+              onTimezoneChange={(timezone) => updateSchedule({ timezone })}
+            />
+            <label className="flex min-w-0 flex-col gap-1.5">
+              <span className="text-[12px] font-medium text-ink-subtle">Task request</span>
+              <textarea
+                value={trigger.prompt}
+                readOnly={!canEdit}
+                onChange={(event) => updateSchedule({ prompt: event.target.value })}
+                rows={3}
+                placeholder={DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT}
+                className="min-h-20 resize-y rounded-lg border border-border bg-canvas px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+              />
+            </label>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+type ScheduleFrequency = AgentSchedulePreset["kind"] | "custom";
+
+const SCHEDULE_FREQUENCY_OPTIONS: { value: ScheduleFrequency; label: string }[] = [
+  { value: "minutes", label: "Every few minutes" },
+  { value: "hours", label: "Every few hours" },
+  { value: "daily", label: "Every day" },
+  { value: "weekdays", label: "Every weekday (Mon–Fri)" },
+  { value: "weekly", label: "Every week" },
+  { value: "custom", label: "Custom (cron expression)" },
+];
+
+const SCHEDULE_WEEKDAY_OPTIONS = [
+  { value: 0, label: "Sunday" },
+  { value: 1, label: "Monday" },
+  { value: 2, label: "Tuesday" },
+  { value: 3, label: "Wednesday" },
+  { value: 4, label: "Thursday" },
+  { value: 5, label: "Friday" },
+  { value: 6, label: "Saturday" },
+];
+
+function ScheduleFrequencyBuilder({
+  cron,
+  timezone,
+  canEdit,
+  onCronChange,
+  onTimezoneChange,
+}: {
+  cron: string;
+  timezone: string;
+  canEdit: boolean;
+  onCronChange: (cron: string) => void;
+  onTimezoneChange: (timezone: string) => void;
+}) {
+  const preset = schedulePresetFromCron(cron);
+  const [customOverride, setCustomOverride] = useState(false);
+  const frequency: ScheduleFrequency = customOverride ? "custom" : (preset?.kind ?? "custom");
+
+  const applyFrequency = (next: ScheduleFrequency) => {
+    if (next === "custom") {
+      setCustomOverride(true);
+      return;
+    }
+    setCustomOverride(false);
+    onCronChange(cronForSchedulePreset(defaultSchedulePreset(next, preset)));
+  };
+
+  const hour = preset && "hour" in preset ? preset.hour : 9;
+  const minute = preset && "minute" in preset ? preset.minute : 0;
+  const dayOfWeek = preset?.kind === "weekly" ? preset.dayOfWeek : 1;
+  const interval =
+    preset?.kind === "minutes"
+      ? preset.interval
+      : preset?.kind === "hours"
+        ? preset.interval
+        : null;
+
+  const setTime = (value: string) => {
+    if (!preset || preset.kind === "minutes" || preset.kind === "hours") return;
+    const [nextHour, nextMinute] = parseTimeValue(value);
+    onCronChange(
+      cronForSchedulePreset(
+        preset.kind === "weekly"
+          ? { kind: "weekly", dayOfWeek: preset.dayOfWeek, hour: nextHour, minute: nextMinute }
+          : { kind: preset.kind, hour: nextHour, minute: nextMinute },
+      ),
+    );
+  };
+
+  const setDayOfWeek = (value: number) => {
+    onCronChange(cronForSchedulePreset({ kind: "weekly", dayOfWeek: value, hour, minute }));
+  };
+
+  const setInterval = (value: number) => {
+    if (frequency !== "minutes" && frequency !== "hours") return;
+    onCronChange(cronForSchedulePreset({ kind: frequency, interval: value }));
+  };
+
+  const summaryText = scheduleSummary({ cron, timezone });
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
+        <label className="flex min-w-0 flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-subtle">Frequency</span>
+          <select
+            value={frequency}
+            disabled={!canEdit}
+            onChange={(event) => applyFrequency(event.target.value as ScheduleFrequency)}
+            className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+          >
+            {SCHEDULE_FREQUENCY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex min-w-0 flex-col gap-1.5">
+          <span className="text-[12px] font-medium text-ink-subtle">Timezone</span>
+          <select
+            value={timezone}
+            disabled={!canEdit}
+            onChange={(event) => onTimezoneChange(event.target.value)}
+            className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+          >
+            {timezoneOptions(timezone).map((option) => (
+              <option key={option} value={option}>
+                {timezoneLabel(option)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {frequency === "minutes" || frequency === "hours" ? (
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-ink-subtle">Every</span>
+            {frequency === "hours" ? (
+              <select
+                value={interval ?? 1}
+                disabled={!canEdit}
+                onChange={(event) => setInterval(Number.parseInt(event.target.value, 10))}
+                className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+              >
+                {SUPPORTED_HOUR_INTERVALS.map((value) => (
+                  <option key={value} value={value}>
+                    {value} {value === 1 ? "hour" : "hours"}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="number"
+                min={1}
+                max={59}
+                value={interval ?? 15}
+                readOnly={!canEdit}
+                onChange={(event) => setInterval(Number.parseInt(event.target.value, 10) || 1)}
+                className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+              />
+            )}
+          </label>
+        ) : null}
+
+        {frequency === "weekly" ? (
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-ink-subtle">Day</span>
+            <select
+              value={dayOfWeek}
+              disabled={!canEdit}
+              onChange={(event) => setDayOfWeek(Number.parseInt(event.target.value, 10))}
+              className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-70"
+            >
+              {SCHEDULE_WEEKDAY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        {frequency === "daily" || frequency === "weekdays" || frequency === "weekly" ? (
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-ink-subtle">At</span>
+            <input
+              type="time"
+              value={formatTimeValue(hour, minute)}
+              readOnly={!canEdit}
+              onChange={(event) => setTime(event.target.value)}
+              className="h-8 rounded-lg border border-border bg-canvas px-2.5 text-[12.5px] text-ink outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+            />
+          </label>
+        ) : null}
+
+        {frequency === "custom" ? (
+          <label className="flex min-w-0 flex-col gap-1.5 sm:col-span-2">
+            <span className="text-[12px] font-medium text-ink-subtle">Cron</span>
+            <input
+              value={cron}
+              readOnly={!canEdit}
+              onChange={(event) => onCronChange(event.target.value)}
+              placeholder={DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON}
+              className="h-8 rounded-lg border border-border bg-canvas px-2.5 font-mono text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20 read-only:opacity-70"
+            />
+          </label>
+        ) : null}
+      </div>
+
+      <p className="text-[12px] text-ink-subtle">
+        {summaryText === "Unsupported schedule"
+          ? `Enter a 5-field cron expression, e.g. "${DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON}".`
+          : `Runs ${summaryText.toLowerCase()} · ${timezone}`}
+      </p>
+    </div>
+  );
+}
+
+function timezoneOptions(current: string) {
+  const options = supportedTimezones();
+  return options.includes(current) ? options : [current, ...options];
+}
+
+function formatTimeValue(hour: number, minute: number) {
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function parseTimeValue(value: string): [number, number] {
+  const [hour, minute] = value.split(":").map((part) => Number.parseInt(part, 10));
+  return [Number.isFinite(hour) ? hour! : 9, Number.isFinite(minute) ? minute! : 0];
+}
+
+function defaultSchedulePreset(
+  kind: Exclude<ScheduleFrequency, "custom">,
+  previous: AgentSchedulePreset | null,
+): AgentSchedulePreset {
+  const hour = previous && "hour" in previous ? previous.hour : 9;
+  const minute = previous && "minute" in previous ? previous.minute : 0;
+  const dayOfWeek = previous?.kind === "weekly" ? previous.dayOfWeek : 1;
+
+  if (kind === "minutes") {
+    return { kind, interval: previous?.kind === "minutes" ? previous.interval : 15 };
+  }
+  if (kind === "hours") {
+    return { kind, interval: previous?.kind === "hours" ? previous.interval : 1 };
+  }
+  if (kind === "weekly") return { kind, hour, minute, dayOfWeek };
+  return { kind, hour, minute };
+}
+
+function TriggerModeButton({
+  icon: Icon,
+  label,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  icon: typeof Clock;
+  label: string;
+  selected: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      disabled={disabled}
+      onClick={onSelect}
+      className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default ${
+        selected
+          ? "bg-surface text-ink shadow-[0_1px_2px_rgba(15,15,15,0.08)]"
+          : "text-ink-subtle hover:bg-surface-hover hover:text-ink"
+      }`}
+    >
+      <Icon size={13} strokeWidth={1.9} />
+      {label}
+    </button>
+  );
+}
+
 function StepCard({
   index,
   step,
@@ -423,12 +809,36 @@ function StepCard({
   canEdit: boolean;
   canRemove: boolean;
   skillCatalog: GoatSkillCatalogItem[];
-  onChange: (partial: Partial<WorkflowStep>) => void;
+  onChange: (partial: WorkflowStepPatch) => void;
   onRemove: () => void;
 }) {
+  const selectedRuntime = GOAT_WORKFLOW_MODEL_OPTIONS.find((option) => option.token === step.model);
+  const cloudRuntime =
+    selectedRuntime && isGoatWorkflowCloudRuntime(selectedRuntime.engine)
+      ? selectedRuntime.engine
+      : null;
+
+  const updateRuntime = (model: string) => {
+    const option = GOAT_WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
+    if (!option || !isGoatWorkflowCloudRuntime(option.engine)) {
+      onChange({ model, runtimeModel: undefined, reasoningEffort: undefined });
+      return;
+    }
+    const runtimeModel = normalizeGoatWorkflowRuntimeModel(option.engine, step.runtimeModel);
+    onChange({
+      model,
+      runtimeModel,
+      reasoningEffort: normalizeGoatWorkflowReasoningEffort(
+        option.engine,
+        runtimeModel,
+        step.reasoningEffort,
+      ),
+    });
+  };
+
   return (
-    <section className="group rounded-xl border border-border bg-surface">
-      <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5">
+    <section className="group rounded-lg border border-border bg-surface">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3.5 py-2.5">
         <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md bg-surface-muted px-1 text-[11px] font-medium text-ink-subtle">
           {index + 1}
         </span>
@@ -439,13 +849,9 @@ function StepCard({
           aria-label={`Step ${index + 1} name`}
           onChange={(event) => onChange({ title: event.target.value })}
           placeholder="Step name"
-          className="min-w-0 flex-1 bg-transparent text-[13.5px] font-medium text-ink outline-none placeholder:text-ink-faint read-only:cursor-default"
+          className="min-w-[160px] flex-1 bg-transparent text-[13.5px] font-medium text-ink outline-none placeholder:text-ink-faint read-only:cursor-default"
         />
-        <StepModelPicker
-          value={step.model}
-          onChange={(model) => onChange({ model })}
-          disabled={!canEdit}
-        />
+        <StepRuntimePicker value={step.model} onChange={updateRuntime} disabled={!canEdit} />
         {canRemove ? (
           <button
             type="button"
@@ -457,21 +863,34 @@ function StepCard({
           </button>
         ) : null}
       </div>
-      <div className="px-3.5 py-3">
-        <MarkdownGoatBrainEditor
-          content={step.instructions}
-          onChange={(instructions) => onChange({ instructions })}
-          readOnly={!canEdit}
-          compact
-          placeholder="Describe what this step should do…"
-          skillMentions={skillCatalog}
+      {cloudRuntime ? (
+        <StepCloudRuntimeControls
+          engine={cloudRuntime}
+          step={step}
+          disabled={!canEdit}
+          onChange={onChange}
         />
+      ) : null}
+      <div className="px-3.5 py-3">
+        {canEdit ? (
+          <MarkdownGoatBrainEditor
+            content={step.instructions}
+            onChange={(instructions) => onChange({ instructions })}
+            compact
+            placeholder="Describe what this step should do..."
+            skillMentions={skillCatalog}
+          />
+        ) : step.instructions.trim() ? (
+          <Markdown content={step.instructions} className="text-[13.5px] leading-6 text-ink" />
+        ) : (
+          <p className="text-[13.5px] leading-6 text-ink-subtle/70">No content yet.</p>
+        )}
       </div>
     </section>
   );
 }
 
-function StepModelPicker({
+function StepRuntimePicker({
   value,
   onChange,
   disabled,
@@ -489,7 +908,7 @@ function StepModelPicker({
       <PopoverTrigger
         type="button"
         disabled={disabled}
-        aria-label={`Model: ${selectedLabel}`}
+        aria-label={`Runtime: ${selectedLabel}`}
         className="flex h-7 max-w-[150px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default disabled:hover:bg-transparent data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
       >
         <Sparkles size={12} strokeWidth={1.9} className="shrink-0" />
@@ -518,6 +937,163 @@ function StepModelPicker({
             selected={value === option.token}
             onSelect={() => {
               onChange(option.token);
+              setOpen(false);
+            }}
+          />
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function StepCloudRuntimeControls({
+  engine,
+  step,
+  disabled,
+  onChange,
+}: {
+  engine: GoatWorkflowCloudRuntime;
+  step: WorkflowStep;
+  disabled: boolean;
+  onChange: (partial: WorkflowStepPatch) => void;
+}) {
+  const runtimeModel = normalizeGoatWorkflowRuntimeModel(engine, step.runtimeModel);
+  const reasoningEffort = normalizeGoatWorkflowReasoningEffort(
+    engine,
+    runtimeModel,
+    step.reasoningEffort,
+  );
+  const supportsEffort = goatWorkflowRuntimeModelSupportsReasoningEffort(engine, runtimeModel);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-muted/35 px-3.5 py-2">
+      <StepCloudModelPicker
+        engine={engine}
+        value={runtimeModel}
+        onChange={(nextModel) => {
+          onChange({
+            runtimeModel: nextModel,
+            reasoningEffort: normalizeGoatWorkflowReasoningEffort(
+              engine,
+              nextModel,
+              step.reasoningEffort,
+            ),
+          });
+        }}
+        disabled={disabled}
+      />
+      {supportsEffort ? (
+        <StepEffortPicker
+          value={reasoningEffort ?? DEFAULT_GOAT_WORKFLOW_REASONING_EFFORT}
+          onChange={(nextEffort) => onChange({ reasoningEffort: nextEffort })}
+          disabled={disabled}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function StepCloudModelPicker({
+  engine,
+  value,
+  onChange,
+  disabled,
+}: {
+  engine: GoatWorkflowCloudRuntime;
+  value: AgentModelId;
+  onChange: (value: AgentModelId) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const options = goatWorkflowCloudModelOptions(engine);
+  const selectedOption = options.find((option) => option.id === value);
+  const selectedLabel = selectedOption?.label ?? value;
+  const runtimeLabel = engine === "codex" ? "Codex" : "Claude Code";
+
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger
+        type="button"
+        disabled={disabled}
+        aria-label={`${runtimeLabel} model: ${selectedLabel}`}
+        className="flex h-7 max-w-[210px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default disabled:hover:bg-transparent data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
+      >
+        <span className="truncate">{selectedLabel}</span>
+        {disabled ? null : <ChevronDown size={11} strokeWidth={2} className="shrink-0" />}
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={8}
+        className="w-[312px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+      >
+        {options.map((option) => (
+          <ModelOption
+            key={option.id}
+            label={option.label}
+            hint={option.description}
+            selected={value === option.id}
+            onSelect={() => {
+              onChange(option.id);
+              setOpen(false);
+            }}
+          />
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const WORKFLOW_EFFORT_LABELS = {
+  low: { label: "Low effort", hint: "Fastest" },
+  medium: { label: "Medium effort", hint: "Balanced" },
+  high: { label: "High effort", hint: "Deeper" },
+  xhigh: { label: "X-high effort", hint: "Maximum" },
+} as const;
+
+const WORKFLOW_EFFORT_OPTIONS = GOAT_WORKFLOW_REASONING_EFFORT_OPTIONS.map((value) => ({
+  value,
+  ...WORKFLOW_EFFORT_LABELS[value],
+}));
+
+type WorkflowEffort = (typeof WORKFLOW_EFFORT_OPTIONS)[number]["value"];
+
+function StepEffortPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: WorkflowEffort;
+  onChange: (value: WorkflowEffort) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedOption = WORKFLOW_EFFORT_OPTIONS.find((option) => option.value === value);
+  const selectedLabel = selectedOption?.label ?? "High effort";
+
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger
+        type="button"
+        disabled={disabled}
+        aria-label={`Effort: ${selectedLabel}`}
+        className="flex h-7 max-w-[160px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default disabled:hover:bg-transparent data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
+      >
+        <span className="truncate">{selectedLabel}</span>
+        {disabled ? null : <ChevronDown size={11} strokeWidth={2} className="shrink-0" />}
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={8}
+        className="w-[220px] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+      >
+        {WORKFLOW_EFFORT_OPTIONS.map((option) => (
+          <ModelOption
+            key={option.value}
+            label={option.label}
+            hint={option.hint}
+            selected={value === option.value}
+            onSelect={() => {
+              onChange(option.value);
               setOpen(false);
             }}
           />
@@ -653,6 +1229,27 @@ function workflowDraft(workflow: GoatWorkflowDetail): WorkflowDraft {
     description: workflow.description,
     status: workflow.status,
     steps: workflow.steps,
+    trigger:
+      workflow.trigger.type === "schedule"
+        ? {
+            type: "schedule",
+            cron: workflow.trigger.cron,
+            timezone: workflow.trigger.timezone,
+            prompt: workflow.trigger.prompt,
+          }
+        : { type: "manual" },
+  };
+}
+
+function workflowStepWithPatch(step: WorkflowStep, patch: WorkflowStepPatch): WorkflowStep {
+  const next = { ...step, ...patch };
+  return {
+    id: next.id,
+    title: next.title,
+    model: next.model,
+    instructions: next.instructions,
+    ...(next.runtimeModel ? { runtimeModel: next.runtimeModel } : {}),
+    ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
   };
 }
 

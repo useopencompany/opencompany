@@ -58,6 +58,28 @@ export async function updateGoatTaskViewModeAction(mode: GoatTaskViewMode) {
   return { ok: Boolean(updated), mode: updated?.taskViewMode ?? user.taskViewMode } as const;
 }
 
+export async function updateGoatImessageEnabledAction(enabled: boolean) {
+  const { user } = await currentGoatUser();
+  const nextEnabled = enabled === true;
+  if (nextEnabled === user.imessageEnabled) {
+    return { ok: true, enabled: nextEnabled } as const;
+  }
+
+  const [updated] = await getDb()
+    .update(goatUsers)
+    .set({ imessageEnabled: nextEnabled, updatedAt: new Date() })
+    .where(eq(goatUsers.workosUserId, user.workosUserId))
+    .returning({ imessageEnabled: goatUsers.imessageEnabled });
+
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  revalidatePath("/settings/integrations");
+  return {
+    ok: Boolean(updated),
+    enabled: updated?.imessageEnabled ?? user.imessageEnabled,
+  } as const;
+}
+
 export async function updateGoatAutoModelRoutingAction(enabled: boolean) {
   const { user } = await currentGoatUser();
   const nextEnabled = enabled === true;

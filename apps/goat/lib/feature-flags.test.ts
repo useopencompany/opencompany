@@ -19,4 +19,11 @@ describe("goatFeatureFlagsFromUser", () => {
       false,
     );
   });
+
+  it("keeps iMessage notifications off unless explicitly enabled", () => {
+    expect(goatFeatureFlagsFromUser({}).imessage).toBe(false);
+    expect(goatFeatureFlagsFromUser({ imessageEnabled: null }).imessage).toBe(false);
+    expect(goatFeatureFlagsFromUser({ imessageEnabled: true }).imessage).toBe(true);
+    expect(goatFeatureFlagsFromUser({ imessageEnabled: false }).imessage).toBe(false);
+  });
 });

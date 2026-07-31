@@ -23,6 +23,7 @@ export type GoatTaskRow = {
   display_id: string;
   name: string;
   user_workos_id: string;
+  workspace_id: string | null;
   prompt: string;
   model: string;
   session_id: string | null;
@@ -87,6 +88,7 @@ export type GoatChatSessionRow = {
   kind: "chat" | "task";
   closed_at: string | null;
   pinned_at: string | null;
+  last_seen_at: string | null;
   created_at: string;
   updated_at: string;
 };
