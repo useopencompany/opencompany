@@ -815,7 +815,7 @@ describe("runGoatCodexChatTurn", () => {
     );
   });
 
-  it("registers read-only integration tools for v2 workspace-pinned sessions", async () => {
+  it("registers read-only action tools for v2 workspace-pinned sessions", async () => {
     await runGoatCodexChatTurn({
       turn: codexTurn(),
       session: {
@@ -832,7 +832,7 @@ describe("runGoatCodexChatTurn", () => {
           expect.objectContaining({ spec: expect.objectContaining({ name: "list_actions" }) }),
           expect.objectContaining({ spec: expect.objectContaining({ name: "use_action" }) }),
         ],
-        task: expect.stringContaining("Read-only integration actions are available"),
+        task: expect.stringContaining("Read-only actions are available"),
       }),
     );
   });
