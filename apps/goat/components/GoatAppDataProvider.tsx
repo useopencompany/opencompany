@@ -8,7 +8,7 @@ import {
   type ReactNode,
   useCallback,
   useContext,
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -126,7 +126,13 @@ export function GoatAppDataProvider({
     (value: GoatAppData) => setLiveSnapshot({ initialData, value }),
     [initialData],
   );
-  const value = liveSnapshot?.initialData === initialData ? liveSnapshot.value : initialValue;
+  const liveSnapshotMatchesScope =
+    liveSnapshot?.value.user.workosUserId === initialData.user.workosUserId &&
+    liveSnapshot.value.workspace.id === initialData.workspace.id;
+  const value =
+    liveSnapshot?.initialData === initialData || liveSnapshotMatchesScope
+      ? liveSnapshot.value
+      : initialValue;
 
   return (
     <GoatAppDataContext.Provider value={value}>
@@ -358,7 +364,9 @@ function GoatAppLiveDataSubscriptions({
   // TanStack DB currently has no server snapshot for useLiveQuery. Keep its
   // subscriptions in this post-hydration bridge while the outer provider
   // serves the server snapshot immediately, without remounting app children.
-  useEffect(() => onData(value), [onData, value]);
+  // Push refreshed live data before paint so same-scope router refreshes do not
+  // briefly repaint the sidebar from the server snapshot.
+  useLayoutEffect(() => onData(value), [onData, value]);
   return null;
 }
 
