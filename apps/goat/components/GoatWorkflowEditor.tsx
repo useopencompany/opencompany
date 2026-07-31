@@ -24,6 +24,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { Markdown } from "@/components/Markdown";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import type { GoatSkillCatalogItem } from "@/lib/skills";
 import { supportedTimezones, timezoneLabel } from "@/lib/timezones";
@@ -871,14 +872,19 @@ function StepCard({
         />
       ) : null}
       <div className="px-3.5 py-3">
-        <MarkdownGoatBrainEditor
-          content={step.instructions}
-          onChange={(instructions) => onChange({ instructions })}
-          readOnly={!canEdit}
-          compact
-          placeholder="Describe what this step should do…"
-          skillMentions={skillCatalog}
-        />
+        {canEdit ? (
+          <MarkdownGoatBrainEditor
+            content={step.instructions}
+            onChange={(instructions) => onChange({ instructions })}
+            compact
+            placeholder="Describe what this step should do..."
+            skillMentions={skillCatalog}
+          />
+        ) : step.instructions.trim() ? (
+          <Markdown content={step.instructions} className="text-[13.5px] leading-6 text-ink" />
+        ) : (
+          <p className="text-[13.5px] leading-6 text-ink-subtle/70">No content yet.</p>
+        )}
       </div>
     </section>
   );
