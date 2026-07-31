@@ -43,11 +43,5 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     );
   }
 
-  return (
-    <GoatWorkflowEditor
-      workflow={workflow}
-      canEdit={context.role === "admin"}
-      skillCatalog={skillCatalog}
-    />
-  );
+  return <GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={skillCatalog} />;
 }

@@ -398,6 +398,7 @@ function taskRow(
     display_id: overrides.display_id ?? `TASK-${overrides.id}`,
     name: overrides.name,
     user_workos_id: "user_1",
+    workspace_id: overrides.workspace_id ?? "workspace_1",
     prompt: overrides.prompt ?? "Do the task.",
     model: "openai/gpt-5.2",
     session_id: overrides.session_id ?? null,

@@ -299,7 +299,7 @@ export async function deleteGoatTaskScheduleForUser(userWorkosId: string, schedu
 }
 
 export async function runGoatTaskScheduleNowAction(scheduleId: string) {
-  const { user } = await currentGoatUser();
+  const { user, workspace } = await currentGoatUser();
   if (!user.taskSpawningEnabled) {
     return { ok: false, error: TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } as const;
   }
@@ -319,6 +319,7 @@ export async function runGoatTaskScheduleNowAction(scheduleId: string) {
   const scheduledFor = new Date();
   const task = await createGoatTaskForUser({
     userWorkosId: user.workosUserId,
+    workspaceId: workspace.id,
     prompt: schedule.prompt,
     name: schedule.name,
     model: schedule.plannedHarnessSpec.model,

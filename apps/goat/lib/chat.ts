@@ -167,6 +167,48 @@ export async function loadGoatChatSessionByIdForUser(
   return toChatSessionView(session, messages, codexComposerSettings, codexRuntime);
 }
 
+export async function loadGoatTaskChatSessionByIdForWorkspace(
+  input: { workspaceId: string; sessionId: string },
+  store: GoatChatStore = createDbGoatChatStore(),
+): Promise<GoatChatSessionView | null> {
+  const [row] = await getDb()
+    .select({ session: goatChatSessions })
+    .from(goatChatSessions)
+    .innerJoin(
+      goatCodexChatSessions,
+      and(
+        eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
+        eq(goatCodexChatSessions.userWorkosId, goatChatSessions.userWorkosId),
+      ),
+    )
+    .where(
+      and(
+        eq(goatChatSessions.id, input.sessionId),
+        eq(goatChatSessions.kind, "task"),
+        isNull(goatChatSessions.closedAt),
+        eq(goatCodexChatSessions.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  const session = row?.session ?? null;
+  if (!session) return null;
+
+  const [messages, codexComposerSettings, codexRuntime] = await Promise.all([
+    store.listMessages(session.id),
+    loadCodexComposerSettingsForChatSession({
+      store,
+      userWorkosId: session.userWorkosId,
+      session,
+    }),
+    loadCodexRuntimeForChatSession({
+      store,
+      userWorkosId: session.userWorkosId,
+      session,
+    }),
+  ]);
+  return toChatSessionView(session, messages, codexComposerSettings, codexRuntime);
+}
+
 export async function listCurrentUserRecentGoatChats(
   limit = GOAT_RECENT_CHAT_LIMIT,
 ): Promise<GoatChatSummaryView[]> {
