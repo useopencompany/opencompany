@@ -45,7 +45,7 @@ import {
   GoatCodexChatHandoffError,
   GoatCodexChatLeaseLostError,
   GoatCodexChatRetryableInfrastructureError,
-  GoatTaskTurnCanceledError,
+  GoatTaskTurnTerminalError,
 } from "./goat-codex-chat-errors";
 import {
   createGoatCodexChatProjector,
@@ -176,7 +176,7 @@ export async function runGoatCodexChatTurn(input: {
       const projector = await bareProjector();
       if (
         effectiveError instanceof GoatCodexChatInterruptedError ||
-        effectiveError instanceof GoatTaskTurnCanceledError
+        effectiveError instanceof GoatTaskTurnTerminalError
       ) {
         await projector.interrupted(buildGoatTaskTerminalProjection(taskContext));
       } else {
