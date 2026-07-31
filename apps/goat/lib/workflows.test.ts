@@ -122,6 +122,27 @@ describe("validateGoatWorkflowFields", () => {
       validateGoatWorkflowFields({
         name: "Workflow",
         description: "",
+        steps: [{ ...validStep, model: "codex", runtimeModel: "anthropic/claude-sonnet-5" }],
+      }),
+    ).toMatch(/coding model/);
+    expect(
+      validateGoatWorkflowFields({
+        name: "Workflow",
+        description: "",
+        steps: [
+          {
+            ...validStep,
+            model: "codex",
+            runtimeModel: "openai/gpt-5.6-luna",
+            reasoningEffort: "extreme" as never,
+          },
+        ],
+      }),
+    ).toMatch(/effort/);
+    expect(
+      validateGoatWorkflowFields({
+        name: "Workflow",
+        description: "",
         steps: [validStep, { ...validStep }],
       }),
     ).toMatch(/unique/);

@@ -25,8 +25,14 @@ describe("session-backed task turns", () => {
   });
 
   it("turns a completed workflow step into the next engine-specific durable turn", () => {
+    const spec = workflowSpec();
+    spec.codex = { repository: "octo/repo", reasoningEffort: "low" };
+    spec.workflow!.steps![1] = {
+      ...spec.workflow!.steps![1]!,
+      reasoningEffort: "xhigh",
+    };
     const completion = buildGoatTaskTurnCompletion({
-      context: context(workflowSpec()),
+      context: context(spec),
       result: "Repository audit complete.",
       reportedOutcome: "done",
       outcomeComment: "The repository is ready.",
@@ -35,6 +41,10 @@ describe("session-backed task turns", () => {
     expect(completion.harnessSpec).toMatchObject({
       engine: "codex",
       model: "openai/gpt-5.5",
+      codex: {
+        repository: "octo/repo",
+        reasoningEffort: "xhigh",
+      },
       workflow: {
         currentStepIndex: 1,
         completedStepCount: 1,
@@ -47,6 +57,7 @@ describe("session-backed task turns", () => {
     expect(completion.nextTurn).toMatchObject({
       engine: "codex",
       chatModel: "openai/gpt-5.5",
+      settings: { reasoningEffort: "xhigh" },
       prompt: expect.stringContaining("Step 2/2 — Implement"),
     });
     expect(completion.nextTurn?.prompt).toContain("Repository audit complete.");
@@ -54,6 +65,7 @@ describe("session-backed task turns", () => {
 
   it("passes the previous step result as an explicit handoff to OpenCompany steps", () => {
     const spec = workflowSpec();
+    spec.codex = { repository: "octo/repo", reasoningEffort: "low" };
     const nextStep = spec.workflow?.steps?.[1];
     if (!nextStep) throw new Error("Expected workflow fixture to have a second step.");
     nextStep.engine = "opencompany";
@@ -70,6 +82,8 @@ describe("session-backed task turns", () => {
       engine: "opencompany",
       prompt: expect.stringContaining("Step 2/2 — Implement"),
     });
+    expect(completion.harnessSpec.codex).toBeUndefined();
+    expect(completion.nextTurn?.settings).toEqual({});
     expect(completion.nextTurn?.prompt).toContain("<previous_step_result>");
     expect(completion.nextTurn?.prompt).toContain("Repository audit complete.");
   });
@@ -80,6 +94,7 @@ describe("session-backed task turns", () => {
       ...spec.workflow!.steps![1]!,
       engine: "claude_code",
       model: "anthropic/claude-sonnet-5",
+      reasoningEffort: "medium",
     };
     const completion = buildGoatTaskTurnCompletion({
       context: context(spec),
@@ -93,6 +108,7 @@ describe("session-backed task turns", () => {
       chatModel: "anthropic/claude-sonnet-5",
       runtimeModel: "claude-sonnet-5",
       hostToolContractVersion: GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
+      settings: { reasoningEffort: "medium" },
       prompt: expect.stringContaining("Step 2/2 — Implement"),
     });
     expect(completion.nextTurn?.prompt).toContain("<previous_step_result>");

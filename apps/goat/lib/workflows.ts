@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  isCodexReasoningEffort,
   isValidFiveFieldCron,
   nextCronRunAt,
   normalizeScheduleTimezone,
@@ -19,7 +20,13 @@ import {
   normalizeGoatBrainId,
 } from "@opencompany/goat-brain";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
-import { isGoatWorkflowModelToken } from "@/lib/workflow-model-options";
+import {
+  GOAT_WORKFLOW_MODEL_OPTIONS,
+  goatWorkflowStepSettings,
+  isGoatWorkflowCloudRuntime,
+  isGoatWorkflowModelToken,
+  isGoatWorkflowRuntimeModel,
+} from "@/lib/workflow-model-options";
 import {
   DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON,
   DEFAULT_GOAT_WORKFLOW_SCHEDULE_PROMPT,
@@ -284,6 +291,22 @@ export function validateGoatWorkflowFields(input: {
     if (model && !isGoatWorkflowModelToken(model)) {
       return "That workflow model is not available.";
     }
+    const option = GOAT_WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
+    if (option && isGoatWorkflowCloudRuntime(option.engine)) {
+      const runtimeModelValue = step.runtimeModel as unknown;
+      const runtimeModel = typeof runtimeModelValue === "string" ? runtimeModelValue.trim() : "";
+      if (runtimeModel && !isGoatWorkflowRuntimeModel(option.engine, runtimeModel)) {
+        return "That workflow coding model is not available.";
+      }
+      const reasoningEffort = step.reasoningEffort as unknown;
+      if (
+        reasoningEffort !== undefined &&
+        reasoningEffort !== "" &&
+        (typeof reasoningEffort !== "string" || !isCodexReasoningEffort(reasoningEffort))
+      ) {
+        return "That workflow effort level is not available.";
+      }
+    }
   }
   const trigger = normalizeGoatWorkflowTriggerInput(input.trigger);
   if (!trigger.ok) return trigger.message;
@@ -355,7 +378,7 @@ export async function updateGoatWorkflow(input: {
   const steps = input.steps.map((step) => ({
     id: step.id,
     title: step.title,
-    model: step.model.trim(),
+    ...goatWorkflowStepSettings(step),
     instructions: step.instructions,
   }));
   const scheduleNextRunAt =

@@ -47,7 +47,11 @@ export type GoatWorkflowTrigger = "manual" | "slack" | "linear" | "schedule";
 export type GoatWorkflowStep = {
   id: string;
   title: string;
+  // Workflow editor runtime token (e.g. "kimi-k2.6", "codex", "claude-code").
   model: string;
+  // Concrete cloud-coding model selected when `model` is "codex" or "claude-code".
+  runtimeModel?: AgentModelId;
+  reasoningEffort?: CodexReasoningEffort;
   instructions: string;
 };
 export type GoatSkillStatus = "draft" | "active";
@@ -268,6 +272,7 @@ export type GoatHarnessWorkflowStep = {
   title: string;
   engine: GoatHarnessEngine;
   model: AgentModelId;
+  reasoningEffort?: CodexReasoningEffort;
   systemPrompt: string;
   systemBlocks: string[];
   skillIds: string[];

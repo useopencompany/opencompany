@@ -7,6 +7,7 @@ import {
   schedulePresetFromCron,
   scheduleSummary,
 } from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import {
   ArrowLeft,
@@ -29,7 +30,15 @@ import { supportedTimezones, timezoneLabel } from "@/lib/timezones";
 import { archiveGoatWorkflowAction, updateGoatWorkflowAction } from "@/lib/workflow-actions";
 import {
   DEFAULT_GOAT_WORKFLOW_MODEL_TOKEN,
+  DEFAULT_GOAT_WORKFLOW_REASONING_EFFORT,
   GOAT_WORKFLOW_MODEL_OPTIONS,
+  GOAT_WORKFLOW_REASONING_EFFORT_OPTIONS,
+  type GoatWorkflowCloudRuntime,
+  goatWorkflowCloudModelOptions,
+  goatWorkflowRuntimeModelSupportsReasoningEffort,
+  isGoatWorkflowCloudRuntime,
+  normalizeGoatWorkflowReasoningEffort,
+  normalizeGoatWorkflowRuntimeModel,
 } from "@/lib/workflow-model-options";
 import {
   DEFAULT_GOAT_WORKFLOW_SCHEDULE_CRON,
@@ -46,6 +55,10 @@ type WorkflowStep = GoatWorkflowDetail["steps"][number];
 type WorkflowTriggerDraft =
   | { type: "manual" }
   | { type: "schedule"; cron: string; timezone: string; prompt: string };
+type WorkflowStepPatch = Partial<Omit<WorkflowStep, "runtimeModel" | "reasoningEffort">> & {
+  runtimeModel?: WorkflowStep["runtimeModel"] | undefined;
+  reasoningEffort?: WorkflowStep["reasoningEffort"] | undefined;
+};
 type WorkflowDraft = Pick<GoatWorkflowDetail, "name" | "description" | "status" | "steps"> & {
   trigger: WorkflowTriggerDraft;
 };
@@ -170,11 +183,13 @@ export function GoatWorkflowEditor({
     setDraft((current) => ({ ...current, ...partial }));
   };
 
-  const updateStep = (id: string, partial: Partial<WorkflowStep>) => {
+  const updateStep = (id: string, partial: WorkflowStepPatch) => {
     if (!canEdit) return;
     setDraft((current) => ({
       ...current,
-      steps: current.steps.map((step) => (step.id === id ? { ...step, ...partial } : step)),
+      steps: current.steps.map((step) =>
+        step.id === id ? workflowStepWithPatch(step, partial) : step,
+      ),
     }));
   };
 
@@ -793,12 +808,36 @@ function StepCard({
   canEdit: boolean;
   canRemove: boolean;
   skillCatalog: GoatSkillCatalogItem[];
-  onChange: (partial: Partial<WorkflowStep>) => void;
+  onChange: (partial: WorkflowStepPatch) => void;
   onRemove: () => void;
 }) {
+  const selectedRuntime = GOAT_WORKFLOW_MODEL_OPTIONS.find((option) => option.token === step.model);
+  const cloudRuntime =
+    selectedRuntime && isGoatWorkflowCloudRuntime(selectedRuntime.engine)
+      ? selectedRuntime.engine
+      : null;
+
+  const updateRuntime = (model: string) => {
+    const option = GOAT_WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
+    if (!option || !isGoatWorkflowCloudRuntime(option.engine)) {
+      onChange({ model, runtimeModel: undefined, reasoningEffort: undefined });
+      return;
+    }
+    const runtimeModel = normalizeGoatWorkflowRuntimeModel(option.engine, step.runtimeModel);
+    onChange({
+      model,
+      runtimeModel,
+      reasoningEffort: normalizeGoatWorkflowReasoningEffort(
+        option.engine,
+        runtimeModel,
+        step.reasoningEffort,
+      ),
+    });
+  };
+
   return (
-    <section className="group rounded-xl border border-border bg-surface">
-      <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5">
+    <section className="group rounded-lg border border-border bg-surface">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3.5 py-2.5">
         <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md bg-surface-muted px-1 text-[11px] font-medium text-ink-subtle">
           {index + 1}
         </span>
@@ -809,13 +848,9 @@ function StepCard({
           aria-label={`Step ${index + 1} name`}
           onChange={(event) => onChange({ title: event.target.value })}
           placeholder="Step name"
-          className="min-w-0 flex-1 bg-transparent text-[13.5px] font-medium text-ink outline-none placeholder:text-ink-faint read-only:cursor-default"
+          className="min-w-[160px] flex-1 bg-transparent text-[13.5px] font-medium text-ink outline-none placeholder:text-ink-faint read-only:cursor-default"
         />
-        <StepModelPicker
-          value={step.model}
-          onChange={(model) => onChange({ model })}
-          disabled={!canEdit}
-        />
+        <StepRuntimePicker value={step.model} onChange={updateRuntime} disabled={!canEdit} />
         {canRemove ? (
           <button
             type="button"
@@ -827,6 +862,14 @@ function StepCard({
           </button>
         ) : null}
       </div>
+      {cloudRuntime ? (
+        <StepCloudRuntimeControls
+          engine={cloudRuntime}
+          step={step}
+          disabled={!canEdit}
+          onChange={onChange}
+        />
+      ) : null}
       <div className="px-3.5 py-3">
         <MarkdownGoatBrainEditor
           content={step.instructions}
@@ -841,7 +884,7 @@ function StepCard({
   );
 }
 
-function StepModelPicker({
+function StepRuntimePicker({
   value,
   onChange,
   disabled,
@@ -859,7 +902,7 @@ function StepModelPicker({
       <PopoverTrigger
         type="button"
         disabled={disabled}
-        aria-label={`Model: ${selectedLabel}`}
+        aria-label={`Runtime: ${selectedLabel}`}
         className="flex h-7 max-w-[150px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default disabled:hover:bg-transparent data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
       >
         <Sparkles size={12} strokeWidth={1.9} className="shrink-0" />
@@ -888,6 +931,163 @@ function StepModelPicker({
             selected={value === option.token}
             onSelect={() => {
               onChange(option.token);
+              setOpen(false);
+            }}
+          />
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function StepCloudRuntimeControls({
+  engine,
+  step,
+  disabled,
+  onChange,
+}: {
+  engine: GoatWorkflowCloudRuntime;
+  step: WorkflowStep;
+  disabled: boolean;
+  onChange: (partial: WorkflowStepPatch) => void;
+}) {
+  const runtimeModel = normalizeGoatWorkflowRuntimeModel(engine, step.runtimeModel);
+  const reasoningEffort = normalizeGoatWorkflowReasoningEffort(
+    engine,
+    runtimeModel,
+    step.reasoningEffort,
+  );
+  const supportsEffort = goatWorkflowRuntimeModelSupportsReasoningEffort(engine, runtimeModel);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-muted/35 px-3.5 py-2">
+      <StepCloudModelPicker
+        engine={engine}
+        value={runtimeModel}
+        onChange={(nextModel) => {
+          onChange({
+            runtimeModel: nextModel,
+            reasoningEffort: normalizeGoatWorkflowReasoningEffort(
+              engine,
+              nextModel,
+              step.reasoningEffort,
+            ),
+          });
+        }}
+        disabled={disabled}
+      />
+      {supportsEffort ? (
+        <StepEffortPicker
+          value={reasoningEffort ?? DEFAULT_GOAT_WORKFLOW_REASONING_EFFORT}
+          onChange={(nextEffort) => onChange({ reasoningEffort: nextEffort })}
+          disabled={disabled}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function StepCloudModelPicker({
+  engine,
+  value,
+  onChange,
+  disabled,
+}: {
+  engine: GoatWorkflowCloudRuntime;
+  value: AgentModelId;
+  onChange: (value: AgentModelId) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const options = goatWorkflowCloudModelOptions(engine);
+  const selectedOption = options.find((option) => option.id === value);
+  const selectedLabel = selectedOption?.label ?? value;
+  const runtimeLabel = engine === "codex" ? "Codex" : "Claude Code";
+
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger
+        type="button"
+        disabled={disabled}
+        aria-label={`${runtimeLabel} model: ${selectedLabel}`}
+        className="flex h-7 max-w-[210px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default disabled:hover:bg-transparent data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
+      >
+        <span className="truncate">{selectedLabel}</span>
+        {disabled ? null : <ChevronDown size={11} strokeWidth={2} className="shrink-0" />}
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={8}
+        className="w-[312px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+      >
+        {options.map((option) => (
+          <ModelOption
+            key={option.id}
+            label={option.label}
+            hint={option.description}
+            selected={value === option.id}
+            onSelect={() => {
+              onChange(option.id);
+              setOpen(false);
+            }}
+          />
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const WORKFLOW_EFFORT_LABELS = {
+  low: { label: "Low effort", hint: "Fastest" },
+  medium: { label: "Medium effort", hint: "Balanced" },
+  high: { label: "High effort", hint: "Deeper" },
+  xhigh: { label: "X-high effort", hint: "Maximum" },
+} as const;
+
+const WORKFLOW_EFFORT_OPTIONS = GOAT_WORKFLOW_REASONING_EFFORT_OPTIONS.map((value) => ({
+  value,
+  ...WORKFLOW_EFFORT_LABELS[value],
+}));
+
+type WorkflowEffort = (typeof WORKFLOW_EFFORT_OPTIONS)[number]["value"];
+
+function StepEffortPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: WorkflowEffort;
+  onChange: (value: WorkflowEffort) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedOption = WORKFLOW_EFFORT_OPTIONS.find((option) => option.value === value);
+  const selectedLabel = selectedOption?.label ?? "High effort";
+
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger
+        type="button"
+        disabled={disabled}
+        aria-label={`Effort: ${selectedLabel}`}
+        className="flex h-7 max-w-[160px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-default disabled:hover:bg-transparent data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink"
+      >
+        <span className="truncate">{selectedLabel}</span>
+        {disabled ? null : <ChevronDown size={11} strokeWidth={2} className="shrink-0" />}
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={8}
+        className="w-[220px] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+      >
+        {WORKFLOW_EFFORT_OPTIONS.map((option) => (
+          <ModelOption
+            key={option.value}
+            label={option.label}
+            hint={option.hint}
+            selected={value === option.value}
+            onSelect={() => {
+              onChange(option.value);
               setOpen(false);
             }}
           />
@@ -1032,6 +1232,18 @@ function workflowDraft(workflow: GoatWorkflowDetail): WorkflowDraft {
             prompt: workflow.trigger.prompt,
           }
         : { type: "manual" },
+  };
+}
+
+function workflowStepWithPatch(step: WorkflowStep, patch: WorkflowStepPatch): WorkflowStep {
+  const next = { ...step, ...patch };
+  return {
+    id: next.id,
+    title: next.title,
+    model: next.model,
+    instructions: next.instructions,
+    ...(next.runtimeModel ? { runtimeModel: next.runtimeModel } : {}),
+    ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
   };
 }
 

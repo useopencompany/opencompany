@@ -79,6 +79,7 @@ describe("resolveGoatWorkflowStepSelection", () => {
     ).toEqual({
       engine: "codex",
       model: "openai/gpt-5.5",
+      reasoningEffort: "high",
     });
   });
 
@@ -91,6 +92,34 @@ describe("resolveGoatWorkflowStepSelection", () => {
     ).toEqual({
       engine: "claude_code",
       model: "anthropic/claude-sonnet-5",
+      reasoningEffort: "high",
+    });
+  });
+
+  it("uses configured coding model and effort for cloud coding steps", () => {
+    expect(
+      resolveGoatWorkflowStepSelection({
+        model: "codex",
+        runtimeModel: "openai/gpt-5.6-luna",
+        reasoningEffort: "medium",
+        instructions: "Fix the bug.",
+      }),
+    ).toEqual({
+      engine: "codex",
+      model: "openai/gpt-5.6-luna",
+      reasoningEffort: "medium",
+    });
+    expect(
+      resolveGoatWorkflowStepSelection({
+        model: "claude-code",
+        runtimeModel: "anthropic/claude-opus-4.8",
+        reasoningEffort: "xhigh",
+        instructions: "Fix the bug.",
+      }),
+    ).toEqual({
+      engine: "claude_code",
+      model: "anthropic/claude-opus-4.8",
+      reasoningEffort: "xhigh",
     });
   });
 
@@ -118,6 +147,45 @@ describe("extractGoatWorkflowSkillMentionRefs", () => {
 });
 
 describe("compileGoatWorkflowHarnessSpec", () => {
+  it("compiles configured cloud coding model and effort onto the active step", () => {
+    const spec = compileGoatWorkflowHarnessSpec({
+      workflow: {
+        id: "ship-feature",
+        name: "Ship feature",
+        description: "Ships product changes.",
+        steps: [
+          {
+            id: "step-1",
+            title: "Implement",
+            model: "codex",
+            runtimeModel: "openai/gpt-5.6-luna",
+            reasoningEffort: "medium",
+            instructions: "Make the change.",
+          },
+        ],
+      },
+      workspaceId: "ws_1",
+      skills: [],
+      tools: ["exa_search"],
+      description: "Add the control.",
+    });
+
+    expect(spec).toMatchObject({
+      engine: "codex",
+      model: "openai/gpt-5.6-luna",
+      codex: { reasoningEffort: "medium" },
+      workflow: {
+        steps: [
+          expect.objectContaining({
+            engine: "codex",
+            model: "openai/gpt-5.6-luna",
+            reasoningEffort: "medium",
+          }),
+        ],
+      },
+    });
+  });
+
   it("compiles independent step models and skills with a step-zero compatibility mirror", () => {
     const spec = compileGoatWorkflowHarnessSpec({
       workflow: {
@@ -135,6 +203,8 @@ describe("compileGoatWorkflowHarnessSpec", () => {
             id: "step-2",
             title: "Implement",
             model: "claude-code",
+            runtimeModel: "anthropic/claude-opus-4.8",
+            reasoningEffort: "xhigh",
             instructions: "Apply the findings with @skill/coding-work.",
           },
         ],
@@ -187,7 +257,8 @@ describe("compileGoatWorkflowHarnessSpec", () => {
       index: 1,
       title: "Implement",
       engine: "claude_code",
-      model: "anthropic/claude-sonnet-5",
+      model: "anthropic/claude-opus-4.8",
+      reasoningEffort: "xhigh",
       skillIds: ["coding-work"],
     });
     expect(spec.workflow?.steps?.[1]?.systemPrompt).not.toContain("<workflow_skills>");

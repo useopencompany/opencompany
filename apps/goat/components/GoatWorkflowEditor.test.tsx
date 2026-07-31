@@ -163,13 +163,48 @@ describe("GoatWorkflowEditor", () => {
   it("offers Claude Code as a workflow step model option", async () => {
     render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /^Model:/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Runtime:/ }));
     fireEvent.click(screen.getByRole("button", { name: /Claude Code/ }));
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        steps: [expect.objectContaining({ id: "step-1", model: "claude-code" })],
+        steps: [
+          expect.objectContaining({
+            id: "step-1",
+            model: "claude-code",
+            runtimeModel: "anthropic/claude-sonnet-5",
+            reasoningEffort: "high",
+          }),
+        ],
+        trigger: { type: "manual" },
+      }),
+    );
+  });
+
+  it("saves the concrete Codex model and effort for coding steps", async () => {
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Runtime:/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Codex/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Codex model:/ }));
+    fireEvent.click(screen.getByRole("button", { name: /GPT 5\.6 Luna/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Effort:/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Medium effort/ }));
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        steps: [
+          expect.objectContaining({
+            id: "step-1",
+            model: "codex",
+            runtimeModel: "openai/gpt-5.6-luna",
+            reasoningEffort: "medium",
+          }),
+        ],
         trigger: { type: "manual" },
       }),
     );
