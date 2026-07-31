@@ -8,6 +8,11 @@ import type {
 import { type GoatAnalyticsPerson, goatAnalyticsPersonProperties } from "./goat-person";
 import { capturePostHogServerEvent } from "./server-core";
 
+type GoatModelSpendBillingSource =
+  GoatAnalyticsEventProperties<"model_spend_recorded">["billing_source"];
+type GoatModelSpendEngine = GoatAnalyticsEventProperties<"model_spend_recorded">["engine"];
+type GoatModelSpendSurface = GoatAnalyticsEventProperties<"model_spend_recorded">["surface"];
+
 export type CaptureGoatTaskSpawnedInput = {
   userWorkosId: string;
   workspaceId?: string | null | undefined;
@@ -106,6 +111,49 @@ function goatTaskSpawnKind(input: {
 function normalizedOptional(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized || undefined;
+}
+
+export function captureGoatModelSpendRecorded(input: {
+  userWorkosId: string;
+  workspaceId?: string | null;
+  billingSource: GoatModelSpendBillingSource;
+  surface: GoatModelSpendSurface;
+  model: string;
+  providerCostUsdMicros: number;
+  platformFeeUsdMicros: number;
+  totalCostUsdMicros: number;
+  modelCostUsdMicros?: number;
+  stage?: string;
+  engine?: GoatModelSpendEngine;
+  ledgerId?: number | null;
+  chatSessionId?: string | null;
+  ingestJobId?: string | null;
+  taskId?: string | null;
+  messageId?: string | null;
+}) {
+  const modelCostUsdMicros = analyticsNumber(
+    input.modelCostUsdMicros ?? input.providerCostUsdMicros,
+  );
+  if (modelCostUsdMicros <= 0) return Promise.resolve();
+
+  return captureGoatServerEvent("model_spend_recorded", input.userWorkosId, {
+    user_id: input.userWorkosId,
+    ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
+    billing_source: input.billingSource,
+    surface: input.surface,
+    model: input.model,
+    ...(input.stage ? { stage: input.stage } : {}),
+    ...(input.engine ? { engine: input.engine } : {}),
+    provider_cost_usd_micros: analyticsNumber(input.providerCostUsdMicros),
+    platform_fee_usd_micros: analyticsNumber(input.platformFeeUsdMicros),
+    total_cost_usd_micros: analyticsNumber(input.totalCostUsdMicros),
+    model_cost_usd_micros: modelCostUsdMicros,
+    ...(input.ledgerId ? { ledger_id: input.ledgerId } : {}),
+    ...(input.chatSessionId ? { chat_session_id: input.chatSessionId } : {}),
+    ...(input.ingestJobId ? { ingest_job_id: input.ingestJobId } : {}),
+    ...(input.taskId ? { task_id: input.taskId } : {}),
+    ...(input.messageId ? { message_id: input.messageId } : {}),
+  });
 }
 
 export type GoatLlmUsageRecordedAnalyticsInput = {

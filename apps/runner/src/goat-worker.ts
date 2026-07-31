@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { captureGoatLlmUsageRecorded } from "@opencompany/analytics/goat/server";
+import {
+  captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded,
+} from "@opencompany/analytics/goat/server";
 import {
   calculateHostedToolUsageCost,
   calculateModelUsageCost,
@@ -1313,6 +1316,23 @@ export async function runClaimedGoatTask(input: {
                   : calculatedCost.totalCostUsdMicros > 0,
               finishReason: usageInput.finishReason,
             });
+            if (calculatedCost.providerCostUsdMicros > 0) {
+              await captureGoatModelSpendRecorded({
+                userWorkosId: input.task.userWorkosId,
+                workspaceId:
+                  input.task.workspaceId ?? input.task.harnessSpec.workflow?.workspaceId ?? null,
+                billingSource: "task_model_usage",
+                surface: "task",
+                model: usageInput.modelName,
+                stage: usageInput.phase,
+                providerCostUsdMicros: calculatedCost.providerCostUsdMicros,
+                platformFeeUsdMicros: calculatedCost.platformFeeUsdMicros,
+                totalCostUsdMicros: calculatedCost.totalCostUsdMicros,
+                modelCostUsdMicros: calculatedCost.providerCostUsdMicros,
+                taskId: input.task.id,
+                messageId: usageInput.messageId ?? null,
+              });
+            }
           },
           recordToolUsage: async (usageInput) => {
             const cost = calculateHostedToolUsageCost({

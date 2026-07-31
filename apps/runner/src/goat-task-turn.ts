@@ -4,7 +4,10 @@ import {
   codexCliModelNameForModelId,
   GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
 } from "@opencompany/agent-runtime";
-import { captureGoatLlmUsageRecorded } from "@opencompany/analytics/goat/server";
+import {
+  captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded,
+} from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import {
@@ -851,7 +854,7 @@ async function recordGoatTaskGatewayUsage(input: {
 
   if (!cost.billable || !input.session.workspaceId) return;
   try {
-    await recordGoatCreditDebit({
+    const debit = await recordGoatCreditDebit({
       workspaceId: input.session.workspaceId,
       userWorkosId: input.context.task.userWorkosId,
       source: "chat_model_usage",
@@ -869,6 +872,25 @@ async function recordGoatTaskGatewayUsage(input: {
       },
       db: getDb(),
     });
+    if (debit.ok) {
+      await captureGoatModelSpendRecorded({
+        userWorkosId: input.context.task.userWorkosId,
+        workspaceId: input.session.workspaceId,
+        billingSource: "chat_model_usage",
+        surface: "task",
+        model: input.model,
+        stage: input.phase,
+        engine: input.session.engine,
+        providerCostUsdMicros: cost.providerCostUsdMicros,
+        platformFeeUsdMicros: cost.platformFeeUsdMicros,
+        totalCostUsdMicros: cost.totalCostUsdMicros,
+        modelCostUsdMicros: cost.providerCostUsdMicros,
+        ledgerId: debit.ledgerId,
+        chatSessionId: input.session.chatSessionId,
+        taskId: input.context.task.id,
+        messageId: input.turn.userMessageId,
+      });
+    }
   } catch (error) {
     console.warn("Goat Codex task Gateway credit debit failed.", {
       event: "goat.codex_task_gateway_credit_debit_failed",

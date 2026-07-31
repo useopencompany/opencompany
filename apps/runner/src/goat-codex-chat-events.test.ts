@@ -4,7 +4,12 @@ import { createGoatCodexChatProjector } from "./goat-codex-chat-events";
 
 const mocks = vi.hoisted(() => ({
   captureException: vi.fn(),
-  createLogger: vi.fn(() => ({ info: vi.fn() })),
+  createLogger: vi.fn(() => ({
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+  })),
   execute: vi.fn(),
 }));
 

@@ -27,11 +27,13 @@ const telemetry = vi.hoisted(() => ({
 }));
 
 const analytics = vi.hoisted(() => ({
-  captureLlmUsage: vi.fn(async () => undefined),
+  captureGoatLlmUsageRecorded: vi.fn(async () => undefined),
+  captureGoatModelSpendRecorded: vi.fn(async () => undefined),
 }));
 
 vi.mock("@opencompany/analytics/goat/server", () => ({
-  captureGoatLlmUsageRecorded: analytics.captureLlmUsage,
+  captureGoatLlmUsageRecorded: analytics.captureGoatLlmUsageRecorded,
+  captureGoatModelSpendRecorded: analytics.captureGoatModelSpendRecorded,
 }));
 
 vi.mock("@opencompany/goat-observability", async (importOriginal) => {
@@ -274,7 +276,7 @@ describe("runClaimedGoatTask", () => {
         "goat.surface": "task",
       },
     });
-    expect(analytics.captureLlmUsage).toHaveBeenCalledWith(
+    expect(analytics.captureGoatLlmUsageRecorded).toHaveBeenCalledWith(
       expect.objectContaining({
         distinctId: "user_1",
         workspaceId: "workspace_1",
@@ -294,6 +296,22 @@ describe("runClaimedGoatTask", () => {
         outputTextTokens: 100,
         outputReasoningTokens: 0,
         totalTokens: 1_100,
+      }),
+    );
+    expect(analytics.captureGoatModelSpendRecorded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        billingSource: "task_model_usage",
+        surface: "task",
+        model: "openai/gpt-5.4-mini",
+        stage: "execution",
+        providerCostUsdMicros: expect.any(Number),
+        platformFeeUsdMicros: expect.any(Number),
+        totalCostUsdMicros: expect.any(Number),
+        modelCostUsdMicros: expect.any(Number),
+        taskId: "goat_task_1",
+        messageId: "assistant_msg_1",
       }),
     );
     expect(store.recordToolUsage).toHaveBeenCalledWith(

@@ -1,3 +1,4 @@
+import { captureGoatModelSpendRecorded } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
@@ -688,7 +689,7 @@ async function recordSlackBotUsage(input: {
   if (!cost.billable) return;
   // A debit failure must never block the already-posted answer.
   try {
-    await recordGoatCreditDebit({
+    const debit = await recordGoatCreditDebit({
       workspaceId: input.workspaceId,
       userWorkosId: input.userWorkosId,
       source: "chat_model_usage",
@@ -699,6 +700,20 @@ async function recordSlackBotUsage(input: {
       costBasis: cost.costBasis,
       metadata: { surface: "slack_bot" },
     });
+    if (debit.ok) {
+      await captureGoatModelSpendRecorded({
+        userWorkosId: input.userWorkosId,
+        workspaceId: input.workspaceId,
+        billingSource: "chat_model_usage",
+        surface: "slack_bot",
+        model: input.model,
+        providerCostUsdMicros: cost.providerCostUsdMicros,
+        platformFeeUsdMicros: cost.platformFeeUsdMicros,
+        totalCostUsdMicros: cost.totalCostUsdMicros,
+        modelCostUsdMicros: cost.providerCostUsdMicros,
+        ledgerId: debit.ledgerId,
+      });
+    }
   } catch (error) {
     console.error("[goat-slack-bot] Credit debit failed", {
       workspaceId: input.workspaceId,
