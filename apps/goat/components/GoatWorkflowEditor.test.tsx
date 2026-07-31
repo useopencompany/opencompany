@@ -160,6 +160,30 @@ describe("GoatWorkflowEditor", () => {
     expect(screen.queryByRole("button", { name: "Remove step 1" })).not.toBeInTheDocument();
   });
 
+  it("renders markdown lists in read-only workflow steps", () => {
+    render(
+      <GoatWorkflowEditor
+        workflow={{
+          ...workflow,
+          steps: [
+            {
+              ...workflow.steps[0]!,
+              instructions:
+                "- Gather customer notes\n- Summarize risks\n\n1. Draft the update\n2. Flag blockers",
+            },
+          ],
+        }}
+        canEdit={false}
+        skillCatalog={[]}
+      />,
+    );
+
+    expect(screen.getByText("Gather customer notes").closest("li")).toBeInTheDocument();
+    expect(screen.getByText("Summarize risks").closest("li")).toBeInTheDocument();
+    expect(screen.getByText("Draft the update").closest("li")).toBeInTheDocument();
+    expect(screen.getByText("Flag blockers").closest("li")).toBeInTheDocument();
+  });
+
   it("offers Claude Code as a workflow step model option", async () => {
     render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 
