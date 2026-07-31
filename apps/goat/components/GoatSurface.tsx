@@ -91,7 +91,7 @@ import {
 } from "@/components/chat/ChatComposerAttachments";
 import { ChatShareButton } from "@/components/chat/ChatShareButton";
 import { MessageBubble } from "@/components/chat/MessageBubble";
-import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
+import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useGoatCreditBalance } from "@/components/chat/useGoatCreditBalance";
@@ -474,6 +474,7 @@ export function GoatSurface({
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
   const [taskMessageSubmitting, setTaskMessageSubmitting] = useState(false);
+  const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [restoringChatId, setRestoringChatId] = useState<string | null>(null);
@@ -527,6 +528,21 @@ export function GoatSurface({
       activeSelectedMentions.find((mention) => mention.kind === "engine"),
     ) ?? baseChatModel;
   const isAutoChatModel = chatModel === AUTO_GOAT_MODEL_SELECTION;
+  const activeTaskId = activeTaskConversation?.taskId ?? null;
+  const activeTaskStatus = activeTaskConversation?.status ?? null;
+  const isTaskConversationStopping = Boolean(
+    activeTaskId &&
+      stoppingTaskId === activeTaskId &&
+      (activeTaskStatus === "queued" || activeTaskStatus === "running"),
+  );
+
+  if (
+    stoppingTaskId &&
+    (taskConversation?.taskId !== stoppingTaskId ||
+      (taskConversation.status !== "queued" && taskConversation.status !== "running"))
+  ) {
+    setStoppingTaskId(null);
+  }
 
   const beginActiveTurn = useCallback((assistantMessageId: string | null = null) => {
     const startedAtMs = Date.now();
@@ -851,11 +867,13 @@ export function GoatSurface({
   const isEngineWorking = isEngineChat && (engineRunning || engineSubmitting);
   const isTaskConversationWorking = Boolean(
     activeTaskConversation &&
+      !isTaskConversationStopping &&
       (activeTaskConversation.status === "queued" ||
         activeTaskConversation.status === "running" ||
         taskMessageSubmitting),
   );
   const isAgentWorking = isGenerating || isEngineWorking || isTaskConversationWorking;
+  const isInteractionPending = isAgentWorking || isTaskConversationStopping;
   const latestActiveTurnStartedAtMs = useMemo(
     () => latestChatTurnStartedAtMs(chatMessages),
     [chatMessages],
@@ -1276,7 +1294,7 @@ export function GoatSurface({
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isAgentWorking || backgroundTaskSubmitting) return;
+    if (isInteractionPending || backgroundTaskSubmitting) return;
     if (chatSendBlocked) {
       toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
@@ -1733,12 +1751,23 @@ export function GoatSurface({
 
   const stopGeneration = useCallback(() => {
     if (activeTaskConversation) {
+      if (isTaskConversationStopping) return;
+      const taskId = activeTaskConversation.taskId;
       setTaskMessageSubmitting(false);
-      void cancelGoatTaskAction(activeTaskConversation.taskId)
+      setStoppingTaskId(taskId);
+      void cancelGoatTaskAction(taskId)
         .then((result) => {
-          if (!result.ok) toast.error(result.error ?? "Could not stop that task.");
+          if (result.ok) {
+            router.refresh();
+            return;
+          }
+          setStoppingTaskId((current) => (current === taskId ? null : current));
+          toast.error(result.error ?? "Could not stop that task.");
         })
-        .catch(() => toast.error("Could not stop that task."));
+        .catch(() => {
+          setStoppingTaskId((current) => (current === taskId ? null : current));
+          toast.error("Could not stop that task.");
+        });
       return;
     }
 
@@ -1770,7 +1799,16 @@ export function GoatSurface({
       }
     }
     void stop();
-  }, [activeEngineChat, activeTaskConversation, chatResumeEnabled, chatSessionId, messages, stop]);
+  }, [
+    activeEngineChat,
+    activeTaskConversation,
+    chatResumeEnabled,
+    chatSessionId,
+    isTaskConversationStopping,
+    messages,
+    router,
+    stop,
+  ]);
 
   useEffect(() => {
     if (mode !== "chat") return;
@@ -1813,7 +1851,7 @@ export function GoatSurface({
 
     if (event.key === "Enter" && (!event.shiftKey || mode === "home")) {
       event.preventDefault();
-      if (!isAgentWorking && !backgroundTaskSubmitting) formRef.current?.requestSubmit();
+      if (!isInteractionPending && !backgroundTaskSubmitting) formRef.current?.requestSubmit();
     }
   };
 
@@ -2202,7 +2240,9 @@ export function GoatSurface({
                       allowActionApproval={message.id === latestAssistantMessageId}
                     />
                   ))}
-                  {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
+                  {isTaskConversationStopping ? (
+                    <PendingActivityIndicator label="Stopping task…" />
+                  ) : isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
                     <ThinkingIndicator
                       startedAtMs={activeTurnTimerStartedAtMs}
                       label={
@@ -2461,6 +2501,7 @@ export function GoatSurface({
                       chatSendBlocked
                     }
                     isGenerating={isGenerating || isTaskConversationWorking}
+                    isStopping={isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />
@@ -5463,14 +5504,30 @@ function modelProviderLabel(id: string) {
 function SubmitButton({
   disabled,
   isGenerating,
+  isStopping = false,
   startsTask = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
+  isStopping?: boolean;
   startsTask?: boolean;
   onStop: () => void;
 }) {
+  if (isStopping) {
+    return (
+      <button
+        type="button"
+        aria-label="Stopping task"
+        title="Stopping task"
+        disabled
+        className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas opacity-60"
+      >
+        <LoaderCircle size={13} strokeWidth={2.2} className="animate-spin" />
+      </button>
+    );
+  }
+
   if (isGenerating) {
     return (
       <button
