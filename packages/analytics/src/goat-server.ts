@@ -1,6 +1,8 @@
 import type {
+  GoatAnalyticsEngine,
   GoatAnalyticsEventName,
   GoatAnalyticsEventProperties,
+  GoatAnalyticsUsageSource,
   GoatTaskSpawnKind,
   GoatTaskSpawnOrigin,
   GoatTaskSpawnTrigger,
@@ -18,7 +20,7 @@ export type CaptureGoatTaskSpawnedInput = {
   workspaceId?: string | null | undefined;
   taskId: string;
   displayId?: string | null | undefined;
-  engine: "opencompany" | "codex" | "claude_code";
+  engine: GoatAnalyticsEngine;
   model: string;
   workflowId?: string | null | undefined;
   scheduleId?: string | null | undefined;
@@ -125,6 +127,7 @@ export function captureGoatModelSpendRecorded(input: {
   modelCostUsdMicros?: number;
   stage?: string;
   engine?: GoatModelSpendEngine;
+  usageSource?: GoatAnalyticsUsageSource;
   ledgerId?: number | null;
   chatSessionId?: string | null;
   ingestJobId?: string | null;
@@ -135,6 +138,7 @@ export function captureGoatModelSpendRecorded(input: {
     input.modelCostUsdMicros ?? input.providerCostUsdMicros,
   );
   if (modelCostUsdMicros <= 0) return Promise.resolve();
+  const usageSource = input.usageSource ?? usageSourceForOptionalEngine(input.engine);
 
   return captureGoatServerEvent("model_spend_recorded", input.userWorkosId, {
     user_id: input.userWorkosId,
@@ -144,6 +148,7 @@ export function captureGoatModelSpendRecorded(input: {
     model: input.model,
     ...(input.stage ? { stage: input.stage } : {}),
     ...(input.engine ? { engine: input.engine } : {}),
+    ...(usageSource ? { usage_source: usageSource } : {}),
     provider_cost_usd_micros: analyticsNumber(input.providerCostUsdMicros),
     platform_fee_usd_micros: analyticsNumber(input.platformFeeUsdMicros),
     total_cost_usd_micros: analyticsNumber(input.totalCostUsdMicros),
@@ -169,6 +174,8 @@ export type GoatLlmUsageRecordedAnalyticsInput = {
   modelProvider: string;
   model: string;
   responseModel?: string | null | undefined;
+  engine: GoatAnalyticsEngine;
+  usageSource?: GoatAnalyticsUsageSource | undefined;
   inputTokens: number;
   inputNoCacheTokens: number;
   inputCacheReadTokens: number;
@@ -197,6 +204,8 @@ export function captureGoatLlmUsageRecorded(input: GoatLlmUsageRecordedAnalytics
     model_provider: input.modelProvider,
     model: input.model,
     ...(input.responseModel ? { response_model: input.responseModel } : {}),
+    engine: input.engine,
+    usage_source: input.usageSource ?? goatAnalyticsUsageSourceForEngine(input.engine),
     input_tokens: analyticsNumber(input.inputTokens),
     input_no_cache_tokens: analyticsNumber(input.inputNoCacheTokens),
     input_cache_read_tokens: analyticsNumber(input.inputCacheReadTokens),
@@ -215,4 +224,16 @@ export function captureGoatLlmUsageRecorded(input: GoatLlmUsageRecordedAnalytics
 
 function analyticsNumber(value: number) {
   return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+}
+
+export function goatAnalyticsUsageSourceForEngine(
+  engine: GoatAnalyticsEngine,
+): GoatAnalyticsUsageSource {
+  return engine === "opencompany" ? "owned_platform" : "external_harness";
+}
+
+function usageSourceForOptionalEngine(
+  engine: GoatAnalyticsEngine | undefined,
+): GoatAnalyticsUsageSource | undefined {
+  return engine ? goatAnalyticsUsageSourceForEngine(engine) : undefined;
 }

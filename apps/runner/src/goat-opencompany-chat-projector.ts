@@ -268,6 +268,7 @@ async function recordOpenCompanyChatModelCost(input: {
     stepIndex: input.stepIndex,
     modelProvider: "vercel-ai-gateway",
     model: input.model,
+    engine: "opencompany",
     inputTokens,
     inputNoCacheTokens: readUsageNumber(input.usage.inputTokenDetails?.noCacheTokens),
     inputCacheReadTokens: readUsageNumber(input.usage.inputTokenDetails?.cacheReadTokens),

@@ -3,6 +3,8 @@
 export type GoatTaskSpawnKind = "adhoc" | "workflow" | "scheduled_task" | "scheduled_workflow";
 export type GoatTaskSpawnOrigin = "adhoc" | "workflow";
 export type GoatTaskSpawnTrigger = "manual" | "schedule";
+export type GoatAnalyticsEngine = "opencompany" | "codex" | "claude_code";
+export type GoatAnalyticsUsageSource = "owned_platform" | "external_harness";
 
 export type GoatAnalyticsEventPropertiesByName = {
   app_opened: {
@@ -15,7 +17,8 @@ export type GoatAnalyticsEventPropertiesByName = {
     workspace_id: string;
     session_id: string;
     is_first_message: boolean;
-    engine: "opencompany" | "codex" | "claude_code";
+    engine: GoatAnalyticsEngine;
+    usage_source: GoatAnalyticsUsageSource;
     model: string;
     message_length: number;
     selection_mode?: "manual" | "auto";
@@ -36,6 +39,8 @@ export type GoatAnalyticsEventPropertiesByName = {
     model_provider: string;
     model: string;
     response_model?: string;
+    engine: GoatAnalyticsEngine;
+    usage_source: GoatAnalyticsUsageSource;
     input_tokens: number;
     input_no_cache_tokens: number;
     input_cache_read_tokens: number;
@@ -57,7 +62,7 @@ export type GoatAnalyticsEventPropertiesByName = {
     task_kind: GoatTaskSpawnKind;
     task_origin: GoatTaskSpawnOrigin;
     task_trigger: GoatTaskSpawnTrigger;
-    engine: "opencompany" | "codex" | "claude_code";
+    engine: GoatAnalyticsEngine;
     model: string;
     has_workflow: boolean;
     has_schedule: boolean;
@@ -92,7 +97,8 @@ export type GoatAnalyticsEventPropertiesByName = {
     surface: "chat" | "task" | "slack_bot" | "brain_ingest";
     model: string;
     stage?: string;
-    engine?: "opencompany" | "codex" | "claude_code";
+    engine?: GoatAnalyticsEngine;
+    usage_source?: GoatAnalyticsUsageSource;
     provider_cost_usd_micros: number;
     platform_fee_usd_micros: number;
     total_cost_usd_micros: number;
@@ -135,6 +141,7 @@ export const goatAnalyticsEvents = {
       "session_id",
       "is_first_message",
       "engine",
+      "usage_source",
       "model",
       "message_length",
       "selection_mode",
@@ -159,6 +166,8 @@ export const goatAnalyticsEvents = {
       "model_provider",
       "model",
       "response_model",
+      "engine",
+      "usage_source",
       "input_tokens",
       "input_no_cache_tokens",
       "input_cache_read_tokens",
@@ -223,6 +232,7 @@ export const goatAnalyticsEvents = {
       "model",
       "stage",
       "engine",
+      "usage_source",
       "provider_cost_usd_micros",
       "platform_fee_usd_micros",
       "total_cost_usd_micros",

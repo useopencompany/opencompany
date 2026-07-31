@@ -30,6 +30,7 @@ export function captureGoatChatMessageSent(input: {
       session_id: input.sessionId,
       is_first_message: input.isFirstMessage,
       engine: input.engine,
+      usage_source: goatAnalyticsUsageSourceForEngine(input.engine),
       model: input.model,
       message_length: input.messageLength,
       ...(input.selectionMode ? { selection_mode: input.selectionMode } : {}),
@@ -47,4 +48,8 @@ export function captureGoatChatMessageSent(input: {
       lastName: input.user.lastName,
     },
   );
+}
+
+function goatAnalyticsUsageSourceForEngine(engine: GoatChatEngine) {
+  return engine === "opencompany" ? "owned_platform" : "external_harness";
 }

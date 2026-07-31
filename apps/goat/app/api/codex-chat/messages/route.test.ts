@@ -137,6 +137,7 @@ describe("POST /api/codex-chat/messages", () => {
         session_id: "goat_chat_1",
         is_first_message: false,
         engine: "codex",
+        usage_source: "external_harness",
         model: "openai/gpt-5.6-terra",
         message_length: 5,
       },
@@ -252,6 +253,7 @@ describe("POST /api/codex-chat/messages", () => {
       expect.objectContaining({
         is_first_message: true,
         engine: "codex",
+        usage_source: "external_harness",
         model: "openai/gpt-5.6-luna",
       }),
       expect.any(Object),

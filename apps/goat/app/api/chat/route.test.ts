@@ -437,6 +437,7 @@ describe("POST /api/chat", () => {
         session_id: "session_1",
         is_first_message: true,
         engine: "opencompany",
+        usage_source: "owned_platform",
         model: "openai/gpt-5.5",
       }),
       {

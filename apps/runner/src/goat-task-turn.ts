@@ -7,6 +7,8 @@ import {
 import {
   captureGoatLlmUsageRecorded,
   captureGoatModelSpendRecorded,
+  captureGoatServerEvent,
+  goatAnalyticsUsageSourceForEngine,
 } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { recordGoatCreditDebit } from "@opencompany/db/goat-credits";
@@ -456,6 +458,7 @@ export function buildGoatTaskTerminalProjection(
 export async function settleGoatDurableTurn(input: {
   target: {
     userWorkosId: string;
+    workspaceId?: string | null;
     codexChatSessionId: string;
     chatSessionId: string;
     turnId: string;
@@ -740,6 +743,29 @@ export async function settleGoatDurableTurn(input: {
     WHERE EXISTS (SELECT 1 FROM updated_task_chat)
   `);
   assertRowsChanged(result);
+  await captureWorkflowHandoffChatMessageSent({ target, next });
+}
+
+async function captureWorkflowHandoffChatMessageSent(input: {
+  target: {
+    userWorkosId: string;
+    workspaceId?: string | null;
+    chatSessionId: string;
+  };
+  next: GoatTaskNextTurn | null;
+}) {
+  const workspaceId = input.target.workspaceId?.trim();
+  if (!workspaceId || !input.next) return;
+  const messageContent = input.next.userMessageContent ?? input.next.prompt;
+  await captureGoatServerEvent("chat_message_sent", input.target.userWorkosId, {
+    workspace_id: workspaceId,
+    session_id: input.target.chatSessionId,
+    is_first_message: false,
+    engine: input.next.engine,
+    usage_source: goatAnalyticsUsageSourceForEngine(input.next.engine),
+    model: input.next.chatModel,
+    message_length: messageContent.length,
+  });
 }
 
 function createNextTaskTurn(input: {
@@ -898,6 +924,7 @@ async function recordGoatTaskGatewayUsage(input: {
     turnId: input.turn.id,
     modelProvider: "vercel-ai-gateway",
     model: input.model,
+    engine: input.session.engine,
     inputTokens,
     inputNoCacheTokens: positiveUsage(input.usage.inputTokenDetails?.noCacheTokens),
     inputCacheReadTokens: positiveUsage(input.usage.inputTokenDetails?.cacheReadTokens),

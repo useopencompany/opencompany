@@ -113,6 +113,7 @@ export async function runGoatCodexChatTurn(input: {
     createGoatCodexChatProjector({
       target: {
         userWorkosId: turn.userWorkosId,
+        workspaceId: session.workspaceId,
         codexChatSessionId: session.id,
         chatSessionId: session.chatSessionId,
         turnId: turn.id,
@@ -261,6 +262,7 @@ export async function runGoatCodexChatTurn(input: {
   const projector = createGoatCodexChatProjector({
     target: {
       userWorkosId: turn.userWorkosId,
+      workspaceId: session.workspaceId,
       codexChatSessionId: session.id,
       chatSessionId: session.chatSessionId,
       turnId: turn.id,
