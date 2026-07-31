@@ -48,7 +48,7 @@ import {
 import {
   GoatCodexChatHandoffError,
   GoatCodexChatLeaseLostError,
-  GoatTaskTurnCanceledError,
+  GoatTaskTurnTerminalError,
 } from "./goat-codex-chat-errors";
 import {
   createGoatCodexChatProjector,
@@ -218,7 +218,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
       }
       if (
         effectiveError instanceof GoatCodexChatInterruptedError ||
-        effectiveError instanceof GoatTaskTurnCanceledError
+        effectiveError instanceof GoatTaskTurnTerminalError
       ) {
         await bareProjector().interrupted(buildGoatTaskTerminalProjection(taskContext));
       } else {
@@ -617,6 +617,14 @@ export async function runGoatClaudeCodeChatTurn(input: {
             result: finalResult,
             reportedOutcome: reported?.reportedOutcome,
             outcomeComment: reported?.outcomeComment,
+            ...(scheduledWakeup
+              ? {
+                  scheduledWakeup: {
+                    wakeup: scheduledWakeup,
+                    parentSettings: turn.settings,
+                  },
+                }
+              : {}),
           }),
         },
       );
@@ -627,7 +635,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
     } else {
       await projector.finalize(appServerSummary);
     }
-    if (summary.status === "success" && outcome === "settled" && scheduledWakeup) {
+    if (summary.status === "success" && outcome === "settled" && scheduledWakeup && !taskContext) {
       try {
         await enqueueGoatCodexChatWakeup({
           parentTurn: turn,

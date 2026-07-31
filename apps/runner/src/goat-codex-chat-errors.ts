@@ -5,13 +5,13 @@ export class GoatCodexChatLeaseLostError extends Error {
   }
 }
 
-// A task can be canceled after its durable turn is claimed but before the engine starts. This is
-// distinct from losing the turn lease: the current worker still owns the turn and must settle it
-// immediately instead of leaving it running until lease expiry.
-export class GoatTaskTurnCanceledError extends Error {
+// A task can become terminal after its durable turn is queued but before the engine starts. This
+// is distinct from losing the turn lease: the current worker still owns the turn and must settle
+// it immediately instead of leaving it running until lease expiry.
+export class GoatTaskTurnTerminalError extends Error {
   constructor() {
-    super("Goat task turn was canceled.");
-    this.name = "GoatTaskTurnCanceledError";
+    super("Goat task is already terminal.");
+    this.name = "GoatTaskTurnTerminalError";
   }
 }
 

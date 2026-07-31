@@ -14,6 +14,7 @@ import {
   type GoatCodexChatSession,
   type GoatCodexChatSessionStatus,
   type GoatCodexChatTurn,
+  type GoatCodexChatTurnSettings,
   type GoatHarnessSpec,
   type GoatHarnessWorkflowStep,
   type GoatTask,
@@ -35,7 +36,11 @@ import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { createGoatBrainMarkdownReportForTask } from "./goat-brain";
-import { GoatCodexChatLeaseLostError, GoatTaskTurnCanceledError } from "./goat-codex-chat-errors";
+import { GoatCodexChatLeaseLostError, GoatTaskTurnTerminalError } from "./goat-codex-chat-errors";
+import {
+  type GoatCodexChatScheduledWakeup,
+  prepareGoatCodexChatScheduledWakeup,
+} from "./goat-codex-chat-wakeup";
 import { getGoatAvailableGitHubRepositoryNamesForRunner } from "./goat-harness-planner";
 import { normalizeGoatTaskToolNames } from "./goat-task-tool-names";
 import { rowsFromExecute } from "./sql-exec";
@@ -64,12 +69,15 @@ type GoatTaskNextTurn = {
   userMessageId: string;
   assistantMessageId: string;
   prompt: string;
+  userMessageContent?: string;
+  userMessageDebugTrace?: Record<string, unknown>;
+  runAfter?: Date;
   harnessSpec: GoatHarnessSpec;
   engine: GoatHarnessSpec["engine"];
   chatModel: string;
   runtimeModel: string;
   hostToolContractVersion: string | null;
-  settings: Record<string, unknown>;
+  settings: GoatCodexChatTurnSettings;
   assistantDebugTrace: Record<string, unknown>;
 };
 
@@ -99,12 +107,12 @@ export async function markGoatTaskTurnRunning(input: {
     SELECT 'updated'::text AS outcome
     FROM updated_task
     UNION ALL
-    SELECT 'canceled'::text AS outcome
+    SELECT 'terminal'::text AS outcome
     FROM goat.tasks AS task
     WHERE task.id = ${input.context.task.id}
       AND task.session_id = ${input.turn.chatSessionId}
       AND task.user_workos_id = ${input.turn.userWorkosId}
-      AND task.status = 'canceled'
+      AND task.status IN ('succeeded', 'failed', 'canceled')
       AND EXISTS (${turnLeaseSubquery(input.turn)})
     LIMIT 1
   `);
@@ -193,12 +201,12 @@ export async function prepareGoatCodexTaskTurn(input: {
     SELECT 'updated'::text AS outcome
     FROM updated_chat
     UNION ALL
-    SELECT 'canceled'::text AS outcome
+    SELECT 'terminal'::text AS outcome
     FROM goat.tasks AS task
     WHERE task.id = ${task.id}
       AND task.session_id = ${input.turn.chatSessionId}
       AND task.user_workos_id = ${input.turn.userWorkosId}
-      AND task.status = 'canceled'
+      AND task.status IN ('succeeded', 'failed', 'canceled')
       AND EXISTS (${turnLeaseSubquery(input.turn)})
     LIMIT 1
   `);
@@ -328,9 +336,23 @@ export function buildGoatTaskTurnCompletion(input: {
   result: string;
   reportedOutcome?: GoatTaskReportedOutcome | null | undefined;
   outcomeComment?: string | null | undefined;
+  scheduledWakeup?:
+    | {
+        wakeup: GoatCodexChatScheduledWakeup;
+        parentSettings: GoatCodexChatTurnSettings;
+        now?: Date;
+      }
+    | undefined;
 }): GoatTaskTurnCompletion {
   const workflow = input.context.harnessSpec.workflow;
   const reportedOutcome = input.reportedOutcome ?? null;
+  const preparedScheduledWakeup = input.scheduledWakeup
+    ? prepareGoatCodexChatScheduledWakeup({
+        parentSettings: input.scheduledWakeup.parentSettings,
+        wakeup: input.scheduledWakeup.wakeup,
+        ...(input.scheduledWakeup.now ? { now: input.scheduledWakeup.now } : {}),
+      })
+    : null;
   let outcomeComment =
     input.outcomeComment?.trim().slice(0, TASK_OUTCOME_COMMENT_MAX_LENGTH) || null;
   let harnessSpec = input.context.harnessSpec;
@@ -365,7 +387,7 @@ export function buildGoatTaskTurnCompletion(input: {
     // Match the legacy workflow runner: only an explicit needs_attention
     // outcome blocks the sequence. A missing closer/tool outcome must not
     // strand a multi-step workflow after an otherwise successful turn.
-    if (reportedOutcome !== "needs_attention" && nextStep) {
+    if (reportedOutcome !== "needs_attention" && nextStep && !preparedScheduledWakeup) {
       const { codex: _previousCodexConfig, ...harnessSpecWithoutCodex } = harnessSpec;
       const nextStepCodexConfig = codexConfigForWorkflowStep(harnessSpec.codex, nextStep);
       const nextHarnessSpec: GoatHarnessSpec = {
@@ -391,6 +413,17 @@ export function buildGoatTaskTurnCompletion(input: {
       });
       harnessSpec = nextHarnessSpec;
     }
+  }
+
+  if (preparedScheduledWakeup) {
+    nextTurn = createNextTaskTurn({
+      harnessSpec,
+      prompt: preparedScheduledWakeup.prompt,
+      userMessageContent: preparedScheduledWakeup.userMessageContent,
+      userMessageDebugTrace: preparedScheduledWakeup.userDebugTrace,
+      runAfter: preparedScheduledWakeup.dueAt,
+      settings: preparedScheduledWakeup.settings,
+    });
   }
 
   return {
@@ -524,6 +557,7 @@ export async function settleGoatDurableTurn(input: {
         session_id,
         role,
         content,
+        debug_trace,
         attachments,
         attachment_texts,
         created_at,
@@ -533,7 +567,8 @@ export async function settleGoatDurableTurn(input: {
         ${next?.userMessageId ?? null},
         task.session_id,
         'user',
-        ${next?.prompt ?? null},
+        ${next?.userMessageContent ?? next?.prompt ?? null},
+        ${next?.userMessageDebugTrace ? JSON.stringify(next.userMessageDebugTrace) : null}::jsonb,
         CASE
           WHEN ${next?.engine ?? null}::text IN ('codex', 'claude_code')
             THEN (SELECT attachments FROM workflow_origin_attachments)
@@ -577,6 +612,7 @@ export async function settleGoatDurableTurn(input: {
         status,
         prompt,
         settings,
+        run_after,
         created_at,
         updated_at
       )
@@ -590,6 +626,7 @@ export async function settleGoatDurableTurn(input: {
         'queued',
         ${next?.prompt ?? null},
         ${next ? JSON.stringify(next.settings) : null}::jsonb,
+        ${next?.runAfter ?? null},
         ${new Date(input.completedAt.getTime() + 2)},
         ${new Date(input.completedAt.getTime() + 2)}
       FROM projected_task AS task
@@ -708,6 +745,10 @@ export async function settleGoatDurableTurn(input: {
 function createNextTaskTurn(input: {
   harnessSpec: GoatHarnessSpec;
   prompt: string;
+  userMessageContent?: string;
+  userMessageDebugTrace?: Record<string, unknown>;
+  runAfter?: Date;
+  settings?: GoatCodexChatTurnSettings;
 }): GoatTaskNextTurn {
   const runtimeModel = runtimeModelNameForHarness(
     input.harnessSpec.engine,
@@ -723,13 +764,16 @@ function createNextTaskTurn(input: {
     userMessageId: `goat_chat_msg_${randomUUID()}`,
     assistantMessageId: `goat_chat_msg_${randomUUID()}`,
     prompt: input.prompt,
+    ...(input.userMessageContent ? { userMessageContent: input.userMessageContent } : {}),
+    ...(input.userMessageDebugTrace ? { userMessageDebugTrace: input.userMessageDebugTrace } : {}),
+    ...(input.runAfter ? { runAfter: input.runAfter } : {}),
     harnessSpec: input.harnessSpec,
     engine: input.harnessSpec.engine,
     chatModel: input.harnessSpec.model,
     runtimeModel,
     hostToolContractVersion:
       input.harnessSpec.engine === "opencompany" ? null : GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
-    settings: {
+    settings: input.settings ?? {
       ...(input.harnessSpec.codex?.reasoningEffort
         ? { reasoningEffort: input.harnessSpec.codex.reasoningEffort }
         : {}),
@@ -956,8 +1000,8 @@ function assertRowsChanged(result: unknown) {
 }
 
 function assertTaskMutationSucceeded(result: unknown) {
-  const row = rowsFromExecute<{ outcome: "updated" | "canceled" }>(result)[0];
+  const row = rowsFromExecute<{ outcome: "updated" | "terminal" }>(result)[0];
   if (row?.outcome === "updated") return;
-  if (row?.outcome === "canceled") throw new GoatTaskTurnCanceledError();
+  if (row?.outcome === "terminal") throw new GoatTaskTurnTerminalError();
   throw new GoatCodexChatLeaseLostError();
 }
