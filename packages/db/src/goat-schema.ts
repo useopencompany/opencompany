@@ -2513,6 +2513,16 @@ export const goatWorkflows = goat.table(
     model: text("model").notNull().default(""),
     steps: jsonb("steps").$type<GoatWorkflowStep[]>().notNull().default(sql`'[]'::jsonb`),
     trigger: text("trigger").$type<GoatWorkflowTrigger>().notNull().default("manual"),
+    scheduleCron: text("schedule_cron"),
+    scheduleTimezone: text("schedule_timezone").notNull().default("UTC"),
+    schedulePrompt: text("schedule_prompt").notNull().default(""),
+    scheduleUserWorkosId: text("schedule_user_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    scheduleHarnessSpec: jsonb("schedule_harness_spec").$type<GoatHarnessSpec | null>(),
+    scheduleEnabled: boolean("schedule_enabled").notNull().default(false),
+    scheduleLastRunAt: timestamp("schedule_last_run_at", { withTimezone: true }),
+    scheduleNextRunAt: timestamp("schedule_next_run_at", { withTimezone: true }),
     status: text("status").$type<GoatWorkflowStatus>().notNull().default("active"),
     createdByWorkosId: text("created_by_workos_id").references(() => goatUsers.workosUserId, {
       onDelete: "set null",
@@ -2532,6 +2542,11 @@ export const goatWorkflows = goat.table(
       table.archivedAt,
       table.updatedAt,
     ),
+    scheduleDueIdx: index("goat_workflows_schedule_due_idx")
+      .on(table.scheduleEnabled, table.scheduleNextRunAt)
+      .where(
+        sql`${table.trigger} = 'schedule' AND ${table.status} = 'active' AND ${table.archivedAt} IS NULL`,
+      ),
     statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
     triggerCheck: check(
       "goat_workflows_trigger_check",
@@ -2721,6 +2736,49 @@ export const goatTaskScheduleRuns = goat.table(
     taskIdx: index("goat_task_schedule_runs_task_idx").on(table.taskId),
     statusCheck: check(
       "goat_task_schedule_runs_status_check",
+      sql`${table.status} IN ('pending', 'created', 'failed')`,
+    ),
+  }),
+);
+
+export const goatWorkflowScheduleRuns = goat.table(
+  "workflow_schedule_runs",
+  {
+    id: text("id").primaryKey(),
+    workflowId: text("workflow_id")
+      .notNull()
+      .references(() => goatWorkflows.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    taskId: text("task_id").references(() => goatTasks.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").$type<GoatTaskScheduleRunStatus>().notNull().default("pending"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workflowForIdx: uniqueIndex("goat_workflow_schedule_runs_workflow_for_idx").on(
+      table.workflowId,
+      table.scheduledFor,
+    ),
+    workspaceCreatedIdx: index("goat_workflow_schedule_runs_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    userCreatedIdx: index("goat_workflow_schedule_runs_user_created_idx").on(
+      table.userWorkosId,
+      table.createdAt,
+    ),
+    taskIdx: index("goat_workflow_schedule_runs_task_idx").on(table.taskId),
+    statusCheck: check(
+      "goat_workflow_schedule_runs_status_check",
       sql`${table.status} IN ('pending', 'created', 'failed')`,
     ),
   }),
@@ -3957,6 +4015,7 @@ export const goatTasksRelations = relations(goatTasks, ({ one, many }) => ({
   sandboxUsage: many(goatTaskSandboxUsage),
   chatMessages: many(goatChatMessages),
   scheduleRuns: many(goatTaskScheduleRuns),
+  workflowScheduleRuns: many(goatWorkflowScheduleRuns),
 }));
 
 export const goatTaskSchedulesRelations = relations(goatTaskSchedules, ({ one, many }) => ({
@@ -3979,6 +4038,25 @@ export const goatTaskScheduleRunsRelations = relations(goatTaskScheduleRuns, ({ 
   }),
   task: one(goatTasks, {
     fields: [goatTaskScheduleRuns.taskId],
+    references: [goatTasks.id],
+  }),
+}));
+
+export const goatWorkflowScheduleRunsRelations = relations(goatWorkflowScheduleRuns, ({ one }) => ({
+  user: one(goatUsers, {
+    fields: [goatWorkflowScheduleRuns.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  workspace: one(goatWorkspaces, {
+    fields: [goatWorkflowScheduleRuns.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
+  workflow: one(goatWorkflows, {
+    fields: [goatWorkflowScheduleRuns.workflowId],
+    references: [goatWorkflows.id],
+  }),
+  task: one(goatTasks, {
+    fields: [goatWorkflowScheduleRuns.taskId],
     references: [goatTasks.id],
   }),
 }));
@@ -4167,6 +4245,7 @@ export type GoatClaudeCodeCredential = typeof goatClaudeCodeCredentials.$inferSe
 export type GoatCodexDeviceAuthFlow = typeof goatCodexDeviceAuthFlows.$inferSelect;
 export type GoatTaskSchedule = typeof goatTaskSchedules.$inferSelect;
 export type GoatTaskScheduleRun = typeof goatTaskScheduleRuns.$inferSelect;
+export type GoatWorkflowScheduleRun = typeof goatWorkflowScheduleRuns.$inferSelect;
 export type GoatTask = typeof goatTasks.$inferSelect;
 export type GoatTaskMessage = typeof goatTaskMessages.$inferSelect;
 export type GoatTaskEvent = typeof goatTaskEvents.$inferSelect;

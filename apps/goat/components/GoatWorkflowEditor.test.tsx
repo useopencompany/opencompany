@@ -53,6 +53,7 @@ const workflow = {
   name: "Weekly update",
   description: "Summarize the week.",
   status: "draft" as const,
+  trigger: { type: "manual" as const },
   steps: [
     {
       id: "step-1",
@@ -92,6 +93,7 @@ describe("GoatWorkflowEditor", () => {
       description: "Summarize the week.",
       steps: workflow.steps,
       status: "draft",
+      trigger: { type: "manual" },
     });
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
@@ -121,6 +123,7 @@ describe("GoatWorkflowEditor", () => {
     expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
       expect.objectContaining({
         steps: [expect.objectContaining({ id: "step-1", title: "Final edit" })],
+        trigger: { type: "manual" },
       }),
     );
   });
@@ -167,6 +170,32 @@ describe("GoatWorkflowEditor", () => {
     expect(workflowActionsMock.update).toHaveBeenCalledWith(
       expect.objectContaining({
         steps: [expect.objectContaining({ id: "step-1", model: "claude-code" })],
+        trigger: { type: "manual" },
+      }),
+    );
+  });
+
+  it("saves an on-a-schedule trigger", async () => {
+    render(<GoatWorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "On a schedule" }));
+    fireEvent.change(screen.getByLabelText("Cron"), { target: { value: "30 8 * * 1-5" } });
+    fireEvent.change(screen.getByLabelText("Timezone"), {
+      target: { value: "America/New_York" },
+    });
+    fireEvent.change(screen.getByLabelText("Task request"), {
+      target: { value: "Draft the weekday update." },
+    });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trigger: {
+          type: "schedule",
+          cron: "30 8 * * 1-5",
+          timezone: "America/New_York",
+          prompt: "Draft the weekday update.",
+        },
       }),
     );
   });

@@ -8,6 +8,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   ArrowLeft,
+  CalendarClock,
   Check,
   CircleUserRound,
   ListTodo,
@@ -813,6 +814,14 @@ function WorkflowListRow({ workflow }: { workflow: GoatWorkflowListItem }) {
         {workflow.description.trim() ? (
           <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
             {workflow.description}
+          </span>
+        ) : null}
+        {workflow.trigger.type === "schedule" ? (
+          <span className="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-[11.5px] leading-4 text-ink-subtle">
+            <CalendarClock size={12} strokeWidth={1.8} className="shrink-0" />
+            <span className="truncate">
+              {workflow.trigger.cron} · {workflow.trigger.timezone}
+            </span>
           </span>
         ) : null}
       </span>
