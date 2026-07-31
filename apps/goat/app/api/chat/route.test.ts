@@ -56,6 +56,7 @@ const browserMocks = vi.hoisted(() => ({
 }));
 
 const analyticsMocks = vi.hoisted(() => ({
+  captureGoatModelSpendRecorded: vi.fn(async () => {}),
   captureGoatServerEvent: vi.fn(async () => {}),
 }));
 
@@ -66,6 +67,7 @@ const capabilityMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatModelSpendRecorded: analyticsMocks.captureGoatModelSpendRecorded,
   captureGoatServerEvent: analyticsMocks.captureGoatServerEvent,
 }));
 

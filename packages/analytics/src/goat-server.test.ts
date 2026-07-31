@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { captureGoatServerEvent } from "./goat-server";
+import { captureGoatModelSpendRecorded, captureGoatServerEvent } from "./goat-server";
 import { captureServerEvent } from "./server";
 
 const posthog = vi.hoisted(() => ({
@@ -109,6 +109,64 @@ describe("PostHog server analytics", () => {
     });
 
     expect(posthog.constructor).not.toHaveBeenCalled();
+    expect(posthog.capture).not.toHaveBeenCalled();
+  });
+
+  it("captures model spend with sum-ready micros properties", async () => {
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+
+    await captureGoatModelSpendRecorded({
+      userWorkosId: "user_123",
+      workspaceId: "workspace_123",
+      billingSource: "chat_model_usage",
+      surface: "chat",
+      model: "openai/gpt-5.5",
+      stage: "generation",
+      engine: "opencompany",
+      providerCostUsdMicros: 10_000.2,
+      platformFeeUsdMicros: 2_000,
+      totalCostUsdMicros: 12_000,
+      ledgerId: 42,
+      chatSessionId: "goat_chat_123",
+    });
+
+    expect(posthog.capture).toHaveBeenCalledWith({
+      distinctId: "user_123",
+      event: "model_spend_recorded",
+      properties: {
+        user_id: "user_123",
+        workspace_id: "workspace_123",
+        billing_source: "chat_model_usage",
+        surface: "chat",
+        model: "openai/gpt-5.5",
+        stage: "generation",
+        engine: "opencompany",
+        provider_cost_usd_micros: 10_000,
+        platform_fee_usd_micros: 2_000,
+        total_cost_usd_micros: 12_000,
+        model_cost_usd_micros: 10_000,
+        ledger_id: 42,
+        chat_session_id: "goat_chat_123",
+      },
+    });
+  });
+
+  it("does not capture model spend when the model cost is zero", async () => {
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_GOAT_POSTHOG_HOST", "https://eu.i.posthog.com");
+
+    await captureGoatModelSpendRecorded({
+      userWorkosId: "user_123",
+      billingSource: "ingest_model_usage",
+      surface: "brain_ingest",
+      model: "anthropic/claude-sonnet-5",
+      providerCostUsdMicros: 1_000,
+      platformFeeUsdMicros: 200,
+      totalCostUsdMicros: 1_200,
+      modelCostUsdMicros: 0,
+    });
+
     expect(posthog.capture).not.toHaveBeenCalled();
   });
 

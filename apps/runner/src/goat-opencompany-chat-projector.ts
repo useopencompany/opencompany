@@ -1,3 +1,4 @@
+import { captureGoatModelSpendRecorded } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import type { GoatChatMessageDebugTrace } from "@opencompany/db/goat-schema";
@@ -252,7 +253,7 @@ async function recordOpenCompanyChatModelCost(input: {
 
   if (!cost.billable || !input.workspaceId) return;
   try {
-    await recordGoatCreditDebit({
+    const debit = await recordGoatCreditDebit({
       workspaceId: input.workspaceId,
       userWorkosId: input.userWorkosId,
       source: "chat_model_usage",
@@ -269,6 +270,24 @@ async function recordOpenCompanyChatModelCost(input: {
       },
       db: getDb(),
     });
+    if (debit.ok) {
+      await captureGoatModelSpendRecorded({
+        userWorkosId: input.userWorkosId,
+        workspaceId: input.workspaceId,
+        billingSource: "chat_model_usage",
+        surface: "chat",
+        model: input.model,
+        stage: "generation",
+        engine: "opencompany",
+        providerCostUsdMicros: cost.providerCostUsdMicros,
+        platformFeeUsdMicros: cost.platformFeeUsdMicros,
+        totalCostUsdMicros: cost.totalCostUsdMicros,
+        modelCostUsdMicros: cost.providerCostUsdMicros,
+        ledgerId: debit.ledgerId,
+        chatSessionId: input.chatSessionId,
+        messageId: input.userMessageId,
+      });
+    }
   } catch (error) {
     logger.warn("Durable OpenCompany chat credit debit failed", {
       event: "opencompany.goat_opencompany_chat_credit_debit_failed",

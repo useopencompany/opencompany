@@ -6,6 +6,7 @@ const dbMock = vi.hoisted(() => ({
   execute: vi.fn(),
 }));
 const usageMocks = vi.hoisted(() => ({
+  captureModelSpend: vi.fn(async () => undefined),
   recordCreditDebit: vi.fn(async () => ({ ok: true })),
   recordModelCost: vi.fn(),
   recordModelUsageTokens: vi.fn(),
@@ -17,6 +18,10 @@ vi.mock("./db", () => ({
 
 vi.mock("@opencompany/db/goat-credits", () => ({
   recordGoatCreditDebit: usageMocks.recordCreditDebit,
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatModelSpendRecorded: usageMocks.captureModelSpend,
 }));
 
 vi.mock("@opencompany/goat-observability", () => ({
@@ -104,6 +109,19 @@ describe("createGoatOpenCompanyChatProjector", () => {
         source: "chat_model_usage",
         idempotencyKey: "chat:user_message_1:durable:turn_1:step:2",
         chatSessionId: "goat_chat_1",
+      }),
+    );
+    expect(usageMocks.captureModelSpend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        workspaceId: "workspace_1",
+        billingSource: "chat_model_usage",
+        surface: "chat",
+        stage: "generation",
+        engine: "opencompany",
+        model: "anthropic/claude-sonnet-5",
+        chatSessionId: "goat_chat_1",
+        messageId: "user_message_1",
       }),
     );
   });

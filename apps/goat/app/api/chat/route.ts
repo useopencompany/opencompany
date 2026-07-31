@@ -2,6 +2,7 @@ import {
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
 } from "@opencompany/agent-runtime";
+import { captureGoatModelSpendRecorded } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
@@ -1704,7 +1705,7 @@ async function recordChatModelCost(input: {
   // resume/replay paths. A debit failure must never fail the turn.
   if (!cost.billable) return;
   try {
-    await recordGoatCreditDebit({
+    const debit = await recordGoatCreditDebit({
       workspaceId: input.workspaceId,
       userWorkosId: input.userWorkosId,
       source: "chat_model_usage",
@@ -1715,6 +1716,24 @@ async function recordChatModelCost(input: {
       totalCostUsdMicros: cost.totalCostUsdMicros,
       costBasis: cost.costBasis,
     });
+    if (debit.ok) {
+      await captureGoatModelSpendRecorded({
+        userWorkosId: input.userWorkosId,
+        workspaceId: input.workspaceId,
+        billingSource: "chat_model_usage",
+        surface: "chat",
+        model: input.model,
+        stage: input.stage ?? "generation",
+        engine: "opencompany",
+        providerCostUsdMicros: cost.providerCostUsdMicros,
+        platformFeeUsdMicros: cost.platformFeeUsdMicros,
+        totalCostUsdMicros: cost.totalCostUsdMicros,
+        modelCostUsdMicros: cost.providerCostUsdMicros,
+        ledgerId: debit.ledgerId,
+        chatSessionId: input.chatSessionId,
+        messageId: input.userMessageId,
+      });
+    }
     // Fire-and-forget: charge the saved card when the balance dropped below
     // the auto-refill threshold. The cron sweep covers runner-side debits.
     void maybeTriggerGoatAutoRefill(input.workspaceId);

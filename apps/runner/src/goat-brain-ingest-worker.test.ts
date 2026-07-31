@@ -16,10 +16,12 @@ import {
 import { buildJamieMeetingBrainWrites } from "./goat-brain-jamie-writes";
 
 const analytics = vi.hoisted(() => ({
+  captureGoatModelSpendRecorded: vi.fn(async () => undefined),
   captureGoatServerEvent: vi.fn(async () => undefined),
 }));
 
 vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatModelSpendRecorded: analytics.captureGoatModelSpendRecorded,
   captureGoatServerEvent: analytics.captureGoatServerEvent,
 }));
 
@@ -41,6 +43,10 @@ const billing = vi.hoisted(() => ({
   releasePendingGoatIngestionReservations: vi.fn(async () => ({ released: 0, failed: 0 })),
 }));
 
+const credits = vi.hoisted(() => ({
+  recordGoatCreditDebit: vi.fn(async () => ({ ok: true as const, ledgerId: 456 })),
+}));
+
 vi.mock("@opencompany/db/goat-billing", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/db/goat-billing")>();
   return {
@@ -48,6 +54,10 @@ vi.mock("@opencompany/db/goat-billing", async (importOriginal) => {
     releasePendingGoatIngestionReservations: billing.releasePendingGoatIngestionReservations,
   };
 });
+
+vi.mock("@opencompany/db/goat-credits", () => ({
+  recordGoatCreditDebit: credits.recordGoatCreditDebit,
+}));
 
 vi.mock("@opencompany/goat-observability", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/goat-observability")>();
@@ -862,6 +872,7 @@ describe("Goat Brain ingest worker", () => {
           id: "gbjob_budget",
           sourceItemId: "gbsrc_123",
           userWorkosId: "user_123",
+          workspaceId: "goat_ws_user_123",
           sourceProvider: "jamie",
           sourceConnectionId: "gint_123",
           integrationId: "gint_123",
@@ -921,5 +932,29 @@ describe("Goat Brain ingest worker", () => {
         "goat.surface": "brain_ingest",
       },
     });
+    expect(credits.recordGoatCreditDebit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "goat_ws_user_123",
+        source: "ingest_model_usage",
+        providerCostUsdMicros: 451_500,
+        platformFeeUsdMicros: 90_300,
+        totalCostUsdMicros: 541_800,
+      }),
+    );
+    expect(analytics.captureGoatModelSpendRecorded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_123",
+        workspaceId: "goat_ws_user_123",
+        billingSource: "ingest_model_usage",
+        surface: "brain_ingest",
+        model: failureResult.trace.model,
+        providerCostUsdMicros: 451_500,
+        platformFeeUsdMicros: 90_300,
+        totalCostUsdMicros: 541_800,
+        modelCostUsdMicros: 450_000,
+        ledgerId: 456,
+        ingestJobId: "gbjob_budget",
+      }),
+    );
   });
 });

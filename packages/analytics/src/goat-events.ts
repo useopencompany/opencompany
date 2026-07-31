@@ -36,6 +36,24 @@ export type GoatAnalyticsEventPropertiesByName = {
     amount_cents: number;
     balance_cents: number;
   };
+  model_spend_recorded: {
+    user_id: string;
+    workspace_id?: string;
+    billing_source: "chat_model_usage" | "ingest_model_usage" | "task_model_usage";
+    surface: "chat" | "task" | "slack_bot" | "brain_ingest";
+    model: string;
+    stage?: string;
+    engine?: "opencompany" | "codex" | "claude_code";
+    provider_cost_usd_micros: number;
+    platform_fee_usd_micros: number;
+    total_cost_usd_micros: number;
+    model_cost_usd_micros: number;
+    ledger_id?: number;
+    chat_session_id?: string;
+    ingest_job_id?: string;
+    task_id?: string;
+    message_id?: string;
+  };
 };
 
 export type GoatAnalyticsEventName = keyof GoatAnalyticsEventPropertiesByName;
@@ -91,6 +109,28 @@ export const goatAnalyticsEvents = {
     name: "billing_topup_completed",
     description: "A manual or automatic billing top-up credited a Goat workspace.",
     safeProperties: ["workspace_id", "topup_type", "amount_cents", "balance_cents"],
+  },
+  model_spend_recorded: {
+    name: "model_spend_recorded",
+    description: "A billable Goat model-cost usage row was recorded.",
+    safeProperties: [
+      "user_id",
+      "workspace_id",
+      "billing_source",
+      "surface",
+      "model",
+      "stage",
+      "engine",
+      "provider_cost_usd_micros",
+      "platform_fee_usd_micros",
+      "total_cost_usd_micros",
+      "model_cost_usd_micros",
+      "ledger_id",
+      "chat_session_id",
+      "ingest_job_id",
+      "task_id",
+      "message_id",
+    ],
   },
 } as const satisfies {
   [EventName in GoatAnalyticsEventName]: GoatAnalyticsEventDefinition<EventName>;
