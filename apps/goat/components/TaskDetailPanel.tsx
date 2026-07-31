@@ -15,15 +15,18 @@ export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunView
   return (
     <TaskRunLiveProvider initialRun={initialRun}>
       {(run) => {
+        const title = taskDetailTitle(run);
         // Session-backed tasks are already ordinary chats. Only pre-cutover
         // legacy rows need the compatibility projection from task_messages.
-        const initialChat: GoatChatSessionView = run.chat ?? {
-          id: run.task.id,
-          title: run.task.name,
-          model: normalizeGoatModel(run.task.model),
-          engine: "opencompany",
-          messages: legacyGoatHarnessRunToChatMessages(run),
-        };
+        const initialChat: GoatChatSessionView = run.chat
+          ? { ...run.chat, title }
+          : {
+              id: run.task.id,
+              title,
+              model: normalizeGoatModel(run.task.model),
+              engine: "opencompany",
+              messages: legacyGoatHarnessRunToChatMessages(run),
+            };
 
         return (
           <GoatSurface
@@ -51,6 +54,10 @@ export function TaskDetailPanel({ initialRun }: { initialRun: GoatHarnessRunView
       }}
     </TaskRunLiveProvider>
   );
+}
+
+function taskDetailTitle(run: GoatHarnessRunViewModel) {
+  return run.task.name.trim() || run.chat?.title.trim() || "Task";
 }
 
 function taskActivityStartedAtMs(run: GoatHarnessRunViewModel) {
