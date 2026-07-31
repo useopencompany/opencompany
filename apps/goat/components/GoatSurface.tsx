@@ -841,6 +841,19 @@ export function GoatSurface({
         taskMessageSubmitting),
   );
   const isAgentWorking = isGenerating || isEngineWorking || isTaskConversationWorking;
+  // Only animate while the backend is producing assistant output. Engine submissions
+  // can briefly leave the previous assistant row last, and native approval continuations
+  // intentionally resubmit that same row before new output starts streaming.
+  const backendActivelyStreaming = isEngineChat
+    ? engineRunning
+    : activeTaskConversation
+      ? isTaskConversationWorking
+      : status === "streaming";
+  const lastRenderedChatMessage = chatMessages.at(-1) ?? null;
+  const activeStreamingAssistantMessageId =
+    backendActivelyStreaming && lastRenderedChatMessage?.role === "assistant"
+      ? lastRenderedChatMessage.id
+      : null;
   const latestActiveTurnStartedAtMs = useMemo(
     () => latestChatTurnStartedAtMs(chatMessages),
     [chatMessages],
@@ -2121,6 +2134,7 @@ export function GoatSurface({
                       allowCodexPlanActions={message.id === latestAssistantMessageId}
                       onActionApproval={handleActionApproval}
                       allowActionApproval={message.id === latestAssistantMessageId}
+                      isStreaming={message.id === activeStreamingAssistantMessageId}
                     />
                   ))}
                   {isAgentWorking && activeTurnTimerStartedAtMs !== null ? (

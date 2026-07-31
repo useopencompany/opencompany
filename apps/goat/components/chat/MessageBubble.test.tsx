@@ -1,5 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/agent-runtime";
+import {
+  CODEX_PLAN_TOOL_NAME,
+  CODEX_QUESTION_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_NAME,
+} from "@opencompany/agent-runtime";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -674,6 +678,173 @@ describe("MessageBubble Codex interactions", () => {
         answers: { scope: { answers: ["revert the migration"] } },
       }),
     );
+  });
+});
+
+describe("MessageBubble streaming animation", () => {
+  it("animates active top-level assistant prose", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_streaming",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [{ type: "text", text: "Live answer" }],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} isStreaming />);
+
+    const bubble = screen.getByText("Live", { exact: false }).closest(".session-markdown");
+    expect(bubble?.querySelectorAll("[data-sd-animate]").length).toBeGreaterThan(0);
+  });
+
+  it("only animates prose appended after a completed approval", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_approval_continuation",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        { type: "text", text: "I found the matching lead." },
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_action_approval",
+          state: "approval-responded",
+          input: {
+            action: "lead.find_person_email",
+            params: { email: "ada@example.com" },
+          },
+          approval: { id: "approval_1", approved: true },
+        },
+        { type: "text", text: "The approved lookup is now running." },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} isStreaming />);
+
+    const prose = document.querySelectorAll(".session-markdown");
+    expect(prose).toHaveLength(2);
+    expect(prose[0]).toHaveTextContent("I found the matching lead.");
+    expect(prose[0]?.querySelectorAll("[data-sd-animate]")).toHaveLength(0);
+    expect(prose[1]).toHaveTextContent("The approved lookup is now running.");
+    expect(prose[1]?.querySelectorAll("[data-sd-animate]").length).toBeGreaterThan(0);
+  });
+
+  it("does not animate reasoning", async () => {
+    const user = userEvent.setup();
+    const message: GoatChatUiMessage = {
+      id: "assistant_reasoning",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        { type: "reasoning", text: "Thinking it through" },
+        { type: "text", text: "Answer" },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} isStreaming />);
+    await user.click(screen.getByRole("button", { name: "Thought" }));
+
+    const reasoning = screen.getByTestId("chat-reasoning-item");
+    expect(reasoning.querySelectorAll("[data-sd-animate]")).toHaveLength(0);
+  });
+
+  it("does not animate nested subagent prose", async () => {
+    const user = userEvent.setup();
+    const message: GoatChatUiMessage = {
+      id: "assistant_subagent",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_SUBAGENT_TOOL_NAME,
+          toolCallId: "subagent_1",
+          state: "output-available",
+          input: { subagentType: "explore" },
+          output: { status: "completed" },
+          children: [{ type: "text", text: "Nested subagent answer" }],
+        } as unknown as GoatChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} isStreaming />);
+    await user.click(screen.getByTestId("chat-tool-call-codex_subagent").querySelector("button")!);
+
+    expect(screen.getByText("Nested subagent answer")).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-sd-animate]")).toHaveLength(0);
+  });
+
+  it("does not animate standalone error text", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_error",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1", error: "Codex sandbox could not be started." },
+      parts: [],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} isStreaming />);
+
+    expect(screen.getByText(/Codex sandbox could not be started/)).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-sd-animate]")).toHaveLength(0);
+  });
+
+  it("keeps citations outside animation spans", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_citations",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: GOAT_BRAIN_TOOL_PART_TYPE,
+          toolCallId: "tool_brain_1",
+          state: "output-available",
+          input: { command: "query", flags: { text: "gtm", limit: 3 } },
+          output: {
+            ok: true,
+            brainRef: "goat_brain_1",
+            exitCode: 0,
+            stdout: "",
+            stderr: "",
+            parsed: {
+              hits: [
+                {
+                  id: "ada",
+                  title: "Ada Lovelace",
+                  folder: "team/gtm",
+                  type: "person",
+                  kind: "page",
+                  status: "active",
+                  updatedAt: "2026-07-01T00:00:00.000Z",
+                  score: 0.9,
+                  signals: ["lexical"],
+                  snippet: "Ada leads GTM.",
+                  neighbors: [],
+                },
+              ],
+            },
+          },
+        },
+        { type: "text", text: "Ada leads GTM." },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} isStreaming />);
+
+    const source = screen.getByRole("link", { name: "Source 1: Ada Lovelace (team/gtm/ada)" });
+    expect(source.closest("[data-sd-animate]")).toBeNull();
+    expect(source.querySelector("[data-sd-animate]")).toBeNull();
+  });
+
+  it("contains no animation spans once the message is no longer streaming", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_completed",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [{ type: "text", text: "Completed answer" }],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} isStreaming={false} />);
+
+    expect(screen.getByText("Completed answer")).toBeInTheDocument();
+    expect(document.querySelectorAll("[data-sd-animate]")).toHaveLength(0);
   });
 });
 

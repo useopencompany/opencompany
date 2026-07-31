@@ -1,5 +1,12 @@
 @import "@opencompany/ui/globals.css";
 @import "@xterm/xterm/css/xterm.css";
+@source "../node_modules/streamdown/dist/*.js";
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sd-animate] {
+    animation: none !important;
+  }
+}
 
 @theme {
   --color-canvas: #f7f7f5;

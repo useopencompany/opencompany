@@ -30,6 +30,7 @@ export function MessageBubble({
   allowActionApproval = false,
   readOnly = false,
   attachmentSrc,
+  isStreaming = false,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -41,6 +42,7 @@ export function MessageBubble({
   allowActionApproval?: boolean;
   readOnly?: boolean;
   attachmentSrc?: (messageId: string, attachment: GoatChatUiAttachment) => string | undefined;
+  isStreaming?: boolean;
 }) {
   if (message.role === "user") {
     return <UserMessageBubble message={message} {...(attachmentSrc ? { attachmentSrc } : {})} />;
@@ -56,6 +58,7 @@ export function MessageBubble({
       onActionApproval={onActionApproval}
       allowActionApproval={allowActionApproval}
       readOnly={readOnly}
+      isStreaming={isStreaming}
     />
   );
 }
@@ -70,6 +73,7 @@ function AssistantTurn({
   onActionApproval,
   allowActionApproval,
   readOnly,
+  isStreaming,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -80,6 +84,7 @@ function AssistantTurn({
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
   allowActionApproval: boolean;
   readOnly: boolean;
+  isStreaming: boolean;
 }) {
   const error = message.metadata?.error;
   const items = getOrderedAssistantItems(
@@ -90,6 +95,8 @@ function AssistantTurn({
   // Failed turns often end without any text part (sandbox start failure, disconnected auth);
   // the error must still get a bubble or the turn renders as nothing.
   const showStandaloneError = Boolean(error) && !items.some((item) => item.type === "text");
+  const lastItem = items.at(-1);
+  const animatedTextItemKey = isStreaming && lastItem?.type === "text" ? lastItem.key : null;
 
   // `nested` is set when rendering a subagent's own trace: its steps are historical, so they render
   // as plain read-only rows (no plan-implement / approval affordances) and no turn-level error.
@@ -100,6 +107,7 @@ function AssistantTurn({
           key={item.key}
           text={item.text}
           citations={item.citations}
+          isAnimating={!nested && item.key === animatedTextItemKey}
           {...(!nested && error ? { error } : {})}
         />
       );

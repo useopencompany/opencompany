@@ -14,6 +14,7 @@ import {
   type GoatCodexRuntimeView,
   START_TASK_TOOL_PART_TYPE,
   START_WORKFLOW_TOOL_PART_TYPE,
+  USE_ACTION_TOOL_PART_TYPE,
   WEB_FETCH_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
@@ -2699,7 +2700,7 @@ describe("GoatSurface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByText("Streaming answer")).toBeInTheDocument();
+    expect(document.querySelector(".session-markdown")?.textContent).toBe("Streaming answer");
     expect(screen.getByRole("status", { name: "Goat is working" })).toBeInTheDocument();
     expect(screen.getByText(/^\d+\.\ds$/)).toBeInTheDocument();
   });
@@ -3390,6 +3391,292 @@ describe("GoatSurface chat streaming UI", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("animates a native Goat answer while status is streaming, and stops once status is ready", () => {
+    chatMock.status = "streaming";
+    const chat = {
+      id: "chat_1",
+      title: "Chat",
+      model: DEFAULT_GOAT_MODEL,
+      messages: [
+        {
+          id: "assistant_1",
+          role: "assistant" as const,
+          metadata: { sessionId: "chat_1" },
+          parts: [{ type: "text" as const, text: "Streaming answer" }],
+        },
+      ],
+    };
+
+    const { rerender } = render(
+      <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chat} />,
+    );
+
+    expect(document.querySelector(".session-markdown")?.textContent).toBe("Streaming answer");
+    expect(document.querySelectorAll("[data-sd-animate]").length).toBeGreaterThan(0);
+
+    chatMock.status = "ready";
+    rerender(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chat} />);
+
+    expect(document.querySelectorAll("[data-sd-animate]")).toHaveLength(0);
+  });
+
+  it("does not reanimate completed native prose while an approval continuation is submitted", () => {
+    chatMock.status = "submitted";
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [
+                { type: "text", text: "I found the matching lead." },
+                {
+                  type: USE_ACTION_TOOL_PART_TYPE,
+                  toolCallId: "tool_action_approval",
+                  state: "approval-responded",
+                  input: {
+                    action: "lead.find_person_email",
+                    params: { email: "ada@example.com" },
+                  },
+                  approval: { id: "approval_1", approved: true },
+                },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(document.querySelector(".session-markdown")).toHaveTextContent(
+      "I found the matching lead.",
+    );
+    expect(document.querySelectorAll("[data-sd-animate]")).toHaveLength(0);
+  });
+
+  it("does not reanimate the previous native answer while the optimistic user message is last", async () => {
+    const user = userEvent.setup();
+
+    const { rerender } = render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [{ type: "text", text: "Previous completed answer" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Another question");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByText("Another question")).toBeInTheDocument();
+
+    // Simulates the AI SDK's `submitted` status landing right as the optimistic
+    // user row is appended, before any new assistant row exists.
+    chatMock.status = "submitted";
+    rerender(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [{ type: "text", text: "Previous completed answer" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(document.querySelectorAll("[data-sd-animate]")).toHaveLength(0);
+  });
+
+  it("only reanimates a Codex answer once engineRunning is true, not merely while submitting", async () => {
+    const user = userEvent.setup();
+    let resolveRequest: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const baseChat = {
+      id: "goat_chat_codex_1",
+      title: "Codex chat",
+      model: DEFAULT_GOAT_MODEL,
+      engine: "codex" as const,
+      messages: [
+        {
+          id: "assistant_prev",
+          role: "assistant" as const,
+          metadata: { sessionId: "goat_chat_codex_1" },
+          parts: [{ type: "text" as const, text: "Previous completed answer" }],
+        },
+      ],
+    };
+
+    const { rerender } = render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        codexConnected
+        initialChat={baseChat}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Follow up");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    // engineSubmitting is true here, but engineRunning is not yet: the previous
+    // completed answer must not reanimate.
+    expect(document.querySelectorAll("[data-sd-animate]")).toHaveLength(0);
+
+    await act(async () => {
+      resolveRequest?.(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            sessionId: "goat_chat_codex_1",
+            userMessageId: "goat_chat_msg_codex_user",
+            assistantMessageId: "goat_chat_msg_codex_assistant",
+            mode: "started",
+          }),
+          { status: 202, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    });
+
+    // engineRunning is now true and the new assistant row is the last message;
+    // simulate its content landing (mirrors an Electric-delivered update).
+    rerender(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        codexConnected
+        initialChat={{
+          ...baseChat,
+          messages: [
+            ...baseChat.messages,
+            {
+              id: "goat_chat_msg_codex_user",
+              role: "user",
+              metadata: { sessionId: "goat_chat_codex_1" },
+              parts: [{ type: "text", text: "Follow up" }],
+            },
+            {
+              id: "goat_chat_msg_codex_assistant",
+              role: "assistant",
+              metadata: { sessionId: "goat_chat_codex_1" },
+              parts: [{ type: "text", text: "Streaming Codex answer" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    const bubbles = document.querySelectorAll(".session-markdown");
+    const bubble = bubbles[bubbles.length - 1];
+    expect(bubble?.textContent).toBe("Streaming Codex answer");
+    expect(bubble?.querySelectorAll("[data-sd-animate]").length).toBeGreaterThan(0);
+  });
+
+  it("animates the active assistant answer for a session-backed task continuation", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_task_1",
+          title: "Morning workflow",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "opencompany",
+          messages: [
+            {
+              id: "task_user_1",
+              role: "user",
+              parts: [{ type: "text", text: "Run the morning workflow" }],
+            },
+            {
+              id: "task_assistant_1",
+              role: "assistant",
+              parts: [{ type: "text", text: "Partial workflow answer" }],
+            },
+          ],
+        }}
+        taskConversation={{
+          taskId: "goat_task_1",
+          status: "running",
+          startedAtMs: Date.now(),
+          sessionBacked: true,
+        }}
+      />,
+    );
+
+    const bubble = document.querySelector(".session-markdown");
+    expect(bubble?.textContent).toBe("Partial workflow answer");
+    expect(bubble?.querySelectorAll("[data-sd-animate]").length).toBeGreaterThan(0);
+  });
+
+  it("removes animation when a response is stopped but keeps partial Markdown repaired", async () => {
+    const user = userEvent.setup();
+    chatMock.status = "streaming";
+    const chat = {
+      id: "chat_1",
+      title: "Chat",
+      model: DEFAULT_GOAT_MODEL,
+      messages: [
+        {
+          id: "assistant_1",
+          role: "assistant" as const,
+          metadata: { sessionId: "chat_1" },
+          parts: [{ type: "text" as const, text: "Some **unfinished emphasis" }],
+        },
+      ],
+    };
+
+    const { rerender } = render(
+      <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chat} />,
+    );
+
+    expect(document.querySelectorAll("[data-sd-animate]").length).toBeGreaterThan(0);
+    expect(document.querySelector("strong")?.textContent).toBe("unfinished emphasis");
+
+    await user.click(screen.getByRole("button", { name: "Stop response" }));
+    expect(chatMock.stop).toHaveBeenCalledTimes(1);
+
+    chatMock.status = "ready";
+    rerender(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chat} />);
+
+    expect(document.querySelectorAll("[data-sd-animate]")).toHaveLength(0);
+    expect(document.querySelector("strong")?.textContent).toBe("unfinished emphasis");
   });
 });
 

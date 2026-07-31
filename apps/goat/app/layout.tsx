@@ -4,6 +4,7 @@ import { AuthKitProvider } from "@workos-inc/authkit-nextjs/components";
 import type { Metadata, Viewport } from "next";
 import type * as React from "react";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import "streamdown/styles.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

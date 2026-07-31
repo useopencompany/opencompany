@@ -12,10 +12,12 @@ export function AssistantTextBubble({
   text,
   citations = [],
   error,
+  isAnimating = false,
 }: {
   text: string;
   citations?: BrainCitation[];
   error?: string | undefined;
+  isAnimating?: boolean;
 }) {
   return (
     <div className="flex justify-start">
@@ -24,7 +26,7 @@ export function AssistantTextBubble({
           error ? "rounded-2xl rounded-bl-md bg-danger-bg px-3 py-2 text-danger" : "text-ink"
         }`}
       >
-        <Markdown content={text} />
+        <Markdown content={text} mode="streaming" isAnimating={isAnimating} />
         {citations.length > 0 ? <BrainCitationChips citations={citations} /> : null}
       </div>
     </div>

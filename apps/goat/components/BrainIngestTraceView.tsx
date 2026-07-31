@@ -111,7 +111,7 @@ export function BrainIngestTraceView({
 
       {trace.finalText.trim() ? (
         <div className="max-w-full break-words text-[14px] leading-6 text-ink/90 md:max-w-[72%]">
-          <Markdown content={trace.finalText} />
+          <Markdown content={trace.finalText} mode="static" />
         </div>
       ) : null}
 
