@@ -501,15 +501,41 @@ export async function settleGoatDurableTurn(input: {
         AND EXISTS (SELECT 1 FROM settled_turn)
       RETURNING task.*
     ),
+    workflow_origin_attachments AS (
+      SELECT origin.attachments, origin.attachment_texts
+      FROM goat.chat_messages AS origin
+      INNER JOIN projected_task AS task
+        ON task.session_id = origin.session_id
+      WHERE origin.role = 'user'
+      ORDER BY origin.created_at ASC, origin.id ASC
+      LIMIT 1
+    ),
     next_user_message AS (
       INSERT INTO goat.chat_messages (
-        id, session_id, role, content, created_at, updated_at
+        id,
+        session_id,
+        role,
+        content,
+        attachments,
+        attachment_texts,
+        created_at,
+        updated_at
       )
       SELECT
         ${next?.userMessageId ?? null},
         task.session_id,
         'user',
         ${next?.prompt ?? null},
+        CASE
+          WHEN ${next?.engine ?? null}::text IN ('codex', 'claude_code')
+            THEN (SELECT attachments FROM workflow_origin_attachments)
+          ELSE NULL
+        END,
+        CASE
+          WHEN ${next?.engine ?? null}::text IN ('codex', 'claude_code')
+            THEN (SELECT attachment_texts FROM workflow_origin_attachments)
+          ELSE NULL
+        END,
         ${input.completedAt},
         ${input.completedAt}
       FROM projected_task AS task

@@ -1,5 +1,9 @@
 import { getDb } from "@opencompany/db/client";
-import { goatChatSessions, goatTasks } from "@opencompany/db/goat-schema";
+import {
+  type GoatChatMessageAttachment,
+  goatChatSessions,
+  goatTasks,
+} from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { generateGoatChatTitle } from "@/lib/chat-title";
 
@@ -306,6 +310,8 @@ describe("createGoatTaskFromWorkflow", () => {
       workspaceId: "ws_1",
       mention: { id: "mixed-workflow" },
       description: "Run it",
+      attachments: [attachment],
+      attachmentTexts: { [attachment.id]: "Extracted report text." },
     });
 
     expect(mocks.resolveGoatSkillMentions).toHaveBeenCalledWith({
@@ -316,6 +322,8 @@ describe("createGoatTaskFromWorkflow", () => {
       expect.objectContaining({
         model: "moonshotai/kimi-k2.6",
         workflowId: "mixed-workflow",
+        attachments: [attachment],
+        attachmentTexts: { [attachment.id]: "Extracted report text." },
       }),
     );
   });
@@ -379,3 +387,13 @@ function updateBuilder<T>(result: T) {
   };
   return builder;
 }
+
+const attachment: GoatChatMessageAttachment = {
+  id: "goat_chat_att_1",
+  kind: "docx",
+  mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  filename: "report.docx",
+  sizeBytes: 1024,
+  blobPathname: "goat-chat/user_1/report.docx",
+  blobUrl: "https://blob.test/goat-chat/user_1/report.docx",
+};

@@ -2,6 +2,7 @@ import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
 import type {
+  GoatChatMessageAttachment,
   GoatHarnessEngine,
   GoatTask,
   GoatTaskToolName,
@@ -191,6 +192,8 @@ export async function createGoatTaskFromWorkflow(input: {
   workspaceId: string | null;
   mention: GoatWorkflowMentionRef;
   description: string;
+  attachments?: GoatChatMessageAttachment[];
+  attachmentTexts?: Record<string, string> | null;
 }): Promise<GoatTask> {
   const workflow = await resolveGoatWorkflowMention({
     workspaceId: input.workspaceId,
@@ -212,6 +215,8 @@ export async function createGoatTaskFromWorkflow(input: {
     model: prepared.stepSelections[0]!.model,
     name: workflow.name,
     harnessSpec: prepared.harnessSpec,
+    ...(input.attachments ? { attachments: input.attachments } : {}),
+    ...(input.attachmentTexts !== undefined ? { attachmentTexts: input.attachmentTexts } : {}),
     // `workflowId` holds the workspace-scoped workflow slug.
     workflowId: workflow.id,
   });

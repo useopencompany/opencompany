@@ -3,7 +3,12 @@
 import { randomUUID } from "node:crypto";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
-import type { GoatHarnessEngine, GoatHarnessSpec, GoatTask } from "@opencompany/db/goat-schema";
+import type {
+  GoatChatMessageAttachment,
+  GoatHarnessEngine,
+  GoatHarnessSpec,
+  GoatTask,
+} from "@opencompany/db/goat-schema";
 import {
   goatTaskEvents,
   goatTaskMessages,
@@ -579,6 +584,8 @@ export async function createGoatTaskForUser(input: {
   scheduledFor?: Date;
   workflowId?: string;
   workflowBrainRef?: string;
+  attachments?: GoatChatMessageAttachment[];
+  attachmentTexts?: Record<string, string> | null;
 }) {
   const initialTaskSpawningState = await loadGoatTaskSpawningState(input.userWorkosId);
   if (initialTaskSpawningState === null) {
@@ -604,7 +611,9 @@ export async function createGoatTaskForUser(input: {
     maxModelSteps: 16,
     resultMode: "assistant_final",
   };
-  if (goatTaskSessionExecutionEnabled()) {
+  const sessionExecutionEnabled = goatTaskSessionExecutionEnabled();
+  const attachments = input.attachments ?? [];
+  if (sessionExecutionEnabled) {
     let task: GoatTask;
     try {
       task = await createGoatTaskSession({
@@ -618,6 +627,8 @@ export async function createGoatTaskForUser(input: {
         scheduledFor: input.scheduledFor ?? null,
         workflowId: input.workflowId ?? null,
         workflowBrainRef: input.workflowBrainRef ?? null,
+        attachments,
+        attachmentTexts: input.attachmentTexts ?? null,
         now,
       });
     } catch (error) {
@@ -641,6 +652,9 @@ export async function createGoatTaskForUser(input: {
       });
     });
     return task;
+  }
+  if (attachments.length > 0) {
+    throw new Error("Workflow attachments require durable task sessions.");
   }
 
   const modelMessage = { role: "user", content: input.prompt };

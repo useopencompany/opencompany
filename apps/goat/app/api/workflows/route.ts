@@ -1,5 +1,9 @@
 import { after, NextResponse } from "next/server";
 import { currentGoatUser } from "@/lib/auth";
+import {
+  extractGoatChatAttachmentTexts,
+  parseGoatChatAttachmentsInput,
+} from "@/lib/chat-attachments";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { GoatSkillMentionError } from "@/lib/skills";
@@ -62,6 +66,17 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  const parsedAttachments = parseGoatChatAttachmentsInput(
+    input.attachments,
+    context.user.workosUserId,
+  );
+  if (!parsedAttachments.ok) {
+    return NextResponse.json({ error: parsedAttachments.error }, { status: 400 });
+  }
+  const attachmentTexts =
+    parsedAttachments.attachments.length > 0
+      ? await extractGoatChatAttachmentTexts(parsedAttachments.attachments)
+      : null;
 
   try {
     const task = await createGoatTaskFromWorkflow({
@@ -69,6 +84,8 @@ export async function POST(request: Request) {
       workspaceId: context.workspace.id,
       mention: parsedMention.mention,
       description,
+      attachments: parsedAttachments.attachments,
+      attachmentTexts,
     });
     after(
       generateGoatWorkflowTaskTitle({
