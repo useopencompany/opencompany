@@ -295,6 +295,53 @@ describe("applyCodexEventToUiMessageParts", () => {
     });
   });
 
+  it("projects native turn plan updates without offering implementation", () => {
+    const parts = reduce(
+      [],
+      [
+        {
+          method: "turn/plan/updated",
+          params: {
+            turnId: "turn_1",
+            plan: [
+              { step: "Inspect the renderer", status: "completed" },
+              { step: "Patch native plan support", status: "inProgress" },
+            ],
+          },
+        },
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_PLAN_TOOL_NAME,
+        toolCallId: "turn-plan:turn_1",
+        state: "input-available",
+        input: {
+          label: "Plan",
+          source: "turn_plan",
+          text: "[x] Inspect the renderer\n[~] Patch native plan support",
+          plan: [
+            { step: "Inspect the renderer", status: "completed" },
+            { step: "Patch native plan support", status: "inProgress" },
+          ],
+        },
+      },
+    ]);
+
+    const finalized = finalizeCodexUiMessageParts(parts, "completed").parts;
+    expect(finalized[0]).toMatchObject({
+      state: "output-available",
+      output: {
+        status: "completed",
+        source: "turn_plan",
+        text: "[x] Inspect the renderer\n[~] Patch native plan support",
+      },
+    });
+    expect(offerCodexPlanImplementation(finalized).changed).toBe(false);
+  });
+
   it("offers implementation only through the explicit terminal Plan-mode transition", () => {
     const noPlan = offerCodexPlanImplementation([{ type: "text", text: "Done" }]);
     expect(noPlan.changed).toBe(false);

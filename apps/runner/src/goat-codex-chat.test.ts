@@ -2,6 +2,7 @@ import { CODEX_COMMAND_TOOL_PART_TYPE, type CodexUiMessagePart } from "@opencomp
 import type { GoatWorkflowHarnessSpec } from "@opencompany/db/goat-harness";
 import type { GoatTask } from "@opencompany/db/goat-schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CodexAppServerRequest } from "./codex-app-server";
 import type { RunnerEnv } from "./env";
 import {
   claimCodexChatRecovery,
@@ -154,6 +155,59 @@ describe("runGoatCodexChatTurn", () => {
       },
     );
     attachmentMocks.downloadBlobBytes.mockResolvedValue(Buffer.from("image bytes"));
+  });
+
+  it("fails closed for native Codex approval and permission requests", async () => {
+    appServerMocks.runCodexAppServerTurn.mockImplementationOnce(
+      async (input: {
+        onBeforeEngineTurnStart?: (turnIds: string[]) => Promise<void>;
+        onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
+      }) => {
+        await input.onBeforeEngineTurnStart?.(["turn_before"]);
+        expect(input.onServerRequest).toBeTypeOf("function");
+        const onServerRequest = input.onServerRequest!;
+        await expect(
+          onServerRequest({
+            id: "approval_1",
+            method: "item/commandExecution/requestApproval",
+            params: { threadId: "thread_1", turnId: "turn_1", itemId: "cmd_1" },
+          }),
+        ).resolves.toEqual({ decision: "decline" });
+        await expect(
+          onServerRequest({
+            id: "approval_2",
+            method: "item/fileChange/requestApproval",
+            params: { threadId: "thread_1", turnId: "turn_1", itemId: "patch_1" },
+          }),
+        ).resolves.toEqual({ decision: "decline" });
+        await expect(
+          onServerRequest({
+            id: "approval_3",
+            method: "item/permissions/requestApproval",
+            params: {
+              threadId: "thread_1",
+              turnId: "turn_1",
+              itemId: "permissions_1",
+              permissions: [{ type: "network" }],
+            },
+          }),
+        ).resolves.toEqual({ permissions: [] });
+        return {
+          sessionId: "thread_existing",
+          status: "success" as const,
+          result: "Done.",
+          error: null,
+          usage: null,
+          goal: null,
+        };
+      },
+    );
+
+    await runGoatCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      env: env(),
+    });
   });
 
   it("materializes uploaded files and passes screenshots to Codex as local images", async () => {
