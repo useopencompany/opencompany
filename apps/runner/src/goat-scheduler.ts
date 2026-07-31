@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { latestCronRunAt, nextCronRunAt } from "@opencompany/agent-runtime";
+import {
+  type CaptureGoatTaskSpawnedInput,
+  captureGoatTaskSpawned,
+} from "@opencompany/analytics/goat/server";
 import type { GoatHarnessSpec } from "@opencompany/db/goat-schema";
 import {
   createGoatTaskSession,
@@ -57,6 +61,13 @@ export async function sweepDueGoatTaskSchedules(
     if (result.status === "created") {
       created += 1;
       input.onTaskCreated?.();
+      await captureGoatTaskSpawned(result.analytics).catch((error) => {
+        console.warn("Goat scheduled task spawned analytics failed.", {
+          event: "goat.scheduled_task_spawned_analytics_failed",
+          task_id: result.taskId,
+          error,
+        });
+      });
     }
   }
 
@@ -231,7 +242,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
         return { status: "duplicate" as const };
       }
 
-      const taskId = await createScheduledTask(tx, {
+      const createdTask = await createScheduledTask(tx, {
         userWorkosId: workflow.userWorkosId,
         workspaceId: workflow.workspaceId,
         prompt: workflow.prompt,
@@ -245,7 +256,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
       await tx.execute(sql`
         UPDATE goat.workflow_schedule_runs
         SET status = 'created',
-            task_id = ${taskId},
+            task_id = ${createdTask.taskId},
             updated_at = ${now}
         WHERE id = ${runId}
       `);
@@ -258,7 +269,11 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
         WHERE id = ${workflow.id}
       `);
 
-      return { status: "created" as const, taskId };
+      return {
+        status: "created" as const,
+        taskId: createdTask.taskId,
+        analytics: createdTask,
+      };
     }
 
     const nextRunAt = toDate(schedule.nextRunAt);
@@ -310,7 +325,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
       return { status: "duplicate" as const };
     }
 
-    const taskId = await createScheduledTask(tx, {
+    const createdTask = await createScheduledTask(tx, {
       userWorkosId: schedule.userWorkosId,
       prompt: schedule.prompt,
       name: schedule.name,
@@ -323,7 +338,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
     await tx.execute(sql`
       UPDATE goat.task_schedule_runs
       SET status = 'created',
-          task_id = ${taskId},
+          task_id = ${createdTask.taskId},
           updated_at = ${now}
       WHERE id = ${runId}
     `);
@@ -336,7 +351,11 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
       WHERE id = ${schedule.id}
     `);
 
-    return { status: "created" as const, taskId };
+    return {
+      status: "created" as const,
+      taskId: createdTask.taskId,
+      analytics: createdTask,
+    };
   });
 }
 
@@ -353,7 +372,7 @@ async function createScheduledTask(
     scheduledFor: Date;
     now: Date;
   },
-) {
+): Promise<CaptureGoatTaskSpawnedInput> {
   if (goatTaskSessionExecutionEnabled()) {
     const task = await createGoatTaskSession(
       {
@@ -369,7 +388,17 @@ async function createScheduledTask(
       },
       tx,
     );
-    return task.id;
+    return {
+      userWorkosId: task.userWorkosId,
+      workspaceId: input.workspaceId ?? task.harnessSpec.workflow?.workspaceId ?? null,
+      taskId: task.id,
+      displayId: task.displayId,
+      engine: task.harnessSpec.engine,
+      model: task.model,
+      workflowId: task.workflowId,
+      scheduleId: task.scheduleId,
+      trigger: "schedule",
+    };
   }
 
   const taskId = `goat_task_${randomUUID()}`;
@@ -436,7 +465,16 @@ async function createScheduledTask(
       ${input.now}
     FROM created_task AS task
   `);
-  return taskId;
+  return {
+    userWorkosId: input.userWorkosId,
+    workspaceId: input.workspaceId ?? input.harnessSpec.workflow?.workspaceId ?? null,
+    taskId,
+    engine: input.harnessSpec.engine,
+    model: input.harnessSpec.model,
+    workflowId: input.workflowId ?? null,
+    scheduleId: input.scheduleId ?? null,
+    trigger: "schedule",
+  };
 }
 
 function rowsFromExecute<T>(result: unknown): T[] {

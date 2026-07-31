@@ -12,12 +12,20 @@ import {
 
 const mocks = vi.hoisted(() => {
   return {
+    after: vi.fn((work: Promise<unknown> | (() => unknown)) =>
+      typeof work === "function" ? work() : work,
+    ),
+    captureGoatTaskSpawned: vi.fn(async () => undefined),
     execute: vi.fn(),
     select: vi.fn(),
     triggerGoatCodexChatWake: vi.fn(),
     triggerGoatTaskRun: vi.fn(),
   };
 });
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatTaskSpawned: mocks.captureGoatTaskSpawned,
+}));
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: () => ({
@@ -37,6 +45,10 @@ vi.mock("@/lib/integrations/google-data", () => ({
 
 vi.mock("@/lib/auth", () => ({
   currentGoatUser: vi.fn(),
+}));
+
+vi.mock("next/server", () => ({
+  after: mocks.after,
 }));
 
 vi.mock("next/cache", () => ({
@@ -116,6 +128,19 @@ describe("createGoatTaskForUser", () => {
 
     expect(task).toMatchObject({ id: "task_1", status: "queued", stage: "queued" });
     expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.captureGoatTaskSpawned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        workspaceId: null,
+        taskId: "task_1",
+        displayId: "TASK-1",
+        engine: "opencompany",
+        model: DEFAULT_GOAT_MODEL,
+        workflowId: undefined,
+        scheduleId: undefined,
+        trigger: "manual",
+      }),
+    );
     expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
     expect(warnSpy).toHaveBeenCalledWith(
       "Goat durable task wake failed; the turn remains queued for polling.",
@@ -145,6 +170,7 @@ describe("createGoatTaskForUser", () => {
 
     expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
     expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
   });
 
   it("reports a concurrent disable when the atomic insert is rejected", async () => {
@@ -169,6 +195,7 @@ describe("createGoatTaskForUser", () => {
       }),
     ).rejects.toThrow("Tasks & Workflows is disabled");
     expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
+    expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
   });
 
   it("reports an unknown user separately from a disabled preference", async () => {
@@ -186,6 +213,7 @@ describe("createGoatTaskForUser", () => {
       }),
     ).rejects.toThrow("unknown user");
     expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.captureGoatTaskSpawned).not.toHaveBeenCalled();
   });
 });
 
