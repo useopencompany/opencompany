@@ -34,6 +34,7 @@ const CONTEXT: GoatActionExecuteContext = {
   currentDate: new Date("2026-07-18T00:00:00.000Z"),
   userTimezone: "UTC",
 };
+const LINEAR_MAX_MARKDOWN_BODY_CHARS = 249_999;
 
 function connectedLinearState(capabilityModes: Record<string, unknown> = {}) {
   return {
@@ -150,6 +151,23 @@ describe("normalizeLinearCreateIssueInput", () => {
       normalizeLinearCreateIssueInput({ title: "Ship", team: "GOAT", deleteAll: true }),
     ).toThrow("Unknown parameter");
   });
+
+  it("allows issue descriptions up to Linear's documented message body cap", () => {
+    const description = "x".repeat(LINEAR_MAX_MARKDOWN_BODY_CHARS);
+    expect(normalizeLinearCreateIssueInput({ title: "Ship", team: "GOAT", description })).toEqual({
+      title: "Ship",
+      team: "GOAT",
+      description,
+    });
+
+    expect(() =>
+      normalizeLinearCreateIssueInput({
+        title: "Ship",
+        team: "GOAT",
+        description: `${description}x`,
+      }),
+    ).toThrow('"description" exceeds 249999 characters');
+  });
 });
 
 describe("normalizeLinearUpdateIssueInput", () => {
@@ -189,6 +207,18 @@ describe("normalizeLinearUpdateIssueInput", () => {
       '"project" must be a non-empty string',
     );
   });
+
+  it("allows replacement descriptions up to Linear's documented message body cap", () => {
+    const description = "x".repeat(LINEAR_MAX_MARKDOWN_BODY_CHARS);
+    expect(normalizeLinearUpdateIssueInput({ id: "GOAT-123", description })).toEqual({
+      id: "GOAT-123",
+      description,
+    });
+
+    expect(() =>
+      normalizeLinearUpdateIssueInput({ id: "GOAT-123", description: `${description}x` }),
+    ).toThrow('"description" exceeds 249999 characters');
+  });
 });
 
 describe("normalizeLinearCreateCommentInput", () => {
@@ -215,6 +245,18 @@ describe("normalizeLinearCreateCommentInput", () => {
         notifyAll: true,
       }),
     ).toThrow("Unknown parameter");
+  });
+
+  it("allows comments up to Linear's documented message body cap", () => {
+    const body = "x".repeat(LINEAR_MAX_MARKDOWN_BODY_CHARS);
+    expect(normalizeLinearCreateCommentInput({ issueId: "GOAT-123", body })).toEqual({
+      issueId: "GOAT-123",
+      body,
+    });
+
+    expect(() =>
+      normalizeLinearCreateCommentInput({ issueId: "GOAT-123", body: `${body}x` }),
+    ).toThrow('"body" exceeds 249999 characters');
   });
 });
 
@@ -250,13 +292,30 @@ describe("resolveLinearActions", () => {
       },
       params: {
         required: ["title", "team"],
+        properties: {
+          description: {
+            maxLength: LINEAR_MAX_MARKDOWN_BODY_CHARS,
+          },
+        },
       },
     });
     expect(catalog?.actions.find((action) => action.id === "linear.update_issue")).toMatchObject({
       params: {
         properties: {
+          description: {
+            maxLength: LINEAR_MAX_MARKDOWN_BODY_CHARS,
+          },
           project: {
             type: ["string", "null"],
+          },
+        },
+      },
+    });
+    expect(catalog?.actions.find((action) => action.id === "linear.create_comment")).toMatchObject({
+      params: {
+        properties: {
+          body: {
+            maxLength: LINEAR_MAX_MARKDOWN_BODY_CHARS,
           },
         },
       },
