@@ -353,6 +353,7 @@ export function GoatSurface({
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const pendingProgrammaticPromptRef = useRef<string | null>(null);
+  const backgroundTaskFocusOriginRef = useRef<Element | null>(null);
   const onboardingKickoffReadRef = useRef(false);
   const onboardingKickoffPromptRef = useRef<string | null>(null);
   const activeTurnStartedAtRef = useRef<number | null>(null);
@@ -1155,6 +1156,34 @@ export function GoatSurface({
     setChatSearchQuery("");
   }, []);
 
+  const prepareMainComposerFocusRestoreAfterBackgroundTask = () => {
+    const activeElement = document.activeElement;
+    backgroundTaskFocusOriginRef.current =
+      activeElement &&
+      (activeElement === inputRef.current || Boolean(formRef.current?.contains(activeElement)))
+        ? activeElement
+        : null;
+  };
+
+  const refocusMainComposerAfterBackgroundTask = () => {
+    requestAnimationFrame(() => {
+      if (!mountedRef.current) return;
+      const focusOrigin = backgroundTaskFocusOriginRef.current;
+      backgroundTaskFocusOriginRef.current = null;
+      if (!focusOrigin) return;
+      const activeElement = document.activeElement;
+      if (
+        activeElement &&
+        activeElement !== document.body &&
+        activeElement !== focusOrigin &&
+        activeElement !== inputRef.current
+      ) {
+        return;
+      }
+      inputRef.current?.focus({ preventScroll: true });
+    });
+  };
+
   const jumpToChat = useCallback(
     (chat: GoatChatSummaryView) => {
       closeCommandPalette();
@@ -1289,6 +1318,7 @@ export function GoatSurface({
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
+      prepareMainComposerFocusRestoreAfterBackgroundTask();
       setBackgroundTaskSubmitting(true);
       void startGoatAdHocTask({
         description: prompt,
@@ -1311,7 +1341,9 @@ export function GoatSurface({
           );
         })
         .finally(() => {
-          if (mountedRef.current) setBackgroundTaskSubmitting(false);
+          if (!mountedRef.current) return;
+          setBackgroundTaskSubmitting(false);
+          refocusMainComposerAfterBackgroundTask();
         });
       return;
     }
@@ -1327,6 +1359,7 @@ export function GoatSurface({
       setInput("");
       setMentionToken(null);
       setSelectedMentions([]);
+      prepareMainComposerFocusRestoreAfterBackgroundTask();
       setBackgroundTaskSubmitting(true);
       void startGoatWorkflowTask({
         workflow: workflowMention,
@@ -1346,7 +1379,9 @@ export function GoatSurface({
           );
         })
         .finally(() => {
-          if (mountedRef.current) setBackgroundTaskSubmitting(false);
+          if (!mountedRef.current) return;
+          setBackgroundTaskSubmitting(false);
+          refocusMainComposerAfterBackgroundTask();
         });
       return;
     }

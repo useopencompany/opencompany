@@ -1465,7 +1465,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(await screen.findByRole("option", { name: /Morning Test/i }));
     expect(textarea).toHaveValue("#morning-test ");
     await user.type(textarea, "run today's checks");
-    await user.click(screen.getByRole("button", { name: "Start task" }));
+    await user.type(textarea, "{Enter}");
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1486,6 +1486,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+    await waitFor(() => expect(textarea).toHaveFocus());
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
@@ -1636,6 +1637,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+    await waitFor(() => expect(textarea).toHaveFocus());
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
