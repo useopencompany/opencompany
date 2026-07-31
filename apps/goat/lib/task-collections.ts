@@ -23,6 +23,7 @@ export type GoatTaskRow = {
   display_id: string;
   name: string;
   user_workos_id: string;
+  workspace_id: string | null;
   prompt: string;
   model: string;
   session_id: string | null;

@@ -1,5 +1,5 @@
 import { currentGoatUser } from "@/lib/auth";
-import { loadGoatChatSessionByIdForUser } from "@/lib/chat";
+import { loadGoatTaskChatSessionByIdForWorkspace } from "@/lib/chat";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { buildGoatHarnessRun } from "@/lib/task-harness-run";
 import { getCurrentUserGoatTaskRun } from "@/lib/tasks";
@@ -23,10 +23,9 @@ export async function GET(_request: Request, { params }: RouteContext) {
 
   const { task, messages, events, modelUsage, toolUsage, sandboxUsage } = runData;
   const chat = task.sessionId
-    ? await loadGoatChatSessionByIdForUser({
-        userWorkosId: context.user.workosUserId,
+    ? await loadGoatTaskChatSessionByIdForWorkspace({
+        workspaceId: context.workspace.id,
         sessionId: task.sessionId,
-        kind: "task",
       })
     : null;
   return Response.json(

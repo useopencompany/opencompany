@@ -468,6 +468,7 @@ function task(overrides: Partial<GoatTask> = {}): GoatTask {
     displayId: "TASK-1",
     name: "Research Marseille",
     userWorkosId: "user_1",
+    workspaceId: "workspace_1",
     prompt: "Research Marseille",
     model: "openai/gpt-5.4-mini",
     sessionId: null,

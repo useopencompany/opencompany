@@ -2637,6 +2637,9 @@ export const goatTasks = goat.table(
     userWorkosId: text("user_workos_id")
       .notNull()
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id").references(() => goatWorkspaces.id, {
+      onDelete: "set null",
+    }),
     prompt: text("prompt").notNull(),
     model: text("model").$type<AgentModelId>().notNull(),
     sessionId: text("session_id").references(() => goatChatSessions.id, {
@@ -2678,6 +2681,11 @@ export const goatTasks = goat.table(
     ),
     userArchivedCreatedAtIdx: index("goat_tasks_user_archived_created_at_idx").on(
       table.userWorkosId,
+      table.archivedAt,
+      table.createdAt,
+    ),
+    workspaceArchivedCreatedAtIdx: index("goat_tasks_workspace_archived_created_at_idx").on(
+      table.workspaceId,
       table.archivedAt,
       table.createdAt,
     ),
@@ -4000,6 +4008,10 @@ export const goatTasksRelations = relations(goatTasks, ({ one, many }) => ({
   user: one(goatUsers, {
     fields: [goatTasks.userWorkosId],
     references: [goatUsers.workosUserId],
+  }),
+  workspace: one(goatWorkspaces, {
+    fields: [goatTasks.workspaceId],
+    references: [goatWorkspaces.id],
   }),
   session: one(goatChatSessions, {
     fields: [goatTasks.sessionId],

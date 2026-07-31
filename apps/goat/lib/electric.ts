@@ -107,11 +107,11 @@ const ELECTRIC_CURSOR_PARAMS = ["offset", "handle", "live", "cursor", "replica"]
 const SHAPE_SCOPES = {
   tasks: {
     table: "goat.tasks",
-    where: scopedUserWhere,
+    where: scopedWorkspaceTaskWhere,
   },
   "goat.tasks": {
     table: "goat.tasks",
-    where: scopedUserWhere,
+    where: scopedWorkspaceTaskWhere,
   },
   task_schedules: {
     table: "goat.task_schedules",
@@ -123,43 +123,43 @@ const SHAPE_SCOPES = {
   },
   task_messages: {
     table: "goat.task_messages",
-    where: scopedTaskWhere,
+    where: scopedTaskChildWhere,
   },
   "goat.task_messages": {
     table: "goat.task_messages",
-    where: scopedTaskWhere,
+    where: scopedTaskChildWhere,
   },
   task_events: {
     table: "goat.task_events",
-    where: scopedTaskWhere,
+    where: scopedTaskChildWhere,
   },
   "goat.task_events": {
     table: "goat.task_events",
-    where: scopedTaskWhere,
+    where: scopedTaskChildWhere,
   },
   task_model_usage: {
     table: "goat.task_model_usage",
-    where: scopedTaskWhere,
+    where: scopedTaskChildWhere,
   },
   "goat.task_model_usage": {
     table: "goat.task_model_usage",
-    where: scopedTaskWhere,
+    where: scopedTaskChildWhere,
   },
   task_tool_usage: {
     table: "goat.task_tool_usage",
-    where: scopedTaskWhere,
+    where: scopedTaskChildWhere,
   },
   "goat.task_tool_usage": {
     table: "goat.task_tool_usage",
-    where: scopedTaskWhere,
+    where: scopedTaskChildWhere,
   },
   task_sandbox_usage: {
     table: "goat.task_sandbox_usage",
-    where: scopedTaskWhere,
+    where: scopedTaskChildWhere,
   },
   "goat.task_sandbox_usage": {
     table: "goat.task_sandbox_usage",
-    where: scopedTaskWhere,
+    where: scopedTaskChildWhere,
   },
   chat_messages: {
     table: "goat.chat_messages",
@@ -321,17 +321,49 @@ export function buildGoatElectricOriginUrl(input: {
   return originUrl;
 }
 
-function scopedTaskWhere(userWorkosId: string, requestUrl: URL): ShapeWhere {
+function scopedWorkspaceTaskWhere(
+  userWorkosId: string,
+  _requestUrl: URL,
+  context: ShapeWhereContext,
+): ShapeWhere {
+  if (!context.workspaceId) return scopedUserWhere(userWorkosId);
+
+  return {
+    clause: `("workspace_id" = $2 OR ("workspace_id" IS NULL AND "user_workos_id" = $1))`,
+    params: [userWorkosId, context.workspaceId],
+  };
+}
+
+function scopedTaskChildWhere(
+  userWorkosId: string,
+  requestUrl: URL,
+  context: ShapeWhereContext,
+): ShapeWhere {
   const taskId = requestUrl.searchParams.get("task_id")?.trim();
-  if (!taskId) {
+  if (!context.workspaceId) {
+    if (!taskId) {
+      return {
+        clause: `"user_workos_id" = $1`,
+        params: [userWorkosId],
+      };
+    }
     return {
-      clause: `"user_workos_id" = $1`,
-      params: [userWorkosId],
+      clause: `"user_workos_id" = $1 AND "task_id" = $2`,
+      params: [userWorkosId, taskId],
     };
   }
+
+  const params = [userWorkosId, context.workspaceId];
+  const clauses = [
+    `"task_id" IN (SELECT task."id" FROM "goat"."tasks" AS task WHERE task."workspace_id" = $2 OR (task."workspace_id" IS NULL AND task."user_workos_id" = $1))`,
+  ];
+  if (taskId) {
+    params.push(taskId);
+    clauses.push(`"task_id" = $${params.length}`);
+  }
   return {
-    clause: `"user_workos_id" = $1 AND "task_id" = $2`,
-    params: [userWorkosId, taskId],
+    clause: clauses.join(" AND "),
+    params,
   };
 }
 

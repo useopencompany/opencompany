@@ -2,21 +2,25 @@ import { describe, expect, it } from "vitest";
 import { buildGoatElectricOriginUrl, hasInvalidElectricCloudSecretPair } from "@/lib/electric";
 
 describe("buildGoatElectricOriginUrl", () => {
-  it("scopes goat.tasks to the authenticated WorkOS user", () => {
+  it("scopes goat.tasks to the active workspace plus legacy private tasks", () => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com/",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.tasks&live=true&where=1=1",
       ),
       userWorkosId: "user_123",
+      workspaceId: "workspace_123",
     });
 
     expect(url).not.toBeNull();
     expect(url?.origin).toBe("https://electric.example.com");
     expect(url?.pathname).toBe("/v1/shape");
     expect(url?.searchParams.get("table")).toBe("goat.tasks");
-    expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1');
+    expect(url?.searchParams.get("where")).toBe(
+      '("workspace_id" = $2 OR ("workspace_id" IS NULL AND "user_workos_id" = $1))',
+    );
     expect(url?.searchParams.get("params[1]")).toBe("user_123");
+    expect(url?.searchParams.get("params[2]")).toBe("workspace_123");
     expect(url?.searchParams.get("live")).toBe("true");
     expect(url?.searchParams.get("where")).not.toBe("1=1");
   });
@@ -31,32 +35,41 @@ describe("buildGoatElectricOriginUrl", () => {
     expect(url).toBeNull();
   });
 
-  it("scopes goat.task_messages to the user and trusted task id", () => {
+  it("scopes goat.task_messages to workspace-visible tasks and trusted task id", () => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         "https://goat.example.com/api/electric/v1/shape?table=goat.task_messages&task_id=goat_task_1&where=1=1",
       ),
       userWorkosId: "user_123",
+      workspaceId: "workspace_123",
     });
 
     expect(url?.searchParams.get("table")).toBe("goat.task_messages");
-    expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1 AND "task_id" = $2');
+    const where = url?.searchParams.get("where") ?? "";
+    expect(where).toContain('"task_id" IN');
+    expect(where).toContain('task."workspace_id" = $2');
+    expect(where).toContain('"task_id" = $3');
     expect(url?.searchParams.get("params[1]")).toBe("user_123");
-    expect(url?.searchParams.get("params[2]")).toBe("goat_task_1");
+    expect(url?.searchParams.get("params[2]")).toBe("workspace_123");
+    expect(url?.searchParams.get("params[3]")).toBe("goat_task_1");
   });
 
-  it("scopes goat.task_events to the user when no task id is requested", () => {
+  it("scopes goat.task_events to workspace-visible tasks when no task id is requested", () => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL("https://goat.example.com/api/electric/v1/shape?table=goat.task_events"),
       userWorkosId: "user_123",
+      workspaceId: "workspace_123",
     });
 
     expect(url?.searchParams.get("table")).toBe("goat.task_events");
-    expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1');
+    const where = url?.searchParams.get("where") ?? "";
+    expect(where).toContain('"task_id" IN');
+    expect(where).toContain('task."workspace_id" = $2');
     expect(url?.searchParams.get("params[1]")).toBe("user_123");
-    expect(url?.searchParams.get("params[2]")).toBeNull();
+    expect(url?.searchParams.get("params[2]")).toBe("workspace_123");
+    expect(url?.searchParams.get("params[3]")).toBeNull();
   });
 
   it("scopes goat.chat_messages to an open chat owned by the user and trusted session id", () => {
@@ -150,19 +163,24 @@ describe("buildGoatElectricOriginUrl", () => {
     "goat.task_model_usage",
     "goat.task_tool_usage",
     "goat.task_sandbox_usage",
-  ])("scopes %s to the user and trusted task id", (table) => {
+  ])("scopes %s to workspace-visible tasks and trusted task id", (table) => {
     const url = buildGoatElectricOriginUrl({
       electricUrl: "https://electric.example.com",
       requestUrl: new URL(
         `https://goat.example.com/api/electric/v1/shape?table=${table}&task_id=goat_task_1&where=1=1`,
       ),
       userWorkosId: "user_123",
+      workspaceId: "workspace_123",
     });
 
     expect(url?.searchParams.get("table")).toBe(table);
-    expect(url?.searchParams.get("where")).toBe('"user_workos_id" = $1 AND "task_id" = $2');
+    const where = url?.searchParams.get("where") ?? "";
+    expect(where).toContain('"task_id" IN');
+    expect(where).toContain('task."workspace_id" = $2');
+    expect(where).toContain('"task_id" = $3');
     expect(url?.searchParams.get("params[1]")).toBe("user_123");
-    expect(url?.searchParams.get("params[2]")).toBe("goat_task_1");
+    expect(url?.searchParams.get("params[2]")).toBe("workspace_123");
+    expect(url?.searchParams.get("params[3]")).toBe("goat_task_1");
   });
 
   it("scopes goat.integrations to the user's personal rows plus the active workspace", () => {

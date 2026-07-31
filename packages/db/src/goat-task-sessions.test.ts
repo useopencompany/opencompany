@@ -179,6 +179,7 @@ function taskRow(spec: GoatHarnessSpec = harnessSpec) {
     displayId: "TASK-1",
     name: "Market research",
     userWorkosId: "user_1",
+    workspaceId: "workspace_1",
     prompt: "Research the market.",
     model: spec.model,
     sessionId: "goat_chat_1",

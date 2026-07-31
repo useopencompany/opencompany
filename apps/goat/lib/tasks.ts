@@ -49,13 +49,16 @@ export type ContinueTaskResult = {
 };
 
 export async function listCurrentUserGoatTasks() {
-  const { user } = await currentGoatUser();
+  const { user, workspace } = await currentGoatUser();
   return getDb()
     .select()
     .from(goatTasks)
     .where(
       and(
-        eq(goatTasks.userWorkosId, user.workosUserId),
+        goatTaskVisibleInWorkspace({
+          userWorkosId: user.workosUserId,
+          workspaceId: workspace.id,
+        }),
         isNull(goatTasks.archivedAt),
         or(
           inArray(goatTasks.status, ["queued", "running"]),
@@ -68,14 +71,17 @@ export async function listCurrentUserGoatTasks() {
 }
 
 export async function getCurrentUserGoatTask(taskId: string) {
-  const { user } = await currentGoatUser();
+  const { user, workspace } = await currentGoatUser();
   const normalizedTaskId = taskId.trim().toUpperCase();
   const [task] = await getDb()
     .select()
     .from(goatTasks)
     .where(
       and(
-        eq(goatTasks.userWorkosId, user.workosUserId),
+        goatTaskVisibleInWorkspace({
+          userWorkosId: user.workosUserId,
+          workspaceId: workspace.id,
+        }),
         or(eq(goatTasks.id, taskId), eq(goatTasks.displayId, normalizedTaskId)),
       ),
     )
@@ -210,18 +216,7 @@ export async function getCurrentUserGoatTaskSummary(taskId: string) {
 }
 
 export async function getCurrentUserGoatTaskRun(taskId: string) {
-  const { user } = await currentGoatUser();
-  const normalizedTaskId = taskId.trim().toUpperCase();
-  const [task] = await getDb()
-    .select()
-    .from(goatTasks)
-    .where(
-      and(
-        eq(goatTasks.userWorkosId, user.workosUserId),
-        or(eq(goatTasks.id, taskId), eq(goatTasks.displayId, normalizedTaskId)),
-      ),
-    )
-    .limit(1);
+  const task = await getCurrentUserGoatTask(taskId);
 
   if (!task) return null;
 
@@ -231,7 +226,7 @@ export async function getCurrentUserGoatTaskRun(taskId: string) {
       .from(goatTaskMessages)
       .where(
         and(
-          eq(goatTaskMessages.userWorkosId, user.workosUserId),
+          eq(goatTaskMessages.userWorkosId, task.userWorkosId),
           eq(goatTaskMessages.taskId, task.id),
         ),
       )
@@ -240,7 +235,7 @@ export async function getCurrentUserGoatTaskRun(taskId: string) {
       .select()
       .from(goatTaskEvents)
       .where(
-        and(eq(goatTaskEvents.userWorkosId, user.workosUserId), eq(goatTaskEvents.taskId, task.id)),
+        and(eq(goatTaskEvents.userWorkosId, task.userWorkosId), eq(goatTaskEvents.taskId, task.id)),
       )
       .orderBy(asc(goatTaskEvents.id)),
     getDb()
@@ -248,7 +243,7 @@ export async function getCurrentUserGoatTaskRun(taskId: string) {
       .from(goatTaskModelUsage)
       .where(
         and(
-          eq(goatTaskModelUsage.userWorkosId, user.workosUserId),
+          eq(goatTaskModelUsage.userWorkosId, task.userWorkosId),
           eq(goatTaskModelUsage.taskId, task.id),
         ),
       )
@@ -258,7 +253,7 @@ export async function getCurrentUserGoatTaskRun(taskId: string) {
       .from(goatTaskToolUsage)
       .where(
         and(
-          eq(goatTaskToolUsage.userWorkosId, user.workosUserId),
+          eq(goatTaskToolUsage.userWorkosId, task.userWorkosId),
           eq(goatTaskToolUsage.taskId, task.id),
         ),
       )
@@ -268,7 +263,7 @@ export async function getCurrentUserGoatTaskRun(taskId: string) {
       .from(goatTaskSandboxUsage)
       .where(
         and(
-          eq(goatTaskSandboxUsage.userWorkosId, user.workosUserId),
+          eq(goatTaskSandboxUsage.userWorkosId, task.userWorkosId),
           eq(goatTaskSandboxUsage.taskId, task.id),
         ),
       )
@@ -283,7 +278,11 @@ export async function archiveGoatTaskAction(taskId: string): Promise<ArchiveTask
     return { ok: false, error: "Could not archive task." };
   }
 
-  const { user } = await currentGoatUser();
+  const { user, workspace } = await currentGoatUser();
+  const taskVisibility = goatTaskVisibleInWorkspace({
+    userWorkosId: user.workosUserId,
+    workspaceId: workspace.id,
+  });
   const now = new Date();
   const [task] = await getDb()
     .update(goatTasks)
@@ -294,7 +293,7 @@ export async function archiveGoatTaskAction(taskId: string): Promise<ArchiveTask
     .where(
       and(
         eq(goatTasks.id, taskId),
-        eq(goatTasks.userWorkosId, user.workosUserId),
+        taskVisibility,
         isNull(goatTasks.archivedAt),
         inArray(goatTasks.status, ["succeeded", "failed", "canceled"]),
       ),
@@ -313,17 +312,25 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
     return { ok: false, error: "Could not stop task." };
   }
 
-  const { user } = await currentGoatUser();
+  const { user, workspace } = await currentGoatUser();
   const now = new Date();
   const [sessionTask] = await getDb()
-    .select({ sessionId: goatTasks.sessionId })
+    .select({ sessionId: goatTasks.sessionId, userWorkosId: goatTasks.userWorkosId })
     .from(goatTasks)
-    .where(and(eq(goatTasks.id, taskId), eq(goatTasks.userWorkosId, user.workosUserId)))
+    .where(
+      and(
+        eq(goatTasks.id, taskId),
+        goatTaskVisibleInWorkspace({
+          userWorkosId: user.workosUserId,
+          workspaceId: workspace.id,
+        }),
+      ),
+    )
     .limit(1);
   if (sessionTask?.sessionId) {
     const result = await cancelSessionBackedGoatTask({
       taskId,
-      userWorkosId: user.workosUserId,
+      userWorkosId: sessionTask.userWorkosId,
       sessionId: sessionTask.sessionId,
       now,
     });
@@ -341,7 +348,11 @@ export async function cancelGoatTaskAction(taskId: string): Promise<CancelTaskRe
           lease_expires_at = NULL,
           updated_at = ${now}
       WHERE task.id = ${taskId}
-        AND task.user_workos_id = ${user.workosUserId}
+        AND task.user_workos_id = ${sessionTask?.userWorkosId ?? user.workosUserId}
+        AND (
+          task.workspace_id = ${workspace.id}
+          OR (task.workspace_id IS NULL AND task.user_workos_id = ${user.workosUserId})
+        )
         AND task.status IN ('queued', 'running')
       RETURNING task.id, task.user_workos_id
     ),
@@ -424,16 +435,24 @@ export async function continueGoatTaskAction(
     };
   }
 
-  const { user } = await currentGoatUser();
+  const { user, workspace } = await currentGoatUser();
   const [task] = await getDb()
-    .select({ sessionId: goatTasks.sessionId })
+    .select({ sessionId: goatTasks.sessionId, userWorkosId: goatTasks.userWorkosId })
     .from(goatTasks)
-    .where(and(eq(goatTasks.id, normalizedTaskId), eq(goatTasks.userWorkosId, user.workosUserId)))
+    .where(
+      and(
+        eq(goatTasks.id, normalizedTaskId),
+        goatTaskVisibleInWorkspace({
+          userWorkosId: user.workosUserId,
+          workspaceId: workspace.id,
+        }),
+      ),
+    )
     .limit(1);
   if (task?.sessionId) {
     const continued = await enqueueGoatTaskSessionTurn({
       taskId: normalizedTaskId,
-      userWorkosId: user.workosUserId,
+      userWorkosId: task.userWorkosId,
       prompt: content,
       clientMessageId,
     });
@@ -471,7 +490,11 @@ export async function continueGoatTaskAction(
           lease_expires_at = NULL,
           updated_at = ${now}
       WHERE task.id = ${normalizedTaskId}
-        AND task.user_workos_id = ${user.workosUserId}
+        AND task.user_workos_id = ${task?.userWorkosId ?? user.workosUserId}
+        AND (
+          task.workspace_id = ${workspace.id}
+          OR (task.workspace_id IS NULL AND task.user_workos_id = ${user.workosUserId})
+        )
         AND task.archived_at IS NULL
         AND task.status IN ('succeeded', 'failed', 'canceled')
       RETURNING task.id, task.user_workos_id
@@ -660,11 +683,32 @@ export async function createGoatTaskForUser(input: {
   const modelMessage = { role: "user", content: input.prompt };
   const task = rowsFromExecute<GoatTaskRow>(
     await getDb().execute(sql`
-      WITH created_task AS (
+      WITH enabled_user AS MATERIALIZED (
+        SELECT "user".workos_user_id
+        FROM goat.users AS "user"
+        WHERE "user".workos_user_id = ${input.userWorkosId}
+          AND "user".task_spawning_enabled = true
+        FOR UPDATE OF "user"
+      ),
+      resolved_workspace AS MATERIALIZED (
+        SELECT member.workspace_id
+        FROM goat.workspace_members AS member
+        INNER JOIN enabled_user AS "user"
+          ON "user".workos_user_id = member.user_workos_id
+        WHERE ${input.workspaceId ?? null}::text IS NULL
+           OR member.workspace_id = ${input.workspaceId ?? null}
+        ORDER BY
+          CASE WHEN member.workspace_id = ${input.workspaceId ?? null} THEN 0 ELSE 1 END,
+          member.created_at ASC,
+          member.workspace_id ASC
+        LIMIT 1
+      ),
+      created_task AS (
         INSERT INTO goat.tasks (
           id,
           name,
           user_workos_id,
+          workspace_id,
           prompt,
           model,
           schedule_id,
@@ -681,7 +725,8 @@ export async function createGoatTaskForUser(input: {
         SELECT
           ${id},
           ${name},
-          ${input.userWorkosId},
+          "user".workos_user_id,
+          (SELECT workspace_id FROM resolved_workspace),
           ${input.prompt},
           ${harnessSpec.model},
           ${input.scheduleId ?? null},
@@ -694,9 +739,9 @@ export async function createGoatTaskForUser(input: {
           ${now},
           ${now},
           ${JSON.stringify(harnessSpec)}::jsonb
-        FROM goat.users AS "user"
-        WHERE "user".workos_user_id = ${input.userWorkosId}
-          AND "user".task_spawning_enabled = true
+        FROM enabled_user AS "user"
+        WHERE ${input.workspaceId ?? null}::text IS NULL
+           OR EXISTS (SELECT 1 FROM resolved_workspace)
         RETURNING *
       ),
       inserted_user_message AS (
@@ -731,6 +776,7 @@ export async function createGoatTaskForUser(input: {
         task.display_id AS "displayId",
         task.name AS "name",
         task.user_workos_id AS "userWorkosId",
+        task.workspace_id AS "workspaceId",
         task.prompt AS "prompt",
         task.model AS "model",
         task.session_id AS "sessionId",
@@ -871,6 +917,13 @@ async function cancelSessionBackedGoatTask(input: {
 function safeGoatTaskMessageId(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed && /^goat_task_msg_[0-9a-f-]{36}$/i.test(trimmed) ? trimmed : null;
+}
+
+function goatTaskVisibleInWorkspace(input: { userWorkosId: string; workspaceId: string }) {
+  return or(
+    eq(goatTasks.workspaceId, input.workspaceId),
+    and(eq(goatTasks.userWorkosId, input.userWorkosId), isNull(goatTasks.workspaceId)),
+  );
 }
 
 async function loadGoatTaskSpawningState(userWorkosId: string): Promise<boolean | null> {
