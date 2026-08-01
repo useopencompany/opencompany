@@ -716,12 +716,22 @@ describe("executeGoatWorkflowStepsTask", () => {
       content: expect.stringContaining("Step 2/2 — Title 2"),
     });
     expect(sink.appendEvent).toHaveBeenCalledWith({
-      type: "workflow.step.started",
-      payload: expect.objectContaining({ stepIndex: 0, stepCount: 2, stepTitle: "Title 1" }),
+      type: "task.status",
+      payload: expect.objectContaining({
+        workflowStepEvent: "started",
+        stepIndex: 0,
+        stepCount: 2,
+        stepTitle: "Title 1",
+      }),
     });
     expect(sink.appendEvent).toHaveBeenCalledWith({
-      type: "workflow.step.completed",
-      payload: expect.objectContaining({ stepIndex: 1, stepCount: 2, stepTitle: "Title 2" }),
+      type: "task.status",
+      payload: expect.objectContaining({
+        workflowStepEvent: "completed",
+        stepIndex: 1,
+        stepCount: 2,
+        stepTitle: "Title 2",
+      }),
     });
   });
 

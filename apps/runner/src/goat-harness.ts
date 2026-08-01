@@ -290,8 +290,11 @@ export async function executeGoatWorkflowStepsTask(
     }
 
     await input.sink.appendEvent({
-      type: "workflow.step.started",
+      type: "task.status",
       payload: {
+        status: "running",
+        stage: "running",
+        workflowStepEvent: "started",
         stepIndex,
         stepCount: steps.length,
         stepTitle: step.title,
@@ -375,15 +378,18 @@ export async function executeGoatWorkflowStepsTask(
       debugTrace: workflowResult.debugTrace,
     });
     await input.sink.appendEvent({
-      type: "workflow.step.completed",
+      type: "task.status",
       payload: {
+        status: "running",
+        stage: "running",
+        workflowStepEvent: "completed",
         stepIndex,
         stepCount: steps.length,
         stepTitle: step.title,
         engine: step.engine,
         model: step.model,
-        reportedOutcome: workflowResult.reportedOutcome ?? null,
-        outcomeComment: workflowOutcomeComment ?? null,
+        stepReportedOutcome: workflowResult.reportedOutcome ?? null,
+        stepOutcomeComment: workflowOutcomeComment ?? null,
       },
     });
     workflowHarnessSpec = completedHarnessSpec;
