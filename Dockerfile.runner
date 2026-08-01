@@ -11,4 +11,4 @@ RUN bun install --frozen-lockfile
 
 ENV NODE_ENV=production
 
-CMD ["bun", "--filter", "@opencompany/runner", "start"]
+CMD ["bun", "apps/runner/src/index.ts"]
