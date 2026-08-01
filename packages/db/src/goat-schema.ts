@@ -419,6 +419,8 @@ export type GoatTaskModelUsagePhase = "planner" | "execution";
 
 export type GoatTaskEventType =
   | "task.status"
+  | "workflow.step.started"
+  | "workflow.step.completed"
   | "harness.planned"
   | "artifact.created"
   | "assistant.delta"

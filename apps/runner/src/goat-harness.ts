@@ -253,6 +253,14 @@ export async function executeGoatWorkflowStepsTask(
       await input.sink.updateCodexEngineSessionId(null);
     }
 
+    const stepInputContent = goatWorkflowStepInputContent({
+      taskPrompt: input.task.prompt,
+      step,
+      stepIndex,
+      stepCount: steps.length,
+      previousResult: latestGoatAssistantResult(conversation),
+    });
+    const handoffPrefix = goatWorkflowStepHandoffPrefix(stepIndex, steps.length);
     const { codex: _previousCodexConfig, ...workflowHarnessSpecWithoutCodex } = workflowHarnessSpec;
     const stepCodexConfig = codexConfigForWorkflowStep(workflowHarnessSpec.codex, step);
     const stepSpec: GoatHarnessSpec = {
@@ -261,6 +269,7 @@ export async function executeGoatWorkflowStepsTask(
       model: step.model,
       ...(stepCodexConfig ? { codex: stepCodexConfig } : {}),
       systemPrompt: step.systemPrompt,
+      initialUserMessage: stepInputContent,
       systemBlocks: step.systemBlocks,
       workflow: {
         ...workflowHarnessSpec.workflow!,
@@ -273,20 +282,23 @@ export async function executeGoatWorkflowStepsTask(
     await input.reportStage("running", { harnessSpec: stepSpec });
 
     if (stepIndex > 0) {
-      const handoffPrefix = goatWorkflowStepHandoffPrefix(stepIndex, steps.length);
       const existingHandoff = hasPersistedGoatWorkflowStepHandoff(conversation, handoffPrefix);
       if (!existingHandoff) {
-        const handoffContent = goatWorkflowStepHandoffContent({
-          step,
-          stepIndex,
-          stepCount: steps.length,
-          previousResult: latestGoatAssistantResult(conversation),
-        });
-        await input.sink.createUserMessage({ content: handoffContent });
-        conversation.push({ role: "user", content: handoffContent });
+        await input.sink.createUserMessage({ content: stepInputContent });
+        conversation.push({ role: "user", content: stepInputContent });
       }
     }
 
+    await input.sink.appendEvent({
+      type: "workflow.step.started",
+      payload: {
+        stepIndex,
+        stepCount: steps.length,
+        stepTitle: step.title,
+        engine: step.engine,
+        model: step.model,
+      },
+    });
     await input.sink.appendEvent({
       type: "task.status",
       payload: {
@@ -324,7 +336,13 @@ export async function executeGoatWorkflowStepsTask(
         harnessSpec: stepSpec,
         codexEngineSessionId,
       },
-      conversationMessages: [...conversation],
+      conversationMessages: goatWorkflowStepConversation({
+        conversation,
+        handoffPrefix,
+        stepIndex,
+        isResumingCurrentStep,
+        stepInputContent,
+      }),
       sink: stepSink,
     });
     conversation.push({ role: "assistant", content: result.result });
@@ -355,6 +373,18 @@ export async function executeGoatWorkflowStepsTask(
     await input.reportStage("running", {
       harnessSpec: completedHarnessSpec,
       debugTrace: workflowResult.debugTrace,
+    });
+    await input.sink.appendEvent({
+      type: "workflow.step.completed",
+      payload: {
+        stepIndex,
+        stepCount: steps.length,
+        stepTitle: step.title,
+        engine: step.engine,
+        model: step.model,
+        reportedOutcome: workflowResult.reportedOutcome ?? null,
+        outcomeComment: workflowOutcomeComment ?? null,
+      },
     });
     workflowHarnessSpec = completedHarnessSpec;
     finalResult = { ...workflowResult, harnessSpec: completedHarnessSpec };
@@ -419,7 +449,28 @@ function hasPersistedGoatWorkflowStepHandoff(
     .some((message) => message.role === "user" && message.content.startsWith(prefix));
 }
 
-function goatWorkflowStepHandoffContent(input: {
+function goatWorkflowStepConversation(input: {
+  conversation: readonly GoatTaskConversationMessage[];
+  handoffPrefix: string;
+  stepIndex: number;
+  isResumingCurrentStep: boolean;
+  stepInputContent: string;
+}): GoatTaskConversationMessage[] {
+  if (!input.isResumingCurrentStep) {
+    return [{ role: "user", content: input.stepInputContent }];
+  }
+  if (input.stepIndex === 0) return [...input.conversation];
+
+  const handoffIndex = input.conversation.findIndex(
+    (message) => message.role === "user" && message.content.startsWith(input.handoffPrefix),
+  );
+  return handoffIndex >= 0
+    ? [...input.conversation.slice(handoffIndex)]
+    : [{ role: "user", content: input.stepInputContent }];
+}
+
+function goatWorkflowStepInputContent(input: {
+  taskPrompt: string;
   step: GoatHarnessWorkflowStep;
   stepIndex: number;
   stepCount: number;
@@ -427,15 +478,21 @@ function goatWorkflowStepHandoffContent(input: {
 }) {
   const title = input.step.title.trim() || "Untitled step";
   const heading = `${goatWorkflowStepHandoffPrefix(input.stepIndex, input.stepCount)} ${title}`;
-  if (!isSandboxedWorkflowEngine(input.step.engine) || !input.previousResult) return heading;
   return [
     heading,
     "",
-    "Continue the workflow using the previous step's result:",
-    "",
-    "<previous_step_result>",
-    input.previousResult,
-    "</previous_step_result>",
+    "Overall task request:",
+    input.taskPrompt.trim(),
+    ...(input.previousResult
+      ? [
+          "",
+          "Continue the workflow using the previous step's result:",
+          "",
+          "<previous_step_result>",
+          input.previousResult,
+          "</previous_step_result>",
+        ]
+      : []),
   ].join("\n");
 }
 

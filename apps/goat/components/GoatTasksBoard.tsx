@@ -802,6 +802,15 @@ function buildTaskActivityEntries({
   const entries: TaskActivityEntry[] = [
     { id: "created", label: "Created", meta: sourceLabel, timestamp: task.createdAt },
   ];
+  for (const step of task.workflowSteps ?? []) {
+    entries.push({
+      id: `workflow-step-${step.index}`,
+      label: `Step ${step.index + 1}/${step.total}: ${step.title}`,
+      meta: workflowStepStatusLabel(step.status),
+      timestamp: task.updatedAt,
+      tone: step.status === "failed" || step.status === "needs_attention" ? "danger" : "default",
+    });
+  }
 
   if (!terminal) {
     if (task.updatedAt !== task.createdAt) {
@@ -852,6 +861,25 @@ function buildTaskActivityEntries({
   }
 
   return entries;
+}
+
+function workflowStepStatusLabel(
+  status: NonNullable<GoatTaskView["workflowSteps"]>[number]["status"],
+) {
+  switch (status) {
+    case "completed":
+      return "Done";
+    case "needs_attention":
+      return "Needs attention";
+    case "failed":
+      return "Failed";
+    case "canceled":
+      return "Canceled";
+    case "running":
+      return "Running";
+    case "pending":
+      return "Pending";
+  }
 }
 
 function TaskStatusDot({ task, className = "" }: { task: GoatTaskView; className?: string }) {
