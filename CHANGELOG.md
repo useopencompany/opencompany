@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-01
+
+### Added
+- Get notified over iMessage when Goat needs your input or finishes a task, with a secure device-pairing flow (#1025) — @louis.
+- Connect an authenticated browser profile so Goat can research pages that need you to be logged in; sensitive sites like banking are blocked by default (#1028) — @opencompany-bot.
+- Workflows can now run on a schedule, set with a plain-language frequency builder — every N minutes or hours, daily, weekdays, or weekly — instead of raw cron (#1009, #1020) — @opencompany-bot.
+- Start a one-off background task straight from the composer with `#task`, no need to save it as a workflow first (#987) — @opencompany-bot.
+- Pick the coding model for each step in a workflow, and use Claude Code as a workflow step engine (#1005, #1022) — @opencompany-bot.
+- Workflow tasks started from chat can now carry attachments (#1012) — @opencompany-bot.
+- Tasks and workflows are now visible to your whole workspace, not just whoever started them (#1013) — @opencompany-bot.
+- The Tasks page can switch to a dense list view alongside the existing board (#992) — @opencompany-bot.
+- Claude Code sessions can now read from your connected tools — Slack, Gmail, Linear, and more — matching what Codex sessions could already do (#989, #1008) — @opencompany-bot.
+- The sidebar now shows a live status dot on each chat for running, waiting-on-you, and errored states (#1011) — @opencompany-bot.
+- Codex chats show their live plan as a running checklist while they work (#1010) — @opencompany-bot.
+
+### Changed
+- @mentioning Claude Code or Codex in the composer now applies to that one message only, instead of switching the chat's engine for good (#1016) — @opencompany-bot.
+- New workflows are active by default instead of needing a manual toggle, and workflow mentions are now highlighted in the composer (#1002, #1007) — @opencompany-bot.
+- Workflow step lists now render in the read-only run detail view (#1030) — @opencompany-bot.
+
+### Fixed
+- Long Linear issue descriptions and comments up to Linear's own limit are no longer rejected early (#1032) — @opencompany-bot.
+- Stopping a task now reacts immediately across Claude Code, Codex, and OpenCompany chat engines (#1023) — @louis.
+- Scheduled task wakeups now reliably fire across all chat engines (#1024) — @louis.
+- The sidebar no longer flashes stale data on refresh (#1026) — @opencompany-bot.
+- Cloud coding workspace terminals no longer freeze while typing during a slow background operation (#982) — @louis.
+- The cloud terminal no longer offers to autofill saved passwords (#986) — @opencompany-bot.
+- Fixed a bash syntax bug that could block every cloud coding session from starting (#979) — @louis.
+- Tasks and workflow runs now hold up better through runner restarts and deploys, without losing chat history or duplicating messages (#988, #990, #991, #993, #995, #1019, #1031) — @opencompany-bot and @louis.
+- Assorted workflow composer fixes: mentions stay available in engine mode, the caret stays aligned, duplicate stop controls are gone, and task titles and sources display correctly (#994, #996, #997, #999, #1000, #1003, #1004, #1006) — @opencompany-bot.
+
 ## [1.4.0] - 2026-07-29
 
 ### Added
