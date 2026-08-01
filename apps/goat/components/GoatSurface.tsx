@@ -2170,11 +2170,15 @@ export function GoatSurface({
                     isTask={Boolean(activeTaskConversation)}
                   />
                   <div className="flex shrink-0 items-center gap-2">
-                    {!activeTaskConversation &&
+                    {(!activeTaskConversation || activeTaskConversation.sessionBacked) &&
                     chatSessionId &&
                     persistedChatSessionId === chatSessionId &&
                     hasMessages ? (
-                      <ChatShareButton chatSessionId={chatSessionId} disabled={isAgentWorking} />
+                      <ChatShareButton
+                        chatSessionId={chatSessionId}
+                        disabled={isAgentWorking}
+                        subject={activeTaskConversation ? "task run" : "chat"}
+                      />
                     ) : null}
                     {activeEngineChat?.engine === "codex" ||
                     activeEngineChat?.engine === "claude_code" ? (

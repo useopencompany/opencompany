@@ -50,7 +50,7 @@ describe("Goat chat sharing", () => {
     const [ownerStatement, ownerParams] = query.mock.calls[0]!;
     expect(ownerStatement).toContain('from "goat"."chat_sessions"');
     expect(ownerStatement).toContain('"goat"."chat_sessions"."kind"');
-    expect(ownerParams).toEqual(expect.arrayContaining(["chat_1", "user_1", "chat"]));
+    expect(ownerParams).toEqual(expect.arrayContaining(["chat_1", "user_1", "chat", "task"]));
     const [insertStatement] = query.mock.calls[1]!;
     expect(insertStatement).toContain("on conflict");
     expect(insertStatement).toContain('"chat_session_id"');
@@ -66,6 +66,7 @@ describe("Goat chat sharing", () => {
     expect(store.ensureShare).toHaveBeenCalledWith({
       id: expect.stringMatching(/^goat_chat_share_/),
       userWorkosId: "user_1",
+      workspaceId: null,
       chatSessionId: "chat_1",
     });
     expect(isGoatChatShareId(vi.mocked(store.ensureShare).mock.calls[0]![0].id)).toBe(true);
@@ -83,10 +84,12 @@ describe("Goat chat sharing", () => {
 
     expect(store.findShareForUser).toHaveBeenCalledWith({
       userWorkosId: "user_1",
+      workspaceId: null,
       chatSessionId: "chat_1",
     });
     expect(store.revokeShare).toHaveBeenCalledWith({
       userWorkosId: "user_1",
+      workspaceId: null,
       chatSessionId: "chat_1",
     });
   });
@@ -110,14 +113,46 @@ describe("Goat chat sharing", () => {
       'inner join "goat"."chat_sessions" on "goat"."chat_session_shares"."chat_session_id"',
     );
     expect(statement).toContain('"goat"."chat_sessions"."kind"');
-    expect(params).toEqual(expect.arrayContaining(["chat_1", "user_1", "chat"]));
+    expect(params).toEqual(expect.arrayContaining(["chat_1", "user_1", "chat", "task"]));
   });
 
-  it("only resolves public shares for ordinary chat sessions", async () => {
+  it("allows workspace members to share task-backed chat sessions", async () => {
+    const query = vi.fn(async (...[statement]: [string, unknown[], object]) => {
+      if (statement.startsWith("insert")) return { rows: [] };
+      if (statement.includes('"goat"."chat_session_shares"')) {
+        return { rows: [[SHARE_ID, "chat_task_1", "2026-07-27T10:00:00.000Z"]] };
+      }
+      return { rows: [["chat_task_1"]] };
+    });
+    const client = Object.assign(query, {
+      transaction: vi.fn(async (queries: Promise<unknown>[]) => Promise.all(queries)),
+    });
+    const store = createDbGoatChatShareStore(drizzle(client as never) as never);
+
+    await expect(
+      store.ensureShare({
+        id: "goat_chat_share_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        userWorkosId: "user_member",
+        workspaceId: "workspace_1",
+        chatSessionId: "chat_task_1",
+      }),
+    ).resolves.toMatchObject({ id: SHARE_ID, chatSessionId: "chat_task_1" });
+
+    const [statement, params] = query.mock.calls[0]!;
+    expect(statement).toContain('left join "goat"."tasks"');
+    expect(statement).toContain('"goat"."tasks"."workspace_id"');
+    expect(params).toEqual(
+      expect.arrayContaining(["chat_task_1", "user_member", "chat", "task", "workspace_1"]),
+    );
+  });
+
+  it("resolves public shares for shareable chat session kinds", async () => {
     const query = vi.fn(async (...args: [string, unknown[], object]) => {
       void args;
       return {
-        rows: [[SHARE_ID, "chat_1", "2026-07-27T10:00:00.000Z", "chat_1", "Architecture review"]],
+        rows: [
+          [SHARE_ID, "chat_1", "2026-07-27T10:00:00.000Z", "chat_1", "Architecture review", "task"],
+        ],
       };
     });
     const client = Object.assign(query, {
@@ -127,12 +162,12 @@ describe("Goat chat sharing", () => {
 
     await expect(store.findShare(SHARE_ID)).resolves.toMatchObject({
       share: { id: SHARE_ID },
-      chatSession: { id: "chat_1", title: "Architecture review" },
+      chatSession: { id: "chat_1", title: "Architecture review", kind: "task" },
     });
 
     const [statement, params] = query.mock.calls[0]!;
     expect(statement).toContain('"goat"."chat_sessions"."kind"');
-    expect(params).toEqual(expect.arrayContaining([SHARE_ID, "chat"]));
+    expect(params).toEqual(expect.arrayContaining([SHARE_ID, "chat", "task"]));
   });
 
   it("deletes a share only after confirming chat ownership", async () => {
@@ -173,6 +208,7 @@ describe("Goat chat sharing", () => {
     await expect(loadPublicGoatChatMetadata(`  ${SHARE_ID}  `, store)).resolves.toEqual({
       shareId: SHARE_ID,
       title: "Architecture review",
+      kind: "chat",
     });
 
     expect(store.findShare).toHaveBeenCalledWith(SHARE_ID);
@@ -209,6 +245,7 @@ describe("Goat chat sharing", () => {
 
     expect(result).toMatchObject({
       shareId: SHARE_ID,
+      kind: "chat",
       title: "Architecture review",
       messages: [
         {

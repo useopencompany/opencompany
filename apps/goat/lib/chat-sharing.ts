@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
-import { type GoatChatShare, goatChatSessions, goatChatShares } from "@opencompany/db/goat-schema";
-import { and, eq } from "drizzle-orm";
+import {
+  type GoatChatSessionKind,
+  type GoatChatShare,
+  goatChatSessions,
+  goatChatShares,
+  goatTasks,
+} from "@opencompany/db/goat-schema";
+import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import { createDbGoatChatStore, type GoatChatStore } from "@/lib/chat";
 import {
   type GoatChatSessionView,
@@ -12,26 +18,36 @@ import {
 
 const GOAT_CHAT_SHARE_ID_PATTERN =
   /^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHAREABLE_GOAT_CHAT_SESSION_KINDS: GoatChatSessionKind[] = ["chat", "task"];
 
 export type PublicGoatChatView = Pick<GoatChatSessionView, "title" | "messages"> & {
   shareId: string;
+  kind: GoatChatSessionKind;
 };
 
-export type PublicGoatChatMetadata = Pick<PublicGoatChatView, "shareId" | "title">;
+export type PublicGoatChatMetadata = Pick<PublicGoatChatView, "shareId" | "title" | "kind">;
 
-type PublicGoatChatSessionRecord = Pick<GoatChatSessionView, "id" | "title">;
+type PublicGoatChatSessionRecord = Pick<GoatChatSessionView, "id" | "title"> & {
+  kind: GoatChatSessionKind;
+};
 
 export type GoatChatShareStore = {
   ensureShare(input: {
     id: string;
     userWorkosId: string;
+    workspaceId?: string | null;
     chatSessionId: string;
   }): Promise<GoatChatShare | null>;
   findShareForUser(input: {
     userWorkosId: string;
+    workspaceId?: string | null;
     chatSessionId: string;
   }): Promise<GoatChatShare | null>;
-  revokeShare(input: { userWorkosId: string; chatSessionId: string }): Promise<boolean>;
+  revokeShare(input: {
+    userWorkosId: string;
+    workspaceId?: string | null;
+    chatSessionId: string;
+  }): Promise<boolean>;
   findShare(
     shareId: string,
   ): Promise<{ share: GoatChatShare; chatSession: PublicGoatChatSessionRecord } | null>;
@@ -47,7 +63,7 @@ export function isGoatChatShareId(value: string) {
 }
 
 export async function ensureGoatChatShareForUser(
-  input: { userWorkosId: string; chatSessionId: string },
+  input: { userWorkosId: string; workspaceId?: string | null; chatSessionId: string },
   store: GoatChatShareStore = createDbGoatChatShareStore(),
 ): Promise<GoatChatShare | null> {
   const chatSessionId = input.chatSessionId.trim();
@@ -56,12 +72,13 @@ export async function ensureGoatChatShareForUser(
   return store.ensureShare({
     id: newGoatChatShareId(),
     userWorkosId: input.userWorkosId,
+    workspaceId: input.workspaceId ?? null,
     chatSessionId,
   });
 }
 
 export async function findGoatChatShareForUser(
-  input: { userWorkosId: string; chatSessionId: string },
+  input: { userWorkosId: string; workspaceId?: string | null; chatSessionId: string },
   store: GoatChatShareStore = createDbGoatChatShareStore(),
 ): Promise<GoatChatShare | null> {
   const chatSessionId = input.chatSessionId.trim();
@@ -69,12 +86,13 @@ export async function findGoatChatShareForUser(
 
   return store.findShareForUser({
     userWorkosId: input.userWorkosId,
+    workspaceId: input.workspaceId ?? null,
     chatSessionId,
   });
 }
 
 export async function revokeGoatChatShareForUser(
-  input: { userWorkosId: string; chatSessionId: string },
+  input: { userWorkosId: string; workspaceId?: string | null; chatSessionId: string },
   store: GoatChatShareStore = createDbGoatChatShareStore(),
 ): Promise<boolean> {
   const chatSessionId = input.chatSessionId.trim();
@@ -82,6 +100,7 @@ export async function revokeGoatChatShareForUser(
 
   return store.revokeShare({
     userWorkosId: input.userWorkosId,
+    workspaceId: input.workspaceId ?? null,
     chatSessionId,
   });
 }
@@ -97,6 +116,7 @@ export async function loadPublicGoatChat(
   return {
     shareId: result.share.id,
     title: result.chatSession.title,
+    kind: result.chatSession.kind,
     messages: messages.map(toPublicGoatChatUiMessage),
   };
 }
@@ -111,6 +131,7 @@ export async function loadPublicGoatChatMetadata(
   return {
     shareId: result.share.id,
     title: result.chatSession.title,
+    kind: result.chatSession.kind,
   };
 }
 
@@ -125,11 +146,11 @@ export function createDbGoatChatShareStore(
       const [ownedSession] = await db
         .select({ id: goatChatSessions.id })
         .from(goatChatSessions)
+        .leftJoin(goatTasks, eq(goatTasks.sessionId, goatChatSessions.id))
         .where(
           and(
             eq(goatChatSessions.id, input.chatSessionId),
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-            eq(goatChatSessions.kind, "chat"),
+            shareableChatSessionAccessCondition(input),
           ),
         )
         .limit(1);
@@ -153,11 +174,11 @@ export function createDbGoatChatShareStore(
         .select({ share: goatChatShares })
         .from(goatChatShares)
         .innerJoin(goatChatSessions, eq(goatChatShares.chatSessionId, goatChatSessions.id))
+        .leftJoin(goatTasks, eq(goatTasks.sessionId, goatChatSessions.id))
         .where(
           and(
             eq(goatChatShares.chatSessionId, input.chatSessionId),
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
-            eq(goatChatSessions.kind, "chat"),
+            shareableChatSessionAccessCondition(input),
           ),
         )
         .limit(1);
@@ -168,10 +189,11 @@ export function createDbGoatChatShareStore(
       const [ownedSession] = await db
         .select({ id: goatChatSessions.id })
         .from(goatChatSessions)
+        .leftJoin(goatTasks, eq(goatTasks.sessionId, goatChatSessions.id))
         .where(
           and(
             eq(goatChatSessions.id, input.chatSessionId),
-            eq(goatChatSessions.userWorkosId, input.userWorkosId),
+            shareableChatSessionAccessCondition(input),
           ),
         )
         .limit(1);
@@ -187,12 +209,23 @@ export function createDbGoatChatShareStore(
           share: goatChatShares,
           chatSession: {
             id: goatChatSessions.id,
-            title: goatChatSessions.title,
+            title: sql<string>`CASE
+              WHEN ${goatChatSessions.kind} = 'task'
+              THEN COALESCE(NULLIF(${goatTasks.name}, ''), ${goatChatSessions.title})
+              ELSE ${goatChatSessions.title}
+            END`,
+            kind: goatChatSessions.kind,
           },
         })
         .from(goatChatShares)
         .innerJoin(goatChatSessions, eq(goatChatShares.chatSessionId, goatChatSessions.id))
-        .where(and(eq(goatChatShares.id, shareId), eq(goatChatSessions.kind, "chat")))
+        .leftJoin(goatTasks, eq(goatTasks.sessionId, goatChatSessions.id))
+        .where(
+          and(
+            eq(goatChatShares.id, shareId),
+            inArray(goatChatSessions.kind, SHAREABLE_GOAT_CHAT_SESSION_KINDS),
+          ),
+        )
         .limit(1);
       return result ?? null;
     },
@@ -233,4 +266,18 @@ function toPublicGoatChatUiMessage(message: GoatStoredChatMessage): GoatChatUiMe
     ...uiMessage,
     metadata,
   };
+}
+
+function shareableChatSessionAccessCondition(input: {
+  userWorkosId: string;
+  workspaceId?: string | null;
+}): SQL {
+  const ownedSession = and(
+    eq(goatChatSessions.userWorkosId, input.userWorkosId),
+    inArray(goatChatSessions.kind, SHAREABLE_GOAT_CHAT_SESSION_KINDS),
+  );
+  const workspaceTaskSession = input.workspaceId?.trim()
+    ? and(eq(goatChatSessions.kind, "task"), eq(goatTasks.workspaceId, input.workspaceId.trim()))
+    : undefined;
+  return (workspaceTaskSession ? or(ownedSession, workspaceTaskSession) : ownedSession) as SQL;
 }

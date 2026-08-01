@@ -36,9 +36,10 @@ export async function getGoatChatShareAction(
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not load sharing settings." };
 
-  const { user } = await currentGoatUser();
+  const { user, workspace } = await currentGoatUser();
   const share = await findGoatChatShareForUser({
     userWorkosId: user.workosUserId,
+    workspaceId: workspace.id,
     chatSessionId: trimmed,
   });
   return { ok: true, shareId: share?.id ?? null };
@@ -50,9 +51,10 @@ export async function createGoatChatShareAction(
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not share that chat." };
 
-  const { user } = await currentGoatUser();
+  const { user, workspace } = await currentGoatUser();
   const share = await ensureGoatChatShareForUser({
     userWorkosId: user.workosUserId,
+    workspaceId: workspace.id,
     chatSessionId: trimmed,
   });
   if (!share) return { ok: false, error: "Could not share that chat." };
@@ -66,9 +68,10 @@ export async function revokeGoatChatShareAction(
   const trimmed = sessionId?.trim();
   if (!trimmed) return { ok: false, error: "Could not stop sharing that chat." };
 
-  const { user } = await currentGoatUser();
+  const { user, workspace } = await currentGoatUser();
   const revoked = await revokeGoatChatShareForUser({
     userWorkosId: user.workosUserId,
+    workspaceId: workspace.id,
     chatSessionId: trimmed,
   });
   if (!revoked) return { ok: false, error: "Could not stop sharing that chat." };
