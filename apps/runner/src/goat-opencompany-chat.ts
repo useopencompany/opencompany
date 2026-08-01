@@ -797,6 +797,7 @@ async function resolveOpenCompanyChatRuntime(input: {
             phoneE164: imessageDelivery.phoneE164,
             source: "task",
             chatSessionId: session.chatSessionId,
+            turnId: turn.id,
             signal,
           }),
         }

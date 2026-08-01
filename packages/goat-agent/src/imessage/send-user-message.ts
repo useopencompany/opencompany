@@ -1,4 +1,8 @@
-import { countGoatImessageSendsSince, recordGoatImessageSend } from "@opencompany/db/goat-imessage";
+import {
+  countGoatImessageSendsSince,
+  getSuccessfulGoatImessageSendForTurn,
+  recordGoatImessageSend,
+} from "@opencompany/db/goat-imessage";
 import type { GoatImessageSendSource } from "@opencompany/db/goat-schema";
 import { resolveGoatImessageProvider } from "./provider";
 
@@ -22,6 +26,7 @@ export function createGoatSendUserMessageRunner(input: {
   phoneE164: string;
   source: Exclude<GoatImessageSendSource, "pairing">;
   chatSessionId?: string;
+  turnId?: string;
   signal?: AbortSignal;
 }): SendUserMessageRunner {
   return async (message) => {
@@ -33,6 +38,10 @@ export function createGoatSendUserMessageRunner(input: {
       const provider = resolveGoatImessageProvider();
       if (!provider) {
         return { ok: false, error: "iMessage sending is not available right now." };
+      }
+      if (input.turnId) {
+        const existingSend = await getSuccessfulGoatImessageSendForTurn(input.turnId);
+        if (existingSend) return { ok: true, delivered: true };
       }
       const cap = dailySendCap();
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -53,6 +62,7 @@ export function createGoatSendUserMessageRunner(input: {
         source: input.source,
         status: result.ok ? "sent" : "failed",
         chatSessionId: input.chatSessionId ?? null,
+        turnId: input.turnId ?? null,
         errorReason: result.ok ? null : result.error,
       });
       if (!result.ok) {

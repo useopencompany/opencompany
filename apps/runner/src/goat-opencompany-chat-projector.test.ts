@@ -79,6 +79,39 @@ describe("createGoatOpenCompanyChatProjector", () => {
     expect(queryValues(dbMock.execute.mock.calls[1]?.[0])).toContain("interrupted");
   });
 
+  it("keeps persisted assistant parts when a reclaimed turn finalizes an empty interrupt", async () => {
+    dbMock.execute
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            content: "Briefing delivered.",
+            debug_trace: {
+              schemaVersion: "opencompany.chat.debug.v1",
+              uiMessageParts: [{ type: "text", text: "Briefing delivered.", state: "done" }],
+              usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+            },
+          },
+        ],
+      })
+      .mockResolvedValue({ rows: [{ id: "updated" }] });
+    const projector = createProjector();
+
+    await projector.interrupted({ parts: [] });
+
+    expect(dbMock.execute).toHaveBeenCalledTimes(3);
+    const hydrateStatement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
+    expect(hydrateStatement).toContain("SELECT content, debug_trace");
+    expect(hydrateStatement).toContain("lease_turn.status = 'running'");
+    expect(queryValues(dbMock.execute.mock.calls[1]?.[0])).toEqual(
+      expect.arrayContaining([
+        "Briefing delivered.",
+        expect.stringContaining('"uiMessageParts":[{"type":"text","text":"Briefing delivered."'),
+        expect.stringContaining('"aborted":true'),
+      ]),
+    );
+    expect(queryValues(dbMock.execute.mock.calls[2]?.[0])).toContain("interrupted");
+  });
+
   it("records every finish-step cost with a replay-safe turn and step key", async () => {
     await createProjector().recordStepUsage({
       stepIndex: 2,

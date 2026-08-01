@@ -78,6 +78,9 @@ export type RunnerEnv = {
   // shorter than such gaps during a long blocking tool call, letting another instance re-claim the
   // job and replay the whole turn (double model + opencode billing). Sized to absorb a normal deploy.
   jobLeaseTtlMs: number;
+  // Durable Goat chat turn lease TTL. Kept shorter than the generic job delivery lease so a dead
+  // worker's chat turn can be reclaimed quickly without changing the older job queue's deploy buffer.
+  goatCodexChatLeaseTtlMs?: number | undefined;
   // Hard ceiling on how many times a job may be re-claimed while its execution (run) lease is busy
   // elsewhere. Lease-busy re-claims are normally deferred indefinitely; this caps the runaway case
   // (one job hit 17) by giving up once the in-flight run clearly owns the message.
@@ -136,6 +139,10 @@ export function loadEnv(): RunnerEnv {
     ),
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
+    goatCodexChatLeaseTtlMs: optionalPositiveIntegerEnv(
+      "RUNNER_GOAT_CODEX_CHAT_LEASE_TTL_MS",
+      90_000,
+    ),
     jobMaxLeaseBusyAttempts: optionalPositiveIntegerEnv("RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS", 10),
     goatTaskWorkerEnabled: optionalBooleanEnv("RUNNER_GOAT_TASK_WORKER_ENABLED", false),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on

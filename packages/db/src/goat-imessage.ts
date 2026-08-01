@@ -150,12 +150,28 @@ export async function countGoatImessageSendsSince(
   return row?.count ?? 0;
 }
 
+export async function getSuccessfulGoatImessageSendForTurn(
+  turnId: string,
+  db: DbLike = getDb(),
+): Promise<{ id: string; createdAt: Date } | null> {
+  const [row] = await db
+    .select({
+      id: goatImessageSends.id,
+      createdAt: goatImessageSends.createdAt,
+    })
+    .from(goatImessageSends)
+    .where(and(eq(goatImessageSends.turnId, turnId), eq(goatImessageSends.status, "sent")))
+    .limit(1);
+  return row ?? null;
+}
+
 export async function recordGoatImessageSend(
   input: {
     userWorkosId: string;
     source: GoatImessageSendSource;
     status: GoatImessageSendStatus;
     chatSessionId?: string | null;
+    turnId?: string | null;
     errorReason?: string | null;
   },
   db: DbLike = getDb(),
@@ -166,6 +182,7 @@ export async function recordGoatImessageSend(
     source: input.source,
     status: input.status,
     chatSessionId: input.chatSessionId ?? null,
+    turnId: input.turnId ?? null,
     errorReason: input.errorReason ?? null,
   });
 }
