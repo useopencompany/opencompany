@@ -1849,7 +1849,7 @@ export function GoatSurface({
       }
     }
 
-    if (event.key === "Enter" && (!event.shiftKey || mode === "home")) {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       if (!isInteractionPending && !backgroundTaskSubmitting) formRef.current?.requestSubmit();
     }

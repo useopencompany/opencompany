@@ -493,23 +493,18 @@ describe("GoatSurface chat streaming UI", () => {
     expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
-  it("submits Shift+Enter from the main composer as a foreground chat", async () => {
+  it("keeps Shift+Enter as a newline in the main composer", async () => {
     const user = userEvent.setup();
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask Goat anything..."), "Start now");
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    await user.type(textarea, "Start now");
     await user.keyboard("{Shift>}{Enter}{/Shift}");
 
-    await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
-    const optimisticHref = historyMock.replaceState.mock.calls[0]?.[2];
-    expect(optimisticHref).toMatch(/^\/chat\/goat_chat_/);
-    expect(chatMock.preparedRequestBodies[0]).toMatchObject({
-      sessionId: null,
-      newSessionId: String(optimisticHref).slice("/chat/".length),
-      model: DEFAULT_GOAT_MODEL,
-    });
-    expect(screen.getByPlaceholderText("Reply...")).toBeInTheDocument();
-    expect(screen.queryByText("welcome back, there")).not.toBeInTheDocument();
+    expect(textarea).toHaveValue("Start now\n");
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(chatMock.preparedRequestBodies).toHaveLength(0);
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
     expect(routerMock.push).not.toHaveBeenCalled();
   });
 
