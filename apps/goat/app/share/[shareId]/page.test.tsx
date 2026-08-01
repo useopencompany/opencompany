@@ -23,6 +23,7 @@ describe("shared chat metadata", () => {
       shareId: SHARE_ID,
       title: "Architecture review",
       kind: "chat",
+      engine: "opencompany",
       messages: [],
     });
   });
@@ -80,6 +81,7 @@ describe("shared chat metadata", () => {
       shareId: SHARE_ID,
       title: "Ship feature",
       kind: "task",
+      engine: "codex",
       messages: [],
     });
 
@@ -103,6 +105,44 @@ describe("shared chat metadata", () => {
         images: [
           expect.objectContaining({
             alt: "Ship feature — shared task run on opencompany",
+          }),
+        ],
+      },
+    });
+  });
+
+  it.each([
+    ["codex", "Codex chat"],
+    ["claude_code", "Claude Code chat"],
+  ] as const)("describes shared %s cloud chats distinctly", async (engine, subject) => {
+    loadPublicGoatChatMock.mockResolvedValueOnce({
+      shareId: SHARE_ID,
+      title: `${subject} session`,
+      kind: "chat",
+      engine,
+      messages: [],
+    });
+
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ shareId: SHARE_ID }),
+    });
+
+    expect(metadata).toMatchObject({
+      title: `${subject} session`,
+      description: `${subject} session — a read-only ${subject} shared from opencompany.`,
+      openGraph: {
+        description: `${subject} session — a read-only ${subject} shared from opencompany.`,
+        images: [
+          expect.objectContaining({
+            alt: `${subject} session — shared ${subject} on opencompany`,
+          }),
+        ],
+      },
+      twitter: {
+        description: `${subject} session — a read-only ${subject} shared from opencompany.`,
+        images: [
+          expect.objectContaining({
+            alt: `${subject} session — shared ${subject} on opencompany`,
           }),
         ],
       },

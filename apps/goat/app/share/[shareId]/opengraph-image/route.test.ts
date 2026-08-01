@@ -20,6 +20,7 @@ describe("shared chat Open Graph image", () => {
       shareId: SHARE_ID,
       title: "Architecture review",
       kind: "chat",
+      engine: "opencompany",
     });
     createSharedChatOpenGraphImageMock.mockReturnValue(
       new Response("image", {

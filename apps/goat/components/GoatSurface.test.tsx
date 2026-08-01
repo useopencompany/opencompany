@@ -1343,13 +1343,46 @@ describe("GoatSurface chat streaming UI", () => {
           title: "Codex chat",
           model: DEFAULT_GOAT_MODEL,
           engine: "codex",
-          messages: [],
+          messages: [
+            {
+              id: "codex_user_1",
+              role: "user",
+              parts: [{ type: "text", text: "Inspect the repo" }],
+            },
+          ],
         }}
       />,
     );
 
     expect(chatMock.lastResume).toBe(false);
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
+    expect(screen.getByRole("button", { name: "Share Codex chat" })).toBeInTheDocument();
+  });
+
+  it("shows the share button for existing Claude Code chats", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        claudeCodeConnected
+        initialChat={{
+          id: "goat_chat_claude_1",
+          title: "Claude Code chat",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "claude_code",
+          messages: [
+            {
+              id: "claude_user_1",
+              role: "user",
+              parts: [{ type: "text", text: "Review the branch" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude");
+    expect(screen.getByRole("button", { name: "Share Claude Code chat" })).toBeInTheDocument();
   });
 
   it("uses the task readiness status in the Codex detail header", () => {

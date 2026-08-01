@@ -20,7 +20,7 @@ import {
 
 type ShareStatus = "idle" | "loading" | "ready" | "error";
 type ShareOperation = "copying" | "revoking" | null;
-type ChatShareSubject = "chat" | "task run";
+type ChatShareSubject = "chat" | "task run" | "Codex chat" | "Claude Code chat";
 
 export function ChatShareButton({
   chatSessionId,

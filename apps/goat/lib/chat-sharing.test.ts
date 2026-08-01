@@ -151,7 +151,15 @@ describe("Goat chat sharing", () => {
       void args;
       return {
         rows: [
-          [SHARE_ID, "chat_1", "2026-07-27T10:00:00.000Z", "chat_1", "Architecture review", "task"],
+          [
+            SHARE_ID,
+            "chat_1",
+            "2026-07-27T10:00:00.000Z",
+            "chat_1",
+            "Architecture review",
+            "task",
+            "codex",
+          ],
         ],
       };
     });
@@ -162,7 +170,7 @@ describe("Goat chat sharing", () => {
 
     await expect(store.findShare(SHARE_ID)).resolves.toMatchObject({
       share: { id: SHARE_ID },
-      chatSession: { id: "chat_1", title: "Architecture review", kind: "task" },
+      chatSession: { id: "chat_1", title: "Architecture review", kind: "task", engine: "codex" },
     });
 
     const [statement, params] = query.mock.calls[0]!;
@@ -209,6 +217,7 @@ describe("Goat chat sharing", () => {
       shareId: SHARE_ID,
       title: "Architecture review",
       kind: "chat",
+      engine: "opencompany",
     });
 
     expect(store.findShare).toHaveBeenCalledWith(SHARE_ID);
@@ -246,6 +255,7 @@ describe("Goat chat sharing", () => {
     expect(result).toMatchObject({
       shareId: SHARE_ID,
       kind: "chat",
+      engine: "opencompany",
       title: "Architecture review",
       messages: [
         {
