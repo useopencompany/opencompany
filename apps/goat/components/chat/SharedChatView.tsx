@@ -9,7 +9,7 @@ import type { PublicGoatChatView } from "@/lib/chat-sharing";
 import type { GoatChatUiAttachment } from "@/lib/chat-ui";
 
 export function SharedChatView({ chat }: { chat: PublicGoatChatView }) {
-  const shareSubject = chat.kind === "task" ? "task run" : "chat";
+  const shareSubject = sharedChatSubject(chat);
   const taskLookup = useMemo(
     () => buildChatTaskLookup({ messages: chat.messages, tasks: [], liveTasks: null }),
     [chat.messages],
@@ -57,4 +57,11 @@ export function SharedChatView({ chat }: { chat: PublicGoatChatView }) {
       </article>
     </main>
   );
+}
+
+function sharedChatSubject(chat: { kind: string; engine?: string | null | undefined }) {
+  if (chat.kind === "task") return "task run";
+  if (chat.engine === "codex") return "Codex chat";
+  if (chat.engine === "claude_code") return "Claude Code chat";
+  return "chat";
 }

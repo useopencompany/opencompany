@@ -288,6 +288,16 @@ function chatModelSelectionFromEngineMention(
   return null;
 }
 
+function shareSubjectForActiveChat(input: {
+  isTask: boolean;
+  engine?: GoatChatEngine | null;
+}): "chat" | "task run" | "Codex chat" | "Claude Code chat" {
+  if (input.isTask) return "task run";
+  if (input.engine === "codex") return "Codex chat";
+  if (input.engine === "claude_code") return "Claude Code chat";
+  return "chat";
+}
+
 // Cloud coding-CLI chats (Codex + Claude Code) share the same home card and status
 // indicator; only the display label differs by engine. Defaults to "Codex" so the
 // shared surface stays labeled for any non-Claude engine that reaches it.
@@ -2177,7 +2187,10 @@ export function GoatSurface({
                       <ChatShareButton
                         chatSessionId={chatSessionId}
                         disabled={isAgentWorking}
-                        subject={activeTaskConversation ? "task run" : "chat"}
+                        subject={shareSubjectForActiveChat({
+                          isTask: Boolean(activeTaskConversation),
+                          engine: activeChatEngine,
+                        })}
                       />
                     ) : null}
                     {activeEngineChat?.engine === "codex" ||

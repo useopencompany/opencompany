@@ -23,12 +23,17 @@ const SHAREABLE_GOAT_CHAT_SESSION_KINDS: GoatChatSessionKind[] = ["chat", "task"
 export type PublicGoatChatView = Pick<GoatChatSessionView, "title" | "messages"> & {
   shareId: string;
   kind: GoatChatSessionKind;
+  engine: GoatChatSessionView["engine"];
 };
 
-export type PublicGoatChatMetadata = Pick<PublicGoatChatView, "shareId" | "title" | "kind">;
+export type PublicGoatChatMetadata = Pick<
+  PublicGoatChatView,
+  "shareId" | "title" | "kind" | "engine"
+>;
 
 type PublicGoatChatSessionRecord = Pick<GoatChatSessionView, "id" | "title"> & {
   kind: GoatChatSessionKind;
+  engine: GoatChatSessionView["engine"];
 };
 
 export type GoatChatShareStore = {
@@ -117,6 +122,7 @@ export async function loadPublicGoatChat(
     shareId: result.share.id,
     title: result.chatSession.title,
     kind: result.chatSession.kind,
+    engine: result.chatSession.engine,
     messages: messages.map(toPublicGoatChatUiMessage),
   };
 }
@@ -132,6 +138,7 @@ export async function loadPublicGoatChatMetadata(
     shareId: result.share.id,
     title: result.chatSession.title,
     kind: result.chatSession.kind,
+    engine: result.chatSession.engine,
   };
 }
 
@@ -215,6 +222,7 @@ export function createDbGoatChatShareStore(
               ELSE ${goatChatSessions.title}
             END`,
             kind: goatChatSessions.kind,
+            engine: goatChatSessions.engine,
           },
         })
         .from(goatChatShares)

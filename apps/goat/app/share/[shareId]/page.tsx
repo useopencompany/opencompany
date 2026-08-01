@@ -29,7 +29,7 @@ export async function generateMetadata({ params }: SharedChatPageProps): Promise
   if (!chat) notFound();
 
   const title = chat.title.trim() || "Shared chat";
-  const shareSubject = chat.kind === "task" ? "task run" : "chat";
+  const shareSubject = sharedChatSubject(chat);
   const description = `${title} — a read-only ${shareSubject} shared from opencompany.`;
   const sharePath = `/share/${encodeURIComponent(chat.shareId)}`;
   const appUrl = getGoatAppUrl();
@@ -81,4 +81,11 @@ export default async function SharedChatPage({ params }: SharedChatPageProps) {
   if (!chat) notFound();
 
   return <SharedChatView chat={chat} />;
+}
+
+function sharedChatSubject(chat: { kind: string; engine?: string | null | undefined }) {
+  if (chat.kind === "task") return "task run";
+  if (chat.engine === "codex") return "Codex chat";
+  if (chat.engine === "claude_code") return "Claude Code chat";
+  return "chat";
 }
