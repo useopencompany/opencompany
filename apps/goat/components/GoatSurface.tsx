@@ -946,18 +946,20 @@ export function GoatSurface({
   }, [chatSessionId, isAgentWorking, mode, persistedChatSessionId]);
 
   useEffect(() => {
-    if (
-      mode !== "chat" ||
-      isAgentWorking ||
-      !chatSessionId ||
-      persistedChatSessionId !== chatSessionId
-    ) {
+    if (mode !== "chat" || !chatSessionId || persistedChatSessionId !== chatSessionId) {
+      return;
+    }
+    if (isAgentWorking) {
+      lastSeenMarkRef.current = null;
       return;
     }
 
-    const markKey = `${chatSessionId}:${
-      activeChatSummary?.updatedAt ?? latestAssistantMessageId ?? chatMessages.length
-    }`;
+    const markKey = [
+      chatSessionId,
+      activeChatSummary?.updatedAt ?? "no-summary-update",
+      latestAssistantMessageId ?? "no-assistant-message",
+      chatMessages.length,
+    ].join(":");
     if (lastSeenMarkRef.current === markKey) return;
     lastSeenMarkRef.current = markKey;
     void markGoatChatSeenAction(chatSessionId).catch(() => undefined);

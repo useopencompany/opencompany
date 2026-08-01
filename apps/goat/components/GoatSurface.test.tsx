@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { closeGoatChatSessionAction } from "@/lib/chat-actions";
+import { closeGoatChatSessionAction, markGoatChatSeenAction } from "@/lib/chat-actions";
 import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
@@ -234,6 +234,7 @@ describe("GoatSurface chat streaming UI", () => {
     historyMock.replaceState.mockReset();
     vi.spyOn(window.history, "replaceState").mockImplementation(historyMock.replaceState);
     vi.mocked(closeGoatChatSessionAction).mockClear();
+    vi.mocked(markGoatChatSeenAction).mockClear();
     vi.mocked(cancelGoatTaskAction).mockClear();
     vi.mocked(continueGoatTaskAction).mockClear();
     attachmentUploadMock.upload.mockReset();
@@ -276,6 +277,64 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
     expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
+  });
+
+  it("marks an already-open chat seen again after a live assistant message finishes", async () => {
+    const staleSummaryUpdatedAt = "2026-07-04T12:00:00.000Z";
+    const initialChat = {
+      id: "goat_chat_live_seen",
+      title: "Live chat",
+      model: DEFAULT_GOAT_MODEL,
+      engine: "opencompany" as const,
+      messages: [
+        {
+          id: "user_1",
+          role: "user" as const,
+          parts: [{ type: "text" as const, text: "Start" }],
+        },
+      ],
+    };
+    const staleSummary: GoatChatSummaryView = {
+      id: initialChat.id,
+      title: initialChat.title,
+      model: DEFAULT_GOAT_MODEL,
+      engine: "opencompany",
+      preview: "Start",
+      updatedAt: staleSummaryUpdatedAt,
+      lastSeenAt: staleSummaryUpdatedAt,
+      state: "done_seen",
+      pinnedAt: null,
+    };
+
+    const { rerender } = render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={initialChat}
+        recentChats={[staleSummary]}
+      />,
+    );
+
+    await waitFor(() => expect(markGoatChatSeenAction).toHaveBeenCalledWith(initialChat.id));
+    vi.mocked(markGoatChatSeenAction).mockClear();
+
+    await act(async () => {
+      chatMock.status = "streaming";
+      chatMock.startWithSessionId?.(initialChat.id, DEFAULT_GOAT_MODEL);
+    });
+    expect(markGoatChatSeenAction).not.toHaveBeenCalled();
+
+    chatMock.status = "ready";
+    rerender(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={initialChat}
+        recentChats={[staleSummary]}
+      />,
+    );
+
+    await waitFor(() => expect(markGoatChatSeenAction).toHaveBeenCalledWith(initialChat.id));
   });
 
   it("continues a session-backed workflow task through the same chat composer", async () => {
