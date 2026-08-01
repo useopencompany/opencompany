@@ -9,6 +9,7 @@ import {
   createGoatTaskSession,
   goatTaskSessionExecutionEnabled,
 } from "@opencompany/db/goat-task-sessions";
+import { captureException } from "@opencompany/observability";
 import { type SQL, sql } from "drizzle-orm";
 import { getDb } from "./db";
 
@@ -110,6 +111,7 @@ export function startGoatTaskScheduleWorker(input: { onTaskCreated?: () => void 
       await sweepDueGoatTaskSchedules({
         ...(input.onTaskCreated ? { onTaskCreated: input.onTaskCreated } : {}),
       }).catch((error) => {
+        captureException(error, { event: "opencompany.goat_task_schedule_sweep_failed" });
         console.error("Goat task schedule sweep failed.", {
           event: "opencompany.goat_task_schedule_sweep_failed",
           error,
@@ -134,14 +136,14 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
     const schedule = rowsFromExecute<DueScheduleRow>(
       await tx.execute(sql`
         SELECT
-          id,
-          user_workos_id AS "userWorkosId",
-          name,
-          cron,
-          timezone,
-          prompt,
-          planned_harness_spec AS "plannedHarnessSpec",
-          next_run_at AS "nextRunAt"
+          schedule.id,
+          schedule.user_workos_id AS "userWorkosId",
+          schedule.name,
+          schedule.cron,
+          schedule.timezone,
+          schedule.prompt,
+          schedule.planned_harness_spec AS "plannedHarnessSpec",
+          schedule.next_run_at AS "nextRunAt"
         FROM goat.task_schedules AS schedule
         INNER JOIN goat.users AS "user"
           ON "user".workos_user_id = schedule.user_workos_id
