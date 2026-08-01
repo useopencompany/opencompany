@@ -8,6 +8,7 @@ import {
 } from "./goat-codex-chat-errors";
 import {
   claimNextGoatCodexChatTurn,
+  goatCodexChatLeaseTtlMs,
   goatCodexChatRetryAt,
   heartbeatGoatCodexChatTurn,
   resolveGoatCodexChatWorkerConcurrency,
@@ -169,6 +170,21 @@ describe("resolveGoatCodexChatWorkerConcurrency", () => {
 
   it("honors an explicit test override", () => {
     expect(resolveGoatCodexChatWorkerConcurrency({ workerConcurrency: 40 }, 2)).toBe(2);
+  });
+});
+
+describe("goatCodexChatLeaseTtlMs", () => {
+  it("uses the dedicated durable chat lease when configured", () => {
+    expect(
+      goatCodexChatLeaseTtlMs({
+        jobLeaseTtlMs: 300_000,
+        goatCodexChatLeaseTtlMs: 90_000,
+      }),
+    ).toBe(90_000);
+  });
+
+  it("falls back to the generic job lease for older env fixtures", () => {
+    expect(goatCodexChatLeaseTtlMs({ jobLeaseTtlMs: 300_000 })).toBe(300_000);
   });
 });
 

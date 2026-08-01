@@ -236,6 +236,18 @@ export async function runClaimedTurn(
       recovery_attempts: turn.recoveryAttempts,
     });
   }
+  if (turn.attempts > 1) {
+    logger.warn("Reclaimed durable Goat chat turn", {
+      event: "opencompany.goat_codex_chat_turn_reclaimed",
+      turn_id: turn.id,
+      codex_chat_session_id: session.id,
+      chat_session_id: session.chatSessionId,
+      engine: session.engine,
+      attempt: turn.attempts,
+      interrupt_requested: Boolean(turn.interruptRequestedAt),
+      lease_expires_at: turn.leaseExpiresAt?.toISOString(),
+    });
+  }
 
   let heartbeatAbort: GoatCodexChatLeaseLostError | null = null;
   let rejectHeartbeatAbort: ((error: GoatCodexChatLeaseLostError) => void) | null = null;
@@ -262,14 +274,14 @@ export async function runClaimedTurn(
         turnId: turn.id,
         leaseId,
         leaseOwner,
-        leaseTtlMs: env.jobLeaseTtlMs,
+        leaseTtlMs: goatCodexChatLeaseTtlMs(env),
       })
         .then((owned) => {
           if (!owned) markHeartbeatLost(new GoatCodexChatLeaseLostError());
         })
         .catch(markHeartbeatLost);
     },
-    Math.max(5_000, Math.floor(env.jobLeaseTtlMs / 3)),
+    Math.max(5_000, Math.floor(goatCodexChatLeaseTtlMs(env) / 3)),
   );
   let handedOff = false;
   let retryableError: GoatCodexChatRetryableInfrastructureError | null = null;
@@ -573,7 +585,7 @@ export function startGoatCodexChatWorker(
         while (!stopped && active.size < concurrency) {
           const turn = await claimNextGoatCodexChatTurn({
             leaseOwner: env.instanceId,
-            leaseTtlMs: env.jobLeaseTtlMs,
+            leaseTtlMs: goatCodexChatLeaseTtlMs(env),
           });
           if (!turn) break;
           const handoffController = new AbortController();
@@ -685,6 +697,12 @@ export function resolveGoatCodexChatWorkerConcurrency(
   override?: number,
 ) {
   return Math.max(1, override ?? env.workerConcurrency);
+}
+
+export function goatCodexChatLeaseTtlMs(
+  env: Pick<RunnerEnv, "jobLeaseTtlMs" | "goatCodexChatLeaseTtlMs">,
+) {
+  return env.goatCodexChatLeaseTtlMs ?? env.jobLeaseTtlMs;
 }
 
 function turnFromRow(row: ClaimedTurnRow): GoatCodexChatTurn {

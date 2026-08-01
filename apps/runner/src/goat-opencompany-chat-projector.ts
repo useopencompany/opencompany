@@ -26,9 +26,13 @@ export type GoatOpenCompanyChatUiPart = {
   [key: string]: unknown;
 };
 
+type GoatOpenCompanyChatUsage = Partial<
+  Pick<LanguageModelUsage, "inputTokens" | "outputTokens" | "totalTokens">
+>;
+
 export type GoatOpenCompanyChatProjection = {
   parts: GoatOpenCompanyChatUiPart[];
-  usage?: LanguageModelUsage;
+  usage?: GoatOpenCompanyChatUsage;
   finishReason?: string;
 };
 
@@ -76,18 +80,24 @@ export function createGoatOpenCompanyChatProjector(input: {
       error?: string;
       aborted?: boolean;
       durationMs?: number;
+      preservePersistedOnEmpty?: boolean;
     } = {},
   ) => {
-    const content = projection.parts
+    const effectiveProjection = options.preservePersistedOnEmpty
+      ? await hydrateEmptyProjectionFromPersistedMessage(projection)
+      : projection;
+    const content = effectiveProjection.parts
       .flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : []))
       .join("")
       .trim();
     const debugTrace: GoatChatMessageDebugTrace = {
       schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
       model: target.model,
-      uiMessageParts: projection.parts,
-      ...(projection.finishReason ? { finishReason: projection.finishReason } : {}),
-      ...(projection.usage ? { usage: compactUsage(projection.usage) } : {}),
+      uiMessageParts: effectiveProjection.parts,
+      ...(effectiveProjection.finishReason
+        ? { finishReason: effectiveProjection.finishReason }
+        : {}),
+      ...(effectiveProjection.usage ? { usage: compactUsage(effectiveProjection.usage) } : {}),
       ...(options.error ? { error: options.error } : {}),
       ...(options.aborted ? { aborted: true } : {}),
       ...(typeof options.durationMs === "number" ? { durationMs: options.durationMs } : {}),
@@ -105,6 +115,47 @@ export function createGoatOpenCompanyChatProjector(input: {
         RETURNING message.id
       `),
     );
+    if ((options.error || options.aborted) && isProjectionOutputEmpty(effectiveProjection)) {
+      await logEmptyTerminalOutputWithBilledSteps({
+        turnId: target.turnId,
+        codexChatSessionId: target.codexChatSessionId,
+        chatSessionId: target.chatSessionId,
+        assistantMessageId: target.assistantMessageId,
+        terminalStatus: options.aborted ? "interrupted" : "failed",
+      });
+    }
+  };
+
+  const hydrateEmptyProjectionFromPersistedMessage = async (
+    projection: GoatOpenCompanyChatProjection,
+  ): Promise<GoatOpenCompanyChatProjection> => {
+    if (projection.parts.length > 0) return projection;
+    const result = await getDb().execute(sql`
+      SELECT content, debug_trace
+      FROM goat.chat_messages AS message
+      WHERE message.id = ${target.assistantMessageId}
+        AND message.session_id = ${target.chatSessionId}
+        AND message.role = 'assistant'
+        AND EXISTS (${turnLeaseSubquery({ runningOnly: true })})
+      LIMIT 1
+    `);
+    const row = rowsFromExecute<{
+      content: string | null;
+      debug_trace: GoatChatMessageDebugTrace | null;
+    }>(result)[0];
+    if (!row) throw new GoatCodexChatLeaseLostError();
+    const persistedParts = parsePersistedUiMessageParts(row.debug_trace?.uiMessageParts);
+    const content = row.content?.trim() ?? "";
+    const parts =
+      content && !persistedParts.some((part) => part.type === "text" && hasNonEmptyText(part))
+        ? [...persistedParts, { type: "text", text: content, state: "done" }]
+        : persistedParts;
+    if (parts.length === 0) return projection;
+    return {
+      parts,
+      ...(row.debug_trace?.finishReason ? { finishReason: row.debug_trace.finishReason } : {}),
+      ...(row.debug_trace?.usage ? { usage: row.debug_trace.usage } : {}),
+    };
   };
 
   return {
@@ -187,6 +238,7 @@ export function createGoatOpenCompanyChatProjector(input: {
       const durationMs = elapsedTurnDurationMs(target.turnStartedAt, completedAt);
       await writeAssistantMessage(projection, {
         aborted: true,
+        preservePersistedOnEmpty: true,
         ...(durationMs !== undefined ? { durationMs } : {}),
       });
       await settleGoatDurableTurn({
@@ -208,6 +260,7 @@ export function createGoatOpenCompanyChatProjector(input: {
       const durationMs = elapsedTurnDurationMs(target.turnStartedAt, completedAt);
       await writeAssistantMessage(projection, {
         error,
+        preservePersistedOnEmpty: true,
         ...(durationMs !== undefined ? { durationMs } : {}),
       });
       await settleGoatDurableTurn({
@@ -334,7 +387,7 @@ async function recordOpenCompanyChatModelCost(input: {
   }
 }
 
-function compactUsage(usage: LanguageModelUsage) {
+function compactUsage(usage: GoatOpenCompanyChatUsage) {
   return {
     inputTokens: readUsageNumber(usage.inputTokens),
     outputTokens: readUsageNumber(usage.outputTokens),
@@ -367,6 +420,61 @@ function readUsageNumber(value: number | undefined) {
 function elapsedTurnDurationMs(startedAt: Date | undefined, completedAt: Date) {
   if (!startedAt || Number.isNaN(startedAt.getTime())) return undefined;
   return Math.max(0, completedAt.getTime() - startedAt.getTime());
+}
+
+function isProjectionOutputEmpty(projection: GoatOpenCompanyChatProjection) {
+  return !projection.parts.some((part) => hasNonEmptyText(part));
+}
+
+function hasNonEmptyText(part: GoatOpenCompanyChatUiPart) {
+  return part.type === "text" && typeof part.text === "string" && part.text.trim().length > 0;
+}
+
+function parsePersistedUiMessageParts(value: unknown): GoatOpenCompanyChatUiPart[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (part): part is GoatOpenCompanyChatUiPart => isRecord(part) && typeof part.type === "string",
+  );
+}
+
+async function logEmptyTerminalOutputWithBilledSteps(input: {
+  turnId: string;
+  codexChatSessionId: string;
+  chatSessionId: string;
+  assistantMessageId: string;
+  terminalStatus: "interrupted" | "failed";
+}) {
+  try {
+    const result = await getDb().execute(sql`
+      SELECT count(*)::int AS billed_steps
+      FROM goat.credit_ledger
+      WHERE source = 'chat_model_usage'
+        AND metadata->>'turnId' = ${input.turnId}
+        AND amount_usd_micros < 0
+    `);
+    const billedSteps =
+      Number(rowsFromExecute<{ billed_steps: number | string }>(result)[0]?.billed_steps ?? 0) || 0;
+    if (billedSteps <= 0) return;
+    logger.error("Durable OpenCompany chat turn finalized with empty output after billed steps", {
+      event: "opencompany.goat_opencompany_chat_empty_terminal_output_after_billing",
+      turn_id: input.turnId,
+      codex_chat_session_id: input.codexChatSessionId,
+      chat_session_id: input.chatSessionId,
+      assistant_message_id: input.assistantMessageId,
+      terminal_status: input.terminalStatus,
+      billed_steps: billedSteps,
+    });
+  } catch (error) {
+    logger.warn("Durable OpenCompany chat empty-output billing telemetry failed", {
+      event: "opencompany.goat_opencompany_chat_empty_output_billing_telemetry_failed",
+      turn_id: input.turnId,
+      error,
+    });
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function assertRowsChanged(result: unknown) {

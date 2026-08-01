@@ -1595,6 +1595,7 @@ export const goatImessageSends = goat.table(
       .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
     source: text("source").$type<GoatImessageSendSource>().notNull(),
     chatSessionId: text("chat_session_id"),
+    turnId: text("turn_id"),
     status: text("status").$type<GoatImessageSendStatus>().notNull(),
     errorReason: text("error_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1604,6 +1605,9 @@ export const goatImessageSends = goat.table(
       table.userWorkosId,
       table.createdAt,
     ),
+    turnSentIdx: uniqueIndex("goat_imessage_sends_turn_sent_idx")
+      .on(table.turnId)
+      .where(sql`${table.turnId} IS NOT NULL AND ${table.status} = 'sent'`),
     sourceCheck: check(
       "goat_imessage_sends_source_check",
       sql`${table.source} IN ('chat', 'task', 'pairing')`,
