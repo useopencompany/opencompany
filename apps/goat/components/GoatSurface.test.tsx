@@ -63,7 +63,13 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/chat-actions", () => ({
   closeGoatChatSessionAction: vi.fn(async () => ({ ok: true, error: null })),
+  createGoatChatShareAction: vi.fn(async () => ({
+    ok: true,
+    shareId: "goat_chat_share_123e4567-e89b-42d3-a456-426614174000",
+  })),
+  getGoatChatShareAction: vi.fn(async () => ({ ok: true, shareId: null })),
   markGoatChatSeenAction: vi.fn(async () => ({ ok: true, error: null })),
+  revokeGoatChatShareAction: vi.fn(async () => ({ ok: true })),
 }));
 
 // Server action module; importing it for real drags authkit into jsdom.
@@ -374,7 +380,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Morning workflow")).toBeInTheDocument();
     expect(screen.getByText("Task")).toBeInTheDocument();
     expect(screen.getByText("The workflow is complete.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /share/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Share task run" })).toBeInTheDocument();
 
     await user.type(screen.getByPlaceholderText("Reply..."), "Please check the afternoon too");
     await user.click(screen.getByRole("button", { name: "Send message" }));

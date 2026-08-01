@@ -22,6 +22,7 @@ describe("shared chat metadata", () => {
     loadPublicGoatChatMock.mockResolvedValue({
       shareId: SHARE_ID,
       title: "Architecture review",
+      kind: "chat",
       messages: [],
     });
   });
@@ -69,6 +70,40 @@ describe("shared chat metadata", () => {
             type: "image/png",
             alt: "Architecture review — shared chat on opencompany",
           },
+        ],
+      },
+    });
+  });
+
+  it("describes shared task runs distinctly from chats", async () => {
+    loadPublicGoatChatMock.mockResolvedValueOnce({
+      shareId: SHARE_ID,
+      title: "Ship feature",
+      kind: "task",
+      messages: [],
+    });
+
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ shareId: SHARE_ID }),
+    });
+
+    expect(metadata).toMatchObject({
+      title: "Ship feature",
+      description: "Ship feature — a read-only task run shared from opencompany.",
+      openGraph: {
+        description: "Ship feature — a read-only task run shared from opencompany.",
+        images: [
+          expect.objectContaining({
+            alt: "Ship feature — shared task run on opencompany",
+          }),
+        ],
+      },
+      twitter: {
+        description: "Ship feature — a read-only task run shared from opencompany.",
+        images: [
+          expect.objectContaining({
+            alt: "Ship feature — shared task run on opencompany",
+          }),
         ],
       },
     });

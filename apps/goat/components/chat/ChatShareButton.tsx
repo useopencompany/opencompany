@@ -20,13 +20,16 @@ import {
 
 type ShareStatus = "idle" | "loading" | "ready" | "error";
 type ShareOperation = "copying" | "revoking" | null;
+type ChatShareSubject = "chat" | "task run";
 
 export function ChatShareButton({
   chatSessionId,
   disabled = false,
+  subject = "chat",
 }: {
   chatSessionId: string;
   disabled?: boolean;
+  subject?: ChatShareSubject;
 }) {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<ShareStatus>("idle");
@@ -116,7 +119,7 @@ export function ChatShareButton({
       await navigator.clipboard.writeText(url);
       setCopied(true);
       toast.success("Read-only link copied", {
-        description: "Anyone with the link can view this chat, including new messages.",
+        description: `Anyone with the link can view this ${subject}, including new messages.`,
       });
       if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
       resetTimerRef.current = setTimeout(() => setCopied(false), 1_500);
@@ -137,7 +140,7 @@ export function ChatShareButton({
       setShareId(null);
       setConfirmingRevoke(false);
       setCopied(false);
-      toast.success("Chat is no longer shared", {
+      toast.success(`${capitalizeShareSubject(subject)} is no longer shared`, {
         description: "The old link no longer works.",
       });
     } catch (error) {
@@ -153,14 +156,14 @@ export function ChatShareButton({
         <TooltipTrigger
           ref={triggerRef}
           type="button"
-          aria-label="Share chat"
+          aria-label={`Share ${subject}`}
           disabled={disabled}
           onClick={openSharingDialog}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Link2 size={14} strokeWidth={1.9} />
         </TooltipTrigger>
-        <TooltipContent>Share chat</TooltipContent>
+        <TooltipContent>Share {subject}</TooltipContent>
       </Tooltip>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -168,7 +171,7 @@ export function ChatShareButton({
           {confirmingRevoke ? (
             <>
               <DialogHeader className="text-left">
-                <DialogTitle className="text-[15px]">Stop sharing this chat?</DialogTitle>
+                <DialogTitle className="text-[15px]">Stop sharing this {subject}?</DialogTitle>
                 <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
                   The current link will stop working immediately. You can create a new link whenever
                   you need one.
@@ -200,11 +203,13 @@ export function ChatShareButton({
             <>
               <DialogHeader className="text-left">
                 <DialogTitle className="text-[15px]">
-                  {status === "ready" && shareId ? "Chat is shared" : "Share this chat"}
+                  {status === "ready" && shareId
+                    ? `${capitalizeShareSubject(subject)} is shared`
+                    : `Share this ${subject}`}
                 </DialogTitle>
                 <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
-                  Anyone with the link can view this read-only chat, including new messages. They
-                  can’t edit or continue it.
+                  Anyone with the link can view this read-only {subject}, including new messages.
+                  They can’t edit or continue it.
                 </DialogDescription>
               </DialogHeader>
 
@@ -237,7 +242,7 @@ export function ChatShareButton({
                   <div className="flex items-center gap-2 rounded-lg border border-border bg-surface p-1.5 pl-3">
                     <input
                       readOnly
-                      aria-label="Read-only chat link"
+                      aria-label={`Read-only ${subject} link`}
                       value={shareUrl}
                       onFocus={(event) => event.currentTarget.select()}
                       className="min-w-0 flex-1 bg-transparent text-[12px] text-ink-muted outline-none"
@@ -293,4 +298,8 @@ export function ChatShareButton({
       </Dialog>
     </>
   );
+}
+
+function capitalizeShareSubject(subject: ChatShareSubject) {
+  return subject.charAt(0).toUpperCase() + subject.slice(1);
 }

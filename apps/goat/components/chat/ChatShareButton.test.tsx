@@ -97,6 +97,35 @@ describe("ChatShareButton", () => {
     });
   });
 
+  it("uses task run copy when sharing a task-backed session", async () => {
+    vi.mocked(createGoatChatShareAction).mockResolvedValue({
+      ok: true,
+      shareId: SHARE_ID,
+    });
+    render(<ChatShareButton chatSessionId="goat_chat_task_1" subject="task run" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Share task run" }));
+
+    expect(await screen.findByRole("heading", { name: "Share this task run" })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Anyone with the link can view this read-only task run, including new messages/,
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Create & copy link" }));
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/share/${SHARE_ID}`),
+    );
+    expect(await screen.findByRole("heading", { name: "Task run is shared" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Read-only task run link" })).toHaveValue(
+      `${window.location.origin}/share/${SHARE_ID}`,
+    );
+    expect(toastMock.success).toHaveBeenCalledWith("Read-only link copied", {
+      description: "Anyone with the link can view this task run, including new messages.",
+    });
+  });
+
   it("keeps a failed revocation open so the owner can retry", async () => {
     vi.mocked(getGoatChatShareAction).mockResolvedValue({ ok: true, shareId: SHARE_ID });
     vi.mocked(revokeGoatChatShareAction).mockResolvedValue({

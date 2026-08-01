@@ -29,12 +29,13 @@ export async function generateMetadata({ params }: SharedChatPageProps): Promise
   if (!chat) notFound();
 
   const title = chat.title.trim() || "Shared chat";
-  const description = `${title} — a read-only chat shared from opencompany.`;
+  const shareSubject = chat.kind === "task" ? "task run" : "chat";
+  const description = `${title} — a read-only ${shareSubject} shared from opencompany.`;
   const sharePath = `/share/${encodeURIComponent(chat.shareId)}`;
   const appUrl = getGoatAppUrl();
   const shareUrl = new URL(sharePath, appUrl);
   const imageUrl = new URL(`${sharePath}/opengraph-image`, appUrl);
-  const imageAlt = `${title} — shared chat on opencompany`;
+  const imageAlt = `${title} — shared ${shareSubject} on opencompany`;
 
   return {
     title,

@@ -9,6 +9,7 @@ import type { PublicGoatChatView } from "@/lib/chat-sharing";
 import type { GoatChatUiAttachment } from "@/lib/chat-ui";
 
 export function SharedChatView({ chat }: { chat: PublicGoatChatView }) {
+  const shareSubject = chat.kind === "task" ? "task run" : "chat";
   const taskLookup = useMemo(
     () => buildChatTaskLookup({ messages: chat.messages, tasks: [], liveTasks: null }),
     [chat.messages],
@@ -33,7 +34,7 @@ export function SharedChatView({ chat }: { chat: PublicGoatChatView }) {
           </Link>
           <div className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-[11.5px] font-medium text-ink-muted shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
             <Link2 size={12} strokeWidth={1.9} aria-hidden="true" />
-            <span>Shared chat · Read only</span>
+            <span>Shared {shareSubject} · Read only</span>
           </div>
         </div>
       </header>

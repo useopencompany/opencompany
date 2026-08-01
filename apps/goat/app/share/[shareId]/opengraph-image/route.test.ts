@@ -19,6 +19,7 @@ describe("shared chat Open Graph image", () => {
     loadPublicGoatChatMetadataMock.mockResolvedValue({
       shareId: SHARE_ID,
       title: "Architecture review",
+      kind: "chat",
     });
     createSharedChatOpenGraphImageMock.mockReturnValue(
       new Response("image", {
