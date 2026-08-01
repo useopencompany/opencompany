@@ -31,6 +31,7 @@ import {
   type GoatTaskScheduleRow,
 } from "@/lib/task-collections";
 import type { GoatTaskScheduleView } from "@/lib/task-schedules";
+import { deriveGoatTaskWorkflowSteps } from "@/lib/task-workflow-activity";
 
 // Durable background chats for every engine persist runtime in goat.codex_chat_sessions.
 // The name is historical: OpenCompany, Codex, and Claude Code all use it now.
@@ -408,6 +409,10 @@ export function taskRowToView(row: GoatTaskRow): GoatTaskView {
     error: row.error,
     reportedOutcome: row.reported_outcome,
     outcomeComment: row.outcome_comment,
+    workflowSteps: deriveGoatTaskWorkflowSteps({
+      harnessSpec: row.harness_spec,
+      taskStatus: row.status,
+    }),
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

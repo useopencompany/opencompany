@@ -701,12 +701,37 @@ describe("executeGoatWorkflowStepsTask", () => {
       runStep.mock.calls.map(([input]) => input.task.harnessSpec.workflow?.currentStepIndex),
     ).toEqual([0, 1]);
     expect(runStep.mock.calls[1]?.[0].conversationMessages).toEqual([
-      { role: "user", content: "Prepare the report." },
-      { role: "assistant", content: "Research complete." },
-      { role: "user", content: "Step 2/2 — Title 2" },
+      {
+        role: "user",
+        content: expect.stringContaining("Step 2/2 — Title 2"),
+      },
     ]);
+    expect(runStep.mock.calls[1]?.[0].conversationMessages?.[0]?.content).toContain(
+      "Overall task request:\nResearch Marseille.",
+    );
+    expect(runStep.mock.calls[1]?.[0].conversationMessages?.[0]?.content).toContain(
+      "<previous_step_result>\nResearch complete.",
+    );
     expect(sink.createUserMessage).toHaveBeenCalledWith({
-      content: "Step 2/2 — Title 2",
+      content: expect.stringContaining("Step 2/2 — Title 2"),
+    });
+    expect(sink.appendEvent).toHaveBeenCalledWith({
+      type: "task.status",
+      payload: expect.objectContaining({
+        workflowStepEvent: "started",
+        stepIndex: 0,
+        stepCount: 2,
+        stepTitle: "Title 1",
+      }),
+    });
+    expect(sink.appendEvent).toHaveBeenCalledWith({
+      type: "task.status",
+      payload: expect.objectContaining({
+        workflowStepEvent: "completed",
+        stepIndex: 1,
+        stepCount: 2,
+        stepTitle: "Title 2",
+      }),
     });
   });
 
@@ -779,6 +804,7 @@ describe("executeGoatWorkflowStepsTask", () => {
       role: "user",
       content: expect.stringContaining("Step 2/2 — Title 2"),
     });
+    expect(handoff?.content).toContain("Overall task request:\nResearch Marseille.");
     expect(handoff?.content).toContain("<previous_step_result>\nEvidence from step one.");
   });
 
@@ -855,9 +881,12 @@ describe("executeGoatWorkflowStepsTask", () => {
     expect(
       runStep.mock.calls.map(([input]) => input.task.harnessSpec.workflow?.currentStepIndex),
     ).toEqual([1, 2]);
+    expect(runStep.mock.calls[0]?.[0].conversationMessages).toEqual([
+      { role: "user", content: "Step 2/3 — Title 2" },
+    ]);
     expect(sink.createUserMessage).toHaveBeenCalledTimes(1);
     expect(sink.createUserMessage).toHaveBeenCalledWith({
-      content: "Step 3/3 — Title 3",
+      content: expect.stringContaining("Step 3/3 — Title 3"),
     });
   });
 
@@ -932,7 +961,7 @@ describe("executeGoatWorkflowStepsTask", () => {
     );
 
     expect(sink.createUserMessage).toHaveBeenCalledWith({
-      content: "Step 2/2 — Title 2",
+      content: expect.stringContaining("Step 2/2 — Title 2"),
     });
   });
 

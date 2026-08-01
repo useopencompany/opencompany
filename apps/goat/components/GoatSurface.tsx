@@ -179,6 +179,10 @@ import {
   setGoatTaskScheduleEnabledAction,
   updateGoatTaskScheduleAction,
 } from "@/lib/task-schedules";
+import {
+  deriveGoatTaskWorkflowSteps,
+  type GoatTaskWorkflowStepView,
+} from "@/lib/task-workflow-activity";
 import { archiveGoatTaskAction, cancelGoatTaskAction, continueGoatTaskAction } from "@/lib/tasks";
 import { updateGoatTimezoneAction } from "@/lib/user-preferences";
 import type { GoatWorkflowCatalogItem } from "@/lib/workflows";
@@ -309,6 +313,7 @@ export type GoatTaskView = {
   error: string | null;
   reportedOutcome?: GoatTaskReportedOutcome | null;
   outcomeComment?: string | null;
+  workflowSteps?: GoatTaskWorkflowStepView[];
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -5169,6 +5174,13 @@ function taskRowToView(row: GoatTaskRow): GoatTaskView {
     stage: row.stage,
     result: row.result,
     error: row.error,
+    workflowId: row.workflow_id,
+    reportedOutcome: row.reported_outcome,
+    outcomeComment: row.outcome_comment,
+    workflowSteps: deriveGoatTaskWorkflowSteps({
+      harnessSpec: row.harness_spec,
+      taskStatus: row.status,
+    }),
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
