@@ -95,6 +95,7 @@ import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/T
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useGoatChatAttachments } from "@/components/chat/useGoatChatAttachments";
 import { useGoatCreditBalance } from "@/components/chat/useGoatCreditBalance";
+import { GoatChatStateIndicator } from "@/components/GoatChatStateIndicator";
 import { useHydrated } from "@/components/useHydrated";
 import {
   descriptionFromGoatAdHocTaskPrompt,
@@ -4934,35 +4935,7 @@ function HomeChatStateIndicator({
   localState: ReturnType<typeof goatChatSummaryState> | null;
 }) {
   const state = localState ?? goatChatSummaryState(chat);
-  if (state === "working") {
-    return (
-      <LoaderCircle
-        aria-hidden="true"
-        data-testid="home-chat-working"
-        size={15}
-        strokeWidth={2}
-        className="shrink-0 animate-spin text-ink-subtle group-hover/chat:text-ink-muted"
-      />
-    );
-  }
-  if (state === "done_unseen") {
-    return (
-      <span
-        aria-hidden="true"
-        data-testid="home-chat-unseen"
-        className="h-2 w-2 shrink-0 rounded-full bg-info"
-      />
-    );
-  }
-  return (
-    <CheckCircle2
-      aria-hidden="true"
-      data-testid="home-chat-seen"
-      size={15}
-      strokeWidth={2}
-      className="shrink-0 text-success"
-    />
-  );
+  return <GoatChatStateIndicator state={state} surface="home" showSeen />;
 }
 
 function ScheduleRows({ schedules }: { schedules: readonly GoatTaskScheduleView[] }) {
