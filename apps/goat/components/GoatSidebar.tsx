@@ -23,6 +23,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { type FormEvent, type MouseEventHandler, useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
+import { GoatChatStateIndicator } from "@/components/GoatChatStateIndicator";
 import { GoatSidebarFeedback } from "@/components/GoatSidebarFeedback";
 import { closeGoatChatSessionAction, setGoatChatPinnedAction } from "@/lib/chat-actions";
 import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
@@ -478,27 +479,7 @@ function activeSidebarChatState(chat: GoatChatSummaryView) {
 }
 
 function SidebarChatStateIndicator({ state }: { state: ReturnType<typeof goatChatSummaryState> }) {
-  if (state === "working") {
-    return (
-      <Loader2
-        aria-hidden="true"
-        data-testid="sidebar-chat-working"
-        size={10}
-        strokeWidth={2}
-        className="shrink-0 animate-spin text-ink-subtle"
-      />
-    );
-  }
-  if (state === "done_unseen") {
-    return (
-      <span
-        aria-hidden="true"
-        data-testid="sidebar-chat-unseen"
-        className="h-1.5 w-1.5 shrink-0 rounded-full bg-info"
-      />
-    );
-  }
-  return null;
+  return <GoatChatStateIndicator state={state} surface="sidebar" />;
 }
 
 function chatHref(sessionId: string) {

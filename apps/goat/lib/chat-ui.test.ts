@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   CODEX_COMMAND_TOOL_PART_TYPE,
   compareGoatChatMessageOrder,
+  deriveGoatChatState,
   type GoatStoredChatMessage,
+  goatChatSummaryState,
   LIST_ACTIONS_TOOL_PART_TYPE,
   LIST_SKILLS_TOOL_PART_TYPE,
   listedActionSourceIdsFromMessages,
@@ -15,6 +17,33 @@ import {
   usedSkillIdsFromMessages,
 } from "@/lib/chat-ui";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+
+describe("goatChatSummaryState", () => {
+  it("shows active agent runtime as working before unread", () => {
+    expect(
+      goatChatSummaryState({
+        codexRuntime: {
+          status: "running",
+          error: null,
+          updatedAt: "2026-08-02T20:59:00.000Z",
+        },
+        lastSeenAt: "2026-08-02T20:55:00.000Z",
+        state: "done_unseen",
+        updatedAt: "2026-08-02T21:00:00.000Z",
+      }),
+    ).toBe("working");
+  });
+
+  it("marks completed newer agent work as unseen after runtime stops", () => {
+    expect(
+      deriveGoatChatState({
+        codexRuntime: { status: "idle" },
+        lastSeenAt: "2026-08-02T20:55:00.000Z",
+        updatedAt: "2026-08-02T21:00:00.000Z",
+      }),
+    ).toBe("done_unseen");
+  });
+});
 
 describe("toGoatChatUiMessage", () => {
   it("surfaces scheduled wakeup debug metadata on its synthetic user message", () => {
