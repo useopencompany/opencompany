@@ -1289,6 +1289,27 @@
       "when": 1785497032823,
       "tag": "0183_goat_imessage_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 184,
+      "version": "7",
+      "when": 1785672319573,
+      "tag": "0183_goat_workflow_step_coding_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 185,
+      "version": "7",
+      "when": 1785672319574,
+      "tag": "0184_goat_browser_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 186,
+      "version": "7",
+      "when": 1785672319575,
+      "tag": "0185_goat_imessage_turn_idempotency",
+      "breakpoints": true
     }
   ]
 }

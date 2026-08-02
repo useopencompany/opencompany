@@ -61,6 +61,7 @@
     "github:tunnel": "node scripts/github-tunnel.mjs",
     "db:generate": "bun --filter @opencompany/db db:generate",
     "db:migrate": "bun --filter @opencompany/db db:migrate",
+    "db:migrations:check": "node scripts/check-migration-journal.mjs",
     "db:seed": "node scripts/seed.mjs",
     "db:branch:create": "node scripts/neon-branch.mjs create",
     "db:branch:delete": "node scripts/neon-branch.mjs delete",
