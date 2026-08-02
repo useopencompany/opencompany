@@ -383,7 +383,7 @@ describe("SettingsIntegrationsPanel", () => {
       name: "Find & read files permission",
     });
     const writePermission = within(driveCard as HTMLElement).getByRole("group", {
-      name: "Create & edit Docs permission",
+      name: "Edit Docs & Sheets permission",
     });
     expect(within(readPermission).getByRole("button", { name: "On" })).toHaveAttribute(
       "aria-pressed",
@@ -394,7 +394,9 @@ describe("SettingsIntegrationsPanel", () => {
       "true",
     );
     expect(
-      within(driveCard as HTMLElement).getByRole("link", { name: "Enable creating & editing" }),
+      within(driveCard as HTMLElement).getByRole("link", {
+        name: "Enable Docs & Sheets editing",
+      }),
     ).toHaveAttribute(
       "href",
       "/api/integrations/google-drive/start?returnTo=/settings/integrations",

@@ -102,7 +102,7 @@ describe("mode helpers", () => {
     expect(providerCapability("gmail", "draft")?.label).toBe("Create drafts");
     expect(providerCapability("gmail", "write")?.label).toBe("Send emails");
     expect(providerCapability("google_drive", "read")?.label).toBe("Find & read files");
-    expect(providerCapability("google_drive", "write")?.label).toBe("Create & edit Docs");
+    expect(providerCapability("google_drive", "write")?.label).toBe("Edit Docs & Sheets");
     expect(providerCapability("google_calendar", "write")?.label).toBe("Add events");
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
     expect(providerCapability("slack", "read")?.label).toBe("Read Slack");

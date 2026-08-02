@@ -1,9 +1,13 @@
 import { getDb } from "@opencompany/db/client";
 import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { isValidGoatBrainSourceRef } from "@opencompany/goat-brain";
+import type { JSONSchema7 } from "ai";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { GoogleAccessAuthError, googleApiCall } from "../integrations/google-access-token";
-import { hasGoatGoogleDriveWriteScope } from "../integrations/google-drive-scopes";
+import {
+  hasGoatGoogleDocsWriteScope,
+  hasGoatGoogleSheetsWriteScope,
+} from "../integrations/google-drive-scopes";
 import { effectiveCapabilityMode, type GoatCapabilityId, providerCapability } from "./capabilities";
 import {
   GoatActionAuthError,
@@ -20,7 +24,9 @@ import {
 
 const DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
 const GOOGLE_DOCS_URL = "https://docs.googleapis.com/v1/documents";
+const GOOGLE_SHEETS_URL = "https://sheets.googleapis.com/v4/spreadsheets";
 const GOOGLE_DOC_MIME_TYPE = "application/vnd.google-apps.document";
+const GOOGLE_SHEET_MIME_TYPE = "application/vnd.google-apps.spreadsheet";
 const DEFAULT_SEARCH_RESULTS = 10;
 const MAX_SEARCH_RESULTS = 25;
 const MAX_QUERY_CHARS = 200;
@@ -31,6 +37,15 @@ const MAX_DOCUMENT_TEXT_CHARS = 40_000;
 const MAX_INITIAL_DOCUMENT_TEXT_CHARS = 100_000;
 const MAX_FIND_TEXT_CHARS = 20_000;
 const MAX_REPLACEMENT_TEXT_CHARS = 100_000;
+const DEFAULT_SPREADSHEET_RANGE = "A1:Z100";
+const MAX_SPREADSHEET_RANGE_CHARS = 500;
+const MAX_SPREADSHEET_READ_ROWS = 1_000;
+const MAX_SPREADSHEET_WRITE_ROWS = 500;
+const MAX_SPREADSHEET_COLUMNS = 100;
+const MAX_SPREADSHEET_CELLS = 10_000;
+const MAX_SPREADSHEET_CELL_CHARS = 5_000;
+
+type GoogleSheetCellValue = string | number | boolean | null;
 
 type GoogleDriveConnection = {
   integrationId: string;
@@ -47,23 +62,49 @@ export async function resolveGoogleDriveActions(
   if (allConnections.length === 0) return null;
 
   const readConnections = eligibleConnections(allConnections, "read");
-  const writeConnections = eligibleConnections(allConnections, "write").filter((connection) =>
-    hasGoatGoogleDriveWriteScope(connection.scopes),
+  const writeEligibleConnections = eligibleConnections(allConnections, "write");
+  const docsWriteConnections = writeEligibleConnections.filter((connection) =>
+    hasGoatGoogleDocsWriteScope(connection.scopes),
   );
-  if (readConnections.length === 0 && writeConnections.length === 0) return null;
+  const sheetsWriteConnections = writeEligibleConnections.filter((connection) =>
+    hasGoatGoogleSheetsWriteScope(connection.scopes),
+  );
+  if (
+    readConnections.length === 0 &&
+    docsWriteConnections.length === 0 &&
+    sheetsWriteConnections.length === 0
+  ) {
+    return null;
+  }
 
   const actions: ResolvedGoatAction[] = [];
   if (readConnections.length > 0) {
-    actions.push(searchFilesAction(readConnections), getDocumentAction(readConnections));
-  }
-  if (writeConnections.length > 0) {
     actions.push(
-      createDocumentAction(writeConnections),
-      replaceDocumentTextAction(writeConnections),
+      searchFilesAction(readConnections),
+      getDocumentAction(readConnections),
+      getSpreadsheetValuesAction(readConnections),
+    );
+  }
+  if (docsWriteConnections.length > 0) {
+    actions.push(
+      createDocumentAction(docsWriteConnections),
+      replaceDocumentTextAction(docsWriteConnections),
+    );
+  }
+  if (sheetsWriteConnections.length > 0) {
+    actions.push(
+      updateSpreadsheetValuesAction(sheetsWriteConnections),
+      appendSpreadsheetValuesAction(sheetsWriteConnections),
     );
   }
 
-  const labelConnections = readConnections.length > 0 ? readConnections : writeConnections;
+  const labelConnections =
+    readConnections.length > 0
+      ? readConnections
+      : docsWriteConnections.length > 0
+        ? docsWriteConnections
+        : sheetsWriteConnections;
+  const hasWriteActions = docsWriteConnections.length > 0 || sheetsWriteConnections.length > 0;
   return {
     id: "google_drive",
     label:
@@ -71,11 +112,11 @@ export async function resolveGoogleDriveActions(
         ? `Google Drive (${connectionLabel(labelConnections[0]!)})`
         : `Google Drive (${labelConnections.length} accounts)`,
     description:
-      readConnections.length > 0 && writeConnections.length > 0
-        ? "Find Drive files, read Google Docs, and create or edit Google Docs."
+      readConnections.length > 0 && hasWriteActions
+        ? "Find Drive files, read Google Docs and Sheets, and edit Google Docs or Sheets."
         : readConnections.length > 0
-          ? "Find Drive files and read Google Docs."
-          : "Create new Google Docs and replace text in Google Docs.",
+          ? "Find Drive files and read Google Docs and Sheets."
+          : "Create or edit Google Docs and update Google Sheets.",
     actions,
   };
 }
@@ -123,7 +164,7 @@ function searchFilesAction(connections: readonly GoogleDriveConnection[]): Resol
     capability: "read",
     ...permissionAnnotation("read", connections),
     description:
-      "Search Google Drive, including shared files and shared drives, by file name or indexed text. Returns compact file metadata and links; use google_drive.get_document to read a Google Doc.",
+      "Search Google Drive, including shared files and shared drives, by file name or indexed text. Returns compact file metadata and links; use google_drive.get_document to read a Google Doc or google_drive.get_spreadsheet_values to read a Google Sheet.",
     params: {
       type: "object",
       additionalProperties: false,
@@ -218,7 +259,7 @@ function getDocumentAction(connections: readonly GoogleDriveConnection[]): Resol
           minLength: 1,
           maxLength: MAX_FILE_ID_CHARS,
           description:
-            "Google Drive file id for a Google Doc, usually returned by google_drive.search_files.",
+            "Google Drive file id for a Google Doc, usually returned by google_drive.search_files. For Google Sheets, use google_drive.get_spreadsheet_values instead.",
         },
         ...accountParam,
       },
@@ -256,6 +297,114 @@ function getDocumentAction(connections: readonly GoogleDriveConnection[]): Resol
           ...(revisionId ? { revisionId } : {}),
           text: truncateText(fullText, MAX_DOCUMENT_TEXT_CHARS),
           truncated: fullText.length > MAX_DOCUMENT_TEXT_CHARS,
+        },
+      };
+    },
+  };
+}
+
+function getSpreadsheetValuesAction(
+  connections: readonly GoogleDriveConnection[],
+): ResolvedGoatAction {
+  const accountParam = accountParamSchema(connections);
+  const required = ["file_id"];
+  if (connections.length > 1) required.push("account");
+
+  return {
+    id: "google_drive.get_spreadsheet_values",
+    provider: "google_drive",
+    capability: "read",
+    ...permissionAnnotation("read", connections),
+    description:
+      "Read values from a Google Sheet by Drive file id and A1 notation range. Defaults to A1:Z100 on the first sheet when range is omitted. Empty trailing rows and columns may be omitted by Google Sheets.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      required,
+      properties: {
+        file_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_FILE_ID_CHARS,
+          description:
+            "Google Drive file id for a Google Sheet, usually returned by google_drive.search_files.",
+        },
+        range: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_SPREADSHEET_RANGE_CHARS,
+          description:
+            "A1 notation range to read, for example 'Sheet1!A1:Z100'. Defaults to A1:Z100 on the first sheet.",
+        },
+        major_dimension: {
+          type: "string",
+          enum: ["ROWS", "COLUMNS"],
+          description:
+            "Whether returned values should be grouped by rows or columns. Defaults to ROWS.",
+        },
+        value_render_option: {
+          type: "string",
+          enum: ["FORMATTED_VALUE", "UNFORMATTED_VALUE", "FORMULA"],
+          description: "How cell values should be represented. Defaults to FORMATTED_VALUE.",
+        },
+        date_time_render_option: {
+          type: "string",
+          enum: ["SERIAL_NUMBER", "FORMATTED_STRING"],
+          description:
+            "How dates, times, and durations should be represented when value_render_option is not FORMATTED_VALUE. Defaults to SERIAL_NUMBER.",
+        },
+        ...accountParam,
+      },
+    },
+    execute: async (params, context) => {
+      const hasMultipleAccounts = connections.length > 1;
+      assertOnlyKnownParams(
+        params,
+        ["file_id", "range", "major_dimension", "value_render_option", "date_time_render_option"],
+        hasMultipleAccounts,
+      );
+      const account = hasMultipleAccounts
+        ? boundedOptionalString(params, "account", MAX_ACCOUNT_CHARS)
+        : undefined;
+      const connection = resolveConnection(connections, account);
+      const fileId = requiredBoundedString(params, "file_id", MAX_FILE_ID_CHARS);
+      const range =
+        boundedOptionalString(params, "range", MAX_SPREADSHEET_RANGE_CHARS) ??
+        DEFAULT_SPREADSHEET_RANGE;
+      const majorDimension = enumStringParam(params, "major_dimension", ["ROWS", "COLUMNS"]);
+      const valueRenderOption = enumStringParam(params, "value_render_option", [
+        "FORMATTED_VALUE",
+        "UNFORMATTED_VALUE",
+        "FORMULA",
+      ]);
+      const dateTimeRenderOption = enumStringParam(params, "date_time_render_option", [
+        "SERIAL_NUMBER",
+        "FORMATTED_STRING",
+      ]);
+
+      const url = new URL(
+        `${GOOGLE_SHEETS_URL}/${encodeURIComponent(fileId)}/values/${encodeURIComponent(range)}`,
+      );
+      if (majorDimension) url.searchParams.set("majorDimension", majorDimension);
+      if (valueRenderOption) url.searchParams.set("valueRenderOption", valueRenderOption);
+      if (dateTimeRenderOption) url.searchParams.set("dateTimeRenderOption", dateTimeRenderOption);
+
+      const response = asRecord(await googleDriveApiCall(context, connection, "GET", url));
+      const spreadsheetId = readString(response.spreadsheetId, MAX_FILE_ID_CHARS) ?? fileId;
+      const responseRange = readString(response.range, MAX_SPREADSHEET_RANGE_CHARS) ?? range;
+      const shapedValues = sanitizeSpreadsheetValues(response.values, MAX_SPREADSHEET_READ_ROWS);
+      return {
+        account: connectionLabel(connection),
+        integrationId: connection.integrationId,
+        spreadsheet: {
+          id: spreadsheetId,
+          mimeType: GOOGLE_SHEET_MIME_TYPE,
+          sourceRef: driveFileSourceRef(spreadsheetId),
+          url: googleSpreadsheetUrl(spreadsheetId),
+          range: responseRange,
+          majorDimension: readString(response.majorDimension, 20) ?? majorDimension ?? "ROWS",
+          values: shapedValues.values,
+          truncated: shapedValues.truncated,
         },
       };
     },
@@ -303,7 +452,7 @@ function createDocumentAction(connections: readonly GoogleDriveConnection[]): Re
       const title = requiredBoundedString(params, "title", MAX_FILE_NAME_CHARS);
       const text = boundedOptionalExactText(params, "text", MAX_INITIAL_DOCUMENT_TEXT_CHARS);
 
-      await assertWriteStillEnabled(context.userWorkosId, connection);
+      await assertWriteStillEnabled(context.userWorkosId, connection, "docs");
 
       const created = asRecord(
         await googleDriveApiCall(context, connection, "POST", new URL(GOOGLE_DOCS_URL), { title }),
@@ -440,7 +589,7 @@ function replaceDocumentTextAction(
       const matchCase = optionalBooleanParam(params, "match_case") ?? true;
       const revisionId = boundedOptionalString(params, "revision_id", 2_048);
 
-      await assertWriteStillEnabled(context.userWorkosId, connection);
+      await assertWriteStillEnabled(context.userWorkosId, connection, "docs");
 
       const url = new URL(`${GOOGLE_DOCS_URL}/${encodeURIComponent(fileId)}:batchUpdate`);
       const response = asRecord(
@@ -483,6 +632,224 @@ function replaceDocumentTextAction(
   };
 }
 
+function updateSpreadsheetValuesAction(
+  connections: readonly GoogleDriveConnection[],
+): ResolvedGoatAction {
+  const accountParam = accountParamSchema(connections);
+  const required = ["file_id", "range", "values"];
+  if (connections.length > 1) required.push("account");
+
+  return {
+    id: "google_drive.update_spreadsheet_values",
+    provider: "google_drive",
+    capability: "write",
+    ...permissionAnnotation("write", connections),
+    description:
+      "Update cells in an existing Google Sheet by Drive file id and explicit A1 notation range. Existing values in the target range are overwritten. Use only when the user explicitly asked to edit that spreadsheet.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      required,
+      properties: {
+        file_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_FILE_ID_CHARS,
+          description: "Google Drive file id for the Google Sheet to edit.",
+        },
+        range: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_SPREADSHEET_RANGE_CHARS,
+          description: "A1 notation range to update, for example 'Sheet1!B2:D4'.",
+        },
+        values: spreadsheetValuesParamSchema(
+          "2D array of values to write. Use null to leave a cell unchanged where Google Sheets supports it, and an empty string to clear a cell.",
+        ),
+        major_dimension: {
+          type: "string",
+          enum: ["ROWS", "COLUMNS"],
+          description:
+            "Whether the values array is organized by rows or columns. Defaults to ROWS.",
+        },
+        value_input_option: {
+          type: "string",
+          enum: ["RAW", "USER_ENTERED"],
+          description:
+            "How Google Sheets should interpret input values. Defaults to USER_ENTERED so numbers, dates, and formulas behave like manual edits.",
+        },
+        ...accountParam,
+      },
+    },
+    execute: async (params, context) => {
+      const hasMultipleAccounts = connections.length > 1;
+      assertOnlyKnownParams(
+        params,
+        ["file_id", "range", "values", "major_dimension", "value_input_option"],
+        hasMultipleAccounts,
+      );
+      const account = hasMultipleAccounts
+        ? boundedOptionalString(params, "account", MAX_ACCOUNT_CHARS)
+        : undefined;
+      const connection = resolveConnection(connections, account);
+      const fileId = requiredBoundedString(params, "file_id", MAX_FILE_ID_CHARS);
+      const range = requiredBoundedString(params, "range", MAX_SPREADSHEET_RANGE_CHARS);
+      const values = requiredSpreadsheetValues(params.values);
+      const majorDimension = enumStringParam(params, "major_dimension", ["ROWS", "COLUMNS"]);
+      const valueInputOption =
+        enumStringParam(params, "value_input_option", ["RAW", "USER_ENTERED"]) ?? "USER_ENTERED";
+
+      await assertWriteStillEnabled(context.userWorkosId, connection, "sheets");
+
+      const url = new URL(
+        `${GOOGLE_SHEETS_URL}/${encodeURIComponent(fileId)}/values/${encodeURIComponent(range)}`,
+      );
+      url.searchParams.set("valueInputOption", valueInputOption);
+      const body = {
+        range,
+        majorDimension: majorDimension ?? "ROWS",
+        values,
+      };
+      const response = asRecord(await googleDriveApiCall(context, connection, "PUT", url, body));
+      const spreadsheetId = readString(response.spreadsheetId, MAX_FILE_ID_CHARS) ?? fileId;
+      return {
+        account: connectionLabel(connection),
+        integrationId: connection.integrationId,
+        spreadsheet: {
+          id: spreadsheetId,
+          mimeType: GOOGLE_SHEET_MIME_TYPE,
+          sourceRef: driveFileSourceRef(spreadsheetId),
+          url: googleSpreadsheetUrl(spreadsheetId),
+          updatedRange: readString(response.updatedRange, MAX_SPREADSHEET_RANGE_CHARS),
+          updatedRows: safeNonNegativeInteger(response.updatedRows),
+          updatedColumns: safeNonNegativeInteger(response.updatedColumns),
+          updatedCells: safeNonNegativeInteger(response.updatedCells),
+        },
+      };
+    },
+  };
+}
+
+function appendSpreadsheetValuesAction(
+  connections: readonly GoogleDriveConnection[],
+): ResolvedGoatAction {
+  const accountParam = accountParamSchema(connections);
+  const required = ["file_id", "range", "values"];
+  if (connections.length > 1) required.push("account");
+
+  return {
+    id: "google_drive.append_spreadsheet_values",
+    provider: "google_drive",
+    capability: "write",
+    ...permissionAnnotation("write", connections),
+    description:
+      "Append rows or columns to an existing Google Sheet using the table detected in an A1 notation range. Use only when the user explicitly asked to add spreadsheet values.",
+    params: {
+      type: "object",
+      additionalProperties: false,
+      required,
+      properties: {
+        file_id: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_FILE_ID_CHARS,
+          description: "Google Drive file id for the Google Sheet to append to.",
+        },
+        range: {
+          type: "string",
+          minLength: 1,
+          maxLength: MAX_SPREADSHEET_RANGE_CHARS,
+          description:
+            "A1 notation range where Google Sheets should detect the existing table, for example 'Sheet1!A1:K'.",
+        },
+        values: spreadsheetValuesParamSchema(
+          "2D array of rows or columns to append. With the default ROWS major_dimension, each inner array is one row.",
+        ),
+        major_dimension: {
+          type: "string",
+          enum: ["ROWS", "COLUMNS"],
+          description:
+            "Whether the values array is organized by rows or columns. Defaults to ROWS.",
+        },
+        value_input_option: {
+          type: "string",
+          enum: ["RAW", "USER_ENTERED"],
+          description:
+            "How Google Sheets should interpret input values. Defaults to USER_ENTERED so numbers, dates, and formulas behave like manual edits.",
+        },
+        insert_data_option: {
+          type: "string",
+          enum: ["OVERWRITE", "INSERT_ROWS"],
+          description: "How new data should be inserted. Defaults to INSERT_ROWS.",
+        },
+        ...accountParam,
+      },
+    },
+    execute: async (params, context) => {
+      const hasMultipleAccounts = connections.length > 1;
+      assertOnlyKnownParams(
+        params,
+        [
+          "file_id",
+          "range",
+          "values",
+          "major_dimension",
+          "value_input_option",
+          "insert_data_option",
+        ],
+        hasMultipleAccounts,
+      );
+      const account = hasMultipleAccounts
+        ? boundedOptionalString(params, "account", MAX_ACCOUNT_CHARS)
+        : undefined;
+      const connection = resolveConnection(connections, account);
+      const fileId = requiredBoundedString(params, "file_id", MAX_FILE_ID_CHARS);
+      const range = requiredBoundedString(params, "range", MAX_SPREADSHEET_RANGE_CHARS);
+      const values = requiredSpreadsheetValues(params.values);
+      const majorDimension = enumStringParam(params, "major_dimension", ["ROWS", "COLUMNS"]);
+      const valueInputOption =
+        enumStringParam(params, "value_input_option", ["RAW", "USER_ENTERED"]) ?? "USER_ENTERED";
+      const insertDataOption =
+        enumStringParam(params, "insert_data_option", ["OVERWRITE", "INSERT_ROWS"]) ??
+        "INSERT_ROWS";
+
+      await assertWriteStillEnabled(context.userWorkosId, connection, "sheets");
+
+      const url = new URL(
+        `${GOOGLE_SHEETS_URL}/${encodeURIComponent(fileId)}/values/${encodeURIComponent(range)}:append`,
+      );
+      url.searchParams.set("valueInputOption", valueInputOption);
+      url.searchParams.set("insertDataOption", insertDataOption);
+      const body = {
+        range,
+        majorDimension: majorDimension ?? "ROWS",
+        values,
+      };
+      const response = asRecord(await googleDriveApiCall(context, connection, "POST", url, body));
+      const updates = asRecord(response.updates);
+      const spreadsheetId =
+        readString(response.spreadsheetId, MAX_FILE_ID_CHARS) ??
+        readString(updates.spreadsheetId, MAX_FILE_ID_CHARS) ??
+        fileId;
+      return {
+        account: connectionLabel(connection),
+        integrationId: connection.integrationId,
+        spreadsheet: {
+          id: spreadsheetId,
+          mimeType: GOOGLE_SHEET_MIME_TYPE,
+          sourceRef: driveFileSourceRef(spreadsheetId),
+          url: googleSpreadsheetUrl(spreadsheetId),
+          tableRange: readString(response.tableRange, MAX_SPREADSHEET_RANGE_CHARS),
+          updatedRange: readString(updates.updatedRange, MAX_SPREADSHEET_RANGE_CHARS),
+          updatedRows: safeNonNegativeInteger(updates.updatedRows),
+          updatedColumns: safeNonNegativeInteger(updates.updatedColumns),
+          updatedCells: safeNonNegativeInteger(updates.updatedCells),
+        },
+      };
+    },
+  };
+}
+
 function accountParamSchema(connections: readonly GoogleDriveConnection[]) {
   return connections.length > 1
     ? {
@@ -498,7 +865,11 @@ function accountParamSchema(connections: readonly GoogleDriveConnection[]) {
     : {};
 }
 
-async function assertWriteStillEnabled(userWorkosId: string, connection: GoogleDriveConnection) {
+async function assertWriteStillEnabled(
+  userWorkosId: string,
+  connection: GoogleDriveConnection,
+  target: "docs" | "sheets",
+) {
   const rows = await getDb()
     .select({
       status: goatIntegrations.status,
@@ -515,17 +886,22 @@ async function assertWriteStillEnabled(userWorkosId: string, connection: GoogleD
     )
     .limit(1);
   const row = rows[0];
-  if (!row || row.status !== "connected" || !hasGoatGoogleDriveWriteScope(row.scopes)) {
+  const hasRequiredScope =
+    target === "docs"
+      ? hasGoatGoogleDocsWriteScope(row?.scopes ?? [])
+      : hasGoatGoogleSheetsWriteScope(row?.scopes ?? []);
+  if (!row || row.status !== "connected" || !hasRequiredScope) {
+    const targetLabel = target === "docs" ? "Google Docs" : "Google Sheets";
     throw new GoatActionAuthError(
       "auth_expired",
       "google_drive",
-      `Reconnect Google Drive for ${connectionLabel(connection)} in Settings → Integrations to enable creating and editing Google Docs, then retry.`,
+      `Reconnect Google Drive for ${connectionLabel(connection)} in Settings → Integrations to enable editing ${targetLabel}, then retry.`,
     );
   }
   if (effectiveCapabilityMode("google_drive", "write", row.capabilityModes) === "off") {
     throw new GoatActionPermissionError(
       "google_drive",
-      `Creating and editing Google Docs is turned off for ${connectionLabel(connection)}. It can be changed under Settings → Integrations.`,
+      `Editing Google Drive files is turned off for ${connectionLabel(connection)}. It can be changed under Settings → Integrations.`,
     );
   }
 }
@@ -610,7 +986,7 @@ function normalizeAccountSelector(value: string) {
 async function googleDriveApiCall(
   context: GoatActionExecuteContext,
   connection: GoogleDriveConnection,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PUT",
   url: URL,
   body?: unknown,
 ) {
@@ -713,6 +1089,149 @@ function optionalBooleanParam(params: Record<string, unknown>, key: string) {
   return value;
 }
 
+function enumStringParam<const T extends readonly string[]>(
+  params: Record<string, unknown>,
+  key: string,
+  allowed: T,
+): T[number] | undefined {
+  const value = optionalStringParam(params, key);
+  if (value === undefined) return undefined;
+  if ((allowed as readonly string[]).includes(value)) return value as T[number];
+  throw new GoatActionInvalidParamsError(
+    `"${key}" must be one of: ${allowed.map((entry) => JSON.stringify(entry)).join(", ")}.`,
+  );
+}
+
+function spreadsheetValuesParamSchema(description: string): JSONSchema7 {
+  return {
+    type: "array" as const,
+    minItems: 1,
+    maxItems: MAX_SPREADSHEET_WRITE_ROWS,
+    description,
+    items: {
+      type: "array" as const,
+      minItems: 1,
+      maxItems: MAX_SPREADSHEET_COLUMNS,
+      items: {
+        anyOf: [
+          { type: "string", maxLength: MAX_SPREADSHEET_CELL_CHARS },
+          { type: "number" },
+          { type: "boolean" },
+          { type: "null" },
+        ],
+      },
+    },
+  };
+}
+
+function requiredSpreadsheetValues(value: unknown): GoogleSheetCellValue[][] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new GoatActionInvalidParamsError(
+      '"values" is required and must be a non-empty 2D array.',
+    );
+  }
+  if (value.length > MAX_SPREADSHEET_WRITE_ROWS) {
+    throw new GoatActionInvalidParamsError(
+      `"values" may include at most ${MAX_SPREADSHEET_WRITE_ROWS} rows or columns.`,
+    );
+  }
+
+  let cellCount = 0;
+  return value.map((rawRow, rowIndex) => {
+    if (!Array.isArray(rawRow) || rawRow.length === 0) {
+      throw new GoatActionInvalidParamsError(
+        `"values"[${rowIndex}] must be a non-empty array of cells.`,
+      );
+    }
+    if (rawRow.length > MAX_SPREADSHEET_COLUMNS) {
+      throw new GoatActionInvalidParamsError(
+        `"values"[${rowIndex}] may include at most ${MAX_SPREADSHEET_COLUMNS} cells.`,
+      );
+    }
+    cellCount += rawRow.length;
+    if (cellCount > MAX_SPREADSHEET_CELLS) {
+      throw new GoatActionInvalidParamsError(
+        `"values" may include at most ${MAX_SPREADSHEET_CELLS} cells.`,
+      );
+    }
+    return rawRow.map((cell, columnIndex) => spreadsheetCellValue(cell, rowIndex, columnIndex));
+  });
+}
+
+function spreadsheetCellValue(
+  value: unknown,
+  rowIndex: number,
+  columnIndex: number,
+): GoogleSheetCellValue {
+  if (value === null) return null;
+  if (typeof value === "string") {
+    if (value.length > MAX_SPREADSHEET_CELL_CHARS) {
+      throw new GoatActionInvalidParamsError(
+        `"values"[${rowIndex}][${columnIndex}] must be at most ${MAX_SPREADSHEET_CELL_CHARS} characters.`,
+      );
+    }
+    return value;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new GoatActionInvalidParamsError(
+        `"values"[${rowIndex}][${columnIndex}] must be a finite number.`,
+      );
+    }
+    return value;
+  }
+  if (typeof value === "boolean") return value;
+  throw new GoatActionInvalidParamsError(
+    `"values"[${rowIndex}][${columnIndex}] must be a string, number, boolean, or null.`,
+  );
+}
+
+function sanitizeSpreadsheetValues(value: unknown, maxRows: number) {
+  const rows = asArray(value);
+  const values: GoogleSheetCellValue[][] = [];
+  let truncated = rows.length > maxRows;
+  let cellCount = 0;
+
+  for (const rawRow of rows.slice(0, maxRows)) {
+    const row = asArray(rawRow);
+    if (row.length > MAX_SPREADSHEET_COLUMNS) truncated = true;
+    const shapedRow: GoogleSheetCellValue[] = [];
+    for (const rawCell of row.slice(0, MAX_SPREADSHEET_COLUMNS)) {
+      if (cellCount >= MAX_SPREADSHEET_CELLS) {
+        truncated = true;
+        break;
+      }
+      const cell = sanitizeSpreadsheetCell(rawCell);
+      shapedRow.push(cell.value);
+      if (cell.truncated) truncated = true;
+      cellCount += 1;
+    }
+    values.push(shapedRow);
+    if (cellCount >= MAX_SPREADSHEET_CELLS) break;
+  }
+
+  return { values, truncated };
+}
+
+function sanitizeSpreadsheetCell(value: unknown): {
+  value: GoogleSheetCellValue;
+  truncated: boolean;
+} {
+  if (value === null || typeof value === "boolean") return { value, truncated: false };
+  if (typeof value === "number" && Number.isFinite(value)) return { value, truncated: false };
+  if (typeof value === "string") {
+    return {
+      value: truncateText(value, MAX_SPREADSHEET_CELL_CHARS) ?? "",
+      truncated: value.length > MAX_SPREADSHEET_CELL_CHARS,
+    };
+  }
+  return { value: null, truncated: true };
+}
+
+function safeNonNegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 function compactDriveFile(value: unknown, integrationId: string) {
   const file = asRecord(value);
   const id = readString(file.id, MAX_FILE_ID_CHARS);
@@ -784,6 +1303,10 @@ function driveFileSourceRef(fileId: string) {
 
 function googleDocUrl(fileId: string) {
   return `https://docs.google.com/document/d/${encodeURIComponent(fileId)}/edit`;
+}
+
+function googleSpreadsheetUrl(fileId: string) {
+  return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(fileId)}/edit`;
 }
 
 function driveQueryLiteral(value: string) {

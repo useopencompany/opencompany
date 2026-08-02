@@ -210,8 +210,8 @@ creation, and explicitly requested sends, with an explicit account required when
 connected. Draft creation and sending have separate per-account permissions: creating drafts defaults
 to **On** because it leaves the email for manual review and sending, while sending defaults to
 confirmation-gated **Ask**. Google Calendar exposes a bounded event-list read, while Google Drive
-exposes file search, live Google Doc reads, new Doc creation with optional initial text, and exact
-text replacement in Google Docs. Linear exposes
+exposes file search, live Google Doc and Sheet reads, new Doc creation with optional initial text,
+exact text replacement in Google Docs, and Sheet value updates or appends. Linear exposes
 a curated catalog for reading issues and workspace context, creating and updating issues, and adding
 comments. Attio exposes bounded fuzzy search across standard people, companies, and deals; list,
 field, and membership discovery; and bounded list reads with saved-view filters, explicit filters,
