@@ -36,6 +36,7 @@ not set expiration on the configured parent branch or on branches Neon reports a
 | `bun run db:branch:delete` | Deletes the Neon branch matching the current Git branch. |
 | `bun run db:generate` | Generates a SQL migration from `packages/db/src/schema.ts` changes into `drizzle/`. |
 | `bun run db:migrate` | Applies pending migrations to whatever `DATABASE_URL` points at. |
+| `bun run db:migrations:check` | Verifies every migration SQL file is registered in Drizzle's journal. |
 | `bun run db:seed` | Inserts a dev user + workspace (idempotent). |
 
 ## How branch resolution works
