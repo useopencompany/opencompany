@@ -49,13 +49,13 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
     {
       id: "read",
       label: "Find & read files",
-      description: "Search Google Drive and read the contents of Google Docs.",
+      description: "Search Google Drive and read the contents of Google Docs and Sheets.",
       defaultMode: "on",
     },
     {
       id: "write",
-      label: "Create & edit Docs",
-      description: "Create new Google Docs and replace text in documents you can edit.",
+      label: "Edit Docs & Sheets",
+      description: "Create and edit Google Docs, and update spreadsheets you can edit.",
       defaultMode: "ask",
     },
   ],

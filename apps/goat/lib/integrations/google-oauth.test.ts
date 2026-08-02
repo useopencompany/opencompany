@@ -61,6 +61,9 @@ describe("Goat Google OAuth", () => {
     expect(driveUrl.searchParams.get("scope")).toContain(
       "https://www.googleapis.com/auth/documents",
     );
+    expect(driveUrl.searchParams.get("scope")).toContain(
+      "https://www.googleapis.com/auth/spreadsheets",
+    );
     expect(driveUrl.searchParams.get("scope")).not.toContain("gmail.readonly");
     expect(driveUrl.searchParams.get("scope")).not.toContain("calendar.readonly");
   });

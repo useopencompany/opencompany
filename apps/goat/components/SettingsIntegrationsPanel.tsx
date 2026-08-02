@@ -1012,7 +1012,7 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
               href={integrationConnectHref("google_drive")}
               className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
             >
-              Enable creating & editing
+              Enable Docs & Sheets editing
             </a>
           ) : null}
           {gmailScopeUpgradeLabel ? (

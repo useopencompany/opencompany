@@ -4,6 +4,7 @@ import { GOAT_GMAIL_COMPOSE_SCOPE, GOAT_GMAIL_READ_SCOPE } from "@/lib/integrati
 import {
   GOAT_GOOGLE_DOCS_WRITE_SCOPE,
   GOAT_GOOGLE_DRIVE_READ_SCOPE,
+  GOAT_GOOGLE_SHEETS_WRITE_SCOPE,
 } from "@/lib/integrations/google-drive-scopes";
 import { getGoatAppUrl } from "@/lib/workos";
 
@@ -49,7 +50,12 @@ export const GOAT_GOOGLE_PROVIDER_CONFIG: Record<
     provider: "google_drive",
     routeSegment: "google-drive",
     displayName: "Google Drive",
-    scopes: [GOAT_GOOGLE_DRIVE_READ_SCOPE, GOAT_GOOGLE_DOCS_WRITE_SCOPE, ...OPENID_SCOPES],
+    scopes: [
+      GOAT_GOOGLE_DRIVE_READ_SCOPE,
+      GOAT_GOOGLE_DOCS_WRITE_SCOPE,
+      GOAT_GOOGLE_SHEETS_WRITE_SCOPE,
+      ...OPENID_SCOPES,
+    ],
   },
 };
 

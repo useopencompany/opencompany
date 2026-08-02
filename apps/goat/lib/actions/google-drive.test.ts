@@ -35,6 +35,7 @@ import {
 
 const DRIVE_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 const DOCS_WRITE_SCOPE = "https://www.googleapis.com/auth/documents";
+const SHEETS_WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
 const CONTEXT: GoatActionExecuteContext = {
   userWorkosId: "user_1",
@@ -59,7 +60,7 @@ function connectedRow(
     accountEmail: email,
     accountName: "Louis",
     status: "connected",
-    scopes: [DRIVE_READ_SCOPE, DOCS_WRITE_SCOPE],
+    scopes: [DRIVE_READ_SCOPE, DOCS_WRITE_SCOPE, SHEETS_WRITE_SCOPE],
     capabilityModes: {},
     ...overrides,
   };
@@ -98,8 +99,11 @@ describe("resolveGoogleDriveActions", () => {
     expect(catalog?.actions.map((action) => action.id)).toEqual([
       "google_drive.search_files",
       "google_drive.get_document",
+      "google_drive.get_spreadsheet_values",
       "google_drive.create_document",
       "google_drive.replace_document_text",
+      "google_drive.update_spreadsheet_values",
+      "google_drive.append_spreadsheet_values",
     ]);
     expect(findAction(catalog, "google_drive.search_files")).toMatchObject({
       capability: "read",
@@ -112,7 +116,7 @@ describe("resolveGoogleDriveActions", () => {
       permission: {
         provider: "google_drive",
         capabilityId: "write",
-        label: "Create & edit Docs",
+        label: "Edit Docs & Sheets",
         integrationIds: ["gint_drive_louis@example.com"],
       },
       params: { required: ["title"] },
@@ -123,10 +127,21 @@ describe("resolveGoogleDriveActions", () => {
       permission: {
         provider: "google_drive",
         capabilityId: "write",
-        label: "Create & edit Docs",
+        label: "Edit Docs & Sheets",
         integrationIds: ["gint_drive_louis@example.com"],
       },
       params: { required: ["file_id", "find", "replace"] },
+    });
+    expect(findAction(catalog, "google_drive.update_spreadsheet_values")).toMatchObject({
+      capability: "write",
+      permissionMode: "ask",
+      permission: {
+        provider: "google_drive",
+        capabilityId: "write",
+        label: "Edit Docs & Sheets",
+        integrationIds: ["gint_drive_louis@example.com"],
+      },
+      params: { required: ["file_id", "range", "values"] },
     });
     expect(mocks.googleApiCall).not.toHaveBeenCalled();
   });
@@ -142,6 +157,22 @@ describe("resolveGoogleDriveActions", () => {
     expect(catalog?.actions.map((action) => action.id)).toEqual([
       "google_drive.search_files",
       "google_drive.get_document",
+      "google_drive.get_spreadsheet_values",
+    ]);
+  });
+
+  it("advertises only spreadsheet writes when the account has Sheets write scope", async () => {
+    mocks.dbRows = [
+      connectedRow("louis@example.com", {
+        scopes: [DRIVE_READ_SCOPE, SHEETS_WRITE_SCOPE],
+        capabilityModes: { read: "off", write: "on" },
+      }),
+    ];
+    const catalog = await resolveGoogleDriveActions("user_1");
+
+    expect(catalog?.actions.map((action) => action.id)).toEqual([
+      "google_drive.update_spreadsheet_values",
+      "google_drive.append_spreadsheet_values",
     ]);
   });
 
@@ -171,6 +202,7 @@ describe("resolveGoogleDriveActions", () => {
     expect(catalog?.actions.map((action) => action.id)).toEqual([
       "google_drive.search_files",
       "google_drive.get_document",
+      "google_drive.get_spreadsheet_values",
     ]);
 
     mocks.dbRows = [
@@ -180,6 +212,8 @@ describe("resolveGoogleDriveActions", () => {
     expect(catalog?.actions.map((action) => action.id)).toEqual([
       "google_drive.create_document",
       "google_drive.replace_document_text",
+      "google_drive.update_spreadsheet_values",
+      "google_drive.append_spreadsheet_values",
     ]);
 
     mocks.dbRows = [
@@ -426,6 +460,89 @@ describe("google_drive.get_document", () => {
   });
 });
 
+describe("google_drive.get_spreadsheet_values", () => {
+  it("reads a spreadsheet range and returns a durable source", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({
+      spreadsheetId: "sheet_1",
+      range: "KPI!A1:C3",
+      majorDimension: "ROWS",
+      values: [
+        ["Metric", "Week", "Value"],
+        ["Revenue", "2026-W30", 12345],
+        ["Active", "2026-W30", true],
+      ],
+    });
+    const action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.get_spreadsheet_values",
+    );
+
+    const result = (await action.execute(
+      {
+        file_id: "sheet_1",
+        range: "KPI!A1:C3",
+        value_render_option: "UNFORMATTED_VALUE",
+      },
+      CONTEXT,
+    )) as { spreadsheet: Record<string, unknown> };
+
+    expect(mocks.googleApiCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        integrationId: "gint_drive_louis@example.com",
+        provider: "google_drive",
+      }),
+      "GET",
+      expect.any(URL),
+      { signal: CONTEXT.signal },
+    );
+    const url = mocks.googleApiCall.mock.calls[0]?.[2] as URL;
+    expect(url.toString()).toContain(
+      "sheets.googleapis.com/v4/spreadsheets/sheet_1/values/KPI!A1%3AC3",
+    );
+    expect(url.searchParams.get("valueRenderOption")).toBe("UNFORMATTED_VALUE");
+    expect(result.spreadsheet).toMatchObject({
+      id: "sheet_1",
+      mimeType: "application/vnd.google-apps.spreadsheet",
+      sourceRef: "google-drive:file:sheet_1",
+      url: "https://docs.google.com/spreadsheets/d/sheet_1/edit",
+      range: "KPI!A1:C3",
+      majorDimension: "ROWS",
+      values: [
+        ["Metric", "Week", "Value"],
+        ["Revenue", "2026-W30", 12345],
+        ["Active", "2026-W30", true],
+      ],
+      truncated: false,
+    });
+  });
+
+  it("defaults to a bounded first-sheet range and rejects malformed read input", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({ spreadsheetId: "sheet_1", values: [] });
+    const action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.get_spreadsheet_values",
+    );
+
+    await action.execute({ file_id: "sheet_1" }, CONTEXT);
+    const url = mocks.googleApiCall.mock.calls[0]?.[2] as URL;
+    expect(url.pathname).toBe("/v4/spreadsheets/sheet_1/values/A1%3AZ100");
+
+    mocks.googleApiCall.mockClear();
+    await expect(
+      action.execute({ file_id: "sheet_1", major_dimension: "DIAGONAL" }, CONTEXT),
+    ).rejects.toThrow('"major_dimension" must be one of');
+    await expect(
+      action.execute({ file_id: "sheet_1", range: "x".repeat(501) }, CONTEXT),
+    ).rejects.toThrow('"range" must be at most 500 characters');
+    await expect(action.execute({ file_id: "sheet_1", extra: true }, CONTEXT)).rejects.toThrow(
+      'Unknown parameter: "extra"',
+    );
+    expect(mocks.googleApiCall).not.toHaveBeenCalled();
+  });
+});
+
 describe("google_drive.create_document", () => {
   it("creates a Google Doc with initial text and returns its durable source", async () => {
     mocks.dbRows = [connectedRow()];
@@ -589,7 +706,7 @@ describe("google_drive.create_document", () => {
       name: "GoatActionAuthError",
       code: "auth_expired",
       provider: "google_drive",
-      message: expect.stringContaining("enable creating and editing Google Docs"),
+      message: expect.stringContaining("enable editing Google Docs"),
     } satisfies Partial<GoatActionAuthError>);
 
     mocks.dbRows = [connectedRow()];
@@ -724,7 +841,7 @@ describe("google_drive.replace_document_text", () => {
       name: "GoatActionAuthError",
       code: "auth_expired",
       provider: "google_drive",
-      message: expect.stringContaining("enable creating and editing Google Docs"),
+      message: expect.stringContaining("enable editing Google Docs"),
     } satisfies Partial<GoatActionAuthError>);
 
     mocks.dbRows = [connectedRow()];
@@ -738,6 +855,215 @@ describe("google_drive.replace_document_text", () => {
       action.execute({ file_id: "doc_1", find: "Q3", replace: "Q4" }, CONTEXT),
     ).rejects.toBeInstanceOf(GoatActionPermissionError);
     expect(mocks.googleApiCall).not.toHaveBeenCalled();
+  });
+});
+
+describe("google_drive.update_spreadsheet_values", () => {
+  it("updates a spreadsheet range and returns update counts", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({
+      spreadsheetId: "sheet_1",
+      updatedRange: "KPI!B2:C3",
+      updatedRows: 2,
+      updatedColumns: 2,
+      updatedCells: 4,
+    });
+    const action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.update_spreadsheet_values",
+    );
+
+    const result = await action.execute(
+      {
+        file_id: "sheet_1",
+        range: "KPI!B2:C3",
+        values: [
+          ["Revenue", 12345],
+          ["Runway", "9 months"],
+        ],
+        value_input_option: "USER_ENTERED",
+      },
+      CONTEXT,
+    );
+
+    expect(mocks.googleApiCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        integrationId: "gint_drive_louis@example.com",
+        provider: "google_drive",
+      }),
+      "PUT",
+      expect.any(URL),
+      {
+        signal: CONTEXT.signal,
+        body: {
+          range: "KPI!B2:C3",
+          majorDimension: "ROWS",
+          values: [
+            ["Revenue", 12345],
+            ["Runway", "9 months"],
+          ],
+        },
+      },
+    );
+    const url = mocks.googleApiCall.mock.calls[0]?.[2] as URL;
+    expect(url.toString()).toContain(
+      "sheets.googleapis.com/v4/spreadsheets/sheet_1/values/KPI!B2%3AC3",
+    );
+    expect(url.searchParams.get("valueInputOption")).toBe("USER_ENTERED");
+    expect(result).toMatchObject({
+      integrationId: "gint_drive_louis@example.com",
+      spreadsheet: {
+        id: "sheet_1",
+        sourceRef: "google-drive:file:sheet_1",
+        url: "https://docs.google.com/spreadsheets/d/sheet_1/edit",
+        updatedRange: "KPI!B2:C3",
+        updatedRows: 2,
+        updatedColumns: 2,
+        updatedCells: 4,
+      },
+    });
+  });
+
+  it("rejects malformed spreadsheet updates before calling Google", async () => {
+    mocks.dbRows = [connectedRow()];
+    const action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.update_spreadsheet_values",
+    );
+
+    await expect(
+      action.execute({ file_id: "sheet_1", range: "KPI!B2:C3" }, CONTEXT),
+    ).rejects.toThrow('"values" is required');
+    await expect(
+      action.execute({ file_id: "sheet_1", range: "KPI!B2:C3", values: [[]] }, CONTEXT),
+    ).rejects.toThrow('"values"[0] must be a non-empty array');
+    await expect(
+      action.execute(
+        {
+          file_id: "sheet_1",
+          range: "KPI!B2:C3",
+          values: [[Number.NaN]],
+        },
+        CONTEXT,
+      ),
+    ).rejects.toThrow('"values"[0][0] must be a finite number');
+    await expect(
+      action.execute(
+        {
+          file_id: "sheet_1",
+          range: "KPI!B2:C3",
+          values: [["x"]],
+          value_input_option: "PARSED",
+        },
+        CONTEXT,
+      ),
+    ).rejects.toThrow('"value_input_option" must be one of');
+    await expect(
+      action.execute(
+        {
+          file_id: "sheet_1",
+          range: "KPI!B2:C3",
+          values: [["x"]],
+          extra: true,
+        },
+        CONTEXT,
+      ),
+    ).rejects.toThrow('Unknown parameter: "extra"');
+    expect(mocks.googleApiCall).not.toHaveBeenCalled();
+  });
+
+  it("re-checks Sheets OAuth scope and permission mode immediately before editing", async () => {
+    mocks.dbRows = [connectedRow()];
+    let action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.update_spreadsheet_values",
+    );
+    mocks.dbRows = [connectedRow("louis@example.com", { scopes: [DRIVE_READ_SCOPE] })];
+
+    await expect(
+      action.execute({ file_id: "sheet_1", range: "KPI!B2", values: [[123]] }, CONTEXT),
+    ).rejects.toMatchObject({
+      name: "GoatActionAuthError",
+      code: "auth_expired",
+      provider: "google_drive",
+      message: expect.stringContaining("enable editing Google Sheets"),
+    } satisfies Partial<GoatActionAuthError>);
+
+    mocks.dbRows = [connectedRow()];
+    action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.update_spreadsheet_values",
+    );
+    mocks.dbRows = [connectedRow("louis@example.com", { capabilityModes: { write: "off" } })];
+
+    await expect(
+      action.execute({ file_id: "sheet_1", range: "KPI!B2", values: [[123]] }, CONTEXT),
+    ).rejects.toBeInstanceOf(GoatActionPermissionError);
+    expect(mocks.googleApiCall).not.toHaveBeenCalled();
+  });
+});
+
+describe("google_drive.append_spreadsheet_values", () => {
+  it("appends rows to a spreadsheet table range", async () => {
+    mocks.dbRows = [connectedRow()];
+    mocks.googleApiCall.mockResolvedValue({
+      spreadsheetId: "sheet_1",
+      tableRange: "KPI!A1:C10",
+      updates: {
+        spreadsheetId: "sheet_1",
+        updatedRange: "KPI!A11:C11",
+        updatedRows: 1,
+        updatedColumns: 3,
+        updatedCells: 3,
+      },
+    });
+    const action = findAction(
+      await resolveGoogleDriveActions("user_1"),
+      "google_drive.append_spreadsheet_values",
+    );
+
+    const result = await action.execute(
+      {
+        file_id: "sheet_1",
+        range: "KPI!A1:C",
+        values: [["Revenue", "2026-W31", 13000]],
+        insert_data_option: "INSERT_ROWS",
+      },
+      CONTEXT,
+    );
+
+    expect(mocks.googleApiCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        integrationId: "gint_drive_louis@example.com",
+        provider: "google_drive",
+      }),
+      "POST",
+      expect.any(URL),
+      {
+        signal: CONTEXT.signal,
+        body: {
+          range: "KPI!A1:C",
+          majorDimension: "ROWS",
+          values: [["Revenue", "2026-W31", 13000]],
+        },
+      },
+    );
+    const url = mocks.googleApiCall.mock.calls[0]?.[2] as URL;
+    expect(url.toString()).toContain(
+      "sheets.googleapis.com/v4/spreadsheets/sheet_1/values/KPI!A1%3AC:append",
+    );
+    expect(url.searchParams.get("valueInputOption")).toBe("USER_ENTERED");
+    expect(url.searchParams.get("insertDataOption")).toBe("INSERT_ROWS");
+    expect(result).toMatchObject({
+      spreadsheet: {
+        id: "sheet_1",
+        tableRange: "KPI!A1:C10",
+        updatedRange: "KPI!A11:C11",
+        updatedRows: 1,
+        updatedColumns: 3,
+        updatedCells: 3,
+      },
+    });
   });
 });
 
