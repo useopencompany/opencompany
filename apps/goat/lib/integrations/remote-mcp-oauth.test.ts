@@ -1,13 +1,21 @@
 import { createHmac } from "node:crypto";
 import { auth } from "@ai-sdk/mcp";
-import { saveGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
+import {
+  loadGoatIntegrationCredential,
+  markGoatIntegrationStatus,
+  saveGoatIntegrationCredential,
+} from "@opencompany/db/goat-integrations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendGoatLatitudeMcpStatus,
   startGoatLatitudeMcpOAuth,
   verifyGoatLatitudeMcpState,
 } from "@/lib/integrations/latitude-mcp";
-import { startGoatLinearMcpOAuth, verifyGoatLinearMcpState } from "@/lib/integrations/linear-mcp";
+import {
+  loadGoatLinearMcpWorkerConnection,
+  startGoatLinearMcpOAuth,
+  verifyGoatLinearMcpState,
+} from "@/lib/integrations/linear-mcp";
 import {
   startGoatPostHogMcpOAuth,
   verifyGoatPostHogMcpState,
@@ -17,10 +25,20 @@ const observed = vi.hoisted(() => ({
   callbackUrl: "",
   clientMetadata: null as unknown,
   state: "",
+  dbRows: [] as unknown[],
 }));
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: () => ({
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: async () => observed.dbRows,
+          }),
+        }),
+      }),
+    }),
     insert: () => ({
       values: () => ({
         onConflictDoUpdate: () => ({
@@ -33,6 +51,7 @@ vi.mock("@opencompany/db/client", () => ({
 
 vi.mock("@opencompany/db/goat-integrations", () => ({
   loadGoatIntegrationCredential: vi.fn(async () => null),
+  markGoatIntegrationStatus: vi.fn(async () => undefined),
   saveGoatIntegrationCredential: vi.fn(async () => undefined),
 }));
 
@@ -64,6 +83,7 @@ describe("Goat remote MCP OAuth", () => {
     observed.callbackUrl = "";
     observed.clientMetadata = null;
     observed.state = "";
+    observed.dbRows = [];
   });
 
   it("connects Latitude with dynamic registration and its documented endpoint", async () => {
@@ -184,5 +204,88 @@ describe("Goat remote MCP OAuth", () => {
     expect(appendGoatLatitudeMcpStatus("//evil.example", "connected")).toBe(
       "/settings?integration=latitude&setup=connected",
     );
+  });
+
+  it("marks remote MCP connections as needing reconnect when stored OAuth data is missing", async () => {
+    observed.dbRows = [{ id: "gint_linear", status: "connected" }];
+
+    await expect(
+      loadGoatLinearMcpWorkerConnection({
+        userWorkosId: "user_1",
+        onAuthorizationRequired: () => {
+          throw new Error("unexpected authorization redirect");
+        },
+      }),
+    ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
+
+    expect(markGoatIntegrationStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        integrationId: "gint_linear",
+        provider: "linear",
+        status: "needs_reauth",
+        statusReason: "Linear needs to be reconnected before Goat can use it.",
+      }),
+    );
+  });
+
+  it("marks remote MCP connections as needing reconnect when OAuth credentials are invalidated", async () => {
+    observed.dbRows = [{ id: "gint_linear", status: "connected" }];
+    vi.mocked(loadGoatIntegrationCredential).mockResolvedValueOnce({
+      payload: {
+        clientInformation: { client_id: "dynamic_client" },
+        tokens: { access_token: "stale_token", token_type: "Bearer" },
+      },
+      expiresAt: null,
+      lastRotatedAt: null,
+      updatedAt: new Date("2026-08-03T00:00:00.000Z"),
+      encryptionKeyVersion: 1,
+    });
+
+    const connection = await loadGoatLinearMcpWorkerConnection({
+      userWorkosId: "user_1",
+      onAuthorizationRequired: () => {
+        throw new Error("unexpected authorization redirect");
+      },
+    });
+    if (!connection.ok) throw new Error("expected Linear connection");
+    if (!connection.authProvider.invalidateCredentials) {
+      throw new Error("expected invalidation support");
+    }
+
+    await connection.authProvider.invalidateCredentials("tokens");
+
+    expect(saveGoatIntegrationCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        integrationId: "gint_linear",
+        provider: "linear",
+        payload: expect.not.objectContaining({ tokens: expect.anything() }),
+      }),
+    );
+    expect(markGoatIntegrationStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        integrationId: "gint_linear",
+        provider: "linear",
+        status: "needs_reauth",
+        statusReason: "Linear authorization expired. Reconnect Linear in Settings.",
+      }),
+    );
+  });
+
+  it("reports existing remote MCP reauth states distinctly from missing connections", async () => {
+    observed.dbRows = [{ id: "gint_linear", status: "needs_reauth" }];
+
+    await expect(
+      loadGoatLinearMcpWorkerConnection({
+        userWorkosId: "user_1",
+        onAuthorizationRequired: () => {
+          throw new Error("unexpected authorization redirect");
+        },
+      }),
+    ).resolves.toEqual({ ok: false, reason: "needs_reauth" });
+
+    expect(markGoatIntegrationStatus).not.toHaveBeenCalled();
   });
 });

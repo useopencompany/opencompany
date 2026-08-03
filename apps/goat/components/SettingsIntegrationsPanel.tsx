@@ -802,6 +802,15 @@ function ConnectedStatus({ label = "Connected" }: { label?: string }) {
   );
 }
 
+function NeedsReconnectStatus() {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-warning">
+      <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />
+      Needs reconnect
+    </span>
+  );
+}
+
 function NotConnectedStatus() {
   return (
     <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-ink-subtle">
@@ -831,6 +840,8 @@ function IntegrationCardRow({
   const status = integrationStatus(integration);
   const connectHref = integrationConnectHref(integration.provider);
   const connected = status === "Connected";
+  const needsReconnect = integrationNeedsReconnect(integration);
+  const statusReason = integrationStatusReason(integration);
   const accountLabel =
     integration.provider === "linear" || integration.provider === "posthog"
       ? integration.accountName
@@ -875,6 +886,23 @@ function IntegrationCardRow({
               <ConnectLink href="/settings/repositories" label="Configure repositories" />
             ) : integration.provider === "stripe" && canConnect ? (
               <ConnectLink href={connectHref} label="Manage" />
+            ) : null}
+          </div>
+        ) : needsReconnect && canConnect ? (
+          <div className="flex min-w-0 flex-col gap-2">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <NeedsReconnectStatus />
+                {accountLabel ? (
+                  <span className="truncate text-[12px] leading-4 text-ink-subtle">
+                    · {accountLabel}
+                  </span>
+                ) : null}
+              </div>
+              <ConnectLink href={connectHref} label="Reconnect" />
+            </div>
+            {statusReason ? (
+              <p className="text-[12px] leading-4 text-warning">{statusReason}</p>
             ) : null}
           </div>
         ) : canConnect ? (
@@ -949,6 +977,7 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
     account.provider === "google_drive" &&
     account.connected &&
     !hasGoatGoogleDriveWriteScope(account.scopes);
+  const needsReconnect = account.status === "needs_reauth" || account.status === "sync_failed";
   const gmailScopeUpgradeLabel =
     account.provider === "gmail" && account.connected && !hasGoatGmailDraftScope(account.scopes)
       ? hasGoatGmailSendScope(account.scopes)
@@ -999,6 +1028,10 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
             <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle">
               Connected
             </span>
+          ) : needsReconnect ? (
+            <span className="rounded-full bg-warning-bg px-2 py-0.5 text-[11px] font-medium leading-4 text-warning">
+              Needs reconnect
+            </span>
           ) : (
             <a
               href={integrationConnectHref(account.provider)}
@@ -1033,6 +1066,19 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
           </button>
         </div>
       </div>
+      {needsReconnect ? (
+        <div className="flex flex-col gap-1">
+          {account.statusReason ? (
+            <p className="text-[12px] leading-4 text-warning">{account.statusReason}</p>
+          ) : null}
+          <a
+            href={integrationConnectHref(account.provider)}
+            className="w-fit rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink"
+          >
+            Reconnect
+          </a>
+        </div>
+      ) : null}
       {account.connected ? (
         <CapabilityModeRows
           integrationId={account.integrationId}
@@ -1486,6 +1532,32 @@ function integrationStatus(
     return "Reconnect";
   }
   return "Connect";
+}
+
+function integrationNeedsReconnect(
+  integration:
+    | GoatGoogleProviderState
+    | GoatLinearProviderState
+    | GoatPostHogProviderState
+    | GoatGitHubProviderState
+    | GoatJamieProviderState
+    | GoatSlackProviderState
+    | GoatStripeProviderState,
+) {
+  return integration.status === "needs_reauth" || integration.status === "sync_failed";
+}
+
+function integrationStatusReason(
+  integration:
+    | GoatGoogleProviderState
+    | GoatLinearProviderState
+    | GoatPostHogProviderState
+    | GoatGitHubProviderState
+    | GoatJamieProviderState
+    | GoatSlackProviderState
+    | GoatStripeProviderState,
+) {
+  return "statusReason" in integration ? integration.statusReason : null;
 }
 
 function integrationConnectHref(provider: Exclude<IntegrationMetaKey, "codex">) {

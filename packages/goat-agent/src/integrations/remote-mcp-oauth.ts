@@ -9,6 +9,7 @@ import {
 import { getDb } from "@opencompany/db/client";
 import {
   loadGoatIntegrationCredential,
+  markGoatIntegrationStatus,
   saveGoatIntegrationCredential,
 } from "@opencompany/db/goat-integrations";
 import {
@@ -128,13 +129,19 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
       .orderBy(desc(goatIntegrations.updatedAt))
       .limit(1);
 
-    if (!row || row.status !== "connected") return { ok: false, reason: "not_connected" };
+    if (!row || row.status === "disconnected") return { ok: false, reason: "not_connected" };
+    if (row.status !== "connected") return { ok: false, reason: "needs_reauth" };
 
     const payload = await loadPayload({
       userWorkosId: input.userWorkosId,
       integrationId: row.id,
     });
     if (!payload.clientInformation || !payload.tokens) {
+      await markNeedsReauth({
+        userWorkosId: input.userWorkosId,
+        integrationId: row.id,
+        statusReason: `${config.displayName} needs to be reconnected before Goat can use it.`,
+      });
       return { ok: false, reason: "needs_reauth" };
     }
 
@@ -406,8 +413,29 @@ export function createGoatRemoteMcpIntegration<const TProvider extends GoatInteg
         } else if (scope === "client") {
           await persist(omitPayload(payload, ["clientInformation"]));
         }
+        if (scope !== "verifier") {
+          await markNeedsReauth({
+            userWorkosId: input.userWorkosId,
+            integrationId: input.integrationId,
+            statusReason: `${config.displayName} authorization expired. Reconnect ${config.displayName} in Settings.`,
+          });
+        }
       },
     };
+  }
+
+  async function markNeedsReauth(input: {
+    userWorkosId: string;
+    integrationId: string;
+    statusReason: string;
+  }) {
+    await markGoatIntegrationStatus({
+      userWorkosId: input.userWorkosId,
+      integrationId: input.integrationId,
+      provider: config.provider,
+      status: "needs_reauth",
+      statusReason: input.statusReason,
+    });
   }
 
   return {
