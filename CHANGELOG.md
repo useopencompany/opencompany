@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-03
+
+### Added
+- Read, update, and append rows in Google Sheets from chat, alongside the existing Google Docs support (#1047) — @opencompany-bot.
+- Share links now cover task runs and Codex/Claude Code cloud coding sessions too, not just regular chats (#1043, #1044) — @opencompany-bot.
+- Finished tasks that resulted in a GitHub pull request now show a direct link to it in the task's Properties panel (#1015) — @opencompany-bot.
+
+### Changed
+- The sidebar and chat list status indicator now shows a distinct spinner for chats actively running, instead of only marking finished ones unread (#1046) — @opencompany-bot.
+- Workflow steps now hand off to the next step with a focused brief instead of the whole prior transcript, and each step's activity shows up in the task's timeline (#1036, #1048) — @opencompany-bot.
+
+### Fixed
+- Shift+Enter in the composer now inserts a newline instead of sending the message (#1035) — @opencompany-bot.
+- Chats no longer show a stale unread indicator after a live reply has already arrived (#1042) — @opencompany-bot.
+- Scheduled tasks and workflows now fire reliably instead of occasionally being skipped (#1039) — @opencompany-bot.
+- Interrupted chat turns now recover cleanly, without losing the assistant's reply or double-sending an iMessage notification (#1040) — @opencompany-bot.
+- Looking up a company's employees now returns clean results, with a clear prompt instead of an error when nothing matches (#1049) — @opencompany-bot.
+- Fixed a database migration gap that could silently block iMessage notifications from sending (#1045) — @louis.
+
 ## [1.5.0] - 2026-08-01
 
 ### Added
