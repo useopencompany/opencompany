@@ -16,7 +16,21 @@ import {
   goatTasks,
   goatUsers,
 } from "@opencompany/db/goat-schema";
-import { and, asc, desc, eq, exists, gte, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { currentGoatUser } from "@/lib/auth";
 import {
   applyApprovalResponsesToStoredParts,
@@ -545,7 +559,17 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
                     and(
                       eq(goatCodexChatSessions.chatSessionId, goatChatSessions.id),
                       eq(goatCodexChatSessions.userWorkosId, input.userWorkosId),
-                      inArray(goatCodexChatSessions.status, ["queued", "starting", "running"]),
+                      or(
+                        inArray(goatCodexChatSessions.status, ["queued", "starting", "running"]),
+                        and(
+                          isNotNull(goatCodexChatSessions.activeTurnId),
+                          notInArray(goatCodexChatSessions.status, [
+                            "failed",
+                            "interrupted",
+                            "closed",
+                          ]),
+                        ),
+                      ),
                     ),
                   ),
               ),
@@ -612,6 +636,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
       const [runtime] = await db
         .select({
           status: goatCodexChatSessions.status,
+          activeTurnId: goatCodexChatSessions.activeTurnId,
           error: goatCodexChatSessions.error,
           updatedAt: goatCodexChatSessions.updatedAt,
         })
@@ -626,6 +651,7 @@ export function createDbGoatChatStore(db: GoatChatDb = getDb()): GoatChatStore {
       return runtime
         ? {
             status: runtime.status,
+            activeTurnId: runtime.activeTurnId,
             error: runtime.error,
             updatedAt: runtime.updatedAt.toISOString(),
           }

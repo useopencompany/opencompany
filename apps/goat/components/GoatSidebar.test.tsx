@@ -35,6 +35,7 @@ const recentChatsMock = vi.hoisted(() => ({
     codexComposerSettings: null;
     codexRuntime?: {
       status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
+      activeTurnId?: string | null;
       error: string | null;
       updatedAt: string;
     } | null;
@@ -443,6 +444,35 @@ describe("GoatSidebar", () => {
     );
     expect(screen.getByTestId("sidebar-chat-working")).toBeInTheDocument();
     expect(screen.getByTestId("sidebar-chat-unseen")).toBeInTheDocument();
+  });
+
+  it("shows working instead of unseen when a chat still has an active model turn", () => {
+    pathnameMock.value = "/";
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_lagging_runtime",
+        title: "Still working",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        codexRuntime: {
+          status: "idle",
+          activeTurnId: "goat_codex_chat_turn_1",
+          error: null,
+          updatedAt: "2026-07-14T09:00:30.000Z",
+        },
+        preview: "Ready",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        lastSeenAt: "2026-07-14T09:00:00.000Z",
+        pinnedAt: null,
+        state: "done_unseen",
+      },
+    ];
+
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-working")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
   });
 
   it("hides the unseen marker for the selected completed chat", () => {

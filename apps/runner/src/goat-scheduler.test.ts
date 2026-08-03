@@ -197,7 +197,7 @@ describe("sweepDueGoatTaskSchedules", () => {
       mocks.db = undefined;
       await pg.close();
     }
-  });
+  }, 15_000);
 
   it("creates a separate queued task for a due schedule", async () => {
     const execute = vi

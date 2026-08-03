@@ -62,9 +62,18 @@ describe("createDbGoatChatStore", () => {
     );
     expect(activeQuery).toBeDefined();
     expect(activeQuery?.[0]).toContain("exists");
+    expect(activeQuery?.[0]).toContain('"active_turn_id" is not null');
     expect(activeQuery?.[0]).not.toContain("limit");
     expect(activeQuery?.[1]).toEqual(
-      expect.arrayContaining(["user_1", "queued", "starting", "running"]),
+      expect.arrayContaining([
+        "user_1",
+        "queued",
+        "starting",
+        "running",
+        "failed",
+        "interrupted",
+        "closed",
+      ]),
     );
   });
 

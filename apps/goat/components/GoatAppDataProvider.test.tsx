@@ -113,6 +113,56 @@ describe("GoatAppDataProvider", () => {
     expect(screen.getByTestId("recent").textContent).toBe("claude_code:idle");
   });
 
+  it("keeps active-turn runtimes in recent chats as working when status lags", () => {
+    const now = new Date().toISOString();
+    const old = "2026-07-01T10:00:00.000Z";
+    const chatRow = {
+      id: "goat_chat_active_turn",
+      user_workos_id: "user_1",
+      title: "Lagging runtime",
+      model: "anthropic/claude-sonnet-5",
+      engine: "opencompany" as const,
+      kind: "chat" as const,
+      closed_at: null,
+      pinned_at: null,
+      last_seen_at: "2026-07-01T09:59:00.000Z",
+      created_at: old,
+      updated_at: old,
+    };
+    const runtimeRow = {
+      id: "goat_codex_chat_1",
+      user_workos_id: "user_1",
+      chat_session_id: "goat_chat_active_turn",
+      model: "gpt-5.5",
+      active_turn_id: "goat_codex_chat_turn_1",
+      status: "idle" as const,
+      error: null,
+      created_at: now,
+      updated_at: now,
+    };
+    const perCollection = [
+      { data: [], isLoading: false },
+      { data: [], isLoading: false },
+      { data: [chatRow], isLoading: false },
+      { data: [runtimeRow], isLoading: false },
+      { data: [], isLoading: true },
+    ];
+    let call = 0;
+    mocks.useLiveQuery.mockImplementation(() => {
+      const result = perCollection[call % perCollection.length] ?? { data: [], isLoading: false };
+      call += 1;
+      return result;
+    });
+
+    render(
+      <GoatAppDataProvider initialData={initialData()}>
+        <RecentChatStateProbe />
+      </GoatAppDataProvider>,
+    );
+
+    expect(screen.getByTestId("recent").textContent).toBe("Lagging runtime:working");
+  });
+
   it("keeps same-workspace live data during a server data refresh", () => {
     const now = new Date().toISOString();
     const chatRow = {
@@ -196,6 +246,12 @@ function RecentChatTitleProbe({ onRender }: { onRender: (value: string) => void 
   const title = data.recentChats[0]?.title ?? "empty";
   onRender(title);
   return <div data-testid="recent">{title}</div>;
+}
+
+function RecentChatStateProbe() {
+  const data = useGoatAppData();
+  const chat = data.recentChats[0];
+  return <div data-testid="recent">{chat ? `${chat.title}:${chat.state}` : "empty"}</div>;
 }
 
 function DataProbe() {

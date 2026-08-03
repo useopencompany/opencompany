@@ -43,6 +43,22 @@ describe("goatChatSummaryState", () => {
       }),
     ).toBe("done_unseen");
   });
+
+  it("shows a runtime with an active turn as working even if status lags", () => {
+    expect(
+      goatChatSummaryState({
+        codexRuntime: {
+          status: "idle",
+          activeTurnId: "goat_codex_chat_turn_1",
+          error: null,
+          updatedAt: "2026-08-02T20:59:00.000Z",
+        },
+        lastSeenAt: "2026-08-02T20:55:00.000Z",
+        state: "done_unseen",
+        updatedAt: "2026-08-02T21:00:00.000Z",
+      }),
+    ).toBe("working");
+  });
 });
 
 describe("toGoatChatUiMessage", () => {
