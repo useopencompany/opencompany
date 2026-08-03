@@ -255,7 +255,7 @@ describe("getCurrentUserGoatTaskSummary", () => {
     expect(sqlTextFromExecuteCall(0)).toContain("SELECT COUNT(*)");
   });
 
-  it("summarizes session task duration and linked chat credit debits", async () => {
+  it("summarizes session task duration and linked chat credit debits across workflow step sessions", async () => {
     vi.clearAllMocks();
     mocks.select.mockReturnValue({
       from: vi.fn(() => ({
@@ -291,6 +291,10 @@ describe("getCurrentUserGoatTaskSummary", () => {
     });
     expect(sqlTextFromExecuteCall(0)).toContain("goat.credit_ledger");
     expect(sqlTextFromExecuteCall(0)).toContain("goat.chat_messages");
+    expect(sqlTextFromExecuteCall(0)).toContain("WITH task_chat_sessions AS");
+    expect(sqlTextFromExecuteCall(0)).toContain("SELECT DISTINCT message.session_id");
+    expect(sqlTextFromExecuteCall(0)).toContain("message.task_id =");
+    expect(sqlTextFromExecuteCall(0)).toContain("IN (SELECT session_id FROM task_chat_sessions)");
     expect(sqlTextFromExecuteCall(0)).not.toContain("goat.task_model_usage");
   });
 });
