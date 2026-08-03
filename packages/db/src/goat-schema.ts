@@ -750,10 +750,10 @@ export const goatWorkspaceCapabilities = goat.table(
   }),
 );
 
-// Billing v4: this row is the wallet's Stripe home (customer id + auto-refill
-// state). plan/seat/subscription columns are orphaned v3 leftovers — no code
-// writes them anymore; a cleanup migration drops them once prod confirms zero
-// live goat subscriptions.
+// The wallet remains the usage ledger on every plan. This row also projects
+// the flat Pro workspace subscription from Stripe webhooks. stripe_product_key
+// distinguishes it from retired v3 seat subscriptions; legacy seat fields are
+// retained for backwards-compatible schema shape.
 export const goatWorkspaceBilling = goat.table(
   "workspace_billing",
   {
@@ -766,12 +766,16 @@ export const goatWorkspaceBilling = goat.table(
     stripeSubscriptionId: text("stripe_subscription_id"),
     stripeSubscriptionItemId: text("stripe_subscription_item_id"),
     stripePriceId: text("stripe_price_id"),
+    stripeProductKey: text("stripe_product_key"),
     subscriptionStatus: text("subscription_status").$type<GoatStripeSubscriptionStatus>(),
     seatQuantity: integer("seat_quantity").notNull().default(1),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     paymentNeedsAttention: boolean("payment_needs_attention").notNull().default(false),
     lastStripeEventCreated: timestamp("last_stripe_event_created", { withTimezone: true }),
+    lastStripeInvoiceEventCreated: timestamp("last_stripe_invoice_event_created", {
+      withTimezone: true,
+    }),
     // Auto-refill: card saved during top-up Checkout, charged off-session when
     // the balance drops below the threshold. in_flight_at is a lease so
     // concurrent triggers charge at most once.

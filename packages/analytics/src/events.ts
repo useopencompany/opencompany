@@ -188,6 +188,20 @@ export type AnalyticsEventPropertiesByName = {
     amount_cents: number;
     balance_cents: number;
   };
+  goat_billing_pro_checkout_started: {
+    user_id: string;
+    workspace_id: string;
+    monthly_price_usd_cents: number;
+  };
+  goat_billing_plan_changed: {
+    workspace_id: string;
+    plan: "free" | "pro";
+    subscription_status: string;
+  };
+  goat_billing_payment_failed: {
+    workspace_id: string;
+    subscription_id: string;
+  };
   goat_billing_auto_refill_succeeded: {
     workspace_id: string;
     amount_cents: number;
@@ -438,6 +452,21 @@ export const analyticsEvents = {
     name: "goat_billing_topup_completed",
     description: "Stripe fulfilled a Goat credit top-up into the workspace balance.",
     safeProperties: ["workspace_id", "checkout_record_id", "amount_cents", "balance_cents"],
+  },
+  goat_billing_pro_checkout_started: {
+    name: "goat_billing_pro_checkout_started",
+    description: "A Goat workspace admin opened Pro subscription Checkout.",
+    safeProperties: ["user_id", "workspace_id", "monthly_price_usd_cents"],
+  },
+  goat_billing_plan_changed: {
+    name: "goat_billing_plan_changed",
+    description: "Stripe changed a Goat workspace's projected billing plan.",
+    safeProperties: ["workspace_id", "plan", "subscription_status"],
+  },
+  goat_billing_payment_failed: {
+    name: "goat_billing_payment_failed",
+    description: "Stripe reported a failed OpenCompany Pro invoice payment.",
+    safeProperties: ["workspace_id", "subscription_id"],
   },
   goat_billing_auto_refill_succeeded: {
     name: "goat_billing_auto_refill_succeeded",

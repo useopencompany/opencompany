@@ -5,6 +5,8 @@ import {
   GOAT_LOW_BALANCE_WARN_USD_MICROS,
   goatCalendarMonthWindow,
   goatIngestItemFeeUsdMicros,
+  goatPlanForSubscriptionStatus,
+  goatWorkspaceMemberCap,
 } from "./goat-billing";
 
 describe("Goat billing v4", () => {
@@ -28,5 +30,19 @@ describe("Goat billing v4", () => {
 
   it("warns below the auto-refill threshold so refills fire before the warning", () => {
     expect(GOAT_LOW_BALANCE_WARN_USD_MICROS).toBeLessThan(GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS);
+  });
+
+  it("projects Pro only for usable subscription states", () => {
+    expect(goatPlanForSubscriptionStatus("active")).toBe("pro");
+    expect(goatPlanForSubscriptionStatus("trialing")).toBe("pro");
+    expect(goatPlanForSubscriptionStatus("past_due")).toBe("pro");
+    expect(goatPlanForSubscriptionStatus("unpaid")).toBe("free");
+    expect(goatPlanForSubscriptionStatus("canceled")).toBe("free");
+    expect(goatPlanForSubscriptionStatus(null)).toBe("free");
+  });
+
+  it("keeps Free personal and Pro sized for small teams", () => {
+    expect(goatWorkspaceMemberCap("free")).toBe(1);
+    expect(goatWorkspaceMemberCap("pro")).toBe(10);
   });
 });

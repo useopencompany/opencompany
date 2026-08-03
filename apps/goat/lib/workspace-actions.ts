@@ -1,7 +1,7 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import { GOAT_MAX_MEMBERS } from "@opencompany/db/goat-billing";
+import { getGoatWorkspacePlan, goatWorkspaceMemberCap } from "@opencompany/db/goat-billing";
 import {
   type GoatBrainIntelligence,
   type GoatBrainVisibility,
@@ -460,18 +460,23 @@ export async function inviteToGoatWorkspaceAction(
   }
 
   try {
-    // Product cap (not billing): members plus pending invites must stay under
-    // the workspace limit. Acceptance races can still overshoot by one or two
+    // Members plus pending invites must stay under the plan limit. Acceptance
+    // races can still overshoot by one or two
     // — the adoption path deliberately never blocks a sign-in — so this check
     // plus the members-panel over-cap banner is the enforcement.
-    const [members, invitations] = await Promise.all([
+    const [members, invitations, plan] = await Promise.all([
       listGoatWorkspaceMembers(context.workspace.id),
       listGoatWorkspaceInvitationsAction(),
+      getGoatWorkspacePlan(context.workspace.id),
     ]);
-    if (members.length + invitations.length >= GOAT_MAX_MEMBERS) {
+    const memberCap = goatWorkspaceMemberCap(plan);
+    if (members.length + invitations.length >= memberCap) {
       return {
         ok: false,
-        error: `Workspaces allow up to ${GOAT_MAX_MEMBERS} members (including pending invites). Remove a member or revoke an invite first.`,
+        error:
+          plan === "free"
+            ? "Upgrade to Pro to invite teammates to this workspace."
+            : `Pro workspaces allow up to ${memberCap} members (including pending invites). Remove a member or revoke an invite first.`,
       };
     }
     const organizationId = await ensureGoatWorkspaceOrganization(context.workspace);
@@ -589,6 +594,7 @@ export async function updateGoatWorkspaceNameAction(
 export async function getGoatWorkspaceSettingsAction(): Promise<{
   workspace: { id: string; name: string };
   role: "admin" | "member";
+  plan: "free" | "pro";
   memberCap: number;
   members: GoatWorkspaceMemberView[];
   invitations: GoatWorkspaceInvitationView[];
@@ -600,9 +606,10 @@ export async function getGoatWorkspaceSettingsAction(): Promise<{
     .from(goatWorkspaces)
     .where(eq(goatWorkspaces.id, context.workspace.id))
     .limit(1);
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, plan] = await Promise.all([
     listGoatWorkspaceMembersAction(),
     listGoatWorkspaceInvitationsAction(),
+    getGoatWorkspacePlan(context.workspace.id),
   ]);
   return {
     workspace: {
@@ -610,7 +617,8 @@ export async function getGoatWorkspaceSettingsAction(): Promise<{
       name: workspaceRow?.name ?? context.workspace.name,
     },
     role: context.role,
-    memberCap: GOAT_MAX_MEMBERS,
+    plan,
+    memberCap: goatWorkspaceMemberCap(plan),
     members,
     invitations,
   };

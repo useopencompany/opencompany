@@ -1,6 +1,10 @@
 import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
+  applyGoatStripeInvoicePaymentState,
+  applyGoatStripeSubscriptionProjection,
+  findGoatWorkspaceIdForStripeSubscription,
+  GOAT_PRO_STRIPE_PRODUCT_KEY,
   releasePendingForWorkspace,
   setGoatAutoRefillPaymentMethod,
   settleGoatAutoRefill,
@@ -11,6 +15,7 @@ import {
   markGoatCheckoutRecordFailed,
   recordGoatAutoRefillCredit,
 } from "@opencompany/db/goat-credits";
+import type { GoatStripeSubscriptionStatus } from "@opencompany/db/goat-schema";
 import { after, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import {
@@ -100,9 +105,14 @@ export async function POST(request: Request) {
     if (event.type !== "checkout.session.completed") {
       return NextResponse.json({ received: true });
     }
-    if (session.metadata?.billingProduct === "goat") {
-      // Legacy goat seat subscriptions (billing v3) are retired; a straggler
-      // event for one must fall through harmlessly.
+    if (
+      session.mode === "subscription" &&
+      (session.metadata?.billingProduct === GOAT_PRO_STRIPE_PRODUCT_KEY ||
+        session.metadata?.billingProduct === "goat")
+    ) {
+      // Subscription lifecycle events carry the authoritative item and status.
+      // Checkout completion is a no-op so event ordering cannot grant Pro from
+      // partial Checkout data.
       return NextResponse.json({ received: true });
     }
     // Setup-mode checkouts save a card for auto-refill; payment-mode checkouts are
@@ -125,6 +135,14 @@ export async function POST(request: Request) {
         );
       }
     }
+  } else if (
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
+    await handleGoatSubscriptionEvent(event);
+  } else if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
+    await handleGoatInvoiceEvent(event);
   } else if (event.type === "payment_intent.succeeded") {
     const intent = event.data.object;
     if (intent.metadata?.billingProduct === "goat_auto_refill") {
@@ -140,11 +158,79 @@ export async function POST(request: Request) {
       await handleAutoRefillPaymentIntentFailed(intent);
     }
   }
-  // Goat seat-subscription lifecycle events (customer.subscription.*,
-  // invoice.*) are no longer handled — billing v4 has no subscriptions. Any
-  // straggler falls through to the 200 below so the shared webhook never 500s.
-
   return NextResponse.json({ received: true });
+}
+
+async function handleGoatSubscriptionEvent(
+  event:
+    | Stripe.CustomerSubscriptionCreatedEvent
+    | Stripe.CustomerSubscriptionUpdatedEvent
+    | Stripe.CustomerSubscriptionDeletedEvent,
+) {
+  const subscription = event.data.object;
+  const productKey = subscription.metadata.billingProduct;
+  if (productKey !== GOAT_PRO_STRIPE_PRODUCT_KEY && productKey !== "goat") return;
+  const storedWorkspaceId =
+    productKey === GOAT_PRO_STRIPE_PRODUCT_KEY
+      ? await findGoatWorkspaceIdForStripeSubscription(subscription.id)
+      : null;
+  const workspaceId = subscription.metadata.goatWorkspaceId?.trim() || storedWorkspaceId;
+  if (!workspaceId) return;
+
+  const item = subscription.items.data[0] ?? null;
+  const customerId = stripeObjectId(subscription.customer);
+  if (!customerId) throw new Error("OpenCompany Pro subscription is missing its customer id.");
+  const projection = await applyGoatStripeSubscriptionProjection({
+    eventId: event.id,
+    eventType: event.type,
+    eventCreatedAt: new Date(event.created * 1_000),
+    workspaceId,
+    customerId,
+    subscriptionId: subscription.id,
+    subscriptionItemId: item?.id ?? null,
+    priceId: item ? stripeObjectId(item.price) : null,
+    productKey,
+    status: subscription.status as GoatStripeSubscriptionStatus,
+    cancelAtPeriodEnd: subscription.cancel_at_period_end,
+    currentPeriodEnd: item?.current_period_end ? new Date(item.current_period_end * 1_000) : null,
+  });
+  if (!projection.applied) return;
+
+  if (projection.planChanged) {
+    await captureServerEvent("goat_billing_plan_changed", workspaceId, {
+      workspace_id: workspaceId,
+      plan: projection.plan,
+      subscription_status: subscription.status,
+    });
+  }
+}
+
+async function handleGoatInvoiceEvent(
+  event: Stripe.InvoicePaidEvent | Stripe.InvoicePaymentFailedEvent,
+) {
+  const invoice = event.data.object;
+  const parentSubscription = invoice.parent?.subscription_details?.subscription;
+  const legacySubscription = (
+    invoice as Stripe.Invoice & { subscription?: string | Stripe.Subscription | null }
+  ).subscription;
+  const subscriptionId = stripeObjectId(parentSubscription) ?? stripeObjectId(legacySubscription);
+  if (!subscriptionId) return;
+  const workspaceId = await findGoatWorkspaceIdForStripeSubscription(subscriptionId);
+  if (!workspaceId) return;
+
+  const applied = await applyGoatStripeInvoicePaymentState({
+    eventId: event.id,
+    eventType: event.type,
+    eventCreatedAt: new Date(event.created * 1_000),
+    subscriptionId,
+    needsAttention: event.type === "invoice.payment_failed",
+  });
+  if (applied && event.type === "invoice.payment_failed") {
+    await captureServerEvent("goat_billing_payment_failed", workspaceId, {
+      workspace_id: workspaceId,
+      subscription_id: subscriptionId,
+    });
+  }
 }
 
 // The webhook is the durable path for goat auto-refill charges: the pi:{id}
