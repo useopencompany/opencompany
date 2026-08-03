@@ -132,6 +132,7 @@ import {
   type GoatCodexRuntimeView,
   type GoatStoredChatMessage,
   goatChatSummaryState,
+  isGoatChatRuntimeActive,
   textFromGoatChatUiMessage,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
@@ -4625,10 +4626,10 @@ function codexRuntimeMeta(runtime: GoatCodexRuntimeView | null): CodexRuntimeMet
   };
 }
 
-function isCodexRuntimeActive(runtime: { status?: string | null } | null | undefined) {
-  return (
-    runtime?.status === "queued" || runtime?.status === "starting" || runtime?.status === "running"
-  );
+function isCodexRuntimeActive(
+  runtime: { status?: string | null; activeTurnId?: string | null } | null | undefined,
+) {
+  return isGoatChatRuntimeActive(runtime);
 }
 
 function CodexSessionStatusIndicator({
@@ -4784,6 +4785,7 @@ function LiveCodexChatSessionStatusSubscriber({
       row
         ? {
             status: row.status,
+            activeTurnId: row.active_turn_id,
             error: row.error,
             updatedAt: row.updated_at,
           }

@@ -620,6 +620,7 @@ export type GoatChatSessionView = {
 
 export type GoatCodexRuntimeView = {
   status: GoatCodexChatSessionStatus;
+  activeTurnId?: string | null;
   error: string | null;
   updatedAt: string;
 };
@@ -646,7 +647,7 @@ export const GOAT_PINNED_CHAT_LIMIT = 20;
 export function deriveGoatChatState(input: {
   updatedAt: string;
   lastSeenAt?: string | null;
-  codexRuntime?: { status?: string | null } | null;
+  codexRuntime?: { status?: string | null; activeTurnId?: string | null } | null;
 }): GoatChatState {
   if (isGoatChatRuntimeActive(input.codexRuntime)) return "working";
   if (!input.lastSeenAt) return "done_unseen";
@@ -667,10 +668,18 @@ export function goatChatSummaryState(
 }
 
 export function isGoatChatRuntimeActive(
-  runtime: { status?: string | null } | null | undefined,
+  runtime: { status?: string | null; activeTurnId?: string | null } | null | undefined,
 ): boolean {
+  if (
+    runtime?.status === "queued" ||
+    runtime?.status === "starting" ||
+    runtime?.status === "running"
+  ) {
+    return true;
+  }
+  if (!runtime?.activeTurnId) return false;
   return (
-    runtime?.status === "queued" || runtime?.status === "starting" || runtime?.status === "running"
+    runtime.status !== "failed" && runtime.status !== "interrupted" && runtime.status !== "closed"
   );
 }
 

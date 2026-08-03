@@ -18,6 +18,7 @@ import {
   deriveGoatChatState,
   GOAT_PINNED_CHAT_LIMIT,
   type GoatChatSummaryView,
+  isGoatChatRuntimeActive,
 } from "@/lib/chat-ui";
 import type { GoatFeatureFlags } from "@/lib/feature-flags";
 import { isRecentGoatHomeActivity } from "@/lib/home-activity";
@@ -227,6 +228,7 @@ function GoatAppLiveDataSubscriptions({
         row.chat_session_id,
         {
           status: row.status,
+          activeTurnId: row.active_turn_id,
           error: row.error,
           updatedAt: row.updated_at,
         },
@@ -261,8 +263,8 @@ function GoatAppLiveDataSubscriptions({
     );
     const activeRuntimeChatIds = new Set(
       ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[])
-        .filter(
-          (row) => row.status === "queued" || row.status === "starting" || row.status === "running",
+        .filter((row) =>
+          isGoatChatRuntimeActive({ status: row.status, activeTurnId: row.active_turn_id }),
         )
         .map((row) => row.chat_session_id),
     );
@@ -296,7 +298,12 @@ function GoatAppLiveDataSubscriptions({
     const codexRuntimeByChatId = new Map(
       ((codexChatSessionRows ?? []) as GoatCodexChatSessionRow[]).map((row) => [
         row.chat_session_id,
-        { status: row.status, error: row.error, updatedAt: row.updated_at },
+        {
+          status: row.status,
+          activeTurnId: row.active_turn_id,
+          error: row.error,
+          updatedAt: row.updated_at,
+        },
       ]),
     );
     return ((chatSessionRows ?? []) as GoatChatSessionRow[])
