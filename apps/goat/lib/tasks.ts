@@ -106,6 +106,13 @@ export async function getCurrentUserGoatTaskSummary(taskId: string) {
     await getDb().execute(
       task.sessionId
         ? sql`
+            WITH task_chat_sessions AS (
+              SELECT ${task.sessionId}::text AS session_id
+              UNION
+              SELECT DISTINCT message.session_id
+              FROM goat.chat_messages AS message
+              WHERE message.task_id = ${task.id}
+            )
             SELECT
               NULL AS "runStartedAt",
               NULL AS "runCompletedAt",
@@ -118,20 +125,20 @@ export async function getCurrentUserGoatTaskSummary(taskId: string) {
                   END
                 )
                 FROM goat.chat_messages AS message
-                WHERE message.session_id = ${task.sessionId}
+                WHERE message.session_id IN (SELECT session_id FROM task_chat_sessions)
                   AND message.role = 'assistant'
               ) AS "runDurationMs",
               (
                 SELECT COUNT(*)
                 FROM goat.credit_ledger AS ledger
-                WHERE ledger.chat_session_id = ${task.sessionId}
+                WHERE ledger.chat_session_id IN (SELECT session_id FROM task_chat_sessions)
                   AND ledger.user_workos_id = ${task.userWorkosId}
                   AND ledger.amount_usd_micros < 0
               ) AS "usageRowCount",
               (
                 SELECT COALESCE(SUM(-ledger.amount_usd_micros), 0)
                 FROM goat.credit_ledger AS ledger
-                WHERE ledger.chat_session_id = ${task.sessionId}
+                WHERE ledger.chat_session_id IN (SELECT session_id FROM task_chat_sessions)
                   AND ledger.user_workos_id = ${task.userWorkosId}
                   AND ledger.amount_usd_micros < 0
               ) AS "totalCostUsdMicros"

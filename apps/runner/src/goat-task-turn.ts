@@ -68,6 +68,8 @@ export type GoatTaskTurnCompletion = {
 
 type GoatTaskNextTurn = {
   id: string;
+  chatSessionId?: string;
+  codexChatSessionId?: string;
   userMessageId: string;
   assistantMessageId: string;
   prompt: string;
@@ -412,6 +414,7 @@ export function buildGoatTaskTurnCompletion(input: {
           title: nextStep.title,
           previousResult: input.result,
         }),
+        isolateSession: true,
       });
       harnessSpec = nextHarnessSpec;
     }
@@ -509,11 +512,23 @@ export async function settleGoatDurableTurn(input: {
         AND turn.status = 'running'
       RETURNING turn.id
     ),
+    workflow_origin_attachments AS (
+      SELECT origin.attachments, origin.attachment_texts
+      FROM goat.chat_messages AS origin
+      WHERE origin.session_id = ${target.chatSessionId}
+        AND origin.role = 'user'
+      ORDER BY origin.created_at ASC, origin.id ASC
+      LIMIT 1
+    ),
     projected_task AS (
       UPDATE goat.tasks AS task
       SET status = CASE WHEN ${Boolean(next)} THEN 'running' ELSE ${terminalTaskStatus} END,
           stage = CASE WHEN ${Boolean(next)} THEN 'queued' ELSE ${terminalTaskStage} END,
           model = COALESCE(${completion?.harnessSpec.model ?? null}, task.model),
+          session_id = CASE
+            WHEN ${Boolean(next?.chatSessionId)} THEN ${next?.chatSessionId ?? null}
+            ELSE task.session_id
+          END,
           result = CASE
             WHEN ${Boolean(next)} THEN task.result
             WHEN ${input.turnStatus} = 'completed' THEN ${completion?.result ?? null}
@@ -545,14 +560,74 @@ export async function settleGoatDurableTurn(input: {
         AND EXISTS (SELECT 1 FROM settled_turn)
       RETURNING task.*
     ),
-    workflow_origin_attachments AS (
-      SELECT origin.attachments, origin.attachment_texts
-      FROM goat.chat_messages AS origin
-      INNER JOIN projected_task AS task
-        ON task.session_id = origin.session_id
-      WHERE origin.role = 'user'
-      ORDER BY origin.created_at ASC, origin.id ASC
-      LIMIT 1
+    tagged_current_task_messages AS (
+      UPDATE goat.chat_messages AS message
+      SET task_id = task.id,
+          updated_at = ${input.completedAt}
+      FROM projected_task AS task
+      WHERE message.session_id = ${target.chatSessionId}
+        AND message.task_id IS NULL
+      RETURNING message.id
+    ),
+    created_next_chat AS (
+      INSERT INTO goat.chat_sessions (
+        id,
+        user_workos_id,
+        title,
+        model,
+        engine,
+        kind,
+        created_at,
+        updated_at
+      )
+      SELECT
+        ${next?.chatSessionId ?? null},
+        task.user_workos_id,
+        task.name,
+        ${next?.chatModel ?? null},
+        ${next?.engine ?? null},
+        'task',
+        ${input.completedAt},
+        ${new Date(input.completedAt.getTime() + 1)}
+      FROM projected_task AS task
+      WHERE ${Boolean(next?.chatSessionId)}
+      RETURNING id
+    ),
+    created_next_runtime AS (
+      INSERT INTO goat.codex_chat_sessions (
+        id,
+        user_workos_id,
+        chat_session_id,
+        engine,
+        model,
+        brain_ref,
+        workspace_id,
+        host_tool_contract_version,
+        active_turn_id,
+        status,
+        created_at,
+        updated_at
+      )
+      SELECT
+        ${next?.codexChatSessionId ?? null},
+        task.user_workos_id,
+        ${next?.chatSessionId ?? null},
+        ${next?.engine ?? null},
+        ${next?.runtimeModel ?? null},
+        previous_runtime.brain_ref,
+        previous_runtime.workspace_id,
+        ${next?.hostToolContractVersion ?? null},
+        ${next?.id ?? null},
+        'queued',
+        ${input.completedAt},
+        ${input.completedAt}
+      FROM projected_task AS task
+      INNER JOIN goat.codex_chat_sessions AS previous_runtime
+        ON previous_runtime.id = ${target.codexChatSessionId}
+       AND previous_runtime.user_workos_id = task.user_workos_id
+      WHERE ${Boolean(next?.codexChatSessionId)}
+        AND EXISTS (SELECT 1 FROM created_next_chat)
+      RETURNING id
     ),
     next_user_message AS (
       INSERT INTO goat.chat_messages (
@@ -560,6 +635,7 @@ export async function settleGoatDurableTurn(input: {
         session_id,
         role,
         content,
+        task_id,
         debug_trace,
         attachments,
         attachment_texts,
@@ -568,17 +644,18 @@ export async function settleGoatDurableTurn(input: {
       )
       SELECT
         ${next?.userMessageId ?? null},
-        task.session_id,
+        COALESCE(${next?.chatSessionId ?? null}, task.session_id),
         'user',
         ${next?.userMessageContent ?? next?.prompt ?? null},
+        task.id,
         ${next?.userMessageDebugTrace ? JSON.stringify(next.userMessageDebugTrace) : null}::jsonb,
         CASE
-          WHEN ${next?.engine ?? null}::text IN ('codex', 'claude_code')
+          WHEN ${Boolean(next?.chatSessionId)}
             THEN (SELECT attachments FROM workflow_origin_attachments)
           ELSE NULL
         END,
         CASE
-          WHEN ${next?.engine ?? null}::text IN ('codex', 'claude_code')
+          WHEN ${Boolean(next?.chatSessionId)}
             THEN (SELECT attachment_texts FROM workflow_origin_attachments)
           ELSE NULL
         END,
@@ -586,22 +663,31 @@ export async function settleGoatDurableTurn(input: {
         ${input.completedAt}
       FROM projected_task AS task
       WHERE ${Boolean(next)}
+        AND (
+          NOT ${Boolean(next?.chatSessionId)}
+          OR EXISTS (SELECT 1 FROM created_next_runtime)
+        )
       RETURNING id
     ),
     next_assistant_message AS (
       INSERT INTO goat.chat_messages (
-        id, session_id, role, content, debug_trace, created_at, updated_at
+        id, session_id, role, content, task_id, debug_trace, created_at, updated_at
       )
       SELECT
         ${next?.assistantMessageId ?? null},
-        task.session_id,
+        COALESCE(${next?.chatSessionId ?? null}, task.session_id),
         'assistant',
         '',
+        task.id,
         ${next ? JSON.stringify(next.assistantDebugTrace) : null}::jsonb,
         ${new Date(input.completedAt.getTime() + 1)},
         ${new Date(input.completedAt.getTime() + 1)}
       FROM projected_task AS task
       WHERE ${Boolean(next)}
+        AND (
+          NOT ${Boolean(next?.chatSessionId)}
+          OR EXISTS (SELECT 1 FROM created_next_runtime)
+        )
       RETURNING id
     ),
     next_turn AS (
@@ -622,8 +708,8 @@ export async function settleGoatDurableTurn(input: {
       SELECT
         ${next?.id ?? null},
         task.user_workos_id,
-        ${target.codexChatSessionId},
-        task.session_id,
+        COALESCE(${next?.codexChatSessionId ?? null}, ${target.codexChatSessionId}),
+        COALESCE(${next?.chatSessionId ?? null}, task.session_id),
         ${next?.userMessageId ?? null},
         ${next?.assistantMessageId ?? null},
         'queued',
@@ -636,6 +722,10 @@ export async function settleGoatDurableTurn(input: {
       WHERE ${Boolean(next)}
         AND EXISTS (SELECT 1 FROM next_user_message)
         AND EXISTS (SELECT 1 FROM next_assistant_message)
+        AND (
+          NOT ${Boolean(next?.chatSessionId)}
+          OR EXISTS (SELECT 1 FROM created_next_runtime)
+        )
       RETURNING id
     ),
     next_queued_turn AS (
@@ -651,21 +741,33 @@ export async function settleGoatDurableTurn(input: {
           AND (queued.run_after IS NULL OR queued.run_after <= ${input.completedAt})
           AND EXISTS (SELECT 1 FROM settled_turn)
           AND NOT EXISTS (SELECT 1 FROM next_turn)
+          AND NOT ${Boolean(next?.chatSessionId)}
         ORDER BY queued.created_at ASC, queued.id ASC
         LIMIT 1
       )
     ),
     updated_runtime AS (
       UPDATE goat.codex_chat_sessions AS runtime
-      SET active_turn_id = (SELECT id FROM next_queued_turn),
+      SET active_turn_id = CASE
+            WHEN ${Boolean(next?.chatSessionId)} THEN NULL
+            ELSE (SELECT id FROM next_queued_turn)
+          END,
           status = CASE
-            WHEN EXISTS (SELECT 1 FROM next_queued_turn) THEN 'queued'
+            WHEN NOT ${Boolean(next?.chatSessionId)} AND EXISTS (SELECT 1 FROM next_queued_turn)
+              THEN 'queued'
             ELSE ${input.sessionStatus}
           END,
-          engine = COALESCE(${next?.engine ?? null}, runtime.engine),
-          model = COALESCE(${next?.runtimeModel ?? null}, runtime.model),
+          engine = CASE
+            WHEN ${Boolean(next?.chatSessionId)} THEN runtime.engine
+            ELSE COALESCE(${next?.engine ?? null}, runtime.engine)
+          END,
+          model = CASE
+            WHEN ${Boolean(next?.chatSessionId)} THEN runtime.model
+            ELSE COALESCE(${next?.runtimeModel ?? null}, runtime.model)
+          END,
           host_tool_contract_version = CASE
-            WHEN ${Boolean(next)} THEN ${next?.hostToolContractVersion ?? null}
+            WHEN ${Boolean(next)} AND NOT ${Boolean(next?.chatSessionId)}
+              THEN ${next?.hostToolContractVersion ?? null}
             ELSE runtime.host_tool_contract_version
           END,
           error = ${input.error},
@@ -678,8 +780,14 @@ export async function settleGoatDurableTurn(input: {
     ),
     updated_task_chat AS (
       UPDATE goat.chat_sessions AS chat
-      SET engine = COALESCE(${next?.engine ?? null}, chat.engine),
-          model = COALESCE(${next?.chatModel ?? null}, chat.model),
+      SET engine = CASE
+            WHEN ${Boolean(next?.chatSessionId)} THEN chat.engine
+            ELSE COALESCE(${next?.engine ?? null}, chat.engine)
+          END,
+          model = CASE
+            WHEN ${Boolean(next?.chatSessionId)} THEN chat.model
+            ELSE COALESCE(${next?.chatModel ?? null}, chat.model)
+          END,
           updated_at = ${input.completedAt}
       FROM updated_runtime AS runtime
       WHERE chat.id = runtime.chat_session_id
@@ -741,6 +849,14 @@ export async function settleGoatDurableTurn(input: {
     SELECT runtime.id
     FROM updated_runtime AS runtime
     WHERE EXISTS (SELECT 1 FROM updated_task_chat)
+      AND (
+        NOT ${Boolean(next?.chatSessionId)}
+        OR (
+          EXISTS (SELECT 1 FROM created_next_chat)
+          AND EXISTS (SELECT 1 FROM created_next_runtime)
+          AND EXISTS (SELECT 1 FROM next_turn)
+        )
+      )
   `);
   assertRowsChanged(result);
   await captureWorkflowHandoffChatMessageSent({ target, next });
@@ -759,8 +875,8 @@ async function captureWorkflowHandoffChatMessageSent(input: {
   const messageContent = input.next.userMessageContent ?? input.next.prompt;
   await captureGoatServerEvent("chat_message_sent", input.target.userWorkosId, {
     workspace_id: workspaceId,
-    session_id: input.target.chatSessionId,
-    is_first_message: false,
+    session_id: input.next.chatSessionId ?? input.target.chatSessionId,
+    is_first_message: Boolean(input.next.chatSessionId),
     engine: input.next.engine,
     usage_source: goatAnalyticsUsageSourceForEngine(input.next.engine),
     model: input.next.chatModel,
@@ -775,6 +891,7 @@ function createNextTaskTurn(input: {
   userMessageDebugTrace?: Record<string, unknown>;
   runAfter?: Date;
   settings?: GoatCodexChatTurnSettings;
+  isolateSession?: boolean;
 }): GoatTaskNextTurn {
   const runtimeModel = runtimeModelNameForHarness(
     input.harnessSpec.engine,
@@ -787,6 +904,12 @@ function createNextTaskTurn(input: {
   }
   return {
     id: `goat_codex_chat_turn_${randomUUID()}`,
+    ...(input.isolateSession
+      ? {
+          chatSessionId: `goat_chat_${randomUUID()}`,
+          codexChatSessionId: `goat_codex_chat_${randomUUID()}`,
+        }
+      : {}),
     userMessageId: `goat_chat_msg_${randomUUID()}`,
     assistantMessageId: `goat_chat_msg_${randomUUID()}`,
     prompt: input.prompt,
