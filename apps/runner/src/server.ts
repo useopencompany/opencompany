@@ -16,6 +16,7 @@ import {
   mintGoatCodingWorkspaceAccess,
 } from "./goat-coding-workspace-runtime";
 import { createGoatCodingWorkspaceTransport } from "./goat-coding-workspace-runtime-transport";
+import { createGoatDictationTicket } from "./goat-dictation-auth";
 import { wakeGoatGoogleDriveSyncWorker } from "./goat-google-drive-sync-worker";
 import { planGoatHarnessForTask } from "./goat-harness";
 import { getGoatHarnessPlannerContextForRunner } from "./goat-harness-planner";
@@ -171,6 +172,18 @@ export function createServer(
       }
     },
   );
+
+  app.post("/internal/goat/dictation/access", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const body = request.body as { userWorkosId?: unknown } | undefined;
+    const userWorkosId = typeof body?.userWorkosId === "string" ? body.userWorkosId.trim() : "";
+    if (!userWorkosId) {
+      reply.status(400).send({ error: "userWorkosId is required." });
+      return;
+    }
+
+    reply.send(createGoatDictationTicket({ userWorkosId, secret: env.streamTokenSecret }));
+  });
 
   app.delete("/internal/goat/codex-chat/sandboxes/:sandboxId", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);

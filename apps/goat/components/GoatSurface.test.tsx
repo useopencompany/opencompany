@@ -220,6 +220,84 @@ function requestChatSessionId(init: RequestInit | undefined, fallback: string) {
   return fallback;
 }
 
+class MockDictationWebSocket extends EventTarget {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSED = 3;
+  static instances: MockDictationWebSocket[] = [];
+  readyState = MockDictationWebSocket.CONNECTING;
+  sent: string[] = [];
+
+  constructor(
+    readonly url: string,
+    readonly protocols?: string | string[],
+  ) {
+    super();
+    MockDictationWebSocket.instances.push(this);
+  }
+
+  send(data: string) {
+    this.sent.push(data);
+  }
+
+  close() {
+    this.readyState = MockDictationWebSocket.CLOSED;
+    this.dispatchEvent(new CloseEvent("close"));
+  }
+
+  open() {
+    this.readyState = MockDictationWebSocket.OPEN;
+    this.dispatchEvent(new Event("open"));
+  }
+
+  receive(data: unknown) {
+    this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(data) }));
+  }
+}
+
+class MockAudioContext {
+  sampleRate = 48_000;
+
+  createMediaStreamSource() {
+    return { connect: vi.fn(), disconnect: vi.fn() };
+  }
+
+  createScriptProcessor() {
+    return { connect: vi.fn(), disconnect: vi.fn(), onaudioprocess: null };
+  }
+
+  close() {
+    return Promise.resolve();
+  }
+}
+
+function installDictationBrowserMocks() {
+  MockDictationWebSocket.instances = [];
+  vi.stubGlobal("WebSocket", MockDictationWebSocket);
+  vi.stubGlobal("AudioContext", MockAudioContext);
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: {
+      getUserMedia: vi.fn(async () => ({
+        getTracks: () => [{ stop: vi.fn() }],
+      })),
+    },
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/dictation/access") {
+        return Response.json({
+          websocketUrl: "wss://runner.example.com/goat/dictation",
+          ticket: "ticket_1",
+          expiresAt: 60_000,
+        });
+      }
+      return Response.json({ skills: [] });
+    }),
+  );
+}
+
 describe("GoatSurface chat streaming UI", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -283,6 +361,67 @@ describe("GoatSurface chat streaming UI", () => {
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Hello Goat" });
     expect(textarea).toHaveValue("");
     expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
+  });
+
+  it("restores the prior draft when voice dictation is cancelled", async () => {
+    installDictationBrowserMocks();
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    await user.type(textarea, "Draft before mic");
+    await user.click(screen.getByRole("button", { name: "Start voice dictation" }));
+
+    await waitFor(() => expect(MockDictationWebSocket.instances).toHaveLength(1));
+    const socket = MockDictationWebSocket.instances[0]!;
+    act(() => socket.open());
+    act(() => socket.receive({ type: "delta", delta: " add this" }));
+    expect(textarea).toHaveValue("Draft before mic add this");
+
+    await user.click(screen.getByRole("button", { name: "Cancel voice dictation" }));
+
+    expect(textarea).toHaveValue("Draft before mic");
+    expect(socket.sent.some((message) => message.includes('"type":"cancel"'))).toBe(true);
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps final voice dictation text in the composer for review without sending", async () => {
+    installDictationBrowserMocks();
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    await user.type(textarea, "Please");
+    await user.click(screen.getByRole("button", { name: "Start voice dictation" }));
+
+    await waitFor(() => expect(MockDictationWebSocket.instances).toHaveLength(1));
+    const socket = MockDictationWebSocket.instances[0]!;
+    act(() => socket.open());
+    await user.click(screen.getByRole("button", { name: "Stop voice dictation" }));
+    expect(screen.getByRole("status", { name: "Processing voice dictation" })).toBeInTheDocument();
+    expect(socket.sent.some((message) => message.includes('"type":"stop"'))).toBe(true);
+
+    act(() => socket.receive({ type: "final", text: "send the launch update" }));
+
+    await waitFor(() => expect(textarea).toHaveValue("Please send the launch update"));
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
   });
 
   it("marks an already-open chat seen again after a live assistant message finishes", async () => {

@@ -3,6 +3,7 @@ import {
   getGoatCodexSandboxStatus,
   goatRunnerConfigured,
   requestGoatCodingWorkspaceRuntimeAccess,
+  requestGoatDictationAccess,
   triggerGoatCodexChatWake,
   triggerGoatTaskRun,
 } from "@/lib/task-runner";
@@ -240,5 +241,49 @@ describe("requestGoatCodingWorkspaceRuntimeAccess", () => {
         userWorkosId: "user_1",
       }),
     ).resolves.toMatchObject({ websocketUrl: "wss://runner.example.com/goat/runtime" });
+  });
+});
+
+describe("requestGoatDictationAccess", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("uses the same-origin dev proxy when Goat is HTTPS and the runner is local HTTP", async () => {
+    vi.stubEnv("RUNNER_INTERNAL_URL", "http://127.0.0.1:3040");
+    vi.stubEnv("RUNNER_PUBLIC_URL", "http://localhost:3040");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://localhost:3443");
+    vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ ticket: "ticket_1", expiresAt: 60_000 })),
+    );
+
+    await expect(requestGoatDictationAccess({ userWorkosId: "user_1" })).resolves.toEqual({
+      websocketUrl: "wss://localhost:3443/goat/dictation",
+      ticket: "ticket_1",
+      expiresAt: 60_000,
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:3040/internal/goat/dictation/access",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("uses the hosted runner URL in production-style environments", async () => {
+    vi.stubEnv("RUNNER_INTERNAL_URL", "https://runner-internal.example.com");
+    vi.stubEnv("RUNNER_PUBLIC_URL", "https://runner.example.com");
+    vi.stubEnv("GOAT_NEXT_PUBLIC_APP_URL", "https://goat.example.com");
+    vi.stubEnv("RUNNER_INTERNAL_TOKEN", "token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ ticket: "ticket_1", expiresAt: 60_000 })),
+    );
+
+    await expect(requestGoatDictationAccess({ userWorkosId: "user_1" })).resolves.toMatchObject({
+      websocketUrl: "wss://runner.example.com/goat/dictation",
+    });
   });
 });

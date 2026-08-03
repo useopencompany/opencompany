@@ -50,6 +50,7 @@ import {
   FileText,
   LoaderCircle,
   MessageSquare,
+  Mic,
   PanelRightClose,
   PanelRightOpen,
   Pause,
@@ -806,6 +807,21 @@ export function GoatSurface({
       : isAutoChatModel
         ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
         : {}),
+  });
+  const applyDictatedInput = useCallback(
+    (nextInput: string) => {
+      setInput(nextInput);
+      setMentionToken(null);
+      setSelectedMentions((current) =>
+        current.filter((mention) => goatChatMentionIsVisible(nextInput, mention)),
+      );
+    },
+    [setSelectedMentions],
+  );
+  const voiceDictation = useComposerVoiceDictation({
+    input,
+    inputRef,
+    onInputChange: applyDictatedInput,
   });
   const clearComposerAttachments = composerAttachments.clearAttachments;
 
@@ -2499,6 +2515,7 @@ export function GoatSurface({
                         )
                       }
                       disabled={backgroundTaskSubmitting}
+                      readOnly={voiceDictation.isActive}
                       className={cn(
                         "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
                         composerInputHasMentionHighlights(input, activeSelectedMentions) &&
@@ -2514,6 +2531,14 @@ export function GoatSurface({
                       onStop={stopGeneration}
                     />
                   ) : null}
+                  {voiceDictation.isActive ? (
+                    <VoiceDictationPill
+                      status={voiceDictation.status}
+                      levels={voiceDictation.levels}
+                      onStop={voiceDictation.stop}
+                      onCancel={voiceDictation.cancel}
+                    />
+                  ) : null}
                   <SubmitButton
                     disabled={
                       (!input.trim() &&
@@ -2524,6 +2549,7 @@ export function GoatSurface({
                       engineSubmitting ||
                       engineRunning ||
                       backgroundTaskSubmitting ||
+                      voiceDictation.isActive ||
                       chatSendBlocked
                     }
                     isGenerating={isGenerating || isTaskConversationWorking}
@@ -2550,7 +2576,7 @@ export function GoatSurface({
                       <button
                         type="button"
                         aria-label="Attach files"
-                        disabled={isGenerating || engineSubmitting}
+                        disabled={isGenerating || engineSubmitting || voiceDictation.isActive}
                         onClick={() => attachmentFileInputRef.current?.click()}
                         className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
                       >
@@ -2558,6 +2584,22 @@ export function GoatSurface({
                       </button>
                     </>
                   ) : null}
+                  <button
+                    type="button"
+                    aria-label="Start voice dictation"
+                    disabled={
+                      isGenerating ||
+                      engineSubmitting ||
+                      engineRunning ||
+                      backgroundTaskSubmitting ||
+                      voiceDictation.isActive ||
+                      newChatCommandOpen
+                    }
+                    onClick={voiceDictation.start}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+                  >
+                    <Mic size={15} strokeWidth={1.9} />
+                  </button>
                   <GoatModelPicker
                     value={chatModel}
                     onChange={(model) => {
@@ -2581,7 +2623,7 @@ export function GoatSurface({
                         setCodexGoalTokenBudget("");
                       }
                     }}
-                    disabled={isGenerating || Boolean(chatSessionId)}
+                    disabled={isGenerating || Boolean(chatSessionId) || voiceDictation.isActive}
                     codexConnected={codexConnected}
                     claudeCodeConnected={claudeCodeConnected}
                     autoModelRoutingEnabled={autoModelRoutingEnabled}
@@ -2611,8 +2653,10 @@ export function GoatSurface({
                       goalModeEnabled={codexGoalModeEnabled}
                       goalObjective={codexGoalObjective}
                       goalTokenBudget={codexGoalTokenBudget}
-                      disabled={engineSubmitting}
-                      modelDisabled={engineSubmitting || Boolean(activeEngineChat)}
+                      disabled={engineSubmitting || voiceDictation.isActive}
+                      modelDisabled={
+                        engineSubmitting || Boolean(activeEngineChat) || voiceDictation.isActive
+                      }
                       onReasoningEffortChange={setCodexReasoningEffort}
                       onPlanModeEnabledChange={setCodexPlanModeEnabled}
                       onGoalModeEnabledChange={setCodexGoalModeEnabled}
@@ -3473,6 +3517,384 @@ function QuickChatComposer({
       </form>
     </div>
   );
+}
+
+type VoiceDictationStatus = "idle" | "connecting" | "recording" | "processing";
+type VoiceDictationAccess = {
+  websocketUrl: string;
+  ticket: string;
+  expiresAt: number;
+};
+type VoiceDictationSocketMessage =
+  | { type: "ready" }
+  | { type: "processing" }
+  | { type: "delta"; delta: string }
+  | { type: "partial"; text: string }
+  | { type: "final"; text: string }
+  | { type: "warning"; message: string }
+  | { type: "error"; message: string };
+
+const DICTATION_PROTOCOL = "goat-dictation-v1";
+const DICTATION_TICKET_PROTOCOL_PREFIX = "goat-dictation-ticket.";
+const DICTATION_SAMPLE_RATE = 24_000;
+const DICTATION_LEVEL_COUNT = 18;
+const EMPTY_DICTATION_LEVELS = Array.from({ length: DICTATION_LEVEL_COUNT }, () => 0.08);
+
+function useComposerVoiceDictation({
+  input,
+  inputRef,
+  onInputChange,
+}: {
+  input: string;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
+  onInputChange: (nextInput: string) => void;
+}) {
+  const [status, setStatus] = useState<VoiceDictationStatus>("idle");
+  const statusRef = useRef<VoiceDictationStatus>("idle");
+  const [levels, setLevels] = useState(EMPTY_DICTATION_LEVELS);
+  const socketRef = useRef<WebSocket | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const stopCaptureRef = useRef<(() => void) | null>(null);
+  const priorDraftRef = useRef("");
+  const dictatedTextRef = useRef("");
+  const cancelledRef = useRef(false);
+
+  const setDictationStatus = useCallback((nextStatus: VoiceDictationStatus) => {
+    statusRef.current = nextStatus;
+    setStatus(nextStatus);
+  }, []);
+
+  const cleanup = useCallback((closeSocket = true) => {
+    stopCaptureRef.current?.();
+    stopCaptureRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (closeSocket) socketRef.current?.close();
+    socketRef.current = null;
+  }, []);
+
+  useEffect(
+    () => () => {
+      cancelledRef.current = true;
+      cleanup();
+    },
+    [cleanup],
+  );
+
+  const applyTranscript = useCallback(
+    (transcript: string) => {
+      dictatedTextRef.current = transcript;
+      onInputChange(draftWithDictation(priorDraftRef.current, transcript).slice(0, 10_000));
+    },
+    [onInputChange],
+  );
+
+  const finishWithError = useCallback(
+    (message: string) => {
+      cleanup();
+      applyTranscript("");
+      setLevels(EMPTY_DICTATION_LEVELS);
+      setDictationStatus("idle");
+      toast.error(message);
+      requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
+    },
+    [applyTranscript, cleanup, inputRef, setDictationStatus],
+  );
+
+  const start = useCallback(async () => {
+    if (statusRef.current !== "idle") return;
+    const AudioContextCtor =
+      window.AudioContext ??
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
+      toast.error("Voice dictation is not available in this browser.");
+      return;
+    }
+
+    cancelledRef.current = false;
+    priorDraftRef.current = inputRef.current?.value ?? input;
+    dictatedTextRef.current = "";
+    setLevels(EMPTY_DICTATION_LEVELS);
+    setDictationStatus("connecting");
+
+    try {
+      const response = await fetch("/api/dictation/access", { method: "POST" });
+      if (!response.ok)
+        throw new Error((await response.text()) || "Voice dictation is unavailable.");
+      const access = (await response.json()) as Partial<VoiceDictationAccess>;
+      if (typeof access.websocketUrl !== "string" || typeof access.ticket !== "string") {
+        throw new Error("The runner returned invalid dictation access.");
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      if (cancelledRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      streamRef.current = stream;
+
+      const socket = new WebSocket(access.websocketUrl, [
+        DICTATION_PROTOCOL,
+        `${DICTATION_TICKET_PROTOCOL_PREFIX}${access.ticket}`,
+      ]);
+      socketRef.current = socket;
+      socket.addEventListener("open", () => {
+        if (cancelledRef.current || socketRef.current !== socket) return socket.close();
+        try {
+          stopCaptureRef.current = startPcmMicrophoneCapture({
+            stream,
+            AudioContextCtor,
+            onAudio: (audio) => {
+              if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "audio", audio }));
+              }
+            },
+            onLevel: (level) => {
+              setLevels((current) => [...current.slice(1), Math.max(0.08, Math.min(1, level))]);
+            },
+          });
+          setDictationStatus("recording");
+        } catch (error) {
+          finishWithError(
+            error instanceof Error ? error.message : "Could not start voice dictation.",
+          );
+        }
+      });
+      socket.addEventListener("message", (event) => {
+        if (typeof event.data !== "string" || cancelledRef.current) return;
+        const message = parseDictationMessage(event.data);
+        if (!message) return;
+        if (message.type === "delta") {
+          applyTranscript(`${dictatedTextRef.current}${message.delta}`);
+        } else if (message.type === "partial") {
+          applyTranscript(message.text);
+        } else if (message.type === "processing") {
+          setDictationStatus("processing");
+        } else if (message.type === "final") {
+          applyTranscript(message.text);
+          cleanup(false);
+          setLevels(EMPTY_DICTATION_LEVELS);
+          setDictationStatus("idle");
+          requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
+        } else if (message.type === "error") {
+          finishWithError(message.message);
+        } else if (message.type === "warning") {
+          toast.error(message.message);
+        }
+      });
+      socket.addEventListener("close", (event) => {
+        if (cancelledRef.current || statusRef.current === "idle") return;
+        if (event.code >= 4000 && event.reason) {
+          finishWithError(event.reason);
+          return;
+        }
+        if (statusRef.current !== "processing") finishWithError("Voice dictation stopped.");
+      });
+      socket.addEventListener("error", () => {
+        if (!cancelledRef.current && statusRef.current !== "idle") {
+          finishWithError("Voice dictation connection failed.");
+        }
+      });
+    } catch (error) {
+      finishWithError(error instanceof Error ? error.message : "Could not start voice dictation.");
+    }
+  }, [applyTranscript, cleanup, finishWithError, input, inputRef, setDictationStatus]);
+
+  const stop = useCallback(() => {
+    const socket = socketRef.current;
+    if (
+      statusRef.current !== "recording" ||
+      !socket ||
+      socket.readyState !== WebSocket.OPEN ||
+      cancelledRef.current
+    ) {
+      return;
+    }
+    stopCaptureRef.current?.();
+    stopCaptureRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setDictationStatus("processing");
+    socket.send(JSON.stringify({ type: "stop" }));
+  }, [setDictationStatus]);
+
+  const cancel = useCallback(() => {
+    cancelledRef.current = true;
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: "cancel" }));
+    }
+    cleanup();
+    onInputChange(priorDraftRef.current);
+    setLevels(EMPTY_DICTATION_LEVELS);
+    setDictationStatus("idle");
+    requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
+  }, [cleanup, inputRef, onInputChange, setDictationStatus]);
+
+  return {
+    status,
+    levels,
+    isActive: status !== "idle",
+    start,
+    stop,
+    cancel,
+  };
+}
+
+function VoiceDictationPill({
+  status,
+  levels,
+  onStop,
+  onCancel,
+}: {
+  status: VoiceDictationStatus;
+  levels: readonly number[];
+  onStop: () => void;
+  onCancel: () => void;
+}) {
+  const processing = status === "processing";
+  const connecting = status === "connecting";
+  const statusLabel = processing
+    ? "Processing voice dictation"
+    : connecting
+      ? "Connecting voice dictation"
+      : "Recording voice dictation";
+  return (
+    <div
+      role="status"
+      aria-label={statusLabel}
+      className="flex h-8 shrink-0 items-center gap-2 rounded-full border border-border-strong bg-surface px-2 text-[12px] leading-4 text-ink shadow-[0_1px_4px_rgba(15,15,15,0.08)]"
+    >
+      {processing || connecting ? (
+        <LoaderCircle size={13} strokeWidth={2} className="animate-spin text-ink-subtle" />
+      ) : (
+        <span className="h-2 w-2 rounded-full bg-red-500" />
+      )}
+      <span className="hidden font-medium sm:inline">
+        {processing ? "Processing" : status === "connecting" ? "Connecting" : "Recording"}
+      </span>
+      <div aria-hidden className="flex h-4 items-center gap-0.5">
+        {levels.map((level, index) => (
+          <span
+            // biome-ignore lint/suspicious/noArrayIndexKey: fixed-size live waveform bars.
+            key={index}
+            className="w-0.5 rounded-full bg-ink-subtle/70"
+            style={{ height: `${Math.max(3, Math.round(level * 16))}px` }}
+          />
+        ))}
+      </div>
+      {status === "recording" ? (
+        <button
+          type="button"
+          aria-label="Stop voice dictation"
+          onClick={onStop}
+          className="flex h-6 w-6 items-center justify-center rounded-full text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <Square size={11} strokeWidth={2.2} />
+        </button>
+      ) : null}
+      <button
+        type="button"
+        aria-label="Cancel voice dictation"
+        onClick={onCancel}
+        className="flex h-6 w-6 items-center justify-center rounded-full text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <X size={13} strokeWidth={2.1} />
+      </button>
+    </div>
+  );
+}
+
+function startPcmMicrophoneCapture(input: {
+  stream: MediaStream;
+  AudioContextCtor: typeof AudioContext;
+  onAudio: (audio: string) => void;
+  onLevel: (level: number) => void;
+}) {
+  const audioContext = new input.AudioContextCtor();
+  const source = audioContext.createMediaStreamSource(input.stream);
+  const processor = audioContext.createScriptProcessor(4096, 1, 1);
+  processor.onaudioprocess = (event) => {
+    const samples = event.inputBuffer.getChannelData(0);
+    input.onLevel(rmsLevel(samples));
+    const pcm = floatSamplesToPcm16(samples, audioContext.sampleRate, DICTATION_SAMPLE_RATE);
+    if (pcm.byteLength > 0) input.onAudio(pcm16ToBase64(pcm));
+  };
+  source.connect(processor);
+  processor.connect(audioContext.destination);
+
+  return () => {
+    processor.disconnect();
+    source.disconnect();
+    void audioContext.close().catch(() => {});
+  };
+}
+
+function rmsLevel(samples: Float32Array) {
+  let sum = 0;
+  for (let index = 0; index < samples.length; index += 1) {
+    sum += samples[index]! ** 2;
+  }
+  return Math.sqrt(sum / samples.length) * 3;
+}
+
+function floatSamplesToPcm16(
+  samples: Float32Array,
+  inputSampleRate: number,
+  outputSampleRate: number,
+) {
+  const ratio = inputSampleRate / outputSampleRate;
+  const outputLength = Math.max(0, Math.floor(samples.length / ratio));
+  const output = new Int16Array(outputLength);
+  for (let outputIndex = 0; outputIndex < outputLength; outputIndex += 1) {
+    const sourceIndex = Math.min(samples.length - 1, Math.floor(outputIndex * ratio));
+    const sample = Math.max(-1, Math.min(1, samples[sourceIndex] ?? 0));
+    output[outputIndex] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  }
+  return output;
+}
+
+function pcm16ToBase64(pcm: Int16Array) {
+  const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function draftWithDictation(draft: string, transcript: string) {
+  const cleanTranscript = transcript.trimStart();
+  if (!cleanTranscript) return draft;
+  if (!draft.trim()) return cleanTranscript;
+  return `${draft.trimEnd()} ${cleanTranscript}`;
+}
+
+function parseDictationMessage(data: string): VoiceDictationSocketMessage | null {
+  try {
+    const value = JSON.parse(data) as Partial<VoiceDictationSocketMessage>;
+    if (value.type === "ready") return { type: "ready" };
+    if (value.type === "processing") return { type: "processing" };
+    if (value.type === "delta" && typeof value.delta === "string") {
+      return { type: "delta", delta: value.delta };
+    }
+    if ((value.type === "partial" || value.type === "final") && typeof value.text === "string") {
+      return { type: value.type, text: value.text };
+    }
+    if ((value.type === "warning" || value.type === "error") && typeof value.message === "string") {
+      return { type: value.type, message: value.message };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function formatCreditBalance(usdMicros: number) {
