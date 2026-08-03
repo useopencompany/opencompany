@@ -1344,6 +1344,51 @@ describe("list_actions and use_action tools", () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
+  it("does not burn the provider retry circuit on transient cost-settling errors", async () => {
+    const execute = vi.fn(
+      async ({ action }: { action: string }): Promise<UseActionToolOutput> => ({
+        ok: false,
+        action,
+        error: {
+          code: "provider_error",
+          source: "slack",
+          message: "The capability did not complete and its final cost is settling.",
+        },
+      }),
+    );
+    const context = createOpenCompanyChatToolContext({
+      model: DEFAULT_GOAT_MODEL,
+      runBrainCli: vi.fn(),
+      actions: {
+        catalog,
+        prelistedSourceIds: ["slack"],
+        execute,
+      },
+    });
+
+    await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C1" },
+    });
+    await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C2" },
+    });
+    const third = await executeUseActionTool(context.tools, {
+      action: "slack.fetch_history",
+      params: { channel: "C3" },
+    });
+
+    expect(third).toMatchObject({
+      ok: false,
+      error: {
+        code: "provider_error",
+        message: "The capability did not complete and its final cost is settling.",
+      },
+    });
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+
   it("queues healthy parallel calls instead of treating in-flight work as failures", async () => {
     let releaseProvider!: () => void;
     const providerGate = new Promise<void>((resolve) => {

@@ -35,6 +35,7 @@ vi.mock("@/lib/billing/auto-refill", () => ({
 }));
 
 import type { GoatActionExecuteContext } from "@/lib/actions/types";
+import { GoatActionInvalidParamsError } from "@/lib/actions/types";
 import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
 import {
   evaluateManagedCapabilityApproval,
@@ -214,6 +215,43 @@ describe("executeManagedCapability", () => {
       errorMessage: "The capability returned data that could not be safely used.",
     });
     expect(mocks.settleRun).not.toHaveBeenCalled();
+  });
+
+  it("settles completed work when output validation reports invalid params", async () => {
+    const action = {
+      ...spec(),
+      mapOutput: () => {
+        throw new GoatActionInvalidParamsError("Use the canonical LinkedIn company URL.");
+      },
+    };
+    const client = fakeClient({
+      inspection: inspectPrice(0.0015),
+      run: providerRun({ cost: { value: 0.0015, currency: "USD" } }),
+    });
+
+    await expect(
+      executeManagedCapability({
+        spec: action,
+        params: { query: "openai" },
+        context: context(),
+        client,
+      }),
+    ).rejects.toMatchObject({ name: "GoatActionInvalidParamsError" });
+
+    expect(mocks.recordDebit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerCostUsdMicros: 1_500,
+        platformFeeUsdMicros: 300,
+        totalCostUsdMicros: 1_800,
+      }),
+    );
+    expect(mocks.settleRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "succeeded",
+        providerCostUsdMicros: 1_500,
+        totalCostUsdMicros: 1_800,
+      }),
+    );
   });
 
   it("sends reviewed query parameters in the Monid input envelope", async () => {

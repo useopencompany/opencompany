@@ -2,6 +2,7 @@ import type { GoatManagedCapabilitySource } from "@opencompany/db/goat-schema";
 import type { JSONSchema7 } from "ai";
 import { MAX_EXPANDED_ACTION_RESULT_CHARS } from "@/lib/actions/execute";
 import { GoatActionInvalidParamsError } from "@/lib/actions/types";
+import { shapeCompanyEmployeesOutput } from "@/lib/capabilities/lead-company-employees";
 import { shapePdlPersonEmailOutput } from "@/lib/capabilities/pdl-person";
 import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize";
 import {
@@ -1168,6 +1169,7 @@ export const MANAGED_CAPABILITY_ACTIONS: readonly ManagedCapabilityActionSpec[] 
         canonicalLinks: [companyUrl],
       };
     },
+    mapOutput: (output, raw) => shapeCompanyEmployeesOutput(output, raw),
   },
   seoDomainOverviewAction({
     id: "seo.get_domain_overview",

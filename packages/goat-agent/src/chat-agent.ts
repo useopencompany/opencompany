@@ -1318,7 +1318,10 @@ export function createOpenCompanyChatToolContext(input: {
           const result = await actions.execute({ action, params, toolCallId });
           if (result.ok) {
             outcome = "success";
-          } else if (result.error.code === "provider_error" || result.error.code === "timeout") {
+          } else if (
+            (result.error.code === "provider_error" || result.error.code === "timeout") &&
+            !isRetrySafeProviderFlake(result.error.message)
+          ) {
             outcome = "failure";
           }
           return result;
@@ -1427,6 +1430,15 @@ function createActionProviderRetryGate(maxFailures: number) {
 
 function actionAbortReason(abortSignal: AbortSignal) {
   return abortSignal.reason ?? new DOMException("Action execution was aborted.", "AbortError");
+}
+
+function isRetrySafeProviderFlake(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("final cost is settling") ||
+    normalized.includes("cost is settling") ||
+    normalized.includes("still settling")
+  );
 }
 
 export function prepareOpenCompanyChatStep(input: {

@@ -22,6 +22,7 @@ import {
 import {
   type GoatActionExecuteContext,
   GoatActionExecutionError,
+  GoatActionInvalidParamsError,
   type GoatCapabilityQuote,
   type GoatCapabilityTurnState,
 } from "@/lib/actions/types";
@@ -402,6 +403,13 @@ export async function executeManagedCapability(input: {
     try {
       payload = input.spec.mapOutput(currentRun.output, input.params);
     } catch (error) {
+      if (error instanceof GoatActionInvalidParamsError) {
+        await settleManagedCapabilityRun({
+          auditRun,
+          providerRun: currentRun,
+        });
+        throw error;
+      }
       await settleManagedCapabilityRun({
         auditRun,
         providerRun: currentRun,
