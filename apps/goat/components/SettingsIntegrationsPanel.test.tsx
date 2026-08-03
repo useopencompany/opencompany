@@ -213,6 +213,42 @@ describe("SettingsIntegrationsPanel", () => {
     );
   });
 
+  it("flags a Linear MCP auth error and lets the user reconnect from integrations settings", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_linear_mcp",
+        provider: "linear",
+        externalId: "linear_mcp",
+        accountName: "Linear",
+        status: "needs_reauth",
+        statusReason: "Linear authorization expired. Reconnect Linear in Settings.",
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+
+    const linearCard = screen
+      .getByText("Connect issues, projects, and comments from Linear.")
+      .closest("div.rounded-2xl");
+    expect(linearCard).not.toBeNull();
+    expect(within(linearCard as HTMLElement).getByText("Needs reconnect")).toBeInTheDocument();
+    expect(
+      within(linearCard as HTMLElement).getByText(
+        "Linear authorization expired. Reconnect Linear in Settings.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(linearCard as HTMLElement).getByRole("link", { name: "Reconnect" }),
+    ).toHaveAttribute("href", "/api/integrations/linear/start?returnTo=/settings/integrations");
+    expect(within(linearCard as HTMLElement).queryByText("Connected")).not.toBeInTheDocument();
+    expect(
+      within(linearCard as HTMLElement).queryByRole("group", {
+        name: "Read Linear permission",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows PostHog with read-on and create-insights-ask permissions", () => {
     const integrations = goatIntegrationStateFromRows([
       {
@@ -292,6 +328,41 @@ describe("SettingsIntegrationsPanel", () => {
     expect(
       within(gmailCard as HTMLElement).getByRole("link", { name: "Enable drafts & sending" }),
     ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
+  });
+
+  it("flags personal accounts with persisted auth errors without showing capability controls", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_gmail",
+        provider: "gmail",
+        externalId: "google_account_1",
+        accountEmail: "louis@example.com",
+        status: "needs_reauth",
+        statusReason: "Google authorization expired. Reconnect Gmail.",
+        scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    const gmailCard = screen
+      .getByText("Let Goat read and act on your email.")
+      .closest("div.rounded-2xl");
+    expect(gmailCard).not.toBeNull();
+    expect(within(gmailCard as HTMLElement).getByText("Needs reconnect")).toBeInTheDocument();
+    expect(
+      within(gmailCard as HTMLElement).getByText("Google authorization expired. Reconnect Gmail."),
+    ).toBeInTheDocument();
+    expect(
+      within(gmailCard as HTMLElement).getByRole("link", { name: "Reconnect" }),
+    ).toHaveAttribute("href", "/api/integrations/gmail/start?returnTo=/settings/integrations");
+    expect(
+      within(gmailCard as HTMLElement).queryByRole("group", {
+        name: "Read emails permission",
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it("prompts send-enabled Gmail accounts only for draft access", () => {
