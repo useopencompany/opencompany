@@ -2,10 +2,13 @@ import { PLATFORM_FEE_BPS } from "@opencompany/billing";
 import { loadGoatBillingOverview } from "@opencompany/db/goat-billing";
 import {
   GOAT_DEFAULT_TOP_UP_USD_CENTS,
+  GOAT_FREE_MAX_MEMBERS,
   GOAT_INGEST_ITEM_FEE_USD_MICROS,
   GOAT_LOW_BALANCE_WARN_USD_MICROS,
   GOAT_MAX_TOP_UP_USD_CENTS,
   GOAT_MIN_TOP_UP_USD_CENTS,
+  GOAT_PRO_MAX_MEMBERS,
+  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
   GOAT_TOP_UP_AMOUNTS_USD_CENTS,
 } from "@opencompany/db/goat-billing-constants";
 import { loadGoatCreditOverview } from "@opencompany/db/goat-credits";
@@ -15,7 +18,7 @@ import { currentGoatUser } from "@/lib/auth";
 export default async function WorkspaceBillingSettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ topup?: string }>;
+  searchParams: Promise<{ checkout?: string; topup?: string }>;
 }) {
   const [context, params] = await Promise.all([currentGoatUser(), searchParams]);
   const [overview, credit] = await Promise.all([
@@ -26,6 +29,15 @@ export default async function WorkspaceBillingSettingsPage({
     <GoatBillingPanel
       data={{
         creditBalanceUsdMicros: overview.creditBalanceUsdMicros,
+        plan: overview.billing.plan,
+        subscriptionStatus: overview.billing.subscriptionStatus,
+        cancelAtPeriodEnd: overview.billing.cancelAtPeriodEnd,
+        currentPeriodEnd: overview.billing.currentPeriodEnd?.toISOString() ?? null,
+        paymentNeedsAttention: overview.billing.paymentNeedsAttention,
+        proMonthlyPriceCents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+        memberCount: overview.memberCount,
+        freeMaxMembers: GOAT_FREE_MAX_MEMBERS,
+        proMaxMembers: GOAT_PRO_MAX_MEMBERS,
         spendThisMonthUsdMicros: credit.spendThisMonthUsdMicros,
         spendThisMonthByCategory: credit.spendThisMonthByCategory,
         recentActivity: credit.recentEntries.map((entry) => ({
@@ -59,6 +71,13 @@ export default async function WorkspaceBillingSettingsPage({
       }}
       topupResult={
         params.topup === "success" ? "success" : params.topup === "cancelled" ? "cancelled" : null
+      }
+      checkoutResult={
+        params.checkout === "success"
+          ? "success"
+          : params.checkout === "cancelled"
+            ? "cancelled"
+            : null
       }
     />
   );

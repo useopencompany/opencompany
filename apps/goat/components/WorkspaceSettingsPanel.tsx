@@ -2,6 +2,7 @@
 
 import { toast } from "@opencompany/ui/components/sonner";
 import { Mail, Trash2, UserRound, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
@@ -17,6 +18,7 @@ import {
 type WorkspaceSettings = {
   workspace: { id: string; name: string };
   role: "admin" | "member";
+  plan: "free" | "pro";
   memberCap: number;
   members: GoatWorkspaceMemberView[];
   invitations: GoatWorkspaceInvitationView[];
@@ -95,7 +97,22 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
             : "border-border bg-surface-muted/40 text-ink-subtle"
         }`}
       >
-        {overCap ? (
+        {initial.plan === "free" ? (
+          <>
+            Free workspaces are personal.{" "}
+            {isAdmin ? (
+              <Link
+                href="/settings/workspace/billing"
+                className="font-medium text-ink underline underline-offset-2"
+              >
+                Upgrade to Pro
+              </Link>
+            ) : (
+              "Ask an admin to upgrade to Pro"
+            )}{" "}
+            for up to 10 members.
+          </>
+        ) : overCap ? (
           <>
             This workspace has {initial.members.length} members, over the limit of{" "}
             {initial.memberCap}. Inviting is disabled until you are under the limit.
@@ -143,7 +160,7 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
             />
             <button
               type="button"
-              disabled={isPending || !inviteEmail.trim()}
+              disabled={isPending || !inviteEmail.trim() || seatsUsed >= initial.memberCap}
               onClick={invite}
               className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
             >

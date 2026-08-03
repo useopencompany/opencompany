@@ -3,6 +3,8 @@
 import { randomUUID } from "node:crypto";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
+  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+  GOAT_PRO_STRIPE_PRODUCT_KEY,
   loadGoatBillingOverview,
   setGoatAutoRefillConfig,
   setGoatStripeCustomerId,
@@ -145,6 +147,110 @@ export async function createGoatCreditTopUpAction(
       error: error instanceof Error ? error.message : "Top-up checkout failed to start.",
     }).catch(() => undefined);
     return billingError(error, "Could not start the credit top-up checkout.");
+  }
+  redirect(checkoutUrl);
+}
+
+export async function createGoatProCheckoutAction(): Promise<GoatBillingActionResult> {
+  const context = await currentGoatUser();
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can change the plan." };
+  }
+
+  let checkoutUrl: string;
+  try {
+    assertGoatCheckoutEnabled();
+    const overview = await loadGoatBillingOverview(context.workspace.id);
+    if (overview.billing.plan === "pro") {
+      return { ok: false, error: "This workspace already has OpenCompany Pro." };
+    }
+    if (
+      overview.billing.stripeSubscriptionId &&
+      overview.billing.subscriptionStatus !== "canceled" &&
+      overview.billing.subscriptionStatus !== "incomplete_expired"
+    ) {
+      return {
+        ok: false,
+        error: "This workspace already has a Stripe subscription. Open billing management instead.",
+      };
+    }
+
+    const customerId = await ensureGoatStripeCustomerId({
+      workspaceId: context.workspace.id,
+      workspaceName: context.workspace.name,
+      email: context.authUser.email,
+      existingCustomerId: overview.billing.stripeCustomerId,
+    });
+    const stripe = getGoatStripe();
+    const subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "all",
+      limit: 10,
+    });
+    const existingPro = subscriptions.data.find(
+      (subscription) =>
+        subscription.metadata.billingProduct === GOAT_PRO_STRIPE_PRODUCT_KEY &&
+        subscription.status !== "canceled" &&
+        subscription.status !== "incomplete_expired",
+    );
+    if (existingPro) {
+      return {
+        ok: false,
+        error: "This workspace already has a Pro subscription. Open billing management instead.",
+      };
+    }
+    const appUrl = getGoatAppUrl();
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "subscription",
+        customer: customerId,
+        allow_promotion_codes: true,
+        success_url: `${appUrl}/settings/workspace/billing?checkout=success`,
+        cancel_url: `${appUrl}/settings/workspace/billing?checkout=cancelled`,
+        automatic_tax: { enabled: true },
+        billing_address_collection: "required",
+        tax_id_collection: { enabled: true },
+        customer_update: { address: "auto", name: "auto" },
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              unit_amount: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+              tax_behavior: "exclusive",
+              recurring: { interval: "month" },
+              product_data: {
+                name: "OpenCompany Pro",
+                description: "Team collaboration for one OpenCompany workspace",
+              },
+            },
+            quantity: 1,
+          },
+        ],
+        metadata: {
+          billingProduct: GOAT_PRO_STRIPE_PRODUCT_KEY,
+          goatWorkspaceId: context.workspace.id,
+        },
+        subscription_data: {
+          metadata: {
+            billingProduct: GOAT_PRO_STRIPE_PRODUCT_KEY,
+            goatWorkspaceId: context.workspace.id,
+          },
+        },
+      },
+      {
+        idempotencyKey: `goat-pro-${context.workspace.id}-${Math.floor(Date.now() / 3_600_000)}`,
+      },
+    );
+    if (!session.url) return { ok: false, error: "Stripe did not return a Checkout URL." };
+
+    await captureServerEvent("goat_billing_pro_checkout_started", context.user.workosUserId, {
+      user_id: context.user.workosUserId,
+      workspace_id: context.workspace.id,
+      monthly_price_usd_cents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+    });
+    checkoutUrl = session.url;
+  } catch (error) {
+    return billingError(error, "Could not start OpenCompany Pro checkout.");
   }
   redirect(checkoutUrl);
 }

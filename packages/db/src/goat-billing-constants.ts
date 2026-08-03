@@ -3,9 +3,13 @@
 // math the server enforces instead of mirroring them. Re-exported by
 // ./goat-billing.
 //
-// Billing v4 is pure usage-based: no plans, no seats. A workspace wallet is
-// topped up via Stripe and every billable action debits it — model cost from
-// the pricing table plus a platform fee, and a flat per-item fee on ingestion.
+// Usage remains wallet-based on every plan. Pro is a small-team workspace
+// subscription; it changes collaboration limits, never how usage is priced.
+
+export const GOAT_PRO_MONTHLY_PRICE_USD_CENTS = 2_000;
+export const GOAT_PRO_STRIPE_PRODUCT_KEY = "goat_pro";
+export const GOAT_FREE_MAX_MEMBERS = 1;
+export const GOAT_PRO_MAX_MEMBERS = 10;
 
 // One-time grant at workspace creation — the only free usage. Everything
 // after it is metered.
@@ -28,8 +32,9 @@ export const GOAT_INGEST_ITEM_FEE_USD_MICROS = 4_000;
 export const GOAT_LOW_BALANCE_WARN_USD_MICROS = 2_000_000;
 export const GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS = 5_000_000;
 
-// Plain product cap, no longer tied to billing plans.
-export const GOAT_MAX_MEMBERS = 50;
+export function goatWorkspaceMemberCap(plan: "free" | "pro") {
+  return plan === "pro" ? GOAT_PRO_MAX_MEMBERS : GOAT_FREE_MAX_MEMBERS;
+}
 
 // Ingestion model tiers: both are metered (model cost + fee); "frontier" just
 // runs a more expensive model.

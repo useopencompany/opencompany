@@ -1,6 +1,9 @@
 import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
+  applyGoatStripeInvoicePaymentState,
+  applyGoatStripeSubscriptionProjection,
+  findGoatWorkspaceIdForStripeSubscription,
   releasePendingForWorkspace,
   setGoatAutoRefillPaymentMethod,
   settleGoatAutoRefill,
@@ -24,6 +27,15 @@ vi.mock("@opencompany/analytics/goat/server", () => ({
 }));
 
 vi.mock("@opencompany/db/goat-billing", () => ({
+  applyGoatStripeInvoicePaymentState: vi.fn().mockResolvedValue(true),
+  applyGoatStripeSubscriptionProjection: vi.fn().mockResolvedValue({
+    applied: true,
+    planChanged: true,
+    plan: "pro",
+    cancellationScheduled: false,
+  }),
+  findGoatWorkspaceIdForStripeSubscription: vi.fn().mockResolvedValue(null),
+  GOAT_PRO_STRIPE_PRODUCT_KEY: "goat_pro",
   releasePendingForWorkspace: vi.fn().mockResolvedValue(0),
   setGoatAutoRefillPaymentMethod: vi.fn().mockResolvedValue(undefined),
   settleGoatAutoRefill: vi.fn().mockResolvedValue(undefined),
@@ -61,6 +73,11 @@ vi.mock("next/server", async (importOriginal) => {
 
 const captureGoatServerEventMock = vi.mocked(captureGoatServerEvent);
 const captureServerEventMock = vi.mocked(captureServerEvent);
+const applyGoatStripeInvoicePaymentStateMock = vi.mocked(applyGoatStripeInvoicePaymentState);
+const applyGoatStripeSubscriptionProjectionMock = vi.mocked(applyGoatStripeSubscriptionProjection);
+const findGoatWorkspaceIdForStripeSubscriptionMock = vi.mocked(
+  findGoatWorkspaceIdForStripeSubscription,
+);
 const fulfillCheckoutSessionMock = vi.mocked(fulfillCheckoutSession);
 const fulfillGoatTopUpCheckoutSessionMock = vi.mocked(fulfillGoatTopUpCheckoutSession);
 const markGoatCheckoutRecordFailedMock = vi.mocked(markGoatCheckoutRecordFailed);
@@ -260,7 +277,7 @@ describe("Stripe webhook route", () => {
     expect(fulfillGoatTopUpCheckoutSessionMock).not.toHaveBeenCalled();
   });
 
-  it("ignores straggler legacy Goat subscription checkouts and lifecycle events", async () => {
+  it("waits for the subscription webhook before granting Pro", async () => {
     getStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_goat_sub",
@@ -269,7 +286,7 @@ describe("Stripe webhook route", () => {
           object: {
             id: "cs_goat_sub",
             mode: "subscription",
-            metadata: { billingProduct: "goat", goatWorkspaceId: "goat_ws_1" },
+            metadata: { billingProduct: "goat_pro", goatWorkspaceId: "goat_ws_1" },
           },
         },
       }),
@@ -278,15 +295,105 @@ describe("Stripe webhook route", () => {
     expect(checkoutResponse.status).toBe(200);
     expect(fulfillCheckoutSessionMock).not.toHaveBeenCalled();
 
+    expect(applyGoatStripeSubscriptionProjectionMock).not.toHaveBeenCalled();
+
     getStripeMock.mockReturnValue(
       stripeWithEvent({
         id: "evt_goat_sub_2",
         type: "customer.subscription.updated",
-        data: { object: { id: "sub_goat_1", metadata: { billingProduct: "goat" } } },
+        created: 1_786_000_000,
+        data: {
+          object: {
+            id: "sub_goat_1",
+            customer: "cus_goat_1",
+            status: "active",
+            cancel_at_period_end: false,
+            metadata: { billingProduct: "goat_pro", goatWorkspaceId: "goat_ws_1" },
+            items: {
+              data: [
+                {
+                  id: "si_goat_1",
+                  price: { id: "price_goat_1" },
+                  current_period_end: 1_788_000_000,
+                },
+              ],
+            },
+          },
+        },
       }),
     );
     const subscriptionResponse = await POST(request("sig_ok"));
     expect(subscriptionResponse.status).toBe(200);
+    expect(applyGoatStripeSubscriptionProjectionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "goat_ws_1",
+        subscriptionId: "sub_goat_1",
+        status: "active",
+        priceId: "price_goat_1",
+      }),
+    );
+    expect(captureServerEventMock).toHaveBeenCalledWith(
+      "goat_billing_plan_changed",
+      "goat_ws_1",
+      expect.objectContaining({ plan: "pro" }),
+    );
+  });
+
+  it("does not grant Pro from an unrelated Stripe subscription", async () => {
+    getStripeMock.mockReturnValue(
+      stripeWithEvent({
+        id: "evt_other_sub",
+        type: "customer.subscription.updated",
+        created: 1_786_000_000,
+        data: {
+          object: {
+            id: "sub_other_1",
+            customer: "cus_other_1",
+            status: "active",
+            cancel_at_period_end: false,
+            metadata: { billingProduct: "other_product", goatWorkspaceId: "goat_ws_1" },
+            items: { data: [] },
+          },
+        },
+      }),
+    );
+
+    const response = await POST(request("sig_ok"));
+
+    expect(response.status).toBe(200);
+    expect(applyGoatStripeSubscriptionProjectionMock).not.toHaveBeenCalled();
+  });
+
+  it("marks a failed Pro invoice for attention", async () => {
+    findGoatWorkspaceIdForStripeSubscriptionMock.mockResolvedValueOnce("goat_ws_1");
+    getStripeMock.mockReturnValue(
+      stripeWithEvent({
+        id: "evt_invoice_failed",
+        type: "invoice.payment_failed",
+        created: 1_786_000_000,
+        data: {
+          object: {
+            id: "in_goat_1",
+            parent: { subscription_details: { subscription: "sub_goat_1" } },
+          },
+        },
+      }),
+    );
+
+    const response = await POST(request("sig_ok"));
+
+    expect(response.status).toBe(200);
+    expect(applyGoatStripeInvoicePaymentStateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subscriptionId: "sub_goat_1",
+        needsAttention: true,
+      }),
+    );
+    expect(captureServerEventMock).toHaveBeenCalledWith(
+      "goat_billing_payment_failed",
+      "goat_ws_1",
+      expect.objectContaining({ subscription_id: "sub_goat_1" }),
+    );
   });
 
   it("credits a Goat auto-refill PaymentIntent and releases paused ingestion", async () => {

@@ -1,6 +1,8 @@
+import { getGoatWorkspacePlan } from "@opencompany/db/goat-billing";
 import {
   createGoatWorkspaceForUser,
   listAccessibleGoatBrains,
+  listGoatWorkspaceMembers,
   listGoatWorkspacesForUser,
   newGoatWorkspaceId,
 } from "@opencompany/db/goat-workspaces";
@@ -9,7 +11,11 @@ import { revalidatePath } from "next/cache";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
 import { getWorkOSClient } from "@/lib/workos-client";
-import { createGoatWorkspaceAction, switchGoatWorkspaceAction } from "./workspace-actions";
+import {
+  createGoatWorkspaceAction,
+  inviteToGoatWorkspaceAction,
+  switchGoatWorkspaceAction,
+} from "./workspace-actions";
 
 const cookieStore = vi.hoisted(() => ({
   set: vi.fn(),
@@ -21,7 +27,8 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@opencompany/db/goat-billing", () => ({
-  GOAT_MAX_MEMBERS: 50,
+  getGoatWorkspacePlan: vi.fn().mockResolvedValue("free"),
+  goatWorkspaceMemberCap: (plan: "free" | "pro") => (plan === "pro" ? 10 : 1),
 }));
 
 vi.mock("@opencompany/db/goat-workspaces", () => ({
@@ -65,15 +72,18 @@ vi.mock("@/lib/workos-client", () => ({
 }));
 
 const createGoatWorkspaceForUserMock = vi.mocked(createGoatWorkspaceForUser);
+const getGoatWorkspacePlanMock = vi.mocked(getGoatWorkspacePlan);
 const currentGoatUserMock = vi.mocked(currentGoatUser);
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
 const listAccessibleGoatBrainsMock = vi.mocked(listAccessibleGoatBrains);
 const listGoatWorkspacesForUserMock = vi.mocked(listGoatWorkspacesForUser);
+const listGoatWorkspaceMembersMock = vi.mocked(listGoatWorkspaceMembers);
 const newGoatWorkspaceIdMock = vi.mocked(newGoatWorkspaceId);
 const revalidatePathMock = vi.mocked(revalidatePath);
 const switchToOrganizationMock = vi.mocked(switchToOrganization);
 
 const context = {
+  role: "admin",
   authUser: { id: "user_123" },
   user: { workosUserId: "user_123" },
   workspace: {
@@ -93,6 +103,8 @@ const workos = {
   },
   userManagement: {
     createOrganizationMembership: vi.fn(async () => ({ id: "om_new" })),
+    listInvitations: vi.fn(async () => ({ data: [] })),
+    sendInvitation: vi.fn(async () => ({ id: "inv_new" })),
   },
 };
 
@@ -279,5 +291,40 @@ describe("switchGoatWorkspaceAction", () => {
 
     expect(cookieStore.set).not.toHaveBeenCalled();
     expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("inviteToGoatWorkspaceAction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentGoatUserMock.mockResolvedValue(context as never);
+    getWorkOSClientMock.mockReturnValue(workos as never);
+    listGoatWorkspaceMembersMock.mockResolvedValue([
+      { member: { role: "admin" }, user: { workosUserId: "user_123" } },
+    ] as never);
+  });
+
+  it("keeps Free workspaces personal", async () => {
+    getGoatWorkspacePlanMock.mockResolvedValue("free");
+
+    await expect(inviteToGoatWorkspaceAction("teammate@example.com")).resolves.toEqual({
+      ok: false,
+      error: "Upgrade to Pro to invite teammates to this workspace.",
+    });
+    expect(workos.userManagement.sendInvitation).not.toHaveBeenCalled();
+  });
+
+  it("allows a Pro admin to invite within the small-team cap", async () => {
+    getGoatWorkspacePlanMock.mockResolvedValue("pro");
+
+    await expect(inviteToGoatWorkspaceAction("teammate@example.com")).resolves.toEqual({
+      ok: true,
+    });
+    expect(workos.userManagement.sendInvitation).toHaveBeenCalledWith({
+      email: "teammate@example.com",
+      organizationId: "org_current",
+      inviterUserId: "user_123",
+      roleSlug: "member",
+    });
   });
 });

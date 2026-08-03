@@ -1310,6 +1310,13 @@
       "when": 1785672319575,
       "tag": "0185_goat_imessage_turn_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 187,
+      "version": "7",
+      "when": 1785779200000,
+      "tag": "0186_goat_pro_invoice_ordering",
+      "breakpoints": true
     }
   ]
 }

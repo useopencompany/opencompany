@@ -1,16 +1,26 @@
 "use client";
 
 import { toast } from "@opencompany/ui/components/sonner";
-import { CreditCard, Loader2, RefreshCw, Wallet } from "lucide-react";
+import { BadgeCheck, CreditCard, Loader2, RefreshCw, Users, Wallet } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
 import {
   createGoatBillingPortalAction,
   createGoatCreditTopUpAction,
+  createGoatProCheckoutAction,
   setGoatAutoRefillAction,
 } from "@/lib/billing/actions";
 
 export type GoatBillingPanelData = {
+  plan: "free" | "pro";
+  subscriptionStatus: string | null;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: string | null;
+  paymentNeedsAttention: boolean;
+  proMonthlyPriceCents: number;
+  memberCount: number;
+  freeMaxMembers: number;
+  proMaxMembers: number;
   creditBalanceUsdMicros: number;
   spendThisMonthUsdMicros: number;
   spendThisMonthByCategory: {
@@ -47,9 +57,11 @@ export type GoatBillingPanelData = {
 
 export function GoatBillingPanel({
   data,
+  checkoutResult,
   topupResult,
 }: {
   data: GoatBillingPanelData;
+  checkoutResult: "success" | "cancelled" | null;
   topupResult: "success" | "cancelled" | null;
 }) {
   const [isPending, startTransition] = useTransition();
@@ -59,6 +71,17 @@ export function GoatBillingPanel({
     String(data.autoRefill.amountCents / 100),
   );
   const announcedTopupResult = useRef(false);
+  const announcedCheckoutResult = useRef(false);
+
+  useEffect(() => {
+    if (!checkoutResult || announcedCheckoutResult.current) return;
+    announcedCheckoutResult.current = true;
+    if (checkoutResult === "success") {
+      toast.success("Welcome to Pro. Your plan updates as soon as Stripe confirms it.");
+    } else {
+      toast("Pro checkout cancelled — no subscription was started.");
+    }
+  }, [checkoutResult]);
 
   useEffect(() => {
     if (!topupResult || announcedTopupResult.current) return;
@@ -71,6 +94,10 @@ export function GoatBillingPanel({
   }, [topupResult]);
 
   const lowBalance = data.creditBalanceUsdMicros < data.lowBalanceWarnUsdMicros;
+  const hasManageableSubscription =
+    data.subscriptionStatus !== null &&
+    data.subscriptionStatus !== "canceled" &&
+    data.subscriptionStatus !== "incomplete_expired";
 
   function run(action: () => Promise<{ ok: false; error: string }>) {
     startTransition(async () => {
@@ -118,8 +145,76 @@ export function GoatBillingPanel({
   return (
     <GoatSettingsContent
       title="Billing"
-      description="Add credits to the shared workspace balance. Everything is pay-as-you-go — no seats, no subscription."
+      description="Choose a workspace plan and fund usage from one shared balance."
     >
+      {data.paymentNeedsAttention ? (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
+          Your Pro payment needs attention. Update the payment method to keep team access active.
+        </div>
+      ) : null}
+
+      {data.cancelAtPeriodEnd && data.currentPeriodEnd ? (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
+          Pro is cancelled and remains active until {formatDate(data.currentPeriodEnd)}.
+        </div>
+      ) : null}
+
+      <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface-muted/40 p-4">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+          <div>
+            <div className="flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+              {data.plan === "pro" ? <BadgeCheck size={13} /> : <Users size={13} />}
+              {data.plan === "pro" ? "Pro plan" : "Free plan"}
+            </div>
+            <div className="mt-1 text-[20px] font-semibold tracking-tight text-ink">
+              {data.plan === "pro" ? formatUsd(data.proMonthlyPriceCents) : "$0"}
+              <span className="ml-1 text-[12.5px] font-normal text-ink-subtle">per month</span>
+            </div>
+            <p className="mt-1 max-w-xl text-[12.5px] leading-5 text-ink-subtle">
+              {data.plan === "pro"
+                ? `One workspace for up to ${data.proMaxMembers} people. Usage is billed separately from the shared credit balance.`
+                : `Built for one founder. Upgrade when you are ready to share the workspace with up to ${data.proMaxMembers} people.`}
+            </p>
+            <p className="mt-2 text-[11.5px] text-ink-subtle">
+              {data.memberCount} of {data.plan === "pro" ? data.proMaxMembers : data.freeMaxMembers}{" "}
+              member
+              {(data.plan === "pro" ? data.proMaxMembers : data.freeMaxMembers) === 1 ? "" : "s"}
+              {" used"}
+            </p>
+          </div>
+          {data.isAdmin ? (
+            data.plan === "pro" || hasManageableSubscription ? (
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => run(createGoatBillingPortalAction)}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md border border-border bg-canvas px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-50"
+              >
+                {isPending ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <CreditCard size={13} />
+                )}
+                {data.plan === "pro" ? "Manage plan" : "Manage subscription"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => run(createGoatProCheckoutAction)}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
+              >
+                {isPending ? <Loader2 size={13} className="animate-spin" /> : null}
+                Upgrade to Pro
+              </button>
+            )
+          ) : (
+            <span className="text-[11.5px] text-ink-subtle">
+              Ask a workspace admin to change plans.
+            </span>
+          )}
+        </div>
+      </section>
       {lowBalance ? (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
           {data.creditBalanceUsdMicros <= 0
@@ -335,7 +430,7 @@ export function GoatBillingPanel({
         </section>
       ) : null}
 
-      {data.isAdmin && data.hasStripeCustomer ? (
+      {data.isAdmin && data.hasStripeCustomer && data.plan !== "pro" ? (
         <button
           type="button"
           disabled={isPending}
@@ -348,6 +443,12 @@ export function GoatBillingPanel({
       ) : null}
     </GoatSettingsContent>
   );
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+  }).format(new Date(value));
 }
 
 function formatUsd(cents: number) {

@@ -4,8 +4,11 @@ import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { getDb } from "./client";
 import {
   type GoatBrainSourceProvider,
+  type GoatStripeSubscriptionStatus,
+  type GoatWorkspacePlan,
   goatBrainIngestJobs,
   goatCreditBalances,
+  goatStripeWebhookEvents,
   goatWorkspaceBilling,
   goatWorkspaceIngestionReservations,
   goatWorkspaceMembers,
@@ -15,15 +18,20 @@ type DbLike = any;
 
 export {
   GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS,
+  GOAT_FREE_MAX_MEMBERS,
   GOAT_INGEST_ITEM_FEE_USD_MICROS,
   GOAT_LOW_BALANCE_WARN_USD_MICROS,
-  GOAT_MAX_MEMBERS,
+  GOAT_PRO_MAX_MEMBERS,
+  GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+  GOAT_PRO_STRIPE_PRODUCT_KEY,
   goatIngestItemFeeUsdMicros,
+  goatWorkspaceMemberCap,
 } from "./goat-billing-constants";
 
 import {
   GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS,
   GOAT_INGEST_ITEM_FEE_USD_MICROS,
+  GOAT_PRO_STRIPE_PRODUCT_KEY,
   goatIngestItemFeeUsdMicros,
 } from "./goat-billing-constants";
 import { GOAT_USD_MICROS_PER_CENT, getGoatCreditBalanceUsdMicros } from "./goat-credits";
@@ -52,6 +60,18 @@ export function goatCalendarMonthWindow(now: Date) {
   const resetAt = new Date(start);
   resetAt.setUTCMonth(resetAt.getUTCMonth() + 1);
   return { start, resetAt };
+}
+
+const PRO_SUBSCRIPTION_STATUSES = new Set<GoatStripeSubscriptionStatus>([
+  "active",
+  "trialing",
+  "past_due",
+]);
+
+export function goatPlanForSubscriptionStatus(
+  status: GoatStripeSubscriptionStatus | null,
+): GoatWorkspacePlan {
+  return status && PRO_SUBSCRIPTION_STATUSES.has(status) ? "pro" : "free";
 }
 
 async function ensureBillingRow(workspaceId: string, db: DbLike) {
@@ -401,7 +421,12 @@ export async function loadGoatBillingOverview(workspaceId: string, options: { db
       getGoatCreditBalanceUsdMicros(workspaceId, db),
     ]);
   return {
-    billing,
+    billing: {
+      ...billing,
+      // v3 Pro rows were intentionally retained when billing v4 retired
+      // plans. Only the new product key can confer the new entitlement.
+      plan: billing.stripeProductKey === GOAT_PRO_STRIPE_PRODUCT_KEY ? billing.plan : "free",
+    },
     memberCount: Number(memberCountRows[0]?.total ?? 0),
     creditBalanceUsdMicros: creditBalance,
     ingestedThisMonth: Number(usage[0]?.total ?? 0),
@@ -443,6 +468,152 @@ export async function setGoatStripeCustomerId(
     .where(eq(goatWorkspaceBilling.workspaceId, input.workspaceId))
     .limit(1);
   return current?.stripeCustomerId ?? null;
+}
+
+export async function getGoatWorkspacePlan(workspaceId: string, options: { db?: DbLike } = {}) {
+  const db = options.db ?? getDb();
+  const billing = await ensureBillingRow(workspaceId, db);
+  return billing.stripeProductKey === GOAT_PRO_STRIPE_PRODUCT_KEY
+    ? (billing.plan as GoatWorkspacePlan)
+    : "free";
+}
+
+export type GoatStripeSubscriptionProjection = {
+  eventId: string;
+  eventType: string;
+  eventCreatedAt: Date;
+  workspaceId: string;
+  customerId: string;
+  subscriptionId: string;
+  subscriptionItemId: string | null;
+  priceId: string | null;
+  productKey: string;
+  status: GoatStripeSubscriptionStatus;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: Date | null;
+};
+
+// Stripe webhooks are the only authority that grants Pro. Event ids make
+// retries harmless, and event creation time prevents delayed events from
+// rolling a workspace back to stale subscription state.
+export async function applyGoatStripeSubscriptionProjection(
+  input: GoatStripeSubscriptionProjection,
+  options: { db?: DbLike } = {},
+) {
+  const db = options.db ?? getDb();
+  return runAtomically(db, async (tx: DbLike) => {
+    const [recorded] = await tx
+      .insert(goatStripeWebhookEvents)
+      .values({
+        eventId: input.eventId,
+        eventType: input.eventType,
+        eventCreatedAt: input.eventCreatedAt,
+      })
+      .onConflictDoNothing()
+      .returning({ eventId: goatStripeWebhookEvents.eventId });
+    if (!recorded) return { applied: false as const, reason: "duplicate" as const };
+
+    await lockWorkspace(input.workspaceId, tx);
+    const current = await ensureBillingRow(input.workspaceId, tx);
+    if (current.lastStripeEventCreated && current.lastStripeEventCreated > input.eventCreatedAt) {
+      return { applied: false as const, reason: "stale" as const };
+    }
+
+    const plan =
+      input.productKey === GOAT_PRO_STRIPE_PRODUCT_KEY
+        ? goatPlanForSubscriptionStatus(input.status)
+        : "free";
+    const planChanged = plan !== current.plan;
+    const cancellationScheduled = !current.cancelAtPeriodEnd && input.cancelAtPeriodEnd;
+    await tx
+      .update(goatWorkspaceBilling)
+      .set({
+        plan,
+        ...(planChanged ? { planStartedAt: input.eventCreatedAt } : {}),
+        stripeCustomerId: input.customerId,
+        stripeSubscriptionId: input.subscriptionId,
+        stripeSubscriptionItemId: input.subscriptionItemId,
+        stripePriceId: input.priceId,
+        stripeProductKey: input.productKey,
+        seatQuantity: 1,
+        subscriptionStatus: input.status,
+        cancelAtPeriodEnd: input.cancelAtPeriodEnd,
+        currentPeriodEnd: input.currentPeriodEnd,
+        paymentNeedsAttention: input.status === "past_due" || input.status === "unpaid",
+        lastStripeEventCreated: input.eventCreatedAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(goatWorkspaceBilling.workspaceId, input.workspaceId));
+    return { applied: true as const, planChanged, plan, cancellationScheduled };
+  });
+}
+
+export async function findGoatWorkspaceIdForStripeSubscription(
+  subscriptionId: string,
+  options: { db?: DbLike } = {},
+) {
+  const db = options.db ?? getDb();
+  const [row] = await db
+    .select({ workspaceId: goatWorkspaceBilling.workspaceId })
+    .from(goatWorkspaceBilling)
+    .where(
+      and(
+        eq(goatWorkspaceBilling.stripeSubscriptionId, subscriptionId),
+        eq(goatWorkspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+      ),
+    )
+    .limit(1);
+  return row?.workspaceId ?? null;
+}
+
+export async function applyGoatStripeInvoicePaymentState(
+  input: {
+    eventId: string;
+    eventType: string;
+    eventCreatedAt: Date;
+    subscriptionId: string;
+    needsAttention: boolean;
+  },
+  options: { db?: DbLike } = {},
+) {
+  const db = options.db ?? getDb();
+  return runAtomically(db, async (tx: DbLike) => {
+    const [recorded] = await tx
+      .insert(goatStripeWebhookEvents)
+      .values({
+        eventId: input.eventId,
+        eventType: input.eventType,
+        eventCreatedAt: input.eventCreatedAt,
+      })
+      .onConflictDoNothing()
+      .returning({ eventId: goatStripeWebhookEvents.eventId });
+    if (!recorded) return false;
+
+    const [billing] = await tx
+      .select({ workspaceId: goatWorkspaceBilling.workspaceId })
+      .from(goatWorkspaceBilling)
+      .where(eq(goatWorkspaceBilling.stripeSubscriptionId, input.subscriptionId))
+      .limit(1);
+    if (!billing) return false;
+
+    await lockWorkspace(billing.workspaceId, tx);
+    const current = await ensureBillingRow(billing.workspaceId, tx);
+    if (
+      current.lastStripeInvoiceEventCreated &&
+      current.lastStripeInvoiceEventCreated > input.eventCreatedAt
+    ) {
+      return false;
+    }
+    await tx
+      .update(goatWorkspaceBilling)
+      .set({
+        paymentNeedsAttention: input.needsAttention,
+        lastStripeInvoiceEventCreated: input.eventCreatedAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(goatWorkspaceBilling.stripeSubscriptionId, input.subscriptionId));
+    return true;
+  });
 }
 
 export async function getGoatStripeCustomerId(workspaceId: string, options: { db?: DbLike } = {}) {
