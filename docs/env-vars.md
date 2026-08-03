@@ -351,6 +351,9 @@ Set these in the Render `opencompany-runner` service.
 | `BLOB_READ_WRITE_TOKEN` | Yes | Private `opencompany-attachments` Blob store token. Downloads attachment bytes (images/PDFs) to inline into model calls. Must match Vercel. |
 | `E2B_API_KEY` | Yes | Creates/connects E2B sandboxes. |
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls through Vercel AI Gateway. |
+| `OPENAI_API_KEY` | Goat voice dictation | Platform OpenAI key used only by the runner-hosted Goat dictation WebSocket relay and final transcription pass. Store it in Infisical `prod` + `/runner`; it must never reach the browser. |
+| `GOAT_DICTATION_REALTIME_MODEL` | No | Optional realtime transcription model override for Goat voice dictation. Defaults to the documented OpenAI realtime transcription model. |
+| `GOAT_DICTATION_FINAL_MODEL` | No | Optional final-pass transcription model override for Goat voice dictation. Defaults to the documented OpenAI transcription model. |
 | `EXA_API_KEY` | Goat/Exa only | Required for Goat main chat web search, Goat tasks, and agents that enable Exa. |
 | `RUNNER_GOAT_BROWSER_ENABLED` | Goat Browser only | Enables Goat task browser tools. Defaults to `false`. When enabled in production, the runner defaults to `AGENT_BROWSER_PROVIDER=browserless`. |
 | `AGENT_BROWSER_PROVIDER` | Goat Browser only | Optional `agent-browser` provider override. Leave unset for local Chrome; use `browserless` in production unless intentionally testing another provider. |
@@ -519,7 +522,7 @@ orchestrator and are not stored anywhere long-term.
 
 | Var | Used by | Notes |
 |---|---|---|
-| `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `OPENAI_CODEX_API_KEY`, `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | runner | Required at runner boot. `OPENAI_CODEX_API_KEY` is the broker upstream for `codex_coder`; the encryption key must match web so preview runners can read seeded encrypted integration credentials. |
+| `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `OPENAI_API_KEY`, `OPENAI_CODEX_API_KEY`, `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | runner | Required at runner boot. `OPENAI_API_KEY` powers Goat voice dictation server-side; `OPENAI_CODEX_API_KEY` is the broker upstream for `codex_coder`; the encryption key must match web so preview runners can read seeded encrypted integration credentials. |
 | `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` | runner | Enables runner Brain sync. |
 | `GITHUB_INTEGRATION_APP_ID`, `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | runner | Enables connected-repository GitHub operations. |
 | Optional runner tool/provider keys | runner | `EXA_API_KEY`, `APIFY_API_TOKEN`, `SUPADATA_API_KEY`, `AMP_API_KEY`, Google/Slack OAuth keys, and observability settings are passed through when present. `X_API_BEARER_TOKEN` is deprecated and unused by the X hosted tool. |

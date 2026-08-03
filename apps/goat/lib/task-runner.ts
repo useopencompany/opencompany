@@ -4,6 +4,7 @@ import { GOAT_SPANS, recordGoatTaskDispatch, startGoatSpan } from "@opencompany/
 const CODEX_CHAT_WAKE_TIMEOUT_MS = 5_000;
 const CODEX_CHAT_SANDBOX_STATUS_TIMEOUT_MS = 5_000;
 const CODING_WORKSPACE_RUNTIME_ACCESS_TIMEOUT_MS = 10_000;
+const GOAT_DICTATION_ACCESS_TIMEOUT_MS = 10_000;
 
 export type GoatCodexSandboxStatus = "running" | "sleeping" | "deleted";
 export type GoatCodingWorkspaceRuntimeAccess = {
@@ -11,6 +12,11 @@ export type GoatCodingWorkspaceRuntimeAccess = {
   ticket: string;
   expiresAt: number;
   sandboxStatus: Exclude<GoatCodexSandboxStatus, "deleted">;
+};
+export type GoatDictationAccess = {
+  websocketUrl: string;
+  ticket: string;
+  expiresAt: number;
 };
 
 type RunnerContext = {
@@ -286,6 +292,53 @@ export async function requestGoatCodingWorkspaceRuntimeAccess(input: {
     ticket: body.ticket,
     expiresAt: body.expiresAt,
     sandboxStatus: body.sandboxStatus,
+  };
+}
+
+export async function requestGoatDictationAccess(input: {
+  userWorkosId: string;
+}): Promise<GoatDictationAccess> {
+  const internalBaseUrl = runnerInternalBaseUrl();
+  const publicBaseUrl = runnerPublicBaseUrl();
+  const token = runnerToken();
+  if (!internalBaseUrl || !publicBaseUrl || !token) {
+    throw new Error("Goat runner dictation access is not configured.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GOAT_DICTATION_ACCESS_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${internalBaseUrl}/internal/goat/dictation/access`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ userWorkosId: input.userWorkosId }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    const message = typeof body?.error === "string" ? body.error : "Dictation is unavailable.";
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as Record<string, unknown>;
+  if (typeof body.ticket !== "string" || typeof body.expiresAt !== "number") {
+    throw new Error("Goat runner returned invalid dictation access.");
+  }
+  const websocketUrl = new URL("/goat/dictation", `${publicBaseUrl}/`);
+  websocketUrl.protocol = websocketUrl.protocol === "https:" ? "wss:" : "ws:";
+
+  return {
+    websocketUrl: websocketUrl.toString(),
+    ticket: body.ticket,
+    expiresAt: body.expiresAt,
   };
 }
 

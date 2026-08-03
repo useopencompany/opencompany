@@ -14,6 +14,11 @@ export type RunnerEnv = {
   // (llm-broker.ts) as the upstream credential for the "openai" provider. Never enters
   // the sandbox.
   openaiCodexApiKey: string | undefined;
+  // Platform OpenAI key used only by the runner-hosted Goat voice dictation relay.
+  // It is never sent to the browser; the Goat app mints short-lived runner tickets instead.
+  openaiApiKey?: string | undefined;
+  goatDictationRealtimeModel?: string | undefined;
+  goatDictationFinalModel?: string | undefined;
   // Public base URL of this runner (Render's RENDER_EXTERNAL_URL, or
   // RUNNER_LLM_BROKER_PUBLIC_URL to override). E2B cloud sandboxes use it to call back
   // into runner-hosted routes: the LLM broker and Goat's Google tool bridge. Unset
@@ -102,6 +107,9 @@ export function loadEnv(): RunnerEnv {
     e2bApiKey: requiredEnv("E2B_API_KEY"),
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
     openaiCodexApiKey: optionalEnv("OPENAI_CODEX_API_KEY"),
+    openaiApiKey: optionalEnv("OPENAI_API_KEY"),
+    goatDictationRealtimeModel: optionalEnv("GOAT_DICTATION_REALTIME_MODEL"),
+    goatDictationFinalModel: optionalEnv("GOAT_DICTATION_FINAL_MODEL"),
     publicUrl: optionalEnv("RUNNER_LLM_BROKER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
     previewBaseDomain: optionalPreviewBaseDomainEnv(),
     previewProtocol: optionalPreviewProtocolEnv(),

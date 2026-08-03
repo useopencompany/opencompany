@@ -21,6 +21,10 @@ import {
   verifyGoatCodingWorkspaceTicket,
 } from "./goat-coding-workspace-runtime-auth";
 import {
+  createGoatDictationWebSocketServer,
+  GOAT_DICTATION_PATH,
+} from "./goat-dictation-transport";
+import {
   armSandboxIdleTimeout,
   connectSandbox,
   keepSandboxActive,
@@ -64,6 +68,7 @@ export function createGoatCodingWorkspaceTransport(env: RunnerEnv) {
     },
   });
   const previewWebSockets = new WebSocketServer({ noServer: true });
+  const dictationWebSockets = createGoatDictationWebSocketServer(env);
   const previewCache = new Map<string, { expiresAt: number; target: Promise<PreviewTarget> }>();
   let closePromise: Promise<void> | null = null;
 
@@ -72,9 +77,11 @@ export function createGoatCodingWorkspaceTransport(env: RunnerEnv) {
       previewCache.clear();
       for (const webSocket of runtimeWebSockets.clients) webSocket.terminate();
       for (const webSocket of previewWebSockets.clients) webSocket.terminate();
+      for (const webSocket of dictationWebSockets.webSocketServer.clients) webSocket.terminate();
       await Promise.all([
         closeWebSocketServer(runtimeWebSockets),
         closeWebSocketServer(previewWebSockets),
+        closeWebSocketServer(dictationWebSockets.webSocketServer),
       ]);
     })();
     return closePromise;
@@ -95,7 +102,13 @@ export function createGoatCodingWorkspaceTransport(env: RunnerEnv) {
         return;
       }
 
-      if (request.url?.split("?", 1)[0] !== RUNTIME_PATH) {
+      const path = request.url?.split("?", 1)[0];
+      if (path === GOAT_DICTATION_PATH) {
+        dictationWebSockets.accept(request, socket, head);
+        return;
+      }
+
+      if (path !== RUNTIME_PATH) {
         rejectUpgrade(socket, 404, "Not Found");
         return;
       }

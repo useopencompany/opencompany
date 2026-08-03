@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mintGoatCodingWorkspaceAccess } from "./goat-coding-workspace-runtime";
+import { verifyGoatDictationTicket } from "./goat-dictation-auth";
 import { wakeGoatTaskWorker } from "./goat-worker";
 import { enqueueRunnerJob } from "./jobs";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
@@ -45,6 +46,9 @@ const env = {
   e2bApiKey: "e2b",
   vercelAiGatewayApiKey: "gateway",
   openaiCodexApiKey: undefined,
+  openaiApiKey: "openai",
+  goatDictationRealtimeModel: undefined,
+  goatDictationFinalModel: undefined,
   publicUrl: undefined,
   llmBrokerEnabled: true,
   integrationCredentialEncryptionKey: Buffer.alloc(32, 0),
@@ -162,6 +166,44 @@ describe("Goat coding workspace access", () => {
       userWorkosId: "user_1",
       env,
     });
+  });
+});
+
+describe("Goat dictation access", () => {
+  it("requires internal auth and returns an owner-bound ticket", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const unauthorized = await server.inject({
+      method: "POST",
+      url: "/internal/goat/dictation/access",
+      payload: { userWorkosId: "user_1" },
+    });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const missingOwner = await server.inject({
+      method: "POST",
+      url: "/internal/goat/dictation/access",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+    expect(missingOwner.statusCode).toBe(400);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/dictation/access",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+      payload: { userWorkosId: "user_1" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as { ticket: string; expiresAt: number };
+    expect(body.expiresAt).toBeGreaterThan(Date.now());
+    expect(
+      verifyGoatDictationTicket({
+        ticket: body.ticket,
+        secret: env.streamTokenSecret,
+      }),
+    ).toMatchObject({ userWorkosId: "user_1" });
   });
 });
 
