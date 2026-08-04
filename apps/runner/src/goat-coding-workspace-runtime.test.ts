@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  discoverGoatCodingWorkspacePreviewPorts,
   GOAT_CODING_WORKSPACE_SANDBOX_NETWORK,
   isAllowedPreviewPort,
   mintGoatCodingWorkspaceAccess,
   parseListeningPorts,
+  parseWorkspaceListeningPorts,
 } from "./goat-coding-workspace-runtime";
 import { verifyGoatCodingWorkspaceTicket } from "./goat-coding-workspace-runtime-auth";
+import type { SandboxHandle } from "./sandbox";
 
 const mocks = vi.hoisted(() => ({
   rows: [] as unknown[],
@@ -51,13 +54,63 @@ describe("Goat coding workspace preview port discovery", () => {
     ]);
   });
 
+  it("keeps only listeners owned by processes running inside the coding workspace", () => {
+    expect(
+      parseWorkspaceListeningPorts(
+        [
+          "5173\t123\t/home/user/opencompany-goat/codex-chat/repo",
+          "2019\t456\t/home/user/opencompany-goat/codex-chat/repo",
+          "46095\t789\t/opt/e2b",
+          "3000\t234\t/home/user/opencompany-goat/codex-chat",
+          "8080\t345\t/home/user/opencompany-goat/codex-chat-other",
+          "5173\t123\t/home/user/opencompany-goat/codex-chat/repo",
+        ].join("\n"),
+        "/home/user/opencompany-goat/codex-chat",
+      ),
+    ).toEqual([5_173, 3_000]);
+  });
+
   it("rejects privileged, internal, non-integer, and out-of-range ports", () => {
     expect(isAllowedPreviewPort(80)).toBe(false);
+    expect(isAllowedPreviewPort(2_019)).toBe(false);
     expect(isAllowedPreviewPort(49_983)).toBe(false);
     expect(isAllowedPreviewPort(50_005)).toBe(false);
     expect(isAllowedPreviewPort(3_000.5)).toBe(false);
     expect(isAllowedPreviewPort(65_536)).toBe(false);
     expect(isAllowedPreviewPort(3_000)).toBe(true);
+  });
+
+  it("probes only workspace-owned listening ports", async () => {
+    const run = vi.fn(async (command: string) => {
+      if (command.startsWith("ss -H -ltnp")) {
+        return {
+          stdout: [
+            "5173\t123\t/home/user/opencompany-goat/codex-chat/repo",
+            "2019\t456\t/home/user/opencompany-goat/codex-chat/repo",
+            "46095\t789\t/opt/e2b",
+            "3000\t234\t/home/user/opencompany-goat/codex-chat",
+          ].join("\n"),
+        };
+      }
+      if (command.includes("127.0.0.1:5173/")) return { stdout: "200" };
+      if (command.includes("127.0.0.1:3000/")) return { stdout: "404" };
+      throw new Error(`Unexpected command: ${command}`);
+    });
+    const sandbox = { commands: { run } } as unknown as SandboxHandle;
+
+    const ports = await discoverGoatCodingWorkspacePreviewPorts(sandbox, {
+      workDirectory: "/home/user/opencompany-goat/codex-chat",
+    });
+
+    expect(ports.map((port) => port.port)).toEqual([3_000, 5_173]);
+    expect(run).not.toHaveBeenCalledWith(
+      expect.stringContaining("127.0.0.1:2019/"),
+      expect.anything(),
+    );
+    expect(run).not.toHaveBeenCalledWith(
+      expect.stringContaining("127.0.0.1:46095/"),
+      expect.anything(),
+    );
   });
 });
 
