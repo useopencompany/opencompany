@@ -329,7 +329,7 @@ export function attachRuntimeConnection(
   };
 
   const refreshPorts = async () => {
-    const ports = await discoverGoatCodingWorkspacePreviewPorts(sandbox);
+    const ports = await discoverGoatCodingWorkspacePreviewPorts(sandbox, { workDirectory });
     sendControl({ type: "ports", ports });
   };
 
@@ -338,7 +338,7 @@ export function attachRuntimeConnection(
       throw new Error("Preview is not configured on this runner.");
     }
     if (!isAllowedPreviewPort(port)) throw new Error("That preview port is reserved or invalid.");
-    const ports = await discoverGoatCodingWorkspacePreviewPorts(sandbox);
+    const ports = await discoverGoatCodingWorkspacePreviewPorts(sandbox, { workDirectory });
     if (!ports.some((candidate) => candidate.port === port)) {
       throw new Error(`Nothing is listening on port ${port}.`);
     }
