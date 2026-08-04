@@ -775,7 +775,9 @@ export function GoatSurface({
       creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
   );
   const adHocTaskMentionEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
-  const selectedAdHocTask = adHocTaskMentionEnabled && hasGoatAdHocTaskToken(input);
+  const backgroundChatDirective = hasGoatBackgroundChatDirective(input);
+  const selectedAdHocTask =
+    adHocTaskMentionEnabled && !backgroundChatDirective && hasGoatAdHocTaskToken(input);
   const mentionOptions = buildMentionOptions({
     token: mentionToken,
     skills: skillCatalog,
@@ -789,7 +791,9 @@ export function GoatSurface({
   });
   const selectedWorkflowMention = selectedAdHocTask
     ? null
-    : (activeSelectedMentions.find(isWorkflowMention) ?? null);
+    : backgroundChatDirective
+      ? null
+      : (activeSelectedMentions.find(isWorkflowMention) ?? null);
   const selectedWorkflowName = selectedWorkflowMention
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
@@ -1398,8 +1402,12 @@ export function GoatSurface({
       return;
     }
 
+    const backgroundChat = parseGoatBackgroundChatDirective(prompt);
+    const messagePrompt = backgroundChat?.prompt ?? prompt;
+    if (!messagePrompt && readyAttachments.length === 0) return;
+
     const mentions = activeSelectedMentions.filter((mention) =>
-      goatChatMentionIsVisible(prompt, mention),
+      goatChatMentionIsVisible(messagePrompt, mention),
     );
     // previewUrl rides along for the optimistic bubble render; the server ignores it and
     // re-mints attachment ids on persist.
@@ -1415,6 +1423,126 @@ export function GoatSurface({
       blobPathname: attachment.blobPathname!,
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
+
+    if (backgroundChat) {
+      if (messagePrompt.length > BACKGROUND_CHAT_PROMPT_MAX_LENGTH) {
+        toast.error(
+          `Messages can be at most ${BACKGROUND_CHAT_PROMPT_MAX_LENGTH.toLocaleString()} characters.`,
+        );
+        return;
+      }
+
+      const backgroundMentions = mentions.filter((mention) => !isWorkflowMention(mention));
+      const metadata: GoatChatMessageMetadata = {
+        ...(backgroundMentions.length > 0 ? { mentions: backgroundMentions } : {}),
+        ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
+      };
+      const restoreDraft = () => {
+        setInput(prompt);
+        setSelectedMentions(mentions);
+        composerAttachments.setAttachments(pendingAttachments);
+      };
+
+      if (activeEngine) {
+        const settings =
+          activeEngine === "claude_code"
+            ? ({
+                ok: true,
+                settings: { reasoningEffort: codexReasoningEffort },
+              } as const)
+            : buildCodexComposerSettings({
+                prompt: messagePrompt,
+                reasoningEffort: codexReasoningEffort,
+                planModeEnabled: codexPlanModeEnabled,
+                goalModeEnabled: codexGoalModeEnabled,
+                goalObjective: codexGoalObjective,
+                goalTokenBudget: codexGoalTokenBudget,
+              });
+        if (!settings.ok) {
+          toast.error(settings.error);
+          return;
+        }
+
+        clearError();
+        setInput("");
+        setMentionToken(null);
+        setSelectedMentions([]);
+        prepareMainComposerFocusRestoreAfterBackgroundTask();
+        setBackgroundTaskSubmitting(true);
+        composerAttachments.setAttachments([]);
+        toast("Started a new chat in the background.");
+
+        const engine = activeEngine;
+        const config = ENGINE_CHAT_CONFIG[engine];
+        void sendEngineChatMessage({
+          endpoint: config.messagesEndpoint,
+          errorLabel: config.label,
+          prompt: messagePrompt,
+          sessionId: null,
+          newSessionId: newOptimisticGoatChatSessionId(),
+          settings: settings.settings,
+          userMessageId: `goat_chat_msg_${crypto.randomUUID()}`,
+          attachments: attachmentsMetadata,
+          mentions: backgroundMentions.filter(isSkillMention),
+          ...(engine === "codex"
+            ? { model: codexModel }
+            : engine === "claude_code"
+              ? { model: claudeModel }
+              : {}),
+        })
+          .then(() => {
+            revokeGoatAttachmentPreviews(pendingAttachments);
+            if (!mountedRef.current) return;
+            router.refresh();
+            toast.success(`${config.label} is ready.`);
+          })
+          .catch((error) => {
+            if (!mountedRef.current) return;
+            restoreDraft();
+            toast.error(
+              error instanceof Error ? error.message : `${config.label} could not start that turn.`,
+            );
+          })
+          .finally(() => {
+            if (!mountedRef.current) return;
+            setBackgroundTaskSubmitting(false);
+            refocusMainComposerAfterBackgroundTask();
+          });
+        return;
+      }
+
+      clearError();
+      setInput("");
+      setMentionToken(null);
+      setSelectedMentions([]);
+      prepareMainComposerFocusRestoreAfterBackgroundTask();
+      setBackgroundTaskSubmitting(true);
+      composerAttachments.setAttachments([]);
+      toast("Started a new chat in the background.");
+
+      void runBackgroundChatTurn({
+        prompt: messagePrompt,
+        model: String(chatModel),
+        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+      })
+        .then(() => {
+          revokeGoatAttachmentPreviews(pendingAttachments);
+          if (!mountedRef.current) return;
+          router.refresh();
+          toast.success("Background chat is ready.");
+        })
+        .catch((error) => {
+          if (!mountedRef.current) return;
+          restoreDraft();
+          toast.error(error instanceof Error ? error.message : "Could not start that chat.");
+        })
+        .finally(() => {
+          if (!mountedRef.current) return;
+          setBackgroundTaskSubmitting(false);
+          refocusMainComposerAfterBackgroundTask();
+        });
+      return;
+    }
 
     if (adHocTaskMentionEnabled && hasGoatAdHocTaskToken(prompt)) {
       const description = descriptionFromGoatAdHocTaskPrompt(prompt);
@@ -4238,6 +4366,16 @@ function goatChatMentionIsVisible(value: string, mention: GoatChatMention) {
   return new RegExp(`(^|\\s)${token}(?=\\s|$)`, "i").test(value);
 }
 
+function hasGoatBackgroundChatDirective(value: string) {
+  return value.trimStart().startsWith("&");
+}
+
+function parseGoatBackgroundChatDirective(value: string): { prompt: string } | null {
+  const trimmedStart = value.trimStart();
+  if (!trimmedStart.startsWith("&")) return null;
+  return { prompt: trimmedStart.slice(1).trimStart() };
+}
+
 type ComposerMentionHighlight = Extract<GoatChatMention, { kind: "skill" | "workflow" }>;
 
 type ComposerMentionHighlightRange = {
@@ -6027,6 +6165,12 @@ async function runBackgroundChatTurn(input: {
   }
 
   await consumeResponseBody(response);
+}
+
+function revokeGoatAttachmentPreviews(attachments: readonly { previewUrl?: string }[]) {
+  for (const attachment of attachments) {
+    if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+  }
 }
 
 async function consumeResponseBody(response: Response) {
