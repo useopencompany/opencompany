@@ -16,6 +16,7 @@ import {
   startGoatLinearMcpOAuth,
   verifyGoatLinearMcpState,
 } from "@/lib/integrations/linear-mcp";
+import { startGoatNeonMcpOAuth, verifyGoatNeonMcpState } from "@/lib/integrations/neon-mcp";
 import {
   startGoatPostHogMcpOAuth,
   verifyGoatPostHogMcpState,
@@ -170,6 +171,28 @@ describe("Goat remote MCP OAuth", () => {
     });
     expect(verifyGoatPostHogMcpState(observed.state)).toMatchObject({
       provider: "posthog",
+      userWorkosId: "user_1",
+      returnTo: "/settings/integrations",
+    });
+  });
+
+  it("connects Neon with read-only OAuth and provider-side tool categories", async () => {
+    await startGoatNeonMcpOAuth({
+      userWorkosId: "user_1",
+      returnTo: "/settings/integrations",
+    });
+
+    expect(auth).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        serverUrl:
+          "https://mcp.neon.tech/mcp?readonly=true&category=projects&category=branches&category=schema&category=querying",
+      }),
+    );
+    expect(observed.callbackUrl).toBe("https://goat.example/api/integrations/neon/callback");
+    expect(observed.clientMetadata).toMatchObject({ scope: "read" });
+    expect(verifyGoatNeonMcpState(observed.state)).toMatchObject({
+      provider: "neon",
       userWorkosId: "user_1",
       returnTo: "/settings/integrations",
     });

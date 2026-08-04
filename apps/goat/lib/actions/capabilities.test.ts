@@ -50,6 +50,13 @@ describe("GOAT_PROVIDER_CAPABILITIES", () => {
     ]);
   });
 
+  it("keeps Neon structure visible but gates database-row queries by default", () => {
+    expect(GOAT_PROVIDER_CAPABILITIES.neon).toEqual([
+      expect.objectContaining({ id: "read", defaultMode: "on" }),
+      expect.objectContaining({ id: "query", defaultMode: "ask" }),
+    ]);
+  });
+
   it("uses human-readable labels for every registered capability", () => {
     for (const capabilities of Object.values(GOAT_PROVIDER_CAPABILITIES)) {
       for (const capability of capabilities) {
@@ -93,6 +100,7 @@ describe("mode helpers", () => {
 
   it("recognizes provider-specific capability ids", () => {
     expect(isGoatCapabilityId("read")).toBe(true);
+    expect(isGoatCapabilityId("query")).toBe(true);
     expect(isGoatCapabilityId("draft")).toBe(true);
     expect(isGoatCapabilityId("write")).toBe(true);
     expect(isGoatCapabilityId("send")).toBe(false);
@@ -107,6 +115,8 @@ describe("mode helpers", () => {
     expect(providerCapability("linear", "write")?.label).toBe("Manage issues");
     expect(providerCapability("slack", "read")?.label).toBe("Read Slack");
     expect(providerCapability("attio", "write")?.label).toBe("Update Attio");
+    expect(providerCapability("neon", "read")?.label).toBe("Inspect Neon structure");
+    expect(providerCapability("neon", "query")?.label).toBe("Query database data");
     expect(providerCapability("slack", "write")).toBeUndefined();
   });
 });

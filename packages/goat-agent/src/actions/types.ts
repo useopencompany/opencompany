@@ -12,7 +12,8 @@ export type GoatActionProviderId =
   | "attio"
   | "github"
   | "stripe"
-  | "latitude";
+  | "latitude"
+  | "neon";
 
 export type GoatActionSourceId = GoatActionProviderId | GoatManagedCapabilitySource;
 

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   resolveGoogleCalendarActions: vi.fn(),
   resolveGoogleDriveActions: vi.fn(),
   resolveLatitudeActions: vi.fn(),
+  resolveNeonActions: vi.fn(),
   resolveLinearActions: vi.fn(),
   resolvePostHogActions: vi.fn(),
   resolveGitHubActions: vi.fn(),
@@ -39,6 +40,9 @@ vi.mock("@opencompany/goat-agent/actions/latitude", () => ({
 vi.mock("@opencompany/goat-agent/actions/linear", () => ({
   resolveLinearActions: mocks.resolveLinearActions,
 }));
+vi.mock("@opencompany/goat-agent/actions/neon", () => ({
+  resolveNeonActions: mocks.resolveNeonActions,
+}));
 vi.mock("@opencompany/goat-agent/actions/posthog", () => ({
   resolvePostHogActions: mocks.resolvePostHogActions,
 }));
@@ -59,6 +63,7 @@ function providerCatalog(
     | "google_calendar"
     | "google_drive"
     | "latitude"
+    | "neon"
     | "linear"
     | "posthog"
     | "attio"
@@ -107,6 +112,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveLinearActions.mockResolvedValue(providerCatalog("linear"));
     mocks.resolvePostHogActions.mockResolvedValue(providerCatalog("posthog"));
     mocks.resolveLatitudeActions.mockResolvedValue(providerCatalog("latitude"));
+    mocks.resolveNeonActions.mockResolvedValue(providerCatalog("neon"));
     mocks.resolveAttioActions.mockResolvedValue(providerCatalog("attio"));
     mocks.resolveGitHubActions.mockResolvedValue(providerCatalog("github"));
     mocks.resolveStripeActions.mockResolvedValue(providerCatalog("stripe"));
@@ -122,6 +128,7 @@ describe("resolveGoatActionCatalog", () => {
       "linear",
       "posthog",
       "latitude",
+      "neon",
       "attio",
       "github",
       "stripe",
@@ -133,6 +140,7 @@ describe("resolveGoatActionCatalog", () => {
       "linear description",
       "posthog description",
       "latitude description",
+      "neon description",
       "attio description",
       "github description",
       "stripe description",
@@ -144,6 +152,7 @@ describe("resolveGoatActionCatalog", () => {
       "linear.read_something",
       "posthog.read_something",
       "latitude.read_something",
+      "neon.read_something",
       "attio.read_something",
       "github.read_something",
       "stripe.read_something",
@@ -160,6 +169,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolvePostHogActions.mockResolvedValue(null);
     mocks.resolveLatitudeActions.mockResolvedValue(null);
+    mocks.resolveNeonActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
@@ -179,6 +189,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolvePostHogActions.mockResolvedValue(null);
     mocks.resolveLatitudeActions.mockResolvedValue(null);
+    mocks.resolveNeonActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
@@ -200,6 +211,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolvePostHogActions.mockResolvedValue(null);
     mocks.resolveLatitudeActions.mockResolvedValue(null);
+    mocks.resolveNeonActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
@@ -258,6 +270,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveLinearActions.mockResolvedValue(null);
     mocks.resolvePostHogActions.mockResolvedValue(null);
     mocks.resolveLatitudeActions.mockResolvedValue(null);
+    mocks.resolveNeonActions.mockResolvedValue(null);
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);

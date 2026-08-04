@@ -36,6 +36,9 @@ describe("Goat onboarding integrations", () => {
     expect(goatOnboardingConnectionError("posthog", "posthog_denied")).toBe(
       "PostHog authorization was cancelled.",
     );
+    expect(goatOnboardingConnectionError("neon", "neon_denied")).toBe(
+      "Neon authorization was cancelled.",
+    );
     expect(goatOnboardingConnectionError("github", "missing_code")).toContain(
       "did not return a valid authorization",
     );
@@ -51,6 +54,7 @@ describe("Goat onboarding integrations", () => {
     expect(goatIntegrationConnectionSuccess("hubspot")).toBe("HubSpot connected.");
     expect(goatIntegrationConnectionSuccess("google_drive")).toBe("Google Drive connected.");
     expect(goatIntegrationConnectionSuccess("posthog")).toBe("PostHog connected.");
+    expect(goatIntegrationConnectionSuccess("neon")).toBe("Neon connected.");
     expect(goatIntegrationConnectionSuccess(null)).toBe("Integration connected.");
   });
 });
