@@ -7,6 +7,7 @@ import { resolveLatitudeActions } from "./latitude";
 import { resolveLinearActions } from "./linear";
 import { resolveNeonActions } from "./neon";
 import { resolvePostHogActions } from "./posthog";
+import { resolveRevolutActions } from "./revolut";
 import { resolveSlackActions } from "./slack";
 import { resolveStripeActions } from "./stripe";
 import type {
@@ -63,6 +64,7 @@ export async function resolveGoatActionCatalog(
     resolveAttioActions(input.userWorkosId).catch(() => null),
     resolveGitHubActions(input.workspaceId).catch(() => null),
     resolveStripeActions(input.workspaceId).catch(() => null),
+    resolveRevolutActions(input.workspaceId).catch(() => null),
   ]);
   const providers = resolved.filter(
     (entry): entry is GoatActionProviderCatalog => entry !== null && entry.actions.length > 0,

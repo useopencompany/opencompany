@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   resolvePostHogActions: vi.fn(),
   resolveGitHubActions: vi.fn(),
   resolveStripeActions: vi.fn(),
+  resolveRevolutActions: vi.fn(),
   listGoatWorkspaceCapabilities: vi.fn(),
 }));
 
@@ -52,6 +53,9 @@ vi.mock("@opencompany/goat-agent/actions/github", () => ({
 vi.mock("@opencompany/goat-agent/actions/stripe", () => ({
   resolveStripeActions: mocks.resolveStripeActions,
 }));
+vi.mock("@opencompany/goat-agent/actions/revolut", () => ({
+  resolveRevolutActions: mocks.resolveRevolutActions,
+}));
 
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
 import type { GoatActionProviderCatalog } from "@/lib/actions/types";
@@ -68,7 +72,8 @@ function providerCatalog(
     | "posthog"
     | "attio"
     | "github"
-    | "stripe",
+    | "stripe"
+    | "revolut",
 ): GoatActionProviderCatalog {
   return {
     id,
@@ -116,6 +121,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveAttioActions.mockResolvedValue(providerCatalog("attio"));
     mocks.resolveGitHubActions.mockResolvedValue(providerCatalog("github"));
     mocks.resolveStripeActions.mockResolvedValue(providerCatalog("stripe"));
+    mocks.resolveRevolutActions.mockResolvedValue(providerCatalog("revolut"));
 
     const catalog = await resolveGoatActionCatalog({
       userWorkosId: "user_1",
@@ -132,6 +138,7 @@ describe("resolveGoatActionCatalog", () => {
       "attio",
       "github",
       "stripe",
+      "revolut",
     ]);
     expect(catalog.providers.map((provider) => provider.description)).toEqual([
       "slack description",
@@ -144,6 +151,7 @@ describe("resolveGoatActionCatalog", () => {
       "attio description",
       "github description",
       "stripe description",
+      "revolut description",
     ]);
     expect(catalog.actions.map((action) => action.id)).toEqual([
       "slack.read_something",
@@ -156,9 +164,11 @@ describe("resolveGoatActionCatalog", () => {
       "attio.read_something",
       "github.read_something",
       "stripe.read_something",
+      "revolut.read_something",
     ]);
     expect(mocks.resolveGitHubActions).toHaveBeenCalledWith("workspace_1");
     expect(mocks.resolveStripeActions).toHaveBeenCalledWith("workspace_1");
+    expect(mocks.resolveRevolutActions).toHaveBeenCalledWith("workspace_1");
   });
 
   it("keeps other providers when one resolver throws", async () => {
@@ -173,6 +183,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
+    mocks.resolveRevolutActions.mockResolvedValue(null);
 
     const catalog = await resolveGoatActionCatalog({
       userWorkosId: "user_1",
@@ -193,6 +204,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
+    mocks.resolveRevolutActions.mockResolvedValue(null);
 
     const catalog = await resolveGoatActionCatalog({
       userWorkosId: "user_1",
@@ -215,6 +227,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
+    mocks.resolveRevolutActions.mockResolvedValue(null);
     mocks.listGoatWorkspaceCapabilities.mockResolvedValue([
       { source: "x", enabled: true },
       { source: "linkedin", enabled: false },
@@ -274,6 +287,7 @@ describe("resolveGoatActionCatalog", () => {
     mocks.resolveAttioActions.mockResolvedValue(null);
     mocks.resolveGitHubActions.mockResolvedValue(null);
     mocks.resolveStripeActions.mockResolvedValue(null);
+    mocks.resolveRevolutActions.mockResolvedValue(null);
 
     const catalog = await resolveGoatActionCatalog({
       userWorkosId: "user_1",
