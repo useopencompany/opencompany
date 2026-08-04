@@ -2563,7 +2563,9 @@ export function GoatSurface({
                   ))}
                 </div>
               ) : null}
-              {selectedAdHocTask ? (
+              {backgroundChatDirective ? (
+                <BackgroundChatDirectiveHint engine={activeEngine} />
+              ) : selectedAdHocTask ? (
                 <div
                   role="status"
                   data-testid="ad-hoc-task-hint"
@@ -2646,7 +2648,7 @@ export function GoatSurface({
                       readOnly={voiceDictation.isActive}
                       className={cn(
                         "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
-                        composerInputHasMentionHighlights(input, activeSelectedMentions) &&
+                        composerInputHasHighlights(input, activeSelectedMentions) &&
                           "text-transparent caret-ink",
                       )}
                       style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
@@ -2908,7 +2910,9 @@ function QuickChatComposer({
       : null;
   const isEngineChat = selectedEngine !== null;
   const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
-  const selectedAdHocTask = adHocTaskMentionEnabled && hasGoatAdHocTaskToken(input);
+  const backgroundChatDirective = hasGoatBackgroundChatDirective(input);
+  const selectedAdHocTask =
+    adHocTaskMentionEnabled && !backgroundChatDirective && hasGoatAdHocTaskToken(input);
   const outOfCredits = Boolean(
     creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
   );
@@ -2927,7 +2931,9 @@ function QuickChatComposer({
   });
   const selectedWorkflowMention = selectedAdHocTask
     ? null
-    : (activeSelectedMentions.find(isWorkflowMention) ?? null);
+    : backgroundChatDirective
+      ? null
+      : (activeSelectedMentions.find(isWorkflowMention) ?? null);
   const selectedWorkflowName = selectedWorkflowMention
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
@@ -3202,7 +3208,10 @@ function QuickChatComposer({
       return;
     }
 
-    const prompt = input.trim();
+    const rawPrompt = input.trim();
+    const backgroundChat = parseGoatBackgroundChatDirective(rawPrompt);
+    const prompt = backgroundChat?.prompt ?? rawPrompt;
+    const isBackgroundChatDirective = backgroundChat !== null;
     const pendingAttachments = composerAttachments.attachments;
     const readyAttachments = pendingAttachments.filter(
       (attachment) => attachment.status === "ready",
@@ -3239,7 +3248,7 @@ function QuickChatComposer({
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
 
-    if (adHocTaskMentionEnabled && hasGoatAdHocTaskToken(prompt)) {
+    if (!isBackgroundChatDirective && adHocTaskMentionEnabled && hasGoatAdHocTaskToken(prompt)) {
       const description = descriptionFromGoatAdHocTaskPrompt(prompt);
       if (!description) {
         toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
@@ -3278,7 +3287,7 @@ function QuickChatComposer({
       return;
     }
 
-    const workflowMention = mentions.find(isWorkflowMention);
+    const workflowMention = isBackgroundChatDirective ? null : mentions.find(isWorkflowMention);
     if (workflowMention) {
       setIsSubmitting(true);
       setInput("");
@@ -3378,8 +3387,11 @@ function QuickChatComposer({
     onSubmitted();
     toast("Started a new chat in the background.");
 
+    const backgroundChatMentions = isBackgroundChatDirective
+      ? mentions.filter((mention) => !isWorkflowMention(mention))
+      : mentions;
     const metadata: GoatChatMessageMetadata = {
-      ...(mentions.length > 0 ? { mentions } : {}),
+      ...(backgroundChatMentions.length > 0 ? { mentions: backgroundChatMentions } : {}),
       ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
     };
     void runBackgroundChatTurn({
@@ -3461,7 +3473,9 @@ function QuickChatComposer({
           ))}
         </div>
       ) : null}
-      {selectedAdHocTask ? (
+      {backgroundChatDirective ? (
+        <BackgroundChatDirectiveHint engine={selectedEngine} />
+      ) : selectedAdHocTask ? (
         <div
           role="status"
           data-testid="ad-hoc-task-hint"
@@ -3532,7 +3546,7 @@ function QuickChatComposer({
                 disabled={isSubmitting}
                 className={cn(
                   "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
-                  composerInputHasMentionHighlights(input, activeSelectedMentions) &&
+                  composerInputHasHighlights(input, activeSelectedMentions) &&
                     "text-transparent caret-ink",
                 )}
                 style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
@@ -4378,14 +4392,21 @@ function parseGoatBackgroundChatDirective(value: string): { prompt: string } | n
 
 type ComposerMentionHighlight = Extract<GoatChatMention, { kind: "skill" | "workflow" }>;
 
-type ComposerMentionHighlightRange = {
-  start: number;
-  end: number;
-  mention: ComposerMentionHighlight;
-};
+type ComposerInputHighlightRange =
+  | {
+      kind: "background-directive";
+      start: number;
+      end: number;
+    }
+  | {
+      kind: "mention";
+      start: number;
+      end: number;
+      mention: ComposerMentionHighlight;
+    };
 
-function composerInputHasMentionHighlights(value: string, mentions: readonly GoatChatMention[]) {
-  return composerMentionHighlightRanges(value, mentions).length > 0;
+function composerInputHasHighlights(value: string, mentions: readonly GoatChatMention[]) {
+  return composerInputHighlightRanges(value, mentions).length > 0;
 }
 
 function renderComposerInputOverlay({
@@ -4397,7 +4418,7 @@ function renderComposerInputOverlay({
   mentions: readonly GoatChatMention[];
   overlayRef: RefObject<HTMLDivElement | null>;
 }) {
-  const ranges = composerMentionHighlightRanges(value, mentions);
+  const ranges = composerInputHighlightRanges(value, mentions);
   if (ranges.length === 0) return null;
 
   let offset = 0;
@@ -4406,7 +4427,9 @@ function renderComposerInputOverlay({
     const chip = (
       <span
         key={`mention-${range.start}-${range.end}-${index}`}
-        data-goat-chat-mention={range.mention.kind}
+        {...(range.kind === "mention"
+          ? { "data-goat-chat-mention": range.mention.kind }
+          : { "data-goat-chat-directive": "background" })}
         className={COMPOSER_MENTION_CHIP_CLASS}
       >
         {value.slice(range.start, range.end)}
@@ -4430,12 +4453,23 @@ function renderComposerInputOverlay({
   );
 }
 
-function composerMentionHighlightRanges(
+function composerInputHighlightRanges(
   value: string,
   mentions: readonly GoatChatMention[],
-): ComposerMentionHighlightRange[] {
+): ComposerInputHighlightRange[] {
   if (!value) return [];
-  const candidates = mentions
+  const backgroundDirectiveStart = value.search(/\S/);
+  const backgroundDirectiveRange: ComposerInputHighlightRange[] =
+    backgroundDirectiveStart >= 0 && value[backgroundDirectiveStart] === "&"
+      ? [
+          {
+            kind: "background-directive",
+            start: backgroundDirectiveStart,
+            end: backgroundDirectiveStart + 1,
+          },
+        ]
+      : [];
+  const mentionRanges = mentions
     .filter(
       (mention): mention is ComposerMentionHighlight =>
         mention.kind === "skill" || mention.kind === "workflow",
@@ -4447,12 +4481,22 @@ function composerMentionHighlightRanges(
         if (typeof match.index !== "number") return [];
         const leading = match[1] ?? "";
         const start = match.index + leading.length;
-        return [{ start, end: start + match[0].length - leading.length, mention }];
+        return [
+          {
+            kind: "mention" as const,
+            start,
+            end: start + match[0].length - leading.length,
+            mention,
+          },
+        ];
       });
     })
     .toSorted((left, right) => left.start - right.start || left.end - right.end);
+  const candidates = [...backgroundDirectiveRange, ...mentionRanges].toSorted(
+    (left, right) => left.start - right.start || left.end - right.end,
+  );
 
-  const ranges: ComposerMentionHighlightRange[] = [];
+  const ranges: ComposerInputHighlightRange[] = [];
   for (const candidate of candidates) {
     const previous = ranges.at(-1);
     if (previous && candidate.start < previous.end) continue;
@@ -4827,6 +4871,20 @@ function CodingEngineModelPicker({
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function BackgroundChatDirectiveHint({ engine }: { engine: GoatEngineChatKind | null }) {
+  const label = engine ? ENGINE_CHAT_CONFIG[engine].label : null;
+  return (
+    <div
+      role="status"
+      data-testid="background-chat-hint"
+      className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <MessageSquare size={13} strokeWidth={2} className="shrink-0" />
+      <span>Sending starts this as a new {label ? `${label} ` : ""}chat in the background.</span>
+    </div>
   );
 }
 

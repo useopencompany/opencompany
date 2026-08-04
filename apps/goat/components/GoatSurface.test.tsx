@@ -392,6 +392,15 @@ describe("GoatSurface chat streaming UI", () => {
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
     await user.type(textarea, "& Research Q3");
+    expect(screen.getByTestId("background-chat-hint")).toHaveTextContent(
+      "Sending starts this as a new chat in the background.",
+    );
+    const overlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    const directiveChip = overlay?.querySelector('[data-goat-chat-directive="background"]');
+    expect(directiveChip).toHaveTextContent("&");
+    expect(textarea).toHaveClass("text-transparent");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
@@ -2913,6 +2922,72 @@ describe("GoatSurface chat streaming UI", () => {
     ).not.toBeInTheDocument();
     // Never navigates away from the home screen it was opened on.
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+  });
+
+  it("highlights and strips an ampersand background directive in Cmd+K compose", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      if (String(input).includes("/api/electric/")) {
+        return new Response("", {
+          headers: {
+            "electric-handle": "test-handle",
+            "electric-offset": "0",
+            "electric-schema": "[]",
+          },
+        });
+      }
+
+      return new Response("done", { status: 200 });
+    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const quickComposerInput = screen.getByPlaceholderText(
+      "Ask Goat anything, or describe a task...",
+    );
+    await user.type(quickComposerInput, "& Research Q3");
+
+    expect(screen.getByTestId("background-chat-hint")).toHaveTextContent(
+      "Sending starts this as a new chat in the background.",
+    );
+    const overlay = quickComposerInput.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(overlay?.querySelector('[data-goat-chat-directive="background"]')).toHaveTextContent(
+      "&",
+    );
+    expect(quickComposerInput).toHaveClass("text-transparent");
+
+    await user.keyboard("{Enter}");
+
+    const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
+    await waitFor(() => expect(chatRequests()).toHaveLength(1));
+    const [, init] = chatRequests()[0]!;
+    const body = JSON.parse(String((init as RequestInit).body));
+
+    expect(body).toMatchObject({
+      message: {
+        parts: [{ type: "text", text: "Research Q3" }],
+      },
+    });
   });
 
   it("routes a dropped file only to the Cmd+K composer while the palette is open", async () => {
