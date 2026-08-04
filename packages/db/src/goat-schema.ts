@@ -86,6 +86,7 @@ export type GoatIntegrationProvider =
   | "latitude"
   | "posthog"
   | "neon"
+  | "x"
   | "imessage";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,

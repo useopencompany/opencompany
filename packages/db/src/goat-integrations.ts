@@ -255,6 +255,106 @@ export async function connectGoatSlackIntegration(input: {
   return { integrationId: integration.id };
 }
 
+export type GoatXOAuthCredentialPayload = {
+  access_token: string;
+  refresh_token?: string;
+  scope?: string;
+  token_type?: string;
+};
+
+export async function connectGoatXIntegration(input: {
+  userWorkosId: string;
+  xUserId: string;
+  username: string;
+  displayName: string | null;
+  accessToken: string;
+  refreshToken?: string;
+  tokenType?: string;
+  expiresAt: Date | null;
+  scopes: string[];
+  db?: GoatIntegrationDb;
+  now?: Date;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const connectionLabel = input.username.trim() ? `@${input.username.trim()}` : "X";
+
+  const [integration] = await db
+    .insert(goatIntegrations)
+    .values({
+      id: newGoatIntegrationId(),
+      userWorkosId: input.userWorkosId,
+      provider: "x",
+      externalId: input.xUserId,
+      connectionLabel,
+      accountName: input.displayName,
+      accountEmail: null,
+      accountType: "x_user",
+      status: "connected",
+      statusReason: null,
+      scopes: input.scopes,
+      lastSyncedAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        goatIntegrations.userWorkosId,
+        goatIntegrations.provider,
+        goatIntegrations.externalId,
+      ],
+      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+      set: {
+        connectionLabel,
+        accountName: input.displayName,
+        accountEmail: null,
+        accountType: "x_user",
+        status: "connected",
+        statusReason: null,
+        scopes: input.scopes,
+        lastSyncedAt: now,
+        updatedAt: now,
+      },
+    })
+    .returning({ id: goatIntegrations.id });
+
+  if (!integration) {
+    throw new Error("Could not persist Goat X integration.");
+  }
+
+  const payload: GoatXOAuthCredentialPayload = {
+    access_token: input.accessToken,
+    ...(input.refreshToken ? { refresh_token: input.refreshToken } : {}),
+    ...(input.scopes.length > 0 ? { scope: input.scopes.join(" ") } : {}),
+    ...(input.tokenType ? { token_type: input.tokenType } : {}),
+  };
+
+  try {
+    await saveGoatIntegrationCredential({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "x",
+      kind: "oauth_token",
+      payload,
+      expiresAt: input.expiresAt,
+      db,
+      now,
+    });
+  } catch (error) {
+    await markGoatIntegrationStatus({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "x",
+      status: "sync_failed",
+      statusReason: "Failed to persist X integration credentials.",
+      db,
+      now: new Date(),
+    });
+    throw error;
+  }
+
+  return { integrationId: integration.id };
+}
+
 export type GoatSlackBotOAuthCredentialPayload = {
   access_token: string;
   bot_user_id: string;

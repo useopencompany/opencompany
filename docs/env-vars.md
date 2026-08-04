@@ -63,6 +63,8 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Vercel web/Goat envs | 32+ character secret used only to sign Google integration OAuth state. |
 | `MCP_OAUTH_STATE_SECRET` | Vercel web/Goat envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. Goat's direct remote-MCP callbacks include `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/linear/callback` and `.../api/integrations/posthog/callback`. |
 | `SLACK_MCP_CLIENT_ID` / `SLACK_MCP_CLIENT_SECRET` | Vercel, Render | Slack hosted MCP OAuth app credentials. |
+| `GOAT_X_CLIENT_ID` / `GOAT_X_CLIENT_SECRET` | Vercel Goat envs, Render | X OAuth 2.0 app credentials for Goat's native X posting integration. Configure `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/x/callback` as the redirect URL and request `tweet.read`, `tweet.write`, `users.read`, and `offline.access`. X developer access and billing must allow creating posts with `POST /2/tweets`. |
+| `GOAT_X_STATE_SECRET` | Vercel Goat envs | 32+ character secret used only to sign X integration OAuth state. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
 
 ## Vercel Blob stores
@@ -128,6 +130,9 @@ Set these in Vercel Production.
 | `MCP_OAUTH_STATE_SECRET` | MCP only | Dedicated secret used to sign MCP OAuth setup state. Generate a separate 32+ character value with `openssl rand -base64 32`. |
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Callback URL: `${NEXT_PUBLIC_APP_URL}/api/mcp/slack/callback`. |
 | `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Stored only in env, not in Neon. |
+| `GOAT_X_CLIENT_ID` | X only | X OAuth 2.0 client id for Goat native posting. Callback URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/x/callback`. |
+| `GOAT_X_CLIENT_SECRET` | X only | X OAuth 2.0 client secret. Stored only in env, not in Neon. |
+| `GOAT_X_STATE_SECRET` | X only | Dedicated secret used to sign X OAuth setup state. Generate a separate 32+ character value. |
 | `SLACK_SUPPORT_BOT_TOKEN` | Slack Connect only | `xoxb-…` bot token for OC's own support Slack app. The Inngest provisioning function runs on the web deployment, so this lives here (not the runner). Server-only, never `NEXT_PUBLIC`. Empty = feature disabled (no-ops to `failed`, onboarding never crashes). Distinct from `SLACK_MCP_*`. |
 | `SLACK_SUPPORT_TEAM_ID` | Slack Connect only | OC Slack workspace/team id (`T…`), denormalized for link building. |
 | `SLACK_SUPPORT_MEMBER_IDS` | Slack Connect only | Comma-separated `U…` ids of OC support members auto-invited to each channel. |

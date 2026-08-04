@@ -16,6 +16,7 @@ import type {
   GoatResolvedActionCatalog,
   ResolvedGoatAction,
 } from "./types";
+import { resolveXActions } from "./x";
 
 // Managed (Monid) capabilities need server-only execution + billing, so their
 // resolution lives in the host app (apps/goat) and is injected here. The runner
@@ -65,6 +66,7 @@ export async function resolveGoatActionCatalog(
     resolveGitHubActions(input.workspaceId).catch(() => null),
     resolveStripeActions(input.workspaceId).catch(() => null),
     resolveRevolutActions(input.workspaceId).catch(() => null),
+    resolveXActions(input.userWorkosId).catch(() => null),
   ]);
   const providers = resolved.filter(
     (entry): entry is GoatActionProviderCatalog => entry !== null && entry.actions.length > 0,

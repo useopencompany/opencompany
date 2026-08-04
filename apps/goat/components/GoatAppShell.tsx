@@ -26,6 +26,7 @@ import { getGoatPersonalAccounts } from "@/lib/integrations/personal-accounts";
 import { getGoatPostHogIntegrationState } from "@/lib/integrations/posthog-mcp";
 import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
 import { getGoatStripeIntegrationState } from "@/lib/integrations/stripe";
+import { getGoatXIntegrationState } from "@/lib/integrations/x";
 import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
 import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
@@ -43,6 +44,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     github,
     jamie,
     slack,
+    x,
     granola,
     fathom,
     attio,
@@ -62,6 +64,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatGitHubIntegrationState(workspace.id),
     getGoatJamieIntegrationState(workspace.id),
     getGoatSlackIntegrationState(user.workosUserId),
+    getGoatXIntegrationState(user.workosUserId),
     getGoatGranolaIntegrationState(user.workosUserId),
     getGoatFathomIntegrationState(user.workosUserId),
     getGoatAttioIntegrationState(user.workosUserId),
@@ -129,6 +132,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       github,
       jamie,
       slack,
+      x,
       granola,
       fathom,
       attio,
@@ -198,6 +202,7 @@ function buildIntegrationState(input: {
   github: GoatIntegrationState["github"];
   jamie: GoatIntegrationState["jamie"];
   slack: GoatIntegrationState["slack"];
+  x: GoatIntegrationState["x"];
   granola: GoatIntegrationState["granola"];
   fathom: GoatIntegrationState["fathom"];
   attio: GoatIntegrationState["attio"];
@@ -216,6 +221,7 @@ function buildIntegrationState(input: {
     github: input.github,
     jamie: input.jamie,
     slack: input.slack,
+    x: input.x,
     granola: input.granola,
     fathom: input.fathom,
     attio: input.attio,

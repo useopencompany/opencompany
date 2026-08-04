@@ -34,6 +34,7 @@ export function goatIntegrationConnectionError(provider: string | null, reason: 
     case "latitude_denied":
     case "posthog_denied":
     case "neon_denied":
+    case "x_denied":
       return `${name} authorization was cancelled.`;
     case "missing_code":
     case "missing_installation_id":
@@ -83,6 +84,8 @@ function providerName(provider: string | null) {
       return "PostHog";
     case "neon":
       return "Neon";
+    case "x":
+      return "X";
     default:
       return "This source";
   }

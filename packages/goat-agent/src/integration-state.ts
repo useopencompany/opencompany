@@ -165,6 +165,16 @@ export type GoatSlackProviderState = {
   statusReason: string | null;
 };
 
+export type GoatXProviderState = {
+  provider: "x";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  username: string | null;
+  displayName: string | null;
+  statusReason: string | null;
+};
+
 export type GoatCodexProviderState = {
   provider: "codex";
   connected: boolean;
@@ -210,7 +220,8 @@ export type GoatPersonalAccountProvider =
   | "fathom"
   | "attio"
   | "latitude"
-  | "neon";
+  | "neon"
+  | "x";
 
 export type GoatIntegrationState = {
   gmail: GoatGoogleProviderState;
@@ -221,6 +232,7 @@ export type GoatIntegrationState = {
   github: GoatGitHubProviderState;
   jamie: GoatJamieProviderState;
   slack: GoatSlackProviderState;
+  x: GoatXProviderState;
   granola: GoatGranolaProviderState;
   fathom: GoatFathomProviderState;
   attio: GoatAttioProviderState;
@@ -271,6 +283,7 @@ export function goatPersonalAccountsFromRows(
     google_drive: [],
     linear: [],
     slack: [],
+    x: [],
     hubspot: [],
     granola: [],
     fathom: [],
@@ -292,6 +305,7 @@ export function goatPersonalAccountsFromRows(
       row.provider === "google_calendar" ||
       row.provider === "google_drive" ||
       row.provider === "slack" ||
+      row.provider === "x" ||
       row.provider === "hubspot" ||
       row.provider === "granola" ||
       row.provider === "fathom" ||
@@ -337,6 +351,7 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
     github: githubProviderState(byProvider.get("github")),
     jamie: jamieProviderState(byProvider.get("jamie")),
     slack: slackProviderState(byProvider.get("slack")),
+    x: xProviderState(byProvider.get("x")),
     granola: granolaProviderState(byProvider.get("granola")),
     fathom: fathomProviderState(byProvider.get("fathom")),
     attio: attioProviderState(byProvider.get("attio")),
@@ -493,6 +508,30 @@ function slackProviderState(row: IntegrationStateRow | undefined): GoatSlackProv
     integrationId: row.id ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     teamName: row.connectionLabel ?? row.connection_label ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+  };
+}
+
+function xProviderState(row: IntegrationStateRow | undefined): GoatXProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "x",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      username: null,
+      displayName: null,
+      statusReason: null,
+    };
+  }
+
+  return {
+    provider: "x",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    username: row.connectionLabel ?? row.connection_label ?? null,
+    displayName: row.accountName ?? row.account_name ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
   };
 }

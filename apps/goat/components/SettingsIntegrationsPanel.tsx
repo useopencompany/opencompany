@@ -152,6 +152,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     Icon: SlackIcon,
     tileClass: "bg-[#4A154B] text-white",
   },
+  x: {
+    label: "X",
+    description: "Let Goat create posts from your X account when you ask.",
+    monogram: "X",
+    tileClass: "bg-[#000000] text-white",
+  },
   hubspot: {
     label: "HubSpot",
     description: "Sync CRM activity on contacts, companies, and deals.",
@@ -328,6 +334,7 @@ const PERSONAL_ACCOUNT_PROVIDERS = [
   "google_calendar",
   "google_drive",
   "slack",
+  "x",
   "latitude",
   "neon",
 ] as const satisfies readonly GoatPersonalAccountProvider[];
@@ -437,6 +444,7 @@ function IntegrationCards({
               provider="slack"
               accounts={integrations.personalAccounts.slack}
             />
+            <IntegrationProviderGroupCard provider="x" accounts={integrations.personalAccounts.x} />
             <IntegrationProviderGroupCard
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
@@ -1595,6 +1603,7 @@ function integrationConnectHref(provider: Exclude<IntegrationMetaKey, "codex">) 
   if (provider === "attio") return "/settings/attio";
   if (provider === "stripe") return "/settings/stripe";
   if (provider === "slack") return "/api/integrations/slack/start?returnTo=/settings/integrations";
+  if (provider === "x") return "/api/integrations/x/start?returnTo=/settings/integrations";
   if (provider === "hubspot")
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
   if (provider === "latitude")

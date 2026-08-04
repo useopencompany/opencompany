@@ -14,7 +14,8 @@ export type GoatActionProviderId =
   | "stripe"
   | "revolut"
   | "latitude"
-  | "neon";
+  | "neon"
+  | "x";
 
 export type GoatActionSourceId = GoatActionProviderId | GoatManagedCapabilitySource;
 
