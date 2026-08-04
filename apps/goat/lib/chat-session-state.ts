@@ -22,6 +22,22 @@ export function setLocalGoatChatState(sessionId: string | null, state: GoatChatS
   for (const listener of listeners) listener();
 }
 
+export function clearLocalGoatChatState(sessionId: string | null, expectedState?: GoatChatState) {
+  if (!sessionId) return;
+  const current = states.get(sessionId) ?? null;
+  if (!current || (expectedState && current !== expectedState)) return;
+  states.delete(sessionId);
+  snapshot = states.size > 0 ? new Map(states) : EMPTY_SNAPSHOT;
+  for (const listener of listeners) listener();
+}
+
+export function clearAllLocalGoatChatStates() {
+  if (states.size === 0) return;
+  states.clear();
+  snapshot = EMPTY_SNAPSHOT;
+  for (const listener of listeners) listener();
+}
+
 export function useLocalGoatChatStates() {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

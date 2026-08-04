@@ -20,14 +20,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { type FormEvent, type MouseEventHandler, useState, useTransition } from "react";
+import { type FormEvent, type MouseEventHandler, useEffect, useState, useTransition } from "react";
 import { useGoatAppData } from "@/components/GoatAppDataProvider";
 import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
 import { GoatChatStateIndicator } from "@/components/GoatChatStateIndicator";
 import { GoatSidebarFeedback } from "@/components/GoatSidebarFeedback";
 import { closeGoatChatSessionAction, setGoatChatPinnedAction } from "@/lib/chat-actions";
 import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
-import { useLocalGoatChatStates } from "@/lib/chat-session-state";
+import { clearLocalGoatChatState, useLocalGoatChatStates } from "@/lib/chat-session-state";
 import { type GoatChatSummaryView, goatChatSummaryState } from "@/lib/chat-ui";
 import { createGoatWorkspaceAction, switchGoatWorkspaceAction } from "@/lib/workspace-actions";
 
@@ -248,6 +248,14 @@ function GoatSidebarRecentChats() {
   const [pinningIds, setPinningIds] = useState<Set<string>>(() => new Set());
   const [pinOverrides, setPinOverrides] = useState<Map<string, boolean>>(() => new Map());
   const [previousRecentChats, setPreviousRecentChats] = useState(recentChats);
+
+  useEffect(() => {
+    for (const chat of recentChats) {
+      if (localChatStates.get(chat.id) === "working" && goatChatSummaryState(chat) === "working") {
+        clearLocalGoatChatState(chat.id, "working");
+      }
+    }
+  }, [localChatStates, recentChats]);
 
   if (previousRecentChats !== recentChats) {
     setPreviousRecentChats(recentChats);
