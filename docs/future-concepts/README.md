@@ -15,3 +15,6 @@ the owning spec, architecture doc, migration plan, or code comments.
   runtime sandboxes.
 - [External Skills Support Research](./external-skills-support-research.md) -
   research and implementation direction for user-configurable external skills.
+- [Revolut Business Agent Access](./revolut-business-agent-access-research.md) -
+  research and product direction for a read-only Revolut Business finance
+  assistant.
