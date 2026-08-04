@@ -363,6 +363,59 @@ describe("GoatSurface chat streaming UI", () => {
     expect(await screen.findAllByText("Hello Goat")).toHaveLength(2);
   });
 
+  it("starts a background chat from the main composer when the message starts with ampersand", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      if (String(input).includes("/api/electric/")) {
+        return new Response("", {
+          headers: {
+            "electric-handle": "test-handle",
+            "electric-offset": "0",
+            "electric-schema": "[]",
+          },
+        });
+      }
+
+      return new Response("done", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    await user.type(textarea, "& Research Q3");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
+    await waitFor(() => expect(chatRequests()).toHaveLength(1));
+    const [, init] = chatRequests()[0]!;
+    const body = JSON.parse(String((init as RequestInit).body));
+
+    expect(body).toMatchObject({
+      sessionId: null,
+      model: DEFAULT_GOAT_MODEL,
+      message: {
+        role: "user",
+        parts: [{ type: "text", text: "Research Q3" }],
+      },
+    });
+    expect(body.message.id).toMatch(/^ui_background_/);
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    expect(routerMock.push).not.toHaveBeenCalled();
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(textarea).toHaveValue("");
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+  });
+
   it("restores the prior draft when voice dictation is cancelled", async () => {
     installDictationBrowserMocks();
     const user = userEvent.setup();
