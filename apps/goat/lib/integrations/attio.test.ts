@@ -36,6 +36,7 @@ vi.mock("@opencompany/goat-agent/app-url", () => ({
 
 import {
   connectGoatAttioIntegration,
+  hasGoatAttioCommentWriteScopes,
   hasGoatAttioListConfigurationWriteScope,
   hasGoatAttioListReadScopes,
   hasGoatAttioListWriteScopes,
@@ -101,6 +102,20 @@ describe("Attio API key scope handling", () => {
     expect(hasGoatAttioListWriteScopes(["list_configuration:read", "list_entry:read"])).toBe(false);
     expect(hasGoatAttioListConfigurationWriteScope(["list_configuration:read"])).toBe(false);
     expect(hasGoatAttioListConfigurationWriteScope(["list_configuration:read-write"])).toBe(true);
+    expect(
+      hasGoatAttioCommentWriteScopes([
+        "comment:read-write",
+        "object_configuration:read",
+        "record_permission:read",
+      ]),
+    ).toBe(true);
+    expect(
+      hasGoatAttioCommentWriteScopes([
+        "comment:read",
+        "object_configuration:read",
+        "record_permission:read",
+      ]),
+    ).toBe(false);
   });
 
   it("returns Attio scopes with the validated workspace identity", async () => {
@@ -112,6 +127,7 @@ describe("Attio API key scope handling", () => {
           workspace_id: "workspace_1",
           workspace_name: "Acme",
           workspace_slug: "acme",
+          authorized_by_workspace_member_id: "member_1",
           scope: [
             "object_configuration:read record_permission:read-write note:read-write webhook:read-write",
           ],
@@ -124,6 +140,7 @@ describe("Attio API key scope handling", () => {
         workspaceId: "workspace_1",
         workspaceName: "Acme",
         workspaceSlug: "acme",
+        authorizedByWorkspaceMemberId: "member_1",
         scopes: [
           "note:read-write",
           "object_configuration:read",
@@ -168,6 +185,7 @@ describe("Attio API key scope handling", () => {
         workspaceId: "workspace_1",
         workspaceName: "Acme",
         workspaceSlug: "acme",
+        authorizedByWorkspaceMemberId: "member_1",
         scopes,
       },
       now: new Date("2026-07-21T00:00:00.000Z"),
@@ -181,6 +199,7 @@ describe("Attio API key scope handling", () => {
         integrationId: "gint_attio",
         payload: expect.objectContaining({
           apiKey: "attio_test_api_key",
+          authorizedByWorkspaceMemberId: "member_1",
           webhookId: "webhook_1",
         }),
       }),
