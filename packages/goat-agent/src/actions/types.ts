@@ -12,6 +12,7 @@ export type GoatActionProviderId =
   | "attio"
   | "github"
   | "stripe"
+  | "revolut"
   | "latitude"
   | "neon";
 
