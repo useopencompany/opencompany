@@ -543,6 +543,46 @@ describe("SettingsIntegrationsPanel", () => {
     ).toHaveAttribute("href", "/api/integrations/latitude/start?returnTo=/settings/integrations");
   });
 
+  it("connects Neon personally with structure On and database queries Ask", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_neon",
+        provider: "neon",
+        externalId: "neon_mcp",
+        connectionLabel: "Neon",
+        status: "connected",
+        scopes: ["read"],
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    const neonCard = screen
+      .getByText("Inspect Neon projects and schemas, and run permission-gated read-only SQL.")
+      .closest("div.rounded-2xl");
+    expect(neonCard).not.toBeNull();
+    expect(within(neonCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    const structurePermission = within(neonCard as HTMLElement).getByRole("group", {
+      name: "Inspect Neon structure permission",
+    });
+    const queryPermission = within(neonCard as HTMLElement).getByRole("group", {
+      name: "Query database data permission",
+    });
+    expect(within(structurePermission).getByRole("button", { name: "On" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(queryPermission).getByRole("button", { name: "Ask" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      within(neonCard as HTMLElement).getByRole("link", { name: "Reconnect" }),
+    ).toHaveAttribute("href", "/api/integrations/neon/start?returnTo=/settings/integrations");
+  });
+
   it("shows a workspace-owned Stripe connection and test-mode label", () => {
     const integrations = goatIntegrationStateFromRows([
       {

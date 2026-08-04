@@ -13,6 +13,7 @@ import {
   HubSpotIcon,
   type LucideIcon as IconComponent,
   LinearIcon,
+  NeonIcon,
   OpenAIIcon,
   PostHogIcon,
   SlackIcon,
@@ -138,6 +139,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Observe, understand, and improve your AI agents from Goat.",
     monogram: "L",
     tileClass: "bg-[#171717] text-white",
+  },
+  neon: {
+    label: "Neon",
+    description: "Inspect Neon projects and schemas, and run permission-gated read-only SQL.",
+    Icon: NeonIcon,
+    tileClass: "bg-[#00E599] text-[#0B0F14]",
   },
   slack: {
     label: "Slack",
@@ -322,6 +329,7 @@ const PERSONAL_ACCOUNT_PROVIDERS = [
   "google_drive",
   "slack",
   "latitude",
+  "neon",
 ] as const satisfies readonly GoatPersonalAccountProvider[];
 
 function countConnectedAccounts(
@@ -432,6 +440,10 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="latitude"
               accounts={integrations.personalAccounts.latitude}
+            />
+            <IntegrationProviderGroupCard
+              provider="neon"
+              accounts={integrations.personalAccounts.neon}
             />
             <CodexIntegrationCard integration={integrations.codex} />
             <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
@@ -946,7 +958,13 @@ function IntegrationProviderGroupCard({
       footer={
         <ConnectLink
           href={connectHref}
-          label={provider === "google_calendar" ? "Reconnect or add" : "Add account"}
+          label={
+            provider === "google_calendar"
+              ? "Reconnect or add"
+              : provider === "neon"
+                ? "Reconnect"
+                : "Add account"
+          }
         />
       }
     />
@@ -1581,6 +1599,7 @@ function integrationConnectHref(provider: Exclude<IntegrationMetaKey, "codex">) 
     return "/api/integrations/hubspot/start?returnTo=/settings/integrations";
   if (provider === "latitude")
     return "/api/integrations/latitude/start?returnTo=/settings/integrations";
+  if (provider === "neon") return "/api/integrations/neon/start?returnTo=/settings/integrations";
   if (provider === "posthog")
     return "/api/integrations/posthog/start?returnTo=/settings/integrations";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";

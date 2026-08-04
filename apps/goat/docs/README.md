@@ -220,6 +220,10 @@ and list-entry updates, Linear writes, and Google Calendar event creation requir
 default and can be configured under Integrations. Latitude's live MCP catalog is mapped into the same
 action surface: tools annotated read-only default to On, while mutations and tools without that
 annotation default to Ask. An explicit account or workspace is required when several are connected.
+Neon's hosted MCP catalog is constrained to its provider-enforced read-only mode and a local tool
+allowlist: project, branch, table, and schema inspection defaults to On, while SQL queries default to
+Ask. Persistent coding sessions only receive SQL access after the user explicitly changes that
+permission to On, and connection-string or mutation tools are never exposed.
 Stripe exposes read-only workspace
 metrics for balance activity by period, current balances, subscription health with estimated MRR,
 and open receivables. Stripe uses an encrypted restricted API key and is excluded from automatic

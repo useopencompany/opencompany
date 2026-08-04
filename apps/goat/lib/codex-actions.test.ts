@@ -31,6 +31,7 @@ describe("executeGoatCodexActionGateway", () => {
         { id: "gmail", label: "Gmail", description: "Email" },
         { id: "slack", kind: "integration", label: "Slack", description: "Messages" },
         { id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" },
+        { id: "posthog", kind: "integration", label: "PostHog", description: "Analytics" },
       ],
       actions: [
         readAction,
@@ -50,6 +51,12 @@ describe("executeGoatCodexActionGateway", () => {
           id: "linkedin.search",
           provider: "linkedin",
         },
+        {
+          ...readAction,
+          id: "posthog.query",
+          provider: "posthog",
+          capability: "query",
+        },
       ],
     };
     const response = await executeGoatCodexActionGateway({
@@ -68,6 +75,41 @@ describe("executeGoatCodexActionGateway", () => {
         { id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" },
       ],
     });
+  });
+
+  it("includes Neon row queries only after their read-only permission is On", async () => {
+    const queryAction = createReadAction("neon.run_sql", "neon");
+    queryAction.capability = "query";
+    const catalog: GoatResolvedActionCatalog = {
+      providers: [{ id: "neon", kind: "integration", label: "Neon", description: "Database" }],
+      actions: [queryAction],
+    };
+
+    await expect(
+      executeGoatCodexActionGateway({
+        request: listRequest(),
+        signal: new AbortController().signal,
+        dependencies: {
+          loadContext: vi.fn(async () => context),
+          resolveCatalog: vi.fn(async () => catalog),
+        },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      sources: [{ id: "neon", kind: "integration", label: "Neon", description: "Database" }],
+    });
+
+    queryAction.permissionMode = "ask";
+    await expect(
+      executeGoatCodexActionGateway({
+        request: listRequest(),
+        signal: new AbortController().signal,
+        dependencies: {
+          loadContext: vi.fn(async () => context),
+          resolveCatalog: vi.fn(async () => catalog),
+        },
+      }),
+    ).resolves.toEqual({ ok: true, sources: [] });
   });
 
   it("reuses the canonical executor with host-derived identity", async () => {

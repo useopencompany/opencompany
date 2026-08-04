@@ -143,7 +143,8 @@ function readOnlyCatalog(catalog: GoatResolvedActionCatalog): GoatResolvedAction
   const sourceIds = new Set(catalog.providers.map((source) => source.id));
   const actions = catalog.actions.filter(
     (action) =>
-      action.capability === "read" &&
+      (action.capability === "read" ||
+        (action.provider === "neon" && action.capability === "query")) &&
       action.permissionMode === "on" &&
       sourceIds.has(action.provider),
   );

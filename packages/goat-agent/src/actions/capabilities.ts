@@ -11,7 +11,7 @@ import type { GoatActionProviderId } from "./types";
 // server-side action catalog and the settings panel.
 
 export type GoatCapabilityMode = "on" | "off" | "ask";
-export type GoatCapabilityId = "read" | "draft" | "write";
+export type GoatCapabilityId = "read" | "query" | "draft" | "write";
 
 export type GoatProviderCapability = {
   id: GoatCapabilityId;
@@ -138,6 +138,21 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  neon: [
+    {
+      id: "read",
+      label: "Inspect Neon structure",
+      description:
+        "List accessible projects and branches, and inspect database tables and schemas.",
+      defaultMode: "on",
+    },
+    {
+      id: "query",
+      label: "Query database data",
+      description: "Run provider-enforced read-only SQL against databases you can access in Neon.",
+      defaultMode: "ask",
+    },
+  ],
 };
 
 export function isGoatCapabilityMode(value: unknown): value is GoatCapabilityMode {
@@ -145,7 +160,7 @@ export function isGoatCapabilityMode(value: unknown): value is GoatCapabilityMod
 }
 
 export function isGoatCapabilityId(value: unknown): value is GoatCapabilityId {
-  return value === "read" || value === "draft" || value === "write";
+  return value === "read" || value === "query" || value === "draft" || value === "write";
 }
 
 // The lookups accept any provider string (integration rows carry providers

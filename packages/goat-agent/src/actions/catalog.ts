@@ -5,6 +5,7 @@ import { resolveGoogleCalendarActions } from "./google-calendar";
 import { resolveGoogleDriveActions } from "./google-drive";
 import { resolveLatitudeActions } from "./latitude";
 import { resolveLinearActions } from "./linear";
+import { resolveNeonActions } from "./neon";
 import { resolvePostHogActions } from "./posthog";
 import { resolveSlackActions } from "./slack";
 import { resolveStripeActions } from "./stripe";
@@ -58,6 +59,7 @@ export async function resolveGoatActionCatalog(
     resolveLinearActions(input.userWorkosId).catch(() => null),
     resolvePostHogActions(input.userWorkosId).catch(() => null),
     resolveLatitudeActions(input.userWorkosId).catch(() => null),
+    resolveNeonActions(input.userWorkosId).catch(() => null),
     resolveAttioActions(input.userWorkosId).catch(() => null),
     resolveGitHubActions(input.workspaceId).catch(() => null),
     resolveStripeActions(input.workspaceId).catch(() => null),
