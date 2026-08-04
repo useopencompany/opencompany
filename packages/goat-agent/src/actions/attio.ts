@@ -57,6 +57,7 @@ const MAX_FILTER_PROPERTIES = 12;
 const MAX_SORTS = 3;
 const MAX_WRITE_PROPERTIES = 20;
 const MAX_WRITE_JSON_CHARS = 12_000;
+const MAX_CREATE_VALUES_JSON_CHARS = 12_000;
 const MAX_FILTER_JSON_CHARS = 6_000;
 const MAX_JSON_DEPTH = 5;
 const MAX_JSON_ARRAY_ITEMS = 50;
@@ -712,7 +713,70 @@ export async function resolveAttioActions(
 
   if (recordWriteConnections.length > 0) {
     const multipleWriteAccounts = recordWriteConnections.length > 1;
-    const writeAccountParam = attioAccountParam(recordWriteConnections, "update");
+    const writeAccountParam = attioAccountParam(recordWriteConnections, "create or update");
+    actions.push({
+      id: "attio.create_record",
+      provider: "attio",
+      capability: "write",
+      ...permissionAnnotation("write", recordWriteConnections),
+      description:
+        "Create a new Attio person, company, or deal. For people, set name as an array with full_name and optional first_name/last_name; include email_addresses only when the user supplied a real email. This creates the CRM record only; use attio.add_record_to_list with the returned id when the user also asked to add it to a list.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleWriteAccounts ? ["object", "values", "account"] : ["object", "values"],
+        properties: {
+          object: {
+            type: "string",
+            enum: [...STANDARD_OBJECTS],
+            description:
+              'The record type to create. Use "people" for a person such as a guest or contact.',
+          },
+          values: {
+            type: "object",
+            minProperties: 1,
+            maxProperties: MAX_WRITE_PROPERTIES,
+            description:
+              'Record fields to set, keyed by Attio attribute API slug or UUID. Example person values: {"name":[{"full_name":"Tim Draper"}]}.',
+          },
+          ...writeAccountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(
+          params,
+          multipleWriteAccounts ? ["object", "values", "account"] : ["object", "values"],
+        );
+        const connection = resolveConnection(
+          recordWriteConnections,
+          multipleWriteAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const credential = await getCredential(context, connection);
+        const object = parseObject(
+          requiredStringParam(params, "object"),
+          credential.availableObjects,
+        );
+        const values = parseAttioCreateRecordValues(params.values);
+        await assertAttioWriteStillEnabled(context, connection, "record");
+        const response = await callAttioApi({
+          context,
+          connection,
+          credential,
+          path: `/objects/${encodeURIComponent(object)}/records`,
+          method: "POST",
+          body: { data: { values } },
+        });
+        const record = asRecord(asRecord(response)?.data) as AttioRecordInput | null;
+        const compact = record
+          ? compactAttioRecord(record, credential.objectSlugById, MAX_DETAIL_PROPERTIES)
+          : null;
+        if (!compact) {
+          throw new Error("Attio returned an invalid created record response.");
+        }
+        return { workspace: connection.selector, record: compact };
+      },
+    });
+
     actions.push({
       id: "attio.update_record",
       provider: "attio",
@@ -1391,11 +1455,11 @@ export async function resolveAttioActions(
     description: hasWrites
       ? hasLists
         ? hasComments
-          ? "Search and inspect CRM records and lists, configure pipeline fields and options, add records to lists, update records or pipeline entries, and add comments in Attio."
-          : "Search and inspect CRM records and lists, configure pipeline fields and options, add records to lists, and update records or pipeline entries in Attio."
+          ? "Search and inspect CRM records and lists, create or update records, configure pipeline fields and options, add records to lists, update pipeline entries, and add comments in Attio."
+          : "Search and inspect CRM records and lists, create or update records, configure pipeline fields and options, add records to lists, and update pipeline entries in Attio."
         : hasComments
-          ? "Search, inspect, update, and comment on people, companies, and deals in Attio."
-          : "Search, inspect, and update people, companies, and deals in Attio."
+          ? "Search, inspect, create, update, and comment on people, companies, and deals in Attio."
+          : "Search, inspect, create, and update people, companies, and deals in Attio."
       : hasLists
         ? "Search and inspect CRM records and lists in Attio."
         : "Search and inspect people, companies, and deals in Attio.",
@@ -1984,13 +2048,25 @@ function parseAttioSorts(
 }
 
 function parseAttioWriteValues(value: unknown): Record<string, unknown> {
+  return parseAttioValuesObject(value, "values", MAX_WRITE_JSON_CHARS);
+}
+
+function parseAttioCreateRecordValues(value: unknown): Record<string, unknown> {
+  return parseAttioValuesObject(value, "values", MAX_CREATE_VALUES_JSON_CHARS);
+}
+
+function parseAttioValuesObject(
+  value: unknown,
+  key: string,
+  maxJsonChars: number,
+): Record<string, unknown> {
   const values = asRecord(value);
   if (!values || Object.keys(values).length === 0) {
-    throw new GoatActionInvalidParamsError('"values" must be a non-empty object.');
+    throw new GoatActionInvalidParamsError(`"${key}" must be a non-empty object.`);
   }
   if (Object.keys(values).length > MAX_WRITE_PROPERTIES) {
     throw new GoatActionInvalidParamsError(
-      `"values" allows at most ${MAX_WRITE_PROPERTIES} fields per update.`,
+      `"${key}" allows at most ${MAX_WRITE_PROPERTIES} fields per write.`,
     );
   }
   for (const key of Object.keys(values)) {
@@ -2001,7 +2077,7 @@ function parseAttioWriteValues(value: unknown): Record<string, unknown> {
     }
   }
   const normalized = normalizeAttioJson(values, "values", 0);
-  assertAttioJsonSize(normalized, "values", MAX_WRITE_JSON_CHARS);
+  assertAttioJsonSize(normalized, "values", maxJsonChars);
   return normalized as Record<string, unknown>;
 }
 

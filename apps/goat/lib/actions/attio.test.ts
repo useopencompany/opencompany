@@ -281,6 +281,7 @@ describe("resolveAttioActions", () => {
     const writeOnly = await resolveAttioActions("user_1");
     expect(writeOnly?.actions.some((entry) => entry.capability === "read")).toBe(false);
     expect(writeOnly?.actions.map((entry) => entry.id)).toEqual([
+      "attio.create_record",
       "attio.update_record",
       "attio.create_comment",
       "attio.create_attribute",
