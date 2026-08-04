@@ -123,6 +123,7 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
     expect(prompt).toContain("call list_actions with the relevant source id");
     expect(prompt).toContain("Managed capabilities are read-only");
     expect(prompt).toContain("cannot post, edit, create, delete");
+    expect(prompt).toContain("not access to the user's LinkedIn account or connection graph");
     expect(prompt).toContain("write action only when the user explicitly asked");
     expect(prompt).toContain("Never claim a write happened unless the action returned ok=true");
     expect(prompt).toContain("Choose the lightest path");
@@ -183,6 +184,7 @@ describe("createOpenCompanyChatSystemPrompt integrations", () => {
       "linkedin [managed capability] — LinkedIn: Metered public LinkedIn research.",
     );
     expect(prompt).toContain("metered third-party services, not connected user accounts");
+    expect(prompt).toContain("Do not use them to answer who the user personally knows");
     expect(prompt).toContain("never describe them as free");
   });
 
