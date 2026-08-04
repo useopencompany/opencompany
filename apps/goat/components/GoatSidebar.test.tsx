@@ -3,6 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
+import { clearAllLocalGoatChatStates, setLocalGoatChatState } from "@/lib/chat-session-state";
 import { GoatSidebar } from "./GoatSidebar";
 
 const pathnameMock = vi.hoisted(() => ({ value: "/" }));
@@ -129,6 +130,7 @@ describe("GoatSidebar", () => {
     featureFlagsMock.taskSpawning = false;
     recentChatsMock.value = [];
     tasksMock.value = [];
+    clearAllLocalGoatChatStates();
   });
 
   it("renders home, the brain list, and footer links", () => {
@@ -473,6 +475,74 @@ describe("GoatSidebar", () => {
 
     expect(screen.getByTestId("sidebar-chat-working")).toBeInTheDocument();
     expect(screen.queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
+  });
+
+  it("uses a retained local working state while durable runtime has not caught up", () => {
+    pathnameMock.value = "/";
+    setLocalGoatChatState("goat_chat_streaming", "working");
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_streaming",
+        title: "Still streaming",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Partial answer",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        lastSeenAt: "2026-07-14T09:00:00.000Z",
+        pinnedAt: null,
+        state: "done_unseen",
+      },
+    ];
+
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-working")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
+  });
+
+  it("drops a retained local working state after durable runtime reports working", async () => {
+    pathnameMock.value = "/";
+    setLocalGoatChatState("goat_chat_runtime", "working");
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_runtime",
+        title: "Runtime caught up",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        codexRuntime: {
+          status: "running",
+          activeTurnId: "goat_codex_chat_turn_1",
+          error: null,
+          updatedAt: "2026-07-14T09:01:00.000Z",
+        },
+        preview: "Partial answer",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        lastSeenAt: "2026-07-14T09:00:00.000Z",
+        pinnedAt: null,
+        state: "done_unseen",
+      },
+    ];
+
+    const { rerender } = render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-working")).toBeInTheDocument();
+    await waitFor(() => {
+      recentChatsMock.value = [
+        {
+          ...recentChatsMock.value[0]!,
+          codexRuntime: {
+            status: "idle",
+            activeTurnId: null,
+            error: null,
+            updatedAt: "2026-07-14T09:02:00.000Z",
+          },
+        },
+      ];
+      rerender(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      expect(screen.getByTestId("sidebar-chat-unseen")).toBeInTheDocument();
+    });
   });
 
   it("hides the unseen marker for the selected completed chat", () => {

@@ -6,6 +6,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeGoatChatSessionAction, markGoatChatSeenAction } from "@/lib/chat-actions";
 import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
+import { clearAllLocalGoatChatStates, useLocalGoatChatStates } from "@/lib/chat-session-state";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
   type GoatChatMessageMetadata,
@@ -338,6 +339,7 @@ describe("GoatSurface chat streaming UI", () => {
   });
 
   afterEach(() => {
+    clearAllLocalGoatChatStates();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -840,6 +842,43 @@ describe("GoatSurface chat streaming UI", () => {
     expect(historyMock.replaceState).toHaveBeenCalledTimes(1);
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
+  });
+
+  it("keeps an active chat locally working after Home until the stream finishes", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <>
+        <GoatSurface
+          tasks={[]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={{
+            id: "chat_1",
+            title: "Chat",
+            model: DEFAULT_GOAT_MODEL,
+            messages: [],
+          }}
+        />
+        <LocalChatStateProbe sessionId="chat_1" />
+      </>,
+    );
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Keep working");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    act(() => {
+      chatMock.status = "streaming";
+      chatMock.startWithSessionId?.("chat_1", DEFAULT_GOAT_MODEL);
+    });
+    expect(screen.getByTestId("local-chat-state")).toHaveTextContent("working");
+
+    act(() => window.dispatchEvent(new Event(GOAT_HOME_NAVIGATION_EVENT)));
+
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByTestId("local-chat-state")).toHaveTextContent("working");
+
+    act(() => chatMock.finishWithSessionId?.("chat_1"));
+
+    await waitFor(() => expect(screen.getByTestId("local-chat-state")).toHaveTextContent("none"));
   });
 
   it("renders composer input as native textarea text", async () => {
@@ -4194,6 +4233,11 @@ function codexChatSummary(
 
 function currentTimestamp() {
   return new Date().toISOString();
+}
+
+function LocalChatStateProbe({ sessionId }: { sessionId: string }) {
+  const states = useLocalGoatChatStates();
+  return <div data-testid="local-chat-state">{states.get(sessionId) ?? "none"}</div>;
 }
 
 async function nextAnimationFrame() {

@@ -121,7 +121,11 @@ import {
   subscribeLastGoatChatSelection,
 } from "@/lib/chat-composer-selection";
 import { GOAT_HOME_NAVIGATION_EVENT, newOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
-import { setLocalGoatChatState, useLocalGoatChatStates } from "@/lib/chat-session-state";
+import {
+  clearLocalGoatChatState,
+  setLocalGoatChatState,
+  useLocalGoatChatStates,
+} from "@/lib/chat-session-state";
 import {
   compareGoatChatMessageOrder,
   type GoatChatMention,
@@ -395,6 +399,7 @@ export function GoatSurface({
   const onboardingKickoffPromptRef = useRef<string | null>(null);
   const activeTurnStartedAtRef = useRef<number | null>(null);
   const activeTurnAssistantMessageIdRef = useRef<string | null>(null);
+  const activeTurnChatSessionIdRef = useRef<string | null>(initialChat?.id ?? null);
   const lastSeenMarkRef = useRef<string | null>(null);
   const wasAgentWorkingRef = useRef(false);
   const optimisticAttachmentPreviewUrlsRef = useRef<ReadonlyMap<string, string[]>>(new Map());
@@ -564,9 +569,16 @@ export function GoatSurface({
 
   const beginActiveTurn = useCallback((assistantMessageId: string | null = null) => {
     const startedAtMs = Date.now();
+    const sessionId = routedChatSessionIdRef.current;
     activeTurnStartedAtRef.current = startedAtMs;
     activeTurnAssistantMessageIdRef.current = assistantMessageId;
+    activeTurnChatSessionIdRef.current = sessionId;
+    if (sessionId) setLocalGoatChatState(sessionId, "working");
     setActiveTurnStartedAtMs(startedAtMs);
+  }, []);
+
+  const clearLocalActiveTurnState = useCallback((sessionId: string | null | undefined) => {
+    clearLocalGoatChatState(sessionId ?? activeTurnChatSessionIdRef.current, "working");
   }, []);
 
   const clearActiveTurn = useCallback(() => {
@@ -708,10 +720,11 @@ export function GoatSurface({
     // the model continues the turn.
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onFinish: ({ message }) => {
+      const sessionId = message.metadata?.sessionId;
+      clearLocalActiveTurnState(sessionId);
       if (!mountedRef.current) return;
       void refetchCreditBalance();
       recordOptimisticTurnDuration(message.id);
-      const sessionId = message.metadata?.sessionId;
       const pendingNewSessionId = pendingNewSessionIdRef.current;
       const ownsRoute = Boolean(sessionId && routedChatSessionIdRef.current === sessionId);
       if (sessionId && ownsRoute) {
@@ -724,6 +737,7 @@ export function GoatSurface({
       adoptResolvedAutoModel(message);
     },
     onError: (error) => {
+      clearLocalActiveTurnState(null);
       if (error.message?.includes(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE)) {
         void refetchCreditBalance();
         toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
@@ -974,7 +988,9 @@ export function GoatSurface({
     if (!chatSessionId || persistedChatSessionId !== chatSessionId) return;
     const state = isAgentWorking ? "working" : mode === "chat" ? "done_seen" : null;
     setLocalGoatChatState(chatSessionId, state);
-    return () => setLocalGoatChatState(chatSessionId, null);
+    return () => {
+      if (state !== "working") setLocalGoatChatState(chatSessionId, null);
+    };
   }, [chatSessionId, isAgentWorking, mode, persistedChatSessionId]);
 
   useEffect(() => {
@@ -1383,6 +1399,7 @@ export function GoatSurface({
           if (!result.ok) {
             setMessages((current) => current.filter((message) => message.id !== messageId));
             setInput(prompt);
+            clearLocalActiveTurnState(null);
             clearActiveTurn();
             toast.error(result.error ?? "Could not continue that task.");
             return;
@@ -1393,6 +1410,7 @@ export function GoatSurface({
           if (!mountedRef.current) return;
           setMessages((current) => current.filter((message) => message.id !== messageId));
           setInput(prompt);
+          clearLocalActiveTurnState(null);
           clearActiveTurn();
           toast.error("Could not continue that task.");
         })
@@ -1719,8 +1737,9 @@ export function GoatSurface({
           }
         })
         .catch((error) => {
-          clearActiveTurn();
           const requestChatSessionId = existingEngineSessionId ?? newSessionId;
+          clearLocalActiveTurnState(requestChatSessionId);
+          clearActiveTurn();
           if (requestChatSessionId && routedChatSessionIdRef.current === requestChatSessionId) {
             setInput(prompt);
             setSelectedMentions(mentions);
@@ -1764,8 +1783,9 @@ export function GoatSurface({
     void sendMessage(message, {
       body: { sessionId: requestSessionId, newSessionId, model },
     }).catch((error) => {
-      clearActiveTurn();
       const requestChatSessionId = requestSessionId ?? newSessionId;
+      clearLocalActiveTurnState(requestChatSessionId);
+      clearActiveTurn();
       if (requestChatSessionId && routedChatSessionIdRef.current === requestChatSessionId) {
         setInput(prompt);
         setSelectedMentions(mentions);
@@ -1906,11 +1926,14 @@ export function GoatSurface({
   };
 
   const closeChat = useCallback(() => {
-    if (isGenerating) void stop();
+    if (isGenerating) {
+      clearLocalActiveTurnState(chatSessionId);
+      void stop();
+    }
     openChat(null);
     router.replace("/");
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [isGenerating, openChat, router, stop]);
+  }, [chatSessionId, clearLocalActiveTurnState, isGenerating, openChat, router, stop]);
 
   const stopGeneration = useCallback(() => {
     if (activeTaskConversation) {
@@ -1937,6 +1960,7 @@ export function GoatSurface({
     if (activeEngineChat) {
       const config = ENGINE_CHAT_CONFIG[activeEngineChat.engine];
       setEngineRunning(false);
+      clearLocalActiveTurnState(activeEngineChat.chatSessionId);
       void fetch(config.interruptEndpoint(activeEngineChat.chatSessionId), {
         method: "POST",
       }).catch(() => {
@@ -1951,6 +1975,7 @@ export function GoatSurface({
         new Set(current).add(lastAssistantMessage.id),
       );
     }
+    clearLocalActiveTurnState(chatSessionId ?? lastAssistantMessage?.metadata?.sessionId ?? null);
     // With resumable streams, aborting the connection is only a disconnect;
     // the stop endpoint cancels the server-side generation itself.
     if (chatResumeEnabled) {
@@ -1967,6 +1992,7 @@ export function GoatSurface({
     activeTaskConversation,
     chatResumeEnabled,
     chatSessionId,
+    clearLocalActiveTurnState,
     isTaskConversationStopping,
     messages,
     router,
