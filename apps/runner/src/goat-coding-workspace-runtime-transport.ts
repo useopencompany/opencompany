@@ -45,6 +45,7 @@ const PREVIEW_SESSION_CACHE_MS = 5_000;
 const MAX_PREVIEW_SESSION_CACHE_ENTRIES = 256;
 const MAX_PENDING_PREVIEW_WEBSOCKET_BYTES = 256 * 1_024;
 const MAX_PENDING_TERMINAL_INPUT_BYTES = 256 * 1_024;
+const TERMINAL_INPUT_BATCH_MS = 8;
 const runtimeToolInstalls = new Map<string, Promise<void>>();
 
 type PreviewTarget = {
@@ -235,13 +236,20 @@ export function attachRuntimeConnection(
   let operation = Promise.resolve();
 
   // Terminal input bypasses the control-operation queue: keystrokes must never wait
-  // behind a port scan or preview lookup. While one sendInput RPC is in flight,
-  // further keystrokes coalesce into a single follow-up call, so a typing burst costs
-  // at most two sandbox round-trips instead of one per key.
+  // behind a port scan or preview lookup. A tiny sub-frame batch window avoids one
+  // sandbox RPC per key, and while one sendInput RPC is in flight further keystrokes
+  // coalesce into a single follow-up call.
   let pendingInput: Buffer[] = [];
   let pendingInputBytes = 0;
   let inputInFlight = false;
+  let inputFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearInputFlushTimer = () => {
+    if (inputFlushTimer === null) return;
+    clearTimeout(inputFlushTimer);
+    inputFlushTimer = null;
+  };
   const flushTerminalInput = () => {
+    clearInputFlushTimer();
     if (inputInFlight || disposed || terminalPid === null || pendingInput.length === 0) return;
     const pid = terminalPid;
     const data = Buffer.concat(pendingInput);
@@ -255,14 +263,18 @@ export function attachRuntimeConnection(
       })
       .finally(() => {
         inputInFlight = false;
-        flushTerminalInput();
+        scheduleTerminalInputFlush(0);
       });
+  };
+  const scheduleTerminalInputFlush = (delayMs = TERMINAL_INPUT_BATCH_MS) => {
+    if (inputFlushTimer !== null || inputInFlight || disposed || terminalPid === null) return;
+    inputFlushTimer = setTimeout(flushTerminalInput, delayMs);
   };
   const enqueueTerminalInput = (data: Buffer) => {
     if (disposed || pendingInputBytes + data.byteLength > MAX_PENDING_TERMINAL_INPUT_BYTES) return;
     pendingInput.push(data);
     pendingInputBytes += data.byteLength;
-    flushTerminalInput();
+    scheduleTerminalInputFlush();
   };
 
   const sendControl = (message: Record<string, unknown>) => {
@@ -397,6 +409,7 @@ export function attachRuntimeConnection(
 
   webSocket.on("close", () => {
     disposed = true;
+    clearInputFlushTimer();
     pendingInput = [];
     pendingInputBytes = 0;
     clearInterval(heartbeat);
