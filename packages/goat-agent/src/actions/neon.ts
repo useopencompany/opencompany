@@ -88,7 +88,7 @@ export async function resolveNeonActions(
     if ((capability === "read" && !readEnabled) || (capability === "query" && !queryEnabled)) {
       return [];
     }
-    if (definition.annotations?.destructiveHint === true) return [];
+    if (!hasSupportedNeonSafetyContract(definition)) return [];
 
     return [
       {
@@ -190,7 +190,7 @@ async function executeNeonAction(input: {
       );
     }
     if (
-      currentDefinition.annotations?.destructiveHint === true ||
+      !hasSupportedNeonSafetyContract(currentDefinition) ||
       NEON_ACTION_CAPABILITIES[currentDefinition.name] !== input.expectedCapability
     ) {
       throw new GoatActionPermissionError(
@@ -299,6 +299,19 @@ function actionDescription(name: NeonActionToolName, remoteDescription?: string)
 
 function isNeonActionToolName(name: string): name is NeonActionToolName {
   return Object.hasOwn(NEON_ACTION_CAPABILITIES, name);
+}
+
+function hasSupportedNeonSafetyContract(definition: NeonToolDefinition) {
+  if (definition.annotations?.destructiveHint !== true) return true;
+
+  // Neon gives run_sql a destructive hint because the same tool can mutate
+  // databases in full-access mode. This integration always pins the hosted
+  // server to readonly=true, where Neon exposes run_sql for read queries only;
+  // validateNeonReadOnlySql adds a second local guard before execution.
+  return (
+    definition.name === "run_sql" &&
+    new URL(GOAT_NEON_MCP_ENDPOINT_URL).searchParams.get("readonly") === "true"
+  );
 }
 
 function neonInputSchema(value: Record<string, unknown>): JSONSchema7 & Record<string, unknown> {
