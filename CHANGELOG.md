@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-08-04
+
+### Added
+- OpenCompany Pro: a $20/month plan for a single workspace with room for up to 10 members, managed through Stripe billing (#1052) — @opencompany-bot.
+- Voice dictation in the composer — tap the mic, watch your words appear live, and edit before sending (#1054) — @opencompany-bot.
+- Connect Neon as a read-only integration to ask about your database's projects, branches, schemas, and data (#1056, #1059) — @opencompany-bot.
+- Goat can now post comments on Attio records, list entries, and threads (#1055) — @opencompany-bot.
+- Start a background chat straight from the composer by beginning your message with `&` (#1060) — @opencompany-bot.
+
+### Changed
+- Integrations that lose their connection now show a clear "Needs reconnect" state in Settings instead of failing silently (#1053) — @opencompany-bot.
+
+### Fixed
+- The sidebar's working indicator no longer lags behind chats that are actively running (#1051) — @opencompany-bot.
+- The coding workspace preview picker no longer lists internal sandbox ports as if they were your app (#1058) — @opencompany-bot.
+
 ## [1.6.0] - 2026-08-03
 
 ### Added
