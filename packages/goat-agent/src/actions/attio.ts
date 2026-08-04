@@ -13,9 +13,13 @@ import { goatIntegrations } from "@opencompany/db/goat-schema";
 import { and, desc, eq } from "drizzle-orm";
 import {
   GoatAttioApiRequestError,
+  hasGoatAttioCommentWriteScopes,
+  hasGoatAttioListCommentWriteScopes,
   hasGoatAttioListConfigurationWriteScope,
   hasGoatAttioListReadScopes,
   hasGoatAttioListWriteScopes,
+  hasGoatAttioRecordCommentWriteScopes,
+  hasGoatAttioRecordReadScopes,
   hasGoatAttioRecordWriteScopes,
   requestGoatAttioApi,
 } from "../integrations/attio";
@@ -45,6 +49,8 @@ const MAX_LIST_REFERENCE_CHARS = 2_000;
 const MAX_ATTRIBUTE_REFERENCE_CHARS = 200;
 const MAX_RECORD_ID_CHARS = 200;
 const MAX_ENTRY_ID_CHARS = 200;
+const MAX_COMMENT_ID_CHARS = 200;
+const MAX_COMMENT_CHARS = 6_000;
 const MAX_ATTRIBUTES = 30;
 const MAX_ATTRIBUTE_OPTIONS = 25;
 const MAX_FILTER_PROPERTIES = 12;
@@ -79,6 +85,7 @@ type AttioConnection = {
 
 type AttioCredential = {
   apiKey: string;
+  authorizedByWorkspaceMemberId?: string | null;
   objectSlugById: ReadonlyMap<string, AttioObjectSlug>;
   availableObjects: ReadonlySet<AttioObjectSlug>;
 };
@@ -108,6 +115,18 @@ type AttioRecordEntryInput = {
   list_api_slug?: unknown;
   entry_id?: unknown;
   created_at?: unknown;
+};
+
+type AttioCommentInput = {
+  id?: { comment_id?: unknown };
+  thread_id?: unknown;
+  content_plaintext?: unknown;
+  entry?: { entry_id?: unknown; list_id?: unknown };
+  record?: { record_id?: unknown; object_id?: unknown };
+  resolved_at?: unknown;
+  resolved_by?: unknown;
+  created_at?: unknown;
+  author?: unknown;
 };
 
 type AttioAttributeInput = {
@@ -161,11 +180,15 @@ export async function resolveAttioActions(
   const listConfigurationWriteConnections = writeConnections.filter((connection) =>
     hasGoatAttioListConfigurationWriteScope(connection.scopes),
   );
+  const commentWriteConnections = writeConnections.filter((connection) =>
+    hasGoatAttioCommentWriteScopes(connection.scopes),
+  );
   if (
     readConnections.length === 0 &&
     recordWriteConnections.length === 0 &&
     listWriteConnections.length === 0 &&
-    listConfigurationWriteConnections.length === 0
+    listConfigurationWriteConnections.length === 0 &&
+    commentWriteConnections.length === 0
   ) {
     return null;
   }
@@ -764,6 +787,134 @@ export async function resolveAttioActions(
     });
   }
 
+  if (commentWriteConnections.length > 0) {
+    const multipleWriteAccounts = commentWriteConnections.length > 1;
+    const writeAccountParam = attioAccountParam(commentWriteConnections, "comment in");
+    actions.push({
+      id: "attio.create_comment",
+      provider: "attio",
+      capability: "write",
+      ...permissionAnnotation("write", commentWriteConnections),
+      description:
+        "Create a plaintext Attio comment on a record, on a list entry, or as a reply to an existing thread. Record comments are workspace-visible; list-entry comments follow list access. Use only when the user explicitly asked to leave or reply with a CRM comment. Mention workspace members by email in the content when they should be notified.",
+      params: {
+        type: "object",
+        additionalProperties: false,
+        required: multipleWriteAccounts ? ["content", "account"] : ["content"],
+        properties: {
+          content: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_COMMENT_CHARS,
+            description:
+              "Plaintext comment body. Email addresses for Attio workspace members notify them; other email addresses become mailto links.",
+          },
+          object: {
+            type: "string",
+            enum: [...STANDARD_OBJECTS],
+            description:
+              'For a top-level record comment, the record type returned by attio.search_records. Must be paired with "record_id".',
+          },
+          record_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_RECORD_ID_CHARS,
+            description:
+              'For a top-level record comment, the record id returned by attio.search_records. Must be paired with "object".',
+          },
+          list: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_LIST_REFERENCE_CHARS,
+            description:
+              'For a list-entry comment, an Attio list UUID, API slug, or collection URL. Must be paired with "entry_id".',
+          },
+          entry_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_ENTRY_ID_CHARS,
+            description:
+              'For a list-entry comment, the entry id returned by attio.query_list or attio.list_record_entries. Must be paired with "list".',
+          },
+          thread_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_COMMENT_ID_CHARS,
+            description:
+              "To reply to an existing Attio comment thread, pass the thread id and omit record/list-entry target fields.",
+          },
+          author_workspace_member_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_COMMENT_ID_CHARS,
+            description:
+              "Optional Attio workspace member UUID to author the comment. Defaults to the member who authorized the API key.",
+          },
+          ...writeAccountParam,
+        },
+      },
+      execute: async (params, context) => {
+        assertKnownParams(
+          params,
+          multipleWriteAccounts
+            ? [
+                "content",
+                "object",
+                "record_id",
+                "list",
+                "entry_id",
+                "thread_id",
+                "author_workspace_member_id",
+                "account",
+              ]
+            : [
+                "content",
+                "object",
+                "record_id",
+                "list",
+                "entry_id",
+                "thread_id",
+                "author_workspace_member_id",
+              ],
+        );
+        const connection = resolveConnection(
+          commentWriteConnections,
+          multipleWriteAccounts ? requiredStringParam(params, "account") : undefined,
+        );
+        const credential = await getCredential(context, connection);
+        const content = parseAttioCommentContent(params.content);
+        const target = parseAttioCommentTarget(params, credential.availableObjects);
+        const authorId =
+          parseOptionalAttioAuthorId(params) ??
+          (await resolveAttioCommentAuthorId({ context, connection, credential }));
+        await assertAttioWriteStillEnabled(context, connection, target.permissionResource);
+        const response = await callAttioApi({
+          context,
+          connection,
+          credential,
+          path: "/comments",
+          method: "POST",
+          body: {
+            data: {
+              format: "plaintext",
+              content,
+              author: { type: "workspace-member", id: authorId },
+              ...target.body,
+            },
+          },
+        });
+        const comment = compactAttioComment(asRecord(response)?.data);
+        if (!comment) {
+          throw new Error("Attio returned an invalid comment response.");
+        }
+        return {
+          workspace: connection.selector,
+          comment,
+        };
+      },
+    });
+  }
+
   if (listConfigurationWriteConnections.length > 0) {
     const multipleWriteAccounts = listConfigurationWriteConnections.length > 1;
     const writeAccountParam = attioAccountParam(listConfigurationWriteConnections, "configure");
@@ -1223,11 +1374,13 @@ export async function resolveAttioActions(
 
   const hasWrites = actions.some((action) => action.capability === "write");
   const hasLists = actions.some((action) => action.id.includes("list"));
+  const hasComments = actions.some((action) => action.id.includes("comment"));
   const labelConnections = uniqueConnections([
     ...readConnections,
     ...recordWriteConnections,
     ...listWriteConnections,
     ...listConfigurationWriteConnections,
+    ...commentWriteConnections,
   ]);
   return {
     id: "attio",
@@ -1237,8 +1390,12 @@ export async function resolveAttioActions(
         : `Attio (${labelConnections.length} workspaces)`,
     description: hasWrites
       ? hasLists
-        ? "Search and inspect CRM records and lists, configure pipeline fields and options, add records to lists, and update records or pipeline entries in Attio."
-        : "Search, inspect, and update people, companies, and deals in Attio."
+        ? hasComments
+          ? "Search and inspect CRM records and lists, configure pipeline fields and options, add records to lists, update records or pipeline entries, and add comments in Attio."
+          : "Search and inspect CRM records and lists, configure pipeline fields and options, add records to lists, and update records or pipeline entries in Attio."
+        : hasComments
+          ? "Search, inspect, update, and comment on people, companies, and deals in Attio."
+          : "Search, inspect, and update people, companies, and deals in Attio."
       : hasLists
         ? "Search and inspect CRM records and lists in Attio."
         : "Search and inspect people, companies, and deals in Attio.",
@@ -1344,12 +1501,7 @@ function hasAttioReadScopes(scopes: string[]) {
   // Connections saved before scope tracking still came through the same
   // read/write setup flow; execution remains the final permission check.
   if (scopes.length === 0) return true;
-  const canReadObjects =
-    scopes.includes("object_configuration:read") ||
-    scopes.includes("object_configuration:read-write");
-  const canReadRecords =
-    scopes.includes("record_permission:read") || scopes.includes("record_permission:read-write");
-  return canReadObjects && canReadRecords;
+  return hasGoatAttioRecordReadScopes(scopes);
 }
 
 function baseConnectionLabel(connection: { workspaceId: string; workspaceName: string | null }) {
@@ -1420,7 +1572,12 @@ async function loadAttioCredential(
       `The Attio connection for ${connection.selector} has no usable standard objects; reconnect Attio in Settings → Integrations.`,
     );
   }
-  return { apiKey: payload.apiKey, objectSlugById, availableObjects };
+  return {
+    apiKey: payload.apiKey,
+    authorizedByWorkspaceMemberId: safeAttioApiIdentifier(payload.authorizedByWorkspaceMemberId),
+    objectSlugById,
+    availableObjects,
+  };
 }
 
 async function searchAttioRecords(input: {
@@ -1532,7 +1689,13 @@ async function hydrateAttioAttributeOptions(
 async function assertAttioWriteStillEnabled(
   context: GoatActionExecuteContext,
   connection: AttioConnection,
-  resource: "record" | "list_entry" | "list_configuration",
+  resource:
+    | "record"
+    | "list_entry"
+    | "list_configuration"
+    | "record_comment"
+    | "list_comment"
+    | "comment",
 ) {
   const [row] = await getDb()
     .select({
@@ -1566,7 +1729,13 @@ async function assertAttioWriteStillEnabled(
       ? hasGoatAttioRecordWriteScopes(row.scopes)
       : resource === "list_entry"
         ? hasGoatAttioListWriteScopes(row.scopes)
-        : hasGoatAttioListConfigurationWriteScope(row.scopes);
+        : resource === "list_configuration"
+          ? hasGoatAttioListConfigurationWriteScope(row.scopes)
+          : resource === "record_comment"
+            ? hasGoatAttioRecordCommentWriteScopes(row.scopes)
+            : resource === "list_comment"
+              ? hasGoatAttioListCommentWriteScopes(row.scopes)
+              : hasGoatAttioCommentWriteScopes(row.scopes);
   if (!hasWriteScope) {
     throw new GoatActionPermissionError(
       "attio",
@@ -1834,6 +2003,113 @@ function parseAttioWriteValues(value: unknown): Record<string, unknown> {
   const normalized = normalizeAttioJson(values, "values", 0);
   assertAttioJsonSize(normalized, "values", MAX_WRITE_JSON_CHARS);
   return normalized as Record<string, unknown>;
+}
+
+function parseAttioCommentContent(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new GoatActionInvalidParamsError('"content" must be a non-empty string.');
+  }
+  const content = value.trim();
+  if (content.length > MAX_COMMENT_CHARS) {
+    throw new GoatActionInvalidParamsError(
+      `"content" must be at most ${MAX_COMMENT_CHARS} characters.`,
+    );
+  }
+  return content;
+}
+
+function parseOptionalAttioAuthorId(params: Record<string, unknown>) {
+  const value = params.author_workspace_member_id;
+  if (value === undefined || value === null) return undefined;
+  const id = safeAttioApiIdentifier(value);
+  if (!id || id.length > MAX_COMMENT_ID_CHARS) {
+    throw new GoatActionInvalidParamsError(
+      `"author_workspace_member_id" must be an Attio workspace member UUID.`,
+    );
+  }
+  return id;
+}
+
+function parseAttioCommentTarget(
+  params: Record<string, unknown>,
+  availableObjects: ReadonlySet<AttioObjectSlug>,
+): {
+  permissionResource: "record_comment" | "list_comment" | "comment";
+  body:
+    | { thread_id: string }
+    | { record: { object: AttioObjectSlug; record_id: string } }
+    | { entry: { list: string; entry_id: string } };
+} {
+  const hasThread = params.thread_id !== undefined && params.thread_id !== null;
+  const hasObject = params.object !== undefined && params.object !== null;
+  const hasRecordId = params.record_id !== undefined && params.record_id !== null;
+  const hasList = params.list !== undefined && params.list !== null;
+  const hasEntryId = params.entry_id !== undefined && params.entry_id !== null;
+  const targetCount =
+    Number(hasThread) + Number(hasObject || hasRecordId) + Number(hasList || hasEntryId);
+  if (targetCount !== 1) {
+    throw new GoatActionInvalidParamsError(
+      'Pass exactly one comment target: "thread_id", or both "object" and "record_id", or both "list" and "entry_id".',
+    );
+  }
+  if (hasThread) {
+    return {
+      permissionResource: "comment",
+      body: { thread_id: parseBoundedId(params, "thread_id", MAX_COMMENT_ID_CHARS) },
+    };
+  }
+  if (hasObject || hasRecordId) {
+    if (!hasObject || !hasRecordId) {
+      throw new GoatActionInvalidParamsError(
+        'Record comments require both "object" and "record_id".',
+      );
+    }
+    const object = parseObject(requiredStringParam(params, "object"), availableObjects);
+    const recordId = parseBoundedId(params, "record_id", MAX_RECORD_ID_CHARS);
+    return {
+      permissionResource: "record_comment",
+      body: { record: { object, record_id: recordId } },
+    };
+  }
+  if (!hasList || !hasEntryId) {
+    throw new GoatActionInvalidParamsError(
+      'List-entry comments require both "list" and "entry_id".',
+    );
+  }
+  const reference = parseAttioListReference(requiredStringParam(params, "list"));
+  const entryId = parseBoundedId(params, "entry_id", MAX_ENTRY_ID_CHARS);
+  return {
+    permissionResource: "list_comment",
+    body: { entry: { list: reference.list, entry_id: entryId } },
+  };
+}
+
+async function resolveAttioCommentAuthorId(input: {
+  context: GoatActionExecuteContext;
+  connection: AttioConnection;
+  credential: AttioCredential;
+}) {
+  if (input.credential.authorizedByWorkspaceMemberId) {
+    return input.credential.authorizedByWorkspaceMemberId;
+  }
+  const response = await callAttioApi({
+    context: input.context,
+    connection: input.connection,
+    credential: input.credential,
+    path: "/self",
+  });
+  const authorId = boundedIdentifier(
+    asRecord(response)?.authorized_by_workspace_member_id,
+    MAX_COMMENT_ID_CHARS,
+  );
+  if (!authorId) {
+    throw new GoatActionAuthError(
+      "auth_expired",
+      "attio",
+      `Attio did not return an author for ${input.connection.selector}; reconnect Attio in Settings → Integrations.`,
+    );
+  }
+  return authorId;
 }
 
 function normalizeAttioJson(value: unknown, path: string, depth: number): unknown {
@@ -2240,6 +2516,43 @@ function compactAttioListEntry(
     ...(createdAt ? { createdAt } : {}),
     values: compactAttioPropertyBag(entry.entry_values, MAX_LIST_PROPERTIES),
   };
+}
+
+function compactAttioComment(value: unknown) {
+  const comment = asRecord(value) as AttioCommentInput | null;
+  if (!comment) return null;
+  const id = boundedIdentifier(comment.id?.comment_id, MAX_COMMENT_ID_CHARS);
+  const threadId = boundedIdentifier(comment.thread_id, MAX_COMMENT_ID_CHARS);
+  const contentPlaintext = boundedString(comment.content_plaintext, MAX_COMMENT_CHARS);
+  if (!id || !threadId || !contentPlaintext) return null;
+  const listId = boundedIdentifier(comment.entry?.list_id, 200);
+  const entryId = boundedIdentifier(comment.entry?.entry_id, MAX_ENTRY_ID_CHARS);
+  const objectId = boundedIdentifier(comment.record?.object_id, 200);
+  const recordId = boundedIdentifier(comment.record?.record_id, MAX_RECORD_ID_CHARS);
+  const author = compactAttioActor(comment.author);
+  const resolvedBy = compactAttioActor(comment.resolved_by);
+  const resolvedAt = boundedString(comment.resolved_at, 80);
+  const createdAt = boundedString(comment.created_at, 80);
+  return {
+    id,
+    threadId,
+    contentPlaintext,
+    ...(listId && entryId ? { entry: { listId, entryId } } : {}),
+    ...(objectId && recordId ? { record: { objectId, recordId } } : {}),
+    ...(resolvedAt ? { resolvedAt } : {}),
+    ...(resolvedBy ? { resolvedBy } : {}),
+    ...(createdAt ? { createdAt } : {}),
+    ...(author ? { author } : {}),
+  };
+}
+
+function compactAttioActor(value: unknown) {
+  const actor = asRecord(value);
+  if (!actor) return null;
+  const type = safeAttioApiIdentifier(actor.type);
+  const id = actor.id === null ? null : boundedIdentifier(actor.id, MAX_COMMENT_ID_CHARS);
+  if (!type || (actor.id !== null && !id)) return null;
+  return { type, id };
 }
 
 function compactAttioParentRecord(record: AttioRecordInput, object: string) {

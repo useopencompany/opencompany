@@ -52,6 +52,7 @@ export type GoatAttioEventRef = {
 export type GoatAttioApiKeyCredentialPayload = {
   apiKey: string;
   workspaceId: string;
+  authorizedByWorkspaceMemberId?: string | null;
   webhookId: string | null;
   webhookSecret: string | null;
   objectIdBySlug: Partial<Record<GoatAttioObjectType, string>>;

@@ -42,6 +42,7 @@ const LIST_READ_SCOPES = ["list_configuration:read", "list_entry:read"];
 const RECORD_WRITE_SCOPES = ["object_configuration:read", "record_permission:read-write"];
 const LIST_WRITE_SCOPES = ["list_configuration:read", "list_entry:read-write"];
 const LIST_CONFIGURATION_WRITE_SCOPES = ["list_configuration:read-write", "list_entry:read-write"];
+const COMMENT_WRITE_SCOPES = ["comment:read-write"];
 const LIST_ID = "33ebdbe9-e529-47c9-b894-0ba25e9c15c0";
 const VIEW_ID = "cf7aaeb5-7507-4a84-9c26-9d36e34d7b70";
 const LIST_URL = `https://app.attio.com/acme/collection/${LIST_ID}/view/${VIEW_ID}`;
@@ -150,13 +151,18 @@ describe("resolveAttioActions", () => {
   it("puts record, list-membership, and list-entry updates behind the Attio write capability", async () => {
     mocks.dbRows = [
       connectedRow({
-        scopes: [...RECORD_WRITE_SCOPES, ...LIST_CONFIGURATION_WRITE_SCOPES],
+        scopes: [
+          ...RECORD_WRITE_SCOPES,
+          ...LIST_CONFIGURATION_WRITE_SCOPES,
+          ...COMMENT_WRITE_SCOPES,
+        ],
         capabilityModes: { write: "ask" },
       }),
     ];
 
     const catalog = await resolveAttioActions("user_1");
     const updateRecord = catalog?.actions.find((entry) => entry.id === "attio.update_record");
+    const createComment = catalog?.actions.find((entry) => entry.id === "attio.create_comment");
     const addToList = catalog?.actions.find((entry) => entry.id === "attio.add_record_to_list");
     const updateEntry = catalog?.actions.find((entry) => entry.id === "attio.update_list_entry");
     const createAttribute = catalog?.actions.find((entry) => entry.id === "attio.create_attribute");
@@ -167,6 +173,7 @@ describe("resolveAttioActions", () => {
 
     for (const action of [
       updateRecord,
+      createComment,
       createAttribute,
       createStatus,
       createSelectOption,
@@ -185,6 +192,14 @@ describe("resolveAttioActions", () => {
       });
     }
     expect(updateRecord?.params.required).toEqual(["object", "record_id", "values"]);
+    expect(createComment?.params).toMatchObject({
+      required: ["content"],
+      properties: {
+        content: { type: "string", maxLength: 6000 },
+        object: { enum: ["people", "companies", "deals"] },
+        thread_id: { type: "string", maxLength: 200 },
+      },
+    });
     expect(createAttribute?.params).toMatchObject({
       required: ["list", "title", "api_slug", "type"],
       properties: {
@@ -255,7 +270,11 @@ describe("resolveAttioActions", () => {
 
     mocks.dbRows = [
       connectedRow({
-        scopes: [...RECORD_WRITE_SCOPES, ...LIST_CONFIGURATION_WRITE_SCOPES],
+        scopes: [
+          ...RECORD_WRITE_SCOPES,
+          ...LIST_CONFIGURATION_WRITE_SCOPES,
+          ...COMMENT_WRITE_SCOPES,
+        ],
         capabilityModes: { read: "off", write: "on" },
       }),
     ];
@@ -263,6 +282,7 @@ describe("resolveAttioActions", () => {
     expect(writeOnly?.actions.some((entry) => entry.capability === "read")).toBe(false);
     expect(writeOnly?.actions.map((entry) => entry.id)).toEqual([
       "attio.update_record",
+      "attio.create_comment",
       "attio.create_attribute",
       "attio.create_status",
       "attio.create_select_option",
@@ -981,7 +1001,11 @@ describe("Attio updates", () => {
   beforeEach(() => {
     mocks.dbRows = [
       connectedRow({
-        scopes: [...RECORD_WRITE_SCOPES, ...LIST_CONFIGURATION_WRITE_SCOPES],
+        scopes: [
+          ...RECORD_WRITE_SCOPES,
+          ...LIST_CONFIGURATION_WRITE_SCOPES,
+          ...COMMENT_WRITE_SCOPES,
+        ],
         capabilityModes: { write: "ask" },
       }),
     ];
@@ -1132,6 +1156,185 @@ describe("Attio updates", () => {
         values: { stage: "Invited" },
       },
     });
+  });
+
+  it("creates a native comment on an Attio record using the stored author", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          id: { comment_id: "comment_1" },
+          thread_id: "thread_1",
+          content_plaintext: "Send the founder follow-up.",
+          record: { object_id: "object_people", record_id: "person_1" },
+          created_at: "2026-07-22T10:00:00.000Z",
+          author: { type: "workspace-member", id: "member_1" },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await findAction("attio.create_comment").then((action) =>
+      action.execute(
+        {
+          object: "people",
+          record_id: "person_1",
+          content: " Send the founder follow-up. ",
+        },
+        CONTEXT,
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.attio.com/v2/comments",
+      expect.objectContaining({
+        method: "POST",
+        signal: CONTEXT.signal,
+        body: JSON.stringify({
+          data: {
+            format: "plaintext",
+            content: "Send the founder follow-up.",
+            author: { type: "workspace-member", id: "member_1" },
+            record: { object: "people", record_id: "person_1" },
+          },
+        }),
+      }),
+    );
+    expect(result).toEqual({
+      workspace: "Acme",
+      comment: {
+        id: "comment_1",
+        threadId: "thread_1",
+        contentPlaintext: "Send the founder follow-up.",
+        record: { objectId: "object_people", recordId: "person_1" },
+        createdAt: "2026-07-22T10:00:00.000Z",
+        author: { type: "workspace-member", id: "member_1" },
+      },
+    });
+  });
+
+  it("creates a native comment on an Attio list entry", async () => {
+    mocks.dbRows = [
+      connectedRow({
+        scopes: [...READ_SCOPES, ...LIST_WRITE_SCOPES, ...COMMENT_WRITE_SCOPES],
+        capabilityModes: { write: "ask" },
+      }),
+    ];
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          id: { comment_id: "comment_2" },
+          thread_id: "thread_2",
+          content_plaintext: "Move this candidate after the onsite.",
+          entry: { list_id: LIST_ID, entry_id: "entry_1" },
+          author: { type: "workspace-member", id: "member_1" },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await findAction("attio.create_comment").then((action) =>
+      action.execute(
+        {
+          list: LIST_URL,
+          entry_id: "entry_1",
+          content: "Move this candidate after the onsite.",
+        },
+        CONTEXT,
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.attio.com/v2/comments",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          data: {
+            format: "plaintext",
+            content: "Move this candidate after the onsite.",
+            author: { type: "workspace-member", id: "member_1" },
+            entry: { list: LIST_ID, entry_id: "entry_1" },
+          },
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      workspace: "Acme",
+      comment: {
+        id: "comment_2",
+        threadId: "thread_2",
+        entry: { listId: LIST_ID, entryId: "entry_1" },
+      },
+    });
+  });
+
+  it("falls back to /self for legacy Attio credentials without a stored author", async () => {
+    mocks.loadCredential.mockResolvedValue(credential("workspace_1", true, null));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ authorized_by_workspace_member_id: "member_from_self" }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            id: { comment_id: "comment_3" },
+            thread_id: "thread_3",
+            content_plaintext: "Replying here.",
+            author: { type: "workspace-member", id: "member_from_self" },
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await findAction("attio.create_comment").then((action) =>
+      action.execute({ thread_id: "thread_3", content: "Replying here." }, CONTEXT),
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://api.attio.com/v2/self",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.attio.com/v2/comments",
+      expect.objectContaining({
+        body: JSON.stringify({
+          data: {
+            format: "plaintext",
+            content: "Replying here.",
+            author: { type: "workspace-member", id: "member_from_self" },
+            thread_id: "thread_3",
+          },
+        }),
+      }),
+    );
+  });
+
+  it("validates comment targets before posting to Attio", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const action = await findAction("attio.create_comment");
+
+    await expect(action.execute({ content: "Missing target" }, CONTEXT)).rejects.toThrow(
+      "Pass exactly one comment target",
+    );
+    await expect(
+      action.execute({ object: "people", content: "Missing record id" }, CONTEXT),
+    ).rejects.toThrow('Record comments require both "object" and "record_id"');
+    await expect(
+      action.execute(
+        { object: "people", record_id: "person_1", thread_id: "thread_1", content: "Two" },
+        CONTEXT,
+      ),
+    ).rejects.toThrow("Pass exactly one comment target");
+    await expect(
+      action.execute({ thread_id: "thread_1", content: "x".repeat(6001) }, CONTEXT),
+    ).rejects.toThrow('"content" must be at most 6000');
+    await expect(
+      action.execute({ object: "contacts", record_id: "contact_1", content: "Contact" }, CONTEXT),
+    ).rejects.toThrow('"object" must be one of people, companies, or deals');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("can add an existing record to a list without initial list fields", async () => {
@@ -1517,11 +1720,16 @@ function connectedRow(
   };
 }
 
-function credential(workspaceId = "workspace_1", includeDeals = false) {
+function credential(
+  workspaceId = "workspace_1",
+  includeDeals = false,
+  authorId: string | null = "member_1",
+) {
   return {
     payload: {
       apiKey: "attio_test_api_key",
       workspaceId,
+      authorizedByWorkspaceMemberId: authorId,
       webhookId: null,
       webhookSecret: null,
       objectIdBySlug: {

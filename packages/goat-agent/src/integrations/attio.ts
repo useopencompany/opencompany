@@ -44,6 +44,7 @@ export type GoatAttioWorkspaceIdentity = {
   workspaceId: string;
   workspaceName: string | null;
   workspaceSlug: string | null;
+  authorizedByWorkspaceMemberId: string | null;
   scopes: string[];
 };
 
@@ -62,6 +63,15 @@ export function hasGoatAttioListReadScopes(scopes: readonly string[]) {
   return canReadListConfiguration && canReadListEntries;
 }
 
+export function hasGoatAttioRecordReadScopes(scopes: readonly string[]) {
+  const canReadObjectConfiguration =
+    scopes.includes("object_configuration:read") ||
+    scopes.includes("object_configuration:read-write");
+  const canReadRecords =
+    scopes.includes("record_permission:read") || scopes.includes("record_permission:read-write");
+  return canReadObjectConfiguration && canReadRecords;
+}
+
 export function hasGoatAttioRecordWriteScopes(scopes: readonly string[]) {
   const canReadObjectConfiguration =
     scopes.includes("object_configuration:read") ||
@@ -77,6 +87,21 @@ export function hasGoatAttioListWriteScopes(scopes: readonly string[]) {
 
 export function hasGoatAttioListConfigurationWriteScope(scopes: readonly string[]) {
   return scopes.includes("list_configuration:read-write");
+}
+
+export function hasGoatAttioRecordCommentWriteScopes(scopes: readonly string[]) {
+  return scopes.includes("comment:read-write") && hasGoatAttioRecordReadScopes(scopes);
+}
+
+export function hasGoatAttioListCommentWriteScopes(scopes: readonly string[]) {
+  return scopes.includes("comment:read-write") && hasGoatAttioListReadScopes(scopes);
+}
+
+export function hasGoatAttioCommentWriteScopes(scopes: readonly string[]) {
+  return (
+    scopes.includes("comment:read-write") &&
+    (hasGoatAttioRecordReadScopes(scopes) || hasGoatAttioListReadScopes(scopes))
+  );
 }
 
 // Attio publishes no key format; only reject strings that are clearly not a
@@ -112,6 +137,7 @@ export async function validateGoatAttioApiKey(apiKey: string): Promise<GoatAttio
     workspace_id?: string;
     workspace_name?: string;
     workspace_slug?: string;
+    authorized_by_workspace_member_id?: string;
     scope?: string | string[];
   } | null;
   if (!body?.active || typeof body.workspace_id !== "string" || !body.workspace_id) {
@@ -123,6 +149,11 @@ export async function validateGoatAttioApiKey(apiKey: string): Promise<GoatAttio
       workspaceId: body.workspace_id,
       workspaceName: typeof body.workspace_name === "string" ? body.workspace_name : null,
       workspaceSlug: typeof body.workspace_slug === "string" ? body.workspace_slug : null,
+      authorizedByWorkspaceMemberId:
+        typeof body.authorized_by_workspace_member_id === "string" &&
+        body.authorized_by_workspace_member_id
+          ? body.authorized_by_workspace_member_id
+          : null,
       scopes: parseGoatAttioScopes(body.scope),
     },
   };
@@ -304,6 +335,7 @@ export async function connectGoatAttioIntegration(input: {
     payload = {
       apiKey: input.apiKey,
       workspaceId: input.identity.workspaceId,
+      authorizedByWorkspaceMemberId: input.identity.authorizedByWorkspaceMemberId,
       webhookId: webhook.webhookId,
       webhookSecret: webhook.secret,
       objectIdBySlug,

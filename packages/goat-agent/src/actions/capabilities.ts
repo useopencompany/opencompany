@@ -119,7 +119,8 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
     {
       id: "write",
       label: "Update Attio",
-      description: "Update CRM records, add them to lists, and change list-entry fields.",
+      description:
+        "Update CRM records, add them to lists, change list-entry fields, and add comments.",
       defaultMode: "ask",
     },
   ],
