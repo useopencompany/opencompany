@@ -20,22 +20,26 @@ const [goatValues, webValues] = await Promise.all([
   readRequiredValues(webProjectId, webEnv, requiredWebKeys, "web"),
 ]);
 
+const invalid = [];
 if (!goatValues.GOAT_STRIPE_API_KEY.startsWith("rk_live_")) {
-  throw new Error("Goat GOAT_STRIPE_API_KEY must be a live restricted Stripe key.");
+  invalid.push("Goat GOAT_STRIPE_API_KEY must be a live restricted Stripe key.");
 }
 if (!/^[rs]k_live_/.test(webValues.STRIPE_SECRET_KEY)) {
-  throw new Error("Web STRIPE_SECRET_KEY must be a live Stripe key.");
+  invalid.push("Web STRIPE_SECRET_KEY must be a live Stripe key.");
 }
 if (!webValues.STRIPE_WEBHOOK_SECRET.startsWith("whsec_")) {
-  throw new Error("Web STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.");
+  invalid.push("Web STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.");
 }
 if (goatValues.GOAT_STRIPE_CHECKOUT_ENABLED !== "true") {
-  throw new Error(
+  invalid.push(
     "Goat GOAT_STRIPE_CHECKOUT_ENABLED must be true before a production billing release.",
   );
 }
 if (goatValues.CRON_SECRET.length < 32) {
-  throw new Error("Goat CRON_SECRET must be at least 32 characters.");
+  invalid.push("Goat CRON_SECRET must be at least 32 characters.");
+}
+if (invalid.length > 0) {
+  throw new Error(`Production Goat billing configuration is invalid:\n- ${invalid.join("\n- ")}`);
 }
 
 console.log("Verified production Goat billing, webhook, and reconciliation configuration.");
