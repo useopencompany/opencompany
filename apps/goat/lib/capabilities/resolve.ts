@@ -5,6 +5,7 @@ import type {
   GoatActionSourceDescriptor,
   ResolvedGoatAction,
 } from "@opencompany/goat-agent/actions/types";
+import { GOAT_ACTION_EFFECTS_METERED_READ } from "@opencompany/goat-agent/actions/types";
 import {
   MANAGED_CAPABILITY_ACTIONS,
   MANAGED_CAPABILITY_SOURCE_DETAILS,
@@ -38,6 +39,7 @@ export async function resolveGoatManagedCapabilities(
     id: spec.id,
     provider: spec.source,
     capability: "read" as const,
+    effects: GOAT_ACTION_EFFECTS_METERED_READ,
     description: spec.description,
     params: spec.params,
     timeoutMs: GOAT_CAPABILITY_ACTION_TIMEOUT_MS,

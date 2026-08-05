@@ -91,7 +91,8 @@ export async function evaluateManagedCapabilityApproval(input: {
       action: input.spec.id,
       params: input.params,
     });
-    const cached = input.turnState.quotesByToolCallId.get(input.toolCallId);
+    const turnSnapshot = await capabilityTurnSnapshot(input.turnState);
+    const cached = turnSnapshot.quotesByToolCallId.get(input.toolCallId);
     if (cached) {
       return cached.inputHash === inputHash && cached.decision === "approval_required";
     }
@@ -109,18 +110,23 @@ export async function evaluateManagedCapabilityApproval(input: {
       sumGoatCapabilitySessionSpendUsdMicros({
         workspaceId: input.workspaceId,
         chatSessionId: input.chatSessionId,
-        excludeToolCallIds: input.turnState.admittedToolCallIds,
+        excludeToolCallIds: turnSnapshot.admittedToolCallIds,
       }),
     ]);
     if (
-      spentUsdMicros + input.turnState.quotedTotalUsdMicros + quote.quoteTotalCostUsdMicros <=
+      spentUsdMicros + turnSnapshot.quotedTotalUsdMicros + quote.quoteTotalCostUsdMicros <=
       budgetUsdMicros
     ) {
-      admitCapabilityQuote(input.turnState, input.toolCallId, {
-        ...quote,
-        decision: "auto",
-      });
-      return false;
+      const admitted = await admitCapabilityQuote(
+        input.turnState,
+        input.toolCallId,
+        {
+          ...quote,
+          decision: "auto",
+        },
+        budgetUsdMicros - spentUsdMicros,
+      );
+      if (admitted) return false;
     }
 
     const createdAt = input.now?.() ?? new Date();
@@ -141,11 +147,16 @@ export async function evaluateManagedCapabilityApproval(input: {
       approvalExpiresAt: new Date(createdAt.getTime() + GOAT_CAPABILITY_APPROVAL_EXPIRES_MS),
       now: createdAt,
     });
-    input.turnState.quotesByToolCallId.set(input.toolCallId, {
-      ...quote,
-      decision: "approval_required",
-      runId: run.id,
-    });
+    await storeCapabilityQuote(
+      input.turnState,
+      input.toolCallId,
+      {
+        ...quote,
+        decision: "approval_required",
+        runId: run.id,
+      },
+      false,
+    );
     return true;
   } catch {
     // AI SDK treats needsApproval failures as stream errors. Execution owns
@@ -202,7 +213,8 @@ export async function executeManagedCapability(input: {
     params: input.params,
   });
   const toolCallId = input.context.toolCallId ?? "";
-  const cachedQuote = toolCallId ? turnState.quotesByToolCallId.get(toolCallId) : undefined;
+  const turnSnapshot = await capabilityTurnSnapshot(turnState);
+  const cachedQuote = toolCallId ? turnSnapshot.quotesByToolCallId.get(toolCallId) : undefined;
   if (cachedQuote && cachedQuote.inputHash !== inputHash) {
     throw new GoatActionExecutionError(
       "provider_error",
@@ -229,10 +241,10 @@ export async function executeManagedCapability(input: {
   }
 
   try {
-    claimAsyncCapabilityRun(input.spec, turnState);
+    await claimAsyncCapabilityRun(input.spec, turnState, toolCallId);
   } catch (error) {
     if (toolCallId && cachedQuote?.decision === "auto") {
-      releaseCapabilityQuote(turnState, toolCallId);
+      await releaseCapabilityQuote(turnState, toolCallId);
     }
     throw error;
   }
@@ -276,14 +288,14 @@ export async function executeManagedCapability(input: {
         sumGoatCapabilitySessionSpendUsdMicros({
           workspaceId,
           chatSessionId,
-          excludeToolCallIds: turnState.admittedToolCallIds,
+          excludeToolCallIds: turnSnapshot.admittedToolCallIds,
         }),
       ]);
       if (
-        spentUsdMicros + turnState.quotedTotalUsdMicros + quote.quoteTotalCostUsdMicros >
+        spentUsdMicros + turnSnapshot.quotedTotalUsdMicros + quote.quoteTotalCostUsdMicros >
         budgetUsdMicros
       ) {
-        releaseAsyncCapabilityRun(input.spec, turnState);
+        await releaseAsyncCapabilityRun(input.spec, turnState, toolCallId);
         throw new GoatActionExecutionError(
           "approval_required",
           "This paid lookup still exceeds the session budget. Ask again only if the user wants a fresh approval card.",
@@ -291,7 +303,19 @@ export async function executeManagedCapability(input: {
       }
       quote = { ...quote, decision: "auto" };
       if (toolCallId) {
-        admitCapabilityQuote(turnState, toolCallId, quote);
+        const admitted = await admitCapabilityQuote(
+          turnState,
+          toolCallId,
+          quote,
+          budgetUsdMicros - spentUsdMicros,
+        );
+        if (!admitted) {
+          await releaseAsyncCapabilityRun(input.spec, turnState, toolCallId);
+          throw new GoatActionExecutionError(
+            "approval_required",
+            "Concurrent paid lookups consumed the remaining session budget. Ask again only if the user wants a fresh approval card.",
+          );
+        }
       } else {
         turnState.quotedTotalUsdMicros += quote.quoteTotalCostUsdMicros;
       }
@@ -629,20 +653,59 @@ async function inspectCapabilityQuote(input: {
   };
 }
 
-function admitCapabilityQuote(
+async function capabilityTurnSnapshot(turnState: GoatCapabilityTurnState) {
+  return turnState.governance?.load() ?? turnState;
+}
+
+async function storeCapabilityQuote(
   turnState: GoatCapabilityTurnState,
   toolCallId: string,
   quote: GoatCapabilityQuote,
+  admitted: boolean,
+  maxQuotedTotalUsdMicros?: number,
 ) {
-  if (turnState.quotesByToolCallId.has(toolCallId)) return;
-  turnState.quotedTotalUsdMicros += quote.quoteTotalCostUsdMicros;
-  turnState.admittedToolCallIds.push(toolCallId);
+  if (turnState.governance) {
+    return turnState.governance.storeQuote({
+      toolCallId,
+      quote,
+      admitted,
+      ...(maxQuotedTotalUsdMicros === undefined ? {} : { maxQuotedTotalUsdMicros }),
+    });
+  }
+  if (turnState.quotesByToolCallId.has(toolCallId)) return true;
+  if (admitted) {
+    if (
+      maxQuotedTotalUsdMicros !== undefined &&
+      turnState.quotedTotalUsdMicros + quote.quoteTotalCostUsdMicros > maxQuotedTotalUsdMicros
+    ) {
+      return false;
+    }
+    turnState.quotedTotalUsdMicros += quote.quoteTotalCostUsdMicros;
+    turnState.admittedToolCallIds.push(toolCallId);
+  }
   turnState.quotesByToolCallId.set(toolCallId, quote);
+  return true;
 }
 
-function releaseCapabilityQuote(turnState: GoatCapabilityTurnState, toolCallId: string) {
-  const quote = turnState.quotesByToolCallId.get(toolCallId);
+async function admitCapabilityQuote(
+  turnState: GoatCapabilityTurnState,
+  toolCallId: string,
+  quote: GoatCapabilityQuote,
+  maxQuotedTotalUsdMicros?: number,
+) {
+  return storeCapabilityQuote(turnState, toolCallId, quote, true, maxQuotedTotalUsdMicros);
+}
+
+async function releaseCapabilityQuote(turnState: GoatCapabilityTurnState, toolCallId: string) {
+  const quote = (await capabilityTurnSnapshot(turnState)).quotesByToolCallId.get(toolCallId);
   if (!quote) return;
+  if (turnState.governance) {
+    await turnState.governance.releaseQuote({
+      toolCallId,
+      quoteTotalCostUsdMicros: quote.quoteTotalCostUsdMicros,
+    });
+    return;
+  }
   turnState.quotesByToolCallId.delete(toolCallId);
   turnState.admittedToolCallIds = turnState.admittedToolCallIds.filter((id) => id !== toolCallId);
   turnState.quotedTotalUsdMicros = Math.max(
@@ -651,11 +714,25 @@ function releaseCapabilityQuote(turnState: GoatCapabilityTurnState, toolCallId: 
   );
 }
 
-function claimAsyncCapabilityRun(
+async function claimAsyncCapabilityRun(
   spec: ManagedCapabilityActionSpec,
   turnState: GoatCapabilityTurnState,
+  toolCallId: string,
 ) {
   if (spec.executionMode !== "async") return;
+  if (turnState.governance && toolCallId) {
+    const claimed = await turnState.governance.claimAsyncRun({
+      toolCallId,
+      maxRuns: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
+    });
+    if (!claimed) {
+      throw new GoatActionExecutionError(
+        "call_budget",
+        `Only ${GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN} long-running paid capabilities can be started in a turn.`,
+      );
+    }
+    return;
+  }
   if (turnState.asyncRunsStarted >= GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN) {
     throw new GoatActionExecutionError(
       "call_budget",
@@ -666,11 +743,16 @@ function claimAsyncCapabilityRun(
   turnState.asyncRunsStarted += 1;
 }
 
-function releaseAsyncCapabilityRun(
+async function releaseAsyncCapabilityRun(
   spec: ManagedCapabilityActionSpec,
   turnState: GoatCapabilityTurnState,
+  toolCallId: string,
 ) {
   if (spec.executionMode !== "async") return;
+  if (turnState.governance && toolCallId) {
+    await turnState.governance.releaseAsyncRun({ toolCallId });
+    return;
+  }
   turnState.asyncRunsStarted = Math.max(0, turnState.asyncRunsStarted - 1);
 }
 

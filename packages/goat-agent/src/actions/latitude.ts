@@ -8,6 +8,8 @@ import {
 } from "../integrations/latitude-mcp";
 import { effectiveCapabilityMode, type GoatCapabilityId, providerCapability } from "./capabilities";
 import {
+  GOAT_ACTION_EFFECTS_READ,
+  GOAT_ACTION_EFFECTS_WRITE,
   GoatActionAuthError,
   type GoatActionExecuteContext,
   GoatActionInvalidParamsError,
@@ -68,6 +70,7 @@ export async function resolveLatitudeActions(
         id: `latitude.${definition.name}`,
         provider: "latitude",
         capability,
+        effects: capability === "read" ? GOAT_ACTION_EFFECTS_READ : GOAT_ACTION_EFFECTS_WRITE,
         ...permissionAnnotation(capability, {
           integrationId,
           capabilityModes: state.capabilityModes,

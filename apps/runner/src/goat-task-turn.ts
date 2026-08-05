@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
-  GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
+  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
 } from "@opencompany/agent-runtime";
 import {
   captureGoatLlmUsageRecorded,
@@ -921,7 +921,7 @@ function createNextTaskTurn(input: {
     chatModel: input.harnessSpec.model,
     runtimeModel,
     hostToolContractVersion:
-      input.harnessSpec.engine === "opencompany" ? null : GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
+      input.harnessSpec.engine === "opencompany" ? null : GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
     settings: input.settings ?? {
       ...(input.harnessSpec.codex?.reasoningEffort
         ? { reasoningEffort: input.harnessSpec.codex.reasoningEffort }

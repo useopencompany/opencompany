@@ -1,5 +1,6 @@
 export * from "./client";
 export * from "./codex-auth";
+export * from "./goat-action-governance";
 export * from "./goat-brain-files";
 export * from "./goat-brain-import";
 export * from "./goat-brain-ingest";

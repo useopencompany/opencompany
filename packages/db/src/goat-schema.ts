@@ -3168,6 +3168,60 @@ export const goatChatShares = goat.table(
   }),
 );
 
+// Harness-neutral, durable governance for one cloud action turn. It is the
+// atomic enforcement boundary shared by Codex and MCP requests; foreground
+// chat uses the same action service with request-local governance.
+export const goatActionTurns = goat.table(
+  "action_turns",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id").notNull(),
+    turnId: text("turn_id").notNull(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    policy: text("policy")
+      .$type<"foregroundInteractive" | "cloudReadOnly" | "headless">()
+      .notNull(),
+    actionCallCount: integer("action_call_count").notNull().default(0),
+    invocationIds: jsonb("invocation_ids").$type<string[]>().notNull().default([]),
+    listedSourceIds: jsonb("listed_source_ids").$type<string[]>().notNull().default([]),
+    quotedTotalUsdMicros: bigint("quoted_total_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    admittedInvocationIds: jsonb("admitted_invocation_ids").$type<string[]>().notNull().default([]),
+    capabilityQuotes: jsonb("capability_quotes")
+      .$type<Record<string, Record<string, unknown>>>()
+      .notNull()
+      .default({}),
+    asyncRunsStarted: integer("async_runs_started").notNull().default(0),
+    asyncInvocationIds: jsonb("async_invocation_ids").$type<string[]>().notNull().default([]),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionTurnIdx: uniqueIndex("goat_action_turns_session_turn_idx").on(
+      table.sessionId,
+      table.turnId,
+    ),
+    expiresIdx: index("goat_action_turns_expires_idx").on(table.expiresAt),
+    policyCheck: check(
+      "goat_action_turns_policy_check",
+      sql`${table.policy} IN ('foregroundInteractive', 'cloudReadOnly', 'headless')`,
+    ),
+    countersCheck: check(
+      "goat_action_turns_counters_check",
+      sql`${table.actionCallCount} >= 0
+        AND ${table.quotedTotalUsdMicros} >= 0
+        AND ${table.asyncRunsStarted} >= 0`,
+    ),
+  }),
+);
+
 // Durable paid-capability lifecycle. Inputs and provider output intentionally
 // stay out of this table: the exact input is bound by input_hash and the
 // safety-bounded provider result lives only in the requesting chat trace.
@@ -4467,6 +4521,7 @@ export type GoatTaskToolUsage = typeof goatTaskToolUsage.$inferSelect;
 export type GoatTaskSandboxUsage = typeof goatTaskSandboxUsage.$inferSelect;
 export type GoatChatSession = typeof goatChatSessions.$inferSelect;
 export type GoatChatShare = typeof goatChatShares.$inferSelect;
+export type GoatActionTurn = typeof goatActionTurns.$inferSelect;
 export type GoatCapabilityRun = typeof goatCapabilityRuns.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
 export type GoatChatSandboxUsage = typeof goatChatSandboxUsage.$inferSelect;

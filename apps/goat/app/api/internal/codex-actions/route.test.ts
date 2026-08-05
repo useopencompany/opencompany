@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executeGoatCodexActionGateway } from "@/lib/codex-actions";
+import { executeGoatActionGateway } from "@/lib/codex-actions";
 import { POST } from "./route";
 
 vi.mock("@/lib/codex-actions", () => ({
-  executeGoatCodexActionGateway: vi.fn(),
+  executeGoatActionGateway: vi.fn(),
 }));
 
 vi.mock("next/server", () => ({
@@ -16,11 +16,11 @@ vi.mock("next/server", () => ({
   },
 }));
 
-describe("POST /api/internal/codex-actions", () => {
+describe("POST /api/internal/action-gateway", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("RUNNER_INTERNAL_TOKEN", "shared-secret");
-    vi.mocked(executeGoatCodexActionGateway).mockResolvedValue({
+    vi.mocked(executeGoatActionGateway).mockResolvedValue({
       ok: true,
       sources: [],
     });
@@ -30,7 +30,7 @@ describe("POST /api/internal/codex-actions", () => {
     const response = await POST(request({ operation: "list" }));
 
     expect(response.status).toBe(401);
-    expect(executeGoatCodexActionGateway).not.toHaveBeenCalled();
+    expect(executeGoatActionGateway).not.toHaveBeenCalled();
   });
 
   it("accepts only bounded host identity fields", async () => {
@@ -38,11 +38,11 @@ describe("POST /api/internal/codex-actions", () => {
       request(
         {
           operation: "execute",
-          codexChatSessionId: "session_1",
-          codexChatTurnId: "turn_1",
+          sessionId: "session_1",
+          turnId: "turn_1",
           action: "gmail.search",
           params: { query: "from:ada" },
-          toolCallId: "call_1",
+          invocationId: "call_1",
           userWorkosId: "untrusted",
           workspaceId: "untrusted",
         },
@@ -51,14 +51,47 @@ describe("POST /api/internal/codex-actions", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(executeGoatCodexActionGateway).toHaveBeenCalledWith({
+    expect(executeGoatActionGateway).toHaveBeenCalledWith({
       request: {
         operation: "execute",
-        codexChatSessionId: "session_1",
-        codexChatTurnId: "turn_1",
+        sessionId: "session_1",
+        turnId: "turn_1",
         action: "gmail.search",
         params: { query: "from:ada" },
-        toolCallId: "call_1",
+        invocationId: "call_1",
+      },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it("translates the previous Codex-named transport fields during deploy overlap", async () => {
+    const response = await POST(
+      new Request("https://goat.example.com/api/internal/codex-actions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer shared-secret",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          operation: "execute",
+          codexChatSessionId: "session_1",
+          codexChatTurnId: "turn_1",
+          action: "gmail.search",
+          params: {},
+          toolCallId: "call_1",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(executeGoatActionGateway).toHaveBeenCalledWith({
+      request: {
+        operation: "execute",
+        sessionId: "session_1",
+        turnId: "turn_1",
+        action: "gmail.search",
+        params: {},
+        invocationId: "call_1",
       },
       signal: expect.any(AbortSignal),
     });
@@ -66,15 +99,15 @@ describe("POST /api/internal/codex-actions", () => {
 });
 
 function request(body: Record<string, unknown>, bearer?: string) {
-  return new Request("https://goat.example.com/api/internal/codex-actions", {
+  return new Request("https://goat.example.com/api/internal/action-gateway", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
     },
     body: JSON.stringify({
-      codexChatSessionId: "session_1",
-      codexChatTurnId: "turn_1",
+      sessionId: "session_1",
+      turnId: "turn_1",
       ...body,
     }),
   });

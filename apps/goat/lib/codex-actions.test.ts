@@ -1,13 +1,21 @@
-import type { GoatCodexActionGatewayRequest } from "@opencompany/agent-runtime";
+import {
+  GOAT_ACTION_MAX_CALLS_PER_TURN,
+  type GoatActionGatewayRequest,
+} from "@opencompany/agent-runtime";
+import {
+  GOAT_ACTION_EFFECTS_METERED_READ,
+  GOAT_ACTION_EFFECTS_READ,
+  GOAT_ACTION_EFFECTS_WRITE,
+} from "@opencompany/goat-agent/actions/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoatResolvedActionCatalog, ResolvedGoatAction } from "@/lib/actions/types";
-import { executeGoatCodexActionGateway } from "@/lib/codex-actions";
+import { executeGoatActionGateway } from "@/lib/codex-actions";
 
-function listRequest(source?: string): GoatCodexActionGatewayRequest {
+function listRequest(source?: string): GoatActionGatewayRequest {
   return {
     operation: "list",
-    codexChatSessionId: "codex_session_1",
-    codexChatTurnId: "codex_turn_1",
+    sessionId: "codex_session_1",
+    turnId: "codex_turn_1",
     ...(source ? { source } : {}),
   };
 }
@@ -19,7 +27,7 @@ const context = {
   userTimezone: "Europe/Paris",
 };
 
-describe("executeGoatCodexActionGateway", () => {
+describe("executeGoatActionGateway", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
   });
@@ -39,6 +47,7 @@ describe("executeGoatCodexActionGateway", () => {
           ...readAction,
           id: "gmail.send",
           capability: "write",
+          effects: GOAT_ACTION_EFFECTS_WRITE,
         },
         {
           ...readAction,
@@ -50,6 +59,7 @@ describe("executeGoatCodexActionGateway", () => {
           ...readAction,
           id: "linkedin.search",
           provider: "linkedin",
+          effects: GOAT_ACTION_EFFECTS_METERED_READ,
         },
         {
           ...readAction,
@@ -59,7 +69,7 @@ describe("executeGoatCodexActionGateway", () => {
         },
       ],
     };
-    const response = await executeGoatCodexActionGateway({
+    const response = await executeGoatActionGateway({
       request: listRequest(),
       signal: new AbortController().signal,
       dependencies: {
@@ -73,6 +83,7 @@ describe("executeGoatCodexActionGateway", () => {
       sources: [
         { id: "gmail", kind: "integration", label: "Gmail", description: "Email" },
         { id: "linkedin", kind: "managed", label: "LinkedIn", description: "Paid" },
+        { id: "posthog", kind: "integration", label: "PostHog", description: "Analytics" },
       ],
     });
   });
@@ -86,7 +97,7 @@ describe("executeGoatCodexActionGateway", () => {
     };
 
     await expect(
-      executeGoatCodexActionGateway({
+      executeGoatActionGateway({
         request: listRequest(),
         signal: new AbortController().signal,
         dependencies: {
@@ -101,7 +112,7 @@ describe("executeGoatCodexActionGateway", () => {
 
     queryAction.permissionMode = "ask";
     await expect(
-      executeGoatCodexActionGateway({
+      executeGoatActionGateway({
         request: listRequest(),
         signal: new AbortController().signal,
         dependencies: {
@@ -118,19 +129,20 @@ describe("executeGoatCodexActionGateway", () => {
       providers: [{ id: "gmail", kind: "integration", label: "Gmail", description: "Email" }],
       actions: [readAction],
     };
-    const response = await executeGoatCodexActionGateway({
+    const response = await executeGoatActionGateway({
       request: {
         operation: "execute",
-        codexChatSessionId: "codex_session_1",
-        codexChatTurnId: "codex_turn_1",
+        sessionId: "codex_session_1",
+        turnId: "codex_turn_1",
         action: "gmail.search",
         params: { query: "from:ada" },
-        toolCallId: "call_1",
+        invocationId: "call_1",
       },
       signal: new AbortController().signal,
       dependencies: {
         loadContext: vi.fn(async () => context),
         resolveCatalog: vi.fn(async () => catalog),
+        claimInvocation: admittedInvocation,
         now: () => new Date("2026-07-28T12:00:00.000Z"),
       },
     });
@@ -152,8 +164,9 @@ describe("executeGoatCodexActionGateway", () => {
     );
   });
 
-  it("shares managed capability turn state across calls in the same Codex turn", async () => {
+  it("shares managed capability turn state across calls in the same turn", async () => {
     const managedAction = createReadAction("linkedin.search_posts", "linkedin");
+    managedAction.effects = GOAT_ACTION_EFFECTS_METERED_READ;
     managedAction.execute = vi.fn(async (_params, actionContext) => {
       const turnState = actionContext.capabilityTurnState;
       if (!turnState) throw new Error("Missing capability turn state");
@@ -166,25 +179,33 @@ describe("executeGoatCodexActionGateway", () => {
     };
     const request = {
       operation: "execute" as const,
-      codexChatSessionId: "codex_session_state",
-      codexChatTurnId: "codex_turn_state",
+      sessionId: "codex_session_state",
+      turnId: "codex_turn_state",
       action: "linkedin.search_posts",
       params: { query: "founders" },
-      toolCallId: "call_1",
+      invocationId: "call_1",
+    };
+    const capabilityTurnState = {
+      quotedTotalUsdMicros: 0,
+      admittedToolCallIds: [],
+      quotesByToolCallId: new Map(),
+      asyncRunsStarted: 0,
     };
     const dependencies = {
       loadContext: vi.fn(async () => context),
       resolveCatalog: vi.fn(async () => catalog),
+      claimInvocation: admittedInvocation,
+      getCapabilityTurnState: () => capabilityTurnState,
       now: () => new Date("2026-07-28T12:00:00.000Z"),
     };
 
-    const first = await executeGoatCodexActionGateway({
+    const first = await executeGoatActionGateway({
       request,
       signal: new AbortController().signal,
       dependencies,
     });
-    const second = await executeGoatCodexActionGateway({
-      request: { ...request, toolCallId: "call_2" },
+    const second = await executeGoatActionGateway({
+      request: { ...request, invocationId: "call_2" },
       signal: new AbortController().signal,
       dependencies,
     });
@@ -201,9 +222,118 @@ describe("executeGoatCodexActionGateway", () => {
     });
   });
 
+  it("rejects call 17 through the shared gateway budget", async () => {
+    const readAction = createReadAction();
+    const catalog: GoatResolvedActionCatalog = {
+      providers: [{ id: "gmail", label: "Gmail", description: "Email" }],
+      actions: [readAction],
+    };
+    let count = 0;
+    const claimInvocation = vi.fn(async () => {
+      if (count >= GOAT_ACTION_MAX_CALLS_PER_TURN) {
+        return { ok: false as const, reason: "call_budget" as const };
+      }
+      count += 1;
+      return { ok: true as const, callCount: count, duplicate: false };
+    });
+    const dependencies = {
+      loadContext: vi.fn(async () => context),
+      resolveCatalog: vi.fn(async () => catalog),
+      claimInvocation,
+    };
+
+    for (let call = 1; call <= GOAT_ACTION_MAX_CALLS_PER_TURN; call += 1) {
+      await expect(
+        executeGoatActionGateway({
+          request: {
+            operation: "execute",
+            sessionId: "session_budget",
+            turnId: "turn_budget",
+            action: readAction.id,
+            params: {},
+            invocationId: `call_${call}`,
+          },
+          signal: new AbortController().signal,
+          dependencies,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+    }
+
+    await expect(
+      executeGoatActionGateway({
+        request: {
+          operation: "execute",
+          sessionId: "session_budget",
+          turnId: "turn_budget",
+          action: readAction.id,
+          params: {},
+          invocationId: "call_17",
+        },
+        signal: new AbortController().signal,
+        dependencies,
+      }),
+    ).resolves.toMatchObject({ ok: false, error: { code: "call_budget" } });
+  });
+
+  it("does not redispatch an admitted invocation after a transport retry", async () => {
+    const action = createReadAction();
+    const response = await executeGoatActionGateway({
+      request: {
+        operation: "execute",
+        sessionId: "session_retry",
+        turnId: "turn_retry",
+        action: action.id,
+        params: {},
+        invocationId: "stable_call_1",
+      },
+      signal: new AbortController().signal,
+      dependencies: {
+        loadContext: vi.fn(async () => context),
+        resolveCatalog: vi.fn(async () => ({
+          providers: [
+            {
+              id: "gmail" as const,
+              label: "Gmail",
+              description: "Email",
+            },
+          ],
+          actions: [action],
+        })),
+        claimInvocation: vi.fn(async () => ({
+          ok: true as const,
+          callCount: 1,
+          duplicate: true,
+        })),
+      },
+    });
+
+    expect(response).toMatchObject({ ok: false, error: { code: "duplicate_invocation" } });
+    expect(action.execute).not.toHaveBeenCalled();
+  });
+
+  it("returns a structured internal error when durable governance is unavailable", async () => {
+    const action = createReadAction();
+    const response = await executeGoatActionGateway({
+      request: listRequest("gmail"),
+      signal: new AbortController().signal,
+      dependencies: {
+        loadContext: vi.fn(async () => context),
+        resolveCatalog: vi.fn(async () => ({
+          providers: [{ id: "gmail" as const, label: "Gmail", description: "Email" }],
+          actions: [action],
+        })),
+        recordSourceDiscovery: vi.fn(async () => {
+          throw new Error("database unavailable");
+        }),
+      },
+    });
+
+    expect(response).toMatchObject({ ok: false, error: { code: "internal" } });
+  });
+
   it("fails closed when the turn no longer authorizes access", async () => {
     const resolveCatalog = vi.fn();
-    const response = await executeGoatCodexActionGateway({
+    const response = await executeGoatActionGateway({
       request: listRequest(),
       signal: new AbortController().signal,
       dependencies: {
@@ -228,9 +358,16 @@ function createReadAction(
     id,
     provider,
     capability: "read",
+    effects: GOAT_ACTION_EFFECTS_READ,
     description: "Search Gmail.",
     params: { type: "object" },
     permissionMode: "on",
     execute: vi.fn(async () => ({ messages: [] })),
   };
 }
+
+const admittedInvocation = vi.fn(async () => ({
+  ok: true as const,
+  callCount: 1,
+  duplicate: false,
+}));

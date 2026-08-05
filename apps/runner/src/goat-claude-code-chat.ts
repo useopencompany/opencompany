@@ -5,7 +5,7 @@ import {
   createClaudeCodeEventNormalizer,
   createGoatClaudeActionGatewayTicket,
   isCodexReasoningEffort,
-  isGoatCodexActionHostToolContractVersion,
+  isGoatActionHostToolContractVersion,
   shellQuote,
 } from "@opencompany/agent-runtime";
 import {
@@ -285,7 +285,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
   const repositoryBootstrap = await repositoryBootstrapPromise;
   const github = await loadGoatGitHubAuthForUser(turn.userWorkosId);
   const actionToolsEnabled =
-    isGoatCodexActionHostToolContractVersion(session.hostToolContractVersion) &&
+    isGoatActionHostToolContractVersion(session.hostToolContractVersion) &&
     Boolean(session.workspaceId) &&
     Boolean(env.goatAppUrl);
   // Minted before the redactor so a leaked ticket (e.g. the agent cats its own MCP

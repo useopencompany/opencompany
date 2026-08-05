@@ -20,9 +20,10 @@ Goat has three LLM paths:
    materialized into that sandbox. Each engine keeps its own resumable thread/session state and
    trusted working directory. Codex additionally receives images as native local-image inputs; new
    Codex chats pin the active Brain and expose its read plane and capture-first save path through
-   runner-hosted dynamic tools. Both Codex and Claude Code chats expose the same read-only
-   integration action catalog (`list_actions`/`use_action`, `apps/goat/lib/codex-actions.ts`) —
-   Codex through app-server dynamic tools, Claude Code through a turn-scoped internal MCP server
+   runner-hosted dynamic tools. Both Codex and Claude Code chats expose the same externally
+   read-only action catalog (`list_actions`/`use_action`) from the policy-driven action gateway —
+   including metered managed reads when enabled. Codex uses app-server dynamic tools, while Claude
+   Code uses a turn-scoped internal MCP server
    (`apps/goat/app/api/internal/claude-actions`) since that is Claude Code's only custom-tool
    mechanism. Brain tools remain Codex-only for now.
 
@@ -202,7 +203,12 @@ sources through Search.
 Connected integration and managed capability actions are dispatched through `list_actions` and
 `use_action`. The route resolves one compact source catalog from currently connected providers and
 the workspace's enabled managed capabilities, and the model must discover a source's concrete action
-ids and parameter schemas before executing one. Slack exposes
+ids and parameter schemas before executing one. Every canonical action declares external mutation,
+metering, idempotency, destructive behavior, and uncertain-after-dispatch effects separately from
+its user-facing On/Ask/Off permission group. Shared `foregroundInteractive`, `cloudReadOnly`, and
+`headless` projections combine those effects, permission modes, and source kinds; adapters do not
+filter catalogs themselves. The harness-neutral action service owns discovery, invocation identity,
+the per-turn call budget, duplicate suppression, and provider retry governance. Slack exposes
 conversation, message, thread, member, and scope-dependent search reads under one **Read Slack**
 permission, which defaults to **On** and can be changed to **Ask** or **Off** under Integrations.
 Gmail exposes message search, message and thread retrieval, explicitly requested plain-text draft
@@ -358,8 +364,9 @@ for `codex`, `claude_code`, and the internal-only `opencompany` engine path. A c
 turn runs the shared AI SDK chat loop without a sandbox or engine thread, streams text, reasoning,
 and tool lifecycle parts into its pre-created assistant `goat.chat_messages` row, and reconstructs
 follow-up model history from those persisted UI message parts. Its headless tool catalog includes
-read-only Brain/web tools and only integration actions whose permission mode is `on`; managed
-capabilities and approval-gated actions are excluded. No product route selects this durable
+read-only Brain/web tools and the shared `headless` action projection: connected integration actions
+whose permission mode is `on`; managed capabilities and approval-gated actions are excluded. No
+product route selects this durable
 OpenCompany path yet. It is exercisable only through the bearer-authenticated
 `POST /api/internal/opencompany-chat/messages` endpoint, which accepts an explicit user, workspace,
 prompt, and optional Brain/session/model before enqueueing through the same durable queue.
@@ -414,14 +421,25 @@ and current Brain access, then uses the same immediate-inbox-draft and backgroun
 as main chat. Its content-derived idempotency key lets a recovered Codex turn reuse the same
 completed capture.
 
-The action gateway derives the user and workspace from the running turn, rechecks current workspace
-membership, resolves current connections and permission settings, and exposes only integration
-actions whose capability is `read` and permission mode is `on`. Writes, confirmation-gated actions,
-and paid managed capabilities are not present in the Cloud Codex catalog. Provider credentials,
-the internal bearer, and database access never enter E2B. A per-turn call budget bounds provider
-reads.
+The harness-neutral action gateway derives the user and workspace from the running turn, rechecks
+current workspace membership, connections, permissions, and action availability on every request,
+then applies the shared `cloudReadOnly` projection. That policy selects On actions by explicit
+external-mutation effects, not capability labels or provider exceptions. It excludes writes and
+confirmation-gated actions while including enabled metered managed reads. In particular, Neon SQL
+queries need no cloud-only provider special case once their reviewed action declares non-mutating
+effects. Provider credentials, the internal bearer, and database access never enter E2B.
 
-Claude Code chats reach the same gateway (`executeGoatCodexActionGateway`) and the same read-only
+`packages/goat-agent/src/actions/service.ts` is the common discovery/execution and governance
+service used by the AI SDK, Codex, and MCP adapters. Tool names, descriptions, input schemas,
+annotations, and structured gateway responses live once in the dependency-light
+`@opencompany/agent-runtime` contract. The `/api/internal/action-gateway` transport uses neutral
+session, turn, and invocation fields; the old `/api/internal/codex-actions` path only translates the
+previous field names during deploy overlap. Durable `goat.action_turns` rows atomically enforce the
+16-call budget and discovery-before-execution rule, suppress repeated invocation dispatch, and
+persist metered quote totals and async-run claims across HTTP requests, process recovery, and app
+instances.
+
+Claude Code chats reach the same gateway (`executeGoatActionGateway`) and the same read-only
 policy, but through a different transport: the `claude` CLI runs entirely inside the sandbox and
 only supports custom tools over MCP, so there is no host-side app-server relay to keep credentials
 out of E2B the way Codex does. Instead, `apps/runner/src/goat-claude-code-chat.ts` mints a
@@ -432,7 +450,10 @@ short-lived, HMAC-signed ticket bound to that one `codexChatSessionId`/`codexCha
 (`apps/goat/lib/claude-actions.ts`) that verifies the ticket instead of the raw bearer token. The
 ticket only proves "mint this turn's action calls"; it expires with the turn and cannot reach any
 other internal route, unlike `RUNNER_INTERNAL_TOKEN` itself, which is deliberately never placed in
-the Claude Code sandbox.
+the Claude Code sandbox. The MCP adapter derives a retry-stable invocation id from the turn,
+transport session, and JSON-RPC request id, so independent HTTP calls are distinct and retries keep
+the same identity. It has no request-local authoritative counter; call 17 is rejected by the shared
+service exactly as it is for Codex.
 
 Because app-server stores dynamic tool definitions on the thread, resumed turns provide the
 matching runner callbacks without trying to redefine the tools. Existing Brain-tool v1 sessions
@@ -648,6 +669,10 @@ Important tables:
   all three engines (the legacy table name is intentionally retained).
 - `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
 - `goat.codex_chat_events`: normalized persistent cloud coding event audit rows.
+- `goat.action_turns`: expiring, per-session-turn action discovery, invocation, call-budget, quote,
+  and async-run governance shared across harness transports and app instances.
+- `goat.capability_runs`: durable managed-capability approval, execution, settlement, and cost audit
+  rows. Provider payloads remain outside this table.
 - `goat.repo_configs`: workspace-scoped repository setup instructions, masked env key names, and
   encrypted environment-file payloads used by Codex and Claude Code chat sandboxes.
 - `goat.tasks`: thin task projection linked to a chat through `session_id`, with status, stage,

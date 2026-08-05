@@ -23,6 +23,7 @@ import {
   type GoatHarnessEngine,
   goatChatSandboxUsage,
 } from "@opencompany/db/goat-schema";
+import { projectActionCatalog } from "@opencompany/goat-agent/actions/policy";
 import { resolveGoatImessageProvider } from "@opencompany/goat-agent/imessage/provider";
 import { createGoatSendUserMessageRunner } from "@opencompany/goat-agent/imessage/send-user-message";
 import {
@@ -334,7 +335,7 @@ export async function POST(request: Request): Promise<Response> {
   // delegated work.
   const actionsEnabled = !requestedEngine && !isGoatChatActionsKilled();
   const emptyCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
-  const [actionCatalog, skillCatalog, workflowCatalog, modelRouting, imessageDelivery] =
+  const [resolvedActionCatalog, skillCatalog, workflowCatalog, modelRouting, imessageDelivery] =
     await Promise.all([
       actionsEnabled
         ? resolveGoatActionCatalog({
@@ -385,6 +386,7 @@ export async function POST(request: Request): Promise<Response> {
           })
         : Promise.resolve<GoatImessageDelivery | null>(null),
     ]);
+  const actionCatalog = projectActionCatalog(resolvedActionCatalog, "foregroundInteractive");
   if (modelRouting && userInput) {
     userInput = { ...userInput, model: modelRouting.model };
   }

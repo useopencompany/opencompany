@@ -1,6 +1,7 @@
 import {
   CODEX_DEFAULT_MODEL_ID,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
+  GOAT_ACTION_TOOL_CONTRACT,
   isCodexModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
@@ -28,6 +29,7 @@ import {
   tool,
 } from "ai";
 import { MAX_ACTION_CALLS_PER_TURN } from "./actions/limits";
+import { createInMemoryGoatActionTurnGovernance, serveGoatActionRequest } from "./actions/service";
 import {
   buildGoatBrainMultiBrainToolSchema,
   GOAT_BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
@@ -105,7 +107,6 @@ import {
   DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
   GOAT_BRAIN_TOOL_DESCRIPTION,
-  LIST_ACTIONS_SOURCE_DESCRIPTION,
   LIST_ACTIONS_TOOL_DESCRIPTION,
   LIST_SKILLS_QUERY_DESCRIPTION,
   LIST_SKILLS_TOOL_DESCRIPTION,
@@ -135,8 +136,6 @@ import {
   START_WORKFLOW_TOOL_DESCRIPTION,
   TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
   TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
-  USE_ACTION_ACTION_DESCRIPTION,
-  USE_ACTION_PARAMS_DESCRIPTION,
   USE_ACTION_TOOL_DESCRIPTION,
   USE_SKILL_ID_DESCRIPTION,
   USE_SKILL_TOOL_DESCRIPTION,
@@ -157,7 +156,6 @@ export const OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1"
 export const OPENCOMPANY_CHAT_MAX_STEPS = 8;
 export const OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX = 16;
 export const MAX_LIST_SKILL_RESULTS = 20;
-const MAX_ACTION_PROVIDER_FAILURES_PER_TURN = 2;
 
 // Task-only tool. It exists only when a caller explicitly injects an
 // `updateTaskStatus` runner. Normal background task execution does not expose
@@ -515,12 +513,13 @@ export function createOpenCompanyChatToolContext(input: {
   let webFetchCallCount = 0;
   let webSearchCallCount = 0;
   let browserCallCount = 0;
-  let actionCallCount = 0;
-  const listedActionSourceIds = new Set(input.actions?.prelistedSourceIds ?? []);
+  let internalActionInvocationSequence = 0;
+  const actionTurnGovernance = createInMemoryGoatActionTurnGovernance({
+    ...(input.actions?.prelistedSourceIds
+      ? { prelistedSourceIds: input.actions.prelistedSourceIds }
+      : {}),
+  });
   const listedSkillIds = new Set(input.skills?.prelistedSkillIds ?? []);
-  const actionProviderRetryGate = createActionProviderRetryGate(
-    MAX_ACTION_PROVIDER_FAILURES_PER_TURN,
-  );
   let repairToolCall: ToolCallRepairFunction<ToolSet> | undefined;
 
   const multiBrainTargets = input.goatBrainMultiBrain?.targets ?? [];
@@ -1145,6 +1144,10 @@ export function createOpenCompanyChatToolContext(input: {
 
   const actions = input.actions;
   if (actions && actions.catalog.actions.length > 0) {
+    const actionServiceCatalog = {
+      sources: actions.catalog.sources,
+      actions: actions.catalog.actions,
+    };
     const sourceIds = actions.catalog.sources.map((source) => source.id);
     const actionIds = actions.catalog.actions.map((action) => action.id);
     const actionIdSet = new Set(actionIds);
@@ -1168,38 +1171,32 @@ export function createOpenCompanyChatToolContext(input: {
     tools[LIST_ACTIONS_TOOL_NAME] = tool<ListActionsToolInput, ListActionsToolOutput>({
       description: LIST_ACTIONS_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<ListActionsToolInput>({
-        type: "object",
-        additionalProperties: false,
+        ...GOAT_ACTION_TOOL_CONTRACT.list.inputSchema,
         properties: {
           source: {
-            type: "string",
+            ...GOAT_ACTION_TOOL_CONTRACT.list.inputSchema.properties.source,
             enum: sourceIds,
-            description: LIST_ACTIONS_SOURCE_DESCRIPTION,
           },
         },
-        required: ["source"],
       }),
       execute: async (args) => {
         visibleToolActivity = true;
         const requestedSource =
           typeof args.source === "string" ? args.source.trim().toLowerCase() : "";
-        const source = actions.catalog.sources.find((entry) => entry.id === requestedSource);
-        if (!source) {
-          return {
-            ok: false,
-            error: {
-              code: "unknown_source",
-              message: `Unknown source ${JSON.stringify(requestedSource)}. Use an exact id from <action_sources>.`,
-              availableSources: sourceIds,
-            },
-          };
-        }
-        listedActionSourceIds.add(source.id);
-        return {
-          ok: true,
-          source,
-          actions: actions.catalog.actions.filter((action) => action.source === source.id),
-        };
+        return serveGoatActionRequest({
+          request: {
+            operation: "list",
+            sessionId: "foreground",
+            turnId: "foreground",
+            ...(requestedSource ? { source: requestedSource } : {}),
+          },
+          catalog: actionServiceCatalog,
+          governance: actionTurnGovernance,
+          execute: async () => {
+            throw new Error("list_actions cannot execute an action");
+          },
+          maxCalls: actionCap,
+        }) as Promise<ListActionsToolOutput>;
       },
     });
     tools[USE_ACTION_TOOL_NAME] = tool<UseActionToolInput, UseActionToolOutput>({
@@ -1209,7 +1206,10 @@ export function createOpenCompanyChatToolContext(input: {
         const resolvedAction = actions.catalog.actions.find((entry) => entry.id === action);
         if (!resolvedAction) return false;
         if (resolvedAction.permissionMode === "ask") return true;
-        if (!listedActionSourceIds.has(resolvedAction.source) || !actions.needsApproval) {
+        if (
+          !actionTurnGovernance.hasDiscoveredSource?.(resolvedAction.source) ||
+          !actions.needsApproval
+        ) {
           return false;
         }
         const params =
@@ -1231,67 +1231,23 @@ export function createOpenCompanyChatToolContext(input: {
         }
       },
       inputSchema: jsonSchema<UseActionToolInput>({
-        type: "object",
-        additionalProperties: false,
+        ...GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema,
+        required: [...GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema.required],
         properties: {
           action: {
-            type: "string",
+            ...GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema.properties.action,
             enum: actionIds,
-            description: USE_ACTION_ACTION_DESCRIPTION,
           },
-          params: {
-            type: "object",
-            additionalProperties: true,
-            description: USE_ACTION_PARAMS_DESCRIPTION,
-          },
+          params: GOAT_ACTION_TOOL_CONTRACT.execute.inputSchema.properties.params,
         },
-        required: ["action", "params"],
       }),
       execute: async (args, executionContext) => {
         visibleToolActivity = true;
         const action = typeof args.action === "string" ? args.action : "";
-        const resolvedAction = actions.catalog.actions.find((entry) => entry.id === action);
-        // Models occasionally emit values outside a schema enum; re-validate so
-        // an invented id fails as a steering result, not an executor error.
-        if (!resolvedAction) {
-          return {
-            ok: false,
-            action,
-            error: {
-              code: "invalid_params",
-              message: `"${action}" is not an available action. Call list_actions with the relevant source id for the current catalog.`,
-            },
-          };
-        }
-        if (!listedActionSourceIds.has(resolvedAction.source)) {
-          return {
-            ok: false,
-            action,
-            error: {
-              code: "invalid_params",
-              source: resolvedAction.source,
-              message: `Call list_actions with source ${JSON.stringify(
-                resolvedAction.source,
-              )} in this chat turn before using ${JSON.stringify(action)}.`,
-            },
-          };
-        }
         const params =
           args.params && typeof args.params === "object" && !Array.isArray(args.params)
             ? args.params
             : {};
-        if (actionCallCount >= actionCap) {
-          return {
-            ok: false,
-            action,
-            error: {
-              code: "call_budget",
-              message: `use_action is limited to ${actionCap} calls per chat turn. Summarize what you already have and continue in a later chat turn if needed.`,
-            },
-          };
-        }
-        actionCallCount += 1;
-        const actionCallNumber = actionCallCount;
         const actionAbortSignal =
           executionContext &&
           typeof executionContext === "object" &&
@@ -1299,39 +1255,34 @@ export function createOpenCompanyChatToolContext(input: {
           executionContext.abortSignal instanceof AbortSignal
             ? executionContext.abortSignal
             : undefined;
-        if (!(await actionProviderRetryGate.acquire(action, actionAbortSignal))) {
-          return {
-            ok: false,
-            action,
-            error: {
-              code: "provider_error",
-              source: resolvedAction.source,
-              message: `${JSON.stringify(action)} reached its provider retry limit in this chat turn. Do not call it again now; summarize any results already available and explain what remains unverified.`,
-            },
-          };
-        }
         const toolCallId =
           executionContext &&
           typeof executionContext === "object" &&
           "toolCallId" in executionContext &&
           typeof executionContext.toolCallId === "string"
             ? executionContext.toolCallId
-            : `action_${actionCallNumber}`;
-        let outcome: ActionProviderAttemptOutcome = "neutral";
-        try {
-          const result = await actions.execute({ action, params, toolCallId });
-          if (result.ok) {
-            outcome = "success";
-          } else if (
-            (result.error.code === "provider_error" || result.error.code === "timeout") &&
-            !isRetrySafeProviderFlake(result.error.message)
-          ) {
-            outcome = "failure";
-          }
-          return result;
-        } finally {
-          actionProviderRetryGate.complete(action, outcome);
-        }
+            : `ai-sdk:${++internalActionInvocationSequence}`;
+        return serveGoatActionRequest({
+          request: {
+            operation: "execute",
+            sessionId: "foreground",
+            turnId: "foreground",
+            action,
+            params,
+            invocationId: toolCallId,
+          },
+          catalog: actionServiceCatalog,
+          governance: actionTurnGovernance,
+          maxCalls: actionCap,
+          ...(actionAbortSignal ? { signal: actionAbortSignal } : {}),
+          execute: async ({ action: admittedAction, params: admittedParams, invocationId }) => {
+            return actions.execute({
+              action: admittedAction,
+              params: admittedParams,
+              toolCallId: invocationId,
+            });
+          },
+        }) as Promise<UseActionToolOutput>;
       },
     });
   }
@@ -1361,88 +1312,6 @@ export function createOpenCompanyChatToolContext(input: {
     repairToolCall,
     tools,
   };
-}
-
-type ActionProviderAttemptOutcome = "success" | "failure" | "neutral";
-
-function createActionProviderRetryGate(maxFailures: number) {
-  const failureCounts = new Map<string, number>();
-  const callsInFlight = new Map<string, number>();
-  const stateSignals = new Map<string, { promise: Promise<void>; resolve: () => void }>();
-
-  function waitForStateChange(action: string, abortSignal?: AbortSignal) {
-    const existing = stateSignals.get(action);
-    let statePromise = existing?.promise;
-    if (!statePromise) {
-      let resolve!: () => void;
-      statePromise = new Promise<void>((release) => {
-        resolve = release;
-      });
-      stateSignals.set(action, { promise: statePromise, resolve });
-    }
-    if (!abortSignal) return statePromise;
-    if (abortSignal.aborted) return Promise.reject(actionAbortReason(abortSignal));
-    return new Promise<void>((resolve, reject) => {
-      const onAbort = () => reject(actionAbortReason(abortSignal));
-      abortSignal.addEventListener("abort", onAbort, { once: true });
-      void statePromise.then(() => {
-        abortSignal.removeEventListener("abort", onAbort);
-        resolve();
-      });
-    });
-  }
-
-  function notifyStateChange(action: string) {
-    const signal = stateSignals.get(action);
-    if (!signal) return;
-    stateSignals.delete(action);
-    signal.resolve();
-  }
-
-  return {
-    async acquire(action: string, abortSignal?: AbortSignal) {
-      while (true) {
-        if (abortSignal?.aborted) throw actionAbortReason(abortSignal);
-        const failures = failureCounts.get(action) ?? 0;
-        if (failures >= maxFailures) return false;
-
-        const inFlight = callsInFlight.get(action) ?? 0;
-        if (failures + inFlight < maxFailures) {
-          callsInFlight.set(action, inFlight + 1);
-          return true;
-        }
-
-        // In-flight work is not a failure. Wait for it to settle, then admit
-        // another call if success reopened the circuit.
-        await waitForStateChange(action, abortSignal);
-      }
-    },
-    complete(action: string, outcome: ActionProviderAttemptOutcome) {
-      if (outcome === "success") {
-        failureCounts.delete(action);
-      } else if (outcome === "failure") {
-        failureCounts.set(action, (failureCounts.get(action) ?? 0) + 1);
-      }
-
-      const remaining = (callsInFlight.get(action) ?? 1) - 1;
-      if (remaining > 0) callsInFlight.set(action, remaining);
-      else callsInFlight.delete(action);
-      notifyStateChange(action);
-    },
-  };
-}
-
-function actionAbortReason(abortSignal: AbortSignal) {
-  return abortSignal.reason ?? new DOMException("Action execution was aborted.", "AbortError");
-}
-
-function isRetrySafeProviderFlake(message: string) {
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes("final cost is settling") ||
-    normalized.includes("cost is settling") ||
-    normalized.includes("still settling")
-  );
 }
 
 export function prepareOpenCompanyChatStep(input: {

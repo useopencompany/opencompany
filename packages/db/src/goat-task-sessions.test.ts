@@ -1,4 +1,4 @@
-import { GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
+import { GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
@@ -121,7 +121,7 @@ describe("Goat task sessions", () => {
     expect(query.params).toContain("claude_code");
     expect(query.params).toContain("anthropic/claude-sonnet-5");
     expect(query.params).toContain("claude-sonnet-5");
-    expect(query.params).toContain(GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION);
+    expect(query.params).toContain(GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION);
   });
 
   it("continues a terminal task by appending native chat messages and a turn", async () => {

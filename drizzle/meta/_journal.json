@@ -1324,6 +1324,13 @@
       "when": 1785836263580,
       "tag": "0187_goat_neon_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 189,
+      "version": "7",
+      "when": 1785889000000,
+      "tag": "0188_goat_action_turn_governance",
+      "breakpoints": true
     }
   ]
 }

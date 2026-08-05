@@ -1234,14 +1234,14 @@ describe("list_actions and use_action tools", () => {
     const listed = await executeListActionsTool(context.tools, { source: "slack" });
     expect(listed).toEqual({
       ok: true,
-      source: catalog.sources[0],
+      source: { ...catalog.sources[0], kind: "integration" },
       actions: [catalog.actions[0]],
     });
 
     const listedLinear = await executeListActionsTool(context.tools, { source: "linear" });
     expect(listedLinear).toEqual({
       ok: true,
-      source: catalog.sources[1],
+      source: { ...catalog.sources[1], kind: "integration" },
       actions: [catalog.actions[1]],
     });
 
@@ -1252,7 +1252,7 @@ describe("list_actions and use_action tools", () => {
       ok: false,
       error: {
         code: "unknown_source",
-        message: 'Unknown source "mail". Use an exact id from <action_sources>.',
+        message: 'Unknown source "mail". Use an exact id returned by list_actions.',
         availableSources: ["slack", "linear"],
       },
     });
@@ -1947,11 +1947,13 @@ async function executeUseActionTool(
     throw new Error(`${USE_ACTION_TOOL_NAME} execute function was not configured.`);
   }
   return tool.execute(input, {
-    toolCallId: "call_1",
+    toolCallId: `call_${++actionToolCallSequence}`,
     messages: [],
     ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
   });
 }
+
+let actionToolCallSequence = 0;
 
 async function evaluateUseActionApproval(
   tools: unknown,

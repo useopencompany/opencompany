@@ -4,9 +4,9 @@ import {
   CODEX_DYNAMIC_TOOL_NAME,
   CODEX_SUBAGENT_TOOL_PART_TYPE,
   type CodexUiMessagePart,
-  GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
+  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
   isCodexReasoningEffort,
-  isGoatCodexActionHostToolContractVersion,
+  isGoatActionHostToolContractVersion,
   shellQuote,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
@@ -367,7 +367,7 @@ export async function runGoatCodexChatTurn(input: {
       leaseOwner,
       ...(shouldAbort ? { shouldAbort } : {}),
     });
-    const actionHostToolsEnabled = isGoatCodexActionHostToolContractVersion(
+    const actionHostToolsEnabled = isGoatActionHostToolContractVersion(
       session.hostToolContractVersion,
     );
     const brainToolEnabled =
@@ -377,7 +377,7 @@ export async function runGoatCodexChatTurn(input: {
     const brainCaptureEnabled =
       Boolean(session.brainRef) &&
       Boolean(session.workspaceId) &&
-      session.hostToolContractVersion === GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION;
+      session.hostToolContractVersion === GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION;
     const actionToolsEnabled = actionHostToolsEnabled && Boolean(session.workspaceId);
     const dynamicTools = [
       ...(brainToolEnabled && session.brainRef

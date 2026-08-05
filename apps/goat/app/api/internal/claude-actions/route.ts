@@ -3,7 +3,7 @@ import { createMcpHandler } from "mcp-handler";
 import { registerGoatClaudeActionTools } from "@/lib/claude-actions";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 150;
 
 // MCP bridge for Claude Code sessions: the `claude` CLI runs inside the sandbox and
 // only supports custom tools via MCP, unlike Codex's dynamic tools, which round-trip

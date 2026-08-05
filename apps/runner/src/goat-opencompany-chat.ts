@@ -15,6 +15,7 @@ import {
 } from "@opencompany/db/goat-workspaces";
 import { resolveGoatActionCatalog } from "@opencompany/goat-agent/actions/catalog";
 import { executeGoatAction } from "@opencompany/goat-agent/actions/execute";
+import { projectActionCatalog } from "@opencompany/goat-agent/actions/policy";
 import type { GoatResolvedActionCatalog } from "@opencompany/goat-agent/actions/types";
 import {
   createOpenCompanyChatToolContext,
@@ -752,21 +753,11 @@ async function resolveOpenCompanyChatRuntime(input: {
       brains.find((candidate) => candidate.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
   }
 
-  let onCatalog: GoatResolvedActionCatalog = { providers: [], actions: [] };
   const resolved = await resolveGoatActionCatalog({
     userWorkosId: turn.userWorkosId,
     workspaceId,
   }).catch(() => ({ providers: [], actions: [] }) as GoatResolvedActionCatalog);
-  const integrationProviders = resolved.providers.filter((source) => source.kind !== "managed");
-  const integrationProviderIds = new Set(integrationProviders.map((source) => source.id));
-  const onActions = resolved.actions.filter(
-    (action) => action.permissionMode === "on" && integrationProviderIds.has(action.provider),
-  );
-  const onProviderIds = new Set(onActions.map((action) => action.provider));
-  onCatalog = {
-    providers: integrationProviders.filter((source) => onProviderIds.has(source.id)),
-    actions: onActions,
-  };
+  const onCatalog = projectActionCatalog(resolved, "headless");
   const dispatcherCatalog: GoatChatActionCatalog = {
     sources: onCatalog.providers.map((source) => ({
       ...source,

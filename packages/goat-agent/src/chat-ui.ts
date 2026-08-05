@@ -1,4 +1,9 @@
 import type { CodexCommandToolInput, CodexCommandToolOutput } from "@opencompany/agent-runtime";
+import {
+  GOAT_ACTION_TOOL_CONTRACT,
+  type GoatActionExecutionResponse,
+  type GoatActionGatewayResponse,
+} from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { BrowserToolName } from "@opencompany/browser-tools";
 import type {
@@ -54,9 +59,9 @@ export const WEB_FETCH_TOOL_NAME = "web_fetch";
 export const WEB_FETCH_TOOL_PART_TYPE = `tool-${WEB_FETCH_TOOL_NAME}` as const;
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 export const WEB_SEARCH_TOOL_PART_TYPE = `tool-${WEB_SEARCH_TOOL_NAME}` as const;
-export const LIST_ACTIONS_TOOL_NAME = "list_actions";
+export const LIST_ACTIONS_TOOL_NAME = GOAT_ACTION_TOOL_CONTRACT.list.name;
 export const LIST_ACTIONS_TOOL_PART_TYPE = `tool-${LIST_ACTIONS_TOOL_NAME}` as const;
-export const USE_ACTION_TOOL_NAME = "use_action";
+export const USE_ACTION_TOOL_NAME = GOAT_ACTION_TOOL_CONTRACT.execute.name;
 export const USE_ACTION_TOOL_PART_TYPE = `tool-${USE_ACTION_TOOL_NAME}` as const;
 export const SEND_USER_MESSAGE_TOOL_NAME = "send_user_message";
 export const SEND_USER_MESSAGE_TOOL_PART_TYPE = `tool-${SEND_USER_MESSAGE_TOOL_NAME}` as const;
@@ -409,10 +414,12 @@ export type GoatChatActionCatalog = {
 };
 
 export type ListActionsToolInput = {
-  source: GoatActionSourceId;
+  source?: GoatActionSourceId;
 };
 
 export type ListActionsToolOutput =
+  | Extract<GoatActionGatewayResponse, { ok: true; sources: unknown }>
+  | Extract<GoatActionGatewayResponse, { ok: false }>
   | {
       ok: true;
       source: GoatActionSourceDescriptor;
@@ -432,18 +439,11 @@ export type UseActionToolInput = {
   params?: Record<string, unknown>;
 };
 
-export type UseActionToolOutput =
-  | { ok: true; action: string; result: unknown }
-  | {
-      ok: false;
-      action: string;
-      error: {
-        code: GoatActionErrorCode;
-        source?: GoatActionSourceId;
-        message: string;
-        approval?: GoatActionApprovalView;
-      };
-    };
+export type UseActionToolOutput = GoatActionExecutionResponse<
+  GoatActionSourceId,
+  GoatActionErrorCode,
+  GoatActionApprovalView
+>;
 
 export type GoatChatSkillCatalogItem = {
   id: string;
@@ -567,7 +567,8 @@ export function listedActionSourceIdsFromMessages(
       if (
         part.type === LIST_ACTIONS_TOOL_PART_TYPE &&
         part.state === "output-available" &&
-        part.output.ok
+        part.output.ok &&
+        "source" in part.output
       ) {
         sourceIds.add(part.output.source.id);
       }

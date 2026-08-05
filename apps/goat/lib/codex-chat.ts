@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   claudeCodeCliModelNameForModelId,
   codexCliModelNameForModelId,
-  GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION,
+  GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION,
   isCloudCodingEngine,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
@@ -419,7 +419,7 @@ async function createFirstCodexChatTurn(input: {
   // Claude Code only wires the action-gateway tools today, not the brain tools. The opencompany
   // engine is not a sandboxed CLI session and has its own tool wiring, so it stays null here.
   const hostToolContractVersion =
-    input.engine === "opencompany" ? null : GOAT_CODEX_HOST_TOOL_CONTRACT_VERSION;
+    input.engine === "opencompany" ? null : GOAT_ACTION_HOST_TOOL_CONTRACT_VERSION;
 
   await getDb().execute(sql`
     WITH created_chat AS (
