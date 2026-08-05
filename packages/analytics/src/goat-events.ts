@@ -88,6 +88,7 @@ export type GoatAnalyticsEventPropertiesByName = {
     workspace_id: string;
     topup_type: "manual" | "auto_refill";
     amount_cents: number;
+    amount_usd: number;
     balance_cents: number;
   };
   model_spend_recorded: {
@@ -219,7 +220,7 @@ export const goatAnalyticsEvents = {
   billing_topup_completed: {
     name: "billing_topup_completed",
     description: "A manual or automatic billing top-up credited a Goat workspace.",
-    safeProperties: ["workspace_id", "topup_type", "amount_cents", "balance_cents"],
+    safeProperties: ["workspace_id", "topup_type", "amount_cents", "amount_usd", "balance_cents"],
   },
   model_spend_recorded: {
     name: "model_spend_recorded",
