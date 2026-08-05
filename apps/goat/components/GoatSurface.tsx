@@ -39,6 +39,7 @@ import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalRespons
 import {
   AlertCircle,
   Archive,
+  ArrowLeft,
   ArrowUp,
   CalendarClock,
   Check,
@@ -47,6 +48,7 @@ import {
   CircleDotDashed,
   Clock,
   Code2,
+  CornerDownLeft,
   FileText,
   LoaderCircle,
   MessageSquare,
@@ -60,6 +62,7 @@ import {
   Settings,
   Sparkles,
   Square,
+  SquarePen,
   Target,
   Trash2,
   Workflow as WorkflowIcon,
@@ -524,6 +527,7 @@ export function GoatSurface({
   const [taskMessageSubmitting, setTaskMessageSubmitting] = useState(false);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
+  const [commandPaletteView, setCommandPaletteView] = useState<"search" | "compose">("search");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [restoringChatId, setRestoringChatId] = useState<string | null>(null);
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
@@ -852,10 +856,13 @@ export function GoatSurface({
   const composerAttachments = useGoatChatAttachments({
     userWorkosId,
     modelName: String(chatModel),
-    // Cmd+K mounts a second composer with its own window-level drop listener.
-    // Keep the main composer visible behind the modal, but let only the quick
-    // composer consume dropped files while the palette is open.
-    enabled: attachmentsEnabled && !engineSubmitting && !newChatCommandOpen,
+    // The Cmd+K compose view mounts a second composer with its own window-level drop
+    // listener. Keep the main composer visible behind the modal, but let only the quick
+    // composer consume dropped files while that view is showing.
+    enabled:
+      attachmentsEnabled &&
+      !engineSubmitting &&
+      !(newChatCommandOpen && commandPaletteView === "compose"),
     ...(composerEngine === "codex" || composerEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
       : isAutoChatModel
@@ -1413,6 +1420,15 @@ export function GoatSurface({
   const closeCommandPalette = useCallback(() => {
     setNewChatCommandOpen(false);
     setChatSearchQuery("");
+    setCommandPaletteView("search");
+  }, []);
+
+  const openCommandPaletteCompose = useCallback(() => {
+    setCommandPaletteView("compose");
+  }, []);
+
+  const backToCommandPaletteSearch = useCallback(() => {
+    setCommandPaletteView("search");
   }, []);
 
   const prepareMainComposerFocusRestoreAfterBackgroundTask = () => {
@@ -2427,37 +2443,88 @@ export function GoatSurface({
     <div className="relative flex min-h-0 flex-1 flex-col items-center overflow-hidden">
       <Dialog
         open={newChatCommandOpen}
-        onOpenChange={(open) => (open ? setNewChatCommandOpen(true) : closeCommandPalette())}
+        onOpenChange={(open, eventDetails) => {
+          if (open) {
+            setNewChatCommandOpen(true);
+            return;
+          }
+          // Esc backs out of compose to search first, like drilling out of a command
+          // one level at a time, instead of dropping straight out of the palette.
+          if (eventDetails.reason === "escape-key" && commandPaletteView === "compose") {
+            eventDetails.cancel();
+            backToCommandPaletteSearch();
+            return;
+          }
+          closeCommandPalette();
+        }}
       >
         <DialogHeader className="sr-only">
-          <DialogTitle>New chat</DialogTitle>
+          <DialogTitle>
+            {commandPaletteView === "compose" ? "New chat" : "Jump to a chat"}
+          </DialogTitle>
           <DialogDescription>
-            Start a new chat that runs in the background, or search chats to reopen.
+            {commandPaletteView === "compose"
+              ? "Start a new chat that runs in the background."
+              : "Search chats to reopen, or start a new one."}
           </DialogDescription>
         </DialogHeader>
         <DialogContent
           showCloseButton={false}
           className="top-[18%] max-w-xl translate-y-0 gap-0 overflow-hidden border-border bg-surface p-0 text-ink shadow-[0_18px_60px_rgba(15,15,15,0.18)]"
         >
-          <QuickChatComposer
-            open={newChatCommandOpen}
-            userWorkosId={userWorkosId}
-            defaultModel={defaultModel}
-            codexConnected={codexConnected}
-            claudeCodeConnected={claudeCodeConnected}
-            taskSpawningEnabled={taskSpawningEnabled}
-            autoModelRoutingEnabled={autoModelRoutingEnabled}
-            creditBalance={creditBalance}
-            onSubmitted={closeCommandPalette}
-          />
-          <div className="border-t border-border">
+          {commandPaletteView === "compose" ? (
+            <>
+              <div className="flex items-center gap-1.5 border-b border-border px-3 py-2">
+                <button
+                  type="button"
+                  onClick={backToCommandPaletteSearch}
+                  aria-label="Back to search"
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                >
+                  <ArrowLeft size={14} strokeWidth={2} />
+                </button>
+                <span className="text-[12px] font-medium text-ink-subtle">New chat</span>
+              </div>
+              <QuickChatComposer
+                open={newChatCommandOpen && commandPaletteView === "compose"}
+                initialPrompt={chatSearchQuery.trim()}
+                userWorkosId={userWorkosId}
+                defaultModel={defaultModel}
+                codexConnected={codexConnected}
+                claudeCodeConnected={claudeCodeConnected}
+                taskSpawningEnabled={taskSpawningEnabled}
+                autoModelRoutingEnabled={autoModelRoutingEnabled}
+                creditBalance={creditBalance}
+                onSubmitted={closeCommandPalette}
+              />
+            </>
+          ) : (
             <Command className="bg-surface text-ink">
               <CommandInput
+                autoFocus
                 value={chatSearchQuery}
                 onValueChange={setChatSearchQuery}
-                placeholder="Search chats..."
+                placeholder="Search chats or start something new..."
               />
               <CommandList>
+                <CommandGroup heading="Actions" forceMount>
+                  <CommandItem
+                    value="start-new-chat"
+                    forceMount
+                    onSelect={openCommandPaletteCompose}
+                    className="gap-3"
+                  >
+                    <SquarePen size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
+                      {chatSearchQuery.trim()
+                        ? `Start new chat: "${chatSearchQuery.trim()}"`
+                        : "Start new chat"}
+                    </span>
+                    <CommandShortcut>
+                      <CornerDownLeft size={12} strokeWidth={2} />
+                    </CommandShortcut>
+                  </CommandItem>
+                </CommandGroup>
                 <CommandEmpty>No matching chats.</CommandEmpty>
                 {paletteRecentChats.length > 0 ? (
                   <CommandGroup heading="Chats">
@@ -2513,7 +2580,7 @@ export function GoatSurface({
                 ) : null}
               </CommandList>
             </Command>
-          </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -3079,6 +3146,7 @@ export function GoatSurface({
 // never adopts the result into view or navigates to it.
 function QuickChatComposer({
   open,
+  initialPrompt,
   userWorkosId,
   defaultModel,
   codexConnected,
@@ -3089,6 +3157,7 @@ function QuickChatComposer({
   onSubmitted,
 }: {
   open: boolean;
+  initialPrompt: string;
   userWorkosId: string;
   defaultModel: string;
   codexConnected: boolean;
@@ -3237,8 +3306,13 @@ function QuickChatComposer({
 
   useLayoutEffect(() => {
     if (!open) return;
+    // The palette hands off whatever the user was searching for as a starting draft,
+    // so they don't have to retype it once they commit to composing a new chat.
+    /* eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot seed on open, not a render loop */
+    setInput(initialPrompt);
+    if (initialPrompt) pendingInputCaretRef.current = initialPrompt.length;
     inputRef.current?.focus();
-  }, [open]);
+  }, [open, initialPrompt]);
 
   // Mirrors the main composer: refetch the skill/workflow catalog on every mention-menu
   // open so recently created skills/workflows show up.

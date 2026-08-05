@@ -3444,13 +3444,19 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.type(
+      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      "Research Q3",
+    );
+    await user.click(within(dialog).getByRole("option", { name: 'Start new chat: "Research Q3"' }));
     const quickComposerInput = screen.getByPlaceholderText(
       "Ask Goat anything, or describe a task...",
     );
+    expect(quickComposerInput).toHaveValue("Research Q3");
     // Same controls as the main composer: model picker, attach button, submit button.
     expect(screen.getAllByLabelText("Model")).toHaveLength(2);
     expect(screen.getAllByLabelText("Attach files")).toHaveLength(2);
-    await user.type(quickComposerInput, "Research Q3");
     await user.keyboard("{Enter}");
 
     const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
@@ -3520,6 +3526,8 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     const quickComposerInput = screen.getByPlaceholderText(
       "Ask Goat anything, or describe a task...",
     );
@@ -3551,7 +3559,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(body.newSessionId).toMatch(/^goat_chat_/);
   });
 
-  it("routes a dropped file only to the Cmd+K composer while the palette is open", async () => {
+  it("routes a dropped file only to the Cmd+K composer while the compose view is open", async () => {
     const user = userEvent.setup();
     render(
       <GoatSurface
@@ -3567,6 +3575,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByText("Cloud Codex sandbox"));
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     const file = new File(["pdf"], "brief.pdf", { type: "application/pdf" });
     fireEvent.drop(window, {
       dataTransfer: {
@@ -3608,6 +3617,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // The model picker's popover content portals outside the dialog's DOM subtree.
     await user.click(screen.getByText("Cloud Codex sandbox"));
@@ -3684,6 +3694,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
 
@@ -3737,6 +3748,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // Popover content (model list, goal mode fields) portals outside the dialog's DOM subtree.
     await user.click(screen.getByText("Cloud Codex sandbox"));
@@ -3773,6 +3785,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // The model picker's popover content portals outside the dialog's DOM subtree.
     await user.click(screen.getByText("Cloud Codex sandbox"));
@@ -3780,7 +3793,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBeNull();
   });
 
-  it("searches and jumps to an existing chat from the Cmd+K palette without affecting the quick composer", async () => {
+  it("searches and jumps to an existing chat from the Cmd+K palette", async () => {
     const user = userEvent.setup();
 
     render(
@@ -3802,11 +3815,72 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
-    await user.type(within(dialog).getByPlaceholderText("Search chats..."), "Q2 planning");
+    await user.type(
+      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      "Q2 planning",
+    );
     const result = await within(dialog).findByText("Q2 planning");
     await user.click(result);
 
     expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_1");
+  });
+
+  it("drills from Cmd+K search into compose on Enter, prefilled with the typed query", async () => {
+    const user = userEvent.setup();
+
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.type(
+      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      "Research Q3",
+    );
+    // The pinned "Start new chat" action is the only forceMounted item, so it stays
+    // highlighted as the user types — Enter should drill into compose, not submit yet.
+    await user.keyboard("{Enter}");
+
+    const quickComposerInput = within(dialog).getByPlaceholderText(
+      "Ask Goat anything, or describe a task...",
+    );
+    expect(quickComposerInput).toHaveValue("Research Q3");
+  });
+
+  it("backs out of Cmd+K compose to search on Escape, and closes the palette on a second Escape", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_1",
+            title: "Q2 planning",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Let's plan Q2",
+            updatedAt: currentTimestamp(),
+          },
+        ]}
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
+    expect(
+      within(dialog).getByPlaceholderText("Ask Goat anything, or describe a task..."),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(
+      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("does not navigate or refresh when the stream confirms the reserved session id", async () => {
