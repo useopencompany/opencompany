@@ -173,7 +173,7 @@ describe("usage recording", () => {
         payload: expect.objectContaining({
           sandboxId: "sbx_abc",
           activeMs: 60_000,
-          chargedCostUsdMicros: 2_178,
+          chargedCostUsdMicros: 1_815,
         }),
       }),
     );

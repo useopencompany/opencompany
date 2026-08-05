@@ -70,7 +70,7 @@ describe("executeManagedCapability", () => {
     });
   });
 
-  it("automatically runs a cheap action and settles provider cost plus 20%", async () => {
+  it("automatically runs a cheap action and settles provider cost at cost", async () => {
     const client = fakeClient({
       inspection: inspectPrice(0.0015),
       run: providerRun({ cost: { value: 0.0015, currency: "USD" } }),
@@ -88,21 +88,21 @@ describe("executeManagedCapability", () => {
         source: "capability_usage",
         idempotencyKey: "capability:monid_run_1",
         providerCostUsdMicros: 1_500,
-        platformFeeUsdMicros: 300,
-        totalCostUsdMicros: 1_800,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 1_500,
       }),
     );
     expect(mocks.settleRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "succeeded",
         providerCostUsdMicros: 1_500,
-        totalCostUsdMicros: 1_800,
+        totalCostUsdMicros: 1_500,
       }),
     );
     expect(result).toMatchObject({
       untrustedProviderData: true,
       resultCount: 1,
-      cost: { totalUsdMicros: 1_800, state: "settled" },
+      cost: { totalUsdMicros: 1_500, state: "settled" },
     });
   });
 
@@ -175,8 +175,8 @@ describe("executeManagedCapability", () => {
     expect(mocks.recordDebit).toHaveBeenCalledWith(
       expect.objectContaining({
         providerCostUsdMicros: 1_500,
-        platformFeeUsdMicros: 300,
-        totalCostUsdMicros: 1_800,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 1_500,
       }),
     );
     expect(mocks.settleRun).toHaveBeenCalledWith(
@@ -241,15 +241,15 @@ describe("executeManagedCapability", () => {
     expect(mocks.recordDebit).toHaveBeenCalledWith(
       expect.objectContaining({
         providerCostUsdMicros: 1_500,
-        platformFeeUsdMicros: 300,
-        totalCostUsdMicros: 1_800,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 1_500,
       }),
     );
     expect(mocks.settleRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "succeeded",
         providerCostUsdMicros: 1_500,
-        totalCostUsdMicros: 1_800,
+        totalCostUsdMicros: 1_500,
       }),
     );
   });
@@ -490,8 +490,8 @@ describe("executeManagedCapability", () => {
       expect.objectContaining({
         status: "awaiting_approval",
         quoteProviderCostUsdMicros: 300_000,
-        quotePlatformFeeUsdMicros: 60_000,
-        quoteTotalCostUsdMicros: 360_000,
+        quotePlatformFeeUsdMicros: 0,
+        quoteTotalCostUsdMicros: 300_000,
         approvalExpiresAt: new Date("2026-07-23T10:15:00.000Z"),
       }),
     );
@@ -522,7 +522,7 @@ describe("executeManagedCapability", () => {
   });
 
   it("accounts for multiple admitted calls before their run rows exist", async () => {
-    mocks.getBudget.mockResolvedValue(3_000);
+    mocks.getBudget.mockResolvedValue(2_500);
     const approvalContext = context();
     const client = fakeClient({
       inspection: inspectPrice(0.0015),
@@ -555,7 +555,7 @@ describe("executeManagedCapability", () => {
     ).resolves.toBe(true);
 
     expect(approvalContext.capabilityTurnState).toMatchObject({
-      quotedTotalUsdMicros: 1_800,
+      quotedTotalUsdMicros: 1_500,
       admittedToolCallIds: ["tool_1"],
     });
     expect(mocks.createRun).toHaveBeenCalledWith(
@@ -614,7 +614,7 @@ describe("executeManagedCapability", () => {
         workspaceId: "workspace_1",
         chatSessionId: "chat_1",
         action: "lead.find_person_email",
-        quoteTotalCostUsdMicros: 360_000,
+        quoteTotalCostUsdMicros: 300_000,
         inputHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
     );
@@ -697,7 +697,7 @@ describe("executeManagedCapability", () => {
       GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
     );
     expect(sharedContext.capabilityTurnState).toMatchObject({
-      quotedTotalUsdMicros: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN * 12_000,
+      quotedTotalUsdMicros: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN * 10_000,
       asyncRunsStarted: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN,
       admittedToolCallIds: Array.from(
         { length: GOAT_CAPABILITY_ASYNC_RUNS_PER_TURN },
@@ -793,7 +793,7 @@ describe("executeManagedCapability", () => {
     expect(firstClient.stopRun).not.toHaveBeenCalled();
     expect(secondClient.stopRun).not.toHaveBeenCalled();
     expect(sharedContext.capabilityTurnState).toMatchObject({
-      quotedTotalUsdMicros: 3_600,
+      quotedTotalUsdMicros: 3_000,
       asyncRunsStarted: 0,
       admittedToolCallIds: ["tool_1", "tool_2"],
     });

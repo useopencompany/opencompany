@@ -111,7 +111,7 @@ describe("Goat billing actions", () => {
     expect(checkoutCreate).not.toHaveBeenCalled();
   });
 
-  it("starts a flat monthly Pro subscription for workspace admins", async () => {
+  it("starts a monthly seat subscription for workspace admins", async () => {
     vi.mocked(currentGoatUser).mockResolvedValue({
       role: "admin",
       workspace: { id: "goat_ws_1", name: "Acme" },
@@ -125,6 +125,7 @@ describe("Goat billing actions", () => {
         stripeSubscriptionId: null,
         subscriptionStatus: null,
       },
+      memberCount: 3,
     } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
 
     await expect(createGoatProCheckoutAction()).rejects.toThrow("NEXT_REDIRECT");
@@ -146,7 +147,7 @@ describe("Goat billing actions", () => {
     ];
     expect(params.mode).toBe("subscription");
     expect(params.line_items[0]).toMatchObject({
-      quantity: 1,
+      quantity: 3,
       price_data: { unit_amount: 2_000, recurring: { interval: "month" } },
     });
     expect(params.metadata).toMatchObject({
@@ -191,7 +192,7 @@ describe("Goat billing actions", () => {
 
     await expect(createGoatProCheckoutAction()).resolves.toMatchObject({
       ok: false,
-      error: expect.stringContaining("already has a Pro subscription"),
+      error: expect.stringContaining("already has a seat subscription"),
     });
     expect(checkoutCreate).not.toHaveBeenCalled();
   });

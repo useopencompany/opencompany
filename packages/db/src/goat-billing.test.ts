@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS,
+  GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS,
   GOAT_INGEST_ITEM_FEE_USD_MICROS,
   GOAT_LOW_BALANCE_WARN_USD_MICROS,
   goatCalendarMonthWindow,
@@ -17,15 +18,17 @@ describe("Goat billing v4", () => {
     });
   });
 
-  it("prices the flat ingestion fee at $0.20 per 50 items", () => {
-    // $0.004/item keeps 2,000 items/mo at ~$8 in fees — under the $10 all-in
-    // anchor once basic-tier model cost is added.
-    expect(GOAT_INGEST_ITEM_FEE_USD_MICROS).toBe(4_000);
-    expect(goatIngestItemFeeUsdMicros(50)).toBe(200_000);
-    expect(goatIngestItemFeeUsdMicros(1)).toBe(4_000);
-    expect(goatIngestItemFeeUsdMicros(2_000)).toBe(8_000_000);
+  it("does not add a flat ingestion platform fee", () => {
+    expect(GOAT_INGEST_ITEM_FEE_USD_MICROS).toBe(0);
+    expect(goatIngestItemFeeUsdMicros(50)).toBe(0);
+    expect(goatIngestItemFeeUsdMicros(1)).toBe(0);
+    expect(goatIngestItemFeeUsdMicros(2_000)).toBe(0);
     expect(goatIngestItemFeeUsdMicros(0)).toBe(0);
     expect(goatIngestItemFeeUsdMicros(-5)).toBe(0);
+  });
+
+  it("includes $20 of at-cost monthly usage per seat", () => {
+    expect(GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS).toBe(2_000);
   });
 
   it("warns below the auto-refill threshold so refills fire before the warning", () => {
@@ -41,8 +44,8 @@ describe("Goat billing v4", () => {
     expect(goatPlanForSubscriptionStatus(null)).toBe("free");
   });
 
-  it("keeps Free personal and Pro sized for small teams", () => {
-    expect(goatWorkspaceMemberCap("free")).toBe(1);
+  it("keeps the seat-billed workspace cap sized for small teams", () => {
+    expect(goatWorkspaceMemberCap("free")).toBe(10);
     expect(goatWorkspaceMemberCap("pro")).toBe(10);
   });
 });

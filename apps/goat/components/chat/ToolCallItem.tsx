@@ -134,8 +134,7 @@ function LegacyCapabilityApprovalRow({ tool }: { tool: ToolCallView }) {
         {capabilitySourceLabel(approval.source)} · {capabilityActionLabel(approval.action)}
       </p>
       <p className="mt-1 text-[11px] leading-4 text-ink-subtle">
-        Maximum charge {formatUsdMicros(approval.maxCostUsdMicros)}, including the platform fee. The
-        final charge may be lower.
+        Maximum charge {formatUsdMicros(approval.maxCostUsdMicros)}. The final charge may be lower.
       </p>
       <p className="mt-2 text-[11px] font-medium text-ink-subtle">
         {capabilityApprovalStatusLabel(status)}
@@ -247,8 +246,7 @@ function CapabilityApprovalCard({
       {quote ? (
         <>
           <p className="mt-2 text-[11px] leading-4 text-ink-subtle">
-            Up to {formatUsdMicros(quote.maxCostUsdMicros)}, including the platform fee — the final
-            charge may be lower.
+            Up to {formatUsdMicros(quote.maxCostUsdMicros)}. The final charge may be lower.
           </p>
           <p className="mt-1 text-[11px] leading-4 text-ink-subtle">
             This would exceed this session&apos;s {formatUsdMicros(quote.sessionBudgetUsdMicros)}{" "}

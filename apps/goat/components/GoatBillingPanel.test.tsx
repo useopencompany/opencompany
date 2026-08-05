@@ -15,12 +15,16 @@ const base: GoatBillingPanelData = {
   subscriptionStatus: null,
   cancelAtPeriodEnd: false,
   currentPeriodEnd: null,
+  includedUsagePeriodEnd: null,
   paymentNeedsAttention: false,
   proMonthlyPriceCents: 2_000,
+  includedUsagePerSeatCents: 2_000,
+  seatQuantity: 1,
   memberCount: 1,
-  freeMaxMembers: 1,
   proMaxMembers: 10,
   creditBalanceUsdMicros: 5_000_000,
+  includedBalanceUsdMicros: 2_000_000,
+  topUpBalanceUsdMicros: 3_000_000,
   spendThisMonthUsdMicros: 1_230_000,
   spendThisMonthByCategory: {
     chat: 800_000,
@@ -39,8 +43,6 @@ const base: GoatBillingPanelData = {
     hasPaymentMethod: true,
     lastError: null,
   },
-  platformFeePercent: 20,
-  ingestFeeUsdCentsPer50: 20,
   hasStripeCustomer: true,
   isAdmin: true,
 };
@@ -56,18 +58,19 @@ describe("GoatBillingPanel", () => {
     );
 
     expect(screen.getByText("Balance").parentElement?.parentElement).toHaveTextContent("$5.00");
+    expect(screen.getByText(/\$2\.00 included · \$3\.00 top-up/i)).toBeVisible();
     expect(screen.getByText("Spent this month").parentElement).toHaveTextContent("$1.23");
     expect(screen.getByRole("button", { name: "Add $5" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Add $100" })).toBeEnabled();
     expect(screen.getByLabelText("Custom top-up amount in dollars")).toHaveValue("20");
   });
 
-  it("explains pricing in dollars with the fee split", () => {
+  it("explains at-cost pricing and included usage", () => {
     render(<GoatBillingPanel data={base} checkoutResult={null} topupResult={null} />);
 
-    expect(screen.getByText(/model cost \+ 20% platform fee, charged per message/i)).toBeVisible();
-    expect(screen.getByText(/\$0\.20 per 50 ingested items/i)).toBeVisible();
-    expect(screen.getByText(/underlying provider cost \+ 20% platform fee/i)).toBeVisible();
+    expect(screen.getByText(/provider retail cost only/i)).toBeVisible();
+    expect(screen.getByText(/there is no platform fee on usage/i)).toBeVisible();
+    expect(screen.getByText(/included usage expires monthly/i)).toBeVisible();
   });
 
   it("warns when the balance is empty", () => {
@@ -144,18 +147,18 @@ describe("GoatBillingPanel", () => {
     const { rerender } = render(
       <GoatBillingPanel data={base} checkoutResult={null} topupResult={null} />,
     );
-    expect(screen.getByRole("button", { name: "Upgrade to Pro" })).toBeEnabled();
-    expect(screen.getByText(/share the workspace with up to 10 people/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Start billing" })).toBeEnabled();
+    expect(screen.getByText(/each seat includes \$20 of at-cost usage/i)).toBeVisible();
 
     rerender(
       <GoatBillingPanel
-        data={{ ...base, plan: "pro", memberCount: 4 }}
+        data={{ ...base, plan: "pro", memberCount: 4, seatQuantity: 4 }}
         checkoutResult={null}
         topupResult={null}
       />,
     );
     expect(screen.getByRole("button", { name: "Manage plan" })).toBeEnabled();
-    expect(screen.getByText(/one workspace for up to 10 people/i)).toBeVisible();
+    expect(screen.getByText(/4 billed seats with \$20 of included at-cost usage/i)).toBeVisible();
   });
 
   it("surfaces Pro cancellation and payment states", () => {

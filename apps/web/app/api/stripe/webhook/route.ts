@@ -111,7 +111,7 @@ export async function POST(request: Request) {
         session.metadata?.billingProduct === "goat")
     ) {
       // Subscription lifecycle events carry the authoritative item and status.
-      // Checkout completion is a no-op so event ordering cannot grant Pro from
+      // Checkout completion is a no-op so event ordering cannot grant seats from
       // partial Checkout data.
       return NextResponse.json({ received: true });
     }
@@ -178,8 +178,14 @@ async function handleGoatSubscriptionEvent(
   if (!workspaceId) return;
 
   const item = subscription.items.data[0] ?? null;
+  const itemWithPeriod = item as
+    | (Stripe.SubscriptionItem & {
+        current_period_start?: number | null;
+        current_period_end?: number | null;
+      })
+    | null;
   const customerId = stripeObjectId(subscription.customer);
-  if (!customerId) throw new Error("OpenCompany Pro subscription is missing its customer id.");
+  if (!customerId) throw new Error("OpenCompany seat subscription is missing its customer id.");
   const projection = await applyGoatStripeSubscriptionProjection({
     eventId: event.id,
     eventType: event.type,
@@ -192,7 +198,13 @@ async function handleGoatSubscriptionEvent(
     productKey,
     status: subscription.status as GoatStripeSubscriptionStatus,
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    currentPeriodEnd: item?.current_period_end ? new Date(item.current_period_end * 1_000) : null,
+    currentPeriodStart: itemWithPeriod?.current_period_start
+      ? new Date(itemWithPeriod.current_period_start * 1_000)
+      : null,
+    currentPeriodEnd: itemWithPeriod?.current_period_end
+      ? new Date(itemWithPeriod.current_period_end * 1_000)
+      : null,
+    seatQuantity: item?.quantity ?? 1,
   });
   if (!projection.applied) return;
 

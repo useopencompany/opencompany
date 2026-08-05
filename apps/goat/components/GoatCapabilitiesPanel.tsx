@@ -182,8 +182,8 @@ export function GoatCapabilitiesPanel({
 
       <div className="flex flex-col gap-2 text-[12px] leading-5 text-ink-subtle">
         <p>
-          Usage is charged to workspace credits at the underlying provider cost plus a 20% platform
-          fee. Chat asks for one-time approval after the per-chat limit is reached.
+          Usage is charged to workspace credits at the underlying provider cost. Chat asks for
+          one-time approval after the per-chat limit is reached.
         </p>
         <p>
           These are managed capabilities, not connected integrations. Results are saved to Brain

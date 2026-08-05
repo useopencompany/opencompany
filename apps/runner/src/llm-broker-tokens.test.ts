@@ -245,14 +245,14 @@ describe("settleBrokerToken", () => {
       operation: "brokered",
       costUsdMicros: 1_000_000,
     });
-    // 20% platform fee on top of the metered provider cost.
+    // Billing v6 passes through metered provider cost without a platform fee.
     expect(recordDebit).toHaveBeenCalledWith(
       expect.objectContaining({
         source: "tool_usage",
         toolUsageId: 1,
         providerCostUsdMicros: 1_000_000,
-        platformFeeUsdMicros: 200_000,
-        totalCostUsdMicros: 1_200_000,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 1_000_000,
         metadata: expect.objectContaining({ brokerTokenId: minted.tokenId }),
       }),
     );
@@ -263,7 +263,7 @@ describe("settleBrokerToken", () => {
         payload: expect.objectContaining({
           provider: "opencode",
           operation: "brokered",
-          chargedCostUsdMicros: 1_200_000,
+          chargedCostUsdMicros: 1_000_000,
         }),
       }),
     );

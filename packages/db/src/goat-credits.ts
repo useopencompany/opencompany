@@ -1,5 +1,6 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "./client";
+import { GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS } from "./goat-billing-constants";
 import type { GoatCreditLedgerSource } from "./goat-schema";
 import { goatCreditLedger, goatStripeCheckoutSessions } from "./goat-schema";
 
@@ -27,18 +28,46 @@ function rowsFromExecute<T extends Record<string, unknown>>(result: unknown): T[
   return [];
 }
 
-export async function getGoatCreditBalanceUsdMicros(
+export async function getGoatCreditPoolsUsdMicros(
   workspaceId: string,
   db?: DbLike,
-): Promise<number> {
+): Promise<{
+  balanceUsdMicros: number;
+  includedBalanceUsdMicros: number;
+  topUpBalanceUsdMicros: number;
+}> {
   const result = await (db ?? getDb()).execute(sql`
-    SELECT balance_usd_micros AS "balanceUsdMicros"
+    SELECT
+      balance_usd_micros AS "balanceUsdMicros",
+      included_balance_usd_micros AS "includedBalanceUsdMicros",
+      top_up_balance_usd_micros AS "topUpBalanceUsdMicros"
     FROM goat.credit_balances
     WHERE workspace_id = ${workspaceId}
     LIMIT 1
   `);
-  const rows = rowsFromExecute<{ balanceUsdMicros: number | string }>(result);
-  return rows[0] ? Number(rows[0].balanceUsdMicros) : 0;
+  const rows = rowsFromExecute<{
+    balanceUsdMicros: number | string;
+    includedBalanceUsdMicros?: number | string | null;
+    topUpBalanceUsdMicros?: number | string | null;
+  }>(result);
+  const row = rows[0];
+  if (!row) {
+    return { balanceUsdMicros: 0, includedBalanceUsdMicros: 0, topUpBalanceUsdMicros: 0 };
+  }
+  const balanceUsdMicros = Number(row.balanceUsdMicros);
+  const includedBalanceUsdMicros = Number(row.includedBalanceUsdMicros ?? 0);
+  const topUpBalanceUsdMicros =
+    row.topUpBalanceUsdMicros === null || row.topUpBalanceUsdMicros === undefined
+      ? balanceUsdMicros - includedBalanceUsdMicros
+      : Number(row.topUpBalanceUsdMicros);
+  return { balanceUsdMicros, includedBalanceUsdMicros, topUpBalanceUsdMicros };
+}
+
+export async function getGoatCreditBalanceUsdMicros(
+  workspaceId: string,
+  db?: DbLike,
+): Promise<number> {
+  return (await getGoatCreditPoolsUsdMicros(workspaceId, db)).balanceUsdMicros;
 }
 
 export async function hasPositiveGoatCreditBalance(workspaceId: string, db?: DbLike) {
@@ -67,9 +96,10 @@ export type GoatCreditDebitInput = {
   db?: DbLike;
 };
 
-// Unconditional debit: the balance may go negative (a turn that finishes after
-// the balance hit zero still gets charged), matching the web credit system.
-// The unique idempotency_key index turns replays into no-ops.
+// Unconditional debit: included seat usage is spent first, then top-up/overage
+// funds. The aggregate balance may go negative (a turn that finishes after the
+// balance hit zero still gets charged), matching the web credit system. The
+// unique idempotency_key index turns replays into no-ops.
 export async function recordGoatCreditDebit(input: GoatCreditDebitInput) {
   if (input.totalCostUsdMicros <= 0) {
     return { ok: false as const, reason: "zero_cost" as const };
@@ -110,17 +140,49 @@ export async function recordGoatCreditDebit(input: GoatCreditDebitInput) {
       ON CONFLICT DO NOTHING
       RETURNING workspace_id, id, amount_usd_micros
     ),
+    locked_balance AS MATERIALIZED (
+      SELECT
+        workspace_id,
+        greatest(included_balance_usd_micros, 0) AS included_balance_usd_micros,
+        top_up_balance_usd_micros
+      FROM goat.credit_balances
+      WHERE workspace_id = ${input.workspaceId}
+      FOR UPDATE
+    ),
+    debit_split AS (
+      SELECT
+        COALESCE((SELECT included_balance_usd_micros FROM locked_balance), 0) AS included_before,
+        LEAST(
+          ${input.totalCostUsdMicros}::bigint,
+          COALESCE((SELECT included_balance_usd_micros FROM locked_balance), 0)
+        ) AS included_debit,
+        ${input.totalCostUsdMicros}::bigint - LEAST(
+          ${input.totalCostUsdMicros}::bigint,
+          COALESCE((SELECT included_balance_usd_micros FROM locked_balance), 0)
+        ) AS top_up_debit
+    ),
     balance AS (
-      INSERT INTO goat.credit_balances (workspace_id, balance_cents, balance_usd_micros, updated_at)
+      INSERT INTO goat.credit_balances (
+        workspace_id,
+        balance_cents,
+        balance_usd_micros,
+        included_balance_usd_micros,
+        top_up_balance_usd_micros,
+        updated_at
+      )
       SELECT
         workspace_id,
         ${-goatUsdMicrosToCents(input.totalCostUsdMicros)},
         amount_usd_micros,
+        0,
+        ${-input.totalCostUsdMicros},
         now()
       FROM ledger
       ON CONFLICT (workspace_id) DO UPDATE
       SET balance_usd_micros = goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros,
           balance_cents = ROUND((goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros)::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
+          included_balance_usd_micros = goat.credit_balances.included_balance_usd_micros - (SELECT included_debit FROM debit_split),
+          top_up_balance_usd_micros = goat.credit_balances.top_up_balance_usd_micros - (SELECT top_up_debit FROM debit_split),
           updated_at = now()
       RETURNING workspace_id, balance_usd_micros
     )
@@ -169,12 +231,20 @@ export async function grantGoatStarterCredit(input: {
       RETURNING id, workspace_id, amount_cents, amount_usd_micros
     ),
     balance AS (
-      INSERT INTO goat.credit_balances (workspace_id, balance_cents, balance_usd_micros, updated_at)
-      SELECT workspace_id, amount_cents, amount_usd_micros, now()
+      INSERT INTO goat.credit_balances (
+        workspace_id,
+        balance_cents,
+        balance_usd_micros,
+        included_balance_usd_micros,
+        top_up_balance_usd_micros,
+        updated_at
+      )
+      SELECT workspace_id, amount_cents, amount_usd_micros, 0, amount_usd_micros, now()
       FROM ledger
       ON CONFLICT (workspace_id) DO UPDATE
       SET balance_cents = goat.credit_balances.balance_cents + excluded.balance_cents,
           balance_usd_micros = goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros,
+          top_up_balance_usd_micros = goat.credit_balances.top_up_balance_usd_micros + excluded.balance_usd_micros,
           updated_at = now()
       RETURNING workspace_id, balance_cents
     )
@@ -185,6 +255,140 @@ export async function grantGoatStarterCredit(input: {
   const rows = rowsFromExecute<{ ledgerId: number; balanceCents: number }>(result);
   if (!rows[0]) return { ok: false as const, reason: "already_granted" as const };
   return { ok: true as const, ...rows[0] };
+}
+
+export async function grantGoatSeatIncludedUsage(input: {
+  workspaceId: string;
+  subscriptionId: string;
+  seatQuantity: number;
+  periodStart: Date;
+  periodEnd: Date;
+  eventId?: string | null;
+  db?: DbLike;
+}) {
+  if (!Number.isSafeInteger(input.seatQuantity) || input.seatQuantity < 1) {
+    throw new Error("Seat included usage requires at least one seat.");
+  }
+  if (!(input.periodStart < input.periodEnd)) {
+    throw new Error("Seat included usage requires a valid billing period.");
+  }
+  const amountCents = input.seatQuantity * GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS;
+  const amountUsdMicros = amountCents * GOAT_USD_MICROS_PER_CENT;
+  const db = input.db ?? getDb();
+  const grantKey = `seat_included_grant:${input.subscriptionId}:${input.periodStart.toISOString()}`;
+  const expireKey = `seat_included_expiration:${input.workspaceId}:${input.periodStart.toISOString()}`;
+  const result = await db.execute(sql`
+    WITH locked_balance AS MATERIALIZED (
+      SELECT workspace_id, included_balance_usd_micros
+      FROM goat.credit_balances
+      WHERE workspace_id = ${input.workspaceId}
+      FOR UPDATE
+    ),
+    current_billing AS MATERIALIZED (
+      SELECT included_usage_period_start
+      FROM goat.workspace_billing
+      WHERE workspace_id = ${input.workspaceId}
+    ),
+    should_rotate AS (
+      SELECT COALESCE(
+        (SELECT included_usage_period_start IS DISTINCT FROM ${input.periodStart.toISOString()}::timestamptz FROM current_billing),
+        true
+      ) AS value
+    ),
+    expiration AS (
+      INSERT INTO goat.credit_ledger (
+        workspace_id,
+        amount_cents,
+        amount_usd_micros,
+        source,
+        idempotency_key,
+        metadata
+      )
+      SELECT
+        ${input.workspaceId},
+        -ROUND(COALESCE(included_balance_usd_micros, 0)::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
+        -COALESCE(included_balance_usd_micros, 0),
+        'seat_included_expiration',
+        ${expireKey},
+        jsonb_build_object(
+          'reason', 'seat_included_usage_no_rollover',
+          'newPeriodStart', ${input.periodStart.toISOString()},
+          'stripeEventId', ${input.eventId ?? null}::text
+        )
+      FROM locked_balance
+      WHERE (SELECT value FROM should_rotate)
+        AND COALESCE(included_balance_usd_micros, 0) > 0
+      ON CONFLICT DO NOTHING
+      RETURNING amount_usd_micros
+    ),
+    grant_row AS (
+      INSERT INTO goat.credit_ledger (
+        workspace_id,
+        amount_cents,
+        amount_usd_micros,
+        source,
+        idempotency_key,
+        metadata
+      )
+      SELECT
+        ${input.workspaceId},
+        ${amountCents},
+        ${amountUsdMicros},
+        'seat_included_grant',
+        ${grantKey},
+        jsonb_build_object(
+          'reason', 'seat_included_usage',
+          'subscriptionId', ${input.subscriptionId},
+          'seatQuantity', ${input.seatQuantity},
+          'periodStart', ${input.periodStart.toISOString()},
+          'periodEnd', ${input.periodEnd.toISOString()},
+          'stripeEventId', ${input.eventId ?? null}::text
+        )
+      WHERE (SELECT value FROM should_rotate)
+      ON CONFLICT DO NOTHING
+      RETURNING amount_usd_micros
+    ),
+    balance AS (
+      INSERT INTO goat.credit_balances (
+        workspace_id,
+        balance_cents,
+        balance_usd_micros,
+        included_balance_usd_micros,
+        top_up_balance_usd_micros,
+        updated_at
+      )
+      SELECT
+        ${input.workspaceId},
+        ${amountCents},
+        COALESCE((SELECT SUM(amount_usd_micros) FROM expiration), 0) + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0),
+        COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0),
+        0,
+        now()
+      WHERE EXISTS (SELECT 1 FROM expiration) OR EXISTS (SELECT 1 FROM grant_row)
+      ON CONFLICT (workspace_id) DO UPDATE
+      SET included_balance_usd_micros = COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0),
+          balance_usd_micros = goat.credit_balances.top_up_balance_usd_micros + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0),
+          balance_cents = ROUND((goat.credit_balances.top_up_balance_usd_micros + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0))::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
+          updated_at = now()
+      RETURNING balance_usd_micros
+    )
+    SELECT
+      COALESCE((SELECT COUNT(*) FROM grant_row), 0)::integer AS "grants",
+      COALESCE((SELECT COUNT(*) FROM expiration), 0)::integer AS "expirations",
+      COALESCE((SELECT balance_usd_micros FROM balance), NULL) AS "balanceUsdMicros"
+  `);
+  const rows = rowsFromExecute<{
+    grants: number | string;
+    expirations: number | string;
+    balanceUsdMicros: number | string | null;
+  }>(result);
+  const row = rows[0];
+  return {
+    ok: Number(row?.grants ?? 0) > 0,
+    grants: Number(row?.grants ?? 0),
+    expirations: Number(row?.expirations ?? 0),
+    balanceUsdMicros: row?.balanceUsdMicros == null ? null : Number(row.balanceUsdMicros),
+  };
 }
 
 export async function createGoatPendingCheckoutRecord(input: {
@@ -289,12 +493,26 @@ export async function fulfillGoatTopUpCheckoutSession(
       RETURNING id, workspace_id, user_workos_id, amount_cents, stripe_checkout_session_id
     ),
     balance AS (
-      INSERT INTO goat.credit_balances (workspace_id, balance_cents, balance_usd_micros, updated_at)
-      SELECT workspace_id, amount_cents, amount_cents::bigint * ${GOAT_USD_MICROS_PER_CENT}, now()
+      INSERT INTO goat.credit_balances (
+        workspace_id,
+        balance_cents,
+        balance_usd_micros,
+        included_balance_usd_micros,
+        top_up_balance_usd_micros,
+        updated_at
+      )
+      SELECT
+        workspace_id,
+        amount_cents,
+        amount_cents::bigint * ${GOAT_USD_MICROS_PER_CENT},
+        0,
+        amount_cents::bigint * ${GOAT_USD_MICROS_PER_CENT},
+        now()
       FROM fulfilled_session
       ON CONFLICT (workspace_id) DO UPDATE
       SET balance_cents = goat.credit_balances.balance_cents + excluded.balance_cents,
           balance_usd_micros = goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros,
+          top_up_balance_usd_micros = goat.credit_balances.top_up_balance_usd_micros + excluded.balance_usd_micros,
           updated_at = now()
       RETURNING workspace_id, balance_cents
     ),
@@ -370,12 +588,20 @@ export async function recordGoatAutoRefillCredit(input: {
       RETURNING id, workspace_id, amount_cents, amount_usd_micros
     ),
     balance AS (
-      INSERT INTO goat.credit_balances (workspace_id, balance_cents, balance_usd_micros, updated_at)
-      SELECT workspace_id, amount_cents, amount_usd_micros, now()
+      INSERT INTO goat.credit_balances (
+        workspace_id,
+        balance_cents,
+        balance_usd_micros,
+        included_balance_usd_micros,
+        top_up_balance_usd_micros,
+        updated_at
+      )
+      SELECT workspace_id, amount_cents, amount_usd_micros, 0, amount_usd_micros, now()
       FROM ledger
       ON CONFLICT (workspace_id) DO UPDATE
       SET balance_cents = goat.credit_balances.balance_cents + excluded.balance_cents,
           balance_usd_micros = goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros,
+          top_up_balance_usd_micros = goat.credit_balances.top_up_balance_usd_micros + excluded.balance_usd_micros,
           updated_at = now()
       RETURNING workspace_id, balance_usd_micros
     )

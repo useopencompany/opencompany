@@ -16,12 +16,16 @@ export type GoatBillingPanelData = {
   subscriptionStatus: string | null;
   cancelAtPeriodEnd: boolean;
   currentPeriodEnd: string | null;
+  includedUsagePeriodEnd: string | null;
   paymentNeedsAttention: boolean;
   proMonthlyPriceCents: number;
+  includedUsagePerSeatCents: number;
+  seatQuantity: number;
   memberCount: number;
-  freeMaxMembers: number;
   proMaxMembers: number;
   creditBalanceUsdMicros: number;
+  includedBalanceUsdMicros: number;
+  topUpBalanceUsdMicros: number;
   spendThisMonthUsdMicros: number;
   spendThisMonthByCategory: {
     chat: number;
@@ -49,8 +53,6 @@ export type GoatBillingPanelData = {
     hasPaymentMethod: boolean;
     lastError: string | null;
   };
-  platformFeePercent: number;
-  ingestFeeUsdCentsPer50: number;
   hasStripeCustomer: boolean;
   isAdmin: boolean;
 };
@@ -77,9 +79,9 @@ export function GoatBillingPanel({
     if (!checkoutResult || announcedCheckoutResult.current) return;
     announcedCheckoutResult.current = true;
     if (checkoutResult === "success") {
-      toast.success("Welcome to Pro. Your plan updates as soon as Stripe confirms it.");
+      toast.success("Seat billing updates as soon as Stripe confirms it.");
     } else {
-      toast("Pro checkout cancelled — no subscription was started.");
+      toast("Seat checkout cancelled — no subscription was started.");
     }
   }, [checkoutResult]);
 
@@ -145,17 +147,18 @@ export function GoatBillingPanel({
   return (
     <GoatSettingsContent
       title="Billing"
-      description="Choose a workspace plan and fund usage from one shared balance."
+      description="Manage seats, included usage, and top-up funds for this workspace."
     >
       {data.paymentNeedsAttention ? (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
-          Your Pro payment needs attention. Update the payment method to keep team access active.
+          Your seat subscription payment needs attention. Update the payment method to keep access
+          active.
         </div>
       ) : null}
 
       {data.cancelAtPeriodEnd && data.currentPeriodEnd ? (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
-          Pro is cancelled and remains active until {formatDate(data.currentPeriodEnd)}.
+          Seat billing is cancelled and remains active until {formatDate(data.currentPeriodEnd)}.
         </div>
       ) : null}
 
@@ -164,22 +167,21 @@ export function GoatBillingPanel({
           <div>
             <div className="flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
               {data.plan === "pro" ? <BadgeCheck size={13} /> : <Users size={13} />}
-              {data.plan === "pro" ? "Pro plan" : "Free plan"}
+              Seat billing
             </div>
             <div className="mt-1 text-[20px] font-semibold tracking-tight text-ink">
-              {data.plan === "pro" ? formatUsd(data.proMonthlyPriceCents) : "$0"}
-              <span className="ml-1 text-[12.5px] font-normal text-ink-subtle">per month</span>
+              {formatUsd(data.proMonthlyPriceCents)}
+              <span className="ml-1 text-[12.5px] font-normal text-ink-subtle">
+                per seat / month
+              </span>
             </div>
             <p className="mt-1 max-w-xl text-[12.5px] leading-5 text-ink-subtle">
               {data.plan === "pro"
-                ? `One workspace for up to ${data.proMaxMembers} people. Usage is billed separately from the shared credit balance.`
-                : `Built for one founder. Upgrade when you are ready to share the workspace with up to ${data.proMaxMembers} people.`}
+                ? `${data.seatQuantity} billed ${data.seatQuantity === 1 ? "seat" : "seats"} with ${formatUsd(data.includedUsagePerSeatCents)} of included at-cost usage per seat each month.`
+                : `Start seat billing to keep using Goat after the signup grant. Each seat includes ${formatUsd(data.includedUsagePerSeatCents)} of at-cost usage.`}
             </p>
             <p className="mt-2 text-[11.5px] text-ink-subtle">
-              {data.memberCount} of {data.plan === "pro" ? data.proMaxMembers : data.freeMaxMembers}{" "}
-              member
-              {(data.plan === "pro" ? data.proMaxMembers : data.freeMaxMembers) === 1 ? "" : "s"}
-              {" used"}
+              {data.memberCount} of {data.proMaxMembers} members used
             </p>
           </div>
           {data.isAdmin ? (
@@ -205,7 +207,7 @@ export function GoatBillingPanel({
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
               >
                 {isPending ? <Loader2 size={13} className="animate-spin" /> : null}
-                Upgrade to Pro
+                Start billing
               </button>
             )
           ) : (
@@ -239,6 +241,13 @@ export function GoatBillingPanel({
             </div>
             <div className="mt-1 text-[24px] font-semibold tracking-tight text-ink">
               {formatUsdMicros(data.creditBalanceUsdMicros)}
+            </div>
+            <div className="mt-1 text-[11.5px] text-ink-subtle">
+              {formatUsdMicros(data.includedBalanceUsdMicros)} included ·{" "}
+              {formatUsdMicros(data.topUpBalanceUsdMicros)} top-up
+              {data.includedUsagePeriodEnd
+                ? ` · included expires ${formatDate(data.includedUsagePeriodEnd)}`
+                : ""}
             </div>
           </div>
           <div className="text-right">
@@ -291,8 +300,8 @@ export function GoatBillingPanel({
           </div>
         </div>
         <p className="text-[11.5px] leading-4 text-ink-subtle">
-          Anyone in the workspace can add credits. Payments run through Stripe; the card is saved
-          for auto-refill.
+          Anyone in the workspace can add top-up funds. Payments run through Stripe; the card is
+          saved for auto-refill.
         </p>
       </section>
 
@@ -371,16 +380,16 @@ export function GoatBillingPanel({
         </h2>
         <ul className="flex flex-col gap-1 text-[12.5px] leading-5 text-ink-subtle">
           <li>
-            Chat: model cost + {data.platformFeePercent}% platform fee, charged per message from
-            your balance.
+            Chat: provider retail cost only, charged from included usage first and top-up funds
+            after that.
           </li>
           <li>
-            Brain ingestion: model cost + {data.platformFeePercent}% platform fee, plus{" "}
-            {formatUsd(data.ingestFeeUsdCentsPer50)} per 50 ingested items.
+            Brain ingestion: model, capability, and sandbox COGS at cost. There is no platform fee
+            on usage.
           </li>
           <li>
-            Paid capabilities: underlying provider cost + {data.platformFeePercent}% platform fee.
-            Higher-cost actions ask for one-time approval before running.
+            Included usage expires monthly. Top-up funds stay in one workspace pool that all members
+            draw from.
           </li>
           <li>Brain retrieval and browsing are free.</li>
         </ul>
@@ -419,8 +428,7 @@ export function GoatBillingPanel({
                   </div>
                   {entry.amountUsdMicros < 0 ? (
                     <div className="text-[10.5px] text-ink-subtle">
-                      {formatUsdMicros(entry.providerCostUsdMicros)} cost +{" "}
-                      {formatUsdMicros(entry.platformFeeUsdMicros)} fee
+                      {formatUsdMicros(entry.providerCostUsdMicros)} cost
                     </div>
                   ) : null}
                 </div>
@@ -493,5 +501,7 @@ function billingActivityLabel(
     return isAutoRefill ? "Auto-refill" : "Credit top-up";
   }
   if (source === "starter_grant") return "Starter credits";
+  if (source === "seat_included_grant") return "Included monthly usage";
+  if (source === "seat_included_expiration") return "Expired included usage";
   return "Workspace credits";
 }

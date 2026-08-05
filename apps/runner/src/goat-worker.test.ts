@@ -325,8 +325,8 @@ describe("runClaimedGoatTask", () => {
         providerRequestId: "exa_req_1",
         cost: expect.objectContaining({
           providerCostUsdMicros: 1_000,
-          platformFeeUsdMicros: 200,
-          totalCostUsdMicros: 1_200,
+          platformFeeUsdMicros: 0,
+          totalCostUsdMicros: 1_000,
           costBasis: expect.objectContaining({ kind: "tool_usage" }),
         }),
       }),

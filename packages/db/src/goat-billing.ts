@@ -19,6 +19,7 @@ type DbLike = any;
 export {
   GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS,
   GOAT_FREE_MAX_MEMBERS,
+  GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS,
   GOAT_INGEST_ITEM_FEE_USD_MICROS,
   GOAT_LOW_BALANCE_WARN_USD_MICROS,
   GOAT_PRO_MAX_MEMBERS,
@@ -34,7 +35,11 @@ import {
   GOAT_PRO_STRIPE_PRODUCT_KEY,
   goatIngestItemFeeUsdMicros,
 } from "./goat-billing-constants";
-import { GOAT_USD_MICROS_PER_CENT, getGoatCreditBalanceUsdMicros } from "./goat-credits";
+import {
+  GOAT_USD_MICROS_PER_CENT,
+  getGoatCreditPoolsUsdMicros,
+  grantGoatSeatIncludedUsage,
+} from "./goat-credits";
 
 // The default web-app client (`./client`) is neon-http, which has no interactive
 // transactions (one HTTPS request per query) and throws on db.transaction().
@@ -106,6 +111,30 @@ async function tryAdmitGoatIngestion(
   db: DbLike,
 ) {
   const feeUsdMicros = goatIngestItemFeeUsdMicros(input.rawEventCount);
+  if (feeUsdMicros === 0) {
+    const result = await db.execute(sql`
+      WITH locked_balance AS MATERIALIZED (
+        SELECT workspace_id, balance_usd_micros
+        FROM goat.credit_balances
+        WHERE workspace_id = ${input.workspaceId}
+        FOR UPDATE
+      )
+      UPDATE goat.workspace_ingestion_reservations AS reservation
+      SET status = 'consumed',
+          consumed_at = ${input.now.toISOString()},
+          updated_at = ${input.now.toISOString()}
+      WHERE reservation.id = ${input.reservationId}
+        AND reservation.workspace_id = ${input.workspaceId}
+        AND reservation.status = 'pending'
+        AND (
+          NOT ${isGoatCreditsEnforcementEnabled()}
+          OR EXISTS (SELECT 1 FROM locked_balance WHERE balance_usd_micros > 0)
+        )
+      RETURNING reservation.id AS "reservationId"
+    `);
+    const rows = Array.isArray(result) ? result : ((result as { rows?: unknown[] })?.rows ?? []);
+    return rows.length > 0;
+  }
   const feeCents = Math.round(feeUsdMicros / GOAT_USD_MICROS_PER_CENT);
   const requirePositiveBalance = isGoatCreditsEnforcementEnabled();
   const costBasis = {
@@ -161,12 +190,20 @@ async function tryAdmitGoatIngestion(
       RETURNING workspace_id, amount_usd_micros
     ),
     balance AS (
-      INSERT INTO goat.credit_balances (workspace_id, balance_cents, balance_usd_micros, updated_at)
-      SELECT workspace_id, ${-feeCents}, amount_usd_micros, now()
+      INSERT INTO goat.credit_balances (
+        workspace_id,
+        balance_cents,
+        balance_usd_micros,
+        included_balance_usd_micros,
+        top_up_balance_usd_micros,
+        updated_at
+      )
+      SELECT workspace_id, ${-feeCents}, amount_usd_micros, 0, amount_usd_micros, now()
       FROM debit
       ON CONFLICT (workspace_id) DO UPDATE
       SET balance_usd_micros = goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros,
           balance_cents = ROUND((goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros)::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
+          top_up_balance_usd_micros = goat.credit_balances.top_up_balance_usd_micros + excluded.balance_usd_micros,
           updated_at = now()
       RETURNING workspace_id
     )
@@ -418,7 +455,7 @@ export async function loadGoatBillingOverview(workspaceId: string, options: { db
         .select({ total: sql<number>`count(*)::integer` })
         .from(goatWorkspaceMembers)
         .where(eq(goatWorkspaceMembers.workspaceId, workspaceId)),
-      getGoatCreditBalanceUsdMicros(workspaceId, db),
+      getGoatCreditPoolsUsdMicros(workspaceId, db),
     ]);
   return {
     billing: {
@@ -428,7 +465,9 @@ export async function loadGoatBillingOverview(workspaceId: string, options: { db
       plan: billing.stripeProductKey === GOAT_PRO_STRIPE_PRODUCT_KEY ? billing.plan : "free",
     },
     memberCount: Number(memberCountRows[0]?.total ?? 0),
-    creditBalanceUsdMicros: creditBalance,
+    creditBalanceUsdMicros: creditBalance.balanceUsdMicros,
+    includedBalanceUsdMicros: creditBalance.includedBalanceUsdMicros,
+    topUpBalanceUsdMicros: creditBalance.topUpBalanceUsdMicros,
     ingestedThisMonth: Number(usage[0]?.total ?? 0),
     pending: Number(pending[0]?.total ?? 0),
     providers: providerRows.map((row: { provider: GoatBrainSourceProvider; total: number }) => ({
@@ -491,9 +530,11 @@ export type GoatStripeSubscriptionProjection = {
   status: GoatStripeSubscriptionStatus;
   cancelAtPeriodEnd: boolean;
   currentPeriodEnd: Date | null;
+  currentPeriodStart: Date | null;
+  seatQuantity: number;
 };
 
-// Stripe webhooks are the only authority that grants Pro. Event ids make
+// Stripe webhooks are the only authority that grants paid seats. Event ids make
 // retries harmless, and event creation time prevents delayed events from
 // rolling a workspace back to stale subscription state.
 export async function applyGoatStripeSubscriptionProjection(
@@ -519,12 +560,11 @@ export async function applyGoatStripeSubscriptionProjection(
       return { applied: false as const, reason: "stale" as const };
     }
 
-    const plan =
-      input.productKey === GOAT_PRO_STRIPE_PRODUCT_KEY
-        ? goatPlanForSubscriptionStatus(input.status)
-        : "free";
+    const isGoatSeatSubscription = input.productKey === GOAT_PRO_STRIPE_PRODUCT_KEY;
+    const plan = isGoatSeatSubscription ? goatPlanForSubscriptionStatus(input.status) : "free";
     const planChanged = plan !== current.plan;
     const cancellationScheduled = !current.cancelAtPeriodEnd && input.cancelAtPeriodEnd;
+    const seatQuantity = Math.max(1, Math.floor(input.seatQuantity));
     await tx
       .update(goatWorkspaceBilling)
       .set({
@@ -535,7 +575,7 @@ export async function applyGoatStripeSubscriptionProjection(
         stripeSubscriptionItemId: input.subscriptionItemId,
         stripePriceId: input.priceId,
         stripeProductKey: input.productKey,
-        seatQuantity: 1,
+        seatQuantity,
         subscriptionStatus: input.status,
         cancelAtPeriodEnd: input.cancelAtPeriodEnd,
         currentPeriodEnd: input.currentPeriodEnd,
@@ -544,7 +584,40 @@ export async function applyGoatStripeSubscriptionProjection(
         updatedAt: new Date(),
       })
       .where(eq(goatWorkspaceBilling.workspaceId, input.workspaceId));
-    return { applied: true as const, planChanged, plan, cancellationScheduled };
+    let includedUsageGranted = false;
+    if (
+      isGoatSeatSubscription &&
+      plan === "pro" &&
+      input.currentPeriodStart &&
+      input.currentPeriodEnd
+    ) {
+      const grant = await grantGoatSeatIncludedUsage({
+        workspaceId: input.workspaceId,
+        subscriptionId: input.subscriptionId,
+        seatQuantity,
+        periodStart: input.currentPeriodStart,
+        periodEnd: input.currentPeriodEnd,
+        eventId: input.eventId,
+        db: tx,
+      });
+      includedUsageGranted = grant.ok;
+      await tx
+        .update(goatWorkspaceBilling)
+        .set({
+          includedUsagePeriodStart: input.currentPeriodStart,
+          includedUsagePeriodEnd: input.currentPeriodEnd,
+          updatedAt: new Date(),
+        })
+        .where(eq(goatWorkspaceBilling.workspaceId, input.workspaceId));
+    }
+    return {
+      applied: true as const,
+      planChanged,
+      plan,
+      cancellationScheduled,
+      seatQuantity,
+      includedUsageGranted,
+    };
   });
 }
 

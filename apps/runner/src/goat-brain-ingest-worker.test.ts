@@ -937,8 +937,8 @@ describe("Goat Brain ingest worker", () => {
         workspaceId: "goat_ws_user_123",
         source: "ingest_model_usage",
         providerCostUsdMicros: 451_500,
-        platformFeeUsdMicros: 90_300,
-        totalCostUsdMicros: 541_800,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 451_500,
       }),
     );
     expect(analytics.captureGoatModelSpendRecorded).toHaveBeenCalledWith(
@@ -949,8 +949,8 @@ describe("Goat Brain ingest worker", () => {
         surface: "brain_ingest",
         model: failureResult.trace.model,
         providerCostUsdMicros: 451_500,
-        platformFeeUsdMicros: 90_300,
-        totalCostUsdMicros: 541_800,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 451_500,
         modelCostUsdMicros: 450_000,
         ledgerId: 456,
         ingestJobId: "gbjob_budget",
