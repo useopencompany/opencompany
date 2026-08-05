@@ -13,6 +13,7 @@ import {
   approveGoatCapabilityRunByToolCall,
   cancelGoatCapabilityRunByToolCall,
 } from "@opencompany/db/goat-capabilities";
+import { recordGoatChatModelRoutingAttempt } from "@opencompany/db/goat-chat-model-routing";
 import { hasPositiveGoatCreditBalance, recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import {
   type GoatImessageDelivery,
@@ -430,6 +431,10 @@ export async function POST(request: Request): Promise<Response> {
           "goat.router_reason": modelRouting.reason,
           "goat.router_outcome": modelRouting.classifier.outcome,
           "goat.router_duration_ms": modelRouting.classifier.durationMs,
+          "goat.router_error_category": modelRouting.classifier.errorCategory,
+          "goat.router_finish_reason": modelRouting.classifier.finishReason,
+          "goat.router_provider_status_code": modelRouting.classifier.providerStatusCode,
+          "goat.router_provider_retryable": modelRouting.classifier.providerRetryable,
         }
       : {}),
     ...(approvalMessage ? { "goat.approval_continuation": true } : {}),
@@ -603,6 +608,51 @@ export async function POST(request: Request): Promise<Response> {
       "goat.chat_message_id": turn.userMessageId,
       "goat.model": turn.session.model,
     });
+    if (modelRouting) {
+      const routingUsage = modelRouting.classifier.usage
+        ? normalizeChatModelUsage(modelRouting.classifier.usage)
+        : null;
+      try {
+        await recordGoatChatModelRoutingAttempt({
+          workspaceId: context.workspace.id,
+          userWorkosId: context.user.workosUserId,
+          chatSessionId: turn.session.id,
+          userMessageId: turn.userMessageId,
+          classifierModel: modelRouting.classifier.model,
+          selectedModel: modelRouting.model,
+          tier: modelRouting.tier,
+          reason: modelRouting.reason,
+          outcome: modelRouting.classifier.outcome,
+          durationMs: modelRouting.classifier.durationMs,
+          ...(modelRouting.classifier.errorCategory
+            ? { errorCategory: modelRouting.classifier.errorCategory }
+            : {}),
+          ...(modelRouting.classifier.finishReason
+            ? { finishReason: modelRouting.classifier.finishReason }
+            : {}),
+          ...(modelRouting.classifier.providerStatusCode !== undefined
+            ? { providerStatusCode: modelRouting.classifier.providerStatusCode }
+            : {}),
+          ...(modelRouting.classifier.providerRetryable !== undefined
+            ? { providerRetryable: modelRouting.classifier.providerRetryable }
+            : {}),
+          promptLength: turn.userMessageContent.length,
+          attachmentCount: attachments.length,
+          inputTokens: routingUsage?.inputTokens ?? 0,
+          outputTokens: routingUsage?.outputTokens ?? 0,
+          totalTokens: routingUsage?.totalTokens ?? 0,
+        });
+      } catch (error) {
+        logger.warn("Goat chat model routing attempt persistence failed", {
+          event: "goat.chat_model_routing_attempt_persistence_failed",
+          workspace_id: context.workspace.id,
+          chat_session_id: turn.session.id,
+          chat_message_id: turn.userMessageId,
+          routing_outcome: modelRouting.classifier.outcome,
+          error,
+        });
+      }
+    }
     if (modelRouting?.classifier.usage) {
       after(
         recordChatModelCost({
@@ -660,6 +710,18 @@ export async function POST(request: Request): Promise<Response> {
               routingReason: modelRouting.reason,
               routingOutcome: modelRouting.classifier.outcome,
               routingDurationMs: modelRouting.classifier.durationMs,
+              ...(modelRouting.classifier.errorCategory
+                ? { routingErrorCategory: modelRouting.classifier.errorCategory }
+                : {}),
+              ...(modelRouting.classifier.finishReason
+                ? { routingFinishReason: modelRouting.classifier.finishReason }
+                : {}),
+              ...(modelRouting.classifier.providerStatusCode !== undefined
+                ? { routingProviderStatusCode: modelRouting.classifier.providerStatusCode }
+                : {}),
+              ...(modelRouting.classifier.providerRetryable !== undefined
+                ? { routingProviderRetryable: modelRouting.classifier.providerRetryable }
+                : {}),
             }
           : {}),
       }),

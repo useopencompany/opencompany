@@ -1,10 +1,24 @@
 import type { AgentModelId } from "@opencompany/agent-runtime";
+import type {
+  GoatChatModelRoutingErrorCategory,
+  GoatChatModelRoutingOutcome,
+  GoatChatModelRoutingReason,
+  GoatChatModelRoutingTier,
+} from "@opencompany/db/goat-schema";
 import {
   createGoatGatewayAttribution,
   goatGatewayProviderOptions,
 } from "@opencompany/goat-observability";
 import { latitudeTelemetry } from "@opencompany/goat-observability/latitude";
-import { createGateway, generateObject, jsonSchema, type LanguageModelUsage } from "ai";
+import {
+  APICallError,
+  createGateway,
+  generateObject,
+  jsonSchema,
+  type LanguageModelUsage,
+  NoObjectGeneratedError,
+  RetryError,
+} from "ai";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 
 export const GOAT_CHAT_ROUTER_MODEL = "google/gemini-3.1-flash-lite";
@@ -12,7 +26,7 @@ export const GOAT_CHAT_STANDARD_MODEL: AgentModelId = "moonshotai/kimi-k2.6";
 export const GOAT_CHAT_FRONTIER_MODEL: AgentModelId = DEFAULT_GOAT_MODEL;
 export const GOAT_CHAT_PDF_MODEL: AgentModelId = "anthropic/claude-sonnet-5";
 
-const GOAT_CHAT_ROUTER_TIMEOUT_MS = 1_000;
+const GOAT_CHAT_ROUTER_TIMEOUT_MS = 2_000;
 const GOAT_CHAT_ROUTER_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -52,29 +66,19 @@ Choose "frontier" for:
 
 Return only the requested structured result.`;
 
-export type GoatChatModelRoutingReason =
-  | "pdf_attachment"
-  | "attachment"
-  | "simple_answer"
-  | "summarization"
-  | "drafting"
-  | "single_action"
-  | "multi_step"
-  | "analysis"
-  | "coding"
-  | "high_stakes"
-  | "ambiguous"
-  | "router_fallback";
-
 export type GoatChatModelRoutingResult = {
   model: AgentModelId;
-  tier: "standard" | "frontier";
+  tier: GoatChatModelRoutingTier;
   reason: GoatChatModelRoutingReason;
   classifier: {
     model: typeof GOAT_CHAT_ROUTER_MODEL;
     durationMs: number;
-    outcome: "success" | "skipped" | "timeout" | "error" | "invalid";
+    outcome: GoatChatModelRoutingOutcome;
     usage?: LanguageModelUsage;
+    errorCategory?: GoatChatModelRoutingErrorCategory | undefined;
+    finishReason?: string | undefined;
+    providerStatusCode?: number | undefined;
+    providerRetryable?: boolean | undefined;
   };
 };
 
@@ -123,7 +127,7 @@ export async function resolveAutoGoatModel(
       schema: jsonSchema(GOAT_CHAT_ROUTER_SCHEMA as never),
       system: GOAT_CHAT_ROUTER_SYSTEM_PROMPT,
       prompt: input.prompt,
-      maxOutputTokens: 30,
+      maxOutputTokens: 100,
       temperature: 0,
       abortSignal,
       providerOptions: goatGatewayProviderOptions(
@@ -133,7 +137,7 @@ export async function resolveAutoGoatModel(
           tags: ["stage:routing"],
         }),
         {
-          gateway: { sort: "latency" },
+          gateway: { sort: "ttft" },
           google: {
             thinkingConfig: {
               thinkingLevel: "minimal",
@@ -155,7 +159,10 @@ export async function resolveAutoGoatModel(
     });
     const object = result.object as { tier?: unknown; reason?: unknown };
     if (!isRouterTier(object.tier) || !isRouterReason(object.reason)) {
-      return fallback(startedAt, "invalid", result.usage);
+      return fallback(startedAt, "invalid", result.usage, {
+        errorCategory: "invalid_output",
+        finishReason: result.finishReason,
+      });
     }
     return {
       model: object.tier === "standard" ? GOAT_CHAT_STANDARD_MODEL : GOAT_CHAT_FRONTIER_MODEL,
@@ -166,17 +173,55 @@ export async function resolveAutoGoatModel(
         durationMs: elapsedMs(startedAt),
         outcome: "success",
         usage: result.usage,
+        finishReason: result.finishReason,
       },
     };
   } catch (error) {
-    return fallback(startedAt, isTimeoutError(error) ? "timeout" : "error");
+    if (NoObjectGeneratedError.isInstance(error)) {
+      return fallback(startedAt, "invalid", error.usage, {
+        errorCategory: error.finishReason === "length" ? "output_length" : "invalid_output",
+        ...(error.finishReason ? { finishReason: error.finishReason } : {}),
+      });
+    }
+    const providerError = apiCallErrorFrom(error);
+    if (
+      isTimeoutError(error) ||
+      providerError?.statusCode === 408 ||
+      providerError?.statusCode === 504
+    ) {
+      return fallback(startedAt, "timeout", undefined, {
+        errorCategory: "timeout",
+        ...(providerError?.statusCode !== undefined
+          ? { providerStatusCode: providerError.statusCode }
+          : {}),
+        ...(providerError ? { providerRetryable: providerError.isRetryable } : {}),
+      });
+    }
+    if (providerError) {
+      return fallback(startedAt, "error", undefined, {
+        errorCategory: providerError.statusCode === 429 ? "rate_limit" : "provider",
+        ...(providerError.statusCode !== undefined
+          ? { providerStatusCode: providerError.statusCode }
+          : {}),
+        providerRetryable: providerError.isRetryable,
+      });
+    }
+    return fallback(startedAt, "error", undefined, { errorCategory: "unknown" });
   }
 }
+
+type GoatChatModelRoutingErrorDetails = {
+  errorCategory: GoatChatModelRoutingErrorCategory;
+  finishReason?: string | undefined;
+  providerStatusCode?: number | undefined;
+  providerRetryable?: boolean | undefined;
+};
 
 function fallback(
   startedAt: number,
   outcome: "timeout" | "error" | "invalid",
   usage?: LanguageModelUsage,
+  details?: GoatChatModelRoutingErrorDetails,
 ): GoatChatModelRoutingResult {
   return {
     model: GOAT_CHAT_FRONTIER_MODEL,
@@ -187,6 +232,7 @@ function fallback(
       durationMs: elapsedMs(startedAt),
       outcome,
       ...(usage ? { usage } : {}),
+      ...details,
     },
   };
 }
@@ -219,6 +265,7 @@ function isRouterReason(
 }
 
 function isTimeoutError(error: unknown) {
+  if (RetryError.isInstance(error)) return isTimeoutError(error.lastError);
   return (
     (error instanceof DOMException && error.name === "TimeoutError") ||
     (error instanceof Error &&
@@ -226,4 +273,12 @@ function isTimeoutError(error: unknown) {
         error.name === "AbortError" ||
         error.message.toLowerCase().includes("timeout")))
   );
+}
+
+function apiCallErrorFrom(error: unknown): APICallError | null {
+  if (APICallError.isInstance(error)) return error;
+  if (RetryError.isInstance(error) && APICallError.isInstance(error.lastError)) {
+    return error.lastError;
+  }
+  return null;
 }

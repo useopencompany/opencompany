@@ -68,6 +68,28 @@ export type GoatTaskStage =
   | "canceled";
 export type GoatTaskScheduleRunStatus = "pending" | "created" | "failed";
 export type GoatChatSessionKind = "chat" | "task";
+export type GoatChatModelRoutingTier = "standard" | "frontier";
+export type GoatChatModelRoutingReason =
+  | "pdf_attachment"
+  | "attachment"
+  | "simple_answer"
+  | "summarization"
+  | "drafting"
+  | "single_action"
+  | "multi_step"
+  | "analysis"
+  | "coding"
+  | "high_stakes"
+  | "ambiguous"
+  | "router_fallback";
+export type GoatChatModelRoutingOutcome = "success" | "skipped" | "timeout" | "error" | "invalid";
+export type GoatChatModelRoutingErrorCategory =
+  | "output_length"
+  | "invalid_output"
+  | "timeout"
+  | "rate_limit"
+  | "provider"
+  | "unknown";
 
 export type GoatIntegrationProvider =
   | "gmail"
@@ -3367,6 +3389,83 @@ export const goatChatMessages = goat.table(
   }),
 );
 
+// One immutable row per Auto classifier attempt. Prompt content is deliberately
+// excluded; lengths, outcomes, safe provider metadata, and usage are sufficient
+// to diagnose routing reliability without creating a second message store.
+export const goatChatModelRoutingAttempts = goat.table(
+  "chat_model_routing_attempts",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    chatSessionId: text("chat_session_id").references(() => goatChatSessions.id, {
+      onDelete: "set null",
+    }),
+    userMessageId: text("user_message_id").references(() => goatChatMessages.id, {
+      onDelete: "set null",
+    }),
+    classifierModel: text("classifier_model").notNull(),
+    selectedModel: text("selected_model").$type<AgentModelId>().notNull(),
+    tier: text("tier").$type<GoatChatModelRoutingTier>().notNull(),
+    reason: text("reason").$type<GoatChatModelRoutingReason>().notNull(),
+    outcome: text("outcome").$type<GoatChatModelRoutingOutcome>().notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    errorCategory: text("error_category").$type<GoatChatModelRoutingErrorCategory>(),
+    finishReason: text("finish_reason"),
+    providerStatusCode: integer("provider_status_code"),
+    providerRetryable: boolean("provider_retryable"),
+    promptLength: integer("prompt_length").notNull(),
+    attachmentCount: integer("attachment_count").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    totalTokens: integer("total_tokens").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceCreatedIdx: index("goat_chat_model_routing_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    sessionCreatedIdx: index("goat_chat_model_routing_session_created_idx").on(
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    outcomeCreatedIdx: index("goat_chat_model_routing_outcome_created_idx").on(
+      table.outcome,
+      table.createdAt,
+    ),
+    userMessageIdx: index("goat_chat_model_routing_user_message_idx").on(table.userMessageId),
+    tierCheck: check(
+      "goat_chat_model_routing_tier_check",
+      sql`${table.tier} IN ('standard', 'frontier')`,
+    ),
+    reasonCheck: check(
+      "goat_chat_model_routing_reason_check",
+      sql`${table.reason} IN ('pdf_attachment', 'attachment', 'simple_answer', 'summarization', 'drafting', 'single_action', 'multi_step', 'analysis', 'coding', 'high_stakes', 'ambiguous', 'router_fallback')`,
+    ),
+    outcomeCheck: check(
+      "goat_chat_model_routing_outcome_check",
+      sql`${table.outcome} IN ('success', 'skipped', 'timeout', 'error', 'invalid')`,
+    ),
+    errorCategoryCheck: check(
+      "goat_chat_model_routing_error_category_check",
+      sql`${table.errorCategory} IS NULL OR ${table.errorCategory} IN ('output_length', 'invalid_output', 'timeout', 'rate_limit', 'provider', 'unknown')`,
+    ),
+    nonNegativeMetricsCheck: check(
+      "goat_chat_model_routing_non_negative_metrics_check",
+      sql`${table.durationMs} >= 0 AND ${table.promptLength} >= 0 AND ${table.attachmentCount} >= 0 AND ${table.inputTokens} >= 0 AND ${table.outputTokens} >= 0 AND ${table.totalTokens} >= 0`,
+    ),
+    providerStatusCodeCheck: check(
+      "goat_chat_model_routing_provider_status_code_check",
+      sql`${table.providerStatusCode} IS NULL OR ${table.providerStatusCode} BETWEEN 100 AND 599`,
+    ),
+  }),
+);
+
 export const goatChatSandboxUsage = goat.table(
   "chat_sandbox_usage",
   {
@@ -4389,6 +4488,7 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
   }),
   task: one(goatTasks),
   messages: many(goatChatMessages),
+  modelRoutingAttempts: many(goatChatModelRoutingAttempts),
   sandboxUsage: many(goatChatSandboxUsage),
   browserProfileSessions: many(goatBrowserProfileSessions),
   skills: many(goatChatSessionSkills),
@@ -4429,7 +4529,30 @@ export const goatChatMessagesRelations = relations(goatChatMessages, ({ one, man
   }),
   activatedSkills: many(goatChatSessionSkills),
   sandboxUsage: many(goatChatSandboxUsage),
+  modelRoutingAttempts: many(goatChatModelRoutingAttempts),
 }));
+
+export const goatChatModelRoutingAttemptsRelations = relations(
+  goatChatModelRoutingAttempts,
+  ({ one }) => ({
+    workspace: one(goatWorkspaces, {
+      fields: [goatChatModelRoutingAttempts.workspaceId],
+      references: [goatWorkspaces.id],
+    }),
+    user: one(goatUsers, {
+      fields: [goatChatModelRoutingAttempts.userWorkosId],
+      references: [goatUsers.workosUserId],
+    }),
+    session: one(goatChatSessions, {
+      fields: [goatChatModelRoutingAttempts.chatSessionId],
+      references: [goatChatSessions.id],
+    }),
+    userMessage: one(goatChatMessages, {
+      fields: [goatChatModelRoutingAttempts.userMessageId],
+      references: [goatChatMessages.id],
+    }),
+  }),
+);
 
 export const goatChatSandboxUsageRelations = relations(goatChatSandboxUsage, ({ one }) => ({
   user: one(goatUsers, {
@@ -4534,6 +4657,7 @@ export type GoatChatShare = typeof goatChatShares.$inferSelect;
 export type GoatActionTurn = typeof goatActionTurns.$inferSelect;
 export type GoatCapabilityRun = typeof goatCapabilityRuns.$inferSelect;
 export type GoatChatMessage = typeof goatChatMessages.$inferSelect;
+export type GoatChatModelRoutingAttempt = typeof goatChatModelRoutingAttempts.$inferSelect;
 export type GoatChatSandboxUsage = typeof goatChatSandboxUsage.$inferSelect;
 export type GoatBrowserProfile = typeof goatBrowserProfiles.$inferSelect;
 export type GoatBrowserProfileSession = typeof goatBrowserProfileSessions.$inferSelect;

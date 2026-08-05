@@ -21,6 +21,10 @@ export function captureGoatChatMessageSent(input: {
   routingReason?: string;
   routingOutcome?: string;
   routingDurationMs?: number;
+  routingErrorCategory?: string;
+  routingFinishReason?: string;
+  routingProviderStatusCode?: number;
+  routingProviderRetryable?: boolean;
 }) {
   return captureGoatServerEvent(
     "chat_message_sent",
@@ -39,6 +43,14 @@ export function captureGoatChatMessageSent(input: {
       ...(input.routingOutcome ? { routing_outcome: input.routingOutcome } : {}),
       ...(input.routingDurationMs !== undefined
         ? { routing_duration_ms: input.routingDurationMs }
+        : {}),
+      ...(input.routingErrorCategory ? { routing_error_category: input.routingErrorCategory } : {}),
+      ...(input.routingFinishReason ? { routing_finish_reason: input.routingFinishReason } : {}),
+      ...(input.routingProviderStatusCode !== undefined
+        ? { routing_provider_status_code: input.routingProviderStatusCode }
+        : {}),
+      ...(input.routingProviderRetryable !== undefined
+        ? { routing_provider_retryable: input.routingProviderRetryable }
         : {}),
     },
     {
