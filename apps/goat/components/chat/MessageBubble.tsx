@@ -29,6 +29,7 @@ export function MessageBubble({
   onActionApproval,
   allowActionApproval = false,
   readOnly = false,
+  isTaskSession = false,
   attachmentSrc,
 }: {
   message: GoatChatUiMessage;
@@ -40,6 +41,7 @@ export function MessageBubble({
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
   allowActionApproval?: boolean;
   readOnly?: boolean;
+  isTaskSession?: boolean;
   attachmentSrc?: (messageId: string, attachment: GoatChatUiAttachment) => string | undefined;
 }) {
   if (message.role === "user") {
@@ -56,6 +58,7 @@ export function MessageBubble({
       onActionApproval={onActionApproval}
       allowActionApproval={allowActionApproval}
       readOnly={readOnly}
+      isTaskSession={isTaskSession}
     />
   );
 }
@@ -70,6 +73,7 @@ function AssistantTurn({
   onActionApproval,
   allowActionApproval,
   readOnly,
+  isTaskSession,
 }: {
   message: GoatChatUiMessage;
   taskLookup: ChatTaskLookup;
@@ -80,13 +84,15 @@ function AssistantTurn({
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
   allowActionApproval: boolean;
   readOnly: boolean;
+  isTaskSession: boolean;
 }) {
   const error = message.metadata?.error;
-  const items = getOrderedAssistantItems(
-    message,
-    taskLookup,
-    stopped || message.metadata?.aborted === true,
-  );
+  // In task sessions this metadata identifies the surrounding run; in regular chats it is also
+  // the legacy fallback for a task launched by this turn. Explicit start-task parts still render.
+  const items = getOrderedAssistantItems(message, taskLookup, {
+    stopped: stopped || message.metadata?.aborted === true,
+    includeMetadataTaskCard: !isTaskSession,
+  });
   // Failed turns often end without any text part (sandbox start failure, disconnected auth);
   // the error must still get a bubble or the turn renders as nothing.
   const showStandaloneError = Boolean(error) && !items.some((item) => item.type === "text");

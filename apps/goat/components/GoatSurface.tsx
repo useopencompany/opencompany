@@ -2576,6 +2576,7 @@ export function GoatSurface({
                       allowCodexPlanActions={message.id === latestAssistantMessageId}
                       onActionApproval={handleActionApproval}
                       allowActionApproval={message.id === latestAssistantMessageId}
+                      isTaskSession={Boolean(activeTaskConversation)}
                     />
                   ))}
                   {isTaskConversationStopping ? (

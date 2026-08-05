@@ -82,11 +82,17 @@ export type ToolCallView = {
   approvalId: string | null;
 };
 
+type AssistantRenderOptions = {
+  stopped?: boolean;
+  includeMetadataTaskCard?: boolean;
+};
+
 export function getOrderedAssistantItems(
   message: GoatChatUiMessage,
   taskLookup: ChatTaskLookup,
-  stopped = false,
+  options: AssistantRenderOptions = {},
 ) {
+  const stopped = options.stopped ?? false;
   const items = collectRenderItems(
     message.parts as readonly RenderablePart[],
     taskLookup,
@@ -95,7 +101,11 @@ export function getOrderedAssistantItems(
   );
 
   const metadataTask = metadataTaskCard(message.metadata);
-  if (!items.some((item) => item.type === "task") && metadataTask) {
+  if (
+    options.includeMetadataTaskCard !== false &&
+    !items.some((item) => item.type === "task") &&
+    metadataTask
+  ) {
     items.push({
       type: "task",
       key: "task-metadata",
