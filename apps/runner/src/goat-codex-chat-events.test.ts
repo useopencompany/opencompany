@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
-import { createGoatCodexChatProjector } from "./goat-codex-chat-events";
+import {
+  createGoatCodexChatProjector,
+  type GoatCodexChatProjectorTarget,
+} from "./goat-codex-chat-events";
 
 const mocks = vi.hoisted(() => ({
+  captureGoatLlmUsageRecorded: vi.fn(async () => undefined),
   captureException: vi.fn(),
   createLogger: vi.fn(() => ({
     debug: vi.fn(),
@@ -11,6 +15,10 @@ const mocks = vi.hoisted(() => ({
     warn: vi.fn(),
   })),
   execute: vi.fn(),
+}));
+
+vi.mock("@opencompany/analytics/goat/server", () => ({
+  captureGoatLlmUsageRecorded: mocks.captureGoatLlmUsageRecorded,
 }));
 
 vi.mock("@opencompany/observability", () => ({
@@ -148,6 +156,102 @@ describe("createGoatCodexChatProjector", () => {
     expect(sessionUpdate).toContain("ELSE idle");
   });
 
+  it("captures Codex token usage in PostHog analytics when a turn finalizes", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const projector = createGoatCodexChatProjector({
+      target: projectorTarget({
+        workspaceId: "workspace_1",
+        engine: "codex",
+        model: "gpt-5.5-codex",
+      }),
+      redact: (value) => value,
+    });
+
+    await projector.finalize({
+      sessionId: "codex_thread_1",
+      status: "success",
+      result: "Done",
+      error: null,
+      usage: {
+        input_tokens: 100,
+        cache_read_input_tokens: 20,
+        cache_creation_input_tokens: 5,
+        output_tokens: 30,
+      },
+      goal: null,
+    });
+
+    expect(mocks.captureGoatLlmUsageRecorded).toHaveBeenCalledWith({
+      distinctId: "user_1",
+      workspaceId: "workspace_1",
+      surface: "chat",
+      stage: "execution",
+      sessionId: "goat_chat_1",
+      messageId: "goat_chat_msg_user_1",
+      taskId: undefined,
+      turnId: "goat_codex_chat_turn_1",
+      modelProvider: "openai",
+      model: "gpt-5.5-codex",
+      engine: "codex",
+      inputTokens: 100,
+      inputNoCacheTokens: 75,
+      inputCacheReadTokens: 20,
+      inputCacheWriteTokens: 5,
+      outputTokens: 30,
+      outputTextTokens: 30,
+      outputReasoningTokens: 0,
+      totalTokens: 130,
+      providerCostUsdMicros: 0,
+      platformFeeUsdMicros: 0,
+      chargedCostUsdMicros: 0,
+      billable: false,
+      finishReason: "success",
+    });
+  });
+
+  it("captures Claude Code token usage in PostHog analytics when a turn finalizes", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
+    const projector = createGoatCodexChatProjector({
+      target: projectorTarget({
+        workspaceId: "workspace_1",
+        engine: "claude_code",
+        model: "claude-sonnet-5",
+      }),
+      redact: (value) => value,
+    });
+
+    await projector.finalize({
+      sessionId: "claude_session_1",
+      status: "success",
+      result: "Done",
+      error: null,
+      usage: {
+        input_tokens: 50,
+        output_tokens: 10,
+      },
+      goal: null,
+    });
+
+    expect(mocks.captureGoatLlmUsageRecorded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distinctId: "user_1",
+        workspaceId: "workspace_1",
+        surface: "chat",
+        stage: "execution",
+        sessionId: "goat_chat_1",
+        messageId: "goat_chat_msg_user_1",
+        turnId: "goat_codex_chat_turn_1",
+        modelProvider: "anthropic",
+        model: "claude-sonnet-5",
+        engine: "claude_code",
+        inputTokens: 50,
+        outputTokens: 10,
+        totalTokens: 60,
+        billable: false,
+      }),
+    );
+  });
+
   it("durably projects and resolves an app-server user-input request", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const projector = createGoatCodexChatProjector({
@@ -211,14 +315,21 @@ describe("createGoatCodexChatProjector", () => {
   });
 });
 
-function projectorTarget() {
+function projectorTarget(overrides: Partial<GoatCodexChatProjectorTarget> = {}) {
+  return { ...projectorTargetBase(), ...overrides };
+}
+
+function projectorTargetBase(): GoatCodexChatProjectorTarget {
   return {
     userWorkosId: "user_1",
+    workspaceId: null,
     codexChatSessionId: "goat_codex_chat_1",
     chatSessionId: "goat_chat_1",
     turnId: "goat_codex_chat_turn_1",
+    userMessageId: "goat_chat_msg_user_1",
     assistantMessageId: "goat_chat_msg_assistant_1",
     model: "gpt-5.5",
+    engine: "codex" as const,
     leaseId: "goat_codex_chat_lease_1",
     leaseOwner: "runner_1",
     planMode: false,

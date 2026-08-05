@@ -28,6 +28,7 @@ type CodexGitHubAuth = {
 type CodexUsage = {
   input_tokens: number;
   cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
   output_tokens: number;
 };
 
@@ -1539,11 +1540,15 @@ function usageFromNotification(params: Record<string, unknown> | undefined): Cod
   const inputTokens = numberFrom(last.inputTokens);
   const outputTokens = numberFrom(last.outputTokens);
   if (inputTokens == null || outputTokens == null) return null;
-  const cachedInputTokens = numberFrom(last.cachedInputTokens);
+  const cachedInputTokens = numberFrom(last.cachedInputTokens ?? last.cacheReadInputTokens);
+  const cacheCreationInputTokens = numberFrom(
+    last.cacheCreationInputTokens ?? last.cacheWriteInputTokens,
+  );
   return {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     ...(cachedInputTokens ? { cache_read_input_tokens: cachedInputTokens } : {}),
+    ...(cacheCreationInputTokens ? { cache_creation_input_tokens: cacheCreationInputTokens } : {}),
   };
 }
 
