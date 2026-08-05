@@ -3928,6 +3928,62 @@ describe("GoatSurface chat streaming UI", () => {
     expect(assistantText.closest(".bg-surface-muted")).toBeNull();
   });
 
+  it("keeps completed assistant text clear of the expanded main composer", async () => {
+    let composerHeight = 96;
+    let resizeObserverCallback: ResizeObserverCallback | null = null;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        constructor(callback: ResizeObserverCallback) {
+          resizeObserverCallback = callback;
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this instanceof HTMLFormElement) {
+        return domRectWithHeight(composerHeight);
+      }
+      return domRectWithHeight(0);
+    });
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [{ type: "text", text: "Finished answer" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Finished answer")).toBeInTheDocument();
+    const threadContent = screen.getByTestId("chat-thread-content");
+    await waitFor(() => expect(threadContent).toHaveStyle({ paddingBottom: "160px" }));
+
+    composerHeight = 252;
+    fireEvent.change(screen.getByPlaceholderText("Reply..."), {
+      target: { value: "Line one\nLine two\nLine three\nLine four\nLine five" },
+    });
+    act(() => resizeObserverCallback?.([], {} as ResizeObserver));
+
+    await waitFor(() => expect(threadContent).toHaveStyle({ paddingBottom: "272px" }));
+  });
+
   it("renders the final elapsed time for completed assistant turns", () => {
     render(
       <GoatSurface
@@ -4634,6 +4690,20 @@ function codexChatSummary(
 
 function currentTimestamp() {
   return new Date().toISOString();
+}
+
+function domRectWithHeight(height: number): DOMRect {
+  return {
+    x: 0,
+    y: 0,
+    width: 720,
+    height,
+    top: 0,
+    right: 720,
+    bottom: height,
+    left: 0,
+    toJSON: () => ({}),
+  } as DOMRect;
 }
 
 function LocalChatStateProbe({ sessionId }: { sessionId: string }) {

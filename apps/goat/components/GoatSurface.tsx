@@ -201,6 +201,8 @@ import type { GoatWorkflowCatalogItem } from "@/lib/workflows";
 
 const TEXTAREA_MAX_HEIGHT_PX = 128;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
+const CHAT_THREAD_MIN_BOTTOM_PADDING_PX = 160;
+const CHAT_THREAD_COMPOSER_GAP_PX = 20;
 const BACKGROUND_CHAT_PROMPT_MAX_LENGTH = 10_000;
 const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
@@ -262,6 +264,13 @@ type ChatComposerDraft = {
   input: string;
   mentions: GoatChatMention[];
 };
+
+function chatThreadBottomPaddingForComposerHeight(composerHeightPx: number) {
+  return Math.max(
+    CHAT_THREAD_MIN_BOTTOM_PADDING_PX,
+    Math.ceil(composerHeightPx) + CHAT_THREAD_COMPOSER_GAP_PX,
+  );
+}
 
 const ENGINE_CHAT_CONFIG: Record<
   GoatEngineChatKind,
@@ -485,6 +494,9 @@ export function GoatSurface({
   const [composerDraftsByChatId, setComposerDraftsByChatId] = useState<
     ReadonlyMap<string, ChatComposerDraft>
   >(() => new Map());
+  const [chatThreadBottomPaddingPx, setChatThreadBottomPaddingPx] = useState(
+    CHAT_THREAD_MIN_BOTTOM_PADDING_PX,
+  );
   const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
     initialCodexComposerUiState.reasoningEffort,
   );
@@ -1272,6 +1284,28 @@ export function GoatSurface({
   }, [input]);
 
   useLayoutEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+
+    const updateBottomPadding = () => {
+      setChatThreadBottomPaddingPx(
+        chatThreadBottomPaddingForComposerHeight(form.getBoundingClientRect().height),
+      );
+    };
+
+    updateBottomPadding();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateBottomPadding);
+      return () => window.removeEventListener("resize", updateBottomPadding);
+    }
+
+    const observer = new ResizeObserver(updateBottomPadding);
+    observer.observe(form);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
     const caret = pendingInputCaretRef.current;
     if (caret === null) return;
     pendingInputCaretRef.current = null;
@@ -1299,6 +1333,13 @@ export function GoatSurface({
     if (!thread || typeof thread.scrollTo !== "function") return;
     thread.scrollTo({ top: thread.scrollHeight, behavior: "auto" });
   }, [chatMessages, isAgentWorking, mode]);
+
+  useLayoutEffect(() => {
+    if (mode !== "chat" || !isPinnedAtBottomRef.current) return;
+    const thread = threadRef.current;
+    if (!thread || typeof thread.scrollTo !== "function") return;
+    thread.scrollTo({ top: thread.scrollHeight, behavior: "auto" });
+  }, [chatThreadBottomPaddingPx, mode]);
 
   useEffect(() => {
     if (!chatError || chatError.message === lastError.current) return;
@@ -2596,7 +2637,11 @@ export function GoatSurface({
                   isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
                 }}
               >
-                <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pb-40 pt-2">
+                <div
+                  data-testid="chat-thread-content"
+                  className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pt-2"
+                  style={{ paddingBottom: chatThreadBottomPaddingPx }}
+                >
                   {chatMessages.map((message) => (
                     <MessageBubble
                       key={message.id}
