@@ -3,8 +3,10 @@ import { POST as actionGatewayPost } from "../action-gateway/route";
 // Compatibility endpoint for runners on the previous deployment. New runners
 // use the harness-neutral /api/internal/action-gateway route. Translate only
 // transport identity fields; authorization and request validation stay owned
-// by the neutral route.
-export { maxDuration, runtime } from "../action-gateway/route";
+// by the neutral route. Next.js requires route segment config to be declared
+// as local literals rather than re-exported from another route module.
+export const runtime = "nodejs";
+export const maxDuration = 150;
 
 export async function POST(request: Request) {
   const body = await request
