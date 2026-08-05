@@ -4,8 +4,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 
-const TERMINAL_INPUT_BATCH_MS = 8;
-const MAX_BATCHED_TERMINAL_INPUT_CHARS = 8_192;
+const MAX_LOCAL_ECHO_INPUT_CHARS = 256;
+const MAX_PENDING_LOCAL_ECHO_BYTES = 64 * 1_024;
 
 export default function CodingWorkspaceTerminal({ socket }: { socket: WebSocket }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,43 +55,129 @@ export default function CodingWorkspaceTerminal({ socket }: { socket: WebSocket 
     const resizeObserver = new ResizeObserver(fit);
     resizeObserver.observe(container);
     fit();
+    const encoder = new TextEncoder();
+    let pendingLocalEcho: Uint8Array[] = [];
+    let pendingLocalEchoBytes = 0;
+    let localEchoColumns = 0;
+    let appendOnlyLocalEcho = true;
+    let alternateScreenActive = false;
+    let sensitivePromptActive = false;
+    let remoteLineTail = "";
+
+    const appendPendingLocalEcho = (data: string) => {
+      if (!data) return;
+      const encoded = encoder.encode(data);
+      if (pendingLocalEchoBytes + encoded.byteLength > MAX_PENDING_LOCAL_ECHO_BYTES) {
+        pendingLocalEcho = [];
+        pendingLocalEchoBytes = 0;
+        return;
+      }
+      pendingLocalEcho.push(encoded);
+      pendingLocalEchoBytes += encoded.byteLength;
+    };
+
+    const stripPendingLocalEcho = (data: Uint8Array) => {
+      if (pendingLocalEchoBytes === 0) return data;
+
+      const expected = new Uint8Array(pendingLocalEchoBytes);
+      let offset = 0;
+      for (const chunk of pendingLocalEcho) {
+        expected.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+
+      const compareLength = Math.min(data.byteLength, expected.byteLength);
+      for (let index = 0; index < compareLength; index += 1) {
+        if (data[index] !== expected[index]) {
+          pendingLocalEcho = [];
+          pendingLocalEchoBytes = 0;
+          return data;
+        }
+      }
+
+      if (data.byteLength <= expected.byteLength) {
+        const remaining = expected.slice(data.byteLength);
+        pendingLocalEcho = remaining.byteLength > 0 ? [remaining] : [];
+        pendingLocalEchoBytes = remaining.byteLength;
+        return null;
+      }
+
+      pendingLocalEcho = [];
+      pendingLocalEchoBytes = 0;
+      return data.slice(expected.byteLength);
+    };
+
+    const localEchoForInput = (data: string) => {
+      if (sensitivePromptActive) {
+        if (data.includes("\r") || data.includes("\n")) sensitivePromptActive = false;
+        return null;
+      }
+      if (alternateScreenActive || data.length > MAX_LOCAL_ECHO_INPUT_CHARS) return null;
+
+      let echo = "";
+      for (const character of data) {
+        const codePoint = character.codePointAt(0) ?? 0;
+        if (character === "\r" || character === "\n") {
+          echo += "\r\n";
+          localEchoColumns = 0;
+          appendOnlyLocalEcho = true;
+        } else if (character === "\u007f" || character === "\b") {
+          if (!appendOnlyLocalEcho) return null;
+          if (localEchoColumns > 0) {
+            echo += "\b \b";
+            localEchoColumns -= 1;
+          }
+        } else if (character === "\t" || codePoint < 0x20 || codePoint === 0x7f) {
+          appendOnlyLocalEcho = false;
+          return null;
+        } else {
+          if (!appendOnlyLocalEcho) return null;
+          echo += character;
+          localEchoColumns += 1;
+        }
+      }
+      return echo;
+    };
+
+    const writeRemoteData = (data: Uint8Array) => {
+      const text = new TextDecoder().decode(data);
+      remoteLineTail = trailingTerminalLine(`${remoteLineTail}${text}`);
+      sensitivePromptActive = isSensitiveTerminalPrompt(remoteLineTail);
+      if (text.includes("\x1b[?1049h")) alternateScreenActive = true;
+      if (text.includes("\x1b[?1049l")) {
+        alternateScreenActive = false;
+        appendOnlyLocalEcho = true;
+        localEchoColumns = 0;
+      }
+
+      const filtered = stripPendingLocalEcho(data);
+      if (filtered && filtered.byteLength > 0) terminal.write(filtered);
+    };
+
     const onMessage = (event: MessageEvent) => {
       if (event.data instanceof ArrayBuffer) {
-        terminal.write(new Uint8Array(event.data));
+        writeRemoteData(new Uint8Array(event.data));
+      } else if (ArrayBuffer.isView(event.data)) {
+        writeRemoteData(
+          new Uint8Array(event.data.buffer, event.data.byteOffset, event.data.byteLength),
+        );
       } else if (event.data instanceof Blob) {
-        void event.data.arrayBuffer().then((data) => terminal.write(new Uint8Array(data)));
+        void event.data.arrayBuffer().then((data) => writeRemoteData(new Uint8Array(data)));
       }
     };
     socket.addEventListener("message", onMessage);
-    const encoder = new TextEncoder();
-    let pendingInput = "";
-    let inputFlushTimer: ReturnType<typeof setTimeout> | null = null;
-    const flushInput = () => {
-      if (inputFlushTimer !== null) {
-        clearTimeout(inputFlushTimer);
-        inputFlushTimer = null;
-      }
-      if (!pendingInput) return;
-      const data = pendingInput;
-      pendingInput = "";
-      if (socket.readyState === WebSocket.OPEN) socket.send(encoder.encode(data));
-    };
-    const scheduleInputFlush = () => {
-      if (inputFlushTimer !== null) return;
-      inputFlushTimer = setTimeout(flushInput, TERMINAL_INPUT_BATCH_MS);
-    };
+
     const input = terminal.onData((data) => {
-      pendingInput += data;
-      if (pendingInput.length >= MAX_BATCHED_TERMINAL_INPUT_CHARS) {
-        flushInput();
-      } else {
-        scheduleInputFlush();
+      const localEcho = localEchoForInput(data);
+      if (localEcho) {
+        terminal.write(localEcho);
+        appendPendingLocalEcho(localEcho);
       }
+      if (socket.readyState === WebSocket.OPEN) socket.send(encoder.encode(data));
     });
     sendSize("terminal.attach");
 
     return () => {
-      flushInput();
       socket.removeEventListener("message", onMessage);
       resizeObserver.disconnect();
       input.dispose();
@@ -100,4 +186,14 @@ export default function CodingWorkspaceTerminal({ socket }: { socket: WebSocket 
   }, [socket]);
 
   return <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden p-2" />;
+}
+
+function isSensitiveTerminalPrompt(text: string) {
+  return /\b(password|passphrase|secret|token|api\s*key|otp|verification code)\b.*[:?]\s*$/i.test(
+    text,
+  );
+}
+
+function trailingTerminalLine(text: string) {
+  return text.split(/\r?\n/).at(-1)?.slice(-256) ?? "";
 }

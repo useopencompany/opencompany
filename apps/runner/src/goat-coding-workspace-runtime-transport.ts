@@ -274,7 +274,8 @@ export function attachRuntimeConnection(
     if (disposed || pendingInputBytes + data.byteLength > MAX_PENDING_TERMINAL_INPUT_BYTES) return;
     pendingInput.push(data);
     pendingInputBytes += data.byteLength;
-    scheduleTerminalInputFlush();
+    if (isTerminalInputBoundary(data)) flushTerminalInput();
+    else scheduleTerminalInputFlush();
   };
 
   const sendControl = (message: Record<string, unknown>) => {
@@ -695,6 +696,10 @@ function copyWebSocketData(data: RawData) {
   if (Array.isArray(data)) return Buffer.concat(data);
   if (data instanceof ArrayBuffer) return Buffer.from(new Uint8Array(data));
   return Buffer.from(data);
+}
+
+function isTerminalInputBoundary(data: Buffer) {
+  return data.includes(0x0a) || data.includes(0x0d) || data.includes(0x03);
 }
 
 function clampDimension(value: number | undefined, fallback: number) {
