@@ -5,7 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeGoatChatSessionAction, markGoatChatSeenAction } from "@/lib/chat-actions";
-import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
+import {
+  GOAT_CHAT_COMPOSER_FOCUS_EVENT,
+  GOAT_HOME_NAVIGATION_EVENT,
+  requestGoatChatComposerFocus,
+} from "@/lib/chat-navigation";
 import { clearAllLocalGoatChatStates, useLocalGoatChatStates } from "@/lib/chat-session-state";
 import {
   GOAT_BRAIN_TOOL_PART_TYPE,
@@ -1028,6 +1032,62 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(screen.getByText("Second chat")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Draft for the second chat");
+  });
+
+  it("focuses the composer when the requested chat session opens", async () => {
+    const user = userEvent.setup();
+    const chatOne = {
+      id: "chat_1",
+      title: "First chat",
+      model: DEFAULT_GOAT_MODEL,
+      messages: [],
+    };
+    const chatTwo = {
+      id: "chat_2",
+      title: "Second chat",
+      model: DEFAULT_GOAT_MODEL,
+      messages: [],
+    };
+    const { rerender } = render(
+      <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatOne} />,
+    );
+    const composer = screen.getByPlaceholderText("Reply...");
+
+    await user.type(composer, "Draft");
+    composer.blur();
+    act(() => requestGoatChatComposerFocus("chat_2"));
+
+    rerender(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatTwo} />);
+    await nextAnimationFrame();
+    await nextAnimationFrame();
+
+    expect(screen.getByText("Second chat")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Reply...")).toHaveFocus();
+  });
+
+  it("focuses the composer immediately when the active chat session is requested", () => {
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [],
+        }}
+      />,
+    );
+    const composer = screen.getByPlaceholderText("Reply...");
+
+    composer.blur();
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent(GOAT_CHAT_COMPOSER_FOCUS_EVENT, { detail: { sessionId: "chat_1" } }),
+      ),
+    );
+
+    expect(composer).toHaveFocus();
   });
 
   it("does not reopen a new chat when its response arrives after Home was clicked", async () => {

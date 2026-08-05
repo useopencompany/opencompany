@@ -120,7 +120,12 @@ import {
   readLastGoatChatSelection,
   subscribeLastGoatChatSelection,
 } from "@/lib/chat-composer-selection";
-import { GOAT_HOME_NAVIGATION_EVENT, newOptimisticGoatChatSessionId } from "@/lib/chat-navigation";
+import {
+  consumePendingGoatChatComposerFocus,
+  GOAT_CHAT_COMPOSER_FOCUS_EVENT,
+  GOAT_HOME_NAVIGATION_EVENT,
+  newOptimisticGoatChatSessionId,
+} from "@/lib/chat-navigation";
 import {
   clearLocalGoatChatState,
   setLocalGoatChatState,
@@ -1173,6 +1178,9 @@ export function GoatSurface({
       setSelectedMentions(nextDraft?.mentions ?? []);
       clearError();
       setMode(chat ? "chat" : "home");
+      if (chat && consumePendingGoatChatComposerFocus(chat.id)) {
+        requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
+      }
     },
     [
       applyCodexComposerUiState,
@@ -1227,6 +1235,27 @@ export function GoatSurface({
     window.addEventListener(GOAT_HOME_NAVIGATION_EVENT, handleHomeNavigation);
     return () => window.removeEventListener(GOAT_HOME_NAVIGATION_EVENT, handleHomeNavigation);
   }, [clearComposerAttachments, openChat]);
+
+  useEffect(() => {
+    const handleChatComposerFocusRequest = (event: Event) => {
+      const sessionId =
+        event instanceof CustomEvent && typeof event.detail?.sessionId === "string"
+          ? event.detail.sessionId
+          : null;
+      if (!sessionId || sessionId !== routedChatSessionIdRef.current) return;
+      consumePendingGoatChatComposerFocus(sessionId);
+      inputRef.current?.focus({ preventScroll: true });
+    };
+    window.addEventListener(GOAT_CHAT_COMPOSER_FOCUS_EVENT, handleChatComposerFocusRequest);
+    return () =>
+      window.removeEventListener(GOAT_CHAT_COMPOSER_FOCUS_EVENT, handleChatComposerFocusRequest);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (mode !== "chat" || !chatSessionId) return;
+    if (!consumePendingGoatChatComposerFocus(chatSessionId)) return;
+    inputRef.current?.focus({ preventScroll: true });
+  }, [chatSessionId, mode]);
 
   useEffect(() => {
     const el = inputRef.current;
