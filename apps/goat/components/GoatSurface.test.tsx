@@ -524,6 +524,96 @@ describe("GoatSurface chat streaming UI", () => {
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
   });
 
+  it("starts a selected workflow from a running Codex chat without interrupting Codex", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/skills") return Response.json({ skills: [] });
+      if (url === "/api/workflows" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_1",
+              displayId: "TASK-1",
+              name: "Ship feature",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      if (url === "/api/workflows") {
+        return Response.json({
+          workflows: [
+            {
+              id: "ship-feature",
+              name: "Ship feature",
+              description: "Use this to ship features.",
+            },
+          ],
+        });
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_codex_active",
+          title: "Codex active",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          messages: [],
+          codexRuntime: {
+            status: "running",
+            error: null,
+            updatedAt: new Date().toISOString(),
+          },
+        }}
+        codexConnected
+        userWorkosId="user_1"
+        taskSpawningEnabled
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
+
+    await user.type(textarea, "#");
+    await user.click(await screen.findByRole("option", { name: /Ship feature/i }));
+    await user.type(textarea, "fix the composer send button");
+
+    expect(screen.getByTestId("workflow-task-hint")).toHaveTextContent(
+      "Sending runs workflow Ship feature as a background task.",
+    );
+    const submit = screen.getByRole("button", { name: "Start task" });
+    expect(submit).toBeEnabled();
+
+    await user.click(submit);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      workflow: {
+        kind: "workflow",
+        id: "ship-feature",
+      },
+      description: "#ship-feature fix the composer send button",
+    });
+    expect(chatMock.stop).not.toHaveBeenCalled();
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+  });
+
   it("starts an ampersand ad-hoc task with Enter while the current chat is streaming", async () => {
     const user = userEvent.setup();
     chatMock.status = "streaming";

@@ -961,7 +961,7 @@ export function GoatSurface({
   );
   const isAgentWorking = isGenerating || isEngineWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
-  const isBackgroundSubmit = backgroundDirectiveActive;
+  const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
   const latestActiveTurnStartedAtMs = useMemo(
     () => latestChatTurnStartedAtMs(chatMessages),
     [chatMessages],
@@ -1479,7 +1479,7 @@ export function GoatSurface({
     pendingProgrammaticPromptRef.current = null;
     const backgroundChat = parseGoatBackgroundChatDirective(prompt);
     const backgroundEngine = backgroundChat ? (backgroundChat.engine ?? activeEngine) : null;
-    if ((isInteractionPending && !backgroundChat) || backgroundTaskSubmitting) return;
+    if ((isInteractionPending && !isBackgroundSubmit) || backgroundTaskSubmitting) return;
     if (outOfCredits && !(backgroundEngine ?? activeEngine)) {
       toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
