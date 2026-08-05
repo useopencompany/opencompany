@@ -1172,6 +1172,66 @@ describe("POST /api/chat", () => {
     expect(modelUiMessages[2]?.parts[0]?.text).toContain('"userRequest":"Implement this"');
   });
 
+  it("activates a leading slash skill command in main chat", async () => {
+    mockAuth();
+    vi.mocked(listGoatSkillCatalog).mockResolvedValue([
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "How coding work should happen.",
+      },
+    ]);
+    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "How coding work should happen.",
+        instructions: "Inspect, implement, and verify.",
+      },
+    ]);
+    mockCreateGoatChatUserTurn().mockResolvedValue({
+      session: { id: "session_1", model: "openai/gpt-5.5" },
+      userMessage: { id: "user_message_1" },
+      storedMessages: [],
+      messages: [
+        {
+          id: "user_message_1",
+          role: "user",
+          parts: [{ type: "text", text: "/coding-work Implement this" }],
+        },
+      ],
+    } as never);
+    vi.mocked(activateAndListGoatChatSessionSkills).mockResolvedValue([
+      {
+        chatSessionId: "session_1",
+        skillId: "coding-work",
+        brainRef: "goat_ws_user_1",
+        activatedMessageId: "user_message_1",
+        name: "Coding work",
+        description: "How coding work should happen.",
+        instructions: "Inspect, implement, and verify.",
+        createdAt: new Date("2026-07-17T00:00:00Z"),
+      },
+    ]);
+    mockStreamText().mockReturnValue({
+      toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+    } as never);
+
+    const response = await POST(validChatRequest("/coding-work Implement this"));
+
+    expect(response.status).toBe(200);
+    expect(resolveGoatSkillMentions).toHaveBeenCalledWith({
+      workspaceId: "goat_ws_user_1",
+      mentions: [{ id: "coding-work" }],
+    });
+    expect(activateAndListGoatChatSessionSkills).toHaveBeenCalledWith({
+      chatSessionId: "session_1",
+      activatedMessageId: "user_message_1",
+      workspaceRef: "goat_ws_user_1",
+      skills: [expect.objectContaining({ id: "coding-work" })],
+    });
+  });
+
   it("replays an activated skill from its original message on later turns", async () => {
     mockAuth();
     mockCreateGoatChatUserTurn().mockResolvedValue({

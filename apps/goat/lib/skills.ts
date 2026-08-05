@@ -88,6 +88,31 @@ export function readGoatSkillMentionRefs(
   return { ok: true, mentions };
 }
 
+const GOAT_SKILL_TEXT_MENTION_PATTERN = /(^|\s)@skill\/([a-z0-9][a-z0-9-]{0,79})(?=\s|$)/gi;
+const GOAT_SKILL_SLASH_INVOCATION_PATTERN = /^\s*\/([a-z0-9][a-z0-9-]{0,79})(?=\s|$)/i;
+
+export function goatSkillMentionIdsFromText(value: string) {
+  const ids = new Set<string>();
+  for (const match of value.matchAll(GOAT_SKILL_TEXT_MENTION_PATTERN)) {
+    const id = match[2];
+    if (id) ids.add(id.toLowerCase());
+  }
+  return ids;
+}
+
+export function goatSkillSlashInvocationIdFromText(value: string): string | null {
+  return GOAT_SKILL_SLASH_INVOCATION_PATTERN.exec(value)?.[1]?.toLowerCase() ?? null;
+}
+
+export function goatSkillMentionRefsFromSlashInvocation(
+  value: string,
+  catalog: readonly GoatSkillCatalogItem[],
+) {
+  const id = goatSkillSlashInvocationIdFromText(value);
+  if (!id || !catalog.some((skill) => skill.id === id)) return [];
+  return [{ id }];
+}
+
 export async function listGoatSkillCatalog(
   workspaceId: string,
   db: Db = getDb(),

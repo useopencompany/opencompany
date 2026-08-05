@@ -3,7 +3,11 @@ import type { GoatAuthContext } from "@/lib/auth";
 import { currentGoatUser } from "@/lib/auth";
 import { generateGoatChatTitleForMessage } from "@/lib/chat-title";
 import { createGoatCodexChatMessage } from "@/lib/codex-chat";
-import { GoatSkillMentionError, resolveGoatSkillMentions } from "@/lib/skills";
+import {
+  GoatSkillMentionError,
+  listGoatSkillCatalog,
+  resolveGoatSkillMentions,
+} from "@/lib/skills";
 import { POST } from "./route";
 
 const analyticsMocks = vi.hoisted(() => ({
@@ -28,7 +32,7 @@ vi.mock("@/lib/chat-title", () => ({
 
 vi.mock("@/lib/skills", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/skills")>();
-  return { ...actual, resolveGoatSkillMentions: vi.fn() };
+  return { ...actual, listGoatSkillCatalog: vi.fn(), resolveGoatSkillMentions: vi.fn() };
 });
 
 vi.mock("next/server", () => ({
@@ -74,6 +78,7 @@ describe("POST /api/codex-chat/messages", () => {
       },
     });
     vi.mocked(resolveGoatSkillMentions).mockResolvedValue([]);
+    vi.mocked(listGoatSkillCatalog).mockResolvedValue([]);
   });
 
   it("rejects malformed JSON shapes", async () => {
@@ -301,6 +306,55 @@ describe("POST /api/codex-chat/messages", () => {
     expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: "Implement this",
+        skills: [
+          {
+            id: "coding-work",
+            brainRef: "workspace_1",
+            name: "Coding work",
+            description: "How coding work should happen.",
+            instructions: "Inspect, implement, and verify.",
+          },
+        ],
+      }),
+    );
+  });
+
+  it("resolves a leading slash skill command for native session activation", async () => {
+    vi.mocked(listGoatSkillCatalog).mockResolvedValue([
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "How coding work should happen.",
+      },
+    ]);
+    vi.mocked(resolveGoatSkillMentions).mockResolvedValue([
+      {
+        id: "coding-work",
+        name: "Coding work",
+        description: "How coding work should happen.",
+        instructions: "Inspect, implement, and verify.",
+      },
+    ]);
+
+    const response = await POST(
+      jsonRequest({
+        message: {
+          id: "client_msg_skill",
+          role: "user",
+          parts: [{ type: "text", text: "/coding-work Implement this" }],
+        },
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(listGoatSkillCatalog).toHaveBeenCalledWith("workspace_1");
+    expect(resolveGoatSkillMentions).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      mentions: [{ id: "coding-work" }],
+    });
+    expect(mockCreateGoatCodexChatMessage()).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "/coding-work Implement this",
         skills: [
           {
             id: "coding-work",

@@ -129,6 +129,8 @@ import {
   attachGoatSkillsToPrompt,
   type GoatChatSessionSkillSnapshot,
   GoatSkillMentionError,
+  type GoatSkillMentionRef,
+  goatSkillMentionRefsFromSlashInvocation,
   goatSkillsByteLength,
   listGoatSkillCatalog,
   MAX_GOAT_CHAT_SKILL_BYTES,
@@ -272,10 +274,23 @@ export async function POST(request: Request): Promise<Response> {
     if (!parsedSkillMentions.ok) {
       return new Response(parsedSkillMentions.error, { status: 400 });
     }
+    const slashSkillMentions =
+      userInput?.prompt.trimStart().startsWith("/") && !requestedEngine
+        ? goatSkillMentionRefsFromSlashInvocation(
+            userInput.prompt,
+            await listGoatSkillCatalog(context.workspace.id).catch((error) => {
+              logger.warn("Goat chat slash skill catalog resolution failed", {
+                event: "goat.chat_slash_skill_catalog_resolution_failed",
+                error,
+              });
+              return [];
+            }),
+          )
+        : [];
     try {
       resolvedSkills = await resolveGoatSkillMentions({
         workspaceId: context.workspace.id,
-        mentions: parsedSkillMentions.mentions,
+        mentions: dedupeSkillMentionRefs([...parsedSkillMentions.mentions, ...slashSkillMentions]),
       });
     } catch (error) {
       if (error instanceof GoatSkillMentionError) {
@@ -1578,6 +1593,10 @@ function groupSessionSkillsByActivationMessage(skills: GoatChatSessionSkillSnaps
     grouped.set(skill.activatedMessageId, activated);
   }
   return grouped;
+}
+
+function dedupeSkillMentionRefs(mentions: GoatSkillMentionRef[]) {
+  return [...new Map(mentions.map((mention) => [mention.id, mention])).values()];
 }
 
 async function executeChatWebFetch(input: {

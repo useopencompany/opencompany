@@ -9,6 +9,9 @@ import { type GoatChatUiMessage, textFromGoatChatUiMessage } from "@/lib/chat-ui
 import { createGoatCodexChatMessage } from "@/lib/codex-chat";
 import {
   GoatSkillMentionError,
+  type GoatSkillMentionRef,
+  goatSkillMentionRefsFromSlashInvocation,
+  listGoatSkillCatalog,
   readGoatSkillMentionRefs,
   resolveGoatSkillMentions,
 } from "@/lib/skills";
@@ -53,11 +56,16 @@ export function createCloudChatMessageHandler(input: {
     if (!parsedSkillMentions.ok) {
       return new Response(parsedSkillMentions.error, { status: 400 });
     }
+    const skillMentions = await skillMentionRefsForCloudChatPrompt({
+      workspaceId: context.workspace.id,
+      prompt,
+      structured: parsedSkillMentions.mentions,
+    });
     let resolvedSkills;
     try {
       resolvedSkills = await resolveGoatSkillMentions({
         workspaceId: context.workspace.id,
-        mentions: parsedSkillMentions.mentions,
+        mentions: skillMentions,
       });
     } catch (error) {
       if (error instanceof GoatSkillMentionError) {
@@ -125,6 +133,22 @@ export function createCloudChatMessageHandler(input: {
 
     return NextResponse.json(responseBody, { status: 202 });
   };
+}
+
+async function skillMentionRefsForCloudChatPrompt(input: {
+  workspaceId: string;
+  prompt: string;
+  structured: GoatSkillMentionRef[];
+}) {
+  const catalog = input.prompt.trimStart().startsWith("/")
+    ? await listGoatSkillCatalog(input.workspaceId).catch(() => [])
+    : [];
+  const slash = goatSkillMentionRefsFromSlashInvocation(input.prompt, catalog);
+  return dedupeSkillMentionRefs([...input.structured, ...slash]);
+}
+
+function dedupeSkillMentionRefs(mentions: GoatSkillMentionRef[]) {
+  return [...new Map(mentions.map((mention) => [mention.id, mention])).values()];
 }
 
 function readPrompt(body: CloudChatMessageBody) {

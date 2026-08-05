@@ -1318,6 +1318,66 @@ describe("GoatSurface chat streaming UI", () => {
     });
   });
 
+  it("submits slash-selected Brain skills to cloud Codex", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/skills") {
+        return new Response(
+          JSON.stringify({
+            skills: [
+              {
+                id: "coding-work",
+                name: "Coding work",
+                description: "How coding work should happen.",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: requestChatSessionId(init, "goat_chat_codex_1"),
+          userMessageId: "goat_chat_msg_codex_user",
+          assistantMessageId: "goat_chat_msg_codex_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        codexConnected
+        userWorkosId="user_1"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByText("Cloud Codex sandbox"));
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    await user.type(textarea, "/coding");
+    await user.click(await screen.findByRole("option", { name: /coding work/i }));
+    await user.type(textarea, "implement this");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    const postCall = fetchMock.mock.calls.find(([input]) => input === "/api/codex-chat/messages");
+    const body = JSON.parse(String(postCall?.[1]?.body));
+    expect(body.message).toMatchObject({
+      parts: [{ type: "text", text: "/coding-work implement this" }],
+      metadata: {
+        mentions: [{ kind: "skill", id: "coding-work" }],
+      },
+    });
+  });
+
   it("uploads files and includes them in cloud Codex message metadata", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2401,6 +2461,58 @@ describe("GoatSurface chat streaming UI", () => {
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({
       text: "@skill/coding-work then continue",
+      metadata: {
+        mentions: [{ kind: "skill", id: "coding-work" }],
+      },
+    });
+  });
+
+  it("selects a Brain skill with slash syntax in the main composer", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              skills: [
+                {
+                  id: "coding-work",
+                  name: "Coding work",
+                  description: "Use focused verification for code changes.",
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    await user.type(textarea, "/coding");
+    await user.click(await screen.findByRole("option", { name: /coding work/i }));
+    await user.type(textarea, "implement this");
+
+    expect(textarea).toHaveValue("/coding-work implement this");
+    const overlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(overlay?.querySelector('[data-goat-chat-mention="skill"]')).toHaveTextContent(
+      "/coding-work",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "/coding-work implement this",
       metadata: {
         mentions: [{ kind: "skill", id: "coding-work" }],
       },

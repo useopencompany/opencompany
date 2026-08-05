@@ -170,7 +170,11 @@ import {
   normalizeGoatModel,
 } from "@/lib/model-options";
 import { consumeGoatOnboardingKickoffPrompt } from "@/lib/onboarding-kickoff";
-import type { GoatSkillCatalogItem } from "@/lib/skills";
+import {
+  type GoatSkillCatalogItem,
+  goatSkillMentionIdsFromText,
+  goatSkillSlashInvocationIdFromText,
+} from "@/lib/skills";
 import {
   createGoatCollections,
   type GoatChatMessageRow,
@@ -209,8 +213,8 @@ type ActiveMentionToken = {
   start: number;
   end: number;
   query: string;
-  // "@" opens engine/skill mentions; "#" opens task/workflow mentions.
-  sigil: "@" | "#";
+  // "@" opens engine/skill mentions, "#" opens task/workflow mentions, "/" opens skill commands.
+  sigil: "@" | "#" | "/";
 };
 
 type MentionOption =
@@ -2118,7 +2122,7 @@ export function GoatSurface({
     if (!userWorkosId) return;
 
     const pastedText = event.clipboardData.getData("text/plain");
-    const pastedSkillIds = skillMentionIdsFromText(pastedText);
+    const pastedSkillIds = skillInvocationIdsFromText(pastedText);
     const pastedWorkflowIds = workflowMentionsEnabled
       ? workflowMentionIdsFromText(pastedText)
       : new Set<string>();
@@ -3187,7 +3191,7 @@ function QuickChatComposer({
     if (!userWorkosId) return;
 
     const pastedText = event.clipboardData.getData("text/plain");
-    const pastedSkillIds = skillMentionIdsFromText(pastedText);
+    const pastedSkillIds = skillInvocationIdsFromText(pastedText);
     const pastedWorkflowIds = workflowMentionsEnabled
       ? workflowMentionIdsFromText(pastedText)
       : new Set<string>();
@@ -4435,13 +4439,14 @@ function findActiveMentionToken(value: string, caret: number): ActiveMentionToke
   const nextWhitespace = suffix.search(/\s/);
   const end = nextWhitespace === -1 ? value.length : caret + nextWhitespace;
   const token = value.slice(start, end);
-  if (!token.startsWith("@") && !token.startsWith("#")) return null;
+  const isLeadingSlashToken = token.startsWith("/") && value.slice(0, start).trim() === "";
+  if (!token.startsWith("@") && !token.startsWith("#") && !isLeadingSlashToken) return null;
 
   return {
     start,
     end,
     query: token.slice(1).toLowerCase(),
-    sigil: token.startsWith("#") ? ("#" as const) : ("@" as const),
+    sigil: token.startsWith("#") ? ("#" as const) : token.startsWith("/") ? "/" : ("@" as const),
   };
 }
 
@@ -4452,6 +4457,9 @@ function goatChatMentionToken(mention: GoatChatMention) {
 }
 
 function goatChatMentionIsVisible(value: string, mention: GoatChatMention) {
+  if (mention.kind === "skill" && goatSkillSlashInvocationIdFromText(value) === mention.id) {
+    return true;
+  }
   const token = escapeRegExp(goatChatMentionToken(mention));
   return new RegExp(`(^|\\s)${token}(?=\\s|$)`, "i").test(value);
 }
@@ -4553,7 +4561,7 @@ function composerInputHighlightRanges(
     .flatMap((mention) => {
       const token = escapeRegExp(goatChatMentionToken(mention));
       const pattern = new RegExp(`(^|\\s)${token}(?=\\s|$)`, "gi");
-      return [...value.matchAll(pattern)].flatMap((match) => {
+      const ranges = [...value.matchAll(pattern)].flatMap((match) => {
         if (typeof match.index !== "number") return [];
         const leading = match[1] ?? "";
         const start = match.index + leading.length;
@@ -4566,6 +4574,20 @@ function composerInputHighlightRanges(
           },
         ];
       });
+      if (mention.kind !== "skill" || goatSkillSlashInvocationIdFromText(value) !== mention.id) {
+        return ranges;
+      }
+      const slashStart = value.search(/\S/);
+      if (slashStart < 0) return ranges;
+      return [
+        ...ranges,
+        {
+          kind: "mention" as const,
+          start: slashStart,
+          end: slashStart + mention.id.length + 1,
+          mention,
+        },
+      ];
     })
     .toSorted((left, right) => left.start - right.start || left.end - right.end);
   const candidates = [...backgroundDirectiveRange, ...mentionRanges].toSorted(
@@ -4581,12 +4603,10 @@ function composerInputHighlightRanges(
   return ranges;
 }
 
-function skillMentionIdsFromText(value: string) {
-  const ids = new Set<string>();
-  for (const match of value.matchAll(/(^|\s)@skill\/([a-z0-9][a-z0-9-]{0,79})(?=\s|$)/gi)) {
-    const id = match[2];
-    if (id) ids.add(id.toLowerCase());
-  }
+function skillInvocationIdsFromText(value: string) {
+  const ids = goatSkillMentionIdsFromText(value);
+  const slashId = goatSkillSlashInvocationIdFromText(value);
+  if (slashId) ids.add(slashId);
   return ids;
 }
 
@@ -4666,6 +4686,27 @@ function buildMentionOptions(input: {
 }): MentionOption[] {
   if (!input.token) return [];
   const query = input.token.query;
+
+  if (input.token.sigil === "/") {
+    if (!input.skillsEnabled) return [];
+    const selectedSkillIds = new Set(
+      input.selectedMentions.flatMap((mention) => (mention.kind === "skill" ? [mention.id] : [])),
+    );
+    return input.skills.flatMap((skill) => {
+      if (selectedSkillIds.has(skill.id)) return [];
+      const haystack = `${skill.id} ${skill.name} ${skill.description}`.toLowerCase();
+      if (query && !haystack.includes(query)) return [];
+      return [
+        {
+          kind: "skill" as const,
+          token: `/${skill.id}`,
+          label: skill.name,
+          description: skill.description,
+          mention: { kind: "skill" as const, id: skill.id },
+        },
+      ];
+    });
+  }
 
   // "#" is the task sigil: it starts either the reserved ad-hoc task or one
   // saved workflow as a background task instead of a foreground chat turn.
