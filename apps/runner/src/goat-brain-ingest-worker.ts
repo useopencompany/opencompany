@@ -985,7 +985,7 @@ function withGoatBrainIngestRunDuration<T extends Record<string, unknown>>(
 
 // Usage-based pass-through: debit the attempt's tracked provider cost (model
 // plus brain-query and web-search tool spend, all recorded per attempt for
-// every tier) plus the standard platform fee from the workspace's credits.
+// every tier) from the workspace's credits.
 // Priced from the recorded trace model, so a mid-queue tier toggle can never
 // bill the wrong tier. Charged per attempt — the budget counters reset each
 // attempt, so charging only completed jobs would eat retried attempts' real

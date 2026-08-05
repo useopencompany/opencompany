@@ -149,8 +149,7 @@ export function normalizeBrokerModelId(provider: BrokerProvider, model: string):
 
 // Price one upstream request in USD micros. Preference order:
 // 1. Gateway-reported dollar cost on the response.
-// 2. Platform model catalog (MODEL_PRICING via calculateModelUsageCost) — provider cost
-//    only; the platform fee is applied once at settlement.
+// 2. Platform model catalog (MODEL_PRICING via calculateModelUsageCost).
 // 3. AUX_GATEWAY_MODEL_PRICING for off-catalog gateway models (embeddings, nano).
 // 4. Zero — billing must never guess. The caller records usageParsed so unpriceable
 //    requests stay visible for reconciliation.
