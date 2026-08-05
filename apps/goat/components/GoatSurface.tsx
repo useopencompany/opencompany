@@ -544,14 +544,17 @@ export function GoatSurface({
   const homeGreetingName = userName.trim() || "there";
   const activeTaskConversation =
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
-  const workflowMentionsEnabled = taskSpawningEnabled && !activeTaskConversation;
+  const backgroundInputDirective = parseGoatBackgroundChatDirective(input);
+  const backgroundDirectiveActive = Boolean(backgroundInputDirective);
+  const workflowMentionsEnabled =
+    taskSpawningEnabled && (!activeTaskConversation || backgroundDirectiveActive);
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
       return mention.id === "claude" ? claudeCodeConnected : codexConnected;
     }
     if (mention.kind === "workflow") return workflowMentionsEnabled;
-    return !activeTaskConversation;
+    return !activeTaskConversation || backgroundDirectiveActive;
   });
   const chatModel =
     chatModelSelectionFromEngineMention(
@@ -789,16 +792,26 @@ export function GoatSurface({
   const outOfCredits = Boolean(
     creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
   );
-  const chatSendBlocked = outOfCredits && !isEngineChat;
+  const backgroundChatDirective = backgroundInputDirective;
+  const backgroundDirectiveTargetEngine = backgroundChatDirective
+    ? (backgroundChatDirective.engine ?? activeEngine)
+    : null;
+  const composerEngine = backgroundDirectiveTargetEngine ?? activeEngine;
+  const chatSendBlocked = outOfCredits && !composerEngine;
   const lowCreditBalance = Boolean(
     creditBalance &&
       creditBalance.balanceUsdMicros > 0 &&
       creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
   );
   const adHocTaskMentionEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
-  const backgroundChatDirective = hasGoatBackgroundChatDirective(input);
+  const backgroundAdHocTaskSelected = Boolean(
+    backgroundChatDirective &&
+      taskSpawningEnabled &&
+      hasGoatAdHocTaskToken(backgroundChatDirective.prompt),
+  );
   const selectedAdHocTask =
-    adHocTaskMentionEnabled && !backgroundChatDirective && hasGoatAdHocTaskToken(input);
+    backgroundAdHocTaskSelected ||
+    (!backgroundChatDirective && adHocTaskMentionEnabled && hasGoatAdHocTaskToken(input));
   const mentionOptions = buildMentionOptions({
     token: mentionToken,
     skills: skillCatalog,
@@ -808,13 +821,11 @@ export function GoatSurface({
     claudeCodeConnected,
     skillsEnabled: !activeTaskConversation,
     workflowsEnabled: workflowMentionsEnabled,
-    adHocTaskEnabled: adHocTaskMentionEnabled,
+    adHocTaskEnabled: adHocTaskMentionEnabled || Boolean(backgroundChatDirective),
   });
   const selectedWorkflowMention = selectedAdHocTask
     ? null
-    : backgroundChatDirective
-      ? null
-      : (activeSelectedMentions.find(isWorkflowMention) ?? null);
+    : (activeSelectedMentions.find(isWorkflowMention) ?? null);
   const selectedWorkflowName = selectedWorkflowMention
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
@@ -827,7 +838,7 @@ export function GoatSurface({
     // Keep the main composer visible behind the modal, but let only the quick
     // composer consume dropped files while the palette is open.
     enabled: attachmentsEnabled && !engineSubmitting && !newChatCommandOpen,
-    ...(activeEngine === "codex" || activeEngine === "claude_code"
+    ...(composerEngine === "codex" || composerEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
       : isAutoChatModel
         ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
@@ -945,7 +956,7 @@ export function GoatSurface({
     () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
     [optimisticallyArchivedChatIds, recentChats],
   );
-  const showEngineComposerControls = isEngineChat;
+  const showEngineComposerControls = composerEngine !== null;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1392,8 +1403,12 @@ export function GoatSurface({
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isInteractionPending || backgroundTaskSubmitting) return;
-    if (chatSendBlocked) {
+    const prompt = (pendingProgrammaticPromptRef.current ?? input).trim();
+    pendingProgrammaticPromptRef.current = null;
+    const backgroundChat = parseGoatBackgroundChatDirective(prompt);
+    const backgroundEngine = backgroundChat ? (backgroundChat.engine ?? activeEngine) : null;
+    if ((isInteractionPending && !backgroundChat) || backgroundTaskSubmitting) return;
+    if (outOfCredits && !(backgroundEngine ?? activeEngine)) {
       toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
           label: "Add credits",
@@ -1403,8 +1418,6 @@ export function GoatSurface({
       return;
     }
 
-    const prompt = (pendingProgrammaticPromptRef.current ?? input).trim();
-    pendingProgrammaticPromptRef.current = null;
     const pendingAttachments = composerAttachments.attachments;
     const readyAttachments = pendingAttachments.filter(
       (attachment) => attachment.status === "ready",
@@ -1419,7 +1432,7 @@ export function GoatSurface({
       return;
     }
 
-    if (activeTaskConversation) {
+    if (activeTaskConversation && !backgroundChat) {
       const messageId = activeTaskConversation.sessionBacked
         ? `goat_chat_msg_${crypto.randomUUID()}`
         : `goat_task_msg_${crypto.randomUUID()}`;
@@ -1464,7 +1477,6 @@ export function GoatSurface({
       return;
     }
 
-    const backgroundChat = parseGoatBackgroundChatDirective(prompt);
     const messagePrompt = backgroundChat?.prompt ?? prompt;
     if (!messagePrompt && readyAttachments.length === 0) return;
 
@@ -1505,9 +1517,88 @@ export function GoatSurface({
         composerAttachments.setAttachments(pendingAttachments);
       };
 
-      if (activeEngine) {
+      if (taskSpawningEnabled && hasGoatAdHocTaskToken(messagePrompt)) {
+        const description = descriptionFromGoatAdHocTaskPrompt(messagePrompt);
+        if (!description) {
+          toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
+          return;
+        }
+        if (pendingAttachments.length > 0) {
+          toast.error("Attachments are not supported when starting a background task yet.");
+          return;
+        }
+
+        clearError();
+        setInput("");
+        setMentionToken(null);
+        setSelectedMentions([]);
+        prepareMainComposerFocusRestoreAfterBackgroundTask();
+        setBackgroundTaskSubmitting(true);
+        void startGoatAdHocTask({
+          description: messagePrompt,
+          model: String(chatModel),
+          ...(backgroundEngine === "codex" ||
+          mentions.some((mention) => mention.kind === "engine" && mention.id === "codex")
+            ? { engine: "codex" }
+            : {}),
+        })
+          .then(({ task }) => {
+            if (!mountedRef.current) return;
+            router.refresh();
+            toast.success(`Started ${task.name} in the background.`);
+          })
+          .catch((error) => {
+            if (!mountedRef.current) return;
+            restoreDraft();
+            toast.error(
+              error instanceof Error ? error.message : "Could not start that background task.",
+            );
+          })
+          .finally(() => {
+            if (!mountedRef.current) return;
+            setBackgroundTaskSubmitting(false);
+            refocusMainComposerAfterBackgroundTask();
+          });
+        return;
+      }
+
+      const workflowMention = mentions.find(isWorkflowMention);
+      if (workflowMention) {
+        clearError();
+        setInput("");
+        setMentionToken(null);
+        setSelectedMentions([]);
+        prepareMainComposerFocusRestoreAfterBackgroundTask();
+        setBackgroundTaskSubmitting(true);
+        void startGoatWorkflowTask({
+          workflow: workflowMention,
+          description: messagePrompt,
+          ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
+        })
+          .then(({ task }) => {
+            if (!mountedRef.current) return;
+            composerAttachments.clearAttachments();
+            router.refresh();
+            toast.success(`Started ${task.name} in the background.`);
+          })
+          .catch((error) => {
+            if (!mountedRef.current) return;
+            restoreDraft();
+            toast.error(
+              error instanceof Error ? error.message : "Could not start that workflow task.",
+            );
+          })
+          .finally(() => {
+            if (!mountedRef.current) return;
+            setBackgroundTaskSubmitting(false);
+            refocusMainComposerAfterBackgroundTask();
+          });
+        return;
+      }
+
+      if (backgroundEngine) {
         const settings =
-          activeEngine === "claude_code"
+          backgroundEngine === "claude_code"
             ? ({
                 ok: true,
                 settings: { reasoningEffort: codexReasoningEffort },
@@ -1535,7 +1626,7 @@ export function GoatSurface({
         composerAttachments.setAttachments([]);
         toast("Started a new chat in the background.");
 
-        const engine = activeEngine;
+        const engine = backgroundEngine;
         const config = ENGINE_CHAT_CONFIG[engine];
         void sendEngineChatMessage({
           endpoint: config.messagesEndpoint,
@@ -2639,9 +2730,7 @@ export function GoatSurface({
                   ))}
                 </div>
               ) : null}
-              {backgroundChatDirective ? (
-                <BackgroundChatDirectiveHint engine={activeEngine} />
-              ) : selectedAdHocTask ? (
+              {selectedAdHocTask ? (
                 <div
                   role="status"
                   data-testid="ad-hoc-task-hint"
@@ -2663,6 +2752,8 @@ export function GoatSurface({
                     background task.
                   </span>
                 </div>
+              ) : backgroundChatDirective ? (
+                <BackgroundChatDirectiveHint engine={backgroundDirectiveTargetEngine} />
               ) : null}
               <div
                 {...composerAttachments.dragHandlers}
@@ -2731,7 +2822,10 @@ export function GoatSurface({
                       maxLength={10_000}
                     />
                   </div>
-                  {isEngineChat && engineRunning && !activeTaskConversation ? (
+                  {isEngineChat &&
+                  engineRunning &&
+                  !activeTaskConversation &&
+                  !backgroundChatDirective ? (
                     <EngineStopButton
                       label={activeEngine ? ENGINE_CHAT_CONFIG[activeEngine].label : "Codex"}
                       onStop={stopGeneration}
@@ -2752,14 +2846,16 @@ export function GoatSurface({
                           (attachment) => attachment.status === "ready",
                         )) ||
                       composerAttachments.isUploading ||
-                      engineSubmitting ||
-                      engineRunning ||
+                      (!backgroundChatDirective && engineSubmitting) ||
+                      (!backgroundChatDirective && engineRunning) ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
                       chatSendBlocked
                     }
-                    isGenerating={isGenerating || isTaskConversationWorking}
-                    isStopping={isTaskConversationStopping}
+                    isGenerating={
+                      backgroundChatDirective ? false : isGenerating || isTaskConversationWorking
+                    }
+                    isStopping={!backgroundChatDirective && isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />
@@ -2837,9 +2933,9 @@ export function GoatSurface({
                   {showEngineComposerControls ? (
                     <EngineComposerControls
                       model={
-                        activeEngine === "codex"
+                        composerEngine === "codex"
                           ? { engine: "codex", value: codexModel, onChange: setCodexModel }
-                          : activeEngine === "claude_code"
+                          : composerEngine === "claude_code"
                             ? {
                                 engine: "claude_code",
                                 value: claudeModel,
@@ -2847,15 +2943,15 @@ export function GoatSurface({
                               }
                             : null
                       }
-                      engineLabel={activeEngine === "claude_code" ? "Claude" : "Codex"}
+                      engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
                       reasoningEffortAvailable={
-                        activeEngine !== "claude_code" ||
+                        composerEngine !== "claude_code" ||
                         claudeCodeModelSupportsReasoningEffort(claudeModel)
                       }
                       reasoningEffort={codexReasoningEffort}
                       planModeEnabled={codexPlanModeEnabled}
-                      planModeAvailable={activeEngine === "codex"}
-                      goalModeAvailable={activeEngine !== "claude_code"}
+                      planModeAvailable={composerEngine === "codex"}
+                      goalModeAvailable={composerEngine !== "claude_code"}
                       goalModeEnabled={codexGoalModeEnabled}
                       goalObjective={codexGoalObjective}
                       goalTokenBudget={codexGoalTokenBudget}
@@ -2984,15 +3080,25 @@ function QuickChatComposer({
     : isClaudeMode
       ? "claude_code"
       : null;
-  const isEngineChat = selectedEngine !== null;
-  const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
   const backgroundChatDirective = hasGoatBackgroundChatDirective(input);
+  const parsedBackgroundChatDirective = parseGoatBackgroundChatDirective(input);
+  const composerEngine = parsedBackgroundChatDirective
+    ? (parsedBackgroundChatDirective.engine ?? selectedEngine)
+    : selectedEngine;
+  const isEngineChat = composerEngine !== null;
+  const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
+  const backgroundAdHocTaskSelected = Boolean(
+    parsedBackgroundChatDirective &&
+      taskSpawningEnabled &&
+      hasGoatAdHocTaskToken(parsedBackgroundChatDirective.prompt),
+  );
   const selectedAdHocTask =
-    adHocTaskMentionEnabled && !backgroundChatDirective && hasGoatAdHocTaskToken(input);
+    backgroundAdHocTaskSelected ||
+    (!parsedBackgroundChatDirective && adHocTaskMentionEnabled && hasGoatAdHocTaskToken(input));
   const outOfCredits = Boolean(
     creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
   );
-  const chatSendBlocked = outOfCredits && !isEngineChat;
+  const chatSendBlocked = outOfCredits && !composerEngine;
 
   const mentionOptions = buildMentionOptions({
     token: mentionToken,
@@ -3003,13 +3109,11 @@ function QuickChatComposer({
     claudeCodeConnected,
     skillsEnabled: true,
     workflowsEnabled: workflowMentionsEnabled,
-    adHocTaskEnabled: adHocTaskMentionEnabled,
+    adHocTaskEnabled: adHocTaskMentionEnabled || Boolean(parsedBackgroundChatDirective),
   });
   const selectedWorkflowMention = selectedAdHocTask
     ? null
-    : backgroundChatDirective
-      ? null
-      : (activeSelectedMentions.find(isWorkflowMention) ?? null);
+    : (activeSelectedMentions.find(isWorkflowMention) ?? null);
   const selectedWorkflowName = selectedWorkflowMention
     ? (workflowCatalog.find((workflow) => workflow.id === selectedWorkflowMention.id)?.name ??
       selectedWorkflowMention.id)
@@ -3020,7 +3124,7 @@ function QuickChatComposer({
     userWorkosId,
     modelName: String(chatModel),
     enabled: attachmentsEnabled && !isSubmitting,
-    ...(selectedEngine === "codex" || selectedEngine === "claude_code"
+    ...(composerEngine === "codex" || composerEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
       : chatModel === AUTO_GOAT_MODEL_SELECTION
         ? { capabilities: AUTO_GOAT_MODEL_ATTACHMENT_CAPABILITIES }
@@ -3288,6 +3392,7 @@ function QuickChatComposer({
     const backgroundChat = parseGoatBackgroundChatDirective(rawPrompt);
     const prompt = backgroundChat?.prompt ?? rawPrompt;
     const isBackgroundChatDirective = backgroundChat !== null;
+    const backgroundEngine = backgroundChat ? (backgroundChat.engine ?? selectedEngine) : null;
     const pendingAttachments = composerAttachments.attachments;
     const readyAttachments = pendingAttachments.filter(
       (attachment) => attachment.status === "ready",
@@ -3324,7 +3429,11 @@ function QuickChatComposer({
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
 
-    if (!isBackgroundChatDirective && adHocTaskMentionEnabled && hasGoatAdHocTaskToken(prompt)) {
+    if (
+      taskSpawningEnabled &&
+      (isBackgroundChatDirective || adHocTaskMentionEnabled) &&
+      hasGoatAdHocTaskToken(prompt)
+    ) {
       const description = descriptionFromGoatAdHocTaskPrompt(prompt);
       if (!description) {
         toast.error(`Describe the task after ${GOAT_AD_HOC_TASK_TOKEN}.`);
@@ -3343,7 +3452,8 @@ function QuickChatComposer({
       void startGoatAdHocTask({
         description: prompt,
         model: String(chatModel),
-        ...(mentions.some((mention) => mention.kind === "engine" && mention.id === "codex")
+        ...(backgroundEngine === "codex" ||
+        mentions.some((mention) => mention.kind === "engine" && mention.id === "codex")
           ? { engine: "codex" }
           : {}),
       })
@@ -3363,7 +3473,7 @@ function QuickChatComposer({
       return;
     }
 
-    const workflowMention = isBackgroundChatDirective ? null : mentions.find(isWorkflowMention);
+    const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
       setIsSubmitting(true);
       setInput("");
@@ -3397,11 +3507,12 @@ function QuickChatComposer({
     setMentionToken(null);
     setSelectedMentions([]);
 
-    if (selectedEngine) {
+    const targetEngine = backgroundEngine ?? selectedEngine;
+    if (targetEngine) {
       // Validate before clearing attachments / closing the dialog: once onSubmitted()
       // unmounts this component, there's no visible composer left to restore a draft into.
       const settings =
-        selectedEngine === "claude_code"
+        targetEngine === "claude_code"
           ? ({ ok: true, settings: { reasoningEffort: codexReasoningEffort } } as const)
           : buildCodexComposerSettings({
               prompt,
@@ -3423,7 +3534,7 @@ function QuickChatComposer({
       onSubmitted();
       toast("Started a new chat in the background.");
 
-      const engine = selectedEngine;
+      const engine = targetEngine;
       const config = ENGINE_CHAT_CONFIG[engine];
       const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
       void sendEngineChatMessage({
@@ -3549,9 +3660,7 @@ function QuickChatComposer({
           ))}
         </div>
       ) : null}
-      {backgroundChatDirective ? (
-        <BackgroundChatDirectiveHint engine={selectedEngine} />
-      ) : selectedAdHocTask ? (
+      {selectedAdHocTask ? (
         <div
           role="status"
           data-testid="ad-hoc-task-hint"
@@ -3573,6 +3682,8 @@ function QuickChatComposer({
             task.
           </span>
         </div>
+      ) : backgroundChatDirective ? (
+        <BackgroundChatDirectiveHint engine={composerEngine} />
       ) : null}
       <form ref={formRef} onSubmit={onSubmit}>
         <div
@@ -3703,21 +3814,21 @@ function QuickChatComposer({
             {showEngineComposerControls ? (
               <EngineComposerControls
                 model={
-                  selectedEngine === "codex"
+                  composerEngine === "codex"
                     ? { engine: "codex", value: codexModel, onChange: setCodexModel }
-                    : selectedEngine === "claude_code"
+                    : composerEngine === "claude_code"
                       ? { engine: "claude_code", value: claudeModel, onChange: setClaudeModel }
                       : null
                 }
-                engineLabel={selectedEngine === "claude_code" ? "Claude" : "Codex"}
+                engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
                 reasoningEffortAvailable={
-                  selectedEngine !== "claude_code" ||
+                  composerEngine !== "claude_code" ||
                   claudeCodeModelSupportsReasoningEffort(claudeModel)
                 }
                 reasoningEffort={codexReasoningEffort}
                 planModeEnabled={codexPlanModeEnabled}
-                planModeAvailable={selectedEngine === "codex"}
-                goalModeAvailable={selectedEngine !== "claude_code"}
+                planModeAvailable={composerEngine === "codex"}
+                goalModeAvailable={composerEngine !== "claude_code"}
                 goalModeEnabled={codexGoalModeEnabled}
                 goalObjective={codexGoalObjective}
                 goalTokenBudget={codexGoalTokenBudget}
@@ -4460,10 +4571,17 @@ function hasGoatBackgroundChatDirective(value: string) {
   return value.trimStart().startsWith("&");
 }
 
-function parseGoatBackgroundChatDirective(value: string): { prompt: string } | null {
+function parseGoatBackgroundChatDirective(value: string): {
+  prompt: string;
+  engine: GoatEngineChatKind | null;
+} | null {
   const trimmedStart = value.trimStart();
   if (!trimmedStart.startsWith("&")) return null;
-  return { prompt: trimmedStart.slice(1).trimStart() };
+  const directive = trimmedStart.slice(1).trimStart();
+  const engineMatch = directive.match(/^@(codex|claude)(?=\s|$)/i);
+  if (!engineMatch) return { prompt: directive, engine: null };
+  const engine = engineMatch[1]?.toLowerCase() === "claude" ? "claude_code" : "codex";
+  return { prompt: directive.slice(engineMatch[0].length).trimStart(), engine };
 }
 
 type ComposerMentionHighlight = Extract<GoatChatMention, { kind: "skill" | "workflow" }>;
