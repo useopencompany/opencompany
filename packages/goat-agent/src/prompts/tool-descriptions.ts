@@ -43,13 +43,13 @@ export const SEND_USER_MESSAGE_MESSAGE_DESCRIPTION =
   "The notification text, plain and self-contained (the user reads it on their phone with no chat context). Under 500 characters, no markdown.";
 
 export const START_TASK_TOOL_DESCRIPTION =
-  "Start a task when the user's request should become an asynchronous tracked task, including work that needs connected-account context, external research, monitoring, or a specialized just-in-time agent. If the user explicitly asks for Codex, a Codex task, repository edits, tests, debugging, code review, or pull-request work, preserve that execution intent by setting engine to codex.";
+  "Start a task when the user's request should become an asynchronous tracked task, including work that needs connected-account context, external research, monitoring, or a specialized just-in-time agent. If the user explicitly asks for Codex, Claude Code, a coding-engine task, repository edits, tests, debugging, code review, or pull-request work, preserve that execution intent by setting engine to the requested executor.";
 
 export const START_TASK_PROMPT_DESCRIPTION =
-  "A brief task prompt for the just-in-time agent. Use the user's own request as the backbone and keep it close to what they said. Add only light clarifications from explicit chat context, such as referenced accounts, repositories, date ranges, output format, or execution engine. Do not expand into a detailed plan, invent requirements, or add guessed success criteria. Preserve explicit execution-engine requests such as Codex verbatim instead of paraphrasing them away.";
+  "A brief task prompt for the just-in-time agent. Use the user's own request as the backbone and keep it close to what they said. Add only light clarifications from explicit chat context, such as referenced accounts, repositories, date ranges, output format, or execution engine. Do not expand into a detailed plan, invent requirements, or add guessed success criteria. Preserve explicit execution-engine requests such as Codex or Claude Code verbatim instead of paraphrasing them away.";
 
 export const START_TASK_ENGINE_DESCRIPTION =
-  "Optional execution engine hint. Set to codex when the user explicitly asks for Codex or a Codex task, or for repository edits, tests, debugging, code review, or pull-request work where Codex is the requested executor. Omit for ordinary research, writing, connected-account lookup, or analysis tasks.";
+  "Optional execution engine hint. Set to codex or claude_code when the user explicitly asks for that executor, or for repository edits, tests, debugging, code review, or pull-request work where a coding engine is the requested executor. Omit for ordinary research, writing, connected-account lookup, or analysis tasks.";
 
 export const START_TASK_NAME_DESCRIPTION = "A short 2-7 word task name for the Tasks list.";
 

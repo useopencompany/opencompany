@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { descriptionFromGoatAdHocTaskPrompt } from "@/lib/ad-hoc-task";
 import { currentGoatUser } from "@/lib/auth";
+import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { validateGoatTaskInput } from "@/lib/task-validation";
@@ -29,13 +30,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
 
-  const engine = input.engine === "codex" ? "codex" : undefined;
+  const engine =
+    input.engine === "codex" || input.engine === "claude_code" ? input.engine : undefined;
   if (input.engine !== undefined && !engine) {
     return NextResponse.json({ error: "Invalid task engine." }, { status: 400 });
   }
-  if (engine && !(await isGoatCodexConnectedForUser(context.user.workosUserId))) {
+  if (engine === "codex" && !(await isGoatCodexConnectedForUser(context.user.workosUserId))) {
     return NextResponse.json(
       { error: "Codex is not connected. Connect Codex in Settings first." },
+      { status: 400 },
+    );
+  }
+  if (
+    engine === "claude_code" &&
+    !(await isGoatClaudeCodeConnectedForUser(context.user.workosUserId))
+  ) {
+    return NextResponse.json(
+      { error: "Claude Code is not connected. Connect Claude Code in Settings first." },
       { status: 400 },
     );
   }

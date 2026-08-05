@@ -30,6 +30,7 @@ import {
   USE_SKILL_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
+import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import {
   activateAndListGoatChatSessionSkills,
@@ -162,6 +163,10 @@ vi.mock("@/lib/codex-auth", () => ({
   isGoatCodexConnectedForUser: vi.fn(),
 }));
 
+vi.mock("@/lib/claude-code-auth", () => ({
+  isGoatClaudeCodeConnectedForUser: vi.fn(),
+}));
+
 vi.mock("@/lib/tasks", () => ({
   createGoatTaskForUser: vi.fn(),
 }));
@@ -224,6 +229,7 @@ describe("POST /api/chat", () => {
     browserMocks.getUsage.mockReturnValue(null);
     mockListGoatTaskSchedulesForUser().mockResolvedValue([]);
     mockIsGoatCodexConnectedForUser().mockResolvedValue(false);
+    mockIsGoatClaudeCodeConnectedForUser().mockResolvedValue(false);
     mockIsGoatChatActionsKilled().mockReturnValue(false);
     mockResolveGoatActionCatalog().mockResolvedValue({ providers: [], actions: [] });
     vi.mocked(listGoatSkillCatalog).mockResolvedValue([]);
@@ -2026,6 +2032,60 @@ describe("POST /api/chat", () => {
     });
   });
 
+  it("uses structured Claude Code mention metadata when starting a task", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockIsGoatClaudeCodeConnectedForUser().mockResolvedValue(true);
+    mockCreateGoatTaskForUser().mockResolvedValue({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+    } as never);
+    let startTaskToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tool = (options as { tools?: { [START_TASK_TOOL_NAME]?: { execute?: unknown } } })
+        .tools?.[START_TASK_TOOL_NAME];
+      if (typeof tool?.execute !== "function") {
+        throw new Error("start_task execute function was not configured.");
+      }
+      startTaskToolPromise = tool.execute({
+        name: "Test repo access",
+        prompt: "Check repo access and report whether development work can start.",
+        reason: "Requires connected source-control access.",
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.5",
+        mentions: [{ kind: "engine", id: "claude" }],
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "@claude check repo access" }],
+        },
+      }),
+    );
+    await startTaskToolPromise;
+
+    expect(response.status).toBe(200);
+    expect(isGoatClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
+    expect(isGoatCodexConnectedForUser).not.toHaveBeenCalled();
+    expect(createGoatTaskForUser).toHaveBeenCalledWith({
+      userWorkosId: "user_1",
+      workspaceId: "goat_ws_user_1",
+      brainRef: "goat_brain_user_1",
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+      model: "openai/gpt-5.5",
+      engine: "claude_code",
+    });
+  });
+
   it("ignores malformed mention metadata when starting a task", async () => {
     mockAuth();
     mockCreateTurn();
@@ -2116,6 +2176,52 @@ describe("POST /api/chat", () => {
 
     expect(response.status).toBe(200);
     expect(isGoatCodexConnectedForUser).toHaveBeenCalledWith("user_1");
+    const taskInput = mockCreateGoatTaskForUser().mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(taskInput).not.toHaveProperty("engine");
+  });
+
+  it("ignores structured Claude Code mention metadata when Claude Code is not connected", async () => {
+    mockAuth();
+    mockCreateTurn();
+    mockIsGoatClaudeCodeConnectedForUser().mockResolvedValue(false);
+    mockCreateGoatTaskForUser().mockResolvedValue({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+    } as never);
+    let startTaskToolPromise: Promise<unknown> | null = null;
+    mockStreamText().mockImplementation((options: unknown) => {
+      const tool = (options as { tools?: { [START_TASK_TOOL_NAME]?: { execute?: unknown } } })
+        .tools?.[START_TASK_TOOL_NAME];
+      if (typeof tool?.execute !== "function") {
+        throw new Error("start_task execute function was not configured.");
+      }
+      startTaskToolPromise = tool.execute({
+        name: "Test repo access",
+        prompt: "Check repo access and report whether development work can start.",
+        reason: "Requires connected source-control access.",
+      }) as Promise<unknown>;
+      return {
+        toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
+      } as never;
+    });
+
+    const response = await POST(
+      jsonRequest({
+        model: "openai/gpt-5.5",
+        mentions: [{ kind: "engine", id: "claude" }],
+        message: {
+          id: "ui_user_1",
+          role: "user",
+          parts: [{ type: "text", text: "@claude check repo access" }],
+        },
+      }),
+    );
+    await startTaskToolPromise;
+
+    expect(response.status).toBe(200);
+    expect(isGoatClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
     const taskInput = mockCreateGoatTaskForUser().mock.calls[0]?.[0] as Record<string, unknown>;
     expect(taskInput).not.toHaveProperty("engine");
   });
@@ -2579,6 +2685,10 @@ function mockCaptureToGoatBrainInbox() {
 
 function mockIsGoatCodexConnectedForUser() {
   return vi.mocked(isGoatCodexConnectedForUser);
+}
+
+function mockIsGoatClaudeCodeConnectedForUser() {
+  return vi.mocked(isGoatClaudeCodeConnectedForUser);
 }
 
 function mockCreateGoatTaskForUser() {

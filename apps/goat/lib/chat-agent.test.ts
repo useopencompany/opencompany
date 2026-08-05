@@ -460,6 +460,80 @@ describe("runOpenCompanyChatAgent", () => {
     });
   });
 
+  it("uses structured requested Claude Code steering even when the prompt omits Claude Code", async () => {
+    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: task.name ?? "Test repo access",
+      prompt: task.prompt,
+    }));
+
+    await runOpenCompanyChatAgent({
+      messages: [{ role: "user", content: "@claude check repo access" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      requestedEngine: "claude_code",
+      startTask,
+      generateTextImpl: (async (options: unknown) => {
+        await executeStartTaskTool(options, {
+          name: "Test repo access",
+          prompt: "Check repo access and report whether development work can start.",
+          reason: "Requires connected source-control access.",
+        });
+
+        return {
+          text: "I started a task and added it to Results.",
+          finishReason: "stop",
+          steps: [],
+        };
+      }) as never,
+    });
+
+    expect(startTask).toHaveBeenCalledWith({
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+      model: DEFAULT_GOAT_MODEL,
+      engine: "claude_code",
+    });
+  });
+
+  it("passes through explicit Claude Code start_task engine arguments", async () => {
+    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: task.name ?? "Test repo access",
+      prompt: task.prompt,
+    }));
+
+    await runOpenCompanyChatAgent({
+      messages: [{ role: "user", content: "start a Claude Code task to check repo access" }],
+      model: DEFAULT_GOAT_MODEL,
+      gatewayApiKey: "test-key",
+      startTask,
+      generateTextImpl: (async (options: unknown) => {
+        await executeStartTaskTool(options, {
+          name: "Test repo access",
+          prompt: "Check repo access and report whether development work can start.",
+          reason: "Requires connected source-control access.",
+          engine: "claude_code",
+        });
+
+        return {
+          text: "I started a task and added it to Results.",
+          finishReason: "stop",
+          steps: [],
+        };
+      }) as never,
+    });
+
+    expect(startTask).toHaveBeenCalledWith({
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+      model: DEFAULT_GOAT_MODEL,
+      engine: "claude_code",
+    });
+  });
+
   it("deduplicates concurrent start_task tool calls", async () => {
     type TestStartedTask = {
       id: string;
@@ -1736,7 +1810,7 @@ async function executeStartTaskTool(
     prompt: string;
     name: string;
     reason: string;
-    engine?: "opencompany" | "codex";
+    engine?: "opencompany" | "codex" | "claude_code";
   },
 ) {
   type ToolOptions = {

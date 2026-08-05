@@ -201,6 +201,7 @@ const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
 const CODEX_SANDBOX_STATUS_POLL_INTERVAL_MS = 30_000;
 const CODEX_MENTION: GoatChatMention = { kind: "engine", id: "codex" };
+const CLAUDE_MENTION: GoatChatMention = { kind: "engine", id: "claude" };
 const CLOUD_CODEX_ATTACHMENT_CAPABILITIES = { images: true, pdf: true } as const;
 const COMPOSER_MENTION_CHIP_CLASS =
   "rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]";
@@ -4823,9 +4824,14 @@ function buildMentionOptions(input: {
   if (input.codexConnected && (!query || "codex".startsWith(query))) {
     options.push({ kind: "engine", token: "@codex", label: "Codex", mention: CODEX_MENTION });
   }
-  // No "@claude" option yet: engine mentions steer the main-chat agent's start_task
-  // harness, which does not support the Claude engine. Claude chats start from the
-  // model picker's Engines group.
+  if (input.claudeCodeConnected && (!query || "claude".startsWith(query))) {
+    options.push({
+      kind: "engine",
+      token: "@claude",
+      label: "Claude Code",
+      mention: CLAUDE_MENTION,
+    });
+  }
   if (!input.skillsEnabled) return options;
 
   const selectedSkillIds = new Set(

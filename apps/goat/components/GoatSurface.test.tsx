@@ -18,6 +18,7 @@ import {
   WEB_FETCH_TOOL_PART_TYPE,
   WEB_SEARCH_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
+import { CLAUDE_CHAT_DEFAULT_MODEL_ID } from "@/lib/claude-chat-constants";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import {
   buildGoatOnboardingKickoffPrompt,
@@ -2052,6 +2053,75 @@ describe("GoatSurface chat streaming UI", () => {
         parts: [{ type: "text", text: "@codex check repo access" }],
       },
       model: "openai/gpt-5.6-sol",
+    });
+    expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
+      DEFAULT_GOAT_MODEL,
+    );
+
+    await user.keyboard("{Escape}");
+    await nextAnimationFrame();
+
+    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
+  });
+
+  it("uses @claude as a one-shot model selection without changing the remembered model", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: requestChatSessionId(init, "goat_chat_claude_1"),
+          userMessageId: "goat_chat_msg_claude_user",
+          assistantMessageId: "goat_chat_msg_claude_assistant",
+          mode: "started",
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.localStorage.setItem("opencompany-goat-main-chat-selection:user_1", DEFAULT_GOAT_MODEL);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        claudeCodeConnected
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Goat anything...");
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
+    await user.type(textarea, "@");
+
+    expect(screen.getByRole("listbox", { name: "Mention menu" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("option", { name: /@claude/i }));
+    expect(textarea).toHaveValue("@claude ");
+    expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude Code");
+    expect(
+      screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }),
+    ).toBeInTheDocument();
+
+    await user.type(textarea, "check repo access");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/claude-chat/messages", expect.any(Object)),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/claude-chat/messages")!;
+    const body = JSON.parse(String((init as RequestInit).body));
+    expect(body).toMatchObject({
+      newSessionId: expect.stringMatching(/^goat_chat_/),
+      message: {
+        role: "user",
+        parts: [{ type: "text", text: "@claude check repo access" }],
+      },
+      model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
     });
     expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBe(
       DEFAULT_GOAT_MODEL,
