@@ -326,6 +326,29 @@ describe("MessageBubble assistant errors", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("does not render task attribution metadata as a card inside a task session", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_task_session",
+      role: "assistant",
+      metadata: {
+        taskId: "task_1",
+        task: {
+          id: "task_1",
+          displayId: "TASK-1",
+          title: "Ship the fix",
+          status: "succeeded",
+        },
+      },
+      parts: [{ type: "text", text: "Shipped and merged." }],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} isTaskSession />);
+
+    expect(screen.getByText("Shipped and merged.")).toBeInTheDocument();
+    expect(screen.queryByText("Ship the fix")).not.toBeInTheDocument();
+    expect(screen.queryByText("TASK-1 · Done")).not.toBeInTheDocument();
+  });
+
   it("renders legacy paid capability approvals as inert historical cards", async () => {
     vi.stubGlobal(
       "fetch",

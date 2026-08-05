@@ -50,6 +50,7 @@ export function SharedChatView({ chat }: { chat: PublicGoatChatView }) {
               message={message}
               taskLookup={taskLookup}
               readOnly
+              isTaskSession={chat.kind === "task"}
               attachmentSrc={attachmentSrc}
             />
           ))}

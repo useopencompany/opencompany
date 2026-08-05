@@ -642,6 +642,16 @@ describe("GoatSurface chat streaming UI", () => {
             {
               id: "task_assistant_1",
               role: "assistant",
+              metadata: {
+                sessionId: "goat_chat_task_1",
+                taskId: "goat_task_1",
+                task: {
+                  id: "goat_task_1",
+                  displayId: "TASK-1",
+                  title: "Morning workflow",
+                  status: "succeeded",
+                },
+              },
               parts: [{ type: "text", text: "The workflow is complete." }],
             },
           ],
@@ -658,6 +668,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Morning workflow")).toBeInTheDocument();
     expect(screen.getByText("Task")).toBeInTheDocument();
     expect(screen.getByText("The workflow is complete.")).toBeInTheDocument();
+    expect(screen.queryByText("TASK-1 · Done")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Share task run" })).toBeInTheDocument();
 
     await user.type(screen.getByPlaceholderText("Reply..."), "Please check the afternoon too");
