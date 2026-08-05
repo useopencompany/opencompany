@@ -3,29 +3,31 @@
 // math the server enforces instead of mirroring them. Re-exported by
 // ./goat-billing.
 //
-// Usage remains wallet-based on every plan. Pro is a small-team workspace
-// subscription; it changes collaboration limits, never how usage is priced.
+// Billing v6: every workspace is seat-billed, and every seat contributes the
+// same amount of included at-cost usage to the workspace pool for the current
+// month. Overage/top-up funds live in a separate workspace pool.
 
 export const GOAT_PRO_MONTHLY_PRICE_USD_CENTS = 2_000;
+export const GOAT_SEAT_MONTHLY_PRICE_USD_CENTS = GOAT_PRO_MONTHLY_PRICE_USD_CENTS;
+export const GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS = 2_000;
 export const GOAT_PRO_STRIPE_PRODUCT_KEY = "goat_pro";
-export const GOAT_FREE_MAX_MEMBERS = 1;
+export const GOAT_FREE_MAX_MEMBERS = 10;
 export const GOAT_PRO_MAX_MEMBERS = 10;
 
-// One-time grant at workspace creation — the only free usage. Everything
-// after it is metered.
-export const GOAT_STARTER_CREDIT_USD_CENTS = 500;
+// Signup grant into the pay-per-use wallet. Under billing v6 there is no free
+// plan, but the initial grant lets a founder try real usage before adding a
+// card.
+export const GOAT_STARTER_CREDIT_USD_CENTS = 2_000;
 
 export const GOAT_TOP_UP_AMOUNTS_USD_CENTS = [500, 1_000, 2_000, 5_000, 10_000] as const;
 export const GOAT_DEFAULT_TOP_UP_USD_CENTS = 2_000;
 export const GOAT_MIN_TOP_UP_USD_CENTS = 500;
 export const GOAT_MAX_TOP_UP_USD_CENTS = 100_000;
 
-// Flat ingestion fee, charged once per admitted reservation on top of the
-// pass-through model cost: $0.20 per 50 items = $0.004/item. Anchor: 2,000
-// items/mo ≈ $8 in fees + basic-tier model cost ≲ $10 all-in. Validate against
-// traced per-item model cost before locking; tune this fee, not the
-// pass-through.
-export const GOAT_INGEST_ITEM_FEE_USD_MICROS = 4_000;
+// Billing v6 charges usage at real cost. Brain ingestion is now only the model,
+// capability, and sandbox COGS recorded elsewhere; no flat per-item platform
+// fee is added.
+export const GOAT_INGEST_ITEM_FEE_USD_MICROS = 0;
 
 // Balance thresholds: warn in the UI below $2; auto-refill (when enabled and
 // a card is saved) tops up once the balance drops below $5.

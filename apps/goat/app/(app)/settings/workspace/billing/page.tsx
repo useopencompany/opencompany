@@ -1,9 +1,7 @@
-import { PLATFORM_FEE_BPS } from "@opencompany/billing";
 import { loadGoatBillingOverview } from "@opencompany/db/goat-billing";
 import {
   GOAT_DEFAULT_TOP_UP_USD_CENTS,
-  GOAT_FREE_MAX_MEMBERS,
-  GOAT_INGEST_ITEM_FEE_USD_MICROS,
+  GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS,
   GOAT_LOW_BALANCE_WARN_USD_MICROS,
   GOAT_MAX_TOP_UP_USD_CENTS,
   GOAT_MIN_TOP_UP_USD_CENTS,
@@ -29,14 +27,17 @@ export default async function WorkspaceBillingSettingsPage({
     <GoatBillingPanel
       data={{
         creditBalanceUsdMicros: overview.creditBalanceUsdMicros,
+        includedBalanceUsdMicros: overview.includedBalanceUsdMicros,
+        topUpBalanceUsdMicros: overview.topUpBalanceUsdMicros,
         plan: overview.billing.plan,
         subscriptionStatus: overview.billing.subscriptionStatus,
+        seatQuantity: overview.billing.seatQuantity,
+        includedUsagePeriodEnd: overview.billing.includedUsagePeriodEnd?.toISOString() ?? null,
         cancelAtPeriodEnd: overview.billing.cancelAtPeriodEnd,
         currentPeriodEnd: overview.billing.currentPeriodEnd?.toISOString() ?? null,
         paymentNeedsAttention: overview.billing.paymentNeedsAttention,
         proMonthlyPriceCents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
         memberCount: overview.memberCount,
-        freeMaxMembers: GOAT_FREE_MAX_MEMBERS,
         proMaxMembers: GOAT_PRO_MAX_MEMBERS,
         spendThisMonthUsdMicros: credit.spendThisMonthUsdMicros,
         spendThisMonthByCategory: credit.spendThisMonthByCategory,
@@ -54,6 +55,7 @@ export default async function WorkspaceBillingSettingsPage({
           createdAt: entry.createdAt.toISOString(),
         })),
         lowBalanceWarnUsdMicros: GOAT_LOW_BALANCE_WARN_USD_MICROS,
+        includedUsagePerSeatCents: GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS,
         topUpAmountsCents: [...GOAT_TOP_UP_AMOUNTS_USD_CENTS],
         defaultTopUpCents: GOAT_DEFAULT_TOP_UP_USD_CENTS,
         minTopUpCents: GOAT_MIN_TOP_UP_USD_CENTS,
@@ -64,8 +66,6 @@ export default async function WorkspaceBillingSettingsPage({
           hasPaymentMethod: overview.autoRefill.hasPaymentMethod,
           lastError: overview.autoRefill.lastError,
         },
-        platformFeePercent: PLATFORM_FEE_BPS / 100,
-        ingestFeeUsdCentsPer50: (GOAT_INGEST_ITEM_FEE_USD_MICROS * 50) / 10_000,
         hasStripeCustomer: Boolean(overview.billing.stripeCustomerId),
         isAdmin: context.role === "admin",
       }}

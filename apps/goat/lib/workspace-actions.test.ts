@@ -28,7 +28,7 @@ vi.mock("@opencompany/db/client", () => ({
 
 vi.mock("@opencompany/db/goat-billing", () => ({
   getGoatWorkspacePlan: vi.fn().mockResolvedValue("free"),
-  goatWorkspaceMemberCap: (plan: "free" | "pro") => (plan === "pro" ? 10 : 1),
+  goatWorkspaceMemberCap: () => 10,
 }));
 
 vi.mock("@opencompany/db/goat-workspaces", () => ({
@@ -65,6 +65,10 @@ vi.mock("@/lib/auth", () => ({
   currentGoatUser: vi.fn(),
   GOAT_ACTIVE_BRAIN_COOKIE: "goat-active-brain",
   GOAT_ACTIVE_WORKSPACE_COOKIE: "goat-active-workspace",
+}));
+
+vi.mock("@/lib/billing/seats", () => ({
+  syncGoatStripeSeatQuantityForWorkspace: vi.fn().mockResolvedValue({ ok: true, changed: false }),
 }));
 
 vi.mock("@/lib/workos-client", () => ({
@@ -304,12 +308,19 @@ describe("inviteToGoatWorkspaceAction", () => {
     ] as never);
   });
 
-  it("keeps Free workspaces personal", async () => {
+  it("keeps workspaces inside the small-team cap", async () => {
     getGoatWorkspacePlanMock.mockResolvedValue("free");
+    listGoatWorkspaceMembersMock.mockResolvedValue(
+      Array.from({ length: 10 }, (_, index) => ({
+        member: { role: index === 0 ? "admin" : "member" },
+        user: { workosUserId: `user_${index}` },
+      })) as never,
+    );
 
     await expect(inviteToGoatWorkspaceAction("teammate@example.com")).resolves.toEqual({
       ok: false,
-      error: "Upgrade to Pro to invite teammates to this workspace.",
+      error:
+        "Workspaces allow up to 10 members (including pending invites). Remove a member or revoke an invite first.",
     });
     expect(workos.userManagement.sendInvitation).not.toHaveBeenCalled();
   });

@@ -1819,7 +1819,7 @@ async function recordChatModelCost(input: {
     chargedCostUsdMicros: cost.totalCostUsdMicros,
     billable: cost.billable,
   });
-  // Usage-based chat: debit the turn's total cost (provider + platform fee)
+  // Usage-based chat: debit the turn's at-cost usage.
   // from the workspace credits. Unknown/variable-priced models compute to
   // billable=false and debit nothing. The user-message id dedupes stream
   // resume/replay paths. A debit failure must never fail the turn.

@@ -345,6 +345,8 @@ export type GoatBrainIntelligence = "basic" | "frontier";
 // and "ingest_fee" (flat per-item fee at reservation admission).
 export type GoatCreditLedgerSource =
   | "starter_grant"
+  | "seat_included_grant"
+  | "seat_included_expiration"
   | "stripe_topup"
   | "chat_model_usage"
   | "capability_usage"
@@ -752,9 +754,9 @@ export const goatWorkspaceCapabilities = goat.table(
 );
 
 // The wallet remains the usage ledger on every plan. This row also projects
-// the flat Pro workspace subscription from Stripe webhooks. stripe_product_key
-// distinguishes it from retired v3 seat subscriptions; legacy seat fields are
-// retained for backwards-compatible schema shape.
+// the Stripe seat subscription. stripe_product_key distinguishes it from
+// retired v3 seat subscriptions; seat_quantity is the current billable seat
+// count, and included_usage_period_* defines the non-rollover usage grant.
 export const goatWorkspaceBilling = goat.table(
   "workspace_billing",
   {
@@ -770,6 +772,8 @@ export const goatWorkspaceBilling = goat.table(
     stripeProductKey: text("stripe_product_key"),
     subscriptionStatus: text("subscription_status").$type<GoatStripeSubscriptionStatus>(),
     seatQuantity: integer("seat_quantity").notNull().default(1),
+    includedUsagePeriodStart: timestamp("included_usage_period_start", { withTimezone: true }),
+    includedUsagePeriodEnd: timestamp("included_usage_period_end", { withTimezone: true }),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     paymentNeedsAttention: boolean("payment_needs_attention").notNull().default(false),
@@ -813,16 +817,22 @@ export const goatStripeWebhookEvents = goat.table("stripe_webhook_events", {
   processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// USD credit balance per workspace — the billing v4 wallet. Funds every
-// metered surface: chat turns, ingestion model cost (all tiers), and the flat
-// per-item ingestion fee. Mirrors the web app's workspace_credit_balances,
-// scoped to goat workspaces.
+// USD credit balance per workspace. balance_usd_micros remains the aggregate
+// used by gates and dashboards; billing v6 also tracks the included seat pool
+// separately from overage/top-up funds so debits can draw included usage first
+// and expire unused included usage monthly without touching top-ups.
 export const goatCreditBalances = goat.table("credit_balances", {
   workspaceId: text("workspace_id")
     .primaryKey()
     .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
   balanceCents: integer("balance_cents").notNull().default(0),
   balanceUsdMicros: bigint("balance_usd_micros", { mode: "number" }).notNull().default(0),
+  includedBalanceUsdMicros: bigint("included_balance_usd_micros", { mode: "number" })
+    .notNull()
+    .default(0),
+  topUpBalanceUsdMicros: bigint("top_up_balance_usd_micros", { mode: "number" })
+    .notNull()
+    .default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -921,7 +931,7 @@ export const goatCreditLedger = goat.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'stripe_topup', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'stripe_topup', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );

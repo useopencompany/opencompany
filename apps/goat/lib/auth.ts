@@ -22,6 +22,7 @@ import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { syncGoatStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
 import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
@@ -110,13 +111,26 @@ export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
       userId: authUser.id,
       statuses: ["active"],
     });
-    await adoptGoatWorkspaceMembershipsFromOrgs({
+    const adopted = await adoptGoatWorkspaceMembershipsFromOrgs({
       userWorkosId: authUser.id,
       memberships: memberships.data.map((membership) => ({
         organizationId: membership.organizationId,
         role: membership.role?.slug === "admin" ? ("admin" as const) : ("member" as const),
       })),
     });
+    if (adopted > 0) {
+      const workspaces = await listGoatWorkspacesForUser(authUser.id);
+      await Promise.all(
+        workspaces.map((entry) =>
+          syncGoatStripeSeatQuantityForWorkspace(entry.workspace.id).catch((error) => {
+            console.error(
+              "[goat] Failed to sync Stripe seat quantity after invite adoption",
+              error,
+            );
+          }),
+        ),
+      );
+    }
   } catch (error) {
     console.error("[goat] Failed to adopt WorkOS organization memberships", error);
   }

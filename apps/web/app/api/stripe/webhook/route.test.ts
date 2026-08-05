@@ -314,6 +314,8 @@ describe("Stripe webhook route", () => {
                 {
                   id: "si_goat_1",
                   price: { id: "price_goat_1" },
+                  quantity: 3,
+                  current_period_start: 1_786_000_000,
                   current_period_end: 1_788_000_000,
                 },
               ],
@@ -330,6 +332,9 @@ describe("Stripe webhook route", () => {
         subscriptionId: "sub_goat_1",
         status: "active",
         priceId: "price_goat_1",
+        currentPeriodStart: new Date(1_786_000_000 * 1_000),
+        currentPeriodEnd: new Date(1_788_000_000 * 1_000),
+        seatQuantity: 3,
       }),
     );
     expect(captureServerEventMock).toHaveBeenCalledWith(

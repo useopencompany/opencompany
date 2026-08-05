@@ -3,9 +3,10 @@ import { type SQLWrapper, sql } from "drizzle-orm";
 
 export const USD_MICROS_PER_CENT = 10_000;
 export const USD_MICROS_PER_DOLLAR = 1_000_000;
-// 20% fee on raw provider cost, applied to every metered surface (goat chat,
-// goat ingestion, legacy web usage debits).
-export const PLATFORM_FEE_BPS = 2000;
+// Billing v6 bills usage at provider retail / real COGS. Margin comes from
+// unused seat-included usage, not a markup on tokens, capabilities, or sandbox
+// time.
+export const PLATFORM_FEE_BPS = 0;
 
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;

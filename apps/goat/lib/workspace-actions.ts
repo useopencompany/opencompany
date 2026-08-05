@@ -34,6 +34,7 @@ import {
   GOAT_ACTIVE_BRAIN_COOKIE,
   GOAT_ACTIVE_WORKSPACE_COOKIE,
 } from "@/lib/auth";
+import { syncGoatStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
 
@@ -473,10 +474,7 @@ export async function inviteToGoatWorkspaceAction(
     if (members.length + invitations.length >= memberCap) {
       return {
         ok: false,
-        error:
-          plan === "free"
-            ? "Upgrade to Pro to invite teammates to this workspace."
-            : `Pro workspaces allow up to ${memberCap} members (including pending invites). Remove a member or revoke an invite first.`,
+        error: `Workspaces allow up to ${memberCap} members (including pending invites). Remove a member or revoke an invite first.`,
       };
     }
     const organizationId = await ensureGoatWorkspaceOrganization(context.workspace);
@@ -557,6 +555,9 @@ export async function removeGoatWorkspaceMemberAction(
     await removeGoatWorkspaceMember({
       workspaceId: context.workspace.id,
       userWorkosId,
+    });
+    await syncGoatStripeSeatQuantityForWorkspace(context.workspace.id).catch((error) => {
+      console.error("[goat] Failed to sync Stripe seat quantity after member removal", error);
     });
     revalidatePath("/", "layout");
     return { ok: true };

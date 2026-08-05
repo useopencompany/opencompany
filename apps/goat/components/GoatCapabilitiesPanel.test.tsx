@@ -48,7 +48,7 @@ describe("GoatCapabilitiesPanel", () => {
       expect(toggle).toHaveAttribute("aria-disabled", "true");
     }
     expect(screen.getByText(/Only workspace admins can change/i)).toBeVisible();
-    expect(screen.getByText(/provider cost plus a 20% platform fee/i)).toBeVisible();
+    expect(screen.getByText(/underlying provider cost/i)).toBeVisible();
     expect(screen.getByText("Prospecting")).toBeVisible();
     expect(screen.getByText(/Look up work emails for known prospects/i)).toBeVisible();
   });

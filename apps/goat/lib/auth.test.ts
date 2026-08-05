@@ -65,6 +65,10 @@ vi.mock("@/lib/workos-client", () => ({
   getWorkOSClient: vi.fn(),
 }));
 
+vi.mock("@/lib/billing/seats", () => ({
+  syncGoatStripeSeatQuantityForWorkspace: vi.fn().mockResolvedValue({ ok: true, changed: false }),
+}));
+
 vi.mock("@/lib/workos-organizations", () => ({
   ensureGoatWorkspaceOrganizationsForEntries: vi.fn((entries) => entries),
 }));

@@ -29,12 +29,10 @@ export function GoatUsagePanel({ data }: { data: GoatUsageData }) {
   const days = groupByDay(data.breakdown);
   const totalSpend = data.breakdown.reduce((sum, row) => sum + row.spendUsdMicros, 0);
   const totalProviderCost = data.breakdown.reduce((sum, row) => sum + row.providerCostUsdMicros, 0);
-  const totalFees = data.breakdown.reduce((sum, row) => sum + row.platformFeeUsdMicros, 0);
-
   return (
     <GoatSettingsContent
       title="Usage"
-      description="What this workspace spent over the last 30 days, split into model cost and platform fees."
+      description="What this workspace spent over the last 30 days at provider cost."
     >
       {data.pending > 0 ? (
         <div className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
@@ -52,8 +50,8 @@ export function GoatUsagePanel({ data }: { data: GoatUsageData }) {
 
       <section className="grid gap-2 sm:grid-cols-3">
         <StatTile label="Spent (30 days)" value={formatUsdMicros(totalSpend)} />
-        <StatTile label="Model cost" value={formatUsdMicros(totalProviderCost)} />
-        <StatTile label="Platform fees" value={formatUsdMicros(totalFees)} />
+        <StatTile label="Provider cost" value={formatUsdMicros(totalProviderCost)} />
+        <StatTile label="Usage fee" value="$0.00" />
       </section>
 
       <section className="flex flex-col gap-2">
@@ -77,8 +75,7 @@ export function GoatUsagePanel({ data }: { data: GoatUsageData }) {
                   >
                     {CATEGORY_LABELS[row.category]}: {formatUsdMicros(row.spendUsdMicros)}
                     {" ("}
-                    {formatUsdMicros(row.providerCostUsdMicros)} model +{" "}
-                    {formatUsdMicros(row.platformFeeUsdMicros)} fee{")"}
+                    {formatUsdMicros(row.providerCostUsdMicros)} provider cost{")"}
                   </span>
                 ))}
               </div>

@@ -25,8 +25,8 @@ describe("calculateModelUsageCost", () => {
     });
 
     expect(cost.providerCostUsdMicros).toBe(3_900);
-    expect(cost.platformFeeUsdMicros).toBe(780);
-    expect(cost.totalCostUsdMicros).toBe(4_680);
+    expect(cost.platformFeeUsdMicros).toBe(0);
+    expect(cost.totalCostUsdMicros).toBe(3_900);
   });
 
   it("prices Anthropic cache writes at the prompt-cache write rate", () => {
@@ -40,7 +40,7 @@ describe("calculateModelUsageCost", () => {
     });
 
     expect(cost.providerCostUsdMicros).toBe(19_050);
-    expect(cost.platformFeeUsdMicros).toBe(3_810);
+    expect(cost.platformFeeUsdMicros).toBe(0);
   });
 
   it.each([
@@ -194,11 +194,11 @@ describe("calculateModelUsageCost", () => {
 });
 
 describe("fees and hosted tools", () => {
-  it("adds a 20% platform fee", () => {
-    expect(calculatePlatformFeeUsdMicros(12_345)).toBe(2_469);
+  it("does not add a platform fee", () => {
+    expect(calculatePlatformFeeUsdMicros(12_345)).toBe(0);
   });
 
-  it("prices hosted tools from provider-reported micros plus platform fee", () => {
+  it("prices hosted tools from provider-reported micros at cost", () => {
     expect(
       calculateHostedToolUsageCost({
         provider: "exa",
@@ -207,8 +207,8 @@ describe("fees and hosted tools", () => {
       }),
     ).toMatchObject({
       providerCostUsdMicros: 7_000,
-      platformFeeUsdMicros: 1_400,
-      totalCostUsdMicros: 8_400,
+      platformFeeUsdMicros: 0,
+      totalCostUsdMicros: 7_000,
       costBasis: {
         costSource: "provider_reported",
         pricingVersion: "provider-reported.2026-05-22",
@@ -248,8 +248,8 @@ describe("fees and hosted tools", () => {
       }),
     ).toMatchObject({
       providerCostUsdMicros: 1_000_000,
-      platformFeeUsdMicros: 200_000,
-      totalCostUsdMicros: 1_200_000,
+      platformFeeUsdMicros: 0,
+      totalCostUsdMicros: 1_000_000,
       costBasis: {
         costSource: "broker_metered",
         pricingVersion: "2026-07-29.standard.2",
@@ -259,7 +259,7 @@ describe("fees and hosted tools", () => {
 });
 
 describe("calculateSandboxUsageCost", () => {
-  it("prices vCPU-seconds + RAM-GiB-seconds plus the platform fee", () => {
+  it("prices vCPU-seconds + RAM-GiB-seconds at cost", () => {
     // 60s on the base allocation (2 vCPU, 512 MiB = 0.5 GiB):
     //   vCPU: 60 * 2 * 14   = 1680
     //   RAM:  60 * 0.5 * 4.5 = 135
@@ -271,8 +271,8 @@ describe("calculateSandboxUsageCost", () => {
     });
 
     expect(cost.providerCostUsdMicros).toBe(1_815);
-    expect(cost.platformFeeUsdMicros).toBe(363);
-    expect(cost.totalCostUsdMicros).toBe(2_178);
+    expect(cost.platformFeeUsdMicros).toBe(0);
+    expect(cost.totalCostUsdMicros).toBe(1_815);
     expect(cost.billable).toBe(true);
     expect(cost.costBasis).toMatchObject({
       kind: "sandbox_usage",

@@ -162,7 +162,7 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
     assertGoatCheckoutEnabled();
     const overview = await loadGoatBillingOverview(context.workspace.id);
     if (overview.billing.plan === "pro") {
-      return { ok: false, error: "This workspace already has OpenCompany Pro." };
+      return { ok: false, error: "This workspace already has an active seat subscription." };
     }
     if (
       overview.billing.stripeSubscriptionId &&
@@ -196,9 +196,10 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
     if (existingPro) {
       return {
         ok: false,
-        error: "This workspace already has a Pro subscription. Open billing management instead.",
+        error: "This workspace already has a seat subscription. Open billing management instead.",
       };
     }
+    const seatQuantity = Math.max(1, Math.floor(overview.memberCount ?? 1));
     const appUrl = getGoatAppUrl();
     const session = await stripe.checkout.sessions.create(
       {
@@ -219,11 +220,11 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
               tax_behavior: "exclusive",
               recurring: { interval: "month" },
               product_data: {
-                name: "OpenCompany Pro",
-                description: "Team collaboration for one OpenCompany workspace",
+                name: "OpenCompany seat",
+                description: "$20/month with $20/month of included at-cost usage",
               },
             },
-            quantity: 1,
+            quantity: seatQuantity,
           },
         ],
         metadata: {
@@ -250,7 +251,7 @@ export async function createGoatProCheckoutAction(): Promise<GoatBillingActionRe
     });
     checkoutUrl = session.url;
   } catch (error) {
-    return billingError(error, "Could not start OpenCompany Pro checkout.");
+    return billingError(error, "Could not start seat checkout.");
   }
   redirect(checkoutUrl);
 }

@@ -2,7 +2,6 @@
 
 import { toast } from "@opencompany/ui/components/sonner";
 import { Mail, Trash2, UserRound, X } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { GoatSettingsContent } from "@/components/GoatSettingsChrome";
@@ -97,22 +96,7 @@ export function WorkspaceSettingsPanel({ initial }: { initial: WorkspaceSettings
             : "border-border bg-surface-muted/40 text-ink-subtle"
         }`}
       >
-        {initial.plan === "free" ? (
-          <>
-            Free workspaces are personal.{" "}
-            {isAdmin ? (
-              <Link
-                href="/settings/workspace/billing"
-                className="font-medium text-ink underline underline-offset-2"
-              >
-                Upgrade to Pro
-              </Link>
-            ) : (
-              "Ask an admin to upgrade to Pro"
-            )}{" "}
-            for up to 10 members.
-          </>
-        ) : overCap ? (
+        {overCap ? (
           <>
             This workspace has {initial.members.length} members, over the limit of{" "}
             {initial.memberCap}. Inviting is disabled until you are under the limit.
