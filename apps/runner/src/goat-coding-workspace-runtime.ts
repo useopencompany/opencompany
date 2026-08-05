@@ -196,7 +196,7 @@ function isPathWithinDirectory(pathname: string, directory: string) {
 const LISTENING_PORT_PROCESS_COMMAND = String.raw`
 ss -H -ltnp 2>/dev/null | while IFS= read -r line; do
   local_address=$(printf '%s\n' "$line" | awk '{print $4}')
-  port="\${local_address##*:}"
+  port=$(printf '%s\n' "$local_address" | awk -F: '{print $NF}')
   case "$port" in
     ''|*[!0-9]*) continue ;;
   esac
