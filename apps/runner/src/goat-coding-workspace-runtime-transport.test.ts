@@ -17,6 +17,7 @@ import type { SandboxHandle } from "./sandbox";
 const openServers: WebSocketServer[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(
     openServers.splice(0).map((server) => {
       for (const client of server.clients) client.terminate();
@@ -261,6 +262,58 @@ describe("Goat coding workspace terminal input latency", () => {
     webSocket.emit("message", Buffer.from("t"), true);
 
     await vi.waitFor(() => expect(keystrokes).toEqual(["git"]), { timeout: 5_000 });
+    webSocket.emit("close");
+    await vi.waitFor(() => expect(kill).toHaveBeenCalledOnce(), { timeout: 5_000 });
+  });
+
+  it("flushes submitted terminal lines without waiting for the batch timer", async () => {
+    vi.useFakeTimers();
+    const kill = vi.fn(async () => true);
+    const keystrokes: string[] = [];
+    const sendInput = vi.fn(async (_pid: number, data: Uint8Array) => {
+      const text = Buffer.from(data).toString();
+      if (!text.includes("tmux new-session")) keystrokes.push(text);
+    });
+    const create = vi.fn(async () => ({ pid: 42, kill }));
+    const sandbox = {
+      sandboxId: "sandbox_1",
+      commands: { run: vi.fn(async () => ({ stdout: "" })) },
+      pty: { create, sendInput, resize: vi.fn(async () => undefined) },
+      setTimeout: vi.fn(async () => undefined),
+    } as unknown as SandboxHandle;
+
+    const webSocket = new EventEmitter() as WebSocket & EventEmitter;
+    Object.defineProperty(webSocket, "readyState", { value: WebSocket.OPEN });
+    webSocket.send = vi.fn();
+    webSocket.ping = vi.fn();
+    webSocket.close = vi.fn();
+    webSocket.terminate = vi.fn();
+    attachRuntimeConnection(
+      webSocket,
+      sandbox,
+      {
+        id: "goat_codex_chat_123e4567-e89b-12d3-a456-426614174000",
+        chatSessionId: "chat_1",
+        userWorkosId: "user_1",
+        sandboxId: "sandbox_1",
+        status: "idle",
+        engine: "codex",
+      } satisfies GoatCodingWorkspaceSession,
+      { goatCodexChatIdleTimeoutMs: 300_000 } as RunnerEnv,
+      vi.fn(async () => undefined),
+    );
+
+    webSocket.emit(
+      "message",
+      JSON.stringify({ type: "terminal.attach", cols: 80, rows: 24 }),
+      false,
+    );
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce(), { timeout: 5_000 });
+
+    webSocket.emit("message", Buffer.from("l"), true);
+    webSocket.emit("message", Buffer.from("s\r"), true);
+
+    await vi.waitFor(() => expect(keystrokes).toEqual(["ls\r"]), { timeout: 5_000 });
     webSocket.emit("close");
     await vi.waitFor(() => expect(kill).toHaveBeenCalledOnce(), { timeout: 5_000 });
   });
