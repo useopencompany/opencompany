@@ -433,6 +433,14 @@ describe("runCodexAppServerTurn", () => {
         expect.stringContaining("app-server-proxy.mjs"),
       ]),
     );
+    expect(
+      sandbox.startedCommandRuns().find(({ command }) => command.includes("app-server-proxy.mjs"))
+        ?.options,
+    ).toMatchObject({
+      background: true,
+      stdin: true,
+      timeoutMs: 0,
+    });
     expect(summary).toMatchObject({
       sessionId: "thread_started",
       status: "success",
@@ -1024,6 +1032,15 @@ function fakeSandbox(options: FakeSandboxOptions = {}) {
   let proxyStdout: ((data: string) => void | Promise<void>) | null = null;
   let nextPid = 100;
   const commands: string[] = [];
+  const commandRuns: Array<{
+    command: string;
+    options?: {
+      background?: boolean;
+      stdin?: boolean;
+      timeoutMs?: number;
+      onStdout?: (data: string) => void | Promise<void>;
+    };
+  }> = [];
   const messages: FakeProxyMessage[] = [];
 
   const sandbox = {
@@ -1042,10 +1059,12 @@ function fakeSandbox(options: FakeSandboxOptions = {}) {
         options?: {
           background?: boolean;
           stdin?: boolean;
+          timeoutMs?: number;
           onStdout?: (data: string) => void | Promise<void>;
         },
       ) => {
         commands.push(command);
+        commandRuns.push({ command, ...(options ? { options } : {}) });
         if (command.includes("test -S") && command.includes("kill -0")) {
           throw new Error("not running");
         }
@@ -1069,6 +1088,7 @@ function fakeSandbox(options: FakeSandboxOptions = {}) {
     sentMethods: () => messages.flatMap((message) => (message.method ? [message.method] : [])),
     sentMessages: () => messages,
     startedCommands: () => commands,
+    startedCommandRuns: () => commandRuns,
   };
 
   return sandbox;

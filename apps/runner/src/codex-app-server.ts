@@ -12,6 +12,7 @@ const CODEX_APP_SERVER_STATE = "app-server-state.json";
 const CODEX_APP_SERVER_PROXY = "app-server-proxy.mjs";
 const CODEX_APP_SERVER_PROXY_STATE = "app-server-proxy-state.json";
 const CODEX_APP_SERVER_DAEMON_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+const CODEX_APP_SERVER_PROXY_TIMEOUT_MS = 0;
 const CODEX_APP_SERVER_REQUEST_TIMEOUT_MS = 30_000;
 const CODEX_APP_SERVER_NOTIFICATION_FLUSH_MS = 100;
 const CODEX_APP_SERVER_NOTIFICATION_FLUSH_CHARS = 64;
@@ -371,7 +372,6 @@ async function runTurnThroughProxy(input: {
     command: input.plan.proxyCommand,
     statePath: input.plan.proxyStatePath,
     envs: input.plan.codexEnv,
-    timeoutMs: input.timeoutMs,
     ...(onServerRequest
       ? {
           onServerRequest: async (request: CodexAppServerRequest) => {
@@ -911,7 +911,6 @@ class AppServerProxyClient {
       command: string;
       statePath: string;
       envs: Record<string, string>;
-      timeoutMs: number;
       onServerRequest?: (request: CodexAppServerRequest) => Promise<Record<string, unknown>>;
       onNotification: (notification: JsonRpcNotification) => void;
     },
@@ -926,7 +925,10 @@ class AppServerProxyClient {
       background: true,
       stdin: true,
       envs: this.input.envs,
-      timeoutMs: this.input.timeoutMs,
+      // The proxy is transport for the whole turn, not the turn watchdog. Giving both the same
+      // deadline lets E2B terminate the transport before waitForTurnCompletion can interrupt the
+      // turn and preserve its partial result. stop() owns the proxy lifetime instead.
+      timeoutMs: CODEX_APP_SERVER_PROXY_TIMEOUT_MS,
       onStdout: (data: string) => {
         void this.onStdout(data).catch((error) => this.fail(error));
       },
