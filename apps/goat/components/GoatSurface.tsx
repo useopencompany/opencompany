@@ -949,6 +949,7 @@ export function GoatSurface({
   );
   const isAgentWorking = isGenerating || isEngineWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
+  const isBackgroundSubmit = backgroundDirectiveActive;
   const latestActiveTurnStartedAtMs = useMemo(
     () => latestChatTurnStartedAtMs(chatMessages),
     [chatMessages],
@@ -2211,7 +2212,9 @@ export function GoatSurface({
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (!isInteractionPending && !backgroundTaskSubmitting) formRef.current?.requestSubmit();
+      if ((!isInteractionPending || isBackgroundSubmit) && !backgroundTaskSubmitting) {
+        formRef.current?.requestSubmit();
+      }
     }
   };
 
@@ -2877,16 +2880,16 @@ export function GoatSurface({
                           (attachment) => attachment.status === "ready",
                         )) ||
                       composerAttachments.isUploading ||
-                      (!backgroundChatDirective && engineSubmitting) ||
-                      (!backgroundChatDirective && engineRunning) ||
+                      (!isBackgroundSubmit && engineSubmitting) ||
+                      (!isBackgroundSubmit && engineRunning) ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
                       chatSendBlocked
                     }
                     isGenerating={
-                      backgroundChatDirective ? false : isGenerating || isTaskConversationWorking
+                      isBackgroundSubmit ? false : isGenerating || isTaskConversationWorking
                     }
-                    isStopping={!backgroundChatDirective && isTaskConversationStopping}
+                    isStopping={!isBackgroundSubmit && isTaskConversationStopping}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />

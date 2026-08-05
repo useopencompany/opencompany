@@ -506,6 +506,76 @@ describe("GoatSurface chat streaming UI", () => {
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
   });
 
+  it("starts an ampersand ad-hoc task with Enter while the current chat is streaming", async () => {
+    const user = userEvent.setup();
+    chatMock.status = "streaming";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/tasks" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_streaming_1",
+              displayId: "TASK-7",
+              name: "Research competitors",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_streaming_1",
+          title: "Streaming chat",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "opencompany",
+          messages: [
+            {
+              id: "user_1",
+              role: "user",
+              parts: [{ type: "text", text: "Think through launch options" }],
+            },
+          ],
+        }}
+        taskSpawningEnabled
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "& #task research competitors");
+
+    expect(screen.getByTestId("ad-hoc-task-hint")).toHaveTextContent(
+      "Sending starts this as an ad-hoc background task.",
+    );
+    expect(screen.getByRole("button", { name: "Start task" })).toBeEnabled();
+
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/tasks",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/tasks" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      description: "#task research competitors",
+      model: DEFAULT_GOAT_MODEL,
+    });
+    expect(chatMock.stop).not.toHaveBeenCalled();
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+  });
+
   it("restores the prior draft when voice dictation is cancelled", async () => {
     installDictationBrowserMocks();
     const user = userEvent.setup();
