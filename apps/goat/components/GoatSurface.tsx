@@ -1700,12 +1700,14 @@ export function GoatSurface({
 
         const engine = backgroundEngine;
         const config = ENGINE_CHAT_CONFIG[engine];
+        const newSessionId = newOptimisticGoatChatSessionId();
+        setLocalGoatChatState(newSessionId, "working");
         void sendEngineChatMessage({
           endpoint: config.messagesEndpoint,
           errorLabel: config.label,
           prompt: messagePrompt,
           sessionId: null,
-          newSessionId: newOptimisticGoatChatSessionId(),
+          newSessionId,
           settings: settings.settings,
           userMessageId: `goat_chat_msg_${crypto.randomUUID()}`,
           attachments: attachmentsMetadata,
@@ -1723,6 +1725,7 @@ export function GoatSurface({
             toast.success(`${config.label} is ready.`);
           })
           .catch((error) => {
+            clearLocalGoatChatState(newSessionId, "working");
             if (!mountedRef.current) return;
             restoreDraft();
             toast.error(
@@ -1747,9 +1750,12 @@ export function GoatSurface({
       composerAttachments.setAttachments([]);
       toast("Started a new chat in the background.");
 
+      const newSessionId = newOptimisticGoatChatSessionId();
+      setLocalGoatChatState(newSessionId, "working");
       void runBackgroundChatTurn({
         prompt: messagePrompt,
         model: String(chatModel),
+        newSessionId,
         ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       })
         .then(() => {
@@ -1764,6 +1770,7 @@ export function GoatSurface({
           toast.error(error instanceof Error ? error.message : "Could not start that chat.");
         })
         .finally(() => {
+          clearLocalGoatChatState(newSessionId, "working");
           if (!mountedRef.current) return;
           setBackgroundTaskSubmitting(false);
           refocusMainComposerAfterBackgroundTask();
@@ -3616,12 +3623,14 @@ function QuickChatComposer({
       const engine = targetEngine;
       const config = ENGINE_CHAT_CONFIG[engine];
       const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
+      const newSessionId = newOptimisticGoatChatSessionId();
+      setLocalGoatChatState(newSessionId, "working");
       void sendEngineChatMessage({
         endpoint: config.messagesEndpoint,
         errorLabel: config.label,
         prompt,
         sessionId: null,
-        newSessionId: newOptimisticGoatChatSessionId(),
+        newSessionId,
         settings: settings.settings,
         userMessageId,
         attachments: attachmentsMetadata,
@@ -3638,6 +3647,7 @@ function QuickChatComposer({
           toast.success(`${config.label} is ready.`);
         })
         .catch((error) => {
+          clearLocalGoatChatState(newSessionId, "working");
           toast.error(
             error instanceof Error ? error.message : `${config.label} could not start that turn.`,
           );
@@ -3653,6 +3663,8 @@ function QuickChatComposer({
     onSubmitted();
     toast("Started a new chat in the background.");
 
+    const newSessionId = newOptimisticGoatChatSessionId();
+    setLocalGoatChatState(newSessionId, "working");
     const backgroundChatMentions = isBackgroundChatDirective
       ? mentions.filter((mention) => !isWorkflowMention(mention))
       : mentions;
@@ -3663,6 +3675,7 @@ function QuickChatComposer({
     void runBackgroundChatTurn({
       prompt,
       model: String(chatModel),
+      newSessionId,
       ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     })
       .then(() => {
@@ -3674,6 +3687,7 @@ function QuickChatComposer({
         toast.error(error instanceof Error ? error.message : "Could not start that chat.");
       })
       .finally(() => {
+        clearLocalGoatChatState(newSessionId, "working");
         if (mountedRef.current) setIsSubmitting(false);
       });
   };
@@ -6478,6 +6492,7 @@ function EngineStopButton({ label, onStop }: { label: string; onStop: () => void
 async function runBackgroundChatTurn(input: {
   prompt: string;
   model: string;
+  newSessionId: string;
   metadata?: GoatChatMessageMetadata;
 }) {
   const response = await fetch("/api/chat", {
@@ -6485,6 +6500,7 @@ async function runBackgroundChatTurn(input: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       sessionId: null,
+      newSessionId: input.newSessionId,
       model: input.model,
       message: {
         id: newBackgroundChatMessageId(),

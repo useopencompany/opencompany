@@ -372,6 +372,10 @@ describe("GoatSurface chat streaming UI", () => {
 
   it("starts a background chat from the main composer when the message starts with ampersand", async () => {
     const user = userEvent.setup();
+    let resolveChatResponse: (() => void) | null = null;
+    const chatResponseReady = new Promise<void>((resolve) => {
+      resolveChatResponse = resolve;
+    });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (String(input).includes("/api/electric/")) {
@@ -384,17 +388,21 @@ describe("GoatSurface chat streaming UI", () => {
         });
       }
 
+      await chatResponseReady;
       return new Response("done", { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        userWorkosId="user_1"
-      />,
+      <>
+        <GoatSurface
+          tasks={[]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={null}
+          userWorkosId="user_1"
+        />
+        <LocalChatStatesProbe />
+      </>,
     );
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
@@ -423,11 +431,21 @@ describe("GoatSurface chat streaming UI", () => {
         parts: [{ type: "text", text: "Research Q3" }],
       },
     });
+    expect(body.newSessionId).toMatch(/^goat_chat_/);
     expect(body.message.id).toMatch(/^ui_background_/);
+    await waitFor(() =>
+      expect(screen.getByTestId("local-chat-states")).toHaveTextContent(
+        `${body.newSessionId}:working`,
+      ),
+    );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveChatResponse?.();
+    });
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId("local-chat-states")).toHaveTextContent("none"));
     expect(textarea).toHaveValue("");
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
   });
@@ -3428,6 +3446,7 @@ describe("GoatSurface chat streaming UI", () => {
         parts: [{ type: "text", text: "Research Q3" }],
       },
     });
+    expect(body.newSessionId).toMatch(/^goat_chat_/);
   });
 
   it("routes a dropped file only to the Cmd+K composer while the palette is open", async () => {
@@ -4709,6 +4728,12 @@ function domRectWithHeight(height: number): DOMRect {
 function LocalChatStateProbe({ sessionId }: { sessionId: string }) {
   const states = useLocalGoatChatStates();
   return <div data-testid="local-chat-state">{states.get(sessionId) ?? "none"}</div>;
+}
+
+function LocalChatStatesProbe() {
+  const states = useLocalGoatChatStates();
+  const entries = [...states.entries()].map(([sessionId, state]) => `${sessionId}:${state}`);
+  return <div data-testid="local-chat-states">{entries.join(",") || "none"}</div>;
 }
 
 async function nextAnimationFrame() {
