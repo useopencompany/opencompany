@@ -10,6 +10,11 @@ import {
   parseCodexUiMessageParts,
   resolveCodexUiInteraction,
 } from "@opencompany/agent-runtime";
+import type { GoatAnalyticsEngine } from "@opencompany/analytics/goat/events";
+import {
+  captureGoatLlmUsageRecorded,
+  type GoatLlmUsageAnalyticsStage,
+} from "@opencompany/analytics/goat/server";
 import {
   GOAT_CODEX_CHAT_EVENT_TYPES,
   type GoatChatMessageDebugTrace,
@@ -39,8 +44,10 @@ export type GoatCodexChatProjectorTarget = {
   codexChatSessionId: string;
   chatSessionId: string;
   turnId: string;
+  userMessageId: string;
   assistantMessageId: string;
   model: string;
+  engine: GoatAnalyticsEngine;
   leaseId: string;
   leaseOwner: string;
   planMode: boolean;
@@ -434,6 +441,11 @@ export function createGoatCodexChatProjector(input: {
               totalTokens: summary.usage.input_tokens + summary.usage.output_tokens,
             }
           : undefined;
+        await captureExternalHarnessUsage({
+          target,
+          summary,
+          taskCompletion: options.taskCompletion,
+        });
         if (summary.status === "success") {
           if (options.replacementContent?.trim()) {
             parts = [
@@ -527,6 +539,68 @@ export function createGoatCodexChatProjector(input: {
       });
     },
   };
+}
+
+async function captureExternalHarnessUsage(input: {
+  target: GoatCodexChatProjectorTarget;
+  summary: CodexAppServerSummary;
+  taskCompletion?: GoatTaskTurnCompletion | null | undefined;
+}) {
+  const usage = input.summary.usage;
+  if (!usage || (input.target.engine !== "codex" && input.target.engine !== "claude_code")) return;
+
+  const inputTokens = positiveTokenCount(usage.input_tokens);
+  const outputTokens = positiveTokenCount(usage.output_tokens);
+  if (!inputTokens && !outputTokens) return;
+
+  const inputCacheReadTokens = positiveTokenCount(usage.cache_read_input_tokens);
+  const inputCacheWriteTokens = positiveTokenCount(usage.cache_creation_input_tokens);
+  const inputNoCacheTokens = Math.max(
+    inputTokens - inputCacheReadTokens - inputCacheWriteTokens,
+    0,
+  );
+  const totalTokens = inputTokens + outputTokens;
+
+  await captureGoatLlmUsageRecorded({
+    distinctId: input.target.userWorkosId,
+    workspaceId: input.target.workspaceId,
+    surface: input.taskCompletion ? "task" : "chat",
+    stage: externalHarnessUsageStage(input.target.engine),
+    sessionId: input.target.chatSessionId,
+    messageId: input.target.userMessageId,
+    taskId: input.taskCompletion?.taskId,
+    turnId: input.target.turnId,
+    modelProvider: externalHarnessModelProvider(input.target.engine),
+    model: input.target.model,
+    engine: input.target.engine,
+    inputTokens,
+    inputNoCacheTokens,
+    inputCacheReadTokens,
+    inputCacheWriteTokens,
+    outputTokens,
+    outputTextTokens: outputTokens,
+    outputReasoningTokens: 0,
+    totalTokens,
+    providerCostUsdMicros: 0,
+    platformFeeUsdMicros: 0,
+    chargedCostUsdMicros: 0,
+    billable: false,
+    finishReason: input.summary.status,
+  });
+}
+
+function externalHarnessUsageStage(_engine: GoatAnalyticsEngine): GoatLlmUsageAnalyticsStage {
+  return "execution";
+}
+
+function externalHarnessModelProvider(engine: GoatAnalyticsEngine) {
+  if (engine === "claude_code") return "anthropic";
+  if (engine === "codex") return "openai";
+  return "external";
+}
+
+function positiveTokenCount(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
 function assertRowsChanged(result: unknown) {

@@ -113,7 +113,12 @@ describe("createCodexAppServerAccumulator", () => {
       method: "thread/tokenUsage/updated",
       params: {
         tokenUsage: {
-          last: { inputTokens: 100, cachedInputTokens: 20, outputTokens: 40 },
+          last: {
+            inputTokens: 100,
+            cachedInputTokens: 20,
+            cacheCreationInputTokens: 5,
+            outputTokens: 40,
+          },
         },
       },
     });
@@ -130,6 +135,7 @@ describe("createCodexAppServerAccumulator", () => {
       usage: {
         input_tokens: 100,
         cache_read_input_tokens: 20,
+        cache_creation_input_tokens: 5,
         output_tokens: 40,
       },
     });
