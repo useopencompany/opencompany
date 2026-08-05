@@ -25,11 +25,48 @@ export type GoatActionErrorCode =
   | "provider_error"
   | "timeout"
   | "call_budget"
+  | "duplicate_invocation"
   | "approval_required"
   | "insufficient_credits"
   | "disabled"
   | "not_permitted"
   | "internal";
+
+// Permission capabilities answer which user-facing On / Ask / Off switch owns
+// an action. Effects answer what executing the action can do. Keep the two
+// independent: catalog policies must never infer safety from a permission
+// group name.
+export type GoatActionEffects = {
+  readonly mutatesExternalSystem: boolean;
+  readonly metered: boolean;
+  readonly idempotent: boolean;
+  readonly destructive: boolean;
+  readonly uncertainAfterDispatch: boolean;
+};
+
+export const GOAT_ACTION_EFFECTS_READ = {
+  mutatesExternalSystem: false,
+  metered: false,
+  idempotent: true,
+  destructive: false,
+  uncertainAfterDispatch: false,
+} as const satisfies GoatActionEffects;
+
+export const GOAT_ACTION_EFFECTS_WRITE = {
+  mutatesExternalSystem: true,
+  metered: false,
+  idempotent: false,
+  destructive: false,
+  uncertainAfterDispatch: true,
+} as const satisfies GoatActionEffects;
+
+export const GOAT_ACTION_EFFECTS_METERED_READ = {
+  mutatesExternalSystem: false,
+  metered: true,
+  idempotent: false,
+  destructive: false,
+  uncertainAfterDispatch: true,
+} as const satisfies GoatActionEffects;
 
 // What discovery (list_actions) exposes for one action. The params schema is
 // documentation for the model; each action's execute is the enforcement.
@@ -39,6 +76,7 @@ export type GoatActionDescriptor = {
   // Which human-readable permission capability this action belongs to (see
   // lib/actions/capabilities.ts). Every action must declare itself.
   capability: GoatCapabilityId;
+  effects: GoatActionEffects;
   description: string;
   params: JSONSchema7;
 };
@@ -61,6 +99,10 @@ export type GoatCapabilityTurnState = {
   admittedToolCallIds: string[];
   quotesByToolCallId: Map<string, GoatCapabilityQuote>;
   asyncRunsStarted: number;
+  // Cloud transports span independent HTTP requests and app instances. Their
+  // gateway injects this durable store; foreground/headless loops may omit it
+  // and use the request-local fields above.
+  governance?: GoatCapabilityTurnGovernance;
 };
 
 export type GoatCapabilityQuote = {
@@ -70,6 +112,29 @@ export type GoatCapabilityQuote = {
   quoteTotalCostUsdMicros: number;
   decision: "auto" | "approval_required";
   runId?: string;
+};
+
+export type GoatCapabilityTurnSnapshot = {
+  quotedTotalUsdMicros: number;
+  admittedToolCallIds: string[];
+  quotesByToolCallId: Map<string, GoatCapabilityQuote>;
+  asyncRunsStarted: number;
+};
+
+export type GoatCapabilityTurnGovernance = {
+  load: () => Promise<GoatCapabilityTurnSnapshot>;
+  storeQuote: (input: {
+    toolCallId: string;
+    quote: GoatCapabilityQuote;
+    admitted: boolean;
+    // When admitting a quote, the durable store uses this ceiling in the same
+    // guarded update that increments the turn total. That prevents concurrent
+    // app instances from independently admitting beyond the remaining budget.
+    maxQuotedTotalUsdMicros?: number;
+  }) => Promise<boolean>;
+  releaseQuote: (input: { toolCallId: string; quoteTotalCostUsdMicros: number }) => Promise<void>;
+  claimAsyncRun: (input: { toolCallId: string; maxRuns: number }) => Promise<boolean>;
+  releaseAsyncRun: (input: { toolCallId: string }) => Promise<void>;
 };
 
 export type GoatActionExecuteContext = {

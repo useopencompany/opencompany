@@ -15,6 +15,7 @@ import {
   recordGoatSlackBotThreadParticipation,
 } from "@opencompany/db/goat-slack-bot";
 import { DEFAULT_GOAT_BRAIN_SLUG, listAccessibleGoatBrains } from "@opencompany/db/goat-workspaces";
+import { projectActionCatalog } from "@opencompany/goat-agent/actions/policy";
 import { recordGoatModelCost } from "@opencompany/goat-observability";
 import type { LanguageModelUsage } from "ai";
 import { eq } from "drizzle-orm";
@@ -572,17 +573,7 @@ async function resolveSlackActionDispatcher(input: {
     // explicitly enabled, and omit both "ask" actions and paid managed
     // capabilities, which require a persisted chat session for execution and
     // may return a confirmation card Slack cannot answer.
-    const slackSourceIds = new Set(
-      resolved.providers.filter((source) => source.kind !== "managed").map((source) => source.id),
-    );
-    const actions = resolved.actions.filter(
-      (action) => action.permissionMode === "on" && slackSourceIds.has(action.provider),
-    );
-    const providerIds = new Set(actions.map((action) => action.provider));
-    catalog = {
-      providers: resolved.providers.filter((provider) => providerIds.has(provider.id)),
-      actions,
-    };
+    catalog = projectActionCatalog(resolved, "headless");
   } catch {
     return null;
   }

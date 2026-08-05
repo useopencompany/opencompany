@@ -1,5 +1,6 @@
 import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
 import { BROWSER_TOOL_NAMES } from "@opencompany/browser-tools";
+import { GOAT_ACTION_EFFECTS_READ } from "@opencompany/goat-agent/actions/types";
 import { convertToModelMessages, streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isGoatChatActionsKilled, resolveGoatActionCatalog } from "@/lib/actions/catalog";
@@ -672,6 +673,7 @@ describe("POST /api/chat", () => {
           id: "stripe.get_revenue_summary",
           provider: "stripe",
           capability: "read",
+          effects: GOAT_ACTION_EFFECTS_READ,
           permissionMode: "on",
           description: "Summarize operational payment activity.",
           params: { type: "object", properties: {} },
@@ -2781,6 +2783,7 @@ function sampleActionCatalog() {
     providers: [
       {
         id: "slack" as const,
+        kind: "integration" as const,
         label: 'Slack workspace "Acme"',
         description: "Read conversations, messages, threads, and workspace members.",
       },
@@ -2790,6 +2793,7 @@ function sampleActionCatalog() {
         id: "slack.fetch_history",
         provider: "slack" as const,
         capability: "read" as const,
+        effects: GOAT_ACTION_EFFECTS_READ,
         permissionMode: "on" as const,
         description: "Fetch recent messages from one Slack conversation.",
         params: { type: "object" as const, properties: {} },

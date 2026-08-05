@@ -8,6 +8,7 @@ import {
 } from "../integrations/neon-mcp";
 import { effectiveCapabilityMode, type GoatCapabilityId, providerCapability } from "./capabilities";
 import {
+  GOAT_ACTION_EFFECTS_READ,
   GoatActionAuthError,
   type GoatActionExecuteContext,
   GoatActionInvalidParamsError,
@@ -95,6 +96,7 @@ export async function resolveNeonActions(
         id: `neon.${remoteName}`,
         provider: "neon",
         capability,
+        effects: GOAT_ACTION_EFFECTS_READ,
         ...permissionAnnotation(capability, {
           integrationId,
           capabilityModes: state.capabilityModes,

@@ -8,6 +8,8 @@ import {
 } from "../integrations/linear-mcp";
 import { effectiveCapabilityMode, type GoatCapabilityId, providerCapability } from "./capabilities";
 import {
+  GOAT_ACTION_EFFECTS_READ,
+  GOAT_ACTION_EFFECTS_WRITE,
   GoatActionAuthError,
   type GoatActionExecuteContext,
   GoatActionInvalidParamsError,
@@ -428,6 +430,7 @@ export async function resolveLinearActions(
     id: spec.id,
     provider: "linear",
     capability: spec.capability,
+    effects: spec.capability === "read" ? GOAT_ACTION_EFFECTS_READ : GOAT_ACTION_EFFECTS_WRITE,
     ...permissionAnnotation(spec.capability, {
       integrationId,
       capabilityModes: state.capabilityModes,

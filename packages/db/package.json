@@ -80,6 +80,10 @@
       "types": "./src/goat-schema.ts",
       "default": "./src/goat-schema.ts"
     },
+    "./goat-action-governance": {
+      "types": "./src/goat-action-governance.ts",
+      "default": "./src/goat-action-governance.ts"
+    },
     "./goat-gmail": {
       "types": "./src/goat-gmail.ts",
       "default": "./src/goat-gmail.ts"

@@ -9,6 +9,7 @@ import {
 } from "@opencompany/db/goat-workspaces";
 import { resolveGoatActionCatalog } from "@opencompany/goat-agent/actions/catalog";
 import { executeGoatAction } from "@opencompany/goat-agent/actions/execute";
+import { projectActionCatalog } from "@opencompany/goat-agent/actions/policy";
 import type { GoatResolvedActionCatalog } from "@opencompany/goat-agent/actions/types";
 import {
   createOpenCompanyChatToolContext,
@@ -146,14 +147,7 @@ async function runGoatTaskChatLoopInner(input: {
       userWorkosId: task.userWorkosId,
       workspaceId,
     }).catch(() => ({ providers: [], actions: [] }) as GoatResolvedActionCatalog);
-    const onActions = resolved.actions.filter((action) => action.permissionMode === "on");
-    const onSourceIds = new Set(onActions.map((action) => action.provider));
-    onCatalog = {
-      providers: resolved.providers.filter(
-        (source) => source.kind !== "managed" && onSourceIds.has(source.id),
-      ),
-      actions: onActions,
-    };
+    onCatalog = projectActionCatalog(resolved, "headless");
   }
   const dispatcherCatalog: GoatChatActionCatalog = {
     sources: onCatalog.providers.map((source) => ({

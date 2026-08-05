@@ -2,21 +2,31 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpServer as McpServerType } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { GoatCodexActionGatewayRequest } from "@opencompany/agent-runtime";
+import {
+  GOAT_ACTION_TOOL_CONTRACT,
+  type GoatActionGatewayRequest,
+} from "@opencompany/agent-runtime";
+import {
+  createInMemoryGoatActionTurnGovernance,
+  serveGoatActionRequest,
+} from "@opencompany/goat-agent/actions/service";
 import { describe, expect, it, vi } from "vitest";
 import { registerGoatClaudeActionTools } from "./claude-actions";
-import type { executeGoatCodexActionGateway } from "./codex-actions";
+import type { executeGoatActionGateway } from "./codex-actions";
 
 type RegisteredTool = {
   config: Record<string, unknown>;
-  callback: (args: unknown) => Promise<{
+  callback: (
+    args: Record<string, unknown>,
+    extra?: { requestId: string | number; sessionId?: string },
+  ) => Promise<{
     content: Array<{ text?: string }>;
     isError?: boolean;
     structuredContent?: Record<string, unknown>;
   }>;
 };
 
-function registerTools(executeAction: typeof executeGoatCodexActionGateway) {
+function registerTools(executeAction: typeof executeGoatActionGateway) {
   const tools = new Map<string, RegisteredTool>();
   const server = {
     registerTool: vi.fn(
@@ -41,12 +51,19 @@ function getTool(tools: Map<string, RegisteredTool>, name: string): RegisteredTo
 
 describe("registerGoatClaudeActionTools", () => {
   it("registers list_actions and use_action", () => {
-    const tools = registerTools(vi.fn<typeof executeGoatCodexActionGateway>());
+    const tools = registerTools(vi.fn<typeof executeGoatActionGateway>());
     expect([...tools.keys()]).toEqual(["list_actions", "use_action"]);
+    expect(getTool(tools, "list_actions").config.annotations).toEqual(
+      GOAT_ACTION_TOOL_CONTRACT.list.annotations,
+    );
+    expect(getTool(tools, "use_action").config.annotations).toEqual(
+      GOAT_ACTION_TOOL_CONTRACT.execute.annotations,
+    );
+    expect(GOAT_ACTION_TOOL_CONTRACT.execute.annotations.idempotentHint).toBe(false);
   });
 
   it("translates a list_actions call into a gateway list request", async () => {
-    const executeAction = vi.fn<typeof executeGoatCodexActionGateway>(async () => ({
+    const executeAction = vi.fn<typeof executeGoatActionGateway>(async () => ({
       ok: true,
       sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
     }));
@@ -58,10 +75,10 @@ describe("registerGoatClaudeActionTools", () => {
     if (!call) throw new Error("executeAction was not called");
     expect(call[0].request).toEqual({
       operation: "list",
-      codexChatSessionId: "codex_session_1",
-      codexChatTurnId: "codex_turn_1",
+      sessionId: "codex_session_1",
+      turnId: "codex_turn_1",
       source: "gmail",
-    } satisfies GoatCodexActionGatewayRequest);
+    } satisfies GoatActionGatewayRequest);
     expect(result.isError).toBe(false);
     expect(result.structuredContent).toEqual({
       ok: true,
@@ -69,36 +86,97 @@ describe("registerGoatClaudeActionTools", () => {
     });
   });
 
-  it("translates a use_action call into a gateway execute request with a unique toolCallId", async () => {
-    const executeAction = vi.fn<typeof executeGoatCodexActionGateway>(async () => ({
+  it("derives stable, distinct invocation ids from separate MCP requests", async () => {
+    const executeAction = vi.fn<typeof executeGoatActionGateway>(async () => ({
       ok: true,
       action: "gmail.list",
       result: [],
     }));
-    const tools = registerTools(executeAction);
+    const firstRequestTools = registerTools(executeAction);
+    const secondRequestTools = registerTools(executeAction);
 
-    await getTool(tools, "use_action").callback({ action: "gmail.list", params: { limit: 5 } });
-    await getTool(tools, "use_action").callback({ action: "gmail.list", params: { limit: 5 } });
+    await getTool(firstRequestTools, "use_action").callback(
+      { action: "gmail.list", params: { limit: 5 } },
+      { requestId: "jsonrpc_41", sessionId: "transport_1" },
+    );
+    await getTool(secondRequestTools, "use_action").callback(
+      { action: "gmail.list", params: { limit: 5 } },
+      { requestId: "jsonrpc_42", sessionId: "transport_1" },
+    );
+    await getTool(firstRequestTools, "use_action").callback(
+      { action: "gmail.list", params: { limit: 5 } },
+      { requestId: "jsonrpc_41", sessionId: "transport_1" },
+    );
 
     const firstCall = executeAction.mock.calls[0];
     const secondCall = executeAction.mock.calls[1];
-    if (!firstCall || !secondCall) throw new Error("executeAction was not called twice");
+    const retryCall = executeAction.mock.calls[2];
+    if (!firstCall || !secondCall || !retryCall) {
+      throw new Error("executeAction was not called three times");
+    }
     const firstRequest = firstCall[0].request;
     const secondRequest = secondCall[0].request;
     expect(firstRequest).toMatchObject({
       operation: "execute",
-      codexChatSessionId: "codex_session_1",
-      codexChatTurnId: "codex_turn_1",
+      sessionId: "codex_session_1",
+      turnId: "codex_turn_1",
       action: "gmail.list",
       params: { limit: 5 },
+      invocationId: "mcp:codex_turn_1:transport_1:jsonrpc_41",
     });
-    expect("toolCallId" in firstRequest ? firstRequest.toolCallId : undefined).not.toEqual(
-      "toolCallId" in secondRequest ? secondRequest.toolCallId : undefined,
+    expect(secondRequest).toMatchObject({
+      invocationId: "mcp:codex_turn_1:transport_1:jsonrpc_42",
+    });
+    expect(retryCall[0].request).toMatchObject({
+      invocationId: "mcp:codex_turn_1:transport_1:jsonrpc_41",
+    });
+    expect(firstRequest).not.toEqual(secondRequest);
+  });
+
+  it("surfaces call_budget on call 17 from the shared service", async () => {
+    const governance = createInMemoryGoatActionTurnGovernance();
+    const executeAction = vi.fn<typeof executeGoatActionGateway>(async ({ request }) =>
+      serveGoatActionRequest({
+        request,
+        catalog: {
+          sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
+          actions: [
+            {
+              id: "gmail.search",
+              source: "gmail",
+              description: "Search email.",
+              params: { type: "object" },
+            },
+          ],
+        },
+        governance,
+        execute: async ({ action }) => ({ ok: true, action, result: [] }),
+      }),
     );
+    const tools = registerTools(executeAction);
+
+    await getTool(tools, "list_actions").callback({ source: "gmail" });
+    for (let callNumber = 1; callNumber <= 16; callNumber += 1) {
+      const result = await getTool(tools, "use_action").callback(
+        { action: "gmail.search", params: {} },
+        { requestId: callNumber, sessionId: "transport_1" },
+      );
+      expect(result.isError).toBe(false);
+    }
+    const rejected = await getTool(tools, "use_action").callback(
+      { action: "gmail.search", params: {} },
+      { requestId: 17, sessionId: "transport_1" },
+    );
+
+    expect(rejected.isError).toBe(true);
+    expect(rejected.structuredContent).toMatchObject({
+      ok: false,
+      error: { code: "call_budget" },
+    });
   });
 
   it("marks the MCP result as an error when the gateway response is not ok", async () => {
-    const executeAction = vi.fn<typeof executeGoatCodexActionGateway>(async () => ({
+    const executeAction = vi.fn<typeof executeGoatActionGateway>(async () => ({
       ok: false,
       error: { code: "not_permitted", message: "nope" },
     }));
@@ -121,7 +199,7 @@ describe("registerGoatClaudeActionTools", () => {
       server,
       { codexChatSessionId: "codex_session_1", codexChatTurnId: "codex_turn_1" },
       {
-        executeAction: vi.fn<typeof executeGoatCodexActionGateway>(async ({ request }) =>
+        executeAction: vi.fn<typeof executeGoatActionGateway>(async ({ request }) =>
           request.operation === "list"
             ? { ok: true, sources: [{ id: "gmail", label: "Gmail", description: "d" }] }
             : { ok: true, action: request.action, result: { echoedParams: request.params } },
@@ -135,6 +213,14 @@ describe("registerGoatClaudeActionTools", () => {
 
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toEqual(["list_actions", "use_action"]);
+    expect(tools.tools.find((tool) => tool.name === "use_action")?.inputSchema).toMatchObject({
+      type: "object",
+      required: ["action", "params"],
+      properties: {
+        action: { type: "string" },
+        params: { type: "object" },
+      },
+    });
 
     const listResult = await client.callTool({ name: "list_actions", arguments: {} });
     expect(listResult.structuredContent).toEqual({
@@ -150,6 +236,16 @@ describe("registerGoatClaudeActionTools", () => {
       ok: true,
       action: "gmail.list",
       result: { echoedParams: { limit: 5 } },
+    });
+
+    await expect(
+      client.callTool({
+        name: "use_action",
+        arguments: { action: "gmail.list" },
+      }),
+    ).resolves.toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: expect.stringContaining("Input validation error") }],
     });
   });
 });
