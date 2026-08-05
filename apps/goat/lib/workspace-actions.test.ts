@@ -1,6 +1,7 @@
 import { getGoatWorkspacePlan } from "@opencompany/db/goat-billing";
 import {
   createGoatWorkspaceForUser,
+  hasOwnedGoatHobbyWorkspace,
   listAccessibleGoatBrains,
   listGoatWorkspaceMembers,
   listGoatWorkspacesForUser,
@@ -27,8 +28,8 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@opencompany/db/goat-billing", () => ({
-  getGoatWorkspacePlan: vi.fn().mockResolvedValue("free"),
-  goatWorkspaceMemberCap: () => 10,
+  getGoatWorkspacePlan: vi.fn().mockResolvedValue("hobby"),
+  goatWorkspaceMemberCap: (plan: string) => (plan === "pro" ? 10 : 1),
 }));
 
 vi.mock("@opencompany/db/goat-workspaces", () => ({
@@ -36,6 +37,7 @@ vi.mock("@opencompany/db/goat-workspaces", () => ({
   createGoatWorkspaceForUser: vi.fn(),
   DEFAULT_GOAT_BRAIN_SLUG: "general",
   getGoatBrainAccess: vi.fn(),
+  hasOwnedGoatHobbyWorkspace: vi.fn().mockResolvedValue(false),
   listAccessibleGoatBrains: vi.fn(),
   listGoatBrainMemberIds: vi.fn(),
   listGoatWorkspaceMembers: vi.fn(),
@@ -77,6 +79,7 @@ vi.mock("@/lib/workos-client", () => ({
 
 const createGoatWorkspaceForUserMock = vi.mocked(createGoatWorkspaceForUser);
 const getGoatWorkspacePlanMock = vi.mocked(getGoatWorkspacePlan);
+const hasOwnedGoatHobbyWorkspaceMock = vi.mocked(hasOwnedGoatHobbyWorkspace);
 const currentGoatUserMock = vi.mocked(currentGoatUser);
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
 const listAccessibleGoatBrainsMock = vi.mocked(listAccessibleGoatBrains);
@@ -118,6 +121,7 @@ describe("createGoatWorkspaceAction", () => {
     currentGoatUserMock.mockResolvedValue(context as never);
     getWorkOSClientMock.mockReturnValue(workos as never);
     newGoatWorkspaceIdMock.mockReturnValue("goat_ws_new");
+    hasOwnedGoatHobbyWorkspaceMock.mockResolvedValue(false);
     createGoatWorkspaceForUserMock.mockResolvedValue({
       workspace: {
         id: "goat_ws_new",
@@ -184,6 +188,16 @@ describe("createGoatWorkspaceAction", () => {
       expect.objectContaining({ path: "/", sameSite: "lax" }),
     );
     expect(revalidatePathMock).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("keeps each owner to one Hobby workspace", async () => {
+    hasOwnedGoatHobbyWorkspaceMock.mockResolvedValue(true);
+
+    await expect(createGoatWorkspaceAction("Another workspace")).resolves.toEqual({
+      ok: false,
+      error: "Hobby includes one workspace. Upgrade your Hobby workspace to Pro to create another.",
+    });
+    expect(workos.organizations.createOrganization).not.toHaveBeenCalled();
   });
 
   it("deletes a newly created WorkOS organization when local persistence fails", async () => {
@@ -308,19 +322,12 @@ describe("inviteToGoatWorkspaceAction", () => {
     ] as never);
   });
 
-  it("keeps workspaces inside the small-team cap", async () => {
-    getGoatWorkspacePlanMock.mockResolvedValue("free");
-    listGoatWorkspaceMembersMock.mockResolvedValue(
-      Array.from({ length: 10 }, (_, index) => ({
-        member: { role: index === 0 ? "admin" : "member" },
-        user: { workosUserId: `user_${index}` },
-      })) as never,
-    );
+  it("keeps Hobby to its owner-only member cap", async () => {
+    getGoatWorkspacePlanMock.mockResolvedValue("hobby");
 
     await expect(inviteToGoatWorkspaceAction("teammate@example.com")).resolves.toEqual({
       ok: false,
-      error:
-        "Workspaces allow up to 10 members (including pending invites). Remove a member or revoke an invite first.",
+      error: "Hobby includes one member. Upgrade to Pro to invite teammates.",
     });
     expect(workos.userManagement.sendInvitation).not.toHaveBeenCalled();
   });

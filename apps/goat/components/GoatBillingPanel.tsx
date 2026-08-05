@@ -12,17 +12,18 @@ import {
 } from "@/lib/billing/actions";
 
 export type GoatBillingPanelData = {
-  plan: "free" | "pro";
+  plan: "hobby" | "pro";
   subscriptionStatus: string | null;
   cancelAtPeriodEnd: boolean;
   currentPeriodEnd: string | null;
   includedUsagePeriodEnd: string | null;
   paymentNeedsAttention: boolean;
   proMonthlyPriceCents: number;
+  hobbyIncludedUsageCents: number;
   includedUsagePerSeatCents: number;
   seatQuantity: number;
   memberCount: number;
-  proMaxMembers: number;
+  memberCap: number;
   creditBalanceUsdMicros: number;
   includedBalanceUsdMicros: number;
   topUpBalanceUsdMicros: number;
@@ -47,13 +48,13 @@ export type GoatBillingPanelData = {
   defaultTopUpCents: number;
   minTopUpCents: number;
   maxTopUpCents: number;
+  autoRefillMonthlyMaxCents: number;
   autoRefill: {
     enabled: boolean;
     amountCents: number;
     hasPaymentMethod: boolean;
     lastError: string | null;
   };
-  hasStripeCustomer: boolean;
   isAdmin: boolean;
 };
 
@@ -167,21 +168,23 @@ export function GoatBillingPanel({
           <div>
             <div className="flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
               {data.plan === "pro" ? <BadgeCheck size={13} /> : <Users size={13} />}
-              Seat billing
+              {data.plan === "pro" ? "Pro" : "Hobby"}
             </div>
             <div className="mt-1 text-[20px] font-semibold tracking-tight text-ink">
-              {formatUsd(data.proMonthlyPriceCents)}
-              <span className="ml-1 text-[12.5px] font-normal text-ink-subtle">
-                per seat / month
-              </span>
+              {data.plan === "pro" ? formatUsd(data.proMonthlyPriceCents) : "$0"}
+              {data.plan === "pro" ? (
+                <span className="ml-1 text-[12.5px] font-normal text-ink-subtle">
+                  per seat / month
+                </span>
+              ) : null}
             </div>
             <p className="mt-1 max-w-xl text-[12.5px] leading-5 text-ink-subtle">
               {data.plan === "pro"
                 ? `${data.seatQuantity} billed ${data.seatQuantity === 1 ? "seat" : "seats"} with ${formatUsd(data.includedUsagePerSeatCents)} of included at-cost usage per seat each month.`
-                : `Start seat billing to keep using Goat after the signup grant. Each seat includes ${formatUsd(data.includedUsagePerSeatCents)} of at-cost usage.`}
+                : `${formatUsd(data.hobbyIncludedUsageCents)} of included usage refreshes on the first of every month. Upgrade to add teammates or buy more credits.`}
             </p>
             <p className="mt-2 text-[11.5px] text-ink-subtle">
-              {data.memberCount} of {data.proMaxMembers} members used
+              {data.memberCount} of {data.memberCap} members used
             </p>
           </div>
           {data.isAdmin ? (
@@ -207,7 +210,7 @@ export function GoatBillingPanel({
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
               >
                 {isPending ? <Loader2 size={13} className="animate-spin" /> : null}
-                Start billing
+                Upgrade to Pro
               </button>
             )
           ) : (
@@ -219,9 +222,13 @@ export function GoatBillingPanel({
       </section>
       {lowBalance ? (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
-          {data.creditBalanceUsdMicros <= 0
-            ? "Your workspace is out of credits. Chat, ingestion, and paid capabilities are paused until you top up."
-            : "Your balance is running low. Top up to keep chat, ingestion, and paid capabilities running."}
+          {data.plan === "hobby"
+            ? data.creditBalanceUsdMicros <= 0
+              ? `Your Hobby credits are used up. Usage resumes ${data.includedUsagePeriodEnd ? `on ${formatDate(data.includedUsagePeriodEnd)}` : "next month"}, or you can upgrade to Pro.`
+              : "Your Hobby balance is running low. It refreshes on the first of next month."
+            : data.creditBalanceUsdMicros <= 0
+              ? "Your workspace is out of credits. An admin can add credits to resume usage."
+              : "Your balance is running low. An admin can add credits to keep usage running."}
         </div>
       ) : null}
 
@@ -260,49 +267,59 @@ export function GoatBillingPanel({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {data.topUpAmountsCents.map((amountCents) => (
-            <button
-              key={amountCents}
-              type="button"
-              disabled={isPending}
-              onClick={() => run(() => createGoatCreditTopUpAction(amountCents))}
-              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-50 ${
-                amountCents === data.defaultTopUpCents
-                  ? "border-ink/30 bg-canvas"
-                  : "border-border bg-canvas"
-              }`}
-            >
-              {isPending ? <Loader2 size={12} className="animate-spin" /> : null}
-              Add {formatUsd(amountCents)}
-            </button>
-          ))}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[13px] text-ink-subtle">$</span>
-            <input
-              inputMode="decimal"
-              value={customAmount}
-              onChange={(event) => setCustomAmount(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") topUpCustom();
-              }}
-              aria-label="Custom top-up amount in dollars"
-              className="w-16 rounded-md border border-ink/10 bg-canvas px-2 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
-            />
-            <button
-              type="button"
-              disabled={isPending}
-              onClick={topUpCustom}
-              className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
-            >
-              Add
-            </button>
-          </div>
-        </div>
-        <p className="text-[11.5px] leading-4 text-ink-subtle">
-          Anyone in the workspace can add top-up funds. Payments run through Stripe; the card is
-          saved for auto-refill.
-        </p>
+        {data.plan === "pro" && data.isAdmin ? (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              {data.topUpAmountsCents.map((amountCents) => (
+                <button
+                  key={amountCents}
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => run(() => createGoatCreditTopUpAction(amountCents))}
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-50 ${
+                    amountCents === data.defaultTopUpCents
+                      ? "border-ink/30 bg-canvas"
+                      : "border-border bg-canvas"
+                  }`}
+                >
+                  {isPending ? <Loader2 size={12} className="animate-spin" /> : null}
+                  Add {formatUsd(amountCents)}
+                </button>
+              ))}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[13px] text-ink-subtle">$</span>
+                <input
+                  inputMode="decimal"
+                  value={customAmount}
+                  onChange={(event) => setCustomAmount(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") topUpCustom();
+                  }}
+                  aria-label="Custom top-up amount in dollars"
+                  className="w-16 rounded-md border border-ink/10 bg-canvas px-2 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
+                />
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={topUpCustom}
+                  className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-50"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+            <p className="text-[11.5px] leading-4 text-ink-subtle">
+              Admins can add shared top-up funds. Payments run through Stripe; the card is saved for
+              auto-refill.
+            </p>
+          </>
+        ) : (
+          <p className="text-[11.5px] leading-4 text-ink-subtle">
+            {data.plan === "hobby"
+              ? "Top-ups are available after upgrading this workspace to Pro."
+              : "Ask a workspace admin to add shared top-up funds."}
+          </p>
+        )}
       </section>
 
       <section className="flex flex-col gap-3">
@@ -325,54 +342,60 @@ export function GoatBillingPanel({
         </div>
       </section>
 
-      <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface-muted/40 p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-              <RefreshCw size={13} />
-              Auto-refill
+      {data.plan === "pro" && data.isAdmin ? (
+        <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface-muted/40 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+                <RefreshCw size={13} />
+                Auto-refill
+              </div>
+              <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
+                Automatically add credits with your saved card when the balance drops below $5.
+              </p>
             </div>
-            <p className="mt-1 text-[12.5px] leading-5 text-ink-subtle">
-              Automatically add credits with your saved card when the balance drops below $5.
-            </p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={autoRefillEnabled}
-            disabled={isPending || (!autoRefillEnabled && !data.autoRefill.hasPaymentMethod)}
-            onClick={() => saveAutoRefill(!autoRefillEnabled)}
-            className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-              autoRefillEnabled ? "bg-ink" : "bg-ink/20"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 size-4 rounded-full bg-canvas transition-transform ${
-                autoRefillEnabled ? "translate-x-4" : "translate-x-0.5"
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoRefillEnabled}
+              disabled={isPending || (!autoRefillEnabled && !data.autoRefill.hasPaymentMethod)}
+              onClick={() => saveAutoRefill(!autoRefillEnabled)}
+              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+                autoRefillEnabled ? "bg-ink" : "bg-ink/20"
               }`}
+            >
+              <span
+                className={`absolute top-0.5 size-4 rounded-full bg-canvas transition-transform ${
+                  autoRefillEnabled ? "translate-x-4" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[12.5px] text-ink-subtle">Refill amount</span>
+            <span className="text-[13px] text-ink-subtle">$</span>
+            <input
+              inputMode="decimal"
+              value={autoRefillAmount}
+              onChange={(event) => setAutoRefillAmount(event.target.value)}
+              onBlur={() => {
+                if (autoRefillEnabled) saveAutoRefill(true);
+              }}
+              aria-label="Auto-refill amount in dollars"
+              className="w-16 rounded-md border border-ink/10 bg-canvas px-2 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
             />
-          </button>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[12.5px] text-ink-subtle">Refill amount</span>
-          <span className="text-[13px] text-ink-subtle">$</span>
-          <input
-            inputMode="decimal"
-            value={autoRefillAmount}
-            onChange={(event) => setAutoRefillAmount(event.target.value)}
-            onBlur={() => {
-              if (autoRefillEnabled) saveAutoRefill(true);
-            }}
-            aria-label="Auto-refill amount in dollars"
-            className="w-16 rounded-md border border-ink/10 bg-canvas px-2 py-1.5 text-[13px] text-ink outline-none focus:border-ink/25"
-          />
-        </div>
-        {!data.autoRefill.hasPaymentMethod ? (
+          </div>
+          {!data.autoRefill.hasPaymentMethod ? (
+            <p className="text-[11.5px] leading-4 text-ink-subtle">
+              Add credits once first — auto-refill charges the card saved during a top-up.
+            </p>
+          ) : null}
           <p className="text-[11.5px] leading-4 text-ink-subtle">
-            Add credits once first — auto-refill charges the card saved during a top-up.
+            Automatic charges stop at {formatUsd(data.autoRefillMonthlyMaxCents)} per calendar
+            month.
           </p>
-        ) : null}
-      </section>
+        </section>
+      ) : null}
 
       <section className="flex flex-col gap-2 rounded-xl border border-border bg-surface-muted/40 p-4">
         <h2 className="text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
@@ -437,18 +460,6 @@ export function GoatBillingPanel({
           </div>
         </section>
       ) : null}
-
-      {data.isAdmin && data.hasStripeCustomer && data.plan !== "pro" ? (
-        <button
-          type="button"
-          disabled={isPending}
-          onClick={() => run(createGoatBillingPortalAction)}
-          className="inline-flex w-fit items-center gap-2 rounded-md border border-border bg-canvas px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:opacity-50"
-        >
-          {isPending ? <Loader2 size={13} className="animate-spin" /> : <CreditCard size={13} />}
-          Manage billing details
-        </button>
-      ) : null}
     </GoatSettingsContent>
   );
 }
@@ -500,8 +511,12 @@ function billingActivityLabel(
   if (source === "stripe_topup") {
     return isAutoRefill ? "Auto-refill" : "Credit top-up";
   }
-  if (source === "starter_grant") return "Starter credits";
-  if (source === "seat_included_grant") return "Included monthly usage";
-  if (source === "seat_included_expiration") return "Expired included usage";
+  if (source === "starter_grant") return "Promotional credits";
+  if (source === "seat_included_grant" || source === "included_usage_grant") {
+    return "Included monthly usage";
+  }
+  if (source === "seat_included_expiration" || source === "included_usage_expiration") {
+    return "Expired included usage";
+  }
   return "Workspace credits";
 }

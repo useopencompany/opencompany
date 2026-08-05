@@ -50,13 +50,13 @@ describe("Goat billing actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(currentGoatUser).mockResolvedValue({
-      role: "member",
+      role: "admin",
       workspace: { id: "goat_ws_1", name: "Acme" },
       user: { workosUserId: "user_1" },
-      authUser: { email: "member@example.com" },
+      authUser: { email: "admin@example.com" },
     } as Awaited<ReturnType<typeof currentGoatUser>>);
     vi.mocked(loadGoatBillingOverview).mockResolvedValue({
-      billing: { stripeCustomerId: "cus_goat_1" },
+      billing: { plan: "pro", stripeCustomerId: "cus_goat_1" },
     } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
     checkoutCreate.mockResolvedValue({
       id: "cs_test_1",
@@ -69,7 +69,7 @@ describe("Goat billing actions", () => {
     } as never);
   });
 
-  it("creates a payment-mode top-up Checkout for any member, saving the card", async () => {
+  it("creates a payment-mode top-up Checkout for a Pro admin, saving the card", async () => {
     await expect(createGoatCreditTopUpAction(1_000)).rejects.toThrow("NEXT_REDIRECT");
 
     expect(createGoatPendingCheckoutRecord).toHaveBeenCalledWith(
@@ -105,6 +105,33 @@ describe("Goat billing actions", () => {
     expect(redirect).toHaveBeenCalledWith("https://checkout.stripe.test/session");
   });
 
+  it("rejects top-ups from non-admin members", async () => {
+    vi.mocked(currentGoatUser).mockResolvedValue({
+      role: "member",
+      workspace: { id: "goat_ws_1", name: "Acme" },
+      user: { workosUserId: "user_2" },
+      authUser: { email: "member@example.com" },
+    } as Awaited<ReturnType<typeof currentGoatUser>>);
+
+    await expect(createGoatCreditTopUpAction(1_000)).resolves.toEqual({
+      ok: false,
+      error: "Only workspace admins can add credits.",
+    });
+    expect(checkoutCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects top-ups on Hobby", async () => {
+    vi.mocked(loadGoatBillingOverview).mockResolvedValue({
+      billing: { plan: "hobby", stripeCustomerId: "cus_goat_1" },
+    } as unknown as Awaited<ReturnType<typeof loadGoatBillingOverview>>);
+
+    await expect(createGoatCreditTopUpAction(1_000)).resolves.toEqual({
+      ok: false,
+      error: "Upgrade this workspace to Pro before adding credits.",
+    });
+    expect(checkoutCreate).not.toHaveBeenCalled();
+  });
+
   it("rejects top-up amounts outside the allowed range", async () => {
     await expect(createGoatCreditTopUpAction(100)).resolves.toMatchObject({ ok: false });
     await expect(createGoatCreditTopUpAction(1_000_000)).resolves.toMatchObject({ ok: false });
@@ -120,7 +147,7 @@ describe("Goat billing actions", () => {
     } as Awaited<ReturnType<typeof currentGoatUser>>);
     vi.mocked(loadGoatBillingOverview).mockResolvedValue({
       billing: {
-        plan: "free",
+        plan: "hobby",
         stripeCustomerId: "cus_goat_1",
         stripeSubscriptionId: null,
         subscriptionStatus: null,
@@ -159,6 +186,13 @@ describe("Goat billing actions", () => {
   });
 
   it("does not let non-admin members change the plan", async () => {
+    vi.mocked(currentGoatUser).mockResolvedValue({
+      role: "member",
+      workspace: { id: "goat_ws_1", name: "Acme" },
+      user: { workosUserId: "user_2" },
+      authUser: { email: "member@example.com" },
+    } as Awaited<ReturnType<typeof currentGoatUser>>);
+
     await expect(createGoatProCheckoutAction()).resolves.toEqual({
       ok: false,
       error: "Only workspace admins can change the plan.",
@@ -175,7 +209,7 @@ describe("Goat billing actions", () => {
     } as Awaited<ReturnType<typeof currentGoatUser>>);
     vi.mocked(loadGoatBillingOverview).mockResolvedValue({
       billing: {
-        plan: "free",
+        plan: "hobby",
         stripeCustomerId: "cus_goat_1",
         stripeSubscriptionId: null,
         subscriptionStatus: null,

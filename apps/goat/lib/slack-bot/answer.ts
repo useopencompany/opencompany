@@ -1,7 +1,10 @@
 import { captureGoatModelSpendRecorded } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
-import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
+import {
+  ensureGoatMonthlyIncludedUsage,
+  isGoatCreditsEnforcementEnabled,
+} from "@opencompany/db/goat-billing";
 import { hasPositiveGoatCreditBalance, recordGoatCreditDebit } from "@opencompany/db/goat-credits";
 import { loadGoatIntegrationCredential } from "@opencompany/db/goat-integrations";
 import { goatWorkspaces } from "@opencompany/db/goat-schema";
@@ -212,10 +215,10 @@ async function answerForIntegration(
 
   // Same rollout gate as the chat 402: debits always record, but the hard
   // stop only fires once enforcement is on.
-  if (
-    isGoatCreditsEnforcementEnabled() &&
-    !(await hasPositiveGoatCreditBalance(integration.workspaceId))
-  ) {
+  if (isGoatCreditsEnforcementEnabled()) {
+    await ensureGoatMonthlyIncludedUsage(integration.workspaceId);
+  }
+  if (!(await hasPositiveGoatCreditBalance(integration.workspaceId))) {
     await reply("This workspace is out of credits, so I can't answer right now.");
     return "handled";
   }
