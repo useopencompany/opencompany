@@ -87,6 +87,7 @@ export async function POST(request: Request) {
               workspace_id: workspaceId,
               topup_type: "manual",
               amount_cents: result.amountCents,
+              amount_usd: result.amountCents / 100,
               balance_cents: result.balanceCents,
             },
           );
@@ -94,6 +95,7 @@ export async function POST(request: Request) {
             workspace_id: workspaceId,
             checkout_record_id: result.checkoutRecordId,
             amount_cents: result.amountCents,
+            amount_usd: result.amountCents / 100,
             balance_cents: result.balanceCents,
           });
         });
@@ -263,6 +265,7 @@ async function handleGoatAutoRefillPaymentIntentSucceeded(intent: Stripe.Payment
       workspace_id: workspaceId,
       topup_type: "auto_refill",
       amount_cents: amountCents,
+      amount_usd: amountCents / 100,
       balance_cents: goatUsdMicrosToCents(credit.balanceUsdMicros),
     });
   }

@@ -24,7 +24,7 @@ Goat's product events are:
 | `integration_added` | Integration activation |
 | `brain_source_added` | A new enabled integration source was attached to a Brain |
 | `brain_ingestion_completed` | A full Brain ingestion job completed successfully |
-| `billing_topup_completed` | Credits were added manually or by auto-refill; `topup_type` distinguishes the path |
+| `billing_topup_completed` | Credits were added manually or by auto-refill; `topup_type` distinguishes the path and `amount_usd` can be summed for daily revenue |
 
 There is no separate `chat_started` event because it would double-count the first message. Goat
 does not capture pageviews, page leaves, clicks, dead clicks, heatmaps, exceptions, performance,

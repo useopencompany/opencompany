@@ -78,6 +78,7 @@ describe("runGoatAutoRefill", () => {
         workspace_id: "workspace_123",
         topup_type: "auto_refill",
         amount_cents: 2_000,
+        amount_usd: 20,
         balance_cents: 2_100,
       },
     );

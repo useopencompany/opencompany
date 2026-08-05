@@ -75,6 +75,7 @@ export async function runGoatAutoRefill(workspaceId: string) {
         workspace_id: workspaceId,
         topup_type: "auto_refill",
         amount_cents: claim.amountCents,
+        amount_usd: claim.amountCents / 100,
         balance_cents: goatUsdMicrosToCents(credit.balanceUsdMicros),
       });
     }
