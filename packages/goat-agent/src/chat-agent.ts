@@ -1,4 +1,8 @@
-import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
+import {
+  CODEX_DEFAULT_MODEL_ID,
+  GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
+  isCodexModelId,
+} from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import {
   BROWSER_TOOL_INPUT_SCHEMAS,
@@ -610,7 +614,7 @@ export function createOpenCompanyChatToolContext(input: {
           startTask({
             prompt,
             ...(name ? { name } : {}),
-            model: input.model,
+            model: modelForStartTaskEngine(engine, input.model),
             ...(engine ? { engine } : {}),
           }),
         );
@@ -1531,6 +1535,14 @@ function normalizeStartTaskEngine(value: unknown): GoatHarnessEngine | undefined
   return value === "opencompany" || value === "codex" || value === "claude_code"
     ? value
     : undefined;
+}
+
+function modelForStartTaskEngine(
+  engine: GoatHarnessEngine | undefined,
+  model: AgentModelId,
+): AgentModelId {
+  if (engine !== "codex") return model;
+  return isCodexModelId(model) ? model : CODEX_DEFAULT_MODEL_ID;
 }
 
 function inferStartTaskEngine(value: string | undefined): GoatHarnessEngine | undefined {

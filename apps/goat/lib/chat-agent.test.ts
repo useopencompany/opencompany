@@ -1,3 +1,4 @@
+import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
 import { BROWSER_TOOL_NAMES, type BrowserToolName } from "@opencompany/browser-tools";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -383,7 +384,7 @@ describe("runOpenCompanyChatAgent", () => {
       name: "Test repo access",
       prompt:
         "Check out opencompany-experimental, verify the repository can be viewed, and report whether development work can start.",
-      model: DEFAULT_GOAT_MODEL,
+      model: CODEX_DEFAULT_MODEL_ID,
       engine: "codex",
     });
   });
@@ -455,7 +456,7 @@ describe("runOpenCompanyChatAgent", () => {
     expect(startTask).toHaveBeenCalledWith({
       name: "Test repo access",
       prompt: "Check repo access and report whether development work can start.",
-      model: DEFAULT_GOAT_MODEL,
+      model: CODEX_DEFAULT_MODEL_ID,
       engine: "codex",
     });
   });
