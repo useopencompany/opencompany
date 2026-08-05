@@ -1,4 +1,4 @@
-import type { generateObject } from "ai";
+import { APICallError, type generateObject, NoObjectGeneratedError } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import {
   GOAT_CHAT_FRONTIER_MODEL,
@@ -68,11 +68,11 @@ describe("resolveAutoGoatModel", () => {
     });
     expect(generateObjectImpl).toHaveBeenCalledWith(
       expect.objectContaining({
-        maxOutputTokens: 30,
+        maxOutputTokens: 100,
         temperature: 0,
         abortSignal: expect.any(AbortSignal),
         providerOptions: expect.objectContaining({
-          gateway: expect.objectContaining({ sort: "latency" }),
+          gateway: expect.objectContaining({ sort: "ttft" }),
           google: {
             thinkingConfig: {
               thinkingLevel: "minimal",
@@ -115,8 +115,72 @@ describe("resolveAutoGoatModel", () => {
       model: GOAT_CHAT_FRONTIER_MODEL,
       tier: "frontier",
       reason: "router_fallback",
-      classifier: { outcome: "timeout" },
+      classifier: { outcome: "timeout", errorCategory: "timeout" },
     });
+  });
+
+  it("preserves usage and categorizes output-length object failures", async () => {
+    const usage = {
+      inputTokens: 20,
+      inputTokenDetails: { noCacheTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      outputTokens: 30,
+      outputTokenDetails: { textTokens: 30, reasoningTokens: 0 },
+      totalTokens: 50,
+    };
+    const generateObjectImpl = vi.fn(async () => {
+      throw new NoObjectGeneratedError({
+        message: "No object generated: could not parse the response.",
+        cause: new SyntaxError("Unexpected EOF"),
+        text: '{"tier":"standard","reason":',
+        response: {
+          id: "response_1",
+          timestamp: new Date(),
+          modelId: "google/gemini-3.1-flash-lite",
+        },
+        usage,
+        finishReason: "length",
+      });
+    });
+
+    const result = await resolveAutoGoatModel(baseInput, {
+      generateObjectImpl: generateObjectImpl as unknown as typeof generateObject,
+    });
+
+    expect(result).toMatchObject({
+      model: GOAT_CHAT_FRONTIER_MODEL,
+      reason: "router_fallback",
+      classifier: {
+        outcome: "invalid",
+        errorCategory: "output_length",
+        finishReason: "length",
+        usage,
+      },
+    });
+  });
+
+  it("records safe provider diagnostics without response content", async () => {
+    const generateObjectImpl = vi.fn(async () => {
+      throw new APICallError({
+        message: "Rate limited",
+        url: "https://gateway.test/v1",
+        requestBodyValues: {},
+        statusCode: 429,
+        responseBody: "provider details must not be persisted",
+        isRetryable: true,
+      });
+    });
+
+    const result = await resolveAutoGoatModel(baseInput, {
+      generateObjectImpl: generateObjectImpl as unknown as typeof generateObject,
+    });
+
+    expect(result.classifier).toMatchObject({
+      outcome: "error",
+      errorCategory: "rate_limit",
+      providerStatusCode: 429,
+      providerRetryable: true,
+    });
+    expect(result.classifier).not.toHaveProperty("responseBody");
   });
 
   it("fails safely when the classifier returns an invalid result", async () => {
@@ -133,7 +197,7 @@ describe("resolveAutoGoatModel", () => {
       model: GOAT_CHAT_FRONTIER_MODEL,
       tier: "frontier",
       reason: "router_fallback",
-      classifier: { outcome: "invalid" },
+      classifier: { outcome: "invalid", errorCategory: "invalid_output" },
     });
   });
 });

@@ -6,6 +6,7 @@ export * from "./goat-brain-import";
 export * from "./goat-brain-ingest";
 export * from "./goat-brain-ingest-trace";
 export * from "./goat-capabilities";
+export * from "./goat-chat-model-routing";
 export * from "./goat-claude-code-auth";
 export * from "./goat-codex-auth";
 export * from "./goat-integrations";

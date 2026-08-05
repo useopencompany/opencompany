@@ -1,5 +1,6 @@
 import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
 import { BROWSER_TOOL_NAMES } from "@opencompany/browser-tools";
+import { recordGoatChatModelRoutingAttempt } from "@opencompany/db/goat-chat-model-routing";
 import { GOAT_ACTION_EFFECTS_READ } from "@opencompany/goat-agent/actions/types";
 import { convertToModelMessages, streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -79,6 +80,10 @@ vi.mock("@opencompany/analytics/goat/server", () => ({
 vi.mock("@opencompany/db/goat-capabilities", () => ({
   approveGoatCapabilityRunByToolCall: capabilityMocks.approveByToolCall,
   cancelGoatCapabilityRunByToolCall: capabilityMocks.cancelByToolCall,
+}));
+
+vi.mock("@opencompany/db/goat-chat-model-routing", () => ({
+  recordGoatChatModelRoutingAttempt: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/lib/capabilities/execute", () => ({
@@ -329,6 +334,23 @@ describe("POST /api/chat", () => {
       expect.objectContaining({ model: "moonshotai/kimi-k2.6" }),
       expect.anything(),
     );
+    expect(recordGoatChatModelRoutingAttempt).toHaveBeenCalledWith({
+      workspaceId: "goat_ws_user_1",
+      userWorkosId: "user_1",
+      chatSessionId: "session_1",
+      userMessageId: "user_message_1",
+      classifierModel: "google/gemini-3.1-flash-lite",
+      selectedModel: "moonshotai/kimi-k2.6",
+      tier: "standard",
+      reason: "simple_answer",
+      outcome: "success",
+      durationMs: 420,
+      promptLength: "What is the capital of France?".length,
+      attachmentCount: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    });
     expect(analyticsMocks.captureGoatServerEvent).toHaveBeenCalledWith(
       "chat_message_sent",
       "user_1",

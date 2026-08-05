@@ -1338,6 +1338,13 @@
       "when": 1785902400000,
       "tag": "0189_goat_billing_v6_seat_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 191,
+      "version": "7",
+      "when": 1785934655163,
+      "tag": "0190_goat_chat_model_routing_attempts",
+      "breakpoints": true
     }
   ]
 }
