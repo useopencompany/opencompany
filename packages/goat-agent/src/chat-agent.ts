@@ -586,7 +586,7 @@ export function createOpenCompanyChatToolContext(input: {
           },
           engine: {
             type: "string",
-            enum: ["opencompany", "codex"],
+            enum: ["opencompany", "codex", "claude_code"],
             description: START_TASK_ENGINE_DESCRIPTION,
           },
         },
@@ -1528,7 +1528,9 @@ function parseToolCallParams(input: string): Record<string, unknown> | null {
 }
 
 function normalizeStartTaskEngine(value: unknown): GoatHarnessEngine | undefined {
-  return value === "opencompany" || value === "codex" ? value : undefined;
+  return value === "opencompany" || value === "codex" || value === "claude_code"
+    ? value
+    : undefined;
 }
 
 function inferStartTaskEngine(value: string | undefined): GoatHarnessEngine | undefined {

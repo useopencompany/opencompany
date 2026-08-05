@@ -18,7 +18,11 @@ import {
   type GoatImessageDelivery,
   resolveGoatImessageDelivery,
 } from "@opencompany/db/goat-imessage";
-import { type GoatChatMessageDebugTrace, goatChatSandboxUsage } from "@opencompany/db/goat-schema";
+import {
+  type GoatChatMessageDebugTrace,
+  type GoatHarnessEngine,
+  goatChatSandboxUsage,
+} from "@opencompany/db/goat-schema";
 import { resolveGoatImessageProvider } from "@opencompany/goat-agent/imessage/provider";
 import { createGoatSendUserMessageRunner } from "@opencompany/goat-agent/imessage/send-user-message";
 import {
@@ -121,6 +125,7 @@ import {
 } from "@/lib/chat-validation";
 import { executeGoatChatExaFetch } from "@/lib/chat-web-fetch";
 import { executeGoatChatExaSearch } from "@/lib/chat-web-search";
+import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import type { ChatBrowserToolSession } from "@/lib/sandbox/browser-tools";
@@ -249,10 +254,12 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const mentionEngine = message ? readGoatChatMentionEngine(body.value.mentions) : undefined;
-  const requestedEngine =
-    mentionEngine === "codex" && (await isGoatCodexConnectedForUser(context.user.workosUserId))
-      ? "codex"
-      : undefined;
+  const requestedEngine = mentionEngine
+    ? await resolveConnectedGoatChatMentionEngine({
+        engine: mentionEngine,
+        userWorkosId: context.user.workosUserId,
+      })
+    : undefined;
   if (autoModelRequested && requestedEngine) {
     return new Response("Auto model routing cannot be combined with an engine mention.", {
       status: 400,
@@ -2021,13 +2028,33 @@ function normalizedOptionalString(value: unknown) {
   return trimmed || undefined;
 }
 
-function readGoatChatMentionEngine(value: unknown) {
+type GoatChatMentionEngine = Extract<GoatHarnessEngine, "codex" | "claude_code">;
+
+async function resolveConnectedGoatChatMentionEngine(input: {
+  engine: GoatChatMentionEngine;
+  userWorkosId: string;
+}): Promise<GoatChatMentionEngine | undefined> {
+  if (input.engine === "codex") {
+    return (await isGoatCodexConnectedForUser(input.userWorkosId)) ? "codex" : undefined;
+  }
+  return (await isGoatClaudeCodeConnectedForUser(input.userWorkosId)) ? "claude_code" : undefined;
+}
+
+function readGoatChatMentionEngine(value: unknown): GoatChatMentionEngine | undefined {
   if (!Array.isArray(value)) return undefined;
-  return value.some((item) => isCodexEngineMention(item)) ? "codex" : undefined;
+  for (const item of value) {
+    if (isCodexEngineMention(item)) return "codex";
+    if (isClaudeCodeEngineMention(item)) return "claude_code";
+  }
+  return undefined;
 }
 
 function isCodexEngineMention(value: unknown) {
   return isRecord(value) && value.kind === "engine" && value.id === "codex";
+}
+
+function isClaudeCodeEngineMention(value: unknown) {
+  return isRecord(value) && value.kind === "engine" && value.id === "claude";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

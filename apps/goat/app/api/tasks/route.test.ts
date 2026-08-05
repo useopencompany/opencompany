@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoatAuthContext } from "@/lib/auth";
 import { currentGoatUser } from "@/lib/auth";
+import { isGoatClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isGoatCodexConnectedForUser } from "@/lib/codex-auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
 import { createGoatTaskForUser } from "@/lib/tasks";
@@ -12,6 +13,10 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/lib/codex-auth", () => ({
   isGoatCodexConnectedForUser: vi.fn(),
+}));
+
+vi.mock("@/lib/claude-code-auth", () => ({
+  isGoatClaudeCodeConnectedForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/tasks", () => ({
@@ -29,6 +34,7 @@ describe("POST /api/tasks", () => {
       workspace: { id: "workspace_1" },
     } as GoatAuthContext);
     vi.mocked(isGoatCodexConnectedForUser).mockResolvedValue(true);
+    vi.mocked(isGoatClaudeCodeConnectedForUser).mockResolvedValue(true);
     vi.mocked(createGoatTaskForUser).mockResolvedValue({
       id: "goat_task_1",
       displayId: "TASK-1",
@@ -82,6 +88,22 @@ describe("POST /api/tasks", () => {
     );
   });
 
+  it("supports an explicitly selected connected Claude Code engine", async () => {
+    await POST(
+      jsonRequest({
+        description: "#task Check the repository",
+        model: DEFAULT_GOAT_MODEL,
+        engine: "claude_code",
+      }),
+    );
+
+    expect(isGoatCodexConnectedForUser).not.toHaveBeenCalled();
+    expect(isGoatClaudeCodeConnectedForUser).toHaveBeenCalledWith("user_1");
+    expect(createGoatTaskForUser).toHaveBeenCalledWith(
+      expect.objectContaining({ engine: "claude_code" }),
+    );
+  });
+
   it("rejects Codex tasks when Codex is not connected", async () => {
     vi.mocked(isGoatCodexConnectedForUser).mockResolvedValueOnce(false);
 
@@ -96,6 +118,24 @@ describe("POST /api/tasks", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Codex is not connected. Connect Codex in Settings first.",
+    });
+    expect(createGoatTaskForUser).not.toHaveBeenCalled();
+  });
+
+  it("rejects Claude Code tasks when Claude Code is not connected", async () => {
+    vi.mocked(isGoatClaudeCodeConnectedForUser).mockResolvedValueOnce(false);
+
+    const response = await POST(
+      jsonRequest({
+        description: "#task Check the repository",
+        model: DEFAULT_GOAT_MODEL,
+        engine: "claude_code",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Claude Code is not connected. Connect Claude Code in Settings first.",
     });
     expect(createGoatTaskForUser).not.toHaveBeenCalled();
   });
