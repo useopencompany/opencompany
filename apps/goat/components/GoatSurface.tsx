@@ -4677,7 +4677,7 @@ function parseGoatBackgroundChatDirective(value: string): {
   return { prompt: directive.slice(engineMatch[0].length).trimStart(), engine };
 }
 
-type ComposerMentionHighlight = Extract<GoatChatMention, { kind: "skill" | "workflow" }>;
+type ComposerMentionHighlight = Extract<GoatChatMention, { kind: "engine" | "skill" | "workflow" }>;
 
 type ComposerInputHighlightRange =
   | {
@@ -4759,7 +4759,7 @@ function composerInputHighlightRanges(
   const mentionRanges = mentions
     .filter(
       (mention): mention is ComposerMentionHighlight =>
-        mention.kind === "skill" || mention.kind === "workflow",
+        mention.kind === "engine" || mention.kind === "skill" || mention.kind === "workflow",
     )
     .flatMap((mention) => {
       const token = escapeRegExp(goatChatMentionToken(mention));

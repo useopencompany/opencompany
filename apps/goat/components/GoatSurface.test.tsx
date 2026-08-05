@@ -2283,6 +2283,12 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     expect(textarea).toHaveValue("@codex ");
+    const overlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(overlay?.querySelectorAll('[data-goat-chat-mention="engine"]')).toHaveLength(1);
+    expect(overlay).toHaveTextContent("@codex");
+    expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
     expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" })).toBeInTheDocument();
 
@@ -2350,6 +2356,12 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("option", { name: /@claude/i }));
     expect(textarea).toHaveValue("@claude ");
+    const overlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(overlay?.querySelectorAll('[data-goat-chat-mention="engine"]')).toHaveLength(1);
+    expect(overlay).toHaveTextContent("@claude");
+    expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude Code");
     expect(
       screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }),
