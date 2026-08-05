@@ -1352,6 +1352,13 @@
       "when": 1785940000000,
       "tag": "0191_goat_hobby_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 193,
+      "version": "7",
+      "when": 1785948334202,
+      "tag": "0192_goat_infisical_cli_auth",
+      "breakpoints": true
     }
   ]
 }

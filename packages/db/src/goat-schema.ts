@@ -144,6 +144,13 @@ export type GoatCodexDeviceAuthFlowStatus =
   | "completed"
   | "failed"
   | "expired";
+export type GoatInfisicalConnectionStatus = "connected" | "needs_reauth" | "disconnected";
+export type GoatInfisicalAuthFlowStatus =
+  | "pending"
+  | "link_ready"
+  | "completed"
+  | "failed"
+  | "expired";
 export type GoatIntegrationResourceStatus =
   | "available"
   | "permission_lost"
@@ -3939,6 +3946,82 @@ export const goatCodexDeviceAuthFlows = goat.table(
     statusCheck: check(
       "goat_codex_device_auth_flows_status_check",
       sql`${table.status} IN ('pending', 'code_ready', 'completed', 'failed', 'expired')`,
+    ),
+  }),
+);
+
+// One human Infisical CLI login shared by every coding sandbox in a workspace. The encrypted
+// bundle contains only Infisical's file-vault config and keyring files; project selection remains
+// repository-local through .infisical.json. A disconnected tombstone is retained so resumed
+// sandboxes can observe the new credential generation and remove stale local auth.
+export const goatInfisicalConnections = goat.table(
+  "infisical_connections",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    encryptedAuthBundle:
+      jsonb("encrypted_auth_bundle").$type<GoatIntegrationCredentialEncryptedPayload>(),
+    encryptionKeyVersion: integer("encryption_key_version"),
+    credentialGeneration: uuid("credential_generation").notNull().defaultRandom(),
+    status: text("status").$type<GoatInfisicalConnectionStatus>().notNull().default("disconnected"),
+    statusReason: text("status_reason"),
+    host: text("host").notNull().default("https://app.infisical.com"),
+    accountEmail: text("account_email"),
+    cliVersion: text("cli_version"),
+    bundleFormatVersion: integer("bundle_format_version"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    connectedByWorkosId: text("connected_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    statusIdx: index("goat_infisical_connections_status_idx").on(table.status),
+    connectedByIdx: index("goat_infisical_connections_connected_by_idx").on(
+      table.connectedByWorkosId,
+    ),
+    statusCheck: check(
+      "goat_infisical_connections_status_check",
+      sql`${table.status} IN ('connected', 'needs_reauth', 'disconnected')`,
+    ),
+    credentialCheck: check(
+      "goat_infisical_connections_credential_check",
+      sql`(${table.status} = 'disconnected' AND ${table.encryptedAuthBundle} IS NULL AND ${table.encryptionKeyVersion} IS NULL) OR (${table.status} IN ('connected', 'needs_reauth') AND ${table.encryptedAuthBundle} IS NOT NULL AND ${table.encryptionKeyVersion} IS NOT NULL)`,
+    ),
+  }),
+);
+
+export const goatInfisicalAuthFlows = goat.table(
+  "infisical_auth_flows",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    requestedByWorkosId: text("requested_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    sandboxId: text("sandbox_id").notNull(),
+    loginUrl: text("login_url"),
+    status: text("status").$type<GoatInfisicalAuthFlowStatus>().notNull().default("pending"),
+    statusReason: text("status_reason"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceStatusIdx: index("goat_infisical_auth_flows_workspace_status_idx").on(
+      table.workspaceId,
+      table.status,
+    ),
+    expiresAtIdx: index("goat_infisical_auth_flows_expires_at_idx").on(table.expiresAt),
+    statusCheck: check(
+      "goat_infisical_auth_flows_status_check",
+      sql`${table.status} IN ('pending', 'link_ready', 'completed', 'failed', 'expired')`,
     ),
   }),
 );

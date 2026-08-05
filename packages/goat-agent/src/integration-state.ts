@@ -181,6 +181,15 @@ export type GoatClaudeCodeProviderState = {
   lastValidatedAt: string | null;
 };
 
+export type GoatInfisicalProviderState = {
+  provider: "infisical";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "disconnected" | "not_connected";
+  statusReason: string | null;
+  accountEmail: string | null;
+  lastValidatedAt: string | null;
+};
+
 // One connected account of a personal provider. A user can hold several
 // accounts per provider (two Gmails, two Slack workspaces) — uniqueness in the
 // DB is (user, provider, external_id), so a second OAuth pass creates a
@@ -228,6 +237,7 @@ export type GoatIntegrationState = {
   imessage: GoatImessageProviderState;
   codex: GoatCodexProviderState;
   claude_code: GoatClaudeCodeProviderState;
+  infisical: GoatInfisicalProviderState;
   // All of the user's connected accounts per personal provider. The
   // single-account states above remain the "primary connection" view used by
   // onboarding and zero states; multi-account UI reads this instead.
@@ -305,7 +315,9 @@ export function goatPersonalAccountsFromRows(
   return personalAccounts;
 }
 
-export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[]) {
+export function goatIntegrationStateFromRows(
+  rows: readonly IntegrationStateRow[],
+): GoatIntegrationState {
   const byProvider = new Map<GoatIntegrationProvider, IntegrationStateRow>();
   for (const row of rows) {
     if (row.status === "disconnected") continue;
@@ -354,6 +366,14 @@ export function goatIntegrationStateFromRows(rows: readonly IntegrationStateRow[
       connected: false,
       status: "not_connected",
       statusReason: null,
+      lastValidatedAt: null,
+    },
+    infisical: {
+      provider: "infisical",
+      connected: false,
+      status: "not_connected",
+      statusReason: null,
+      accountEmail: null,
       lastValidatedAt: null,
     },
     personalAccounts,

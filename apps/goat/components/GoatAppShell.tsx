@@ -9,9 +9,11 @@ import { isGoatChatResumeEnabled } from "@/lib/chat-streams";
 import { loadCurrentGoatClaudeCodeAuthSettings } from "@/lib/claude-code-auth";
 import { loadCurrentGoatCodexAuthSettings } from "@/lib/codex-auth";
 import { goatFeatureFlagsFromUser } from "@/lib/feature-flags";
+import { loadCurrentGoatInfisicalAuthSettings } from "@/lib/infisical-auth";
 import {
   type GoatClaudeCodeProviderState,
   type GoatCodexProviderState,
+  type GoatInfisicalProviderState,
   type GoatIntegrationState,
 } from "@/lib/integration-state";
 import { getGoatAttioIntegrationState } from "@/lib/integrations/attio";
@@ -50,6 +52,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     imessage,
     codex,
     claudeCode,
+    infisical,
     workspaceMembers,
     personalAccounts,
   ] = await Promise.all([
@@ -69,6 +72,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatImessageIntegrationState(user.workosUserId),
     loadCurrentGoatCodexAuthSettings(),
     loadCurrentGoatClaudeCodeAuthSettings(),
+    loadCurrentGoatInfisicalAuthSettings(),
     listGoatWorkspaceMembers(workspace.id),
     getGoatPersonalAccounts(user.workosUserId),
   ]);
@@ -149,6 +153,14 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
         statusReason: claudeCode.statusReason,
         lastValidatedAt: claudeCode.lastValidatedAt,
       },
+      infisical: {
+        provider: "infisical",
+        connected: infisical.status === "connected",
+        status: infisical.status ?? "not_connected",
+        statusReason: infisical.statusReason,
+        accountEmail: infisical.accountEmail,
+        lastValidatedAt: infisical.lastValidatedAt,
+      },
     }),
     featureFlags,
     codexConnected: codex.status === "connected",
@@ -206,6 +218,7 @@ function buildIntegrationState(input: {
   personalAccounts: GoatIntegrationState["personalAccounts"];
   codex: GoatCodexProviderState;
   claudeCode: GoatClaudeCodeProviderState;
+  infisical: GoatInfisicalProviderState;
 }): GoatIntegrationState {
   return {
     gmail: input.googleIntegrations.gmail,
@@ -223,6 +236,7 @@ function buildIntegrationState(input: {
     imessage: input.imessage,
     codex: input.codex,
     claude_code: input.claudeCode,
+    infisical: input.infisical,
     personalAccounts: input.personalAccounts,
   };
 }

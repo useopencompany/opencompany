@@ -39,6 +39,12 @@ import {
   startGoatCodexDeviceAuth,
 } from "@/lib/codex-auth";
 import {
+  completeGoatInfisicalAuth,
+  disconnectGoatInfisicalAuth,
+  type GoatInfisicalAuthFlow,
+  startGoatInfisicalAuth,
+} from "@/lib/infisical-auth";
+import {
   disconnectGoatIntegrationAccountAction,
   getGoatIntegrationAccountUsageAction,
   setGoatIntegrationCapabilityModeAction,
@@ -49,6 +55,7 @@ import {
   type GoatGitHubProviderState,
   type GoatGoogleProviderState,
   type GoatImessageProviderState,
+  type GoatInfisicalProviderState,
   type GoatIntegrationAccountView,
   type GoatIntegrationState,
   type GoatJamieProviderState,
@@ -77,6 +84,7 @@ type IntegrationMetaKey =
   | "jamie"
   | "posthog"
   | "stripe"
+  | "infisical"
   | "codex"
   | "claude_code"
   | "imessage";
@@ -169,6 +177,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Give Goat read-only access to payment activity, subscriptions, and receivables.",
     Icon: StripeIcon,
     tileClass: "bg-[#635BFF] text-white",
+  },
+  infisical: {
+    label: "Infisical",
+    description: "Give workspace coding agents access to the real Infisical CLI.",
+    monogram: "I",
+    tileClass: "bg-[#6C47FF] text-white",
   },
   granola: {
     label: "Granola",
@@ -350,6 +364,7 @@ function countWorkspaceConnected(integrations: GoatIntegrationState) {
     (integrationStatus(integrations.linear) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.posthog) === "Connected" ? 1 : 0) +
     (integrationStatus(integrations.stripe) === "Connected" ? 1 : 0) +
+    (integrations.infisical.connected ? 1 : 0) +
     countConnectedAccounts(integrations, WORKSPACE_ACCOUNT_PROVIDERS)
   );
 }
@@ -392,6 +407,10 @@ function IntegrationCards({
             }`}
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <InfisicalIntegrationCard
+              integration={integrations.infisical}
+              canManage={isWorkspaceAdmin}
+            />
             <IntegrationCardRow integration={integrations.github} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.jamie} canConnect={isWorkspaceAdmin} />
             <IntegrationCardRow integration={integrations.linear} />
@@ -1246,6 +1265,178 @@ function CapabilityModeRow({
   );
 }
 
+function InfisicalIntegrationCard({
+  integration,
+  canManage,
+}: {
+  integration: GoatInfisicalProviderState;
+  canManage: boolean;
+}) {
+  const router = useRouter();
+  const [flow, setFlow] = useState<GoatInfisicalAuthFlow | null>(null);
+  const [browserToken, setBrowserToken] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const startAuth = () => {
+    setError(null);
+    setBrowserToken("");
+    startTransition(async () => {
+      const result = await startGoatInfisicalAuth();
+      if (result.ok) setFlow(result.flow);
+      else setError(result.error);
+    });
+  };
+
+  const completeAuth = () => {
+    if (!flow) return;
+    setError(null);
+    startTransition(async () => {
+      const result = await completeGoatInfisicalAuth({ flowId: flow.id, browserToken });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      if (result.flow.status === "completed") {
+        setFlow(null);
+        setBrowserToken("");
+        router.refresh();
+      } else {
+        setFlow(result.flow);
+        setError(result.flow.statusReason);
+      }
+    });
+  };
+
+  const disconnect = () => {
+    if (
+      !window.confirm(
+        "Disconnect Infisical from this workspace? New coding turns will remove the saved login. Commands already running are not interrupted.",
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      const result = await disconnectGoatInfisicalAuth();
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setFlow(null);
+      setBrowserToken("");
+      router.refresh();
+    });
+  };
+
+  const accountLabel = integration.connected
+    ? integration.accountEmail
+      ? `Connected as ${integration.accountEmail}`
+      : "Connected"
+    : integration.statusReason;
+
+  return (
+    <IntegrationCard
+      meta={INTEGRATION_META.infisical}
+      body={
+        <div className="flex flex-col gap-2">
+          <p className="text-[12px] leading-5 text-ink-muted">
+            Coding agents get this account&apos;s Infisical permissions, including secret writes.
+            Use a dedicated, least-privilege account.
+          </p>
+          {accountLabel ? (
+            <p className="truncate text-[12px] leading-4 text-ink-subtle">{accountLabel}</p>
+          ) : null}
+          {!canManage ? (
+            <p className="text-[12px] leading-4 text-ink-subtle">Managed by workspace admins.</p>
+          ) : null}
+          {flow?.status === "link_ready" && flow.loginUrl ? (
+            <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
+              <span>
+                Open Infisical, finish signing in, then copy the browser token it gives you.
+              </span>
+              <a
+                href={flow.loginUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex w-fit items-center gap-1.5 font-medium text-ink underline underline-offset-2"
+              >
+                Open Infisical sign-in
+                <ExternalLink size={13} />
+              </a>
+              <input
+                type="password"
+                value={browserToken}
+                onChange={(event) => setBrowserToken(event.target.value)}
+                placeholder="Paste browser token"
+                autoComplete="off"
+                spellCheck={false}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 font-mono text-[12px] text-ink placeholder:text-ink-subtle focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              />
+            </div>
+          ) : null}
+          {flow?.statusReason || error ? (
+            <div className="text-[12px] leading-4 text-warning">{error ?? flow?.statusReason}</div>
+          ) : null}
+        </div>
+      }
+      footer={
+        canManage ? (
+          <div className="flex items-center gap-2">
+            {flow?.status === "link_ready" ? (
+              <>
+                <button
+                  type="button"
+                  onClick={completeAuth}
+                  disabled={isPending || !browserToken.trim()}
+                  aria-busy={isPending}
+                  className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
+                >
+                  {isPending ? "Connecting" : "Finish connection"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFlow(null);
+                    setBrowserToken("");
+                    setError(null);
+                  }}
+                  disabled={isPending}
+                  className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={startAuth}
+                  disabled={isPending}
+                  aria-busy={isPending}
+                  className="inline-flex items-center justify-center rounded-full border border-border px-4 py-1.5 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
+                >
+                  {buttonLabel(integration.status, isPending)}
+                </button>
+                {integration.connected ? (
+                  <button
+                    type="button"
+                    onClick={disconnect}
+                    disabled={isPending}
+                    className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[13px] font-medium text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+                  >
+                    Disconnect
+                  </button>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null
+      }
+    />
+  );
+}
+
 function CodexIntegrationCard({ integration }: { integration: GoatCodexProviderState }) {
   const router = useRouter();
   const [flow, setFlow] = useState<GoatCodexDeviceAuthFlow | null>(null);
@@ -1578,7 +1769,9 @@ function integrationStatusReason(
   return "statusReason" in integration ? integration.statusReason : null;
 }
 
-function integrationConnectHref(provider: Exclude<IntegrationMetaKey, "codex">) {
+function integrationConnectHref(
+  provider: Exclude<IntegrationMetaKey, "codex" | "claude_code" | "infisical">,
+) {
   if (provider === "gmail") return "/api/integrations/gmail/start?returnTo=/settings/integrations";
   if (provider === "google_calendar") {
     return "/api/integrations/google-calendar/start?returnTo=/settings/integrations";
