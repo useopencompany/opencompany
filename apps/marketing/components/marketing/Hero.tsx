@@ -18,16 +18,16 @@ export function Hero() {
               <span aria-hidden="true">→</span>
             </a>
             <h1 className="max-w-3xl text-balance font-medium font-mono text-3xl text-ink leading-[1.1] tracking-tight sm:text-4xl">
-              Give your AI agents a living company brain.
+              Run your company on agents, not duct tape.
             </h1>
             <p className="mt-6 max-w-xl text-pretty font-medium text-[15px] text-ink-subtle leading-7 opacity-60">
-              Add GitHub, Gmail, Linear, Slack, and meetings as sources. The brain figures out what
-              matters, files it, links it to what you already know, and brings it to any agent with
-              MCP.
+              OpenCompany is the workspace where agents and humans run your company — a living
+              wiki, workflows, and sessions for every team, on the AI subscriptions you already
+              pay for.
             </p>
             <div className="mt-9 flex items-center gap-2">
-              <Cta>Join early beta</Cta>
-              <LaunchVideoDialog />
+              <Cta>Start your first task</Cta>
+              <LaunchVideoDialog>Watch a feature idea become a PR (60s)</LaunchVideoDialog>
             </div>
           </div>
 

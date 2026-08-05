@@ -8,11 +8,15 @@ import {
 } from "@opencompany/ui/components/dialog";
 import { LAUNCH_VIDEO_URL } from "./launch-video";
 
-export function LaunchVideoDialog() {
+type LaunchVideoDialogProps = {
+  children?: React.ReactNode;
+};
+
+export function LaunchVideoDialog({ children = "See how it works" }: LaunchVideoDialogProps) {
   return (
     <Dialog>
       <DialogTrigger className="inline-flex cursor-pointer items-center rounded-none px-2 py-2.5 font-medium font-mono text-[13px] text-ink-subtle tracking-tight transition hover:text-ink">
-        See how it works
+        {children}
       </DialogTrigger>
       <DialogContent className="w-[calc(100%-2rem)] max-w-5xl gap-0 overflow-hidden rounded-none border-white/15 bg-black p-0 [&_[data-slot=dialog-close]]:top-3 [&_[data-slot=dialog-close]]:right-3 [&_[data-slot=dialog-close]]:z-10 [&_[data-slot=dialog-close]]:bg-black/70 [&_[data-slot=dialog-close]]:p-2 [&_[data-slot=dialog-close]]:text-white [&_[data-slot=dialog-close]]:opacity-100">
         <DialogTitle className="sr-only">OpenCompany launch video</DialogTitle>

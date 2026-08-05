@@ -12,31 +12,27 @@ type FaqProps = {
 
 const DEFAULT_FAQS: FaqItem[] = [
   {
-    q: "Do I have to organize anything myself?",
-    a: "No. Ingested activity is auto-classified, filed, and cross-linked. You only write when you want to save a thought or decision directly.",
+    q: "I'm happy with Codex / I have a sub.",
+    a: "Keep it for coding. OpenCompany is the shared layer Codex doesn't have: wiki context, shareable sessions, workflows across the team.",
   },
   {
-    q: "Which sources can it ingest?",
-    a: "GitHub, Gmail, Slack, Linear, meeting notes (Fathom), Google Drive, and direct chat capture. More on request.",
+    q: "I'll just build it myself.",
+    a: "Then you maintain it forever. More time duct-taping than doing real work — and never state of the art.",
   },
   {
-    q: "Does it lock me into one AI model?",
-    a: "No — that's the point. Connect Claude, Cursor, Codex, or ChatGPT via one MCP connection. Same brain, any model.",
+    q: "What can I do with it?",
+    a: "Any job you do with AI today, in the cloud, with your company's context behind it.",
   },
   {
-    q: "What does it cost?",
-    a: "Free to start with $5 in credits. After that, it's usage-based: model cost plus a 20% platform fee, with an additional $0.20 per 50 items for Brain ingestion. No seats or subscription.",
-  },
-  {
-    q: "Where does my data actually live?",
-    a: "Structured Markdown, yours, exportable. No lock-in.",
+    q: "What's the first step?",
+    a: "Sign up, connect your sources. The wiki builds itself. Start your first task.",
   },
 ];
 
 export function Faq({
   eyebrow = "# FAQ",
   title = "Questions, answered.",
-  description = "The practical details about setup, sources, models, pricing, and your data.",
+  description = "The honest answers to the questions we hear most.",
   items = DEFAULT_FAQS,
 }: FaqProps) {
   return (
