@@ -18,3 +18,6 @@ the owning spec, architecture doc, migration plan, or code comments.
 - [Revolut Business Agent Access](./revolut-business-agent-access-research.md) -
   research and product direction for a read-only Revolut Business finance
   assistant.
+- [QM Scope-Centric Agent Architecture](./qm-scope-centric-agent-architecture-research.md) -
+  source-backed research on QM's scope model, memory isolation, credential
+  grants, channels, tasks, and lack of a persistent agent entity.
