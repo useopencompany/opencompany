@@ -350,7 +350,7 @@ export type GoatHarnessSpec = {
 export type GoatWorkspaceRole = "admin" | "member";
 export type GoatMcpClient = "claude" | "chatgpt" | "cursor";
 export type GoatTaskViewMode = "board" | "list";
-export type GoatWorkspacePlan = "free" | "pro";
+export type GoatWorkspacePlan = "hobby" | "pro";
 export type GoatStripeSubscriptionStatus =
   | "incomplete"
   | "incomplete_expired"
@@ -369,6 +369,8 @@ export type GoatCreditLedgerSource =
   | "starter_grant"
   | "seat_included_grant"
   | "seat_included_expiration"
+  | "included_usage_grant"
+  | "included_usage_expiration"
   | "stripe_topup"
   | "chat_model_usage"
   | "capability_usage"
@@ -785,7 +787,7 @@ export const goatWorkspaceBilling = goat.table(
     workspaceId: text("workspace_id")
       .primaryKey()
       .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
-    plan: text("plan").$type<GoatWorkspacePlan>().notNull().default("free"),
+    plan: text("plan").$type<GoatWorkspacePlan>().notNull().default("hobby"),
     planStartedAt: timestamp("plan_started_at", { withTimezone: true }).notNull().defaultNow(),
     stripeCustomerId: text("stripe_customer_id"),
     stripeSubscriptionId: text("stripe_subscription_id"),
@@ -796,6 +798,7 @@ export const goatWorkspaceBilling = goat.table(
     seatQuantity: integer("seat_quantity").notNull().default(1),
     includedUsagePeriodStart: timestamp("included_usage_period_start", { withTimezone: true }),
     includedUsagePeriodEnd: timestamp("included_usage_period_end", { withTimezone: true }),
+    includedUsageAllowanceCents: integer("included_usage_allowance_cents").notNull().default(0),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     paymentNeedsAttention: boolean("payment_needs_attention").notNull().default(false),
@@ -820,7 +823,7 @@ export const goatWorkspaceBilling = goat.table(
     subscriptionIdx: uniqueIndex("goat_workspace_billing_subscription_idx").on(
       table.stripeSubscriptionId,
     ),
-    planCheck: check("goat_workspace_billing_plan_check", sql`${table.plan} IN ('free', 'pro')`),
+    planCheck: check("goat_workspace_billing_plan_check", sql`${table.plan} IN ('hobby', 'pro')`),
     seatQuantityCheck: check(
       "goat_workspace_billing_seat_quantity_check",
       sql`${table.seatQuantity} >= 1`,
@@ -840,8 +843,8 @@ export const goatStripeWebhookEvents = goat.table("stripe_webhook_events", {
 });
 
 // USD credit balance per workspace. balance_usd_micros remains the aggregate
-// used by gates and dashboards; billing v6 also tracks the included seat pool
-// separately from overage/top-up funds so debits can draw included usage first
+// used by gates and dashboards; billing v7 also tracks the monthly included pool
+// separately from top-up funds so debits can draw included usage first
 // and expire unused included usage monthly without touching top-ups.
 export const goatCreditBalances = goat.table("credit_balances", {
   workspaceId: text("workspace_id")
@@ -953,7 +956,7 @@ export const goatCreditLedger = goat.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'stripe_topup', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );

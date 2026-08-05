@@ -1,3 +1,5 @@
+import { ensureGoatMonthlyIncludedUsage } from "@opencompany/db/goat-billing";
+import { hasPositiveGoatCreditBalance } from "@opencompany/db/goat-credits";
 import type { GoatChatMessage, GoatChatMessageAttachment } from "@opencompany/db/goat-schema";
 import type { GoatStoredChatMessage } from "@opencompany/goat-agent/chat-ui";
 import type { LanguageModelUsage } from "ai";
@@ -6,11 +8,44 @@ import { GoatCodexChatLeaseLostError } from "./goat-codex-chat-errors";
 import {
   consumeGoatOpenCompanyChatStream,
   goatOpenCompanyModelMessagesFromStored,
+  hasGoatHostedTurnCredits,
 } from "./goat-opencompany-chat";
 import {
   GoatOpenCompanyChatInterruptedError,
   type GoatOpenCompanyChatProjection,
 } from "./goat-opencompany-chat-projector";
+
+vi.mock("@opencompany/db/goat-billing", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencompany/db/goat-billing")>()),
+  ensureGoatMonthlyIncludedUsage: vi.fn(),
+}));
+
+vi.mock("@opencompany/db/goat-credits", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencompany/db/goat-credits")>()),
+  hasPositiveGoatCreditBalance: vi.fn(),
+}));
+
+describe("hosted turn credit gate", () => {
+  it("refreshes the calendar-month allowance before reading the balance", async () => {
+    vi.mocked(ensureGoatMonthlyIncludedUsage).mockResolvedValue({
+      ok: true,
+      plan: "hobby",
+      seatQuantity: 1,
+      grants: 1,
+      expirations: 0,
+      balanceUsdMicros: 5_000_000,
+      allowanceCents: 500,
+    });
+    vi.mocked(hasPositiveGoatCreditBalance).mockResolvedValue(true);
+    const db = {} as never;
+
+    await expect(hasGoatHostedTurnCredits("goat_ws_1", db)).resolves.toBe(true);
+    expect(ensureGoatMonthlyIncludedUsage).toHaveBeenCalledWith("goat_ws_1", { db });
+    expect(ensureGoatMonthlyIncludedUsage).toHaveBeenCalledBefore(
+      vi.mocked(hasPositiveGoatCreditBalance),
+    );
+  });
+});
 
 describe("consumeGoatOpenCompanyChatStream", () => {
   it("accumulates throttled text, reasoning, and the complete tool lifecycle", async () => {

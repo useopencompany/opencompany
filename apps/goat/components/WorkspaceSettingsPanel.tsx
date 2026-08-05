@@ -17,7 +17,7 @@ import {
 type WorkspaceSettings = {
   workspace: { id: string; name: string };
   role: "admin" | "member";
-  plan: "free" | "pro";
+  plan: "hobby" | "pro";
   memberCap: number;
   members: GoatWorkspaceMemberView[];
   invitations: GoatWorkspaceInvitationView[];

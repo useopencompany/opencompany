@@ -3,7 +3,7 @@ import {
   fulfillGoatTopUpCheckoutSession,
   getGoatCreditBalanceUsdMicros,
   goatUsdMicrosToCents,
-  grantGoatStarterCredit,
+  grantGoatMonthlyIncludedUsage,
   hasPositiveGoatCreditBalance,
   loadGoatSpendBreakdown,
   recordGoatAutoRefillCredit,
@@ -99,14 +99,26 @@ describe("goat credits", () => {
     expect(result).toEqual({ ok: true, ledgerId: 7, balanceUsdMicros: 4_890_000 });
   });
 
-  it("reports an already-granted starter credit as a no-op", async () => {
-    const db = fakeDb([]);
-    const result = await grantGoatStarterCredit({
-      workspaceId: "goat_ws_1",
-      amountCents: 500,
-      db,
+  it("reports a monthly included-usage grant and resulting allowance", async () => {
+    const db = fakeDb([
+      { grants: "1", expirations: "1", balanceUsdMicros: "5000000", allowanceCents: "500" },
+    ]);
+    await expect(
+      grantGoatMonthlyIncludedUsage({
+        workspaceId: "goat_ws_1",
+        plan: "hobby",
+        seatQuantity: 1,
+        periodStart: new Date("2026-08-01T00:00:00.000Z"),
+        periodEnd: new Date("2026-09-01T00:00:00.000Z"),
+        db,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      grants: 1,
+      expirations: 1,
+      balanceUsdMicros: 5_000_000,
+      allowanceCents: 500,
     });
-    expect(result).toEqual({ ok: false, reason: "already_granted" });
   });
 
   it("rejects top-up fulfillment for unpaid or malformed sessions", async () => {

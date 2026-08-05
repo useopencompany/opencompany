@@ -26,6 +26,10 @@ vi.mock("@opencompany/db/goat-capabilities", () => ({
   settleGoatCapabilityRun: mocks.settleRun,
   sumGoatCapabilitySessionSpendUsdMicros: mocks.sumSpend,
 }));
+vi.mock("@opencompany/db/goat-billing", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencompany/db/goat-billing")>()),
+  ensureGoatMonthlyIncludedUsage: vi.fn().mockResolvedValue({ ok: false, reason: "current" }),
+}));
 vi.mock("@opencompany/db/goat-credits", () => ({
   getGoatCreditBalanceUsdMicros: mocks.getBalance,
   recordGoatCreditDebit: mocks.recordDebit,

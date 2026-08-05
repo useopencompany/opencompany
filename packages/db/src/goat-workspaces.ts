@@ -1,13 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, or, sql } from "drizzle-orm";
 import {
   defaultGoatBrainFolderManifestEntries,
   normalizeGoatBrainId,
 } from "../../goat-brain/src/index";
 import { getDb } from "./client";
-import { GOAT_STARTER_CREDIT_USD_CENTS } from "./goat-billing-constants";
+import { GOAT_PRO_STRIPE_PRODUCT_KEY, goatCalendarMonthWindow } from "./goat-billing-constants";
 import { hashGoatBrainContent, seedDefaultGoatBrainFolders } from "./goat-brain-files";
-import { grantGoatStarterCredit } from "./goat-credits";
+import { grantGoatMonthlyIncludedUsage } from "./goat-credits";
 import {
   type GoatBrain,
   type GoatBrainIntelligence,
@@ -21,6 +21,7 @@ import {
   goatBrains,
   goatOnboarding,
   goatUsers,
+  goatWorkspaceBilling,
   goatWorkspaceMembers,
   goatWorkspaces,
 } from "./goat-schema";
@@ -74,7 +75,22 @@ function readableGoatBrainId(name: string, entropy: string) {
 // user is on the brain's member list. Reused by the Electric shape authorizer.
 function brainAccessCondition(userWorkosId: string) {
   return sql`(
-    (${goatBrains.visibility} = 'workspace' AND EXISTS (
+    EXISTS (
+      SELECT 1
+      FROM "goat"."workspaces" access_workspace
+      LEFT JOIN "goat"."workspace_billing" access_billing
+        ON access_billing."workspace_id" = access_workspace."id"
+      WHERE access_workspace."id" = ${goatBrains.workspaceId}
+        AND (
+          access_workspace."created_by_workos_id" = ${userWorkosId}
+          OR (
+            access_billing."plan" = 'pro'
+            AND access_billing."stripe_product_key" = ${GOAT_PRO_STRIPE_PRODUCT_KEY}
+          )
+        )
+    )
+    AND (
+      (${goatBrains.visibility} = 'workspace' AND EXISTS (
       SELECT 1 FROM "goat"."workspace_members" wm
       WHERE wm."workspace_id" = ${goatBrains.workspaceId}
         AND wm."user_workos_id" = ${userWorkosId}
@@ -85,6 +101,7 @@ function brainAccessCondition(userWorkosId: string) {
       WHERE bm."brain_id" = ${goatBrains.id}
         AND bm."user_workos_id" = ${userWorkosId}
     ))
+    )
   )`;
 }
 
@@ -97,9 +114,40 @@ export async function listGoatWorkspacesForUser(
     .select({ workspace: goatWorkspaces, role: goatWorkspaceMembers.role })
     .from(goatWorkspaceMembers)
     .innerJoin(goatWorkspaces, eq(goatWorkspaces.id, goatWorkspaceMembers.workspaceId))
-    .where(eq(goatWorkspaceMembers.userWorkosId, userWorkosId))
+    .leftJoin(goatWorkspaceBilling, eq(goatWorkspaceBilling.workspaceId, goatWorkspaces.id))
+    .where(
+      and(
+        eq(goatWorkspaceMembers.userWorkosId, userWorkosId),
+        or(
+          eq(goatWorkspaces.createdByWorkosId, userWorkosId),
+          and(
+            eq(goatWorkspaceBilling.plan, "pro"),
+            eq(goatWorkspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+          ),
+        ),
+      ),
+    )
     .orderBy(asc(goatWorkspaces.createdAt));
   return rows;
+}
+
+export async function hasOwnedGoatHobbyWorkspace(
+  userWorkosId: string,
+  options: { db?: DbClient } = {},
+) {
+  const db = options.db ?? getDb();
+  const rows = await db
+    .select({ id: goatWorkspaces.id })
+    .from(goatWorkspaces)
+    .leftJoin(goatWorkspaceBilling, eq(goatWorkspaceBilling.workspaceId, goatWorkspaces.id))
+    .where(
+      and(
+        eq(goatWorkspaces.createdByWorkosId, userWorkosId),
+        sql`NOT COALESCE(${goatWorkspaceBilling.plan} = 'pro' AND ${goatWorkspaceBilling.stripeProductKey} = ${GOAT_PRO_STRIPE_PRODUCT_KEY}, false)`,
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }
 
 export async function listAccessibleGoatBrains(
@@ -199,10 +247,19 @@ export async function getGoatWorkspaceRole(
   const rows = await db
     .select({ role: goatWorkspaceMembers.role })
     .from(goatWorkspaceMembers)
+    .innerJoin(goatWorkspaces, eq(goatWorkspaces.id, goatWorkspaceMembers.workspaceId))
+    .leftJoin(goatWorkspaceBilling, eq(goatWorkspaceBilling.workspaceId, goatWorkspaces.id))
     .where(
       and(
         eq(goatWorkspaceMembers.workspaceId, input.workspaceId),
         eq(goatWorkspaceMembers.userWorkosId, input.userWorkosId),
+        or(
+          eq(goatWorkspaces.createdByWorkosId, input.userWorkosId),
+          and(
+            eq(goatWorkspaceBilling.plan, "pro"),
+            eq(goatWorkspaceBilling.stripeProductKey, GOAT_PRO_STRIPE_PRODUCT_KEY),
+          ),
+        ),
       ),
     )
     .limit(1);
@@ -295,19 +352,21 @@ export async function createDefaultGoatWorkspaceForUser(
     },
     { db },
   );
-  // Starter credit so usage-based chat works before the first top-up. The
-  // starter_grant partial unique index makes concurrent bootstraps converge;
-  // a grant failure must never fail workspace creation.
+  // Seed the current Hobby allowance immediately; the hourly billing sweep
+  // repairs a transient failure without blocking sign-in.
   try {
-    await grantGoatStarterCredit({
+    const { start, resetAt } = goatCalendarMonthWindow(new Date());
+    await grantGoatMonthlyIncludedUsage({
       workspaceId: `goat_ws_${input.userWorkosId}`,
-      userWorkosId: input.userWorkosId,
-      amountCents: GOAT_STARTER_CREDIT_USD_CENTS,
+      plan: "hobby",
+      seatQuantity: 1,
+      periodStart: start,
+      periodEnd: resetAt,
       db,
     });
   } catch (error) {
     console.warn(
-      `Failed to grant the starter credit for Goat workspace goat_ws_${input.userWorkosId}.`,
+      `Failed to grant the monthly Hobby allowance for Goat workspace goat_ws_${input.userWorkosId}.`,
       error,
     );
   }
@@ -376,18 +435,24 @@ export async function createGoatWorkspaceForUser(
   const brain = brainRows[0];
   if (!workspace || !brain) throw new Error("Could not persist the Goat workspace.");
 
-  // Starter-credit writes are idempotent and deliberately non-blocking: a
+  // Monthly-allowance writes are idempotent and deliberately non-blocking: a
   // billing outage must not turn a successfully created organization into a
-  // partially cleaned-up workspace.
+  // partially cleaned-up workspace. The hourly sweep repairs the grant.
   try {
-    await grantGoatStarterCredit({
+    const { start, resetAt } = goatCalendarMonthWindow(new Date());
+    await grantGoatMonthlyIncludedUsage({
       workspaceId: workspace.id,
-      userWorkosId: input.userWorkosId,
-      amountCents: GOAT_STARTER_CREDIT_USD_CENTS,
+      plan: "hobby",
+      seatQuantity: 1,
+      periodStart: start,
+      periodEnd: resetAt,
       db,
     });
   } catch (error) {
-    console.warn(`Failed to grant the starter credit for Goat workspace ${workspace.id}.`, error);
+    console.warn(
+      `Failed to grant the monthly Hobby allowance for Goat workspace ${workspace.id}.`,
+      error,
+    );
   }
 
   return { workspace, brain };
@@ -409,12 +474,21 @@ export async function adoptGoatWorkspaceMembershipsFromOrgs(
   let adopted = 0;
   for (const membership of input.memberships) {
     const rows = await db
-      .select({ id: goatWorkspaces.id })
+      .select({
+        id: goatWorkspaces.id,
+        createdByWorkosId: goatWorkspaces.createdByWorkosId,
+        plan: goatWorkspaceBilling.plan,
+        stripeProductKey: goatWorkspaceBilling.stripeProductKey,
+      })
       .from(goatWorkspaces)
+      .leftJoin(goatWorkspaceBilling, eq(goatWorkspaceBilling.workspaceId, goatWorkspaces.id))
       .where(eq(goatWorkspaces.workosOrganizationId, membership.organizationId))
       .limit(1);
     const workspace = rows[0];
     if (!workspace) continue;
+    const isPro =
+      workspace.plan === "pro" && workspace.stripeProductKey === GOAT_PRO_STRIPE_PRODUCT_KEY;
+    if (!isPro && workspace.createdByWorkosId !== input.userWorkosId) continue;
     await db
       .insert(goatWorkspaceMembers)
       .values({
