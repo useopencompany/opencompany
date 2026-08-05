@@ -427,6 +427,80 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
   });
 
+  it("starts a raw ampersand Codex directive from a running Codex chat as a new background Codex session", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/codex-chat/messages") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            sessionId: requestChatSessionId(init, "goat_chat_codex_background"),
+            userMessageId: "goat_chat_msg_codex_user",
+            assistantMessageId: "goat_chat_msg_codex_assistant",
+            mode: "started",
+          }),
+          { status: 202, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_codex_active",
+          title: "Codex active",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          messages: [],
+          codexRuntime: {
+            status: "running",
+            error: null,
+            updatedAt: new Date().toISOString(),
+          },
+        }}
+        codexConnected
+        userWorkosId="user_1"
+        taskSpawningEnabled
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
+
+    await user.type(textarea, "& @codex refactor the parser");
+
+    expect(screen.getByTestId("background-chat-hint")).toHaveTextContent(
+      "Sending starts this as a new Codex chat in the background.",
+    );
+    expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
+    const submit = screen.getByRole("button", { name: "Send message" });
+    expect(submit).toBeEnabled();
+
+    await user.click(submit);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/codex-chat/messages", expect.any(Object)),
+    );
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === "/api/codex-chat/messages")!;
+    const body = JSON.parse(String((init as RequestInit).body));
+    expect(body).toMatchObject({
+      message: {
+        role: "user",
+        parts: [{ type: "text", text: "refactor the parser" }],
+      },
+    });
+    expect(body.sessionId).toBeUndefined();
+    expect(body.newSessionId).toMatch(/^goat_chat_/);
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+  });
+
   it("restores the prior draft when voice dictation is cancelled", async () => {
     installDictationBrowserMocks();
     const user = userEvent.setup();
@@ -597,6 +671,81 @@ describe("GoatSurface chat streaming UI", () => {
     );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(screen.getByText("Please check the afternoon too")).toBeInTheDocument();
+  });
+
+  it("starts an ampersand ad-hoc task from an active task conversation", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/tasks" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_2",
+              displayId: "TASK-2",
+              name: "Research competitors",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_task_1",
+          title: "Morning workflow",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "opencompany",
+          messages: [
+            {
+              id: "task_user_1",
+              role: "user",
+              parts: [{ type: "text", text: "Run the morning workflow" }],
+            },
+          ],
+        }}
+        taskConversation={{
+          taskId: "goat_task_1",
+          status: "running",
+          startedAtMs: Date.now(),
+          sessionBacked: true,
+        }}
+        taskSpawningEnabled
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "& #task research competitors");
+
+    expect(screen.getByTestId("ad-hoc-task-hint")).toHaveTextContent(
+      "Sending starts this as an ad-hoc background task.",
+    );
+    const submit = screen.getByRole("button", { name: "Start task" });
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/tasks",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/tasks" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      description: "#task research competitors",
+      model: DEFAULT_GOAT_MODEL,
+    });
+    expect(continueGoatTaskAction).not.toHaveBeenCalled();
+    expect(cancelGoatTaskAction).not.toHaveBeenCalled();
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
   });
 
   it("uses the chat stop control for an active workflow task", async () => {
