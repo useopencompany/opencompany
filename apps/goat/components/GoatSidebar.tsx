@@ -26,7 +26,7 @@ import { GoatBrainSwitcher } from "@/components/GoatBrainSwitcher";
 import { GoatChatStateIndicator } from "@/components/GoatChatStateIndicator";
 import { GoatSidebarFeedback } from "@/components/GoatSidebarFeedback";
 import { closeGoatChatSessionAction, setGoatChatPinnedAction } from "@/lib/chat-actions";
-import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
+import { GOAT_HOME_NAVIGATION_EVENT, requestGoatChatComposerFocus } from "@/lib/chat-navigation";
 import { clearLocalGoatChatState, useLocalGoatChatStates } from "@/lib/chat-session-state";
 import { type GoatChatSummaryView, goatChatSummaryState } from "@/lib/chat-ui";
 import { createGoatWorkspaceAction, switchGoatWorkspaceAction } from "@/lib/workspace-actions";
@@ -340,6 +340,7 @@ function GoatSidebarRecentChats() {
         archiving={archivingId === chat.id}
         pinning={pinningIds.has(chat.id)}
         onPrefetch={() => router.prefetch(href)}
+        onRequestComposerFocus={() => requestGoatChatComposerFocus(chat.id)}
         onTogglePin={() => togglePin(chat.id, chat.title, pinned)}
         onArchive={() => archiveChat(chat.id, chat.title, href)}
       />
@@ -398,6 +399,7 @@ function GoatSidebarChatRow({
   archiving,
   pinning,
   onPrefetch,
+  onRequestComposerFocus,
   onTogglePin,
   onArchive,
 }: {
@@ -409,6 +411,7 @@ function GoatSidebarChatRow({
   archiving: boolean;
   pinning: boolean;
   onPrefetch: () => void;
+  onRequestComposerFocus: () => void;
   onTogglePin: () => void;
   onArchive: () => void;
 }) {
@@ -424,6 +427,18 @@ function GoatSidebarChatRow({
         prefetch
         onMouseEnter={onPrefetch}
         onFocus={onPrefetch}
+        onClick={(event) => {
+          if (
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey
+          ) {
+            return;
+          }
+          onRequestComposerFocus();
+        }}
         aria-current={active ? "page" : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >

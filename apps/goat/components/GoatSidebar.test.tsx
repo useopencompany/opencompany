@@ -2,7 +2,11 @@ import "@testing-library/jest-dom/vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GOAT_HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
+import {
+  consumePendingGoatChatComposerFocus,
+  GOAT_CHAT_COMPOSER_FOCUS_EVENT,
+  GOAT_HOME_NAVIGATION_EVENT,
+} from "@/lib/chat-navigation";
 import { clearAllLocalGoatChatStates, setLocalGoatChatState } from "@/lib/chat-session-state";
 import { GoatSidebar } from "./GoatSidebar";
 
@@ -131,6 +135,7 @@ describe("GoatSidebar", () => {
     recentChatsMock.value = [];
     tasksMock.value = [];
     clearAllLocalGoatChatStates();
+    consumePendingGoatChatComposerFocus("goat_chat_focus");
   });
 
   it("renders home, the brain list, and footer links", () => {
@@ -446,6 +451,32 @@ describe("GoatSidebar", () => {
     );
     expect(screen.getByTestId("sidebar-chat-working")).toBeInTheDocument();
     expect(screen.getByTestId("sidebar-chat-unseen")).toBeInTheDocument();
+  });
+
+  it("requests composer focus when a recent chat is opened normally", async () => {
+    const user = userEvent.setup();
+    const focusRequest = vi.fn();
+    window.addEventListener(GOAT_CHAT_COMPOSER_FOCUS_EVENT, focusRequest);
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_focus",
+        title: "Focus chat",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        preview: "Ready",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+
+    render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("link", { name: "Focus chat" }));
+
+    expect(focusRequest).toHaveBeenCalledTimes(1);
+    expect(consumePendingGoatChatComposerFocus("goat_chat_focus")).toBe(true);
+    window.removeEventListener(GOAT_CHAT_COMPOSER_FOCUS_EVENT, focusRequest);
   });
 
   it("shows working instead of unseen when a chat still has an active model turn", () => {
