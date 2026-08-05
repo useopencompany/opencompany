@@ -867,6 +867,62 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("Please check the afternoon too")).toBeInTheDocument();
   });
 
+  it("offers Brain skill mentions when continuing a session-backed task", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/skills") {
+        return Response.json({
+          skills: [
+            {
+              id: "product-work",
+              name: "Product work",
+              description: "Shape and ship product changes.",
+            },
+          ],
+        });
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_task_1",
+          title: "Investigate task",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "opencompany",
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "goat_task_1",
+          status: "succeeded",
+          startedAtMs: Date.now(),
+          sessionBacked: true,
+        }}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "@skill/prod");
+    await user.click(await screen.findByRole("option", { name: /Product work/i }));
+    await user.type(textarea, "investigate the mention menu");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(continueGoatTaskAction).toHaveBeenCalledWith(
+        "goat_task_1",
+        "@skill/product-work investigate the mention menu",
+        expect.stringMatching(/^goat_chat_msg_[0-9a-f-]{36}$/),
+        [{ kind: "skill", id: "product-work" }],
+      ),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("starts an ampersand ad-hoc task from an active task conversation", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
