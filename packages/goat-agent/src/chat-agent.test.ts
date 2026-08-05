@@ -1,3 +1,4 @@
+import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
   createOpenCompanyChatToolContext,
@@ -8,6 +9,71 @@ import {
 import { START_TASK_TOOL_NAME, START_WORKFLOW_TOOL_NAME } from "./chat-ui";
 
 const model = "moonshotai/kimi-k2.6" as never;
+
+describe("start_task tool", () => {
+  it.each([
+    "moonshotai/kimi-k3",
+    "xai/grok-4.3",
+    "anthropic/claude-sonnet-5",
+  ])("normalizes a Codex task from %s main chat to the default Codex model", async (mainModel) => {
+    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: task.name ?? "Test repo access",
+      prompt: task.prompt,
+    }));
+    const context = createOpenCompanyChatToolContext({
+      model: mainModel as never,
+      requestedEngine: "codex",
+      startTask,
+    });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await startTaskTool.execute({
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+      reason: "Requires connected source-control access.",
+    });
+
+    expect(startTask).toHaveBeenCalledWith({
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+      model: CODEX_DEFAULT_MODEL_ID,
+      engine: "codex",
+    });
+  });
+
+  it("preserves an already Codex-compatible task model", async () => {
+    const startTask = vi.fn(async (task: { prompt: string; name?: string }) => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: task.name ?? "Test repo access",
+      prompt: task.prompt,
+    }));
+    const context = createOpenCompanyChatToolContext({
+      model: "openai/gpt-5.5" as never,
+      requestedEngine: "codex",
+      startTask,
+    });
+    const startTaskTool = context.tools[START_TASK_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    await startTaskTool.execute({
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+    });
+
+    expect(startTask).toHaveBeenCalledWith({
+      name: "Test repo access",
+      prompt: "Check repo access and report whether development work can start.",
+      model: "openai/gpt-5.5",
+      engine: "codex",
+    });
+  });
+});
 
 describe("update_task_status tool gating", () => {
   it("is absent when no updateTaskStatus runner is injected (interactive chat / Slack)", () => {
