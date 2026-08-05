@@ -828,6 +828,47 @@ describe("GoatSurface chat streaming UI", () => {
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
   });
 
+  it("restores an unsent composer draft when returning to a chat session", async () => {
+    const user = userEvent.setup();
+    const chatOne = {
+      id: "chat_1",
+      title: "First chat",
+      model: DEFAULT_GOAT_MODEL,
+      messages: [],
+    };
+    const chatTwo = {
+      id: "chat_2",
+      title: "Second chat",
+      model: DEFAULT_GOAT_MODEL,
+      messages: [],
+    };
+    const { rerender } = render(
+      <GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatOne} />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Draft for the first chat");
+
+    rerender(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatTwo} />);
+    await nextAnimationFrame();
+
+    expect(screen.getByText("Second chat")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+
+    await user.type(screen.getByPlaceholderText("Reply..."), "Draft for the second chat");
+
+    rerender(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatOne} />);
+    await nextAnimationFrame();
+
+    expect(screen.getByText("First chat")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Draft for the first chat");
+
+    rerender(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={chatTwo} />);
+    await nextAnimationFrame();
+
+    expect(screen.getByText("Second chat")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Draft for the second chat");
+  });
+
   it("does not reopen a new chat when its response arrives after Home was clicked", async () => {
     const user = userEvent.setup();
     render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);

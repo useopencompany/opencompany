@@ -252,6 +252,10 @@ type CodexComposerUiState = {
   goalObjective: string;
   goalTokenBudget: string;
 };
+type ChatComposerDraft = {
+  input: string;
+  mentions: GoatChatMention[];
+};
 
 const ENGINE_CHAT_CONFIG: Record<
   GoatEngineChatKind,
@@ -472,6 +476,9 @@ export function GoatSurface({
     if (!initialChat || !initialChat.codexComposerSettings) return new Map();
     return new Map([[initialChat.id, initialCodexComposerUiState]]);
   });
+  const [composerDraftsByChatId, setComposerDraftsByChatId] = useState<
+    ReadonlyMap<string, ChatComposerDraft>
+  >(() => new Map());
   const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
     initialCodexComposerUiState.reasoningEffort,
   );
@@ -1062,6 +1069,32 @@ export function GoatSurface({
     ],
   );
 
+  const saveComposerDraft = useCallback((sessionId: string | null, draft: ChatComposerDraft) => {
+    if (!sessionId) return;
+    const visibleMentions = draft.mentions.filter((mention) =>
+      goatChatMentionIsVisible(draft.input, mention),
+    );
+    setComposerDraftsByChatId((current) => {
+      const next = new Map(current);
+      if (draft.input.length > 0) {
+        next.set(sessionId, { input: draft.input, mentions: visibleMentions });
+      } else {
+        next.delete(sessionId);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearComposerDraft = useCallback((sessionId: string | null) => {
+    if (!sessionId) return;
+    setComposerDraftsByChatId((current) => {
+      if (!current.has(sessionId)) return current;
+      const next = new Map(current);
+      next.delete(sessionId);
+      return next;
+    });
+  }, []);
+
   const openChat = useCallback(
     (
       chat: {
@@ -1089,6 +1122,8 @@ export function GoatSurface({
 
       const engineTarget = engineChatKindFromChat(chat);
       const nextCodexComposerState = codexComposerUiStateForChat(chat, codexComposerStateByChatId);
+      saveComposerDraft(chatSessionId, { input, mentions: selectedMentions });
+      const nextDraft = chat ? (composerDraftsByChatId.get(chat.id) ?? null) : null;
       releaseAllOptimisticAttachmentPreviews();
       routedChatSessionIdRef.current = chat?.id ?? null;
       pendingNewSessionIdRef.current = null;
@@ -1121,6 +1156,9 @@ export function GoatSurface({
       setOptimisticTurnDurations(new Map());
       setMessages([]);
       setLocallyStoppedAssistantMessageIds(new Set());
+      setInput(nextDraft?.input ?? "");
+      setMentionToken(null);
+      setSelectedMentions(nextDraft?.mentions ?? []);
       clearError();
       setMode(chat ? "chat" : "home");
     },
@@ -1129,18 +1167,23 @@ export function GoatSurface({
       chatSessionId,
       clearActiveTurn,
       clearError,
+      composerDraftsByChatId,
       codexComposerStateByChatId,
       codexGoalModeEnabled,
       codexGoalObjective,
       codexGoalTokenBudget,
       codexPlanModeEnabled,
       codexReasoningEffort,
+      input,
       isEngineChat,
       releaseAllOptimisticAttachmentPreviews,
+      saveComposerDraft,
       setChatModelOverride,
       setClaudeModel,
       setCodexModel,
       setMessages,
+      setSelectedMentions,
+      selectedMentions,
     ],
   );
 
@@ -1386,6 +1429,7 @@ export function GoatSurface({
         parts: [{ type: "text", text: prompt }],
       } as GoatChatUiMessage;
 
+      clearComposerDraft(chatSessionId);
       clearError();
       setInput("");
       setMentionToken(null);
@@ -1481,6 +1525,7 @@ export function GoatSurface({
           return;
         }
 
+        clearComposerDraft(chatSessionId);
         clearError();
         setInput("");
         setMentionToken(null);
@@ -1529,6 +1574,7 @@ export function GoatSurface({
         return;
       }
 
+      clearComposerDraft(chatSessionId);
       clearError();
       setInput("");
       setMentionToken(null);
@@ -1573,6 +1619,7 @@ export function GoatSurface({
         return;
       }
 
+      clearComposerDraft(chatSessionId);
       clearError();
       setInput("");
       setMentionToken(null);
@@ -1609,6 +1656,7 @@ export function GoatSurface({
 
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
+      clearComposerDraft(chatSessionId);
       clearError();
       setInput("");
       setMentionToken(null);
@@ -1670,6 +1718,7 @@ export function GoatSurface({
         toast.error(settings.error);
         return;
       }
+      clearComposerDraft(chatSessionId);
       const engine = activeEngine;
       const config = ENGINE_CHAT_CONFIG[engine];
       const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
@@ -1756,6 +1805,7 @@ export function GoatSurface({
       return;
     }
 
+    clearComposerDraft(chatSessionId);
     const metadata: GoatChatMessageMetadata = {
       ...(mentions.length > 0 ? { mentions } : {}),
       ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
