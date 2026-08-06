@@ -12,6 +12,15 @@ export type GoatOAuthStateCookiePayload = {
   returnPathname?: string;
 };
 
+// Guards against an open redirect: returnPathname round-trips through an
+// unauthenticated cookie set from a public server action, so it must be
+// confined to a same-origin path — reject absolute ("https://evil.com") and
+// protocol-relative ("//evil.com", which `new URL(path, base)` also honors
+// over the base) values before they're ever stored.
+export function isSafeGoatReturnPath(value: string): boolean {
+  return value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\");
+}
+
 function toGoatAuthMethod(
   method: AuthenticationResponse["authenticationMethod"],
 ): GoatAuthMethod | null {
@@ -58,7 +67,10 @@ export async function setGoatOAuthStateCookie(payload: GoatOAuthStateCookiePaylo
 export async function consumeGoatOAuthStateCookie(): Promise<GoatOAuthStateCookiePayload | null> {
   const cookieStore = await cookies();
   const raw = cookieStore.get(OAUTH_STATE_COOKIE)?.value;
-  cookieStore.delete(OAUTH_STATE_COOKIE);
+  // Must match the path the cookie was set with (see setGoatOAuthStateCookie)
+  // or the browser treats this as a no-op deletion of a different cookie,
+  // leaving the original — still consumable — state cookie in place.
+  cookieStore.delete({ name: OAUTH_STATE_COOKIE, path: "/" });
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);

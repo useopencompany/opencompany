@@ -5,7 +5,7 @@ import type { AuthenticationResponse } from "@workos-inc/node";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { completeGoatAuthentication } from "@/lib/auth";
-import { setGoatOAuthStateCookie } from "@/lib/auth-methods";
+import { isSafeGoatReturnPath, setGoatOAuthStateCookie } from "@/lib/auth-methods";
 import { getGoatAppUrl, getGoatWorkOSRedirectUri } from "@/lib/workos";
 import { getWorkOSClient } from "@/lib/workos-client";
 
@@ -36,7 +36,9 @@ export async function startGoogleAuth(formData: FormData) {
   await setGoatOAuthStateCookie({
     state,
     ...(typeof invitationToken === "string" ? { invitationToken } : {}),
-    ...(typeof returnPathname === "string" ? { returnPathname } : {}),
+    ...(typeof returnPathname === "string" && isSafeGoatReturnPath(returnPathname)
+      ? { returnPathname }
+      : {}),
   });
   // screenHint (sign-in vs sign-up) only applies to WorkOS's own hosted
   // "authkit" provider picker; Google's authorize screen has no such concept,

@@ -9,7 +9,8 @@ vi.mock("@/lib/auth", () => ({
   completeGoatAuthentication: vi.fn(),
 }));
 
-vi.mock("@/lib/auth-methods", () => ({
+vi.mock("@/lib/auth-methods", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth-methods")>()),
   consumeGoatOAuthStateCookie: vi.fn(),
 }));
 
@@ -65,6 +66,24 @@ describe("Goat Google OAuth callback", () => {
       expect.anything(),
     );
     expect(response.headers.get("location")).toBe("https://my.opencompany.chat/brain");
+  });
+
+  it("ignores a returnPathname that would redirect off our own origin", async () => {
+    consumeGoatOAuthStateCookieMock.mockResolvedValue({
+      state: "state-123",
+      returnPathname: "https://evil.example.com",
+    });
+    const authenticateWithCode = vi.fn(async () => ({
+      user: { id: "user_123", email: "ada@example.com" },
+      authenticationMethod: "GoogleOAuth",
+    }));
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: { authenticateWithCode },
+    } as never);
+
+    const response = await GET(callbackRequest("?code=auth-code&state=state-123"));
+
+    expect(response.headers.get("location")).toBe("https://my.opencompany.chat/");
   });
 
   it("rejects a callback whose state does not match the stored cookie", async () => {

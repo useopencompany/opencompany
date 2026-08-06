@@ -11,7 +11,8 @@ vi.mock("@/lib/auth", () => ({
   completeGoatAuthentication: vi.fn(),
 }));
 
-vi.mock("@/lib/auth-methods", () => ({
+vi.mock("@/lib/auth-methods", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth-methods")>()),
   setGoatOAuthStateCookie: vi.fn(),
 }));
 
@@ -79,6 +80,19 @@ describe("startGoogleAuth", () => {
     expect(redirectMock).toHaveBeenCalledWith(
       "https://api.workos.com/authorize?provider=GoogleOAuth",
     );
+  });
+
+  it("drops an off-origin returnPathname instead of storing it", async () => {
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: { getAuthorizationUrl: vi.fn(() => "https://api.workos.com/authorize") },
+    } as never);
+    const formData = new FormData();
+    formData.set("returnPathname", "https://evil.example.com");
+
+    await startGoogleAuth(formData);
+
+    const [storedPayload] = setGoatOAuthStateCookieMock.mock.calls[0] ?? [];
+    expect(storedPayload?.returnPathname).toBeUndefined();
   });
 });
 

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { completeGoatAuthentication } from "@/lib/auth";
-import { consumeGoatOAuthStateCookie } from "@/lib/auth-methods";
+import { consumeGoatOAuthStateCookie, isSafeGoatReturnPath } from "@/lib/auth-methods";
 import { getGoatAppUrl } from "@/lib/workos";
 import { getWorkOSClient } from "@/lib/workos-client";
 
@@ -42,7 +42,11 @@ export async function GET(request: NextRequest) {
       ...(userAgent ? { userAgent } : {}),
     });
     await completeGoatAuthentication(authResponse, request);
-    return NextResponse.redirect(new URL(statePayload.returnPathname || "/", getGoatAppUrl()));
+    const returnPathname =
+      statePayload.returnPathname && isSafeGoatReturnPath(statePayload.returnPathname)
+        ? statePayload.returnPathname
+        : "/";
+    return NextResponse.redirect(new URL(returnPathname, getGoatAppUrl()));
   } catch (error) {
     console.error("[goat] Failed to complete Google sign-in", error);
     return signInErrorRedirect("oauth_failed");
