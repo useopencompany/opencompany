@@ -19,12 +19,12 @@ export function LaunchVideoDialog({ children = "See how it works" }: LaunchVideo
         {children}
       </DialogTrigger>
       <DialogContent className="w-[calc(100%-2rem)] max-w-5xl gap-0 overflow-hidden rounded-none border-white/15 bg-black p-0 [&_[data-slot=dialog-close]]:top-3 [&_[data-slot=dialog-close]]:right-3 [&_[data-slot=dialog-close]]:z-10 [&_[data-slot=dialog-close]]:bg-black/70 [&_[data-slot=dialog-close]]:p-2 [&_[data-slot=dialog-close]]:text-white [&_[data-slot=dialog-close]]:opacity-100">
-        <DialogTitle className="sr-only">OpenCompany launch video</DialogTitle>
+        <DialogTitle className="sr-only">opencompany launch video</DialogTitle>
         <div className="aspect-video w-full">
           <iframe
             className="size-full"
             src={LAUNCH_VIDEO_URL}
-            title="OpenCompany launch video"
+            title="opencompany launch video"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             referrerPolicy="strict-origin-when-cross-origin"
             allowFullScreen

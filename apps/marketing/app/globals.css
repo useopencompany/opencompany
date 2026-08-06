@@ -6,8 +6,11 @@
  */
 @import "@opencompany/ui/globals.css";
 
-/* Route the `font-mono` utility to Geist Mono (loaded via next/font in layout). */
+/* Route the font utilities to the Geist families (loaded via next/font in layout). */
 @theme {
+  --font-sans:
+    var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica", "Arial",
+    sans-serif;
   --font-mono:
     var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }

@@ -22,7 +22,9 @@ export function TopNav() {
           <a href="https://my.opencompany.chat/changelog" className={navLinkClassName}>
             changelog
           </a>
-          <Cta className="px-3 py-1.5 text-[12px]">Join beta</Cta>
+          <Cta href="https://my.opencompany.chat" className="px-3 py-1.5 text-[12px]">
+            Signup
+          </Cta>
         </nav>
 
         <details className="group relative sm:hidden">
@@ -69,7 +71,12 @@ export function TopNav() {
             >
               changelog
             </a>
-            <Cta className="mt-1 w-full justify-center px-3 py-2 text-[12px]">Join beta</Cta>
+            <Cta
+              href="https://my.opencompany.chat"
+              className="mt-1 w-full justify-center px-3 py-2 text-[12px]"
+            >
+              Signup
+            </Cta>
           </nav>
         </details>
       </div>

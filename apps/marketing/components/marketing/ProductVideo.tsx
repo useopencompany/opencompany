@@ -8,7 +8,7 @@ export function ProductVideo() {
           <iframe
             className="size-full"
             src={LAUNCH_VIDEO_URL}
-            title="How OpenCompany gives AI agents a living company brain"
+            title="How opencompany gives AI agents a living company brain"
             loading="lazy"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             referrerPolicy="strict-origin-when-cross-origin"

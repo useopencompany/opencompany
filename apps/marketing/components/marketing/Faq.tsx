@@ -13,7 +13,7 @@ type FaqProps = {
 const DEFAULT_FAQS: FaqItem[] = [
   {
     q: "I'm happy with Codex / I have a sub.",
-    a: "Keep it for coding. OpenCompany is the shared layer Codex doesn't have: wiki context, shareable sessions, workflows across the team.",
+    a: "Keep it for coding. opencompany is the shared layer Codex doesn't have: wiki context, shareable sessions, workflows across the team.",
   },
   {
     q: "I'll just build it myself.",
