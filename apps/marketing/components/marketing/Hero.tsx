@@ -116,8 +116,7 @@ export function Hero() {
                 <OpenAIIcon className="size-3 text-foreground" />
               </HarnessBadge>
             </span>
-            . Multi-player. Self-building <Chip icon={WikiIcon}>wiki</Chip> for realtime
-            context.
+            . Multi-player. Self-building <Chip icon={WikiIcon}>wiki</Chip> for realtime context.
           </p>
 
           <div className="mt-6 flex items-center justify-center gap-2">
