@@ -64,6 +64,25 @@ describe("parseGoatChatAttachmentsInput", () => {
     });
   });
 
+  it("accepts and canonicalizes CSV attachment metadata", () => {
+    const parsed = parseGoatChatAttachmentsInput(
+      [
+        submittedAttachment({
+          mediaType: "application/vnd.ms-excel",
+          filename: "customers.csv",
+          blobUrl: "https://blob.example.com/goat-chat/user_1/customers.csv",
+        }),
+      ],
+      "user_1",
+    );
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(parsed.attachments[0]).toMatchObject({
+      kind: "csv",
+      mediaType: "text/csv",
+      filename: "customers.csv",
+    });
+  });
+
   it("rejects blobs outside the caller's prefix", () => {
     const parsed = parseGoatChatAttachmentsInput(
       [
@@ -229,6 +248,42 @@ describe("hydrateGoatChatAttachmentParts", () => {
       hydrated[0]?.parts.some(
         (part) => part.type === "text" && part.text.includes("Hello from the subtitles."),
       ),
+    ).toBe(true);
+    expect(getMock).not.toHaveBeenCalled();
+  });
+
+  it("extracts and replays CSV text without a model attachment capability", async () => {
+    const csv = "name,stage\nAcme,trial";
+    getMock.mockResolvedValue({
+      statusCode: 200,
+      stream: blobStream(Buffer.from(csv)),
+    });
+    const attachment = storedAttachment({
+      id: "goat_chat_att_csv",
+      kind: "csv",
+      mediaType: "text/csv",
+      filename: "customers.csv",
+      blobUrl: "https://blob.example.com/goat-chat/user_1/customers.csv",
+    });
+
+    const attachmentTexts = await extractGoatChatAttachmentTexts([attachment]);
+    expect(attachmentTexts).toEqual({ goat_chat_att_csv: csv });
+
+    getMock.mockClear();
+    const hydrated = await hydrateGoatChatAttachmentParts({
+      uiMessages: [userMessage("m1")],
+      storedMessages: [
+        {
+          id: "m1",
+          role: "user",
+          attachments: [attachment],
+          attachmentTexts,
+        },
+      ],
+      modelId: "moonshotai/kimi-k2.6",
+    });
+    expect(
+      hydrated[0]?.parts.some((part) => part.type === "text" && part.text.includes("Acme,trial")),
     ).toBe(true);
     expect(getMock).not.toHaveBeenCalled();
   });

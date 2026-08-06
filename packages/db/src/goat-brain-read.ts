@@ -176,7 +176,7 @@ export type GoatBrainDocumentRead = {
   createdAt: string;
   updatedAt: string;
   compiledTruth: string;
-  // Machine-extracted text for binary-backed documents (pdf/docx), capped for tool output.
+  // Machine-extracted text for file-backed documents, capped for tool output.
   assetText?: string;
   // Chronological tail of the timeline; fetch the full history via getGoatBrainTimeline.
   timeline: Array<{ at: string; evidenceId: string; body: string }>;

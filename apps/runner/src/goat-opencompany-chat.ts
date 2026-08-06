@@ -87,6 +87,18 @@ const logger = createLogger({
   runtime: "goat-opencompany-chat",
 });
 
+function isTextExtractableAttachment(attachment: Pick<GoatChatMessageAttachment, "kind">) {
+  return (
+    attachment.kind === "docx" ||
+    attachment.kind === "xlsx" ||
+    attachment.kind === "srt" ||
+    attachment.kind === "csv" ||
+    attachment.kind === "tsv" ||
+    attachment.kind === "json" ||
+    attachment.kind === "text"
+  );
+}
+
 export async function runGoatOpenCompanyChatTurn(input: {
   turn: GoatCodexChatTurn;
   session: GoatCodexChatSession;
@@ -692,7 +704,7 @@ async function openCompanyAttachmentToParts(input: {
   const { attachment } = input;
   const label = `[Attached file "${attachment.filename}" (${attachment.kind}) - attachment id: ${attachment.id}]`;
 
-  if (attachment.kind === "docx" || attachment.kind === "xlsx" || attachment.kind === "srt") {
+  if (isTextExtractableAttachment(attachment)) {
     const text = input.attachmentTexts?.[attachment.id];
     return [
       {

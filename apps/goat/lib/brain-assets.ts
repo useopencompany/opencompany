@@ -32,13 +32,27 @@ export const GOAT_BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 // Claude's per-image limit is 5 MB; the ingestion agent sees images natively.
 export const GOAT_BRAIN_ASSET_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 
-export type GoatBrainAssetFormat = "pdf" | "docx" | "xlsx" | "srt" | "image";
+export type GoatBrainAssetFormat =
+  | "pdf"
+  | "docx"
+  | "xlsx"
+  | "srt"
+  | "csv"
+  | "tsv"
+  | "json"
+  | "text"
+  | "image";
 
 const CONTENT_TYPE_FORMATS: Record<string, GoatBrainAssetFormat> = {
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
   [GOAT_CHAT_SRT_MIME_TYPE]: "srt",
+  "text/csv": "csv",
+  "text/tab-separated-values": "tsv",
+  "application/json": "json",
+  "text/markdown": "text",
+  "text/plain": "text",
   "image/png": "image",
   "image/jpeg": "image",
   "image/webp": "image",
@@ -185,7 +199,8 @@ function validateAssetUpload(
   if (!format) {
     return {
       ok: false,
-      message: "Supported uploads: PDF, Word (.docx), Excel (.xlsx), SRT, PNG, JPEG, WebP.",
+      message:
+        "Supported uploads: PDF, Word (.docx), Excel (.xlsx), CSV, TSV, Markdown, text, JSON, SRT, PNG, JPEG, WebP.",
     };
   }
   if (!Number.isFinite(input.sizeBytes) || input.sizeBytes <= 0) {

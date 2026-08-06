@@ -429,7 +429,17 @@ export type GoatBrainSource = {
   title?: string;
   capturedAt?: string;
 };
-export type GoatBrainDocumentFormat = "markdown" | "pdf" | "docx" | "xlsx" | "srt" | "image";
+export type GoatBrainDocumentFormat =
+  | "markdown"
+  | "pdf"
+  | "docx"
+  | "xlsx"
+  | "srt"
+  | "csv"
+  | "tsv"
+  | "json"
+  | "text"
+  | "image";
 export type GoatBrainStatus = "draft" | "active" | "archived" | "merged";
 export type GoatBrainFrontmatterProjection = Record<string, unknown>;
 export type GoatBrainTimelineEntry = {
@@ -497,7 +507,16 @@ export type GoatChatEngine = "opencompany" | "codex" | "claude_code";
 // Engines whose durable turns run through the legacy-named goat.codex_chat_* queue.
 export type GoatCodexChatEngine = GoatChatEngine;
 
-export type GoatChatAttachmentKind = "image" | "pdf" | "docx" | "xlsx" | "srt";
+export type GoatChatAttachmentKind =
+  | "image"
+  | "pdf"
+  | "docx"
+  | "xlsx"
+  | "srt"
+  | "csv"
+  | "tsv"
+  | "json"
+  | "text";
 export type GoatChatMessageAttachment = {
   id: string;
   kind: GoatChatAttachmentKind;
@@ -1227,7 +1246,7 @@ export const goatBrainDocuments = goat.table(
     ),
     formatCheck: check(
       "goat_brain_documents_format_check",
-      sql`${table.format} IN ('markdown', 'pdf', 'docx', 'xlsx', 'srt', 'image')`,
+      sql`${table.format} IN ('markdown', 'pdf', 'docx', 'xlsx', 'srt', 'csv', 'tsv', 'json', 'text', 'image')`,
     ),
     statusCheck: check(
       "goat_brain_documents_status_check",
@@ -3383,7 +3402,7 @@ export const goatChatMessages = goat.table(
     }),
     debugTrace: jsonb("debug_trace").$type<GoatChatMessageDebugTrace | null>(),
     attachments: jsonb("attachments").$type<GoatChatMessageAttachment[] | null>(),
-    // docx/xlsx/srt extracted text keyed by attachment id; server-side model context
+    // docx/xlsx/srt/csv/tsv/json/text extracted text keyed by attachment id; server-side model context
     // only — excluded from the Electric shape.
     attachmentTexts: jsonb("attachment_texts").$type<Record<string, string> | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

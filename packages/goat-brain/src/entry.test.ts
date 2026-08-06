@@ -203,7 +203,7 @@ describe("goat brain canonical entries", () => {
     });
     expect(
       validateGoatBrainSidecar({
-        sidecar: { ...sidecar, format: "text" } as never,
+        sidecar: { ...sidecar, format: "binary" } as never,
         payloadContent: entry.body,
         payloadRelativePath: "concepts/launch-plan.md",
       }),

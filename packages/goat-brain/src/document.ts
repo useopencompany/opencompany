@@ -9,7 +9,7 @@ export const GOAT_BRAIN_EMPTY_TRUTH_PLACEHOLDER = "_No compiled truth yet._";
 export const GOAT_BRAIN_TIMELINE_SENTINEL =
   "<!-- TIMELINE:BELOW - append only past this marker -->";
 
-// Binary-backed documents (pdf/docx rows) materialize with a generated
+// File-backed documents materialize with a generated
 // "extracted text" block appended after the timeline. The block is derived
 // from the DB row on every materialization and is never authoritative: the
 // parser strips it, so edits inside it are discarded on sync.

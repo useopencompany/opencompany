@@ -156,7 +156,7 @@ an existing conversation.
 
 ## Binary assets
 
-`format` on the document row is `markdown` (default), `pdf`, `docx`, `xlsx`, `srt`, or `image`
+`format` on the document row is `markdown` (default), `pdf`, `docx`, `xlsx`, `srt`, `csv`, `tsv`, `json`, `text`, or `image`
 (`GoatBrainDocumentFormat`). A file-backed document is **one row, one folder entry, one artifact**
 — there is no sibling "stub page":
 

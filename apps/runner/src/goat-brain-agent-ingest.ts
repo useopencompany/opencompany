@@ -2253,6 +2253,10 @@ async function extractAssetText(format: string, bytes: Buffer): Promise<string> 
         const { extractXlsxText } = await import("@opencompany/file-extract");
         return await extractXlsxText(bytes);
       }
+      case "csv":
+      case "tsv":
+      case "json":
+      case "text":
       case "srt": {
         const { extractUtf8Text } = await import("@opencompany/file-extract");
         return extractUtf8Text(bytes);

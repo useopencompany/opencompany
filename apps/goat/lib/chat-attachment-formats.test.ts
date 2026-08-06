@@ -26,13 +26,17 @@ describe("goatChatAttachmentKindForMime", () => {
     expect(goatChatAttachmentKindForMime("image/webp")).toBe("image");
     expect(goatChatAttachmentKindForMime("application/x-subrip")).toBe("srt");
     expect(goatChatAttachmentKindForMime("text/srt")).toBe("srt");
+    expect(goatChatAttachmentKindForMime("text/csv")).toBe("csv");
+    expect(goatChatAttachmentKindForMime("text/tab-separated-values")).toBe("tsv");
+    expect(goatChatAttachmentKindForMime("application/json")).toBe("json");
+    expect(goatChatAttachmentKindForMime("text/markdown")).toBe("text");
+    expect(goatChatAttachmentKindForMime("text/plain")).toBe("text");
   });
 
-  it("rejects legacy office formats, gif, and text", () => {
+  it("rejects legacy office formats and gif", () => {
     expect(goatChatAttachmentKindForMime("application/msword")).toBeNull();
     expect(goatChatAttachmentKindForMime("application/vnd.ms-excel")).toBeNull();
     expect(goatChatAttachmentKindForMime("image/gif")).toBeNull();
-    expect(goatChatAttachmentKindForMime("text/plain")).toBeNull();
   });
 });
 
@@ -52,6 +56,16 @@ describe("normalizedGoatChatAttachmentMediaType", () => {
     expect(
       normalizedGoatChatAttachmentMediaType({ mediaType: "text/plain", filename: "notes.txt" }),
     ).toBe("text/plain");
+  });
+
+  it.each([
+    ["", "customers.csv", "text/csv"],
+    ["application/octet-stream", "customers.tsv", "text/tab-separated-values"],
+    ["text/plain", "memo.md", "text/markdown"],
+    ["application/vnd.ms-excel", "export.csv", "text/csv"],
+    ["application/octet-stream", "payload.json", "application/json"],
+  ])("normalizes %j for %j", (mediaType, filename, expected) => {
+    expect(normalizedGoatChatAttachmentMediaType({ mediaType, filename })).toBe(expected);
   });
 });
 
@@ -107,6 +121,23 @@ describe("validateGoatChatAttachmentCandidate", () => {
       validateGoatChatAttachmentCandidate({
         mediaType: "text/srt",
         filename: "captions.txt",
+        sizeBytes: 100,
+      }),
+    ).toMatchObject({ ok: false, reason: "type" });
+  });
+
+  it("accepts text-like founder files despite inconsistent browser MIME types", () => {
+    expect(
+      validateGoatChatAttachmentCandidate({
+        mediaType: "application/octet-stream",
+        filename: "customers.csv",
+        sizeBytes: 100,
+      }),
+    ).toEqual({ ok: true, kind: "csv", mediaType: "text/csv" });
+    expect(
+      validateGoatChatAttachmentCandidate({
+        mediaType: "application/vnd.ms-excel",
+        filename: "legacy.xls",
         sizeBytes: 100,
       }),
     ).toMatchObject({ ok: false, reason: "type" });

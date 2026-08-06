@@ -9,7 +9,7 @@ import {
 // the private Blob store (token minted by /api/brain-assets/upload), then the
 // caller registers the document via uploadGoatBrainAssetAction. Limits mirror
 // the server-side checks in lib/brain-assets.ts; the accepted set is the same
-// core set the chat composer takes (pdf/docx/xlsx/srt/images).
+// core set the chat composer takes.
 export const BRAIN_ASSET_ACCEPT = GOAT_CHAT_ATTACHMENT_ACCEPT;
 export const BRAIN_ASSET_MAX_BYTES = 20 * 1024 * 1024;
 

@@ -8,6 +8,7 @@ import {
 import { goatBrainRelativePath } from "./paths";
 import {
   type GoatBrainDocument,
+  type GoatBrainDocumentFormat,
   type GoatBrainEntityType,
   type GoatBrainFrontmatter,
   type GoatBrainKind,
@@ -28,7 +29,20 @@ import { validateGoatBrainFolderKindType, validateGoatBrainRelations } from "./v
 export const GOAT_BRAIN_ENTRY_SCHEMA_VERSION = "goat.brain.entry.v2";
 export const GOAT_BRAIN_MARKDOWN_MIME_TYPE = "text/markdown";
 
-export type GoatBrainEntryFormat = "markdown" | "pdf" | "docx";
+export type GoatBrainEntryFormat = GoatBrainDocumentFormat;
+
+const GOAT_BRAIN_ENTRY_FORMATS = new Set<GoatBrainEntryFormat>([
+  "markdown",
+  "pdf",
+  "docx",
+  "xlsx",
+  "srt",
+  "csv",
+  "tsv",
+  "json",
+  "text",
+  "image",
+]);
 
 export type GoatBrainEntry = {
   id: string;
@@ -312,7 +326,7 @@ function validateGoatBrainSidecarMetadata(input: {
   if (sidecar.timeline !== undefined && !Array.isArray(sidecar.timeline)) {
     errors.push("sidecar.timeline must be an array.");
   }
-  if (sidecar.format !== "markdown" && sidecar.format !== "pdf" && sidecar.format !== "docx") {
+  if (!GOAT_BRAIN_ENTRY_FORMATS.has(sidecar.format)) {
     errors.push("sidecar.format is invalid.");
   }
   if (typeof sidecar.mimeType !== "string" || !sidecar.mimeType.trim()) {
@@ -359,6 +373,13 @@ function extensionForFormat(format: GoatBrainEntryFormat, originalFileName?: str
   if (extension && /^[a-z0-9]{1,12}$/.test(extension)) return extension;
   if (format === "pdf") return "pdf";
   if (format === "docx") return "docx";
+  if (format === "xlsx") return "xlsx";
+  if (format === "srt") return "srt";
+  if (format === "csv") return "csv";
+  if (format === "tsv") return "tsv";
+  if (format === "json") return "json";
+  if (format === "text") return "txt";
+  if (format === "image") return "png";
   return "md";
 }
 

@@ -1359,6 +1359,13 @@
       "when": 1785948334202,
       "tag": "0192_goat_infisical_cli_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 194,
+      "version": "7",
+      "when": 1785950000000,
+      "tag": "0193_goat_text_like_assets",
+      "breakpoints": true
     }
   ]
 }

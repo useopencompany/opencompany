@@ -28,8 +28,7 @@ export type IndexRecord = {
   contentHash: string;
   embeddingText: string;
   timelineText: string;
-  // Machine-extracted text of binary-backed documents (pdf/docx); empty for
-  // plain markdown pages.
+  // Machine-extracted text of file-backed documents; empty for plain markdown pages.
   assetText: string;
   updatedAt: string;
   relations: GoatBrainRelation[];
