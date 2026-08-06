@@ -23,7 +23,7 @@ export function TopNav() {
             changelog
           </a>
           <Cta href="https://my.opencompany.chat" className="px-3 py-1.5 text-[12px]">
-            Signup
+            Sign up
           </Cta>
         </nav>
 
@@ -75,7 +75,7 @@ export function TopNav() {
               href="https://my.opencompany.chat"
               className="mt-1 w-full justify-center px-3 py-2 text-[12px]"
             >
-              Signup
+              Sign up
             </Cta>
           </nav>
         </details>

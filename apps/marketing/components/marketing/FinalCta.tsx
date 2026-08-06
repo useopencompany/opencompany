@@ -13,7 +13,7 @@ export function FinalCta() {
           Your wiki builds itself on sign-up.
         </p>
         <div className="relative mt-9 flex items-center justify-center">
-          <Cta>Start your first task</Cta>
+          <Cta href="https://my.opencompany.chat">Sign up</Cta>
         </div>
       </div>
     </section>

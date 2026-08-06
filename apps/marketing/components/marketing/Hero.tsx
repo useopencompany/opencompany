@@ -1,5 +1,85 @@
+import { AnthropicIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import { Cta } from "./Cta";
 import { GridBackdrop } from "./GridBackdrop";
+
+const chipIconClass = "size-3.5 text-muted-foreground";
+
+const WikiIcon = (
+  <svg
+    className={chipIconClass}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5v-13ZM20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5v-13Z"
+    />
+  </svg>
+);
+
+const SessionIcon = (
+  <svg
+    className={chipIconClass}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H9l-5 4V5.5Z"
+    />
+  </svg>
+);
+
+const WorkflowIcon = (
+  <svg
+    className={chipIconClass}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+  >
+    <circle cx="6" cy="6" r="2.25" />
+    <circle cx="18" cy="18" r="2.25" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6 8.25v4A3.75 3.75 0 0 0 9.75 16H15.5" />
+  </svg>
+);
+
+// Inline highlight chip for a keyword — a rounded, bordered token with a small
+// glyph, matching the reference (eye/Visibility, Position, Sentiment).
+function Chip({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <span className="mx-0.5 inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-0.5 align-middle font-medium text-[0.9em] text-foreground leading-none">
+      <span aria-hidden="true">{icon}</span>
+      {children}
+    </span>
+  );
+}
+
+// Small circular brand badge used in the "favorite harness" avatar stack.
+function HarnessBadge({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      title={label}
+      className={`inline-flex size-5 items-center justify-center rounded-full border border-border bg-background shadow-sm ${className ?? ""}`}
+    >
+      {children}
+    </span>
+  );
+}
 
 export function Hero() {
   return (
@@ -24,16 +104,24 @@ export function Hero() {
             See what's new in 1.0.0
           </a>
 
-          <h1 className="text-balance font-medium font-mono text-4xl text-ink leading-[1.05] tracking-tight sm:text-6xl">
-            Agent workspace
-            <br />
-            <span className="text-ink-subtle opacity-50">for startups</span>
+          <h1 className="text-balance font-medium font-mono text-3xl text-ink leading-[1.1] tracking-[-0.05em] sm:text-5xl">
+            Run your startup on <span className="text-violet-600 dark:text-violet-400">agents</span>
           </h1>
 
-          <p className="mt-7 max-w-2xl text-pretty font-medium text-[15px] text-muted-foreground leading-8 sm:text-base">
-            Get work done with any model, move processes to agentic workflows,
-            <br />
-            and get better context with a self-building company wiki.
+          <p className="mt-7 max-w-2xl text-pretty font-medium text-[15px] text-muted-foreground leading-7 sm:text-base">
+            A self-building company <Chip icon={WikiIcon}>wiki</Chip> gives every{" "}
+            <Chip icon={SessionIcon}>session</Chip> and agent{" "}
+            <Chip icon={WorkflowIcon}>workflow</Chip> your company's context. Run any model, use
+            curated skills, and bring your favorite harness
+            <span className="ml-1.5 inline-flex items-center align-middle">
+              <HarnessBadge label="Claude Code">
+                <AnthropicIcon className="size-3 text-[#D97757]" />
+              </HarnessBadge>
+              <HarnessBadge label="Codex" className="-ml-1.5">
+                <OpenAIIcon className="size-3 text-foreground" />
+              </HarnessBadge>
+            </span>
+            .
           </p>
 
           <div className="mt-6 flex items-center justify-center gap-2">
@@ -43,7 +131,7 @@ export function Hero() {
             >
               Book demo
             </Cta>
-            <Cta href="https://my.opencompany.chat">Signup</Cta>
+            <Cta href="https://my.opencompany.chat">Sign up</Cta>
           </div>
         </div>
       </div>
