@@ -82,6 +82,41 @@ describe("Goat Brain asset uploads", () => {
     });
   });
 
+  it("stores a CSV asset with a canonical MIME type when the browser reports Excel", async () => {
+    vi.mocked(nextAvailableGoatBrainId).mockResolvedValue("customers");
+    vi.mocked(createGoatBrainAssetDocument).mockResolvedValue({
+      id: "document_1",
+      brainId: "customers",
+      folderPath: "inbox",
+    } as never);
+    vi.mocked(upsertGoatBrainSourceItemAndEnqueue).mockResolvedValue({
+      paused: false,
+      quotaUpdates: [],
+    } as never);
+    vi.mocked(documentViewFromFileRow).mockReturnValue({ id: "document_1" } as never);
+    vi.mocked(goatBrainFilePathFor).mockReturnValue("inbox/customers.md");
+
+    const result = await createGoatBrainAssetForUser({
+      brainRef: "goat_brain_1",
+      userWorkosId: "user_1",
+      folderPath: "inbox",
+      blobUrl: "https://blob.test/goat-brain/goat_brain_1/assets/customers.csv",
+      originalFileName: "customers.csv",
+      mimeType: "application/vnd.ms-excel",
+      sizeBytes: 128,
+      contentSha256: "a".repeat(64),
+    });
+
+    expect(result).toMatchObject({ ok: true, path: "inbox/customers.md" });
+    expect(createGoatBrainAssetDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        format: "csv",
+        mimeType: "text/csv",
+        originalFileName: "customers.csv",
+      }),
+    );
+  });
+
   it("rejects uploads inside the skills zone", async () => {
     await expect(
       createGoatBrainAssetForUser({

@@ -9,7 +9,7 @@ import {
 } from "@/lib/chat-attachment-formats";
 import type { GoatChatUiMessage, GoatStoredChatMessage } from "@/lib/chat-ui";
 
-// docx/xlsx/srt text shown to the chat model; matches the brain capture cap so a
+// Extracted text shown to the chat model; matches the brain capture cap so a
 // save_to_brain of the same content never silently exceeds it.
 const CHAT_ATTACHMENT_TEXT_MAX_BYTES = 64_000;
 const MAX_FILENAME_LENGTH = 200;
@@ -75,7 +75,7 @@ export function parseGoatChatAttachmentsInput(
   return { ok: true, attachments };
 }
 
-// Runs at submit time so docx/xlsx/srt content is visible to the model on this
+// Runs at submit time so extractable file content is visible to the model on this
 // and every later turn without re-extraction. Failures degrade to "no text"
 // (the model still sees the filename) rather than blocking the send.
 export async function extractGoatChatAttachmentTexts(
@@ -83,9 +83,7 @@ export async function extractGoatChatAttachmentTexts(
 ): Promise<Record<string, string> | null> {
   const texts: Record<string, string> = {};
   for (const attachment of attachments) {
-    if (attachment.kind !== "docx" && attachment.kind !== "xlsx" && attachment.kind !== "srt") {
-      continue;
-    }
+    if (!isTextExtractableGoatChatAttachment(attachment)) continue;
     try {
       const bytes = await downloadGoatChatAttachment(attachment.blobUrl);
       const text =
@@ -123,7 +121,7 @@ export async function downloadGoatChatAttachment(blobUrl: string): Promise<Buffe
 
 // Appends attachment parts to every user message before convertToModelMessages:
 // pdf/images as data-URL file parts (the blob store is private, so provider-
-// fetchable URLs don't exist), docx/xlsx/srt as extracted-text parts. Replayed on
+// fetchable URLs don't exist), extractable files as extracted-text parts. Replayed on
 // every turn — follow-up questions about a file are the core use case; caps
 // bound the cost. Each part carries the attachment id so the model can pass it
 // to save_to_brain.
@@ -164,7 +162,7 @@ async function attachmentToParts(
 ): Promise<GoatChatUiMessage["parts"]> {
   const label = attachmentLabel(attachment);
 
-  if (attachment.kind === "docx" || attachment.kind === "xlsx" || attachment.kind === "srt") {
+  if (isTextExtractableGoatChatAttachment(attachment)) {
     const text = stored.attachmentTexts?.[attachment.id];
     return [
       {
@@ -204,4 +202,18 @@ async function attachmentToParts(
 
 function attachmentLabel(attachment: GoatChatMessageAttachment): string {
   return `[Attached file "${attachment.filename}" (${attachment.kind}) — attachment id: ${attachment.id}]`;
+}
+
+export function isTextExtractableGoatChatAttachment(
+  attachment: Pick<GoatChatMessageAttachment, "kind">,
+): boolean {
+  return (
+    attachment.kind === "docx" ||
+    attachment.kind === "xlsx" ||
+    attachment.kind === "srt" ||
+    attachment.kind === "csv" ||
+    attachment.kind === "tsv" ||
+    attachment.kind === "json" ||
+    attachment.kind === "text"
+  );
 }

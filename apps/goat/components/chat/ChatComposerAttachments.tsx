@@ -34,7 +34,7 @@ export function GoatComposerDropOverlay({ className }: { className?: string }) {
         <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
         <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
         <p className="text-[11.5px] text-ink-subtle">
-          PDF, Word, Excel, SRT &amp; images · or paste with ⌘V
+          PDF, Word, Excel, CSV, text &amp; images · or paste with ⌘V
         </p>
       </div>
     </div>
@@ -50,6 +50,10 @@ function attachmentTypeLabel(kind: GoatChatAttachmentKind, filename: string): st
   if (kind === "pdf") return "PDF";
   if (kind === "docx") return "Word";
   if (kind === "xlsx") return "Excel";
+  if (kind === "csv") return "CSV";
+  if (kind === "tsv") return "TSV";
+  if (kind === "json") return "JSON";
+  if (kind === "text") return "Text";
   return "Subtitles";
 }
 

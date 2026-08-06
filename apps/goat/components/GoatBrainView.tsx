@@ -2752,15 +2752,17 @@ function safeDecodePathSegment(segment: string) {
 }
 
 function brainDocumentTreePath(document: GoatBrainDocumentView) {
-  // "image" is a format, not an extension — recover the real one (png/jpg/…)
-  // from the original filename.
+  // Recover the original uploaded extension where we have it; "image" and
+  // generic "text" are formats, not useful tree extensions.
   const originalExtension = document.originalFileName?.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
   const extension =
     document.format === "markdown"
       ? "md"
-      : document.format === "image"
-        ? (originalExtension ?? "png")
-        : document.format;
+      : originalExtension
+        ? originalExtension
+        : document.format === "image"
+          ? "png"
+          : document.format;
   return `${document.folderPath}/${document.brainId}.${extension}`;
 }
 
@@ -3079,6 +3081,10 @@ function normalizeFormat(value: string): GoatBrainDocumentView["format"] {
     value === "docx" ||
     value === "xlsx" ||
     value === "srt" ||
+    value === "csv" ||
+    value === "tsv" ||
+    value === "json" ||
+    value === "text" ||
     value === "image"
   ) {
     return value;

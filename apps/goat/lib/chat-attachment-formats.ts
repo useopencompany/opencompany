@@ -2,9 +2,10 @@ import type { GoatChatAttachmentKind } from "@opencompany/db/goat-schema";
 
 // Isomorphic (client + server) constants for Goat chat attachments. The core
 // set matches what the brain asset pipeline can ingest: pdf, docx, xlsx, SRT,
-// and still images. No legacy .doc/.xls, no gif (animated frames collapse), or
-// generic plain-text kinds — pasted text already flows through the composer.
+// still images, and text-like founder artifacts such as CSV exports, Markdown,
+// plain text, and JSON. No legacy .doc/.xls or gif (animated frames collapse).
 export const GOAT_CHAT_SRT_MIME_TYPE = "application/x-subrip";
+export const GOAT_CHAT_TSV_MIME_TYPE = "text/tab-separated-values";
 
 export const GOAT_CHAT_ATTACHMENT_MIME_KINDS: Record<string, GoatChatAttachmentKind> = {
   "application/pdf": "pdf",
@@ -13,6 +14,11 @@ export const GOAT_CHAT_ATTACHMENT_MIME_KINDS: Record<string, GoatChatAttachmentK
   [GOAT_CHAT_SRT_MIME_TYPE]: "srt",
   "application/srt": "srt",
   "text/srt": "srt",
+  "text/csv": "csv",
+  [GOAT_CHAT_TSV_MIME_TYPE]: "tsv",
+  "application/json": "json",
+  "text/markdown": "text",
+  "text/plain": "text",
   "image/png": "image",
   "image/jpeg": "image",
   "image/webp": "image",
@@ -26,6 +32,12 @@ export const GOAT_CHAT_ATTACHMENT_ACCEPT = [
   ".docx",
   ".xlsx",
   ".srt",
+  ".csv",
+  ".tsv",
+  ".md",
+  ".markdown",
+  ".txt",
+  ".json",
   ".png",
   ".jpg",
   ".jpeg",
@@ -56,7 +68,8 @@ export function validateGoatChatAttachmentCandidate(input: {
     return {
       ok: false,
       reason: "type",
-      message: "Supported files: PDF, Word (.docx), Excel (.xlsx), SRT, PNG, JPEG, WebP.",
+      message:
+        "Supported files: PDF, Word (.docx), Excel (.xlsx), CSV, TSV, Markdown, text, JSON, SRT, PNG, JPEG, WebP.",
     };
   }
   // Unlike the binary formats, SRT has no registered media type that browsers
@@ -87,14 +100,22 @@ export function normalizedGoatChatAttachmentMediaType(input: {
   filename?: string;
 }): string {
   const mediaType = normalizedMimeType(input.mediaType);
+  const extension = extensionOf(input.filename);
   if (
-    isSrtFilename(input.filename) &&
+    extension === "srt" &&
     (!mediaType ||
       mediaType === "application/octet-stream" ||
       mediaType === "text/plain" ||
       goatChatAttachmentKindForMime(mediaType) === "srt")
   ) {
     return GOAT_CHAT_SRT_MIME_TYPE;
+  }
+  if (shouldTrustExtension(mediaType)) {
+    if (extension === "csv") return "text/csv";
+    if (extension === "tsv") return GOAT_CHAT_TSV_MIME_TYPE;
+    if (extension === "md" || extension === "markdown") return "text/markdown";
+    if (extension === "txt") return "text/plain";
+    if (extension === "json") return "application/json";
   }
   return mediaType;
 }
@@ -105,4 +126,20 @@ function normalizedMimeType(mediaType: string): string {
 
 function isSrtFilename(filename: string | undefined): boolean {
   return filename?.trim().toLowerCase().endsWith(".srt") ?? false;
+}
+
+function extensionOf(filename: string | undefined): string {
+  const trimmed = filename?.trim().toLowerCase();
+  if (!trimmed) return "";
+  const dot = trimmed.lastIndexOf(".");
+  return dot >= 0 ? trimmed.slice(dot + 1) : "";
+}
+
+function shouldTrustExtension(mediaType: string): boolean {
+  return (
+    !mediaType ||
+    mediaType === "application/octet-stream" ||
+    mediaType === "text/plain" ||
+    mediaType === "application/vnd.ms-excel"
+  );
 }

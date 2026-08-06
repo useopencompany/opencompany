@@ -64,7 +64,7 @@ import {
 export const GOAT_BRAIN_FILE_MIME_TYPE = "text/markdown";
 export const GOAT_BRAIN_FILE_FORMAT = "markdown";
 export const MAX_GOAT_BRAIN_FILE_BYTES = 1_000_000;
-// Cap on stored machine-extracted asset text (pdf/docx rows).
+// Cap on stored machine-extracted asset text for file-backed rows.
 export const MAX_GOAT_BRAIN_ASSET_TEXT_BYTES = 200_000;
 
 export type GoatBrainFileProjection = {
