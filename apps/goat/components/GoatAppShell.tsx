@@ -28,6 +28,7 @@ import { getGoatPersonalAccounts } from "@/lib/integrations/personal-accounts";
 import { getGoatPostHogIntegrationState } from "@/lib/integrations/posthog-mcp";
 import { getGoatSlackIntegrationState } from "@/lib/integrations/slack";
 import { getGoatStripeIntegrationState } from "@/lib/integrations/stripe";
+import { getGoatXAccountIntegrationState } from "@/lib/integrations/x-account";
 import { listCurrentUserGoatTaskSchedules } from "@/lib/task-schedules";
 import { listCurrentUserGoatTasks } from "@/lib/tasks";
 
@@ -49,6 +50,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     fathom,
     attio,
     stripe,
+    xAccount,
     imessage,
     codex,
     claudeCode,
@@ -69,6 +71,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     getGoatFathomIntegrationState(user.workosUserId),
     getGoatAttioIntegrationState(user.workosUserId),
     getGoatStripeIntegrationState(workspace.id),
+    getGoatXAccountIntegrationState(user.workosUserId),
     getGoatImessageIntegrationState(user.workosUserId),
     loadCurrentGoatCodexAuthSettings(),
     loadCurrentGoatClaudeCodeAuthSettings(),
@@ -137,6 +140,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       fathom,
       attio,
       stripe,
+      xAccount,
       imessage,
       personalAccounts,
       codex: {
@@ -214,6 +218,7 @@ function buildIntegrationState(input: {
   fathom: GoatIntegrationState["fathom"];
   attio: GoatIntegrationState["attio"];
   stripe: GoatIntegrationState["stripe"];
+  xAccount: GoatIntegrationState["x_account"];
   imessage: GoatIntegrationState["imessage"];
   personalAccounts: GoatIntegrationState["personalAccounts"];
   codex: GoatCodexProviderState;
@@ -233,6 +238,7 @@ function buildIntegrationState(input: {
     fathom: input.fathom,
     attio: input.attio,
     stripe: input.stripe,
+    x_account: input.xAccount,
     imessage: input.imessage,
     codex: input.codex,
     claude_code: input.claudeCode,

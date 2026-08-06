@@ -18,6 +18,7 @@ import {
   PostHogIcon,
   SlackIcon,
   StripeIcon,
+  XIcon,
 } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
@@ -213,6 +214,12 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
     description: "Get important updates from Goat as texts on your phone.",
     monogram: "iM",
     tileClass: "bg-[#34C759] text-white",
+  },
+  x_account: {
+    label: "X",
+    description: "Let Goat post new tweets from your X account.",
+    Icon: XIcon,
+    tileClass: "bg-black text-white",
   },
 };
 
@@ -463,6 +470,10 @@ function IntegrationCards({
             <IntegrationProviderGroupCard
               provider="neon"
               accounts={integrations.personalAccounts.neon}
+            />
+            <IntegrationProviderGroupCard
+              provider="x_account"
+              accounts={integrations.personalAccounts.x_account}
             />
             <CodexIntegrationCard integration={integrations.codex} />
             <ClaudeCodeIntegrationCard integration={integrations.claude_code} />
@@ -998,7 +1009,7 @@ function IntegrationAccountRow({ account }: { account: GoatIntegrationAccountVie
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const identity =
-    account.provider === "slack"
+    account.provider === "slack" || account.provider === "x_account"
       ? [account.connectionLabel, account.accountName].filter(Boolean).join(" · ") ||
         account.accountEmail ||
         account.integrationId
@@ -1795,6 +1806,8 @@ function integrationConnectHref(
   if (provider === "neon") return "/api/integrations/neon/start?returnTo=/settings/integrations";
   if (provider === "posthog")
     return "/api/integrations/posthog/start?returnTo=/settings/integrations";
+  if (provider === "x_account")
+    return "/api/integrations/x-account/start?returnTo=/settings/integrations";
   return "/api/integrations/linear/start?returnTo=/settings/integrations";
 }
 
