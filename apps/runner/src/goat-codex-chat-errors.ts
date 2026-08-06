@@ -15,9 +15,10 @@ export class GoatTaskTurnTerminalError extends Error {
   }
 }
 
-// Transient provider failures before Codex starts must preserve the durable user turn. The worker
-// catches this error and defers the same leased row with backoff instead of projecting a failed
-// assistant message.
+// Transient provider failures must preserve the durable user turn. Before an engine starts, the
+// worker retries the same turn from scratch. After the engine boundary, the next claim uses the
+// persisted recovery state to fence any leftover process and resume safely instead of projecting a
+// failed assistant message.
 export class GoatCodexChatRetryableInfrastructureError extends Error {
   override readonly cause: unknown;
 

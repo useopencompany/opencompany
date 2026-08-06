@@ -48,6 +48,7 @@ import {
 import {
   GoatCodexChatHandoffError,
   GoatCodexChatLeaseLostError,
+  GoatCodexChatRetryableInfrastructureError,
   GoatTaskTurnTerminalError,
 } from "./goat-codex-chat-errors";
 import {
@@ -81,6 +82,7 @@ import {
   armSandboxActiveTimeoutById,
   armSandboxIdleTimeout,
   createOrConnectSandbox,
+  isRetryableCommandStreamError,
   type SandboxHandle,
 } from "./sandbox";
 import { materializeCodexSkillSnapshotsForSession } from "./skills";
@@ -693,6 +695,13 @@ export async function runGoatClaudeCodeChatTurn(input: {
     } else if (effectiveError instanceof GoatCodexChatLeaseLostError) {
       leaseLost = true;
       throw effectiveError;
+    } else if (effectiveError instanceof GoatCodexChatRetryableInfrastructureError) {
+      throw effectiveError;
+    } else if (isRetryableCommandStreamError(effectiveError)) {
+      throw new GoatCodexChatRetryableInfrastructureError(
+        "Claude Code lost contact with its sandbox command stream before the turn completed.",
+        effectiveError,
+      );
     } else {
       const message = redact(errorMessage(effectiveError));
       logger.warn("Goat Claude Code chat turn execution failed", {
