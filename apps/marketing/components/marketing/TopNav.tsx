@@ -26,7 +26,11 @@ export function TopNav() {
         </nav>
 
         <div className="flex items-center justify-end gap-2">
-          <Cta variant="secondary" className="hidden px-3 py-1.5 text-[12px] sm:inline-flex">
+          <Cta
+            href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
+            variant="secondary"
+            className="hidden px-3 py-1.5 text-[12px] sm:inline-flex"
+          >
             Book demo
           </Cta>
           <Cta
@@ -77,7 +81,11 @@ export function TopNav() {
               >
                 changelog
               </a>
-              <Cta variant="secondary" className="mt-1 w-full justify-center px-3 py-2 text-[12px]">
+              <Cta
+                href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
+                variant="secondary"
+                className="mt-1 w-full justify-center px-3 py-2 text-[12px]"
+              >
                 Book demo
               </Cta>
               <Cta
