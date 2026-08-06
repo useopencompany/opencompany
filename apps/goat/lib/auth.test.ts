@@ -6,17 +6,19 @@ import {
   listGoatWorkspacesForUser,
 } from "@opencompany/db/goat-workspaces";
 import { recordGoatSignup } from "@opencompany/goat-observability";
-import { withAuth } from "@workos-inc/authkit-nextjs";
+import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
 import { cookies } from "next/headers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   activateGoatWorkspaceForOrganization,
   adoptWorkOSOrganizationMemberships,
+  completeGoatAuthentication,
   currentGoatUser,
   GOAT_ACTIVE_BRAIN_COOKIE,
   GOAT_ACTIVE_WORKSPACE_COOKIE,
   syncGoatUser,
 } from "@/lib/auth";
+import { recordLastGoatAuthMethod } from "@/lib/auth-methods";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
 
@@ -46,7 +48,12 @@ vi.mock("@opencompany/goat-observability", () => ({
 }));
 
 vi.mock("@workos-inc/authkit-nextjs", () => ({
+  saveSession: vi.fn(),
   withAuth: vi.fn(),
+}));
+
+vi.mock("@/lib/auth-methods", () => ({
+  recordLastGoatAuthMethod: vi.fn(),
 }));
 
 vi.mock("next/headers", () => ({
@@ -84,6 +91,8 @@ const listAccessibleGoatBrainsMock = vi.mocked(listAccessibleGoatBrains);
 const listGoatWorkspacesForUserMock = vi.mocked(listGoatWorkspacesForUser);
 const recordGoatSignupMock = vi.mocked(recordGoatSignup);
 const withAuthMock = vi.mocked(withAuth);
+const saveSessionMock = vi.mocked(saveSession);
+const recordLastGoatAuthMethodMock = vi.mocked(recordLastGoatAuthMethod);
 
 const now = new Date("2026-01-01T00:00:00.000Z");
 const authUser = {
@@ -369,6 +378,94 @@ describe("activateGoatWorkspaceForOrganization", () => {
       expect.any(Object),
     );
     expect(cookieStore.delete).toHaveBeenCalledWith(GOAT_ACTIVE_BRAIN_COOKIE);
+  });
+});
+
+describe("completeGoatAuthentication", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function mockSyncAndAdopt() {
+    const dbMock = createDbMock({ insertReturning: [goatUser] });
+    getDbMock.mockReturnValue(dbMock.db as never);
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: {
+        listOrganizationMemberships: vi.fn(async () => ({ data: [] })),
+      },
+    } as never);
+    return dbMock;
+  }
+
+  it("seals the session, records the auth method, and activates the invited workspace", async () => {
+    mockSyncAndAdopt();
+    listGoatWorkspacesForUserMock.mockResolvedValue([
+      {
+        workspace: { id: "goat_ws_invited", workosOrganizationId: "org_invited" },
+        role: "member",
+      },
+    ] as never);
+    listAccessibleGoatBrainsMock.mockResolvedValue([
+      { id: "brain_default", slug: "default" },
+    ] as never);
+    const cookieStore = { set: vi.fn(), delete: vi.fn() };
+    cookiesMock.mockResolvedValue(cookieStore as never);
+
+    const authResponse = {
+      user: authUser,
+      organizationId: "org_invited",
+      accessToken: "at_123",
+      refreshToken: "rt_123",
+      authenticationMethod: "MagicAuth",
+    };
+
+    await completeGoatAuthentication(authResponse as never, "https://my.opencompany.chat");
+
+    expect(saveSessionMock).toHaveBeenCalledWith(authResponse, "https://my.opencompany.chat");
+    expect(recordLastGoatAuthMethodMock).toHaveBeenCalledWith("MagicAuth");
+    expect(cookieStore.set).toHaveBeenCalledWith(
+      "goat-active-workspace",
+      "goat_ws_invited",
+      expect.any(Object),
+    );
+  });
+
+  it("skips workspace activation when the auth response has no organization", async () => {
+    mockSyncAndAdopt();
+
+    const authResponse = {
+      user: authUser,
+      accessToken: "at_123",
+      refreshToken: "rt_123",
+      authenticationMethod: "GoogleOAuth",
+    };
+
+    await completeGoatAuthentication(authResponse as never, "https://my.opencompany.chat");
+
+    expect(listGoatWorkspacesForUserMock).not.toHaveBeenCalled();
+  });
+
+  it("does not block authentication when workspace activation fails", async () => {
+    mockSyncAndAdopt();
+    listGoatWorkspacesForUserMock.mockRejectedValue(new Error("Database unavailable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const authResponse = {
+      user: authUser,
+      organizationId: "org_invited",
+      accessToken: "at_123",
+      refreshToken: "rt_123",
+      authenticationMethod: "MagicAuth",
+    };
+
+    await expect(
+      completeGoatAuthentication(authResponse as never, "https://my.opencompany.chat"),
+    ).resolves.toBeUndefined();
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "[goat] Failed to activate the authenticated workspace",
+      expect.any(Error),
+    );
   });
 });
 

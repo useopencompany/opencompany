@@ -16,12 +16,14 @@ import {
   listGoatWorkspacesForUser,
 } from "@opencompany/db/goat-workspaces";
 import { recordGoatSignup } from "@opencompany/goat-observability";
-import { withAuth } from "@workos-inc/authkit-nextjs";
-import type { User as WorkOSUser } from "@workos-inc/node";
+import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
+import type { AuthenticationResponse, User as WorkOSUser } from "@workos-inc/node";
 import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import type { NextRequest } from "next/server";
 import { cache } from "react";
+import { recordLastGoatAuthMethod } from "@/lib/auth-methods";
 import { syncGoatStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
 import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
 import { getWorkOSClient } from "@/lib/workos-client";
@@ -172,6 +174,30 @@ export async function activateGoatWorkspaceForOrganization(input: {
   return true;
 }
 
+// Shared by both custom sign-in surfaces (Google OAuth callback and the magic-link
+// server action): seals the WorkOS session into the same cookie withAuth() reads,
+// then runs the same sync/adopt/activate side effects the old hosted-AuthKit
+// onSuccess callback used to run.
+export async function completeGoatAuthentication(
+  authResponse: AuthenticationResponse,
+  request: NextRequest | string,
+) {
+  await saveSession(authResponse, request);
+  await recordLastGoatAuthMethod(authResponse.authenticationMethod);
+  await syncGoatUser(authResponse.user);
+  await adoptWorkOSOrganizationMemberships(authResponse.user);
+  if (authResponse.organizationId) {
+    try {
+      await activateGoatWorkspaceForOrganization({
+        userWorkosId: authResponse.user.id,
+        organizationId: authResponse.organizationId,
+      });
+    } catch (error) {
+      console.error("[goat] Failed to activate the authenticated workspace", error);
+    }
+  }
+}
+
 async function ensureGoatWorkspaces(
   authUser: WorkOSUser,
   user: typeof goatUsers.$inferSelect,
@@ -252,7 +278,7 @@ export async function currentGoatUser(options: { optional?: boolean } = {}) {
   const context = await resolveGoatAuthContext();
   if (!context) {
     if (options.optional) return null;
-    redirect("/auth/sign-in");
+    redirect("/signin");
   }
   return context;
 }

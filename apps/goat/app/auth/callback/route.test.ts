@@ -1,89 +1,181 @@
-import { describe, expect, it, vi } from "vitest";
-import {
-  activateGoatWorkspaceForOrganization,
-  adoptWorkOSOrganizationMemberships,
-  syncGoatUser,
-} from "@/lib/auth";
+import { AuthenticationException } from "@workos-inc/node";
+import { NextRequest } from "next/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { completeGoatAuthentication } from "@/lib/auth";
+import { consumeGoatOAuthStateCookie, setGoatOrganizationSelection } from "@/lib/auth-methods";
+import { getWorkOSClient } from "@/lib/workos-client";
 import { GET } from "./route";
 
-vi.mock("@workos-inc/authkit-nextjs", () => ({
-  handleAuth: vi.fn((config) => config),
+vi.mock("@/lib/auth", () => ({
+  completeGoatAuthentication: vi.fn(),
 }));
 
-vi.mock("@/lib/auth", () => ({
-  activateGoatWorkspaceForOrganization: vi.fn(),
-  adoptWorkOSOrganizationMemberships: vi.fn(),
-  syncGoatUser: vi.fn(),
-}));
+vi.mock("@/lib/auth-methods", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth-methods")>();
+  return {
+    ...actual,
+    consumeGoatOAuthStateCookie: vi.fn(),
+    setGoatOrganizationSelection: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/workos", () => ({
   getGoatAppUrl: vi.fn(() => "https://my.opencompany.chat"),
 }));
 
-const syncGoatUserMock = vi.mocked(syncGoatUser);
-const adoptWorkOSOrganizationMembershipsMock = vi.mocked(adoptWorkOSOrganizationMemberships);
-const activateGoatWorkspaceForOrganizationMock = vi.mocked(activateGoatWorkspaceForOrganization);
+vi.mock("@/lib/workos-client", () => ({
+  getWorkOSClient: vi.fn(),
+}));
 
-function authConfig() {
-  const config = GET as unknown as {
-    baseURL?: string;
-    returnPathname?: string;
-    onSuccess?: (input: { user: never; organizationId?: string }) => Promise<void>;
-  };
-  if (!config.onSuccess) throw new Error("Auth callback onSuccess was not registered.");
-  return config;
+const completeGoatAuthenticationMock = vi.mocked(completeGoatAuthentication);
+const consumeGoatOAuthStateCookieMock = vi.mocked(consumeGoatOAuthStateCookie);
+const setGoatOrganizationSelectionMock = vi.mocked(setGoatOrganizationSelection);
+const getWorkOSClientMock = vi.mocked(getWorkOSClient);
+
+function callbackRequest(search: string) {
+  return new NextRequest(`https://my.opencompany.chat/auth/callback${search}`, {
+    headers: { "user-agent": "vitest", "x-forwarded-for": "203.0.113.5" },
+  });
 }
 
-describe("Goat auth callback", () => {
-  it("pins AuthKit callback redirects to the Goat app origin", () => {
-    expect(authConfig().baseURL).toBe("https://my.opencompany.chat");
-    expect(authConfig().returnPathname).toBe("/");
+describe("Goat Google OAuth callback", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("syncs memberships and activates the workspace selected by AuthKit", async () => {
-    const user = {
-      id: "user_123",
-      email: "ada@example.com",
-      firstName: "Ada",
-      lastName: "Lovelace",
-    };
-
-    await authConfig().onSuccess?.({
-      user: user as never,
-      organizationId: "org_invited",
+  it("exchanges the code, completes the session, and returns to the requested path", async () => {
+    consumeGoatOAuthStateCookieMock.mockResolvedValue({
+      state: "state-123",
+      invitationToken: "invite-token-123",
+      returnPathname: "/brain",
     });
-
-    expect(syncGoatUserMock).toHaveBeenCalledWith(user);
-    expect(adoptWorkOSOrganizationMembershipsMock).toHaveBeenCalledWith(user);
-    expect(activateGoatWorkspaceForOrganizationMock).toHaveBeenCalledWith({
-      userWorkosId: user.id,
+    const authenticateWithCode = vi.fn(async () => ({
+      user: { id: "user_123", email: "ada@example.com" },
       organizationId: "org_invited",
+      authenticationMethod: "GoogleOAuth",
+    }));
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: { authenticateWithCode },
+    } as never);
+
+    const response = await GET(callbackRequest("?code=auth-code&state=state-123"));
+
+    expect(authenticateWithCode).toHaveBeenCalledWith({
+      clientId: expect.any(String),
+      code: "auth-code",
+      invitationToken: "invite-token-123",
+      ipAddress: "203.0.113.5",
+      userAgent: "vitest",
     });
-    expect(syncGoatUserMock.mock.invocationCallOrder[0]).toBeLessThan(
-      adoptWorkOSOrganizationMembershipsMock.mock.invocationCallOrder[0] ??
-        Number.POSITIVE_INFINITY,
+    expect(completeGoatAuthenticationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "org_invited" }),
+      expect.anything(),
     );
-    expect(adoptWorkOSOrganizationMembershipsMock.mock.invocationCallOrder[0]).toBeLessThan(
-      activateGoatWorkspaceForOrganizationMock.mock.invocationCallOrder[0] ??
-        Number.POSITIVE_INFINITY,
-    );
+    expect(response.headers.get("location")).toBe("https://my.opencompany.chat/brain");
   });
 
-  it("does not block authentication when local workspace activation fails", async () => {
-    const error = new Error("Database unavailable");
-    activateGoatWorkspaceForOrganizationMock.mockRejectedValueOnce(error);
+  it("ignores a returnPathname that would redirect off our own origin", async () => {
+    consumeGoatOAuthStateCookieMock.mockResolvedValue({
+      state: "state-123",
+      returnPathname: "https://evil.example.com",
+    });
+    const authenticateWithCode = vi.fn(async () => ({
+      user: { id: "user_123", email: "ada@example.com" },
+      authenticationMethod: "GoogleOAuth",
+    }));
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: { authenticateWithCode },
+    } as never);
+
+    const response = await GET(callbackRequest("?code=auth-code&state=state-123"));
+
+    expect(response.headers.get("location")).toBe("https://my.opencompany.chat/");
+  });
+
+  it("rejects a callback whose state does not match the stored cookie", async () => {
+    consumeGoatOAuthStateCookieMock.mockResolvedValue({ state: "expected-state" });
+
+    const response = await GET(callbackRequest("?code=auth-code&state=wrong-state"));
+
+    expect(getWorkOSClientMock).not.toHaveBeenCalled();
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.pathname).toBe("/signin");
+    expect(location.searchParams.get("error")).toBe("oauth_state");
+  });
+
+  it("redirects to sign-in with an error when the code exchange fails", async () => {
+    consumeGoatOAuthStateCookieMock.mockResolvedValue({ state: "state-123" });
+    const authenticateWithCode = vi.fn(async () => {
+      throw new Error("invalid_grant");
+    });
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: { authenticateWithCode },
+    } as never);
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(
-      authConfig().onSuccess?.({
-        user: { id: "user_123" } as never,
-        organizationId: "org_invited",
-      }),
-    ).resolves.toBeUndefined();
+    const response = await GET(callbackRequest("?code=auth-code&state=state-123"));
 
-    expect(consoleError).toHaveBeenCalledWith(
-      "[goat] Failed to activate the authenticated workspace",
-      error,
-    );
+    expect(completeGoatAuthenticationMock).not.toHaveBeenCalled();
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.searchParams.get("error")).toBe("oauth_failed");
+    expect(consoleError).toHaveBeenCalled();
+  });
+
+  it("continues with organization selection when WorkOS requires it", async () => {
+    consumeGoatOAuthStateCookieMock.mockResolvedValue({
+      state: "state-123",
+      returnPathname: "/brain",
+    });
+    const authenticateWithCode = vi.fn(async () => {
+      throw new AuthenticationException(
+        400,
+        {
+          code: "organization_selection_required",
+          pending_authentication_token: "pending-token",
+          organizations: [
+            { id: "org_one", name: "One" },
+            { id: "org_two", name: "Two" },
+          ],
+        },
+        "request-123",
+      );
+    });
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: { authenticateWithCode },
+    } as never);
+
+    const response = await GET(callbackRequest("?code=auth-code&state=state-123"));
+
+    expect(setGoatOrganizationSelectionMock).toHaveBeenCalledWith({
+      pendingAuthenticationToken: "pending-token",
+      organizations: [
+        { id: "org_one", name: "One" },
+        { id: "org_two", name: "Two" },
+      ],
+      returnPathname: "/brain",
+    });
+    expect(completeGoatAuthenticationMock).not.toHaveBeenCalled();
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.pathname).toBe("/signin");
+    expect(location.search).toBe("");
+  });
+
+  it("does not allow a callback return path to redirect off-site", async () => {
+    consumeGoatOAuthStateCookieMock.mockResolvedValue({
+      state: "state-123",
+      returnPathname: "https://attacker.example/steal",
+    });
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: {
+        authenticateWithCode: vi.fn(async () => ({
+          user: { id: "user_123", email: "ada@example.com" },
+          authenticationMethod: "GoogleOAuth",
+        })),
+      },
+    } as never);
+
+    const response = await GET(callbackRequest("?code=auth-code&state=state-123"));
+
+    expect(response.headers.get("location")).toBe("https://my.opencompany.chat/");
   });
 });

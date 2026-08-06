@@ -1,7 +1,10 @@
-import { getSignInUrl } from "@workos-inc/authkit-nextjs";
-import { redirect } from "next/navigation";
-import { getGoatWorkOSRedirectUri } from "@/lib/workos";
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
-export async function GET() {
-  redirect(await getSignInUrl({ redirectUri: getGoatWorkOSRedirectUri() }));
+// Compat redirect for bookmarked/cached links to the old hosted-AuthKit entry
+// point. The real sign-in page now lives at /signin.
+export function GET(request: NextRequest) {
+  const url = new URL("/signin", request.url);
+  url.search = request.nextUrl.search;
+  return NextResponse.redirect(url);
 }

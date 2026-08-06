@@ -82,6 +82,18 @@ describe("parseGoatOnboardingProfile", () => {
     });
   });
 
+  it.each([
+    "jamie",
+    "https://localhost",
+    "https://example.",
+    "https://example.123",
+  ])("rejects a value without a real domain (%s)", (companyUrl) => {
+    expect(parseGoatOnboardingProfile({ role: "founder", companyUrl })).toEqual({
+      ok: false,
+      error: "Enter a valid company URL.",
+    });
+  });
+
   it("rejects credentials and values beyond the stored limit", () => {
     expect(normalizeGoatOnboardingCompanyUrl("https://user:secret@example.com")).toBeNull();
     expect(

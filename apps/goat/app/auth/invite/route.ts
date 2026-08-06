@@ -1,7 +1,6 @@
-import { getSignInUrl } from "@workos-inc/authkit-nextjs";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { getGoatWorkOSRedirectUri } from "@/lib/workos";
+import { getGoatAppUrl } from "@/lib/workos";
 import { getWorkOSClient } from "@/lib/workos-client";
 
 function privateRedirect(url: string | URL) {
@@ -11,39 +10,30 @@ function privateRedirect(url: string | URL) {
   return response;
 }
 
+// Resolves a workspace invitation link into our own sign-up page. The
+// invitation_token itself (not organizationId) is what threads through
+// lib/auth-actions.ts to WorkOS's authenticate calls, which associate the
+// invitation's organization automatically once the person authenticates.
 export async function GET(request: NextRequest) {
   const invitationToken = request.nextUrl.searchParams.get("invitation_token")?.trim();
   if (!invitationToken) {
-    return privateRedirect(new URL("/auth/sign-in", request.url));
+    return privateRedirect(new URL("/signin", getGoatAppUrl()));
   }
 
-  let organizationId: string | undefined;
-  let loginHint: string | undefined;
+  const url = new URL("/signup", getGoatAppUrl());
+  url.searchParams.set("invitation_token", invitationToken);
+
   try {
     const invitation =
       await getWorkOSClient().userManagement.findInvitationByToken(invitationToken);
-    if (invitation.state === "pending") {
-      organizationId = invitation.organizationId ?? undefined;
-      loginHint = invitation.email;
+    if (invitation.state === "pending" && invitation.email) {
+      url.searchParams.set("email", invitation.email);
     }
   } catch {
-    // AuthKit remains the source of truth for invalid or expired tokens and
-    // provides the user-facing error after the redirect below.
-    // Do not log the WorkOS error because it can contain the invitation token.
-    console.warn("[goat] Could not resolve the workspace invitation before sign-in");
+    // Our sign-up flow surfaces the real error when the token is exchanged;
+    // don't log it here because it can contain the invitation token.
+    console.warn("[goat] Could not resolve the workspace invitation before sign-up");
   }
 
-  const authorizationUrl = new URL(
-    await getSignInUrl({
-      redirectUri: getGoatWorkOSRedirectUri(),
-      ...(organizationId ? { organizationId } : {}),
-      ...(loginHint ? { loginHint } : {}),
-    }),
-  );
-  // authkit-nextjs does not expose invitationToken in its sign-in options, but WorkOS's
-  // authorization endpoint supports it. Preserve the SDK's PKCE/state URL and
-  // add only the invitation selector.
-  authorizationUrl.searchParams.set("invitation_token", invitationToken);
-
-  return privateRedirect(authorizationUrl);
+  return privateRedirect(url);
 }
