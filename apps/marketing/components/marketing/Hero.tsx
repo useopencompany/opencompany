@@ -4,6 +4,19 @@ import { GridBackdrop } from "./GridBackdrop";
 
 const chipIconClass = "size-3.5 text-muted-foreground";
 
+const TasksIcon = (
+  <svg
+    className={chipIconClass}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+  >
+    <rect x="4" y="4" width="16" height="16" rx="3" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 12.5 10.5 14.75 15.75 9.5" />
+  </svg>
+);
+
 const WikiIcon = (
   <svg
     className={chipIconClass}
@@ -16,22 +29,6 @@ const WikiIcon = (
       strokeLinecap="round"
       strokeLinejoin="round"
       d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5v-13ZM20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5v-13Z"
-    />
-  </svg>
-);
-
-const SessionIcon = (
-  <svg
-    className={chipIconClass}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.75"
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H9l-5 4V5.5Z"
     />
   </svg>
 );
@@ -105,14 +102,12 @@ export function Hero() {
           </a>
 
           <h1 className="text-balance font-medium font-mono text-3xl text-ink leading-[1.1] tracking-[-0.05em] sm:text-5xl">
-            Run your startup on <span className="text-violet-600 dark:text-violet-400">agents</span>
+            Run your company on <span className="text-violet-600 dark:text-violet-400">agents</span>
           </h1>
 
-          <p className="mt-7 max-w-2xl text-pretty font-medium text-[15px] text-muted-foreground leading-7 sm:text-base">
-            A self-building company <Chip icon={WikiIcon}>wiki</Chip> gives every{" "}
-            <Chip icon={SessionIcon}>session</Chip> and agent{" "}
-            <Chip icon={WorkflowIcon}>workflow</Chip> your company's context. Run any model, use
-            curated skills, and bring your favorite harness
+          <p className="mt-6 max-w-2xl text-pretty font-medium text-[15px] text-muted-foreground leading-7 sm:text-base">
+            One agent workspace to get <Chip icon={TasksIcon}>tasks</Chip> done and build agent{" "}
+            <Chip icon={WorkflowIcon}>workflows</Chip>. Bring any harness
             <span className="ml-1.5 inline-flex items-center align-middle">
               <HarnessBadge label="Claude Code">
                 <AnthropicIcon className="size-3 text-[#D97757]" />
@@ -121,7 +116,8 @@ export function Hero() {
                 <OpenAIIcon className="size-3 text-foreground" />
               </HarnessBadge>
             </span>
-            .
+            . Multi-player. Self-building <Chip icon={WikiIcon}>wiki</Chip> for realtime
+            context.
           </p>
 
           <div className="mt-6 flex items-center justify-center gap-2">
