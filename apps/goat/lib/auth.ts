@@ -8,7 +8,6 @@ import {
 } from "@opencompany/db/goat-schema";
 import {
   adoptGoatWorkspaceMembershipsFromOrgs,
-  createDefaultGoatWorkspaceForUser,
   DEFAULT_GOAT_BRAIN_SLUG,
   type GoatWorkspaceWithRole,
   getGoatBrainAccess,
@@ -25,12 +24,22 @@ import type { NextRequest } from "next/server";
 import { cache } from "react";
 import { recordLastGoatAuthMethod } from "@/lib/auth-methods";
 import { syncGoatStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
-import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
+import {
+  GOAT_ACTIVE_BRAIN_COOKIE,
+  GOAT_ACTIVE_WORKSPACE_COOKIE,
+  rememberActiveGoatWorkspace,
+} from "@/lib/workspace-session";
 
-export const GOAT_ACTIVE_WORKSPACE_COOKIE = "goat-active-workspace";
-export const GOAT_ACTIVE_BRAIN_COOKIE = "goat-active-brain";
+export { GOAT_ACTIVE_BRAIN_COOKIE, GOAT_ACTIVE_WORKSPACE_COOKIE };
+
+export type GoatIdentityContext = {
+  authUser: WorkOSUser;
+  organizationId: string | null;
+  user: typeof goatUsers.$inferSelect;
+  workspaces: GoatWorkspaceWithRole[];
+};
 
 export type GoatAuthContext = {
   authUser: WorkOSUser;
@@ -96,17 +105,11 @@ export async function syncGoatUser(authUser: WorkOSUser) {
   return updatedUser;
 }
 
-function defaultWorkspaceName(user: typeof goatUsers.$inferSelect) {
-  const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-  const base = fullName || user.email.split("@")[0] || "My";
-  return `${base}'s Workspace`;
-}
-
 // Reconciles memberships for WorkOS organizations the user accepted an
 // invitation to. Authentication calls this even when the user already has a
-// personal workspace; otherwise that existing membership hides newly accepted
-// workspace invitations. Failures are swallowed: sign-in must not depend on
-// WorkOS API health.
+// workspace; otherwise existing local membership can hide newly accepted
+// invitations. Failures are swallowed: sign-in must not depend on WorkOS API
+// health.
 export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
   try {
     const memberships = await getWorkOSClient().userManagement.listOrganizationMemberships({
@@ -155,21 +158,10 @@ export async function activateGoatWorkspaceForOrganization(input: {
   const activeBrain =
     brains.find((brain) => brain.slug === DEFAULT_GOAT_BRAIN_SLUG) ?? brains[0] ?? null;
 
-  const cookieStore = await cookies();
-  cookieStore.set(GOAT_ACTIVE_WORKSPACE_COOKIE, target.workspace.id, {
-    path: "/",
-    sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 365,
+  await rememberActiveGoatWorkspace({
+    workspaceId: target.workspace.id,
+    brainId: activeBrain?.id ?? null,
   });
-  if (activeBrain) {
-    cookieStore.set(GOAT_ACTIVE_BRAIN_COOKIE, activeBrain.id, {
-      path: "/",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 365,
-    });
-  } else {
-    cookieStore.delete(GOAT_ACTIVE_BRAIN_COOKIE);
-  }
 
   return true;
 }
@@ -198,33 +190,11 @@ export async function completeGoatAuthentication(
   }
 }
 
-async function ensureGoatWorkspaces(
-  authUser: WorkOSUser,
-  user: typeof goatUsers.$inferSelect,
-): Promise<GoatWorkspaceWithRole[]> {
-  let workspaces = await listGoatWorkspacesForUser(user.workosUserId);
-  if (workspaces.length > 0) return ensureGoatWorkspaceOrganizationsForEntries(workspaces);
-
-  await adoptWorkOSOrganizationMemberships(authUser);
-  workspaces = await listGoatWorkspacesForUser(user.workosUserId);
-  if (workspaces.length > 0) return ensureGoatWorkspaceOrganizationsForEntries(workspaces);
-
-  await createDefaultGoatWorkspaceForUser({
-    userWorkosId: user.workosUserId,
-    name: defaultWorkspaceName(user),
-  });
-  // A user only reaches this branch when we create their own workspace (invited
-  // members return above), so this is the "brand-new owner" moment. Enroll them
-  // in the founder onboarding email drip and fire the welcome immediately.
-  // Best-effort: email/DB hiccups must never block sign-in.
-  await enrollOwnerInOnboardingEmails({ workosUserId: user.workosUserId }).catch((error) => {
-    console.error("[goat] Failed to enroll owner in onboarding emails", error);
-  });
-  workspaces = await listGoatWorkspacesForUser(user.workosUserId);
-  return ensureGoatWorkspaceOrganizationsForEntries(workspaces);
-}
-
-const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> => {
+// Authentication and workspace provisioning are separate product states. A
+// newly authenticated owner legitimately has zero workspaces until the
+// onboarding workspace step creates one; invited users receive memberships in
+// completeGoatAuthentication() before this resolver runs.
+const resolveGoatIdentity = cache(async (): Promise<GoatIdentityContext | null> => {
   const session = await withAuth();
   if (!session.user) return null;
 
@@ -235,23 +205,43 @@ const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> =
     .where(eq(goatUsers.workosUserId, session.user.id))
     .limit(1);
   const user = existingUser ?? (await syncGoatUser(session.user));
+  let accessibleWorkspaces = await listGoatWorkspacesForUser(user.workosUserId);
+  if (accessibleWorkspaces.length === 0 && session.organizationId) {
+    // The auth callback normally adopts invitations. Retry only when AuthKit
+    // selected an organization but no local membership is visible, covering a
+    // transient callback-side WorkOS/DB failure without penalizing new owners.
+    await adoptWorkOSOrganizationMemberships(session.user);
+    accessibleWorkspaces = await listGoatWorkspacesForUser(user.workosUserId);
+  }
+  const workspaces = await ensureGoatWorkspaceOrganizationsForEntries(accessibleWorkspaces);
 
-  const workspaces = await ensureGoatWorkspaces(session.user, user);
-  const first = workspaces[0];
+  return {
+    authUser: session.user,
+    organizationId: session.organizationId ?? null,
+    user,
+    workspaces,
+  };
+});
+
+const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> => {
+  const identity = await resolveGoatIdentity();
+  if (!identity) return null;
+
+  const first = identity.workspaces[0];
   if (!first) return null;
 
   const cookieStore = await cookies();
   const requestedWorkspaceId = cookieStore.get(GOAT_ACTIVE_WORKSPACE_COOKIE)?.value;
   const active =
-    workspaces.find(
+    identity.workspaces.find(
       (entry) =>
-        session.organizationId && entry.workspace.workosOrganizationId === session.organizationId,
+        identity.organizationId && entry.workspace.workosOrganizationId === identity.organizationId,
     ) ??
-    workspaces.find((entry) => entry.workspace.id === requestedWorkspaceId) ??
+    identity.workspaces.find((entry) => entry.workspace.id === requestedWorkspaceId) ??
     first;
 
   const brains = await listAccessibleGoatBrains({
-    userWorkosId: user.workosUserId,
+    userWorkosId: identity.user.workosUserId,
     workspaceId: active.workspace.id,
   });
   const requestedBrainId = cookieStore.get(GOAT_ACTIVE_BRAIN_COOKIE)?.value;
@@ -262,23 +252,43 @@ const resolveGoatAuthContext = cache(async (): Promise<GoatAuthContext | null> =
     null;
 
   return {
-    authUser: session.user,
-    user,
+    authUser: identity.authUser,
+    user: identity.user,
     workspace: active.workspace,
     role: active.role,
-    workspaces,
+    workspaces: identity.workspaces,
     brains,
     activeBrain,
   };
 });
 
+export async function currentGoatIdentity(options: {
+  optional: true;
+}): Promise<GoatIdentityContext | null>;
+export async function currentGoatIdentity(options?: {
+  optional?: false;
+}): Promise<GoatIdentityContext>;
+export async function currentGoatIdentity(options: { optional?: boolean } = {}) {
+  const identity = await resolveGoatIdentity();
+  if (!identity) {
+    if (options.optional) return null;
+    redirect("/signin");
+  }
+  return identity;
+}
+
 export async function currentGoatUser(options: { optional: true }): Promise<GoatAuthContext | null>;
 export async function currentGoatUser(options?: { optional?: false }): Promise<GoatAuthContext>;
 export async function currentGoatUser(options: { optional?: boolean } = {}) {
+  const identity = await resolveGoatIdentity();
+  if (!identity) {
+    if (options.optional) return null;
+    redirect("/signin");
+  }
   const context = await resolveGoatAuthContext();
   if (!context) {
     if (options.optional) return null;
-    redirect("/signin");
+    redirect("/onboarding");
   }
   return context;
 }

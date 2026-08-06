@@ -223,6 +223,20 @@ export async function grantGoatMonthlyIncludedUsage(input: {
   const db = input.db ?? getDb();
   const grantKey = `included_usage_grant:${input.workspaceId}:${input.periodStart.toISOString()}:${targetAllowanceCents}`;
   const expireKey = `included_usage_expiration:${input.workspaceId}:${input.periodStart.toISOString()}`;
+  const expirationMetadata = JSON.stringify({
+    reason: "included_usage_no_rollover",
+    newPeriodStart: input.periodStart.toISOString(),
+    stripeEventId: input.eventId ?? null,
+  });
+  const grantMetadata = JSON.stringify({
+    reason: "monthly_included_usage",
+    plan: input.plan,
+    seatQuantity: input.seatQuantity,
+    allowanceCents: targetAllowanceCents,
+    periodStart: input.periodStart.toISOString(),
+    periodEnd: input.periodEnd.toISOString(),
+    stripeEventId: input.eventId ?? null,
+  });
   const result = await db.execute(sql`
     WITH current_billing AS MATERIALIZED (
       INSERT INTO goat.workspace_billing (workspace_id)
@@ -267,11 +281,7 @@ export async function grantGoatMonthlyIncludedUsage(input: {
         -COALESCE(included_balance_usd_micros, 0),
         'included_usage_expiration',
         ${expireKey},
-        jsonb_build_object(
-          'reason', 'included_usage_no_rollover',
-          'newPeriodStart', ${input.periodStart.toISOString()},
-          'stripeEventId', ${input.eventId ?? null}::text
-        )
+        ${expirationMetadata}::jsonb
       FROM locked_balance
       WHERE (SELECT value FROM should_rotate)
         AND COALESCE(included_balance_usd_micros, 0) > 0
@@ -293,15 +303,7 @@ export async function grantGoatMonthlyIncludedUsage(input: {
         (SELECT cents FROM grant_amount)::bigint * ${GOAT_USD_MICROS_PER_CENT},
         'included_usage_grant',
         ${grantKey},
-        jsonb_build_object(
-          'reason', 'monthly_included_usage',
-          'plan', ${input.plan},
-          'seatQuantity', ${input.seatQuantity},
-          'allowanceCents', ${targetAllowanceCents},
-          'periodStart', ${input.periodStart.toISOString()},
-          'periodEnd', ${input.periodEnd.toISOString()},
-          'stripeEventId', ${input.eventId ?? null}::text
-        )
+        ${grantMetadata}::jsonb
       WHERE (SELECT cents FROM grant_amount) > 0
       ON CONFLICT DO NOTHING
       RETURNING amount_usd_micros

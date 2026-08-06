@@ -1,3 +1,5 @@
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import {
   fulfillGoatTopUpCheckoutSession,
@@ -100,9 +102,10 @@ describe("goat credits", () => {
   });
 
   it("reports a monthly included-usage grant and resulting allowance", async () => {
-    const db = fakeDb([
-      { grants: "1", expirations: "1", balanceUsdMicros: "5000000", allowanceCents: "500" },
-    ]);
+    const execute = vi.fn(async (_query: unknown) => ({
+      rows: [{ grants: "1", expirations: "1", balanceUsdMicros: "5000000", allowanceCents: "500" }],
+    }));
+    const db = { execute };
     await expect(
       grantGoatMonthlyIncludedUsage({
         workspaceId: "goat_ws_1",
@@ -119,6 +122,29 @@ describe("goat credits", () => {
       balanceUsdMicros: 5_000_000,
       allowanceCents: 500,
     });
+
+    const query = new PgDialect().sqlToQuery(execute.mock.calls[0]![0] as SQL);
+    expect(query.sql).not.toContain("jsonb_build_object");
+    expect(query.sql.match(/::jsonb/g)).toHaveLength(2);
+    const metadata = query.params
+      .filter((value): value is string => typeof value === "string" && value.startsWith("{"))
+      .map((value) => JSON.parse(value));
+    expect(metadata).toEqual([
+      {
+        reason: "included_usage_no_rollover",
+        newPeriodStart: "2026-08-01T00:00:00.000Z",
+        stripeEventId: null,
+      },
+      {
+        reason: "monthly_included_usage",
+        plan: "hobby",
+        seatQuantity: 1,
+        allowanceCents: 500,
+        periodStart: "2026-08-01T00:00:00.000Z",
+        periodEnd: "2026-09-01T00:00:00.000Z",
+        stripeEventId: null,
+      },
+    ]);
   });
 
   it("rejects top-up fulfillment for unpaid or malformed sessions", async () => {
