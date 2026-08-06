@@ -1,7 +1,12 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { completeGoatAuthentication } from "@/lib/auth";
-import { consumeGoatOAuthStateCookie } from "@/lib/auth-methods";
+import {
+  consumeGoatOAuthStateCookie,
+  organizationSelectionFromError,
+  safeGoatReturnPathname,
+  setGoatOrganizationSelection,
+} from "@/lib/auth-methods";
 import { getGoatAppUrl } from "@/lib/workos";
 import { getWorkOSClient } from "@/lib/workos-client";
 
@@ -42,8 +47,18 @@ export async function GET(request: NextRequest) {
       ...(userAgent ? { userAgent } : {}),
     });
     await completeGoatAuthentication(authResponse, request);
-    return NextResponse.redirect(new URL(statePayload.returnPathname || "/", getGoatAppUrl()));
+    return NextResponse.redirect(
+      new URL(safeGoatReturnPathname(statePayload.returnPathname), getGoatAppUrl()),
+    );
   } catch (error) {
+    const selection = organizationSelectionFromError(error);
+    if (selection) {
+      await setGoatOrganizationSelection({
+        ...selection,
+        returnPathname: safeGoatReturnPathname(statePayload.returnPathname),
+      });
+      return NextResponse.redirect(new URL("/signin", getGoatAppUrl()));
+    }
     console.error("[goat] Failed to complete Google sign-in", error);
     return signInErrorRedirect("oauth_failed");
   }

@@ -13,14 +13,21 @@ import { Input } from "@opencompany/ui/components/input";
 import { Label } from "@opencompany/ui/components/label";
 import { useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
-import { requestMagicCode, startGoogleAuth, verifyMagicCode } from "@/lib/auth-actions";
-import type { GoatAuthMethod } from "@/lib/auth-methods";
+import {
+  requestMagicCode,
+  restartAuthentication,
+  selectOrganization,
+  startGoogleAuth,
+  verifyMagicCode,
+} from "@/lib/auth-actions";
+import type { GoatAuthMethod, GoatOrganizationOption } from "@/lib/auth-methods";
 
 type AuthCardProps = {
   mode: "sign-in" | "sign-up";
   invitationToken?: string;
   prefillEmail?: string;
   lastUsedMethod: GoatAuthMethod | null;
+  organizationOptions?: GoatOrganizationOption[] | null;
   initialError?: string | null;
 };
 
@@ -28,8 +35,9 @@ type Step = "request" | "code-sent";
 
 function UsedLastBadge() {
   return (
-    <span className="ml-auto rounded-full bg-surface-muted px-2 py-0.5 text-xs font-normal text-ink-muted">
-      Used last time
+    <span className="ml-auto flex items-center gap-1.5 rounded-full bg-violet-500/10 px-2 py-0.5 text-xs font-normal text-violet-600 dark:text-violet-400">
+      <span aria-hidden="true" className="size-1.5 rounded-full bg-violet-500" />
+      Last used
     </span>
   );
 }
@@ -78,6 +86,7 @@ export function AuthCard({
   invitationToken,
   prefillEmail,
   lastUsedMethod,
+  organizationOptions,
   initialError,
 }: AuthCardProps) {
   const [step, setStep] = useState<Step>("request");
@@ -93,6 +102,62 @@ export function AuthCard({
     : isSignUp
       ? "Set up your workspace in a minute."
       : "Sign in to your workspace.";
+
+  function handleOrganizationSelection(organizationId: string) {
+    setError(null);
+    startTransition(async () => {
+      const result = await selectOrganization({ organizationId });
+      if (!result.ok) setError(result.error);
+    });
+  }
+
+  function handleRestartAuthentication() {
+    setError(null);
+    startTransition(async () => {
+      await restartAuthentication();
+    });
+  }
+
+  if (organizationOptions) {
+    return (
+      <Card className="w-full max-w-sm border-border/80 shadow-sm">
+        <CardHeader>
+          <CardTitle className="font-mono text-lg tracking-tight">Choose a workspace</CardTitle>
+          <CardDescription>Select where you want to continue.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex max-h-64 flex-col gap-2 overflow-y-auto">
+            {organizationOptions.map((organization) => (
+              <Button
+                key={organization.id}
+                type="button"
+                variant="outline"
+                className="w-full justify-start"
+                disabled={isPending}
+                onClick={() => handleOrganizationSelection(organization.id)}
+              >
+                {organization.name}
+              </Button>
+            ))}
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full justify-center"
+            disabled={isPending}
+            onClick={handleRestartAuthentication}
+          >
+            Use another account
+          </Button>
+          {error ? (
+            <p className="rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-sm text-danger">
+              {error}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+    );
+  }
 
   function handleRequestCode() {
     setError(null);
@@ -123,9 +188,9 @@ export function AuthCard({
   }
 
   return (
-    <Card className="w-full max-w-sm">
+    <Card className="w-full max-w-sm border-border/80 shadow-sm">
       <CardHeader>
-        <CardTitle className="text-lg">{title}</CardTitle>
+        <CardTitle className="font-mono text-lg tracking-tight">{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -210,14 +275,20 @@ export function AuthCard({
         {isSignUp ? (
           <span>
             Already have an account?{" "}
-            <a className="text-ink underline underline-offset-2" href="/signin">
+            <a
+              className="font-medium text-violet-600 underline-offset-2 transition-colors hover:underline dark:text-violet-400"
+              href="/signin"
+            >
               Sign in
             </a>
           </span>
         ) : (
           <span>
             New here?{" "}
-            <a className="text-ink underline underline-offset-2" href="/signup">
+            <a
+              className="font-medium text-violet-600 underline-offset-2 transition-colors hover:underline dark:text-violet-400"
+              href="/signup"
+            >
               Create an account
             </a>
           </span>

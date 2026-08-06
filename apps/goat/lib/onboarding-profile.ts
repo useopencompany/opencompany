@@ -52,6 +52,13 @@ export function normalizeGoatOnboardingCompanyUrl(value: unknown): string | null
     const url = new URL(candidate);
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
     if (!url.hostname || url.username || url.password) return null;
+    // Require a real domain (at least one dot and a plausible letter TLD) so
+    // bare words like "jamie" — which new URL() otherwise accepts as a
+    // single-label hostname — don't pass as a company URL.
+    const labels = url.hostname.split(".");
+    const tld = labels[labels.length - 1] ?? "";
+    if (labels.length < 2 || labels.some((label) => label.length === 0)) return null;
+    if (!/^[a-z]{2,}$/i.test(tld)) return null;
     url.hash = "";
     return url.toString();
   } catch {

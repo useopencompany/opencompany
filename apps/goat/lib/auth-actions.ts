@@ -5,7 +5,14 @@ import type { AuthenticationResponse } from "@workos-inc/node";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { completeGoatAuthentication } from "@/lib/auth";
-import { setGoatOAuthStateCookie } from "@/lib/auth-methods";
+import {
+  clearGoatOrganizationSelection,
+  organizationSelectionFromError,
+  readPendingGoatOrganizationSelection,
+  safeGoatReturnPathname,
+  setGoatOAuthStateCookie,
+  setGoatOrganizationSelection,
+} from "@/lib/auth-methods";
 import { getGoatAppUrl, getGoatWorkOSRedirectUri } from "@/lib/workos";
 import { getWorkOSClient } from "@/lib/workos-client";
 
@@ -36,7 +43,7 @@ export async function startGoogleAuth(formData: FormData) {
   await setGoatOAuthStateCookie({
     state,
     ...(typeof invitationToken === "string" ? { invitationToken } : {}),
-    ...(typeof returnPathname === "string" ? { returnPathname } : {}),
+    returnPathname: safeGoatReturnPathname(returnPathname),
   });
   // screenHint (sign-in vs sign-up) only applies to WorkOS's own hosted
   // "authkit" provider picker; Google's authorize screen has no such concept,
@@ -89,10 +96,52 @@ export async function verifyMagicCode(input: {
       ...signals,
     });
   } catch (error) {
+    const selection = organizationSelectionFromError(error);
+    if (selection) {
+      await setGoatOrganizationSelection(selection);
+      return redirect("/signin");
+    }
     console.error("[goat] Failed to verify a magic sign-in code", error);
     return { ok: false, error: "That code is invalid or expired. Request a new one." };
   }
 
   await completeGoatAuthentication(authResponse, getGoatAppUrl());
   redirect("/");
+}
+
+export async function selectOrganization(input: {
+  organizationId: string;
+}): Promise<GoatAuthActionResult> {
+  const selection = await readPendingGoatOrganizationSelection();
+  if (!selection) {
+    return { ok: false, error: "Your sign-in session expired. Start again." };
+  }
+
+  const organizationId = input.organizationId.trim();
+  if (!selection.organizations.some((organization) => organization.id === organizationId)) {
+    return { ok: false, error: "Choose one of the available workspaces." };
+  }
+
+  const signals = await getRequestSignals();
+  let authResponse: AuthenticationResponse;
+  try {
+    authResponse = await getWorkOSClient().userManagement.authenticateWithOrganizationSelection({
+      clientId: WORKOS_CLIENT_ID,
+      organizationId,
+      pendingAuthenticationToken: selection.pendingAuthenticationToken,
+      ...signals,
+    });
+  } catch (error) {
+    console.error("[goat] Failed to complete organization selection", error);
+    return { ok: false, error: "We couldn't open that workspace. Try signing in again." };
+  }
+
+  await clearGoatOrganizationSelection();
+  await completeGoatAuthentication(authResponse, getGoatAppUrl());
+  redirect(selection.returnPathname);
+}
+
+export async function restartAuthentication() {
+  await clearGoatOrganizationSelection();
+  redirect("/signin");
 }

@@ -1,16 +1,65 @@
-import type { AuthenticationResponse } from "@workos-inc/node";
+import { AuthenticationException, type AuthenticationResponse } from "@workos-inc/node";
 import { cookies } from "next/headers";
 
 export type GoatAuthMethod = "google" | "magic_link";
 
 const LAST_AUTH_METHOD_COOKIE = "goat-last-auth-method";
 const OAUTH_STATE_COOKIE = "goat-oauth-state";
+const ORGANIZATION_SELECTION_COOKIE = "goat-organization-selection";
+
+export type GoatOrganizationOption = {
+  id: string;
+  name: string;
+};
+
+type GoatOrganizationSelection = {
+  pendingAuthenticationToken: string;
+  organizations: GoatOrganizationOption[];
+  returnPathname: string;
+};
 
 export type GoatOAuthStateCookiePayload = {
   state: string;
   invitationToken?: string;
   returnPathname?: string;
 };
+
+export function safeGoatReturnPathname(value: unknown): string {
+  if (typeof value !== "string" || !value.startsWith("/")) return "/";
+
+  const baseUrl = new URL("https://goat.invalid");
+  try {
+    const url = new URL(value, baseUrl);
+    if (url.origin !== baseUrl.origin) return "/";
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
+export function organizationSelectionFromError(
+  error: unknown,
+): Omit<GoatOrganizationSelection, "returnPathname"> | null {
+  if (
+    !(error instanceof AuthenticationException) ||
+    error.code !== "organization_selection_required" ||
+    !error.pendingAuthenticationToken
+  ) {
+    return null;
+  }
+
+  const organizations = (error.rawData.organizations ?? []).flatMap((organization) => {
+    const id = organization.id.trim();
+    const name = organization.name.trim();
+    return id && name ? [{ id, name }] : [];
+  });
+  if (organizations.length === 0) return null;
+
+  return {
+    pendingAuthenticationToken: error.pendingAuthenticationToken,
+    organizations,
+  };
+}
 
 function toGoatAuthMethod(
   method: AuthenticationResponse["authenticationMethod"],
@@ -66,4 +115,69 @@ export async function consumeGoatOAuthStateCookie(): Promise<GoatOAuthStateCooki
   } catch {
     return null;
   }
+}
+
+export async function setGoatOrganizationSelection(
+  selection: Omit<GoatOrganizationSelection, "returnPathname"> & { returnPathname?: string },
+) {
+  const cookieStore = await cookies();
+  const value = Buffer.from(
+    JSON.stringify({
+      ...selection,
+      returnPathname: safeGoatReturnPathname(selection.returnPathname),
+    } satisfies GoatOrganizationSelection),
+  ).toString("base64url");
+  cookieStore.set(ORGANIZATION_SELECTION_COOKIE, value, {
+    path: "/",
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 10,
+  });
+}
+
+async function readGoatOrganizationSelection(): Promise<GoatOrganizationSelection | null> {
+  const cookieStore = await cookies();
+  const raw = cookieStore.get(ORGANIZATION_SELECTION_COOKIE)?.value;
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(raw, "base64url").toString("utf8"),
+    ) as Partial<GoatOrganizationSelection>;
+    if (
+      typeof parsed.pendingAuthenticationToken !== "string" ||
+      !Array.isArray(parsed.organizations)
+    ) {
+      return null;
+    }
+    const organizations = parsed.organizations.flatMap((organization) => {
+      if (!organization || typeof organization !== "object") return [];
+      const id = typeof organization.id === "string" ? organization.id.trim() : "";
+      const name = typeof organization.name === "string" ? organization.name.trim() : "";
+      return id && name ? [{ id, name }] : [];
+    });
+    if (!parsed.pendingAuthenticationToken || organizations.length === 0) return null;
+    return {
+      pendingAuthenticationToken: parsed.pendingAuthenticationToken,
+      organizations,
+      returnPathname: safeGoatReturnPathname(parsed.returnPathname),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function readGoatOrganizationOptions(): Promise<GoatOrganizationOption[] | null> {
+  const selection = await readGoatOrganizationSelection();
+  return selection?.organizations ?? null;
+}
+
+export async function readPendingGoatOrganizationSelection() {
+  return readGoatOrganizationSelection();
+}
+
+export async function clearGoatOrganizationSelection() {
+  const cookieStore = await cookies();
+  cookieStore.delete(ORGANIZATION_SELECTION_COOKIE);
 }
