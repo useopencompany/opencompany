@@ -1,26 +1,50 @@
-import { handleAuth } from "@workos-inc/authkit-nextjs";
-import {
-  activateGoatWorkspaceForOrganization,
-  adoptWorkOSOrganizationMemberships,
-  syncGoatUser,
-} from "@/lib/auth";
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { completeGoatAuthentication } from "@/lib/auth";
+import { consumeGoatOAuthStateCookie } from "@/lib/auth-methods";
 import { getGoatAppUrl } from "@/lib/workos";
+import { getWorkOSClient } from "@/lib/workos-client";
 
-export const GET = handleAuth({
-  baseURL: getGoatAppUrl(),
-  returnPathname: "/",
-  onSuccess: async ({ user, organizationId }) => {
-    await syncGoatUser(user);
-    await adoptWorkOSOrganizationMemberships(user);
-    if (!organizationId) return;
+// authkit-nextjs's getWorkOS() doesn't thread WORKOS_CLIENT_ID down into
+// userManagement's per-call default, so calls made directly against the SDK
+// (bypassing authkit-nextjs's own callback handler) need it passed explicitly.
+const WORKOS_CLIENT_ID = process.env.WORKOS_CLIENT_ID ?? "";
 
-    try {
-      await activateGoatWorkspaceForOrganization({
-        userWorkosId: user.id,
-        organizationId,
-      });
-    } catch (error) {
-      console.error("[goat] Failed to activate the authenticated workspace", error);
-    }
-  },
-});
+function signInErrorRedirect(reason: string) {
+  const url = new URL("/signin", getGoatAppUrl());
+  url.searchParams.set("error", reason);
+  return NextResponse.redirect(url);
+}
+
+// Handles the Google OAuth leg of our custom sign-in/sign-up UI. We don't use
+// authkit-nextjs's handleAuth()/getSignInUrl() here because those are wired to
+// the hosted AuthKit picker (provider: "authkit"); this route instead pairs
+// with lib/auth-actions.ts's startGoogleAuth, which targets GoogleOAuth
+// directly and stores its own CSRF state cookie.
+export async function GET(request: NextRequest) {
+  const code = request.nextUrl.searchParams.get("code");
+  const state = request.nextUrl.searchParams.get("state");
+  const statePayload = await consumeGoatOAuthStateCookie();
+
+  if (!code || !state || !statePayload || state !== statePayload.state) {
+    return signInErrorRedirect("oauth_state");
+  }
+
+  const ipAddress = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const userAgent = request.headers.get("user-agent") ?? undefined;
+
+  try {
+    const authResponse = await getWorkOSClient().userManagement.authenticateWithCode({
+      clientId: WORKOS_CLIENT_ID,
+      code,
+      ...(statePayload.invitationToken ? { invitationToken: statePayload.invitationToken } : {}),
+      ...(ipAddress ? { ipAddress } : {}),
+      ...(userAgent ? { userAgent } : {}),
+    });
+    await completeGoatAuthentication(authResponse, request);
+    return NextResponse.redirect(new URL(statePayload.returnPathname || "/", getGoatAppUrl()));
+  } catch (error) {
+    console.error("[goat] Failed to complete Google sign-in", error);
+    return signInErrorRedirect("oauth_failed");
+  }
+}

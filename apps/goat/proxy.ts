@@ -7,6 +7,8 @@ const UNAUTHENTICATED_PATHS = new Set([
   "/auth/callback",
   "/auth/invite",
   "/auth/sign-in",
+  "/signin",
+  "/signup",
   "/api/healthz",
   "/mcp",
   "/changelog",
@@ -19,7 +21,7 @@ export default async function proxy(request: NextRequest) {
     return NextResponse.redirect(localHttpsRedirect);
   }
 
-  const { session, headers, authorizationUrl } = await authkit(request, {
+  const { session, headers } = await authkit(request, {
     redirectUri: getGoatWorkOSRedirectUri(),
   });
 
@@ -32,7 +34,7 @@ export default async function proxy(request: NextRequest) {
   }
 
   return handleAuthkitHeaders(request, headers, {
-    redirect: authorizationUrl ?? new URL("/auth/sign-in", request.url).toString(),
+    redirect: new URL("/signin", request.url).toString(),
   });
 }
 

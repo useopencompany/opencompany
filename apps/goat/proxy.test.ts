@@ -83,6 +83,11 @@ describe("Goat public routes", () => {
     expect(isUnauthenticatedPath("/auth/invite")).toBe(true);
   });
 
+  it("allows the custom sign-in and sign-up pages without authentication", () => {
+    expect(isUnauthenticatedPath("/signin")).toBe(true);
+    expect(isUnauthenticatedPath("/signup")).toBe(true);
+  });
+
   it("allows shared chats and their attachment routes without authentication", () => {
     expect(isUnauthenticatedPath("/share/goat_chat_share_123")).toBe(true);
     expect(
