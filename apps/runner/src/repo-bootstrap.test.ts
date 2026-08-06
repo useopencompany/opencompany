@@ -73,6 +73,9 @@ describe("Goat repository bootstrap", () => {
     expect(bootstrap.promptFragment).toContain('"opencompany/app"');
     expect(bootstrap.promptFragment).toContain("/opt/oc/repos/123/.env");
     expect(bootstrap.promptFragment).toContain("run bun install");
+    expect(bootstrap.promptFragment).toContain(
+      "read and follow its root AGENTS.md and CLAUDE.md files",
+    );
     expect(bootstrap.promptFragment).not.toContain("short-secret");
     expect(bootstrap.secretValues).toEqual(
       expect.arrayContaining([

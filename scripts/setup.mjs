@@ -1,7 +1,7 @@
 import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { argv, exit, versions } from "node:process";
 import {
   caddyState,
@@ -530,8 +530,30 @@ function runStripeCliJson(args) {
 
 async function ensureEnvFile(state) {
   step("Local env file");
+  const stagedEnvPath = ".env";
+  const hasCloudStagedEnv =
+    Boolean(process.env.E2B_SANDBOX_ID?.trim()) && existsSync(stagedEnvPath);
+
   if (state.envFile === "exists") {
+    if (hasCloudStagedEnv) {
+      const localEnv = parseEnv(".env.local");
+      const stagedValues = Object.fromEntries(
+        Object.entries(parseEnv(stagedEnvPath)).filter(([key]) => isPlaceholder(localEnv[key])),
+      );
+      if (Object.keys(stagedValues).length > 0) {
+        writeEnvValues(".env.local", stagedValues);
+        chmodSync(".env.local", 0o600);
+        ok("Filled missing .env.local values from the staged cloud environment");
+        return;
+      }
+    }
     ok(".env.local already exists");
+    return;
+  }
+  if (hasCloudStagedEnv) {
+    copyFileSync(stagedEnvPath, ".env.local");
+    chmodSync(".env.local", 0o600);
+    ok("Created .env.local from the staged cloud environment");
     return;
   }
   if (!existsSync(".env.example")) {
@@ -919,6 +941,9 @@ async function ensureStripe(state) {
 
 async function ensureBranchDatabase() {
   step("Neon branch database");
+  if (process.env.E2B_SANDBOX_ID?.trim()) {
+    run("bun", ["run", "db:cloud-base:refresh"]);
+  }
   run("bun", ["run", "db:branch:create"]);
 
   const after = inspectState();
@@ -932,7 +957,13 @@ async function ensureBranchDatabase() {
 
 async function runMigrations() {
   step("Run migrations");
-  run("bun", ["run", "db:migrate"]);
+  const databaseUrl = readEffectiveLocalEnv().DATABASE_URL;
+  if (isPlaceholder(databaseUrl)) {
+    throw new Error("DATABASE_URL is missing after Neon branch setup.");
+  }
+  run("bun", ["run", "db:migrate"], {
+    env: { ...process.env, DATABASE_URL: databaseUrl },
+  });
 }
 
 // Like run(), but returns the exit code instead of throwing so a failed Docker

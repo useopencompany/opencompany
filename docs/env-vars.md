@@ -593,7 +593,7 @@ Useful local-only vars:
 | `OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS` | Comma-separated emails that skip onboarding locally. Ignored in production, CI, and hosted Vercel runtimes. Local setup/export scripts seed this value when missing. |
 | `NEON_PROJECT_ID` | Required for local Neon branch automation. |
 | `NEON_API_KEY` | Optional for headless Neon CLI usage. |
-| `NEON_PARENT_BRANCH` | Optional parent branch for local Neon branches. |
+| `NEON_PARENT_BRANCH` | Optional parent branch for local Neon branches. E2B uses it only when creating the schema-only `cloud-base`; sandbox children always fork from that base. |
 | `NEON_BRANCH_NAME` | Optional override when multiple worktrees share a Git branch. |
 | `NEON_BRANCH_TTL_HOURS` | Optional local Neon branch lifetime in hours. Defaults to `24`; use `0` to disable expiration. |
 | `NEON_DATABASE_NAME` | Optional nonstandard Neon database name. |

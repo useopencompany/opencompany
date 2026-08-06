@@ -33,6 +33,16 @@ Useful commands:
 
 The user usually keeps a dev server running. Do not start another one unless asked or unless you have confirmed it is needed.
 
+### Cloud coding sandboxes
+
+When the system prompt gives you a staged environment file for this repository:
+
+1. Never inspect or print it. If `.env.local` is missing, copy the staged file there and set mode `600`.
+2. Run `bun install --frozen-lockfile`, then `bun run setup`, before starting any development process.
+3. For Goat work, start `bun run dev:goat` only after setup succeeds. Do not use `setup:dev`, which starts the legacy web stack.
+
+Cloud setup refreshes the schema-only `cloud-base` Neon branch and creates a sandbox-unique child branch from it. Do not override that parent or start the dev server against an unset `DATABASE_URL`.
+
 Local dev logs: `bun run dev` and `bun run dev:stream` write Turbo task output to `.context/logs/dev-turbo.json`. Use `bun run dev:logs -- --source runner --tail 100`, `bun run dev:logs -- --source web --tail 100`, `bun run dev:logs -- --errors`, or `bun run dev:logs -- --grep <text>` when debugging. The log file is gitignored and may contain sensitive terminal output, so summarize relevant lines instead of pasting large raw excerpts.
 
 ## App Boundaries

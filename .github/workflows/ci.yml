@@ -136,6 +136,7 @@ jobs:
       - name: Test orchestration scripts
         run: >-
           node --test
+          scripts/lib/neon-branch-config.test.mjs
           scripts/lib/preview-config.test.mjs
           scripts/lib/preview-render.test.mjs
           scripts/lib/preview-debug-session.test.mjs

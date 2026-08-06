@@ -1,6 +1,9 @@
 import "./load-env.mjs";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { resolveNeonBranchName, resolveNeonParentBranch } from "./lib/neon-branch-config.mjs";
 
 function realEnv(name) {
   const value = process.env[name];
@@ -14,8 +17,12 @@ function realEnv(name) {
 
 const action = process.argv[2];
 const projectId = realEnv("NEON_PROJECT_ID");
-const parentBranch = realEnv("NEON_PARENT_BRANCH");
 const branchNameOverride = realEnv("NEON_BRANCH_NAME");
+const sandboxId = realEnv("E2B_SANDBOX_ID");
+const parentBranch = resolveNeonParentBranch({
+  localParentBranch: realEnv("NEON_PARENT_BRANCH"),
+  sandboxId,
+});
 const branchTtlHours = realEnv("NEON_BRANCH_TTL_HOURS") ?? "24";
 const databaseName = realEnv("NEON_DATABASE_NAME");
 const roleName = realEnv("NEON_ROLE_NAME");
@@ -23,6 +30,7 @@ const apiKey = realEnv("NEON_API_KEY");
 const DEFAULT_DATABASE_NAME = "neondb";
 const DEFAULT_ROLE_NAME = "neondb_owner";
 const MAX_BRANCH_TTL_HOURS = 24 * 30;
+const neonConfigDir = join(tmpdir(), "opencompany-neonctl");
 
 if (!["create", "delete"].includes(action)) {
   throw new Error("Usage: node scripts/neon-branch.mjs <create|delete>");
@@ -40,23 +48,12 @@ function currentGitBranch() {
   return branch;
 }
 
-function sanitizeBranchName(name) {
-  const sanitized = name
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 63);
-
-  if (!sanitized) {
-    throw new Error(`Could not derive a valid Neon branch name from "${name}".`);
-  }
-
-  return sanitized;
-}
-
 function neonBranchName() {
-  if (branchNameOverride) return sanitizeBranchName(branchNameOverride);
-  return sanitizeBranchName(currentGitBranch());
+  return resolveNeonBranchName({
+    gitBranch: branchNameOverride ? undefined : currentGitBranch(),
+    branchNameOverride,
+    sandboxId,
+  });
 }
 
 function branchExpirationDate() {
@@ -82,10 +79,11 @@ function neon(args) {
     baseArgs.push("--project-id", projectId);
   }
 
-  // Browser OAuth via `neon auth` is preferred locally. NEON_API_KEY is
-  // only needed in headless environments like CI/Vercel.
+  // Browser OAuth via `neon auth` is preferred locally. neonctl reads
+  // NEON_API_KEY from the environment in headless environments like E2B/CI.
   if (apiKey) {
-    baseArgs.push("--api-key", apiKey);
+    mkdirSync(neonConfigDir, { recursive: true, mode: 0o700 });
+    baseArgs.push("--config-dir", neonConfigDir);
   }
 
   try {
@@ -93,7 +91,7 @@ function neon(args) {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "inherit"],
     }).trim();
-  } catch (error) {
+  } catch {
     if (!projectId && !apiKey) {
       console.error(
         "\nHint: run `bun run env:pull` to copy NEON_PROJECT_ID from Infisical dev,\n" +
@@ -105,7 +103,7 @@ function neon(args) {
           "auto-selects `neondb_owner`; set NEON_ROLE_NAME only for nonstandard projects.\n",
       );
     }
-    throw error;
+    throw new Error(`Neon ${args[0]} command failed.`);
   }
 }
 
