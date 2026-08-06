@@ -43,6 +43,7 @@ import {
   type GoatChatUiMessage,
   type GoatCodexRuntimeView,
   type GoatStoredChatMessage,
+  settleIncompleteToolCallsInStoredParts,
   toGoatChatUiMessage,
 } from "@/lib/chat-ui";
 import { DEFAULT_CLAUDE_CHAT_REASONING_EFFORT } from "@/lib/claude-chat-settings";
@@ -388,28 +389,28 @@ export async function createGoatChatApprovalContinuationTurn(
   };
 }
 
-// Called on normal user turns before the history goes to the model: approval
-// requests the user talked past get denied as dismissed (an unresolved
-// approval request is a tool call with no result, which the model conversion
-// rejects). Changes are persisted so the chat UI resolves the stale card.
-export async function dismissStaleGoatChatApprovals(
+// Called on normal user turns before the history goes to the model. Approval
+// requests the user talked past are denied, and incomplete calls left by a
+// stopped or failed stream are settled. Both otherwise create tool calls with
+// no result, which model conversion rejects. Persist the repair so the UI and
+// every later turn share the same terminal state.
+export async function settleStaleGoatChatToolCalls(
   turn: { storedMessages: GoatStoredChatMessage[] },
   store: GoatChatStore = createDbGoatChatStore(),
 ): Promise<{ changed: boolean; messages: GoatChatUiMessage[]; toolCallIds: string[] }> {
   let changedAny = false;
-  const toolCallIds: string[] = [];
+  const toolCallIds = new Set<string>();
   const storedMessages = await Promise.all(
     turn.storedMessages.map(async (message) => {
       if (message.role !== "assistant" || !message.debugTrace?.uiMessageParts) return message;
-      const {
-        parts,
-        changed,
-        toolCallIds: dismissedToolCallIds,
-      } = dismissPendingApprovalsInStoredParts(message.debugTrace.uiMessageParts);
-      if (!changed) return message;
+      const dismissed = dismissPendingApprovalsInStoredParts(message.debugTrace.uiMessageParts);
+      const settled = settleIncompleteToolCallsInStoredParts(dismissed.parts);
+      if (!dismissed.changed && !settled.changed) return message;
       changedAny = true;
-      toolCallIds.push(...dismissedToolCallIds);
-      const debugTrace = { ...message.debugTrace, uiMessageParts: parts };
+      for (const toolCallId of [...dismissed.toolCallIds, ...settled.toolCallIds]) {
+        toolCallIds.add(toolCallId);
+      }
+      const debugTrace = { ...message.debugTrace, uiMessageParts: settled.parts };
       await persistGoatChatAssistantMessage(
         {
           sessionId: message.sessionId,
@@ -426,7 +427,7 @@ export async function dismissStaleGoatChatApprovals(
   return {
     changed: changedAny,
     messages: storedMessages.map((message) => toGoatChatUiMessage(message)),
-    toolCallIds,
+    toolCallIds: [...toolCallIds],
   };
 }
 

@@ -22,6 +22,7 @@ import {
   EDIT_TASK_SCHEDULE_TOOL_NAME,
   GOAT_BRAIN_TOOL_NAME,
   GOAT_BRAIN_TOOL_PART_TYPE,
+  GOAT_INCOMPLETE_TOOL_CALL_REASON,
   LIST_ACTIONS_TOOL_NAME,
   LIST_ACTIONS_TOOL_PART_TYPE,
   LIST_SKILLS_TOOL_NAME,
@@ -150,7 +151,7 @@ vi.mock("@/lib/chat", () => ({
   createDbGoatChatStore: vi.fn(() => ({})),
   createGoatChatApprovalContinuationTurn: vi.fn(),
   createGoatChatUserTurn: vi.fn(),
-  dismissStaleGoatChatApprovals: vi.fn(async () => ({
+  settleStaleGoatChatToolCalls: vi.fn(async () => ({
     changed: false,
     messages: [],
     toolCallIds: [],
@@ -2441,7 +2442,7 @@ describe("POST /api/chat", () => {
     });
   });
 
-  it("persists streamed tool parts when the chat stream is stopped before final text", async () => {
+  it("settles streamed tool parts when the chat stream is stopped before final text", async () => {
     mockAuth();
     mockCreateTurn();
     const toolPart = {
@@ -2501,7 +2502,13 @@ describe("POST /api/chat", () => {
         debugTrace: expect.objectContaining({
           aborted: true,
           finishReason: "stop",
-          uiMessageParts: [toolPart],
+          uiMessageParts: [
+            {
+              ...toolPart,
+              state: "output-error",
+              errorText: GOAT_INCOMPLETE_TOOL_CALL_REASON,
+            },
+          ],
         }),
       },
       expect.anything(),

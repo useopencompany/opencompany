@@ -71,9 +71,9 @@ import {
   createDbGoatChatStore,
   createGoatChatApprovalContinuationTurn,
   createGoatChatUserTurn,
-  dismissStaleGoatChatApprovals,
   newGoatChatMessageId,
   persistGoatChatAssistantMessage,
+  settleStaleGoatChatToolCalls,
 } from "@/lib/chat";
 import {
   createOpenCompanyChatDebugTrace,
@@ -115,6 +115,7 @@ import {
   listedActionSourceIdsFromMessages,
   listedSkillIdsFromMessages,
   replaceGoatChatUiMessageText,
+  settleIncompleteToolCallsInStoredParts,
   textFromGoatChatUiMessage,
   type UseActionToolOutput,
   usedSkillIdsFromMessages,
@@ -527,11 +528,11 @@ export async function POST(request: Request): Promise<Response> {
         },
         store,
       );
-      // Approvals the user talked past get denied now, so the history stays
-      // convertible and the stale card resolves in the UI.
-      const dismissed = await dismissStaleGoatChatApprovals(userTurn, store);
+      // Settle approvals the user talked past and tools interrupted by an
+      // earlier stream so persisted history remains model-convertible.
+      const settled = await settleStaleGoatChatToolCalls(userTurn, store);
       await Promise.allSettled(
-        dismissed.toolCallIds.map((toolCallId) =>
+        settled.toolCallIds.map((toolCallId) =>
           cancelGoatCapabilityRunByToolCall({
             toolCallId,
             chatSessionId: userTurn.session.id,
@@ -547,7 +548,7 @@ export async function POST(request: Request): Promise<Response> {
         usageUserMessageId: userTurn.userMessage.id,
         userMessageContent: userInput.prompt,
         storedMessages: userTurn.storedMessages,
-        messages: dismissed.changed ? dismissed.messages : userTurn.messages,
+        messages: settled.changed ? settled.messages : userTurn.messages,
         respondedApprovals: [],
         continuationTaskId: null,
       };
@@ -1430,6 +1431,7 @@ export async function POST(request: Request): Promise<Response> {
         storedMessages: turn.storedMessages,
         modelId: turn.session.model,
       }),
+      { ignoreIncompleteToolCalls: true },
     ),
     stopWhen: stepCountIs(maxChatSteps),
     // Providers deliver tokens in bursts; re-chunk to word-level with a small
@@ -1570,8 +1572,11 @@ export async function POST(request: Request): Promise<Response> {
       if (assistantPersisted) return;
 
       const startedTask = toolContext.getStartedTask();
-      const rawContent = textFromGoatChatUiMessage(responseMessage);
-      const hasAssistantParts = hasDisplayableAssistantParts(responseMessage);
+      const responseParts = settleIncompleteToolCallsInStoredParts(responseMessage.parts)
+        .parts as GoatChatUiMessage["parts"];
+      const settledResponseMessage = { ...responseMessage, parts: responseParts };
+      const rawContent = textFromGoatChatUiMessage(settledResponseMessage);
+      const hasAssistantParts = hasDisplayableAssistantParts(settledResponseMessage);
       if (isAborted && !rawContent && !startedTask && !hasAssistantParts) {
         finishChatTelemetry("aborted", {
           "goat.chat_session_id": turn.session.id,
@@ -1588,7 +1593,7 @@ export async function POST(request: Request): Promise<Response> {
         ...debugTrace,
         durationMs: elapsedChatDurationMs(),
         ...(isAborted ? { aborted: true } : {}),
-        ...(responseMessage.parts.length ? { uiMessageParts: responseMessage.parts } : {}),
+        ...(responseParts.length ? { uiMessageParts: responseParts } : {}),
         ...(finishReasonText ? { finishReason: finishReasonText } : {}),
       };
       const assistantMessageInput = {
