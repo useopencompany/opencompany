@@ -34,6 +34,7 @@ not set expiration on the configured parent branch or on branches Neon reports a
 |---|---|
 | `bun run db:branch:create` | Creates a Neon branch matching the current Git branch, writes `DATABASE_URL` to `.env.local`. Idempotent. |
 | `bun run db:branch:delete` | Deletes the Neon branch matching the current Git branch. |
+| `bun run db:cloud-base:refresh` | Creates or migrates the protected, schema-only base used by E2B sessions. Idempotent. |
 | `bun run db:generate` | Generates a SQL migration from `packages/db/src/schema.ts` changes into `drizzle/`. |
 | `bun run db:migrate` | Applies pending migrations to whatever `DATABASE_URL` points at. |
 | `bun run db:migrations:check` | Verifies every migration SQL file is registered in Drizzle's journal. |
@@ -54,6 +55,16 @@ When fetching a connection string, the script auto-selects `neondb` and `neondb_
 The Neon branch name is your current Git branch, lower-cased and sanitized to `[a-z0-9-]`, truncated to 63 chars.
 
 If two local worktrees intentionally use the same Git branch, set `NEON_BRANCH_NAME` in one or both `.env.local` files so they do not point at the same Neon branch.
+
+### Cloud coding sandboxes
+
+E2B coding sessions use a separate path so an empty dev-project default branch does not make every sandbox replay the complete migration history over a high-latency connection:
+
+1. `bun run setup` refreshes the shared `cloud-base` branch under a Postgres advisory lock. The branch is created schema-only from `NEON_PARENT_BRANCH` (or `production`) and protected from deletion/reset; it contains no parent application data.
+2. Setup forks a child named `<git-branch>-e2b-<sandbox-id>` from `cloud-base`, so concurrent sessions never share a writable database.
+3. The normal migration step runs on the child and applies only migrations added after its snapshot, which is normally a no-op.
+
+The refresh is idempotent and runs before every E2B child is created. It advances the base only when the checked-out migration and schema files exactly match `origin/main`; unmerged feature migrations stay isolated to the feature's child branch. It can also be run explicitly with `bun run db:cloud-base:refresh`. Local machines retain the Git-branch naming and `NEON_PARENT_BRANCH` behavior described above.
 
 For a clean local reset, delete and recreate the branch:
 
