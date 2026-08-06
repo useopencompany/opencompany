@@ -330,7 +330,7 @@ describe("runGoatCodexChatTurn", () => {
       resolveBootstrap?.({
         configs: [],
         promptFragment:
-          '<repository_bootstrap>\nWhen working on "opencompany/app": its environment file is staged at "/opt/oc/repos/123/.env".\n</repository_bootstrap>',
+          '<repository_bootstrap>\nWhen working on "opencompany/app": its environment file is staged at "/opt/oc/repos/123/.env".\nAfter cloning a repository, read and follow its root AGENTS.md and CLAUDE.md files when present, before running setup or development commands.\n</repository_bootstrap>',
         secretValues: ["never-project-this-secret"],
       });
       return sandbox;
@@ -355,6 +355,11 @@ describe("runGoatCodexChatTurn", () => {
     expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.stringContaining("/opt/oc/repos/123/.env"),
+      }),
+    );
+    expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.stringContaining("read and follow its root AGENTS.md and CLAUDE.md files"),
       }),
     );
   });
