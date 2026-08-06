@@ -105,6 +105,19 @@ describe("startGoogleAuth", () => {
       "https://api.workos.com/authorize?provider=GoogleOAuth",
     );
   });
+
+  it("normalizes an off-origin returnPathname before storing it", async () => {
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: { getAuthorizationUrl: vi.fn(() => "https://api.workos.com/authorize") },
+    } as never);
+    const formData = new FormData();
+    formData.set("returnPathname", "https://evil.example.com");
+
+    await startGoogleAuth(formData);
+
+    const [storedPayload] = setGoatOAuthStateCookieMock.mock.calls[0] ?? [];
+    expect(storedPayload?.returnPathname).toBe("/");
+  });
 });
 
 describe("requestMagicCode", () => {

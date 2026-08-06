@@ -24,6 +24,8 @@ export type GoatOAuthStateCookiePayload = {
   returnPathname?: string;
 };
 
+// Normalize a return target from an unauthenticated cookie to a same-origin
+// path, rejecting absolute and protocol-relative URLs before redirecting.
 export function safeGoatReturnPathname(value: unknown): string {
   if (typeof value !== "string" || !value.startsWith("/")) return "/";
 
@@ -107,7 +109,10 @@ export async function setGoatOAuthStateCookie(payload: GoatOAuthStateCookiePaylo
 export async function consumeGoatOAuthStateCookie(): Promise<GoatOAuthStateCookiePayload | null> {
   const cookieStore = await cookies();
   const raw = cookieStore.get(OAUTH_STATE_COOKIE)?.value;
-  cookieStore.delete(OAUTH_STATE_COOKIE);
+  // Must match the path the cookie was set with (see setGoatOAuthStateCookie)
+  // or the browser treats this as a no-op deletion of a different cookie,
+  // leaving the original — still consumable — state cookie in place.
+  cookieStore.delete({ name: OAUTH_STATE_COOKIE, path: "/" });
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
