@@ -196,7 +196,7 @@ export type AnalyticsEventPropertiesByName = {
   };
   goat_billing_plan_changed: {
     workspace_id: string;
-    plan: "free" | "pro";
+    plan: "hobby" | "pro";
     subscription_status: string;
   };
   goat_billing_payment_failed: {

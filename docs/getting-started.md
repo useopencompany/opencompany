@@ -232,12 +232,15 @@ gitignored local-development fallback. It refuses non-restricted keys without an
 environments always require a dedicated restricted key stored in Infisical. If the active profile
 has no suitable key, run `stripe login` or create a restricted test key in Stripe, store it in
 Infisical `dev` + `/web`, and rerun setup.
-Goat billing is pure usage-based (wallet top-ups, no subscription Prices to provision). Stripe
-Checkout uses automatic tax; add the jurisdictions where the business is registered under
+Goat billing has a $0 Hobby plan with $5 of calendar-month usage and a $20-per-seat Pro plan with
+$20 of calendar-month usage per seat. Pro admins can buy shared top-up credits and enable
+auto-refill. Checkout creates the recurring price inline, so there is no Price id to provision.
+Stripe Checkout uses automatic tax; add the jurisdictions where the business is registered under
 **Stripe Tax → Registrations** before enabling live Checkout. Configure the customer portal
 separately in test and live modes with payment methods, invoice history, and tax IDs enabled.
-Limit the Goat restricted key to Customer, Checkout Session, Customer Portal, and PaymentIntent
-write permissions (auto-refill creates off-session PaymentIntents on saved cards).
+Limit the Goat restricted key to Customer, Checkout Session, Customer Portal, PaymentIntent, and
+Subscription read/write permissions (seat reconciliation updates subscription items; auto-refill
+creates off-session PaymentIntents on saved cards).
 Hosted live Checkout also requires `GOAT_STRIPE_CHECKOUT_ENABLED=true`; keep it false until the
 business's Stripe Tax registrations are configured.
 

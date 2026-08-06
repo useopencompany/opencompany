@@ -4,7 +4,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type GoatIntegrationState, goatIntegrationStateFromRows } from "@/lib/integration-state";
 import { SettingsIntegrationsPanel } from "./SettingsIntegrationsPanel";
 
-const { toastError, toastSuccess } = vi.hoisted(() => ({
+const {
+  completeInfisicalAuth,
+  disconnectInfisicalAuth,
+  startInfisicalAuth,
+  toastError,
+  toastSuccess,
+} = vi.hoisted(() => ({
+  completeInfisicalAuth: vi.fn(),
+  disconnectInfisicalAuth: vi.fn(),
+  startInfisicalAuth: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
 }));
@@ -30,6 +39,12 @@ vi.mock("@/lib/codex-auth", () => ({
   startGoatCodexDeviceAuth: vi.fn(),
 }));
 
+vi.mock("@/lib/infisical-auth", () => ({
+  completeGoatInfisicalAuth: completeInfisicalAuth,
+  disconnectGoatInfisicalAuth: disconnectInfisicalAuth,
+  startGoatInfisicalAuth: startInfisicalAuth,
+}));
+
 // Pulls in @/lib/auth (authkit), which vitest cannot resolve.
 vi.mock("@/lib/claude-code-auth", () => ({
   disconnectGoatClaudeCodeAuth: vi.fn(async () => ({ ok: true })),
@@ -50,6 +65,9 @@ describe("SettingsIntegrationsPanel", () => {
   beforeEach(() => {
     toastError.mockClear();
     toastSuccess.mockClear();
+    completeInfisicalAuth.mockReset();
+    disconnectInfisicalAuth.mockReset();
+    startInfisicalAuth.mockReset();
     window.history.replaceState({}, "", "/settings/integrations");
   });
 
@@ -146,6 +164,73 @@ describe("SettingsIntegrationsPanel", () => {
     expect(
       screen.queryByText("Bring pull requests and issues from your repositories into Goat."),
     ).not.toBeInTheDocument();
+  });
+
+  it("lets workspace admins complete the Infisical browser-token handoff", async () => {
+    startInfisicalAuth.mockResolvedValue({
+      ok: true,
+      flow: {
+        id: "ginff_123",
+        status: "link_ready",
+        loginUrl: "https://app.infisical.com/login?callback_port=12345",
+        statusReason: null,
+        expiresAt: "2026-08-05T17:00:00.000Z",
+      },
+    });
+    completeInfisicalAuth.mockResolvedValue({
+      ok: true,
+      flow: {
+        id: "ginff_123",
+        status: "completed",
+        loginUrl: "https://app.infisical.com/login?callback_port=12345",
+        statusReason: null,
+        expiresAt: "2026-08-05T17:00:00.000Z",
+      },
+    });
+
+    render(
+      <SettingsIntegrationsPanel
+        initialIntegrations={goatIntegrationStateFromRows([])}
+        isWorkspaceAdmin
+      />,
+    );
+    const card = screen
+      .getByText("Give workspace coding agents access to the real Infisical CLI.")
+      .closest("div.rounded-2xl");
+    expect(card).not.toBeNull();
+    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => {
+      expect(
+        within(card as HTMLElement).getByRole("link", { name: /Open Infisical sign-in/ }),
+      ).toHaveAttribute("href", "https://app.infisical.com/login?callback_port=12345");
+    });
+    fireEvent.change(within(card as HTMLElement).getByPlaceholderText("Paste browser token"), {
+      target: { value: "browser-token" },
+    });
+    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Finish connection" }));
+
+    await waitFor(() => {
+      expect(completeInfisicalAuth).toHaveBeenCalledWith({
+        flowId: "ginff_123",
+        browserToken: "browser-token",
+      });
+    });
+  });
+
+  it("keeps workspace Infisical read-only for non-admin members", () => {
+    render(
+      <SettingsIntegrationsPanel
+        initialIntegrations={goatIntegrationStateFromRows([])}
+        isWorkspaceAdmin={false}
+      />,
+    );
+    const card = screen
+      .getByText("Give workspace coding agents access to the real Infisical CLI.")
+      .closest("div.rounded-2xl");
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByText("Managed by workspace admins.")).toBeVisible();
+    expect(within(card as HTMLElement).queryByRole("button", { name: "Connect" })).toBeNull();
   });
 
   it("links a connected GitHub workspace to repository configuration", () => {

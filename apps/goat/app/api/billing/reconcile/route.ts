@@ -1,5 +1,9 @@
-import { releasePendingGoatIngestionReservations } from "@opencompany/db/goat-billing";
+import {
+  refreshGoatMonthlyIncludedUsage,
+  releasePendingGoatIngestionReservations,
+} from "@opencompany/db/goat-billing";
 import { sweepGoatAutoRefills } from "@/lib/billing/auto-refill";
+import { reconcileGoatStripeSeatQuantities } from "@/lib/billing/seats";
 import { reconcileGoatCapabilities } from "@/lib/capabilities/reconcile";
 
 export const runtime = "nodejs";
@@ -14,17 +18,21 @@ export async function GET(request: Request) {
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const [capabilities, ingestion] = await Promise.all([
+  const [capabilities, ingestion, includedUsage, seats] = await Promise.all([
     reconcileGoatCapabilities(100),
     releasePendingGoatIngestionReservations({
       maxWorkspaces: 200,
     }),
+    refreshGoatMonthlyIncludedUsage({ limit: 500 }),
+    reconcileGoatStripeSeatQuantities(100),
   ]);
   const autoRefills = await sweepGoatAutoRefills(25);
   return Response.json({
     released: ingestion.released,
     failed: ingestion.failed,
     autoRefills,
+    includedUsage,
+    seats,
     capabilities,
   });
 }

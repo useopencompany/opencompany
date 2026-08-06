@@ -570,13 +570,15 @@ export function GoatSurface({
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
   const workflowMentionsEnabled =
     taskSpawningEnabled && (!activeTaskConversation || backgroundDirectiveActive);
+  const skillMentionsEnabled =
+    !activeTaskConversation || activeTaskConversation.sessionBacked || backgroundDirectiveActive;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
       return mention.id === "claude" ? claudeCodeConnected : codexConnected;
     }
     if (mention.kind === "workflow") return workflowMentionsEnabled;
-    return !activeTaskConversation || backgroundDirectiveActive;
+    return skillMentionsEnabled;
   });
   const chatModel =
     chatModelSelectionFromEngineMention(
@@ -841,7 +843,7 @@ export function GoatSurface({
     selectedMentions: activeSelectedMentions,
     codexConnected,
     claudeCodeConnected,
-    skillsEnabled: !activeTaskConversation,
+    skillsEnabled: skillMentionsEnabled,
     workflowsEnabled: workflowMentionsEnabled,
     adHocTaskEnabled: adHocTaskMentionEnabled || Boolean(backgroundChatDirective),
   });
@@ -890,7 +892,7 @@ export function GoatSurface({
   // created or edited since the last open must appear, and a transient fetch failure
   // must not blank the menu for the rest of the session — keep the previous catalog
   // and let the next open retry.
-  const skillMentionMenuOpen = Boolean(userWorkosId && mentionToken && !activeTaskConversation);
+  const skillMentionMenuOpen = Boolean(userWorkosId && mentionToken && skillMentionsEnabled);
   useEffect(() => {
     if (!skillMentionMenuOpen) return;
     const controller = new AbortController();
@@ -1521,12 +1523,18 @@ export function GoatSurface({
     }
 
     if (activeTaskConversation && !backgroundChat) {
+      const taskSkillMentions = activeSelectedMentions
+        .filter(isSkillMention)
+        .filter((mention) => goatChatMentionIsVisible(prompt, mention));
       const messageId = activeTaskConversation.sessionBacked
         ? `goat_chat_msg_${crypto.randomUUID()}`
         : `goat_task_msg_${crypto.randomUUID()}`;
       const optimisticMessage = {
         id: messageId,
         role: "user",
+        ...(taskSkillMentions.length > 0
+          ? { metadata: { mentions: taskSkillMentions } satisfies GoatChatMessageMetadata }
+          : {}),
         parts: [{ type: "text", text: prompt }],
       } as GoatChatUiMessage;
 
@@ -1538,12 +1546,22 @@ export function GoatSurface({
       setTaskMessageSubmitting(true);
       beginActiveTurn();
       setMessages((current) => [...current, optimisticMessage]);
-      void continueGoatTaskAction(activeTaskConversation.taskId, prompt, messageId)
+      const continueTask =
+        taskSkillMentions.length > 0
+          ? continueGoatTaskAction(
+              activeTaskConversation.taskId,
+              prompt,
+              messageId,
+              taskSkillMentions,
+            )
+          : continueGoatTaskAction(activeTaskConversation.taskId, prompt, messageId);
+      void continueTask
         .then((result) => {
           if (!mountedRef.current) return;
           if (!result.ok) {
             setMessages((current) => current.filter((message) => message.id !== messageId));
             setInput(prompt);
+            setSelectedMentions(taskSkillMentions);
             clearLocalActiveTurnState(null);
             clearActiveTurn();
             toast.error(result.error ?? "Could not continue that task.");
@@ -1555,6 +1573,7 @@ export function GoatSurface({
           if (!mountedRef.current) return;
           setMessages((current) => current.filter((message) => message.id !== messageId));
           setInput(prompt);
+          setSelectedMentions(taskSkillMentions);
           clearLocalActiveTurnState(null);
           clearActiveTurn();
           toast.error("Could not continue that task.");

@@ -1,4 +1,5 @@
 import {
+  ensureGoatMonthlyIncludedUsage,
   GOAT_LOW_BALANCE_WARN_USD_MICROS,
   isGoatCreditsEnforcementEnabled,
 } from "@opencompany/db/goat-billing";
@@ -13,6 +14,7 @@ export const runtime = "nodejs";
 export async function GET() {
   try {
     const context = await currentGoatUser();
+    await ensureGoatMonthlyIncludedUsage(context.workspace.id);
     const balanceUsdMicros = await getGoatCreditBalanceUsdMicros(context.workspace.id);
     return NextResponse.json({
       balanceUsdMicros,

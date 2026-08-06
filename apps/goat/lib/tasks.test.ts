@@ -3,6 +3,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatUser } from "@/lib/auth";
 import { DEFAULT_GOAT_MODEL } from "@/lib/model-options";
+import type { GoatWorkspaceSkill } from "@/lib/skills";
 import {
   cancelGoatTaskAction,
   continueGoatTaskAction,
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => {
     ),
     captureGoatTaskSpawned: vi.fn(async () => undefined),
     execute: vi.fn(),
+    resolveGoatSkillMentions: vi.fn(async (): Promise<GoatWorkspaceSkill[]> => []),
     select: vi.fn(),
     triggerGoatCodexChatWake: vi.fn(),
     triggerGoatTaskRun: vi.fn(),
@@ -47,6 +49,14 @@ vi.mock("@/lib/auth", () => ({
   currentGoatUser: vi.fn(),
 }));
 
+vi.mock("@/lib/skills", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/skills")>();
+  return {
+    ...actual,
+    resolveGoatSkillMentions: mocks.resolveGoatSkillMentions,
+  };
+});
+
 vi.mock("next/server", () => ({
   after: mocks.after,
 }));
@@ -56,6 +66,7 @@ vi.mock("next/cache", () => ({
 }));
 
 beforeEach(() => {
+  mocks.resolveGoatSkillMentions.mockResolvedValue([]);
   vi.mocked(currentGoatUser).mockResolvedValue({
     user: { workosUserId: "user_1" },
     workspace: { id: "workspace_1" },
@@ -421,6 +432,47 @@ describe("continueGoatTaskAction", () => {
     expect(sqlTextFromExecuteCall(0)).not.toContain("goat.task_messages");
     expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
     expect(mocks.triggerGoatTaskRun).not.toHaveBeenCalled();
+  });
+
+  it("activates selected skills when continuing a session-backed task", async () => {
+    const messageId = "goat_chat_msg_11111111-1111-4111-8111-111111111111";
+    mocks.resolveGoatSkillMentions.mockResolvedValueOnce([
+      {
+        id: "product-work",
+        name: "Product work",
+        description: "Shape and ship product changes.",
+        instructions: "Think through the product job before implementation.",
+      },
+    ]);
+    mocks.execute.mockResolvedValueOnce([{ id: messageId, task_id: "goat_task_1" }]);
+
+    await expect(
+      continueGoatTaskAction("goat_task_1", "@skill/product-work Check the session.", messageId, [
+        { kind: "skill", id: "product-work" },
+      ]),
+    ).resolves.toEqual({
+      ok: true,
+      error: null,
+      messageId,
+    });
+
+    expect(mocks.resolveGoatSkillMentions).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      mentions: [{ id: "product-work" }],
+    });
+    expect(sqlTextFromExecuteCall(0)).toContain("INSERT INTO goat.chat_session_skills");
+    expect(renderedExecuteCall(0).params).toContain(
+      JSON.stringify([
+        {
+          skill_id: "product-work",
+          brain_ref: "workspace_1",
+          name: "Product work",
+          description: "Shape and ship product changes.",
+          instructions: "Think through the product job before implementation.",
+        },
+      ]),
+    );
+    expect(mocks.triggerGoatCodexChatWake).toHaveBeenCalledOnce();
   });
 
   it("continues a session-backed task owned by another workspace member", async () => {

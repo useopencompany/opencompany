@@ -1092,6 +1092,7 @@ function queryBuilder(rows: unknown[][], execute: ReturnType<typeof vi.fn>) {
     select: () => builder,
     from: () => builder,
     innerJoin: () => builder,
+    leftJoin: () => builder,
     where: () => builder,
     orderBy: () => builder,
     limit: async () => rows.shift() ?? [],

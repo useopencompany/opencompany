@@ -1,7 +1,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "./client";
-import { GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS } from "./goat-billing-constants";
-import type { GoatCreditLedgerSource } from "./goat-schema";
+import { goatIncludedUsageAllowanceCents } from "./goat-billing-constants";
+import type { GoatCreditLedgerSource, GoatWorkspacePlan } from "./goat-schema";
 import { goatCreditLedger, goatStripeCheckoutSessions } from "./goat-schema";
 
 type DbLike = any;
@@ -96,7 +96,7 @@ export type GoatCreditDebitInput = {
   db?: DbLike;
 };
 
-// Unconditional debit: included seat usage is spent first, then top-up/overage
+// Unconditional debit: monthly included usage is spent first, then top-up
 // funds. The aggregate balance may go negative (a turn that finishes after the
 // balance hit zero still gets charged), matching the web credit system. The
 // unique idempotency_key index turns replays into no-ops.
@@ -199,67 +199,14 @@ export async function recordGoatCreditDebit(input: GoatCreditDebitInput) {
   };
 }
 
-// One-time grant at workspace creation (and the backfill for pre-existing
-// workspaces). The partial unique index on (workspace_id) WHERE
-// source = 'starter_grant' makes re-runs no-ops.
-export async function grantGoatStarterCredit(input: {
+// Rotates the expiring included pool on the first of each UTC month. Within a
+// month the allowance only moves upward, so a Pro seat added mid-month gets
+// its full $20 immediately while removing and re-adding a seat cannot mint the
+// same allowance twice. Top-up and historical starter-grant funds are never
+// expired or changed here.
+export async function grantGoatMonthlyIncludedUsage(input: {
   workspaceId: string;
-  userWorkosId?: string | null;
-  amountCents: number;
-  db?: DbLike;
-}) {
-  const db = input.db ?? getDb();
-  const result = await db.execute(sql`
-    WITH ledger AS (
-      INSERT INTO goat.credit_ledger (
-        workspace_id,
-        user_workos_id,
-        amount_cents,
-        amount_usd_micros,
-        source,
-        metadata
-      )
-      VALUES (
-        ${input.workspaceId},
-        ${input.userWorkosId ?? null},
-        ${input.amountCents},
-        ${input.amountCents}::bigint * ${GOAT_USD_MICROS_PER_CENT},
-        'starter_grant',
-        jsonb_build_object('reason', 'goat_workspace_starter_credit')
-      )
-      ON CONFLICT (workspace_id) WHERE source = 'starter_grant' DO NOTHING
-      RETURNING id, workspace_id, amount_cents, amount_usd_micros
-    ),
-    balance AS (
-      INSERT INTO goat.credit_balances (
-        workspace_id,
-        balance_cents,
-        balance_usd_micros,
-        included_balance_usd_micros,
-        top_up_balance_usd_micros,
-        updated_at
-      )
-      SELECT workspace_id, amount_cents, amount_usd_micros, 0, amount_usd_micros, now()
-      FROM ledger
-      ON CONFLICT (workspace_id) DO UPDATE
-      SET balance_cents = goat.credit_balances.balance_cents + excluded.balance_cents,
-          balance_usd_micros = goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros,
-          top_up_balance_usd_micros = goat.credit_balances.top_up_balance_usd_micros + excluded.balance_usd_micros,
-          updated_at = now()
-      RETURNING workspace_id, balance_cents
-    )
-    SELECT ledger.id AS "ledgerId", balance.balance_cents AS "balanceCents"
-    FROM ledger
-    JOIN balance ON balance.workspace_id = ledger.workspace_id
-  `);
-  const rows = rowsFromExecute<{ ledgerId: number; balanceCents: number }>(result);
-  if (!rows[0]) return { ok: false as const, reason: "already_granted" as const };
-  return { ok: true as const, ...rows[0] };
-}
-
-export async function grantGoatSeatIncludedUsage(input: {
-  workspaceId: string;
-  subscriptionId: string;
+  plan: GoatWorkspacePlan;
   seatQuantity: number;
   periodStart: Date;
   periodEnd: Date;
@@ -267,33 +214,43 @@ export async function grantGoatSeatIncludedUsage(input: {
   db?: DbLike;
 }) {
   if (!Number.isSafeInteger(input.seatQuantity) || input.seatQuantity < 1) {
-    throw new Error("Seat included usage requires at least one seat.");
+    throw new Error("Monthly included usage requires at least one seat.");
   }
   if (!(input.periodStart < input.periodEnd)) {
-    throw new Error("Seat included usage requires a valid billing period.");
+    throw new Error("Monthly included usage requires a valid billing period.");
   }
-  const amountCents = input.seatQuantity * GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS;
-  const amountUsdMicros = amountCents * GOAT_USD_MICROS_PER_CENT;
+  const targetAllowanceCents = goatIncludedUsageAllowanceCents(input.plan, input.seatQuantity);
   const db = input.db ?? getDb();
-  const grantKey = `seat_included_grant:${input.subscriptionId}:${input.periodStart.toISOString()}`;
-  const expireKey = `seat_included_expiration:${input.workspaceId}:${input.periodStart.toISOString()}`;
+  const grantKey = `included_usage_grant:${input.workspaceId}:${input.periodStart.toISOString()}:${targetAllowanceCents}`;
+  const expireKey = `included_usage_expiration:${input.workspaceId}:${input.periodStart.toISOString()}`;
   const result = await db.execute(sql`
-    WITH locked_balance AS MATERIALIZED (
+    WITH current_billing AS MATERIALIZED (
+      INSERT INTO goat.workspace_billing (workspace_id)
+      VALUES (${input.workspaceId})
+      ON CONFLICT (workspace_id) DO UPDATE
+      SET workspace_id = excluded.workspace_id
+      RETURNING included_usage_period_start, included_usage_allowance_cents
+    ),
+    locked_balance AS MATERIALIZED (
       SELECT workspace_id, included_balance_usd_micros
       FROM goat.credit_balances
       WHERE workspace_id = ${input.workspaceId}
       FOR UPDATE
-    ),
-    current_billing AS MATERIALIZED (
-      SELECT included_usage_period_start
-      FROM goat.workspace_billing
-      WHERE workspace_id = ${input.workspaceId}
     ),
     should_rotate AS (
       SELECT COALESCE(
         (SELECT included_usage_period_start IS DISTINCT FROM ${input.periodStart.toISOString()}::timestamptz FROM current_billing),
         true
       ) AS value
+    ),
+    grant_amount AS (
+      SELECT GREATEST(
+        ${targetAllowanceCents} - CASE
+          WHEN (SELECT value FROM should_rotate) THEN 0
+          ELSE COALESCE((SELECT included_usage_allowance_cents FROM current_billing), 0)
+        END,
+        0
+      )::integer AS cents
     ),
     expiration AS (
       INSERT INTO goat.credit_ledger (
@@ -308,10 +265,10 @@ export async function grantGoatSeatIncludedUsage(input: {
         ${input.workspaceId},
         -ROUND(COALESCE(included_balance_usd_micros, 0)::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
         -COALESCE(included_balance_usd_micros, 0),
-        'seat_included_expiration',
+        'included_usage_expiration',
         ${expireKey},
         jsonb_build_object(
-          'reason', 'seat_included_usage_no_rollover',
+          'reason', 'included_usage_no_rollover',
           'newPeriodStart', ${input.periodStart.toISOString()},
           'stripeEventId', ${input.eventId ?? null}::text
         )
@@ -332,19 +289,20 @@ export async function grantGoatSeatIncludedUsage(input: {
       )
       SELECT
         ${input.workspaceId},
-        ${amountCents},
-        ${amountUsdMicros},
-        'seat_included_grant',
+        (SELECT cents FROM grant_amount),
+        (SELECT cents FROM grant_amount)::bigint * ${GOAT_USD_MICROS_PER_CENT},
+        'included_usage_grant',
         ${grantKey},
         jsonb_build_object(
-          'reason', 'seat_included_usage',
-          'subscriptionId', ${input.subscriptionId},
+          'reason', 'monthly_included_usage',
+          'plan', ${input.plan},
           'seatQuantity', ${input.seatQuantity},
+          'allowanceCents', ${targetAllowanceCents},
           'periodStart', ${input.periodStart.toISOString()},
           'periodEnd', ${input.periodEnd.toISOString()},
           'stripeEventId', ${input.eventId ?? null}::text
         )
-      WHERE (SELECT value FROM should_rotate)
+      WHERE (SELECT cents FROM grant_amount) > 0
       ON CONFLICT DO NOTHING
       RETURNING amount_usd_micros
     ),
@@ -359,28 +317,42 @@ export async function grantGoatSeatIncludedUsage(input: {
       )
       SELECT
         ${input.workspaceId},
-        ${amountCents},
+        ROUND((COALESCE((SELECT SUM(amount_usd_micros) FROM expiration), 0) + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0))::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
         COALESCE((SELECT SUM(amount_usd_micros) FROM expiration), 0) + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0),
-        COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0),
+        COALESCE((SELECT SUM(amount_usd_micros) FROM expiration), 0) + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0),
         0,
         now()
       WHERE EXISTS (SELECT 1 FROM expiration) OR EXISTS (SELECT 1 FROM grant_row)
       ON CONFLICT (workspace_id) DO UPDATE
-      SET included_balance_usd_micros = COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0),
-          balance_usd_micros = goat.credit_balances.top_up_balance_usd_micros + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0),
-          balance_cents = ROUND((goat.credit_balances.top_up_balance_usd_micros + COALESCE((SELECT SUM(amount_usd_micros) FROM grant_row), 0))::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
+      SET included_balance_usd_micros = goat.credit_balances.included_balance_usd_micros + excluded.included_balance_usd_micros,
+          balance_usd_micros = goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros,
+          balance_cents = ROUND((goat.credit_balances.balance_usd_micros + excluded.balance_usd_micros)::numeric / ${GOAT_USD_MICROS_PER_CENT})::integer,
           updated_at = now()
       RETURNING balance_usd_micros
+    ),
+    billing_update AS (
+      UPDATE goat.workspace_billing
+      SET included_usage_period_start = ${input.periodStart.toISOString()},
+          included_usage_period_end = ${input.periodEnd.toISOString()},
+          included_usage_allowance_cents = CASE
+            WHEN (SELECT value FROM should_rotate) THEN ${targetAllowanceCents}
+            ELSE GREATEST(included_usage_allowance_cents, ${targetAllowanceCents})
+          END,
+          updated_at = now()
+      WHERE workspace_id = ${input.workspaceId}
+      RETURNING included_usage_allowance_cents
     )
     SELECT
       COALESCE((SELECT COUNT(*) FROM grant_row), 0)::integer AS "grants",
       COALESCE((SELECT COUNT(*) FROM expiration), 0)::integer AS "expirations",
-      COALESCE((SELECT balance_usd_micros FROM balance), NULL) AS "balanceUsdMicros"
+      COALESCE((SELECT balance_usd_micros FROM balance), NULL) AS "balanceUsdMicros",
+      (SELECT included_usage_allowance_cents FROM billing_update) AS "allowanceCents"
   `);
   const rows = rowsFromExecute<{
     grants: number | string;
     expirations: number | string;
     balanceUsdMicros: number | string | null;
+    allowanceCents: number | string;
   }>(result);
   const row = rows[0];
   return {
@@ -388,6 +360,7 @@ export async function grantGoatSeatIncludedUsage(input: {
     grants: Number(row?.grants ?? 0),
     expirations: Number(row?.expirations ?? 0),
     balanceUsdMicros: row?.balanceUsdMicros == null ? null : Number(row.balanceUsdMicros),
+    allowanceCents: Number(row?.allowanceCents ?? targetAllowanceCents),
   };
 }
 

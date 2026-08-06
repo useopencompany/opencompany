@@ -144,6 +144,13 @@ export type GoatCodexDeviceAuthFlowStatus =
   | "completed"
   | "failed"
   | "expired";
+export type GoatInfisicalConnectionStatus = "connected" | "needs_reauth" | "disconnected";
+export type GoatInfisicalAuthFlowStatus =
+  | "pending"
+  | "link_ready"
+  | "completed"
+  | "failed"
+  | "expired";
 export type GoatIntegrationResourceStatus =
   | "available"
   | "permission_lost"
@@ -350,7 +357,7 @@ export type GoatHarnessSpec = {
 export type GoatWorkspaceRole = "admin" | "member";
 export type GoatMcpClient = "claude" | "chatgpt" | "cursor";
 export type GoatTaskViewMode = "board" | "list";
-export type GoatWorkspacePlan = "free" | "pro";
+export type GoatWorkspacePlan = "hobby" | "pro";
 export type GoatStripeSubscriptionStatus =
   | "incomplete"
   | "incomplete_expired"
@@ -369,6 +376,8 @@ export type GoatCreditLedgerSource =
   | "starter_grant"
   | "seat_included_grant"
   | "seat_included_expiration"
+  | "included_usage_grant"
+  | "included_usage_expiration"
   | "stripe_topup"
   | "chat_model_usage"
   | "capability_usage"
@@ -785,7 +794,7 @@ export const goatWorkspaceBilling = goat.table(
     workspaceId: text("workspace_id")
       .primaryKey()
       .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
-    plan: text("plan").$type<GoatWorkspacePlan>().notNull().default("free"),
+    plan: text("plan").$type<GoatWorkspacePlan>().notNull().default("hobby"),
     planStartedAt: timestamp("plan_started_at", { withTimezone: true }).notNull().defaultNow(),
     stripeCustomerId: text("stripe_customer_id"),
     stripeSubscriptionId: text("stripe_subscription_id"),
@@ -796,6 +805,7 @@ export const goatWorkspaceBilling = goat.table(
     seatQuantity: integer("seat_quantity").notNull().default(1),
     includedUsagePeriodStart: timestamp("included_usage_period_start", { withTimezone: true }),
     includedUsagePeriodEnd: timestamp("included_usage_period_end", { withTimezone: true }),
+    includedUsageAllowanceCents: integer("included_usage_allowance_cents").notNull().default(0),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     paymentNeedsAttention: boolean("payment_needs_attention").notNull().default(false),
@@ -820,7 +830,7 @@ export const goatWorkspaceBilling = goat.table(
     subscriptionIdx: uniqueIndex("goat_workspace_billing_subscription_idx").on(
       table.stripeSubscriptionId,
     ),
-    planCheck: check("goat_workspace_billing_plan_check", sql`${table.plan} IN ('free', 'pro')`),
+    planCheck: check("goat_workspace_billing_plan_check", sql`${table.plan} IN ('hobby', 'pro')`),
     seatQuantityCheck: check(
       "goat_workspace_billing_seat_quantity_check",
       sql`${table.seatQuantity} >= 1`,
@@ -840,8 +850,8 @@ export const goatStripeWebhookEvents = goat.table("stripe_webhook_events", {
 });
 
 // USD credit balance per workspace. balance_usd_micros remains the aggregate
-// used by gates and dashboards; billing v6 also tracks the included seat pool
-// separately from overage/top-up funds so debits can draw included usage first
+// used by gates and dashboards; billing v7 also tracks the monthly included pool
+// separately from top-up funds so debits can draw included usage first
 // and expire unused included usage monthly without touching top-ups.
 export const goatCreditBalances = goat.table("credit_balances", {
   workspaceId: text("workspace_id")
@@ -953,7 +963,7 @@ export const goatCreditLedger = goat.table(
       .where(sql`${table.source} = 'starter_grant'`),
     sourceCheck: check(
       "goat_credit_ledger_source_check",
-      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'stripe_topup', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
+      sql`${table.source} IN ('starter_grant', 'seat_included_grant', 'seat_included_expiration', 'included_usage_grant', 'included_usage_expiration', 'stripe_topup', 'chat_model_usage', 'capability_usage', 'frontier_ingest', 'ingest_overage', 'ingest_model_usage', 'ingest_fee', 'adjustment')`,
     ),
   }),
 );
@@ -3936,6 +3946,82 @@ export const goatCodexDeviceAuthFlows = goat.table(
     statusCheck: check(
       "goat_codex_device_auth_flows_status_check",
       sql`${table.status} IN ('pending', 'code_ready', 'completed', 'failed', 'expired')`,
+    ),
+  }),
+);
+
+// One human Infisical CLI login shared by every coding sandbox in a workspace. The encrypted
+// bundle contains only Infisical's file-vault config and keyring files; project selection remains
+// repository-local through .infisical.json. A disconnected tombstone is retained so resumed
+// sandboxes can observe the new credential generation and remove stale local auth.
+export const goatInfisicalConnections = goat.table(
+  "infisical_connections",
+  {
+    workspaceId: text("workspace_id")
+      .primaryKey()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    encryptedAuthBundle:
+      jsonb("encrypted_auth_bundle").$type<GoatIntegrationCredentialEncryptedPayload>(),
+    encryptionKeyVersion: integer("encryption_key_version"),
+    credentialGeneration: uuid("credential_generation").notNull().defaultRandom(),
+    status: text("status").$type<GoatInfisicalConnectionStatus>().notNull().default("disconnected"),
+    statusReason: text("status_reason"),
+    host: text("host").notNull().default("https://app.infisical.com"),
+    accountEmail: text("account_email"),
+    cliVersion: text("cli_version"),
+    bundleFormatVersion: integer("bundle_format_version"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    connectedByWorkosId: text("connected_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    statusIdx: index("goat_infisical_connections_status_idx").on(table.status),
+    connectedByIdx: index("goat_infisical_connections_connected_by_idx").on(
+      table.connectedByWorkosId,
+    ),
+    statusCheck: check(
+      "goat_infisical_connections_status_check",
+      sql`${table.status} IN ('connected', 'needs_reauth', 'disconnected')`,
+    ),
+    credentialCheck: check(
+      "goat_infisical_connections_credential_check",
+      sql`(${table.status} = 'disconnected' AND ${table.encryptedAuthBundle} IS NULL AND ${table.encryptionKeyVersion} IS NULL) OR (${table.status} IN ('connected', 'needs_reauth') AND ${table.encryptedAuthBundle} IS NOT NULL AND ${table.encryptionKeyVersion} IS NOT NULL)`,
+    ),
+  }),
+);
+
+export const goatInfisicalAuthFlows = goat.table(
+  "infisical_auth_flows",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    requestedByWorkosId: text("requested_by_workos_id").references(() => goatUsers.workosUserId, {
+      onDelete: "set null",
+    }),
+    sandboxId: text("sandbox_id").notNull(),
+    loginUrl: text("login_url"),
+    status: text("status").$type<GoatInfisicalAuthFlowStatus>().notNull().default("pending"),
+    statusReason: text("status_reason"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceStatusIdx: index("goat_infisical_auth_flows_workspace_status_idx").on(
+      table.workspaceId,
+      table.status,
+    ),
+    expiresAtIdx: index("goat_infisical_auth_flows_expires_at_idx").on(table.expiresAt),
+    statusCheck: check(
+      "goat_infisical_auth_flows_status_check",
+      sql`${table.status} IN ('pending', 'link_ready', 'completed', 'failed', 'expired')`,
     ),
   }),
 );

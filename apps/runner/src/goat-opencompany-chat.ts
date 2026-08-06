@@ -1,5 +1,7 @@
 import { AGENT_MODEL_CATALOG, modelSupportsAttachments } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { ensureGoatMonthlyIncludedUsage } from "@opencompany/db/goat-billing";
+import { hasPositiveGoatCreditBalance } from "@opencompany/db/goat-credits";
 import { resolveGoatImessageDelivery } from "@opencompany/db/goat-imessage";
 import {
   type GoatChatMessageAttachment,
@@ -127,6 +129,20 @@ export async function runGoatOpenCompanyChatTurn(input: {
       input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : null,
     );
     return "settled";
+  }
+
+  if (session.workspaceId) {
+    if (!(await hasGoatHostedTurnCredits(session.workspaceId))) {
+      const message =
+        "This workspace is out of credits. Hobby usage refreshes on the first of the month; Pro admins can add credits in Settings → Billing.";
+      projection = { parts: [{ type: "text", text: message }] };
+      await projector.failed(
+        message,
+        projection,
+        input.taskContext ? buildGoatTaskTerminalProjection(input.taskContext) : null,
+      );
+      return "settled";
+    }
   }
 
   const generationController = new AbortController();
@@ -269,6 +285,11 @@ export async function runGoatOpenCompanyChatTurn(input: {
     await abortWatcher.stop();
     await flushLatitude();
   }
+}
+
+export async function hasGoatHostedTurnCredits(workspaceId: string, db = getDb()) {
+  await ensureGoatMonthlyIncludedUsage(workspaceId, { db });
+  return hasPositiveGoatCreditBalance(workspaceId, db);
 }
 
 export async function consumeGoatOpenCompanyChatStream(input: {

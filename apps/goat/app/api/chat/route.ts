@@ -8,7 +8,10 @@ import {
 } from "@opencompany/analytics/goat/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
-import { isGoatCreditsEnforcementEnabled } from "@opencompany/db/goat-billing";
+import {
+  ensureGoatMonthlyIncludedUsage,
+  isGoatCreditsEnforcementEnabled,
+} from "@opencompany/db/goat-billing";
 import {
   approveGoatCapabilityRunByToolCall,
   cancelGoatCapabilityRunByToolCall,
@@ -312,6 +315,7 @@ export async function POST(request: Request): Promise<Response> {
   // credits, and a turn cannot start on an empty balance. Codex-engine turns
   // are exempt (the user's own Codex auth pays for those, not the gateway).
   if (!requestedEngine && isGoatCreditsEnforcementEnabled()) {
+    await ensureGoatMonthlyIncludedUsage(context.workspace.id);
     const hasCredits = await hasPositiveGoatCreditBalance(context.workspace.id).catch((error) => {
       logger.warn("Goat chat credit balance check failed", {
         event: "goat.chat_credit_balance_check_failed",

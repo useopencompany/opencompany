@@ -174,6 +174,10 @@ jobs:
         if: ${{ github.event_name == 'workflow_run' && steps.production-release.outputs.should_release == 'false' }}
         run: echo "This automatic release was superseded before migrations/deploy, so production was not changed."
 
+      - name: Check Goat billing env before production changes
+        if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
+        run: node scripts/check-goat-billing-production-env.mjs
+
       - name: Create GitHub deployment
         id: github-deployment
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
@@ -369,6 +373,9 @@ jobs:
             "RUNNER_PUBLIC_URL",
             "RUNNER_INTERNAL_TOKEN",
             "ELECTRIC_URL",
+            "GOAT_STRIPE_API_KEY",
+            "GOAT_STRIPE_CHECKOUT_ENABLED",
+            "CRON_SECRET",
             "GOAT_HUBSPOT_CLIENT_ID",
             "GOAT_HUBSPOT_CLIENT_SECRET",
             "GOAT_HUBSPOT_STATE_SECRET",
@@ -438,11 +445,36 @@ jobs:
             ]);
             const productionKeys = new Set(goatEnv.map((env) => env.key));
             const missing = required.filter((key) => !productionKeys.has(key));
+            const requiredWebBilling = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"];
+            const webProductionKeys = new Set(webEnv.map((env) => env.key));
+            const missingWebBilling = requiredWebBilling.filter(
+              (key) => !webProductionKeys.has(key),
+            );
 
             console.log(`Vercel Goat production env keys: ${required.length - missing.length}/${required.length} required present.`);
 
             if (missing.length > 0) {
               throw new Error(`Missing Goat Vercel production env keys: ${missing.join(", ")}`);
+            }
+
+            if (missingWebBilling.length > 0) {
+              throw new Error(
+                `Missing web Vercel production env keys required by Goat billing: ${missingWebBilling.join(", ")}`,
+              );
+            }
+
+            const checkoutEnabled = await readEnvValue(
+              goatProjectId,
+              goatEnv,
+              "GOAT_STRIPE_CHECKOUT_ENABLED",
+              "Goat",
+              teamId,
+              token,
+            );
+            if (checkoutEnabled.trim() !== "true") {
+              throw new Error(
+                "Goat GOAT_STRIPE_CHECKOUT_ENABLED must be true before a production billing release.",
+              );
             }
 
             const expectedGoatOrigin = new URL(process.env.PRODUCTION_GOAT_URL).origin;

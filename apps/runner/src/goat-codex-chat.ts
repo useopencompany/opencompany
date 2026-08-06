@@ -61,6 +61,10 @@ import {
   type GoatTaskTurnContext,
   prepareGoatCodexTaskTurn,
 } from "./goat-task-turn";
+import {
+  combineSandboxPromptFragments,
+  reconcileGoatInfisicalSandboxAuth,
+} from "./infisical-sandbox-auth";
 import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
@@ -251,6 +255,11 @@ export async function runGoatCodexChatTurn(input: {
   }
 
   const repositoryBootstrap = await repositoryBootstrapPromise;
+  const infisicalAuth = await reconcileGoatInfisicalSandboxAuth({
+    sandbox,
+    workspaceId: session.workspaceId,
+    userWorkosId: turn.userWorkosId,
+  });
   const serializedAuthJson = auth.kind === "chatgpt" ? JSON.stringify(auth.authJson) : null;
   const github = await loadGoatGitHubAuthForUser(turn.userWorkosId);
   const redact = createKnownSecretRedactor([
@@ -260,6 +269,7 @@ export async function runGoatCodexChatTurn(input: {
     github?.githubAuthHeader ?? null,
     env.internalToken,
     ...repositoryBootstrap.secretValues,
+    ...infisicalAuth.redactionValues,
   ]);
   const projector = createGoatCodexChatProjector({
     target: {
@@ -430,7 +440,10 @@ export async function runGoatCodexChatTurn(input: {
             brainAvailable: brainToolEnabled,
             brainCaptureAvailable: brainCaptureEnabled,
             actionsAvailable: actionToolsEnabled,
-            repositoryBootstrapPrompt: repositoryBootstrap.promptFragment,
+            repositoryBootstrapPrompt: combineSandboxPromptFragments(
+              repositoryBootstrap.promptFragment,
+              infisicalAuth.promptFragment,
+            ),
             previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
             attachmentPaths: materializedAttachments.paths,
             taskContext,
@@ -441,7 +454,10 @@ export async function runGoatCodexChatTurn(input: {
             brainAvailable: brainToolEnabled,
             brainCaptureAvailable: brainCaptureEnabled,
             actionsAvailable: actionToolsEnabled,
-            repositoryBootstrapPrompt: repositoryBootstrap.promptFragment,
+            repositoryBootstrapPrompt: combineSandboxPromptFragments(
+              repositoryBootstrap.promptFragment,
+              infisicalAuth.promptFragment,
+            ),
             attachmentPaths: materializedAttachments.paths,
             taskContext,
           }),

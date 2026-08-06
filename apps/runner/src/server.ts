@@ -21,6 +21,7 @@ import { wakeGoatGoogleDriveSyncWorker } from "./goat-google-drive-sync-worker";
 import { planGoatHarnessForTask } from "./goat-harness";
 import { getGoatHarnessPlannerContextForRunner } from "./goat-harness-planner";
 import { wakeGoatTaskWorker } from "./goat-worker";
+import { completeGoatInfisicalAuthFlow, startGoatInfisicalAuthFlow } from "./infisical-auth";
 import { enqueueRunnerJob } from "./jobs";
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
@@ -371,6 +372,68 @@ export function createServer(
     reply.send({ ok: true, flow });
   });
 
+  app.post("/internal/goat/infisical-auth/start", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const body = request.body as
+      | { workspaceId?: unknown; requestedByWorkosId?: unknown }
+      | undefined;
+    const workspaceId = typeof body?.workspaceId === "string" ? body.workspaceId.trim() : "";
+    const requestedByWorkosId =
+      typeof body?.requestedByWorkosId === "string" ? body.requestedByWorkosId.trim() : "";
+    if (!workspaceId || !requestedByWorkosId) {
+      reply.status(400).send({ error: "workspaceId and requestedByWorkosId are required." });
+      return;
+    }
+    try {
+      const flow = await startGoatInfisicalAuthFlow({ workspaceId, requestedByWorkosId, env });
+      reply.send({ ok: true, flow });
+    } catch (error) {
+      const forbidden =
+        error instanceof Error && error.message === "Only workspace admins can do this.";
+      reply.status(forbidden ? 403 : 502).send({
+        error: forbidden
+          ? "Only workspace admins can do this."
+          : "Infisical connection could not start. Please try again.",
+      });
+    }
+  });
+
+  app.post("/internal/goat/infisical-auth/:flowId/complete", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { flowId } = request.params as { flowId: string };
+    const body = request.body as
+      | { workspaceId?: unknown; requestedByWorkosId?: unknown; browserToken?: unknown }
+      | undefined;
+    const workspaceId = typeof body?.workspaceId === "string" ? body.workspaceId.trim() : "";
+    const requestedByWorkosId =
+      typeof body?.requestedByWorkosId === "string" ? body.requestedByWorkosId.trim() : "";
+    const browserToken = typeof body?.browserToken === "string" ? body.browserToken.trim() : "";
+    if (!workspaceId || !requestedByWorkosId || !browserToken) {
+      reply
+        .status(400)
+        .send({ error: "workspaceId, requestedByWorkosId, and browserToken are required." });
+      return;
+    }
+    try {
+      const flow = await completeGoatInfisicalAuthFlow({
+        workspaceId,
+        requestedByWorkosId,
+        flowId,
+        browserToken,
+      });
+      if (!flow) {
+        reply.status(404).send({ error: "Infisical authentication flow was not found." });
+        return;
+      }
+      reply.send({ ok: true, flow });
+    } catch (error) {
+      const message = safeInfisicalCompletionRouteError(error);
+      reply.status(message === "Only workspace admins can do this." ? 403 : 400).send({
+        error: message,
+      });
+    }
+  });
+
   app.post("/internal/sessions/:id/messages/:messageId/run", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     const { id, messageId } = request.params as {
@@ -520,6 +583,13 @@ function requireInternalAuth(header: string | undefined, token: string) {
     error.statusCode = 401;
     throw error;
   }
+}
+
+function safeInfisicalCompletionRouteError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "Only workspace admins can do this.") return message;
+  if (message === "That does not look like a valid Infisical browser token.") return message;
+  return "Infisical connection could not be completed. Please try again.";
 }
 
 function readBearerToken(header: string | undefined) {

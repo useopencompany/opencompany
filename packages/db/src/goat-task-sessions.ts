@@ -13,6 +13,14 @@ type GoatTaskSessionDb = {
   execute(query: SQL): Promise<unknown>;
 };
 
+export type GoatTaskSessionSkillSnapshot = {
+  id: string;
+  brainRef: string;
+  name: string;
+  description: string;
+  instructions: string;
+};
+
 export type CreateGoatTaskSessionInput = {
   userWorkosId: string;
   workspaceId?: string | null;
@@ -320,6 +328,7 @@ export async function enqueueGoatTaskSessionTurn(
     taskId: string;
     userWorkosId: string;
     prompt: string;
+    skills?: GoatTaskSessionSkillSnapshot[] | null | undefined;
     clientMessageId?: string | null | undefined;
     now?: Date;
   },
@@ -330,6 +339,7 @@ export async function enqueueGoatTaskSessionTurn(
   const turnId = `goat_codex_chat_turn_${randomUUID()}`;
   const now = input.now ?? new Date();
   const assistantCreatedAt = new Date(now.getTime() + 1);
+  const skills = input.skills ?? [];
   const result = await db.execute(sql`
     WITH candidate AS MATERIALIZED (
       SELECT
@@ -394,6 +404,25 @@ export async function enqueueGoatTaskSessionTurn(
         ${now}
       FROM continued_task AS task
       RETURNING id
+    ),
+    activated_skills AS (
+      INSERT INTO goat.chat_session_skills (
+        chat_session_id, skill_id, brain_ref, activated_message_id,
+        name, description, instructions, created_at
+      )
+      SELECT
+        task.session_id, skill.skill_id, skill.brain_ref, ${userMessageId},
+        skill.name, skill.description, skill.instructions, ${now}
+      FROM continued_task AS task
+      CROSS JOIN jsonb_to_recordset(${taskSessionSkillsJsonbValue(skills)}::jsonb) AS skill(
+        skill_id text,
+        brain_ref text,
+        name text,
+        description text,
+        instructions text
+      )
+      ON CONFLICT (chat_session_id, skill_id) DO NOTHING
+      RETURNING skill_id
     ),
     inserted_assistant_message AS (
       INSERT INTO goat.chat_messages (
@@ -506,6 +535,18 @@ function runtimeModelNameForHarness(engine: GoatHarnessSpec["engine"], model: st
 
 function attachmentsJsonbValue(attachments: GoatChatMessageAttachment[]) {
   return attachments.length > 0 ? JSON.stringify(attachments) : null;
+}
+
+function taskSessionSkillsJsonbValue(skills: GoatTaskSessionSkillSnapshot[]) {
+  return JSON.stringify(
+    skills.map((skill) => ({
+      skill_id: skill.id,
+      brain_ref: skill.brainRef,
+      name: skill.name,
+      description: skill.description,
+      instructions: skill.instructions,
+    })),
+  );
 }
 
 function attachmentTextsJsonbValue(attachmentTexts: Record<string, string> | null) {

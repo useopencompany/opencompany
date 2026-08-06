@@ -72,6 +72,10 @@ import {
   type GoatTaskTurnContext,
   markGoatTaskTurnRunning,
 } from "./goat-task-turn";
+import {
+  combineSandboxPromptFragments,
+  reconcileGoatInfisicalSandboxAuth,
+} from "./infisical-sandbox-auth";
 import { loadGoatRepositoryBootstrap, stageGoatRepositoryBootstrap } from "./repo-bootstrap";
 import {
   armSandboxActiveTimeoutById,
@@ -285,6 +289,11 @@ export async function runGoatClaudeCodeChatTurn(input: {
   }
 
   const repositoryBootstrap = await repositoryBootstrapPromise;
+  const infisicalAuth = await reconcileGoatInfisicalSandboxAuth({
+    sandbox,
+    workspaceId: session.workspaceId,
+    userWorkosId: turn.userWorkosId,
+  });
   const github = await loadGoatGitHubAuthForUser(turn.userWorkosId);
   const actionToolsEnabled =
     isGoatActionHostToolContractVersion(session.hostToolContractVersion) &&
@@ -309,6 +318,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
     env.internalToken,
     actionGatewayTicket,
     ...repositoryBootstrap.secretValues,
+    ...infisicalAuth.redactionValues,
   ]);
   const normalizer = createClaudeCodeEventNormalizer();
   const projector = createGoatCodexChatProjector({
@@ -405,7 +415,10 @@ export async function runGoatClaudeCodeChatTurn(input: {
           prompt: turn.prompt,
           githubAvailable: Boolean(github),
           actionsAvailable: actionToolsEnabled,
-          repositoryBootstrapPrompt: repositoryBootstrap.promptFragment,
+          repositoryBootstrapPrompt: combineSandboxPromptFragments(
+            repositoryBootstrap.promptFragment,
+            infisicalAuth.promptFragment,
+          ),
           previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
           attachmentPaths: materializedAttachments.paths,
           skillPaths: invokedSkillPaths,
@@ -415,7 +428,10 @@ export async function runGoatClaudeCodeChatTurn(input: {
           prompt: turn.prompt,
           githubAvailable: Boolean(github),
           actionsAvailable: actionToolsEnabled,
-          repositoryBootstrapPrompt: repositoryBootstrap.promptFragment,
+          repositoryBootstrapPrompt: combineSandboxPromptFragments(
+            repositoryBootstrap.promptFragment,
+            infisicalAuth.promptFragment,
+          ),
           attachmentPaths: materializedAttachments.paths,
           skillPaths: invokedSkillPaths,
           taskContext,
