@@ -10,6 +10,7 @@ import {
   House,
   ListTodo,
   Loader2,
+  LogOut,
   PanelLeft,
   Pin,
   PlugZap,
@@ -105,18 +106,12 @@ export function GoatSidebar({
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
-  const { featureFlags, mcpSetup, user } = useGoatAppData();
+  const { featureFlags, mcpSetup } = useGoatAppData();
   const pathname = usePathname();
   const mcpSetupActive = !mcpSetup.completedAt && pathname === "/settings/mcp";
-  const settingsActive =
-    (pathname === "/settings" || pathname.startsWith("/settings/")) && !mcpSetupActive;
   const homeActive = pathname === "/";
   const tasksActive = pathname === "/tasks" || pathname.startsWith("/tasks/");
   const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
-
-  const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-  const displayName = name || user.email;
-  const initials = getInitials(user.firstName, user.lastName, user.email);
 
   return (
     <aside
@@ -196,45 +191,125 @@ export function GoatSidebar({
         <div className="px-2 pb-3 pt-2">
           <GoatSidebarFeedback />
           <SidebarNavRow href="/changelog" icon={ScrollText} label="Changelog" active={false} />
-          <Link
-            href="/settings"
-            prefetch
-            aria-current={settingsActive ? "page" : undefined}
-            className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-              settingsActive
-                ? "bg-surface-active text-ink"
-                : "text-ink/90 hover:bg-surface-hover hover:text-ink"
-            }`}
-          >
-            {user.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={user.avatarUrl}
-                alt=""
-                className="h-6 w-6 shrink-0 rounded-full bg-surface-muted object-cover"
-              />
-            ) : (
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-muted text-[10.5px] font-semibold text-ink">
-                {initials}
-              </span>
-            )}
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12.5px] font-medium leading-tight text-ink">
-                {displayName}
-              </span>
-              <span className="block truncate text-[11px] leading-tight text-ink-subtle">
-                Settings
-              </span>
-            </span>
-            <Settings
-              size={14}
-              strokeWidth={1.75}
-              className="shrink-0 text-ink/50 transition-colors duration-150 group-hover:text-ink/80"
-            />
-          </Link>
+          <GoatSidebarAccountMenu />
         </div>
       </div>
     </aside>
+  );
+}
+
+function GoatAccountAvatar({
+  avatarUrl,
+  initials,
+  className,
+}: {
+  avatarUrl: string | null;
+  initials: string;
+  className?: string;
+}) {
+  if (avatarUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={avatarUrl}
+        alt=""
+        className={`shrink-0 rounded-full bg-surface-muted object-cover ${className ?? ""}`}
+      />
+    );
+  }
+  return (
+    <span
+      className={`flex shrink-0 items-center justify-center rounded-full bg-surface-muted font-semibold text-ink ${className ?? ""}`}
+    >
+      {initials}
+    </span>
+  );
+}
+
+function GoatSidebarAccountMenu() {
+  const { user, plan } = useGoatAppData();
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+
+  const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
+  const displayName = name || user.email;
+  const initials = getInitials(user.firstName, user.lastName, user.email);
+  const planLabel = plan === "pro" ? "Pro plan" : "Hobby plan";
+  const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        type="button"
+        aria-label={`Account menu for ${displayName}`}
+        className="group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 data-[popup-open]:bg-surface-active"
+      >
+        <GoatAccountAvatar
+          avatarUrl={user.avatarUrl}
+          initials={initials}
+          className="h-6 w-6 text-[10.5px]"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[12.5px] font-medium leading-tight text-ink">
+            {displayName}
+          </span>
+          <span className="block truncate text-[11px] leading-tight text-ink-subtle">
+            {planLabel}
+          </span>
+        </span>
+        <ChevronsUpDown
+          size={13}
+          strokeWidth={1.75}
+          className="shrink-0 text-ink/45 transition-colors duration-150 group-hover:text-ink/70"
+        />
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="start"
+        sideOffset={6}
+        className="w-[240px] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+      >
+        <div className="flex items-center gap-2.5 px-2 py-2">
+          <GoatAccountAvatar
+            avatarUrl={user.avatarUrl}
+            initials={initials}
+            className="h-8 w-8 text-[12px]"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-medium leading-tight text-ink">
+              {displayName}
+            </span>
+            {displayName !== user.email ? (
+              <span className="mt-0.5 block truncate text-[11.5px] leading-tight text-ink-subtle">
+                {user.email}
+              </span>
+            ) : null}
+            <span className="mt-0.5 block truncate text-[11.5px] leading-tight text-ink-subtle">
+              {planLabel}
+            </span>
+          </span>
+        </div>
+        <div className="my-1 h-px bg-border" />
+        <Link
+          href="/settings"
+          prefetch
+          onClick={() => setOpen(false)}
+          aria-current={settingsActive ? "page" : undefined}
+          className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <Settings size={14} strokeWidth={1.75} className="shrink-0 text-ink/60" />
+          <span className="truncate tracking-[-0.005em]">Settings</span>
+        </Link>
+        <a
+          href="/auth/sign-out"
+          onClick={() => setOpen(false)}
+          className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <LogOut size={14} strokeWidth={1.75} className="shrink-0 text-ink/60" />
+          <span className="truncate tracking-[-0.005em]">Sign out</span>
+        </a>
+      </PopoverContent>
+    </Popover>
   );
 }
 

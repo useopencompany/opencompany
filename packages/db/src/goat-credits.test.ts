@@ -102,9 +102,19 @@ describe("goat credits", () => {
   });
 
   it("reports a monthly included-usage grant and resulting allowance", async () => {
-    const execute = vi.fn(async (_query: unknown) => ({
-      rows: [{ grants: "1", expirations: "1", balanceUsdMicros: "5000000", allowanceCents: "500" }],
-    }));
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            grants: "1",
+            expirations: "1",
+            balanceUsdMicros: "5000000",
+            allowanceCents: "500",
+          },
+        ],
+      });
     const db = { execute };
     await expect(
       grantGoatMonthlyIncludedUsage({
@@ -123,10 +133,20 @@ describe("goat credits", () => {
       allowanceCents: 500,
     });
 
-    const query = new PgDialect().sqlToQuery(execute.mock.calls[0]![0] as SQL);
-    expect(query.sql).not.toContain("jsonb_build_object");
-    expect(query.sql.match(/::jsonb/g)).toHaveLength(2);
-    const metadata = query.params
+    expect(execute).toHaveBeenCalledTimes(2);
+    const dialect = new PgDialect();
+    const ensureQuery = dialect.sqlToQuery(execute.mock.calls[0]![0] as SQL);
+    const grantQuery = dialect.sqlToQuery(execute.mock.calls[1]![0] as SQL);
+    const normalizedEnsureSql = ensureQuery.sql.toLowerCase().replace(/\s+/g, " ");
+    const normalizedGrantSql = grantQuery.sql.toLowerCase().replace(/\s+/g, " ");
+    expect(normalizedEnsureSql).toContain("insert into goat.workspace_billing");
+    expect(normalizedEnsureSql).toContain("on conflict (workspace_id) do nothing");
+    expect(normalizedGrantSql).toContain("from goat.workspace_billing");
+    expect(normalizedGrantSql).toContain("for update");
+    expect(normalizedGrantSql.match(/update goat\.workspace_billing/g)).toHaveLength(1);
+    expect(normalizedGrantSql).not.toContain("jsonb_build_object");
+    expect(normalizedGrantSql.match(/::jsonb/g)).toHaveLength(2);
+    const metadata = grantQuery.params
       .filter((value): value is string => typeof value === "string" && value.startsWith("{"))
       .map((value) => JSON.parse(value));
     expect(metadata).toEqual([

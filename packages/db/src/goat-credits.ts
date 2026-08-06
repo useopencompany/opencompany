@@ -237,13 +237,24 @@ export async function grantGoatMonthlyIncludedUsage(input: {
     periodEnd: input.periodEnd.toISOString(),
     stripeEventId: input.eventId ?? null,
   });
+
+  // The billing row must exist before the grant statement starts. PostgreSQL
+  // data-modifying CTEs share one snapshot and cannot reliably modify the same
+  // row twice, so an upsert inside `current_billing` followed by
+  // `billing_update` leaves the period projection stale. A default row is a
+  // safe, retryable intermediate state if the grant statement later fails.
+  await db.execute(sql`
+    INSERT INTO goat.workspace_billing (workspace_id)
+    VALUES (${input.workspaceId})
+    ON CONFLICT (workspace_id) DO NOTHING
+  `);
+
   const result = await db.execute(sql`
     WITH current_billing AS MATERIALIZED (
-      INSERT INTO goat.workspace_billing (workspace_id)
-      VALUES (${input.workspaceId})
-      ON CONFLICT (workspace_id) DO UPDATE
-      SET workspace_id = excluded.workspace_id
-      RETURNING included_usage_period_start, included_usage_allowance_cents
+      SELECT included_usage_period_start, included_usage_allowance_cents
+      FROM goat.workspace_billing
+      WHERE workspace_id = ${input.workspaceId}
+      FOR UPDATE
     ),
     locked_balance AS MATERIALIZED (
       SELECT workspace_id, included_balance_usd_micros

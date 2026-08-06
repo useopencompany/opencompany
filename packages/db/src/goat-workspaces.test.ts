@@ -85,7 +85,7 @@ describe("Goat workspace creation", () => {
     expect(batchedQueries.filter((query) => query.table === goatBrainFolders)).toHaveLength(
       defaultGoatBrainFolderManifestEntries().length,
     );
-    expect(execute).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 });
 
