@@ -2604,7 +2604,7 @@ export function GoatSurface({
       </Dialog>
 
       <div className="relative flex min-h-0 w-full flex-1">
-        <div className="relative flex min-w-0 flex-1 flex-col items-center overflow-hidden">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-hidden">
           {mode === "home" ? (
             <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
               <div className="flex w-full max-w-[560px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
