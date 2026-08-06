@@ -90,7 +90,7 @@ export async function closeGoatChatSessionAction(
     chatSessionId: trimmed,
   });
   if (!closed) {
-    return { ok: false, error: "Could not close that chat." };
+    return { ok: false, error: "Could not archive that chat." };
   }
 
   revalidatePath("/");
