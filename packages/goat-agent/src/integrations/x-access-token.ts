@@ -59,7 +59,11 @@ export async function xAccountApiCall(
   }
   const text = await response.text();
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
+    // Only 401 (after a forced refresh already failed) means the credential
+    // itself is bad. 403 from X's write endpoints is commonly unrelated to
+    // auth — duplicate content, a suspended/restricted account, or app-level
+    // policy — and must not force an unnecessary reconnect.
+    if (response.status === 401) {
       await markXAccountNeedsReauth(connection, "X rejected API access.");
       throw new GoatXAccessAuthError("X rejected access for this account.");
     }
