@@ -29,7 +29,7 @@ export function SiteFooter() {
           <DayCount />
         </div>
         <p className="font-mono text-[12px] text-ink-subtle sm:justify-self-center">
-          © {new Date().getFullYear()} OpenCompany. All rights reserved.
+          © {new Date().getFullYear()} opencompany. All rights reserved.
         </p>
         <nav aria-label="Social media" className="sm:justify-self-end">
           <ul className="flex items-center gap-1">

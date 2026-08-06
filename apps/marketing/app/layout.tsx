@@ -1,7 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import type * as React from "react";
 import "./globals.css";
+
+const geistSans = Geist({
+  subsets: ["latin"],
+  variable: "--font-geist-sans",
+  weight: ["400", "500", "600"],
+});
 
 const geistMono = Geist_Mono({
   subsets: ["latin"],
@@ -27,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // Light theme only: pinning data-theme="light" disables the shared CSS's
   // prefers-color-scheme dark fallback.
   return (
-    <html lang="en" data-theme="light" className={geistMono.variable}>
+    <html lang="en" data-theme="light" className={`${geistSans.variable} ${geistMono.variable}`}>
       <head>
         <script
           src="https://cdn.visitors.now/v.js"

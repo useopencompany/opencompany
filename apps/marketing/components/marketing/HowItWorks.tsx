@@ -11,15 +11,15 @@ type HowItWorksProps = {
 const DEFAULT_STEPS: Step[] = [
   {
     title: "Connect your sources.",
-    body: "GitHub, Gmail, Slack, Linear, meeting notes, Google Drive. Two minutes, no config.",
+    body: "The wiki builds itself in a few clicks and stays current.",
   },
   {
-    title: "It writes itself.",
-    body: "A background agent classifies every new thing that happens, files it, and links it to related people, decisions, and projects. You never touch a folder structure.",
+    title: "Run sessions, set up workflows.",
+    body: "Any model, your subscriptions, cloud sandboxes.",
   },
   {
-    title: "Use it anywhere.",
-    body: "One MCP connection. Claude, Cursor, Codex, ChatGPT — whatever you already use — all reading from the same source of truth.",
+    title: "Agents take over processes.",
+    body: "Feedback → PR, customer email → response.",
   },
 ];
 

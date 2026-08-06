@@ -1,39 +1,137 @@
+import { AnthropicIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import { Cta } from "./Cta";
 import { GridBackdrop } from "./GridBackdrop";
-import { LaunchVideoDialog } from "./LaunchVideoDialog";
-import { MindVisual } from "./MindVisual";
+
+const chipIconClass = "size-3.5 text-muted-foreground";
+
+const WikiIcon = (
+  <svg
+    className={chipIconClass}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5v-13ZM20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5v-13Z"
+    />
+  </svg>
+);
+
+const SessionIcon = (
+  <svg
+    className={chipIconClass}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H9l-5 4V5.5Z"
+    />
+  </svg>
+);
+
+const WorkflowIcon = (
+  <svg
+    className={chipIconClass}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+  >
+    <circle cx="6" cy="6" r="2.25" />
+    <circle cx="18" cy="18" r="2.25" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6 8.25v4A3.75 3.75 0 0 0 9.75 16H15.5" />
+  </svg>
+);
+
+// Inline highlight chip for a keyword — a rounded, bordered token with a small
+// glyph, matching the reference (eye/Visibility, Position, Sentiment).
+function Chip({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <span className="mx-0.5 inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-0.5 align-middle font-medium text-[0.9em] text-foreground leading-none">
+      <span aria-hidden="true">{icon}</span>
+      {children}
+    </span>
+  );
+}
+
+// Small circular brand badge used in the "favorite harness" avatar stack.
+function HarnessBadge({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      title={label}
+      className={`inline-flex size-5 items-center justify-center rounded-full border border-border bg-background shadow-sm ${className ?? ""}`}
+    >
+      {children}
+    </span>
+  );
+}
 
 export function Hero() {
   return (
     <section className="relative overflow-hidden">
-      <div className="relative mx-auto max-w-5xl px-6 pt-24 pb-16 sm:pt-32">
-        <GridBackdrop />
-        <div className="relative grid grid-cols-1 items-center gap-10 lg:grid-cols-2 lg:gap-12">
-          <div>
-            <a
-              href="https://my.opencompany.chat/changelog#release-1.0.0"
-              className="mb-5 inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/5 px-3 py-1 font-mono text-[12px] text-violet-600 transition-colors hover:border-violet-500/50 hover:bg-violet-500/10 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
-            >
-              See what's new in 1.0.0
-              <span aria-hidden="true">→</span>
-            </a>
-            <h1 className="max-w-3xl text-balance font-medium font-mono text-3xl text-ink leading-[1.1] tracking-tight sm:text-4xl">
-              Give your AI agents a living company brain.
-            </h1>
-            <p className="mt-6 max-w-xl text-pretty font-medium text-[15px] text-ink-subtle leading-7 opacity-60">
-              Add GitHub, Gmail, Linear, Slack, and meetings as sources. The brain figures out what
-              matters, files it, links it to what you already know, and brings it to any agent with
-              MCP.
-            </p>
-            <div className="mt-9 flex items-center gap-2">
-              <Cta>Join early beta</Cta>
-              <LaunchVideoDialog />
-            </div>
+      {/* Grid layer bounded to the top-nav container so its left edge (and the
+          crosshair origin) line up with the logo's left edge. The padding lives on
+          the outer wrapper, so the grid's inset-x-0 lands on the content edge. */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+        <div className="mx-auto h-full max-w-5xl px-6">
+          <div className="relative h-full">
+            <GridBackdrop />
           </div>
+        </div>
+      </div>
+      <div className="relative mx-auto max-w-4xl px-6 pt-16 pb-20 text-center sm:pt-24">
+        <div className="relative flex flex-col items-center">
+          <a
+            href="https://my.opencompany.chat/changelog#release-1.0.0"
+            className="mb-8 inline-flex items-center gap-2 rounded-full border border-border bg-background px-3.5 py-1.5 font-medium font-sans text-[13px] text-foreground shadow-sm transition-colors hover:bg-accent"
+          >
+            <span aria-hidden="true" className="size-2 rounded-full bg-violet-500" />
+            See what's new in 1.0.0
+          </a>
 
-          {/* Company-brain visualization — hidden on small screens where it crowds the copy. */}
-          <div className="relative hidden lg:block">
-            <MindVisual />
+          <h1 className="text-balance font-medium font-mono text-3xl text-ink leading-[1.1] tracking-[-0.05em] sm:text-5xl">
+            Run your startup on <span className="text-violet-600 dark:text-violet-400">agents</span>
+          </h1>
+
+          <p className="mt-7 max-w-2xl text-pretty font-medium text-[15px] text-muted-foreground leading-7 sm:text-base">
+            A self-building company <Chip icon={WikiIcon}>wiki</Chip> gives every{" "}
+            <Chip icon={SessionIcon}>session</Chip> and agent{" "}
+            <Chip icon={WorkflowIcon}>workflow</Chip> your company's context. Run any model, use
+            curated skills, and bring your favorite harness
+            <span className="ml-1.5 inline-flex items-center align-middle">
+              <HarnessBadge label="Claude Code">
+                <AnthropicIcon className="size-3 text-[#D97757]" />
+              </HarnessBadge>
+              <HarnessBadge label="Codex" className="-ml-1.5">
+                <OpenAIIcon className="size-3 text-foreground" />
+              </HarnessBadge>
+            </span>
+            .
+          </p>
+
+          <div className="mt-6 flex items-center justify-center gap-2">
+            <Cta
+              href="https://cal.com/louis-morgner-k0wc9i/opencompany-onboarding"
+              variant="secondary"
+            >
+              Book demo
+            </Cta>
+            <Cta href="https://my.opencompany.chat">Sign up</Cta>
           </div>
         </div>
       </div>
