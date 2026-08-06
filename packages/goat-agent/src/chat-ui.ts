@@ -940,6 +940,8 @@ function isPersistedToolPart(value: Record<string, unknown>) {
 // round-tripping through UIMessage types.
 
 export const GOAT_APPROVAL_DISMISSED_REASON = "The user did not respond to the approval request.";
+export const GOAT_INCOMPLETE_TOOL_CALL_REASON =
+  "The turn ended before the tool returned a result, so its outcome is unknown.";
 
 type RawApprovalPart = Record<string, unknown> & {
   toolCallId: string;
@@ -1063,6 +1065,48 @@ export function dismissPendingApprovalsInStoredParts(parts: unknown): {
     };
   });
   return { parts: dismissed, changed, toolCallIds };
+}
+
+// A stopped or failed stream can end after the model emitted a tool call but
+// before its executor returned. `convertToModelMessages` requires every
+// complete tool call to have a result, so carrying that transient UI state into
+// a later turn poisons the session. Preserve calls with complete inputs as
+// explicit errors; drop input-streaming parts because their partial input is
+// not a valid model-visible tool call.
+export function settleIncompleteToolCallsInStoredParts(parts: unknown): {
+  parts: unknown[];
+  changed: boolean;
+  toolCallIds: string[];
+} {
+  if (!Array.isArray(parts)) return { parts: [], changed: false, toolCallIds: [] };
+  let changed = false;
+  const toolCallIds: string[] = [];
+  const settled: unknown[] = [];
+
+  for (const part of parts) {
+    if (
+      !isRecord(part) ||
+      !isPersistedToolPart(part) ||
+      typeof part.toolCallId !== "string" ||
+      (part.state !== "input-streaming" && part.state !== "input-available")
+    ) {
+      settled.push(part);
+      continue;
+    }
+
+    changed = true;
+    toolCallIds.push(part.toolCallId);
+    if (part.state === "input-streaming") continue;
+
+    const { approval: _approval, output: _output, ...call } = part;
+    settled.push({
+      ...call,
+      state: "output-error",
+      errorText: GOAT_INCOMPLETE_TOOL_CALL_REASON,
+    });
+  }
+
+  return { parts: settled, changed, toolCallIds };
 }
 
 function chatMessageCreatedAtMs(value: Date | string) {

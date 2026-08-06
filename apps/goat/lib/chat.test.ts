@@ -4,6 +4,7 @@ import type {
   GoatCodexChatTurnSettings,
   GoatTaskStatus,
 } from "@opencompany/db/goat-schema";
+import { convertToModelMessages } from "ai";
 import { drizzle } from "drizzle-orm/neon-http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -11,7 +12,6 @@ import {
   createDbGoatChatStore,
   createGoatChatApprovalContinuationTurn,
   createGoatChatUserTurn,
-  dismissStaleGoatChatApprovals,
   type GoatChatStore,
   type GoatChatUiMessage,
   listRecentGoatChatsForUser,
@@ -19,6 +19,7 @@ import {
   markGoatChatSessionSeenForUser,
   persistGoatChatAssistantMessage,
   setGoatChatSessionPinnedForUser,
+  settleStaleGoatChatToolCalls,
   textFromGoatChatUiMessage,
 } from "@/lib/chat";
 import { OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION } from "@/lib/chat-agent";
@@ -460,7 +461,7 @@ describe("createGoatChatApprovalContinuationTurn", () => {
   });
 });
 
-describe("dismissStaleGoatChatApprovals", () => {
+describe("settleStaleGoatChatToolCalls", () => {
   it("denies pending approvals the user talked past and persists the rewrite", async () => {
     const { store, messages } = createInMemoryChatStore();
     const { turn } = await seedTurnAwaitingApproval(store, [pendingApprovalPart()]);
@@ -474,7 +475,7 @@ describe("dismissStaleGoatChatApprovals", () => {
       store,
     );
 
-    const result = await dismissStaleGoatChatApprovals(followUp, store);
+    const result = await settleStaleGoatChatToolCalls(followUp, store);
     expect(result.changed).toBe(true);
     expect(result.toolCallIds).toEqual(["call_1"]);
 
@@ -490,12 +491,112 @@ describe("dismissStaleGoatChatApprovals", () => {
     });
   });
 
+  it("repairs an interrupted tool call before the next model turn", async () => {
+    const { store, messages } = createInMemoryChatStore();
+    const { turn } = await seedTurnAwaitingApproval(store, [
+      {
+        type: "tool-browser_open",
+        toolCallId: "browser_open_12",
+        state: "input-available",
+        input: { url: "https://example.com" },
+      },
+    ]);
+    const failedFollowUp = await createGoatChatUserTurn(
+      {
+        userWorkosId: "user_1",
+        prompt: "give me results",
+        model: DEFAULT_GOAT_MODEL,
+        sessionId: turn.session.id,
+      },
+      store,
+    );
+    await persistGoatChatAssistantMessage(
+      {
+        sessionId: turn.session.id,
+        messageId: "assistant_failed_1",
+        content: "I could not produce a response. Try sending that again.",
+        debugTrace: {
+          schemaVersion: OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION,
+          model: DEFAULT_GOAT_MODEL,
+          error: "Tool result is missing for tool call browser_open_12.",
+        },
+      },
+      store,
+    );
+    const followUp = await createGoatChatUserTurn(
+      {
+        userWorkosId: "user_1",
+        prompt: "go",
+        model: DEFAULT_GOAT_MODEL,
+        sessionId: failedFollowUp.session.id,
+      },
+      store,
+    );
+
+    const result = await settleStaleGoatChatToolCalls(followUp, store);
+
+    expect(result.changed).toBe(true);
+    expect(result.toolCallIds).toEqual(["browser_open_12"]);
+    const persisted = messages.find((message) => message.id === "assistant_1");
+    expect(persisted?.debugTrace?.uiMessageParts).toEqual([
+      expect.objectContaining({
+        type: "tool-browser_open",
+        toolCallId: "browser_open_12",
+        state: "output-error",
+        input: { url: "https://example.com" },
+        errorText: expect.stringContaining("outcome is unknown"),
+      }),
+    ]);
+    const modelMessages = await convertToModelMessages(result.messages);
+    expect(modelMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "tool",
+          content: [
+            expect.objectContaining({
+              type: "tool-result",
+              toolCallId: "browser_open_12",
+            }),
+          ],
+        }),
+      ]),
+    );
+  });
+
+  it("drops a partial tool input that cannot be replayed safely", async () => {
+    const { store, messages } = createInMemoryChatStore();
+    const { turn } = await seedTurnAwaitingApproval(store, [
+      {
+        type: "tool-browser_open",
+        toolCallId: "browser_open_partial",
+        state: "input-streaming",
+      },
+    ]);
+    const followUp = await createGoatChatUserTurn(
+      {
+        userWorkosId: "user_1",
+        prompt: "continue",
+        model: DEFAULT_GOAT_MODEL,
+        sessionId: turn.session.id,
+      },
+      store,
+    );
+
+    const result = await settleStaleGoatChatToolCalls(followUp, store);
+
+    expect(result.changed).toBe(true);
+    expect(result.toolCallIds).toEqual(["browser_open_partial"]);
+    const persisted = messages.find((message) => message.id === "assistant_1");
+    expect(persisted?.debugTrace?.uiMessageParts).toEqual([]);
+    await expect(convertToModelMessages(result.messages)).resolves.toBeDefined();
+  });
+
   it("leaves resolved histories untouched", async () => {
     const { store } = createInMemoryChatStore();
     const { turn } = await seedTurnAwaitingApproval(store, [
       pendingApprovalPart({ state: "output-available", output: { ok: true } }),
     ]);
-    const result = await dismissStaleGoatChatApprovals(turn, store);
+    const result = await settleStaleGoatChatToolCalls(turn, store);
     expect(result.changed).toBe(false);
     expect(result.toolCallIds).toEqual([]);
   });
