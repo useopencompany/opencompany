@@ -128,6 +128,7 @@ export function buildGoatRepositoryBootstrapPrompt(
   return [
     "<repository_bootstrap>",
     ...lines,
+    "After cloning a repository, read and follow its root AGENTS.md and CLAUDE.md files when present, before running setup or development commands.",
     "Never print, log, summarize, or expose a staged environment file or any of its values.",
     "</repository_bootstrap>",
   ].join("\n");
