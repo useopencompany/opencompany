@@ -374,6 +374,7 @@ jobs:
             "RUNNER_INTERNAL_TOKEN",
             "ELECTRIC_URL",
             "GOAT_STRIPE_API_KEY",
+            "GOAT_STRIPE_WEBHOOK_SECRET",
             "GOAT_STRIPE_CHECKOUT_ENABLED",
             "CRON_SECRET",
             "GOAT_HUBSPOT_CLIENT_ID",

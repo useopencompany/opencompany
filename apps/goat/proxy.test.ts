@@ -97,6 +97,10 @@ describe("Goat public routes", () => {
     ).toBe(true);
   });
 
+  it("allows the Stripe webhook without authentication", () => {
+    expect(isUnauthenticatedPath("/api/stripe/webhook")).toBe(true);
+  });
+
   it("keeps normal chats behind authentication", () => {
     expect(isUnauthenticatedPath("/chat/goat_chat_123")).toBe(false);
     expect(isUnauthenticatedPath("/share")).toBe(false);
