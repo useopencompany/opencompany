@@ -3,26 +3,25 @@
 // math the server enforces instead of mirroring them. Re-exported by
 // ./goat-billing.
 //
-// Billing v6: every workspace is seat-billed, and every seat contributes the
-// same amount of included at-cost usage to the workspace pool for the current
-// month. Overage/top-up funds live in a separate workspace pool.
+// Billing v7: Hobby and Pro use the same calendar-month included-usage pool.
+// Hobby contributes $5 per workspace; every paid Pro seat contributes $20.
+// Purchased top-up funds live in a separate, non-expiring workspace pool.
 
 export const GOAT_PRO_MONTHLY_PRICE_USD_CENTS = 2_000;
 export const GOAT_SEAT_MONTHLY_PRICE_USD_CENTS = GOAT_PRO_MONTHLY_PRICE_USD_CENTS;
 export const GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS = 2_000;
+export const GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS = 500;
 export const GOAT_PRO_STRIPE_PRODUCT_KEY = "goat_pro";
-export const GOAT_FREE_MAX_MEMBERS = 10;
+export const GOAT_HOBBY_MAX_MEMBERS = 1;
 export const GOAT_PRO_MAX_MEMBERS = 10;
-
-// Signup grant into the pay-per-use wallet. Under billing v6 there is no free
-// plan, but the initial grant lets a founder try real usage before adding a
-// card.
-export const GOAT_STARTER_CREDIT_USD_CENTS = 2_000;
 
 export const GOAT_TOP_UP_AMOUNTS_USD_CENTS = [500, 1_000, 2_000, 5_000, 10_000] as const;
 export const GOAT_DEFAULT_TOP_UP_USD_CENTS = 2_000;
 export const GOAT_MIN_TOP_UP_USD_CENTS = 500;
 export const GOAT_MAX_TOP_UP_USD_CENTS = 100_000;
+// Charge-loop protection for unattended auto-refills. Admins can still add
+// credits manually after reviewing spend.
+export const GOAT_AUTO_REFILL_MONTHLY_MAX_USD_CENTS = 100_000;
 
 // Billing v6 charges usage at real cost. Brain ingestion is now only the model,
 // capability, and sandbox COGS recorded elsewhere; no flat per-item platform
@@ -34,8 +33,23 @@ export const GOAT_INGEST_ITEM_FEE_USD_MICROS = 0;
 export const GOAT_LOW_BALANCE_WARN_USD_MICROS = 2_000_000;
 export const GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS = 5_000_000;
 
-export function goatWorkspaceMemberCap(plan: "free" | "pro") {
-  return plan === "pro" ? GOAT_PRO_MAX_MEMBERS : GOAT_FREE_MAX_MEMBERS;
+export function goatWorkspaceMemberCap(plan: "hobby" | "pro") {
+  return plan === "pro" ? GOAT_PRO_MAX_MEMBERS : GOAT_HOBBY_MAX_MEMBERS;
+}
+
+export function goatIncludedUsageAllowanceCents(plan: "hobby" | "pro", seatQuantity: number) {
+  return plan === "pro"
+    ? Math.max(1, Math.floor(seatQuantity)) * GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS
+    : GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS;
+}
+
+export function goatCalendarMonthWindow(now: Date) {
+  const start = new Date(now);
+  start.setUTCDate(1);
+  start.setUTCHours(0, 0, 0, 0);
+  const resetAt = new Date(start);
+  resetAt.setUTCMonth(resetAt.getUTCMonth() + 1);
+  return { start, resetAt };
 }
 
 // Ingestion model tiers: both are metered (model cost + fee); "frontier" just

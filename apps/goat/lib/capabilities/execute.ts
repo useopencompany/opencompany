@@ -1,6 +1,7 @@
 import "server-only";
 
 import { calculatePlatformFeeUsdMicros, USD_MICROS_PER_DOLLAR } from "@opencompany/billing";
+import { ensureGoatMonthlyIncludedUsage } from "@opencompany/db/goat-billing";
 import {
   consumeGoatCapabilityApprovalByToolCall,
   createGoatCapabilityRun,
@@ -232,6 +233,7 @@ export async function executeManagedCapability(input: {
           signal: input.context.signal,
         });
 
+  await ensureGoatMonthlyIncludedUsage(workspaceId);
   const balanceUsdMicros = await getGoatCreditBalanceUsdMicros(workspaceId);
   if (balanceUsdMicros < quote.quoteTotalCostUsdMicros) {
     throw new GoatActionExecutionError(

@@ -12,6 +12,7 @@ import {
   createGoatWorkspaceForUser,
   DEFAULT_GOAT_BRAIN_SLUG,
   getGoatBrainAccess,
+  hasOwnedGoatHobbyWorkspace,
   listAccessibleGoatBrains,
   listGoatBrainMemberIds,
   listGoatWorkspaceMembers,
@@ -181,6 +182,18 @@ export async function createGoatWorkspaceAction(name: unknown): Promise<GoatWork
   if (!validation.ok) return validation;
 
   const context = await currentGoatUser();
+  try {
+    if (await hasOwnedGoatHobbyWorkspace(context.user.workosUserId)) {
+      return {
+        ok: false,
+        error:
+          "Hobby includes one workspace. Upgrade your Hobby workspace to Pro to create another.",
+      };
+    }
+  } catch (error) {
+    console.error("[goat] Failed to verify Hobby workspace ownership", error);
+    return { ok: false, error: CREATE_WORKSPACE_ERROR_MESSAGE };
+  }
   const workspaceId = newGoatWorkspaceId();
   const workos = getWorkOSClient();
   let workosOrganizationId: string | null = null;
@@ -474,7 +487,10 @@ export async function inviteToGoatWorkspaceAction(
     if (members.length + invitations.length >= memberCap) {
       return {
         ok: false,
-        error: `Workspaces allow up to ${memberCap} members (including pending invites). Remove a member or revoke an invite first.`,
+        error:
+          memberCap === 1
+            ? "Hobby includes one member. Upgrade to Pro to invite teammates."
+            : `Workspaces allow up to ${memberCap} members (including pending invites). Remove a member or revoke an invite first.`,
       };
     }
     const organizationId = await ensureGoatWorkspaceOrganization(context.workspace);
@@ -595,7 +611,7 @@ export async function updateGoatWorkspaceNameAction(
 export async function getGoatWorkspaceSettingsAction(): Promise<{
   workspace: { id: string; name: string };
   role: "admin" | "member";
-  plan: "free" | "pro";
+  plan: "hobby" | "pro";
   memberCap: number;
   members: GoatWorkspaceMemberView[];
   invitations: GoatWorkspaceInvitationView[];

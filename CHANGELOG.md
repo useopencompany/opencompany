@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-08-05
+
+### Added
+- Goat can now create Attio records — people, companies, and deals — directly from chat, alongside the existing search, update, and comment support (#1068) — @opencompany-bot.
+- @claude now starts a Claude Code session from the composer, the same way @codex already does (#1071, #1091) — @opencompany-bot.
+- Composer drafts now save per chat — switch away mid-sentence and your unsent text is still there when you come back (#1069) — @opencompany-bot.
+
+### Changed
+- Background chats started with `&` can now be launched from any chat, including while another chat or Codex session is still running, and the directive is highlighted as you type it (#1064, #1070, #1081, #1088) — @opencompany-bot.
+- Goat usage is now billed at cost with no platform markup, and included monthly usage is tracked separately from top-up funds (#1083) — @opencompany-bot.
+- Typing in the coding workspace terminal now feels instant instead of waiting on the remote echo (#1062, #1076) — @opencompany-bot.
+
+### Fixed
+- The sidebar no longer shows a background chat as unread before it has actually started running (#1086) — @opencompany-bot.
+- The sidebar's working indicator no longer lags behind a chat that keeps generating after you navigate away (#1065) — @opencompany-bot.
+- Task sessions no longer show duplicate task cards, and `@skill` mentions work again inside them (#1075, #1092) — @opencompany-bot.
+- Starting a Codex task from Kimi, Grok, or Claude in main chat now hands off to the right model instead of misrouting it (#1079) — @opencompany-bot.
+- Fixed a race that could mark a Codex coding task as failed even though it was still running (#1072) — @opencompany-bot.
+- The coding workspace preview picker correctly detects open ports again (#1090) — @opencompany-bot.
+- The chat composer no longer overlaps the latest message when it grows tall (#1085) — @opencompany-bot.
+- Opening a chat from the sidebar now focuses the composer automatically (#1078) — @opencompany-bot.
+- Automatic model routing is now more reliable, with better diagnostics when something goes wrong (#1084) — @opencompany-bot.
+
 ## [1.7.0] - 2026-08-04
 
 ### Added

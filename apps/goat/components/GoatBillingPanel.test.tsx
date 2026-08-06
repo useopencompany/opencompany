@@ -11,17 +11,18 @@ vi.mock("@/lib/billing/actions", () => ({
 }));
 
 const base: GoatBillingPanelData = {
-  plan: "free",
+  plan: "hobby",
   subscriptionStatus: null,
   cancelAtPeriodEnd: false,
   currentPeriodEnd: null,
   includedUsagePeriodEnd: null,
   paymentNeedsAttention: false,
   proMonthlyPriceCents: 2_000,
+  hobbyIncludedUsageCents: 500,
   includedUsagePerSeatCents: 2_000,
   seatQuantity: 1,
   memberCount: 1,
-  proMaxMembers: 10,
+  memberCap: 1,
   creditBalanceUsdMicros: 5_000_000,
   includedBalanceUsdMicros: 2_000_000,
   topUpBalanceUsdMicros: 3_000_000,
@@ -37,32 +38,50 @@ const base: GoatBillingPanelData = {
   defaultTopUpCents: 2_000,
   minTopUpCents: 500,
   maxTopUpCents: 100_000,
+  autoRefillMonthlyMaxCents: 100_000,
   autoRefill: {
     enabled: false,
     amountCents: 2_000,
     hasPaymentMethod: true,
     lastError: null,
   },
-  hasStripeCustomer: true,
   isAdmin: true,
 };
 
 describe("GoatBillingPanel", () => {
-  it("shows the balance, monthly spend, and top-up actions for any member", () => {
-    render(
-      <GoatBillingPanel
-        data={{ ...base, isAdmin: false }}
-        checkoutResult={null}
-        topupResult={null}
-      />,
-    );
+  it("shows the Hobby allowance without purchase controls", () => {
+    render(<GoatBillingPanel data={base} checkoutResult={null} topupResult={null} />);
 
     expect(screen.getByText("Balance").parentElement?.parentElement).toHaveTextContent("$5.00");
     expect(screen.getByText(/\$2\.00 included · \$3\.00 top-up/i)).toBeVisible();
     expect(screen.getByText("Spent this month").parentElement).toHaveTextContent("$1.23");
+    expect(screen.getByText("Hobby")).toBeVisible();
+    expect(screen.getByText(/\$5 of included usage refreshes/i)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Add $5" })).toBeNull();
+    expect(screen.getByText(/top-ups are available after upgrading/i)).toBeVisible();
+  });
+
+  it("shows purchase controls only to Pro admins", () => {
+    const { rerender } = render(
+      <GoatBillingPanel
+        data={{ ...base, plan: "pro", memberCap: 10 }}
+        checkoutResult={null}
+        topupResult={null}
+      />,
+    );
     expect(screen.getByRole("button", { name: "Add $5" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Add $100" })).toBeEnabled();
     expect(screen.getByLabelText("Custom top-up amount in dollars")).toHaveValue("20");
+
+    rerender(
+      <GoatBillingPanel
+        data={{ ...base, plan: "pro", memberCap: 10, isAdmin: false }}
+        checkoutResult={null}
+        topupResult={null}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Add $5" })).toBeNull();
+    expect(screen.getByText(/ask a workspace admin to add/i)).toBeVisible();
   });
 
   it("explains at-cost pricing and included usage", () => {
@@ -82,7 +101,7 @@ describe("GoatBillingPanel", () => {
       />,
     );
 
-    expect(screen.getByText(/out of credits/i)).toBeVisible();
+    expect(screen.getByText(/Hobby credits are used up/i)).toBeVisible();
   });
 
   it("surfaces an auto-refill failure", () => {
@@ -105,6 +124,8 @@ describe("GoatBillingPanel", () => {
       <GoatBillingPanel
         data={{
           ...base,
+          plan: "pro",
+          memberCap: 10,
           autoRefill: { ...base.autoRefill, hasPaymentMethod: false },
         }}
         checkoutResult={null}
@@ -118,41 +139,16 @@ describe("GoatBillingPanel", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the Stripe portal button only to admins with a Stripe customer", () => {
-    const { rerender } = render(
-      <GoatBillingPanel data={base} checkoutResult={null} topupResult={null} />,
-    );
-    expect(screen.getByRole("button", { name: /Manage billing details/i })).toBeEnabled();
-
-    rerender(
-      <GoatBillingPanel
-        data={{ ...base, isAdmin: false }}
-        checkoutResult={null}
-        topupResult={null}
-      />,
-    );
-    expect(screen.queryByRole("button", { name: /Manage billing details/i })).toBeNull();
-
-    rerender(
-      <GoatBillingPanel
-        data={{ ...base, hasStripeCustomer: false }}
-        checkoutResult={null}
-        topupResult={null}
-      />,
-    );
-    expect(screen.queryByRole("button", { name: /Manage billing details/i })).toBeNull();
-  });
-
   it("offers Pro to admins and shows the active team plan", () => {
     const { rerender } = render(
       <GoatBillingPanel data={base} checkoutResult={null} topupResult={null} />,
     );
-    expect(screen.getByRole("button", { name: "Start billing" })).toBeEnabled();
-    expect(screen.getByText(/each seat includes \$20 of at-cost usage/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Upgrade to Pro" })).toBeEnabled();
+    expect(screen.getByText(/\$5 of included usage refreshes/i)).toBeVisible();
 
     rerender(
       <GoatBillingPanel
-        data={{ ...base, plan: "pro", memberCount: 4, seatQuantity: 4 }}
+        data={{ ...base, plan: "pro", memberCount: 4, memberCap: 10, seatQuantity: 4 }}
         checkoutResult={null}
         topupResult={null}
       />,
@@ -167,6 +163,7 @@ describe("GoatBillingPanel", () => {
         data={{
           ...base,
           plan: "pro",
+          memberCap: 10,
           paymentNeedsAttention: true,
           cancelAtPeriodEnd: true,
           currentPeriodEnd: "2026-09-01T00:00:00.000Z",

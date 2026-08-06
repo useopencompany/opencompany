@@ -237,12 +237,17 @@ describe("Stripe webhook route", () => {
       expect(captureServerEventMock).toHaveBeenCalledWith(
         "goat_billing_topup_completed",
         "goat_ws_1",
-        expect.objectContaining({ checkout_record_id: "gcs_123", amount_cents: 1_000 }),
+        expect.objectContaining({
+          checkout_record_id: "gcs_123",
+          amount_cents: 1_000,
+          amount_usd: 10,
+        }),
       );
       expect(captureGoatServerEventMock).toHaveBeenCalledWith("billing_topup_completed", "user_1", {
         workspace_id: "goat_ws_1",
         topup_type: "manual",
         amount_cents: 1_000,
+        amount_usd: 10,
         balance_cents: 1_500,
       });
     });
@@ -434,6 +439,7 @@ describe("Stripe webhook route", () => {
         workspace_id: "goat_ws_1",
         topup_type: "auto_refill",
         amount_cents: 2_000,
+        amount_usd: 20,
         balance_cents: 2_500,
       },
     );

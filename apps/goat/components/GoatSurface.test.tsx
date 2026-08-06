@@ -372,6 +372,10 @@ describe("GoatSurface chat streaming UI", () => {
 
   it("starts a background chat from the main composer when the message starts with ampersand", async () => {
     const user = userEvent.setup();
+    let resolveChatResponse: (() => void) | null = null;
+    const chatResponseReady = new Promise<void>((resolve) => {
+      resolveChatResponse = resolve;
+    });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;
       if (String(input).includes("/api/electric/")) {
@@ -384,17 +388,21 @@ describe("GoatSurface chat streaming UI", () => {
         });
       }
 
+      await chatResponseReady;
       return new Response("done", { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <GoatSurface
-        tasks={[]}
-        defaultModel={DEFAULT_GOAT_MODEL}
-        initialChat={null}
-        userWorkosId="user_1"
-      />,
+      <>
+        <GoatSurface
+          tasks={[]}
+          defaultModel={DEFAULT_GOAT_MODEL}
+          initialChat={null}
+          userWorkosId="user_1"
+        />
+        <LocalChatStatesProbe />
+      </>,
     );
 
     const textarea = screen.getByPlaceholderText("Ask Goat anything...");
@@ -423,11 +431,21 @@ describe("GoatSurface chat streaming UI", () => {
         parts: [{ type: "text", text: "Research Q3" }],
       },
     });
+    expect(body.newSessionId).toMatch(/^goat_chat_/);
     expect(body.message.id).toMatch(/^ui_background_/);
+    await waitFor(() =>
+      expect(screen.getByTestId("local-chat-states")).toHaveTextContent(
+        `${body.newSessionId}:working`,
+      ),
+    );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveChatResponse?.();
+    });
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId("local-chat-states")).toHaveTextContent("none"));
     expect(textarea).toHaveValue("");
     expect(screen.getByText("welcome back, there")).toBeInTheDocument();
   });
@@ -503,6 +521,96 @@ describe("GoatSurface chat streaming UI", () => {
     expect(body.newSessionId).toMatch(/^goat_chat_/);
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it("starts a selected workflow from a running Codex chat without interrupting Codex", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/skills") return Response.json({ skills: [] });
+      if (url === "/api/workflows" && init?.method === "POST") {
+        return Response.json(
+          {
+            task: {
+              id: "task_1",
+              displayId: "TASK-1",
+              name: "Ship feature",
+            },
+          },
+          { status: 201 },
+        );
+      }
+      if (url === "/api/workflows") {
+        return Response.json({
+          workflows: [
+            {
+              id: "ship-feature",
+              name: "Ship feature",
+              description: "Use this to ship features.",
+            },
+          ],
+        });
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_codex_active",
+          title: "Codex active",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "codex",
+          messages: [],
+          codexRuntime: {
+            status: "running",
+            error: null,
+            updatedAt: new Date().toISOString(),
+          },
+        }}
+        codexConnected
+        userWorkosId="user_1"
+        taskSpawningEnabled
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
+
+    await user.type(textarea, "#");
+    await user.click(await screen.findByRole("option", { name: /Ship feature/i }));
+    await user.type(textarea, "fix the composer send button");
+
+    expect(screen.getByTestId("workflow-task-hint")).toHaveTextContent(
+      "Sending runs workflow Ship feature as a background task.",
+    );
+    const submit = screen.getByRole("button", { name: "Start task" });
+    expect(submit).toBeEnabled();
+
+    await user.click(submit);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const [, request] = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/api/workflows" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      workflow: {
+        kind: "workflow",
+        id: "ship-feature",
+      },
+      description: "#ship-feature fix the composer send button",
+    });
+    expect(chatMock.stop).not.toHaveBeenCalled();
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
   });
 
@@ -757,6 +865,62 @@ describe("GoatSurface chat streaming UI", () => {
     );
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(screen.getByText("Please check the afternoon too")).toBeInTheDocument();
+  });
+
+  it("offers Brain skill mentions when continuing a session-backed task", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/skills") {
+        return Response.json({
+          skills: [
+            {
+              id: "product-work",
+              name: "Product work",
+              description: "Shape and ship product changes.",
+            },
+          ],
+        });
+      }
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "goat_chat_task_1",
+          title: "Investigate task",
+          model: DEFAULT_GOAT_MODEL,
+          engine: "opencompany",
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "goat_task_1",
+          status: "succeeded",
+          startedAtMs: Date.now(),
+          sessionBacked: true,
+        }}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "@skill/prod");
+    await user.click(await screen.findByRole("option", { name: /Product work/i }));
+    await user.type(textarea, "investigate the mention menu");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(continueGoatTaskAction).toHaveBeenCalledWith(
+        "goat_task_1",
+        "@skill/product-work investigate the mention menu",
+        expect.stringMatching(/^goat_chat_msg_[0-9a-f-]{36}$/),
+        [{ kind: "skill", id: "product-work" }],
+      ),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
   it("starts an ampersand ad-hoc task from an active task conversation", async () => {
@@ -2175,6 +2339,12 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     expect(textarea).toHaveValue("@codex ");
+    const overlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(overlay?.querySelectorAll('[data-goat-chat-mention="engine"]')).toHaveLength(1);
+    expect(overlay).toHaveTextContent("@codex");
+    expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
     expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" })).toBeInTheDocument();
 
@@ -2242,6 +2412,12 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.click(screen.getByRole("option", { name: /@claude/i }));
     expect(textarea).toHaveValue("@claude ");
+    const overlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(overlay?.querySelectorAll('[data-goat-chat-mention="engine"]')).toHaveLength(1);
+    expect(overlay).toHaveTextContent("@claude");
+    expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude Code");
     expect(
       screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }),
@@ -3324,13 +3500,19 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.type(
+      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      "Research Q3",
+    );
+    await user.click(within(dialog).getByRole("option", { name: 'Start new chat: "Research Q3"' }));
     const quickComposerInput = screen.getByPlaceholderText(
       "Ask Goat anything, or describe a task...",
     );
+    expect(quickComposerInput).toHaveValue("Research Q3");
     // Same controls as the main composer: model picker, attach button, submit button.
     expect(screen.getAllByLabelText("Model")).toHaveLength(2);
     expect(screen.getAllByLabelText("Attach files")).toHaveLength(2);
-    await user.type(quickComposerInput, "Research Q3");
     await user.keyboard("{Enter}");
 
     const chatRequests = () => fetchMock.mock.calls.filter(([url]) => url === "/api/chat");
@@ -3400,6 +3582,8 @@ describe("GoatSurface chat streaming UI", () => {
     );
 
     await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     const quickComposerInput = screen.getByPlaceholderText(
       "Ask Goat anything, or describe a task...",
     );
@@ -3428,9 +3612,10 @@ describe("GoatSurface chat streaming UI", () => {
         parts: [{ type: "text", text: "Research Q3" }],
       },
     });
+    expect(body.newSessionId).toMatch(/^goat_chat_/);
   });
 
-  it("routes a dropped file only to the Cmd+K composer while the palette is open", async () => {
+  it("routes a dropped file only to the Cmd+K composer while the compose view is open", async () => {
     const user = userEvent.setup();
     render(
       <GoatSurface
@@ -3446,6 +3631,7 @@ describe("GoatSurface chat streaming UI", () => {
     await user.click(screen.getByText("Cloud Codex sandbox"));
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     const file = new File(["pdf"], "brief.pdf", { type: "application/pdf" });
     fireEvent.drop(window, {
       dataTransfer: {
@@ -3487,6 +3673,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // The model picker's popover content portals outside the dialog's DOM subtree.
     await user.click(screen.getByText("Cloud Codex sandbox"));
@@ -3563,6 +3750,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Cloud Codex sandbox"));
 
@@ -3616,6 +3804,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // Popover content (model list, goal mode fields) portals outside the dialog's DOM subtree.
     await user.click(screen.getByText("Cloud Codex sandbox"));
@@ -3652,6 +3841,7 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // The model picker's popover content portals outside the dialog's DOM subtree.
     await user.click(screen.getByText("Cloud Codex sandbox"));
@@ -3659,7 +3849,7 @@ describe("GoatSurface chat streaming UI", () => {
     expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBeNull();
   });
 
-  it("searches and jumps to an existing chat from the Cmd+K palette without affecting the quick composer", async () => {
+  it("searches and jumps to an existing chat from the Cmd+K palette", async () => {
     const user = userEvent.setup();
 
     render(
@@ -3681,11 +3871,72 @@ describe("GoatSurface chat streaming UI", () => {
 
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
-    await user.type(within(dialog).getByPlaceholderText("Search chats..."), "Q2 planning");
+    await user.type(
+      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      "Q2 planning",
+    );
     const result = await within(dialog).findByText("Q2 planning");
     await user.click(result);
 
     expect(routerMock.push).toHaveBeenCalledWith("/chat/chat_1");
+  });
+
+  it("drills from Cmd+K search into compose on Enter, prefilled with the typed query", async () => {
+    const user = userEvent.setup();
+
+    render(<GoatSurface tasks={[]} defaultModel={DEFAULT_GOAT_MODEL} initialChat={null} />);
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.type(
+      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+      "Research Q3",
+    );
+    // The pinned "Start new chat" action is the only forceMounted item, so it stays
+    // highlighted as the user types — Enter should drill into compose, not submit yet.
+    await user.keyboard("{Enter}");
+
+    const quickComposerInput = within(dialog).getByPlaceholderText(
+      "Ask Goat anything, or describe a task...",
+    );
+    expect(quickComposerInput).toHaveValue("Research Q3");
+  });
+
+  it("backs out of Cmd+K compose to search on Escape, and closes the palette on a second Escape", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_1",
+            title: "Q2 planning",
+            model: DEFAULT_GOAT_MODEL,
+            preview: "Let's plan Q2",
+            updatedAt: currentTimestamp(),
+          },
+        ]}
+      />,
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
+    expect(
+      within(dialog).getByPlaceholderText("Ask Goat anything, or describe a task..."),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(
+      within(dialog).getByPlaceholderText("Search chats or start something new..."),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("does not navigate or refresh when the stream confirms the reserved session id", async () => {
@@ -3926,6 +4177,62 @@ describe("GoatSurface chat streaming UI", () => {
     const assistantText = screen.getByText("Streaming answer");
     expect(assistantText).toBeInTheDocument();
     expect(assistantText.closest(".bg-surface-muted")).toBeNull();
+  });
+
+  it("keeps completed assistant text clear of the expanded main composer", async () => {
+    let composerHeight = 96;
+    let resizeObserverCallback: ResizeObserverCallback | null = null;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        constructor(callback: ResizeObserverCallback) {
+          resizeObserverCallback = callback;
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this instanceof HTMLFormElement) {
+        return domRectWithHeight(composerHeight);
+      }
+      return domRectWithHeight(0);
+    });
+
+    render(
+      <GoatSurface
+        tasks={[]}
+        defaultModel={DEFAULT_GOAT_MODEL}
+        initialChat={{
+          id: "chat_1",
+          title: "Chat",
+          model: DEFAULT_GOAT_MODEL,
+          messages: [
+            {
+              id: "assistant_1",
+              role: "assistant",
+              metadata: { sessionId: "chat_1" },
+              parts: [{ type: "text", text: "Finished answer" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Finished answer")).toBeInTheDocument();
+    const threadContent = screen.getByTestId("chat-thread-content");
+    await waitFor(() => expect(threadContent).toHaveStyle({ paddingBottom: "160px" }));
+
+    composerHeight = 252;
+    fireEvent.change(screen.getByPlaceholderText("Reply..."), {
+      target: { value: "Line one\nLine two\nLine three\nLine four\nLine five" },
+    });
+    act(() => resizeObserverCallback?.([], {} as ResizeObserver));
+
+    await waitFor(() => expect(threadContent).toHaveStyle({ paddingBottom: "272px" }));
   });
 
   it("renders the final elapsed time for completed assistant turns", () => {
@@ -4636,9 +4943,29 @@ function currentTimestamp() {
   return new Date().toISOString();
 }
 
+function domRectWithHeight(height: number): DOMRect {
+  return {
+    x: 0,
+    y: 0,
+    width: 720,
+    height,
+    top: 0,
+    right: 720,
+    bottom: height,
+    left: 0,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
 function LocalChatStateProbe({ sessionId }: { sessionId: string }) {
   const states = useLocalGoatChatStates();
   return <div data-testid="local-chat-state">{states.get(sessionId) ?? "none"}</div>;
+}
+
+function LocalChatStatesProbe() {
+  const states = useLocalGoatChatStates();
+  const entries = [...states.entries()].map(([sessionId, state]) => `${sessionId}:${state}`);
+  return <div data-testid="local-chat-states">{entries.join(",") || "none"}</div>;
 }
 
 async function nextAnimationFrame() {

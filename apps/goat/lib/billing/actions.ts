@@ -51,11 +51,15 @@ async function ensureGoatStripeCustomerId(context: {
   );
 }
 
-// Self-serve: any workspace member can top up the shared wallet.
+// Purchased credits are a Pro entitlement and change shared workspace billing,
+// so only workspace admins may start Checkout.
 export async function createGoatCreditTopUpAction(
   amountCents: number,
 ): Promise<GoatBillingActionResult> {
   const context = await currentGoatUser();
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can add credits." };
+  }
   if (
     !Number.isSafeInteger(amountCents) ||
     amountCents < GOAT_MIN_TOP_UP_USD_CENTS ||
@@ -69,8 +73,11 @@ export async function createGoatCreditTopUpAction(
   let checkoutUrl: string;
   const checkoutRecordId = `goat_chk_${randomUUID().replace(/-/g, "")}`;
   try {
-    assertGoatCheckoutEnabled();
     const overview = await loadGoatBillingOverview(context.workspace.id);
+    if (overview.billing.plan !== "pro") {
+      return { ok: false, error: "Upgrade this workspace to Pro before adding credits." };
+    }
+    assertGoatCheckoutEnabled();
     const customerId = await ensureGoatStripeCustomerId({
       workspaceId: context.workspace.id,
       workspaceName: context.workspace.name,
@@ -262,6 +269,9 @@ export async function setGoatAutoRefillAction(input: {
   amountCents: number;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const context = await currentGoatUser();
+  if (context.role !== "admin") {
+    return { ok: false, error: "Only workspace admins can manage auto-refill." };
+  }
   if (
     !Number.isSafeInteger(input.amountCents) ||
     input.amountCents < GOAT_MIN_TOP_UP_USD_CENTS ||
@@ -273,6 +283,10 @@ export async function setGoatAutoRefillAction(input: {
     };
   }
   try {
+    const overview = await loadGoatBillingOverview(context.workspace.id);
+    if (overview.billing.plan !== "pro") {
+      return { ok: false, error: "Upgrade this workspace to Pro before enabling auto-refill." };
+    }
     const updated = await setGoatAutoRefillConfig({
       workspaceId: context.workspace.id,
       enabled: input.enabled,

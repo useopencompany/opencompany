@@ -30,6 +30,11 @@ import { currentGoatUser } from "@/lib/auth";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
 import { goatHomeActivityCutoff } from "@/lib/home-activity";
 import { getGoatAvailableHarnessTools } from "@/lib/integrations/google-data";
+import {
+  GoatSkillMentionError,
+  readGoatSkillMentionRefs,
+  resolveGoatSkillMentions,
+} from "@/lib/skills";
 import { normalizeGoatTaskName } from "@/lib/task-display";
 import { triggerGoatCodexChatWake, triggerGoatTaskRun } from "@/lib/task-runner";
 import { GOAT_TASK_PROMPT_MAX_LENGTH } from "@/lib/task-validation";
@@ -430,6 +435,7 @@ export async function continueGoatTaskAction(
   taskId: string,
   prompt: string,
   clientMessageId?: string,
+  mentions?: unknown,
 ): Promise<ContinueTaskResult> {
   const normalizedTaskId = taskId.trim();
   const content = prompt.trim();
@@ -445,6 +451,24 @@ export async function continueGoatTaskAction(
   }
 
   const { user, workspace } = await currentGoatUser();
+  const parsedSkillMentions = readGoatSkillMentionRefs(mentions);
+  if (!parsedSkillMentions.ok) {
+    return { ok: false, error: parsedSkillMentions.error, messageId: null };
+  }
+  let resolvedSkills: Awaited<ReturnType<typeof resolveGoatSkillMentions>> = [];
+  if (parsedSkillMentions.mentions.length > 0) {
+    try {
+      resolvedSkills = await resolveGoatSkillMentions({
+        workspaceId: workspace.id,
+        mentions: parsedSkillMentions.mentions,
+      });
+    } catch (error) {
+      if (error instanceof GoatSkillMentionError) {
+        return { ok: false, error: error.message, messageId: null };
+      }
+      throw error;
+    }
+  }
   const [task] = await getDb()
     .select({ sessionId: goatTasks.sessionId, userWorkosId: goatTasks.userWorkosId })
     .from(goatTasks)
@@ -463,6 +487,10 @@ export async function continueGoatTaskAction(
       taskId: normalizedTaskId,
       userWorkosId: task.userWorkosId,
       prompt: content,
+      skills: resolvedSkills.map((skill) => ({
+        ...skill,
+        brainRef: workspace.id,
+      })),
       clientMessageId,
     });
     if (!continued) {

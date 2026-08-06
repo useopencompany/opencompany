@@ -2,6 +2,7 @@ import { captureGoatServerEvent } from "@opencompany/analytics/goat/server";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import {
   claimGoatAutoRefill,
+  ensureGoatMonthlyIncludedUsage,
   GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS,
   listGoatAutoRefillCandidates,
   releasePendingForWorkspace,
@@ -24,6 +25,7 @@ import { assertGoatCheckoutEnabled, getGoatStripe } from "@/lib/billing/stripe";
 
 export async function maybeTriggerGoatAutoRefill(workspaceId: string) {
   try {
+    await ensureGoatMonthlyIncludedUsage(workspaceId);
     const balance = await getGoatCreditBalanceUsdMicros(workspaceId);
     if (balance >= GOAT_AUTO_REFILL_THRESHOLD_USD_MICROS) return;
     await runGoatAutoRefill(workspaceId);
@@ -75,6 +77,7 @@ export async function runGoatAutoRefill(workspaceId: string) {
         workspace_id: workspaceId,
         topup_type: "auto_refill",
         amount_cents: claim.amountCents,
+        amount_usd: claim.amountCents / 100,
         balance_cents: goatUsdMicrosToCents(credit.balanceUsdMicros),
       });
     }

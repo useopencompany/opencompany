@@ -186,6 +186,7 @@ export type AnalyticsEventPropertiesByName = {
     workspace_id: string;
     checkout_record_id: string;
     amount_cents: number;
+    amount_usd: number;
     balance_cents: number;
   };
   goat_billing_pro_checkout_started: {
@@ -195,7 +196,7 @@ export type AnalyticsEventPropertiesByName = {
   };
   goat_billing_plan_changed: {
     workspace_id: string;
-    plan: "free" | "pro";
+    plan: "hobby" | "pro";
     subscription_status: string;
   };
   goat_billing_payment_failed: {
@@ -451,7 +452,13 @@ export const analyticsEvents = {
   goat_billing_topup_completed: {
     name: "goat_billing_topup_completed",
     description: "Stripe fulfilled a Goat credit top-up into the workspace balance.",
-    safeProperties: ["workspace_id", "checkout_record_id", "amount_cents", "balance_cents"],
+    safeProperties: [
+      "workspace_id",
+      "checkout_record_id",
+      "amount_cents",
+      "amount_usd",
+      "balance_cents",
+    ],
   },
   goat_billing_pro_checkout_started: {
     name: "goat_billing_pro_checkout_started",

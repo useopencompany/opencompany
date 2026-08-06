@@ -39,6 +39,7 @@ import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalRespons
 import {
   AlertCircle,
   Archive,
+  ArrowLeft,
   ArrowUp,
   CalendarClock,
   Check,
@@ -47,6 +48,7 @@ import {
   CircleDotDashed,
   Clock,
   Code2,
+  CornerDownLeft,
   FileText,
   LoaderCircle,
   MessageSquare,
@@ -60,6 +62,7 @@ import {
   Settings,
   Sparkles,
   Square,
+  SquarePen,
   Target,
   Trash2,
   Workflow as WorkflowIcon,
@@ -201,6 +204,8 @@ import type { GoatWorkflowCatalogItem } from "@/lib/workflows";
 
 const TEXTAREA_MAX_HEIGHT_PX = 128;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
+const CHAT_THREAD_MIN_BOTTOM_PADDING_PX = 160;
+const CHAT_THREAD_COMPOSER_GAP_PX = 20;
 const BACKGROUND_CHAT_PROMPT_MAX_LENGTH = 10_000;
 const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;
@@ -262,6 +267,13 @@ type ChatComposerDraft = {
   input: string;
   mentions: GoatChatMention[];
 };
+
+function chatThreadBottomPaddingForComposerHeight(composerHeightPx: number) {
+  return Math.max(
+    CHAT_THREAD_MIN_BOTTOM_PADDING_PX,
+    Math.ceil(composerHeightPx) + CHAT_THREAD_COMPOSER_GAP_PX,
+  );
+}
 
 const ENGINE_CHAT_CONFIG: Record<
   GoatEngineChatKind,
@@ -485,6 +497,9 @@ export function GoatSurface({
   const [composerDraftsByChatId, setComposerDraftsByChatId] = useState<
     ReadonlyMap<string, ChatComposerDraft>
   >(() => new Map());
+  const [chatThreadBottomPaddingPx, setChatThreadBottomPaddingPx] = useState(
+    CHAT_THREAD_MIN_BOTTOM_PADDING_PX,
+  );
   const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
     initialCodexComposerUiState.reasoningEffort,
   );
@@ -512,6 +527,7 @@ export function GoatSurface({
   const [taskMessageSubmitting, setTaskMessageSubmitting] = useState(false);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
+  const [commandPaletteView, setCommandPaletteView] = useState<"search" | "compose">("search");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [restoringChatId, setRestoringChatId] = useState<string | null>(null);
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
@@ -554,13 +570,15 @@ export function GoatSurface({
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
   const workflowMentionsEnabled =
     taskSpawningEnabled && (!activeTaskConversation || backgroundDirectiveActive);
+  const skillMentionsEnabled =
+    !activeTaskConversation || activeTaskConversation.sessionBacked || backgroundDirectiveActive;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!goatChatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
       return mention.id === "claude" ? claudeCodeConnected : codexConnected;
     }
     if (mention.kind === "workflow") return workflowMentionsEnabled;
-    return !activeTaskConversation || backgroundDirectiveActive;
+    return skillMentionsEnabled;
   });
   const chatModel =
     chatModelSelectionFromEngineMention(
@@ -825,7 +843,7 @@ export function GoatSurface({
     selectedMentions: activeSelectedMentions,
     codexConnected,
     claudeCodeConnected,
-    skillsEnabled: !activeTaskConversation,
+    skillsEnabled: skillMentionsEnabled,
     workflowsEnabled: workflowMentionsEnabled,
     adHocTaskEnabled: adHocTaskMentionEnabled || Boolean(backgroundChatDirective),
   });
@@ -840,10 +858,13 @@ export function GoatSurface({
   const composerAttachments = useGoatChatAttachments({
     userWorkosId,
     modelName: String(chatModel),
-    // Cmd+K mounts a second composer with its own window-level drop listener.
-    // Keep the main composer visible behind the modal, but let only the quick
-    // composer consume dropped files while the palette is open.
-    enabled: attachmentsEnabled && !engineSubmitting && !newChatCommandOpen,
+    // The Cmd+K compose view mounts a second composer with its own window-level drop
+    // listener. Keep the main composer visible behind the modal, but let only the quick
+    // composer consume dropped files while that view is showing.
+    enabled:
+      attachmentsEnabled &&
+      !engineSubmitting &&
+      !(newChatCommandOpen && commandPaletteView === "compose"),
     ...(composerEngine === "codex" || composerEngine === "claude_code"
       ? { capabilities: CLOUD_CODEX_ATTACHMENT_CAPABILITIES }
       : isAutoChatModel
@@ -871,7 +892,7 @@ export function GoatSurface({
   // created or edited since the last open must appear, and a transient fetch failure
   // must not blank the menu for the rest of the session — keep the previous catalog
   // and let the next open retry.
-  const skillMentionMenuOpen = Boolean(userWorkosId && mentionToken && !activeTaskConversation);
+  const skillMentionMenuOpen = Boolean(userWorkosId && mentionToken && skillMentionsEnabled);
   useEffect(() => {
     if (!skillMentionMenuOpen) return;
     const controller = new AbortController();
@@ -949,7 +970,7 @@ export function GoatSurface({
   );
   const isAgentWorking = isGenerating || isEngineWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
-  const isBackgroundSubmit = backgroundDirectiveActive;
+  const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
   const latestActiveTurnStartedAtMs = useMemo(
     () => latestChatTurnStartedAtMs(chatMessages),
     [chatMessages],
@@ -1272,6 +1293,28 @@ export function GoatSurface({
   }, [input]);
 
   useLayoutEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+
+    const updateBottomPadding = () => {
+      setChatThreadBottomPaddingPx(
+        chatThreadBottomPaddingForComposerHeight(form.getBoundingClientRect().height),
+      );
+    };
+
+    updateBottomPadding();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateBottomPadding);
+      return () => window.removeEventListener("resize", updateBottomPadding);
+    }
+
+    const observer = new ResizeObserver(updateBottomPadding);
+    observer.observe(form);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
     const caret = pendingInputCaretRef.current;
     if (caret === null) return;
     pendingInputCaretRef.current = null;
@@ -1299,6 +1342,13 @@ export function GoatSurface({
     if (!thread || typeof thread.scrollTo !== "function") return;
     thread.scrollTo({ top: thread.scrollHeight, behavior: "auto" });
   }, [chatMessages, isAgentWorking, mode]);
+
+  useLayoutEffect(() => {
+    if (mode !== "chat" || !isPinnedAtBottomRef.current) return;
+    const thread = threadRef.current;
+    if (!thread || typeof thread.scrollTo !== "function") return;
+    thread.scrollTo({ top: thread.scrollHeight, behavior: "auto" });
+  }, [chatThreadBottomPaddingPx, mode]);
 
   useEffect(() => {
     if (!chatError || chatError.message === lastError.current) return;
@@ -1372,6 +1422,15 @@ export function GoatSurface({
   const closeCommandPalette = useCallback(() => {
     setNewChatCommandOpen(false);
     setChatSearchQuery("");
+    setCommandPaletteView("search");
+  }, []);
+
+  const openCommandPaletteCompose = useCallback(() => {
+    setCommandPaletteView("compose");
+  }, []);
+
+  const backToCommandPaletteSearch = useCallback(() => {
+    setCommandPaletteView("search");
   }, []);
 
   const prepareMainComposerFocusRestoreAfterBackgroundTask = () => {
@@ -1438,7 +1497,7 @@ export function GoatSurface({
     pendingProgrammaticPromptRef.current = null;
     const backgroundChat = parseGoatBackgroundChatDirective(prompt);
     const backgroundEngine = backgroundChat ? (backgroundChat.engine ?? activeEngine) : null;
-    if ((isInteractionPending && !backgroundChat) || backgroundTaskSubmitting) return;
+    if ((isInteractionPending && !isBackgroundSubmit) || backgroundTaskSubmitting) return;
     if (outOfCredits && !(backgroundEngine ?? activeEngine)) {
       toast.error(GOAT_CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
@@ -1464,12 +1523,18 @@ export function GoatSurface({
     }
 
     if (activeTaskConversation && !backgroundChat) {
+      const taskSkillMentions = activeSelectedMentions
+        .filter(isSkillMention)
+        .filter((mention) => goatChatMentionIsVisible(prompt, mention));
       const messageId = activeTaskConversation.sessionBacked
         ? `goat_chat_msg_${crypto.randomUUID()}`
         : `goat_task_msg_${crypto.randomUUID()}`;
       const optimisticMessage = {
         id: messageId,
         role: "user",
+        ...(taskSkillMentions.length > 0
+          ? { metadata: { mentions: taskSkillMentions } satisfies GoatChatMessageMetadata }
+          : {}),
         parts: [{ type: "text", text: prompt }],
       } as GoatChatUiMessage;
 
@@ -1481,12 +1546,22 @@ export function GoatSurface({
       setTaskMessageSubmitting(true);
       beginActiveTurn();
       setMessages((current) => [...current, optimisticMessage]);
-      void continueGoatTaskAction(activeTaskConversation.taskId, prompt, messageId)
+      const continueTask =
+        taskSkillMentions.length > 0
+          ? continueGoatTaskAction(
+              activeTaskConversation.taskId,
+              prompt,
+              messageId,
+              taskSkillMentions,
+            )
+          : continueGoatTaskAction(activeTaskConversation.taskId, prompt, messageId);
+      void continueTask
         .then((result) => {
           if (!mountedRef.current) return;
           if (!result.ok) {
             setMessages((current) => current.filter((message) => message.id !== messageId));
             setInput(prompt);
+            setSelectedMentions(taskSkillMentions);
             clearLocalActiveTurnState(null);
             clearActiveTurn();
             toast.error(result.error ?? "Could not continue that task.");
@@ -1498,6 +1573,7 @@ export function GoatSurface({
           if (!mountedRef.current) return;
           setMessages((current) => current.filter((message) => message.id !== messageId));
           setInput(prompt);
+          setSelectedMentions(taskSkillMentions);
           clearLocalActiveTurnState(null);
           clearActiveTurn();
           toast.error("Could not continue that task.");
@@ -1659,12 +1735,14 @@ export function GoatSurface({
 
         const engine = backgroundEngine;
         const config = ENGINE_CHAT_CONFIG[engine];
+        const newSessionId = newOptimisticGoatChatSessionId();
+        setLocalGoatChatState(newSessionId, "working");
         void sendEngineChatMessage({
           endpoint: config.messagesEndpoint,
           errorLabel: config.label,
           prompt: messagePrompt,
           sessionId: null,
-          newSessionId: newOptimisticGoatChatSessionId(),
+          newSessionId,
           settings: settings.settings,
           userMessageId: `goat_chat_msg_${crypto.randomUUID()}`,
           attachments: attachmentsMetadata,
@@ -1682,6 +1760,7 @@ export function GoatSurface({
             toast.success(`${config.label} is ready.`);
           })
           .catch((error) => {
+            clearLocalGoatChatState(newSessionId, "working");
             if (!mountedRef.current) return;
             restoreDraft();
             toast.error(
@@ -1706,9 +1785,12 @@ export function GoatSurface({
       composerAttachments.setAttachments([]);
       toast("Started a new chat in the background.");
 
+      const newSessionId = newOptimisticGoatChatSessionId();
+      setLocalGoatChatState(newSessionId, "working");
       void runBackgroundChatTurn({
         prompt: messagePrompt,
         model: String(chatModel),
+        newSessionId,
         ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       })
         .then(() => {
@@ -1723,6 +1805,7 @@ export function GoatSurface({
           toast.error(error instanceof Error ? error.message : "Could not start that chat.");
         })
         .finally(() => {
+          clearLocalGoatChatState(newSessionId, "working");
           if (!mountedRef.current) return;
           setBackgroundTaskSubmitting(false);
           refocusMainComposerAfterBackgroundTask();
@@ -2379,37 +2462,88 @@ export function GoatSurface({
     <div className="relative flex min-h-0 flex-1 flex-col items-center overflow-hidden">
       <Dialog
         open={newChatCommandOpen}
-        onOpenChange={(open) => (open ? setNewChatCommandOpen(true) : closeCommandPalette())}
+        onOpenChange={(open, eventDetails) => {
+          if (open) {
+            setNewChatCommandOpen(true);
+            return;
+          }
+          // Esc backs out of compose to search first, like drilling out of a command
+          // one level at a time, instead of dropping straight out of the palette.
+          if (eventDetails.reason === "escape-key" && commandPaletteView === "compose") {
+            eventDetails.cancel();
+            backToCommandPaletteSearch();
+            return;
+          }
+          closeCommandPalette();
+        }}
       >
         <DialogHeader className="sr-only">
-          <DialogTitle>New chat</DialogTitle>
+          <DialogTitle>
+            {commandPaletteView === "compose" ? "New chat" : "Jump to a chat"}
+          </DialogTitle>
           <DialogDescription>
-            Start a new chat that runs in the background, or search chats to reopen.
+            {commandPaletteView === "compose"
+              ? "Start a new chat that runs in the background."
+              : "Search chats to reopen, or start a new one."}
           </DialogDescription>
         </DialogHeader>
         <DialogContent
           showCloseButton={false}
           className="top-[18%] max-w-xl translate-y-0 gap-0 overflow-hidden border-border bg-surface p-0 text-ink shadow-[0_18px_60px_rgba(15,15,15,0.18)]"
         >
-          <QuickChatComposer
-            open={newChatCommandOpen}
-            userWorkosId={userWorkosId}
-            defaultModel={defaultModel}
-            codexConnected={codexConnected}
-            claudeCodeConnected={claudeCodeConnected}
-            taskSpawningEnabled={taskSpawningEnabled}
-            autoModelRoutingEnabled={autoModelRoutingEnabled}
-            creditBalance={creditBalance}
-            onSubmitted={closeCommandPalette}
-          />
-          <div className="border-t border-border">
+          {commandPaletteView === "compose" ? (
+            <>
+              <div className="flex items-center gap-1.5 border-b border-border px-3 py-2">
+                <button
+                  type="button"
+                  onClick={backToCommandPaletteSearch}
+                  aria-label="Back to search"
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                >
+                  <ArrowLeft size={14} strokeWidth={2} />
+                </button>
+                <span className="text-[12px] font-medium text-ink-subtle">New chat</span>
+              </div>
+              <QuickChatComposer
+                open={newChatCommandOpen && commandPaletteView === "compose"}
+                initialPrompt={chatSearchQuery.trim()}
+                userWorkosId={userWorkosId}
+                defaultModel={defaultModel}
+                codexConnected={codexConnected}
+                claudeCodeConnected={claudeCodeConnected}
+                taskSpawningEnabled={taskSpawningEnabled}
+                autoModelRoutingEnabled={autoModelRoutingEnabled}
+                creditBalance={creditBalance}
+                onSubmitted={closeCommandPalette}
+              />
+            </>
+          ) : (
             <Command className="bg-surface text-ink">
               <CommandInput
+                autoFocus
                 value={chatSearchQuery}
                 onValueChange={setChatSearchQuery}
-                placeholder="Search chats..."
+                placeholder="Search chats or start something new..."
               />
               <CommandList>
+                <CommandGroup heading="Actions" forceMount>
+                  <CommandItem
+                    value="start-new-chat"
+                    forceMount
+                    onSelect={openCommandPaletteCompose}
+                    className="gap-3"
+                  >
+                    <SquarePen size={16} strokeWidth={2} className="shrink-0 text-ink-subtle" />
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
+                      {chatSearchQuery.trim()
+                        ? `Start new chat: "${chatSearchQuery.trim()}"`
+                        : "Start new chat"}
+                    </span>
+                    <CommandShortcut>
+                      <CornerDownLeft size={12} strokeWidth={2} />
+                    </CommandShortcut>
+                  </CommandItem>
+                </CommandGroup>
                 <CommandEmpty>No matching chats.</CommandEmpty>
                 {paletteRecentChats.length > 0 ? (
                   <CommandGroup heading="Chats">
@@ -2465,7 +2599,7 @@ export function GoatSurface({
                 ) : null}
               </CommandList>
             </Command>
-          </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -2596,7 +2730,11 @@ export function GoatSurface({
                   isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
                 }}
               >
-                <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pb-40 pt-2">
+                <div
+                  data-testid="chat-thread-content"
+                  className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pt-2"
+                  style={{ paddingBottom: chatThreadBottomPaddingPx }}
+                >
                   {chatMessages.map((message) => (
                     <MessageBubble
                       key={message.id}
@@ -3027,6 +3165,7 @@ export function GoatSurface({
 // never adopts the result into view or navigates to it.
 function QuickChatComposer({
   open,
+  initialPrompt,
   userWorkosId,
   defaultModel,
   codexConnected,
@@ -3037,6 +3176,7 @@ function QuickChatComposer({
   onSubmitted,
 }: {
   open: boolean;
+  initialPrompt: string;
   userWorkosId: string;
   defaultModel: string;
   codexConnected: boolean;
@@ -3185,8 +3325,13 @@ function QuickChatComposer({
 
   useLayoutEffect(() => {
     if (!open) return;
+    // The palette hands off whatever the user was searching for as a starting draft,
+    // so they don't have to retype it once they commit to composing a new chat.
+    /* eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot seed on open, not a render loop */
+    setInput(initialPrompt);
+    if (initialPrompt) pendingInputCaretRef.current = initialPrompt.length;
     inputRef.current?.focus();
-  }, [open]);
+  }, [open, initialPrompt]);
 
   // Mirrors the main composer: refetch the skill/workflow catalog on every mention-menu
   // open so recently created skills/workflows show up.
@@ -3571,12 +3716,14 @@ function QuickChatComposer({
       const engine = targetEngine;
       const config = ENGINE_CHAT_CONFIG[engine];
       const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
+      const newSessionId = newOptimisticGoatChatSessionId();
+      setLocalGoatChatState(newSessionId, "working");
       void sendEngineChatMessage({
         endpoint: config.messagesEndpoint,
         errorLabel: config.label,
         prompt,
         sessionId: null,
-        newSessionId: newOptimisticGoatChatSessionId(),
+        newSessionId,
         settings: settings.settings,
         userMessageId,
         attachments: attachmentsMetadata,
@@ -3593,6 +3740,7 @@ function QuickChatComposer({
           toast.success(`${config.label} is ready.`);
         })
         .catch((error) => {
+          clearLocalGoatChatState(newSessionId, "working");
           toast.error(
             error instanceof Error ? error.message : `${config.label} could not start that turn.`,
           );
@@ -3608,6 +3756,8 @@ function QuickChatComposer({
     onSubmitted();
     toast("Started a new chat in the background.");
 
+    const newSessionId = newOptimisticGoatChatSessionId();
+    setLocalGoatChatState(newSessionId, "working");
     const backgroundChatMentions = isBackgroundChatDirective
       ? mentions.filter((mention) => !isWorkflowMention(mention))
       : mentions;
@@ -3618,6 +3768,7 @@ function QuickChatComposer({
     void runBackgroundChatTurn({
       prompt,
       model: String(chatModel),
+      newSessionId,
       ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     })
       .then(() => {
@@ -3629,6 +3780,7 @@ function QuickChatComposer({
         toast.error(error instanceof Error ? error.message : "Could not start that chat.");
       })
       .finally(() => {
+        clearLocalGoatChatState(newSessionId, "working");
         if (mountedRef.current) setIsSubmitting(false);
       });
   };
@@ -4618,7 +4770,7 @@ function parseGoatBackgroundChatDirective(value: string): {
   return { prompt: directive.slice(engineMatch[0].length).trimStart(), engine };
 }
 
-type ComposerMentionHighlight = Extract<GoatChatMention, { kind: "skill" | "workflow" }>;
+type ComposerMentionHighlight = Extract<GoatChatMention, { kind: "engine" | "skill" | "workflow" }>;
 
 type ComposerInputHighlightRange =
   | {
@@ -4700,7 +4852,7 @@ function composerInputHighlightRanges(
   const mentionRanges = mentions
     .filter(
       (mention): mention is ComposerMentionHighlight =>
-        mention.kind === "skill" || mention.kind === "workflow",
+        mention.kind === "engine" || mention.kind === "skill" || mention.kind === "workflow",
     )
     .flatMap((mention) => {
       const token = escapeRegExp(goatChatMentionToken(mention));
@@ -6433,6 +6585,7 @@ function EngineStopButton({ label, onStop }: { label: string; onStop: () => void
 async function runBackgroundChatTurn(input: {
   prompt: string;
   model: string;
+  newSessionId: string;
   metadata?: GoatChatMessageMetadata;
 }) {
   const response = await fetch("/api/chat", {
@@ -6440,6 +6593,7 @@ async function runBackgroundChatTurn(input: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       sessionId: null,
+      newSessionId: input.newSessionId,
       model: input.model,
       message: {
         id: newBackgroundChatMessageId(),

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   discoverGoatCodingWorkspacePreviewPorts,
@@ -111,6 +112,35 @@ describe("Goat coding workspace preview port discovery", () => {
       expect.stringContaining("127.0.0.1:46095/"),
       expect.anything(),
     );
+  });
+
+  it("extracts ports when the rendered scanner executes in a shell", async () => {
+    const workDirectory = process.cwd();
+    const run = vi.fn(async (command: string) => {
+      if (command.startsWith("ss -H -ltnp")) {
+        const stdout = execFileSync(
+          "bash",
+          [
+            "-c",
+            String.raw`
+ss() {
+  printf 'LISTEN 0 511 *:3003 *:* users:(("node",pid=%s,fd=3))\n' "$$"
+}
+${command}
+`,
+          ],
+          { cwd: workDirectory, encoding: "utf8" },
+        );
+        return { stdout };
+      }
+      if (command.includes("127.0.0.1:3003/")) return { stdout: "200" };
+      throw new Error(`Unexpected command: ${command}`);
+    });
+    const sandbox = { commands: { run } } as unknown as SandboxHandle;
+
+    await expect(
+      discoverGoatCodingWorkspacePreviewPorts(sandbox, { workDirectory }),
+    ).resolves.toEqual([{ port: 3_003, isHttp: true, score: 1_000 }]);
   });
 });
 

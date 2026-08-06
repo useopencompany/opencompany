@@ -71,6 +71,11 @@ const capabilityMocks = vi.hoisted(() => ({
   evaluateApproval: vi.fn(async () => false),
 }));
 
+vi.mock("@opencompany/db/goat-billing", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencompany/db/goat-billing")>()),
+  ensureGoatMonthlyIncludedUsage: vi.fn().mockResolvedValue({ ok: false, reason: "current" }),
+}));
+
 vi.mock("@opencompany/analytics/goat/server", () => ({
   captureGoatModelSpendRecorded: analyticsMocks.captureGoatModelSpendRecorded,
   captureGoatLlmUsageRecorded: analyticsMocks.captureGoatLlmUsageRecorded,

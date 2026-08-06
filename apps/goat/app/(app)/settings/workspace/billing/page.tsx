@@ -1,13 +1,15 @@
 import { loadGoatBillingOverview } from "@opencompany/db/goat-billing";
 import {
+  GOAT_AUTO_REFILL_MONTHLY_MAX_USD_CENTS,
   GOAT_DEFAULT_TOP_UP_USD_CENTS,
+  GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS,
   GOAT_INCLUDED_USAGE_PER_SEAT_USD_CENTS,
   GOAT_LOW_BALANCE_WARN_USD_MICROS,
   GOAT_MAX_TOP_UP_USD_CENTS,
   GOAT_MIN_TOP_UP_USD_CENTS,
-  GOAT_PRO_MAX_MEMBERS,
   GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
   GOAT_TOP_UP_AMOUNTS_USD_CENTS,
+  goatWorkspaceMemberCap,
 } from "@opencompany/db/goat-billing-constants";
 import { loadGoatCreditOverview } from "@opencompany/db/goat-credits";
 import { GoatBillingPanel } from "@/components/GoatBillingPanel";
@@ -19,10 +21,8 @@ export default async function WorkspaceBillingSettingsPage({
   searchParams: Promise<{ checkout?: string; topup?: string }>;
 }) {
   const [context, params] = await Promise.all([currentGoatUser(), searchParams]);
-  const [overview, credit] = await Promise.all([
-    loadGoatBillingOverview(context.workspace.id),
-    loadGoatCreditOverview(context.workspace.id),
-  ]);
+  const overview = await loadGoatBillingOverview(context.workspace.id);
+  const credit = await loadGoatCreditOverview(context.workspace.id);
   return (
     <GoatBillingPanel
       data={{
@@ -37,8 +37,9 @@ export default async function WorkspaceBillingSettingsPage({
         currentPeriodEnd: overview.billing.currentPeriodEnd?.toISOString() ?? null,
         paymentNeedsAttention: overview.billing.paymentNeedsAttention,
         proMonthlyPriceCents: GOAT_PRO_MONTHLY_PRICE_USD_CENTS,
+        hobbyIncludedUsageCents: GOAT_HOBBY_INCLUDED_USAGE_USD_CENTS,
         memberCount: overview.memberCount,
-        proMaxMembers: GOAT_PRO_MAX_MEMBERS,
+        memberCap: goatWorkspaceMemberCap(overview.billing.plan),
         spendThisMonthUsdMicros: credit.spendThisMonthUsdMicros,
         spendThisMonthByCategory: credit.spendThisMonthByCategory,
         recentActivity: credit.recentEntries.map((entry) => ({
@@ -60,13 +61,13 @@ export default async function WorkspaceBillingSettingsPage({
         defaultTopUpCents: GOAT_DEFAULT_TOP_UP_USD_CENTS,
         minTopUpCents: GOAT_MIN_TOP_UP_USD_CENTS,
         maxTopUpCents: GOAT_MAX_TOP_UP_USD_CENTS,
+        autoRefillMonthlyMaxCents: GOAT_AUTO_REFILL_MONTHLY_MAX_USD_CENTS,
         autoRefill: {
           enabled: overview.autoRefill.enabled,
           amountCents: overview.autoRefill.amountCents,
           hasPaymentMethod: overview.autoRefill.hasPaymentMethod,
           lastError: overview.autoRefill.lastError,
         },
-        hasStripeCustomer: Boolean(overview.billing.stripeCustomerId),
         isAdmin: context.role === "admin",
       }}
       topupResult={
