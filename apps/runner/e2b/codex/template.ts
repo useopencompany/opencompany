@@ -1,12 +1,20 @@
 import { Template } from "e2b";
 import { CLAUDE_CODE_CLI_PACKAGE, CLAUDE_CODE_CLI_VERSION } from "../../src/claude-code-version";
 import { CODEX_CLI_PACKAGE, CODEX_CLI_VERSION } from "../../src/codex-version";
+import {
+  INFISICAL_CLI_LINUX_AMD64_SHA256,
+  INFISICAL_CLI_VERSION,
+} from "../../src/infisical-version";
 
 export {
   CLAUDE_CODE_CLI_PACKAGE,
   CLAUDE_CODE_CLI_VERSION,
 } from "../../src/claude-code-version";
 export { CODEX_CLI_PACKAGE, CODEX_CLI_VERSION } from "../../src/codex-version";
+export {
+  INFISICAL_CLI_LINUX_AMD64_SHA256,
+  INFISICAL_CLI_VERSION,
+} from "../../src/infisical-version";
 
 export const CODEX_TOOLBOX_TEMPLATE_ALIAS = "opencompany-codex-toolbox";
 export const CODEX_TOOLBOX_CPU_COUNT = 8;
@@ -19,6 +27,19 @@ const user = { user: "user" } as const;
 
 export const template = Template()
   .fromTemplate("codex")
+  .runCmd(
+    [
+      "infisical_install_dir=$(mktemp -d /tmp/opencompany-infisical.XXXXXX)",
+      `curl -fsSL https://github.com/Infisical/cli/releases/download/v${INFISICAL_CLI_VERSION}/cli_${INFISICAL_CLI_VERSION}_linux_amd64.tar.gz -o "$infisical_install_dir/infisical.tar.gz"`,
+      `printf '%s  %s\\n' '${INFISICAL_CLI_LINUX_AMD64_SHA256}' "$infisical_install_dir/infisical.tar.gz" | sha256sum -c -`,
+      'tar -xzf "$infisical_install_dir/infisical.tar.gz" -C "$infisical_install_dir" infisical',
+      'install -m 0755 "$infisical_install_dir/infisical" /usr/local/bin/infisical',
+      'rm -rf "$infisical_install_dir"',
+      "command -v infisical",
+      `test "$(infisical --version)" = "infisical version ${INFISICAL_CLI_VERSION}"`,
+    ].join(" && "),
+    root,
+  )
   .runCmd(
     [
       "export DEBIAN_FRONTEND=noninteractive",

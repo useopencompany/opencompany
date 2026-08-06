@@ -357,6 +357,15 @@ redactor so accidental command output cannot persist them in the chat transcript
 reconciliation still checks warm sandboxes on every turn, while unchanged configurations skip file
 uploads.
 
+Workspace admins can also connect one Infisical Cloud account under Settings → Integrations. The
+runner completes Infisical's real CLI browser-token fallback in a short-lived auth sandbox, stores
+only the encrypted file-vault bundle, and restores it into persistent Codex and Claude Code
+sandboxes. Credential generations reconcile reconnects and disconnects before coding turns, while
+Infisical project and environment selection remains repository-local through `.infisical.json` or
+explicit CLI flags. The connected account's Infisical permissions are the authorization boundary;
+admins should use a dedicated least-privilege account because coding agents can invoke read and
+write CLI commands directly.
+
 ### Codex execution
 
 The legacy-named `goat.codex_chat_turns` queue is the durable, per-session FIFO execution substrate
@@ -675,6 +684,10 @@ Important tables:
   rows. Provider payloads remain outside this table.
 - `goat.repo_configs`: workspace-scoped repository setup instructions, masked env key names, and
   encrypted environment-file payloads used by Codex and Claude Code chat sandboxes.
+- `goat.infisical_connections`: workspace-scoped encrypted Infisical CLI file-vault bundles,
+  connection state, validation metadata, and a generation used to reconcile warm sandboxes.
+- `goat.infisical_auth_flows`: short-lived E2B browser-token login handoffs. Browser tokens are
+  passed directly to the CLI and are never stored in these rows.
 - `goat.tasks`: thin task projection linked to a chat through `session_id`, with status, stage,
   result/outcome, workflow/schedule metadata, board fields, and the current compiled harness.
 - `goat.task_messages` and `goat.task_events`: legacy compatibility history. New tasks never write

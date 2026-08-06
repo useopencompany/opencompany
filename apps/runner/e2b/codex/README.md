@@ -4,7 +4,7 @@ This shared Codex and Claude Code chat template extends E2B's `codex` template a
 runner's repo workflow toolbox:
 `rg`, `fd`, `jq`, `curl`, `git`, `gh`, `tmux`, `ss`, Node/npm 22+, Bun `1.3.2`,
 `@openai/codex@0.144.6`, `@anthropic-ai/claude-code@2.1.220`, Playwright `1.60.0`,
-and Playwright-managed Chromium.
+Infisical CLI `0.43.118`, and Playwright-managed Chromium.
 
 ## Build
 
@@ -34,6 +34,7 @@ node --version
 npm --version
 codex --version
 claude --version
+infisical --version
 playwright --version
 playwright screenshot --browser chromium about:blank /tmp/playwright-chromium-smoke.png
 rm -f /tmp/playwright-chromium-smoke.png
