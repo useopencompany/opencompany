@@ -1880,7 +1880,10 @@ describe("POST /api/chat", () => {
       }
       expect(typedOptions.system).not.toContain("Use web_fetch when the user provides");
       expect(typedOptions.system).not.toContain("Use the web_search tool inside chat");
-      expect(typedOptions.system).toContain("Use browser tools for rendered public pages");
+      expect(typedOptions.system).not.toContain("Use browser tools for rendered public pages");
+      expect(
+        (typedOptions.tools?.browser_open as { description?: string } | undefined)?.description,
+      ).toContain("Browser capability:");
       return {
         toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
       } as never;
@@ -1926,7 +1929,10 @@ describe("POST /api/chat", () => {
       expect(Object.keys(typedOptions.tools ?? {})).toEqual(
         expect.arrayContaining([...BROWSER_TOOL_NAMES]),
       );
-      expect(typedOptions.system).toContain("Use browser tools for rendered public pages");
+      expect(typedOptions.system).not.toContain("Use browser tools for rendered public pages");
+      expect(
+        (typedOptions.tools?.browser_open as { description?: string } | undefined)?.description,
+      ).toContain("Browser capability:");
       return {
         toUIMessageStreamResponse: vi.fn(() => new Response(null, { status: 200 })),
       } as never;
