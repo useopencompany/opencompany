@@ -38,7 +38,7 @@ bun run dev
 - `drizzle` — checked-in migrations
 - `docs` — concept, format spec, and operational guides
 - `docs/future-concepts` — speculative product and architecture ideas to consider before related implementation work
-- `.claude/skills` — agent skills (`start-work`, `pre-merge-check`)
+- `.agents/skills` — agent skills, the source of truth (`.claude/skills` mirrors it with symlinks)
 
 ## Quality gates
 
