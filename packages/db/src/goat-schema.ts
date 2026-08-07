@@ -3973,6 +3973,103 @@ export const goatCodexChatTurns = goat.table(
   }),
 );
 
+// A user-visible file published from a cloud coding chat. The logical artifact has a
+// stable identity while every publication creates an immutable version below. V1 keeps
+// artifacts scoped to their originating workspace, owner, and chat; later surfaces can
+// reuse the same version model without exposing sandbox paths or private blob locators.
+export const goatChatArtifacts = goat.table(
+  "chat_artifacts",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => goatWorkspaces.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => goatUsers.workosUserId, { onDelete: "cascade" }),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => goatChatSessions.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    currentVersion: integer("current_version").notNull().default(0),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceUpdatedIdx: index("goat_chat_artifacts_workspace_updated_idx").on(
+      table.workspaceId,
+      table.updatedAt,
+    ),
+    ownerChatCreatedIdx: index("goat_chat_artifacts_owner_chat_created_idx").on(
+      table.userWorkosId,
+      table.chatSessionId,
+      table.createdAt,
+    ),
+    currentVersionCheck: check(
+      "goat_chat_artifacts_current_version_check",
+      sql`${table.currentVersion} >= 0`,
+    ),
+  }),
+);
+
+export const goatChatArtifactVersions = goat.table(
+  "chat_artifact_versions",
+  {
+    id: text("id").primaryKey(),
+    artifactId: text("artifact_id")
+      .notNull()
+      .references(() => goatChatArtifacts.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    filename: text("filename").notNull(),
+    mediaType: text("media_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    contentSha256: text("content_sha256").notNull(),
+    blobPathname: text("blob_pathname").notNull(),
+    sourceEngine: text("source_engine").$type<GoatCodexChatEngine>().notNull(),
+    sourceToolCallId: text("source_tool_call_id").notNull(),
+    sourceTurnId: text("source_turn_id").references(() => goatCodexChatTurns.id, {
+      onDelete: "set null",
+    }),
+    sourceMessageId: text("source_message_id").references(() => goatChatMessages.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    artifactVersionIdx: uniqueIndex("goat_chat_artifact_versions_artifact_version_idx").on(
+      table.artifactId,
+      table.version,
+    ),
+    sourceTurnCreatedIdx: index("goat_chat_artifact_versions_source_turn_created_idx").on(
+      table.sourceTurnId,
+      table.createdAt,
+    ),
+    sourceTurnToolCallIdx: uniqueIndex("goat_chat_artifact_versions_source_turn_tool_call_idx").on(
+      table.sourceTurnId,
+      table.sourceToolCallId,
+    ),
+    sourceMessageIdx: index("goat_chat_artifact_versions_source_message_idx").on(
+      table.sourceMessageId,
+    ),
+    versionSizeCheck: check(
+      "goat_chat_artifact_versions_version_size_check",
+      sql`${table.version} > 0 AND ${table.sizeBytes} >= 0 AND ${table.sizeBytes} <= 20971520`,
+    ),
+    contentSha256Check: check(
+      "goat_chat_artifact_versions_content_sha256_check",
+      sql`${table.contentSha256} ~ '^[0-9a-f]{64}$'`,
+    ),
+    sourceEngineCheck: check(
+      "goat_chat_artifact_versions_source_engine_check",
+      sql`${table.sourceEngine} IN ('codex', 'claude_code')`,
+    ),
+  }),
+);
+
 export const goatCodexChatInteractions = goat.table(
   "codex_chat_interactions",
   {
@@ -4522,6 +4619,38 @@ export const goatCodexChatTurnsRelations = relations(goatCodexChatTurns, ({ one,
   }),
   interactions: many(goatCodexChatInteractions),
   events: many(goatCodexChatEvents),
+  artifactVersions: many(goatChatArtifactVersions),
+}));
+
+export const goatChatArtifactsRelations = relations(goatChatArtifacts, ({ one, many }) => ({
+  workspace: one(goatWorkspaces, {
+    fields: [goatChatArtifacts.workspaceId],
+    references: [goatWorkspaces.id],
+  }),
+  user: one(goatUsers, {
+    fields: [goatChatArtifacts.userWorkosId],
+    references: [goatUsers.workosUserId],
+  }),
+  chatSession: one(goatChatSessions, {
+    fields: [goatChatArtifacts.chatSessionId],
+    references: [goatChatSessions.id],
+  }),
+  versions: many(goatChatArtifactVersions),
+}));
+
+export const goatChatArtifactVersionsRelations = relations(goatChatArtifactVersions, ({ one }) => ({
+  artifact: one(goatChatArtifacts, {
+    fields: [goatChatArtifactVersions.artifactId],
+    references: [goatChatArtifacts.id],
+  }),
+  sourceTurn: one(goatCodexChatTurns, {
+    fields: [goatChatArtifactVersions.sourceTurnId],
+    references: [goatCodexChatTurns.id],
+  }),
+  sourceMessage: one(goatChatMessages, {
+    fields: [goatChatArtifactVersions.sourceMessageId],
+    references: [goatChatMessages.id],
+  }),
 }));
 
 export const goatCodexChatInteractionsRelations = relations(
@@ -4823,6 +4952,7 @@ export const goatChatSessionsRelations = relations(goatChatSessions, ({ one, man
   skills: many(goatChatSessionSkills),
   brainToolRuns: many(goatBrainToolRuns),
   capabilityRuns: many(goatCapabilityRuns),
+  artifacts: many(goatChatArtifacts),
 }));
 
 export const goatChatSharesRelations = relations(goatChatShares, ({ one }) => ({
@@ -4968,6 +5098,8 @@ export type GoatBrainDocumentVersion = typeof goatBrainDocumentVersions.$inferSe
 export type GoatBrainToolRun = typeof goatBrainToolRuns.$inferSelect;
 export type GoatCodexChatSession = typeof goatCodexChatSessions.$inferSelect;
 export type GoatCodexChatTurn = typeof goatCodexChatTurns.$inferSelect;
+export type GoatChatArtifact = typeof goatChatArtifacts.$inferSelect;
+export type GoatChatArtifactVersion = typeof goatChatArtifactVersions.$inferSelect;
 export type GoatCodexChatInteraction = typeof goatCodexChatInteractions.$inferSelect;
 export type GoatCodexChatEvent = typeof goatCodexChatEvents.$inferSelect;
 export type GoatIntegration = typeof goatIntegrations.$inferSelect;

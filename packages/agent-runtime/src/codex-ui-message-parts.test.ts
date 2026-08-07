@@ -51,6 +51,92 @@ function reduce(parts: CodexUiMessagePart[], raw: Record<string, unknown>[]) {
 }
 
 describe("applyCodexEventToUiMessageParts", () => {
+  it("inserts a published file at tool completion without a transient tool row", () => {
+    const started = applyCodexEventToUiMessageParts(
+      [{ type: "text", text: "I created the plan." }],
+      normalizedEvent("dynamic_tool.started", {
+        itemId: "publish_1",
+        tool: "publish_artifact",
+        arguments: { path: "plan.md" },
+      }),
+    );
+    expect(started.changed).toBe(false);
+
+    const completed = applyCodexEventToUiMessageParts(
+      started.parts,
+      normalizedEvent("dynamic_tool.completed", {
+        itemId: "publish_1",
+        tool: "publish_artifact",
+        status: "completed",
+        success: true,
+        artifact: {
+          artifactId: "artifact_1",
+          artifactVersionId: "version_1",
+          version: 1,
+          title: "Launch plan",
+          filename: "plan.md",
+          mediaType: "text/markdown",
+          sizeBytes: 42,
+          state: "ready",
+        },
+      }),
+    );
+
+    expect(completed.parts).toEqual([
+      { type: "text", text: "I created the plan." },
+      {
+        type: "data-artifact-file",
+        data: {
+          artifactId: "artifact_1",
+          artifactVersionId: "version_1",
+          version: 1,
+          title: "Launch plan",
+          filename: "plan.md",
+          mediaType: "text/markdown",
+          sizeBytes: 42,
+          state: "ready",
+        },
+      },
+    ]);
+  });
+
+  it("keeps a subagent-published file at the top level of the assistant response", () => {
+    const parts = applyCodexEventToUiMessageParts(
+      [
+        {
+          type: CODEX_SUBAGENT_TOOL_PART_TYPE,
+          toolCallId: "task_1",
+          state: "input-available",
+          input: { label: "Analyst" },
+          children: [],
+        },
+      ],
+      normalizedEvent("mcp_tool.completed", {
+        itemId: "publish_1",
+        parentToolCallId: "task_1",
+        tool: "publish_artifact",
+        status: "completed",
+        artifact: {
+          artifactId: "artifact_1",
+          artifactVersionId: "version_1",
+          version: 1,
+          title: "Analysis",
+          filename: "analysis.xlsx",
+          mediaType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          sizeBytes: 1_024,
+          state: "ready",
+        },
+      }),
+    ).parts;
+
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toMatchObject({ type: CODEX_SUBAGENT_TOOL_PART_TYPE, children: [] });
+    expect(parts[1]).toMatchObject({
+      type: "data-artifact-file",
+      data: { artifactVersionId: "version_1", filename: "analysis.xlsx" },
+    });
+  });
+
   it("projects an interleaved reasoning/command/text turn in order", () => {
     const parts = reduce(
       [],
@@ -737,6 +823,19 @@ describe("parseCodexUiMessageParts", () => {
         state: "output-available",
         input: { label: "Brain", tool: "goat_brain" },
         output: { status: "completed", success: true },
+      },
+      {
+        type: "data-artifact-file",
+        data: {
+          artifactId: "artifact_1",
+          artifactVersionId: "version_1",
+          version: 1,
+          title: "Plan",
+          filename: "plan.md",
+          mediaType: "text/markdown",
+          sizeBytes: 42,
+          state: "ready",
+        },
       },
       { type: "text", text: "hello" },
     ];

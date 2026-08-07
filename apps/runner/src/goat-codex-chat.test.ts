@@ -999,6 +999,7 @@ describe("runGoatCodexChatTurn", () => {
     expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         dynamicTools: [
+          expect.objectContaining({ spec: expect.objectContaining({ name: "publish_artifact" }) }),
           expect.objectContaining({ spec: expect.objectContaining({ name: "list_actions" }) }),
           expect.objectContaining({ spec: expect.objectContaining({ name: "use_action" }) }),
         ],
@@ -1022,6 +1023,7 @@ describe("runGoatCodexChatTurn", () => {
     expect(appServerMocks.runCodexAppServerTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         dynamicTools: [
+          expect.objectContaining({ spec: expect.objectContaining({ name: "publish_artifact" }) }),
           expect.objectContaining({ spec: expect.objectContaining({ name: "goat_brain" }) }),
           expect.objectContaining({ spec: expect.objectContaining({ name: "save_to_brain" }) }),
           expect.objectContaining({ spec: expect.objectContaining({ name: "list_actions" }) }),

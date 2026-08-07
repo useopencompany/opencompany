@@ -143,6 +143,14 @@ normalized because browsers report them inconsistently. Foreground chat stores b
 SRT text for the initial and follow-up turns; persistent cloud coding chats receive the original
 file in their sandbox.
 
+Codex and Claude Code can explicitly publish finished sandbox outputs back into main chat with the
+host-provided `publish_artifact` tool. Publication copies an allowlisted file (maximum 20 MB, five
+per turn) into private blob storage and creates a stable `chat_artifacts` identity plus an immutable
+`chat_artifact_versions` row. The assistant message stores only safe file metadata and the exact
+version reference; sandbox paths and blob locators never reach the browser. Owner and opaque
+chat-share routes authorize every open/download request. Deleting a file archives the logical
+artifact, tombstones its message cards, revokes byte routes, and best-effort purges all versions.
+
 When a new chat is submitted, the client reserves its final `goat_chat_<uuid>` id and moves to the
 matching `/chat/<id>` URL immediately with the native History API, without starting a server
 navigation; the server persists that exact id. The stream attaches `sessionId` in message metadata so
@@ -680,6 +688,8 @@ Important tables:
   all three engines (the legacy table name is intentionally retained).
 - `goat.codex_chat_interactions`: pending/resolved/canceled server-initiated requests and responses.
 - `goat.codex_chat_events`: normalized persistent cloud coding event audit rows.
+- `goat.chat_artifacts` and `goat.chat_artifact_versions`: owner/workspace-scoped logical files and
+  immutable generated-file versions published by Codex or Claude Code chat turns.
 - `goat.action_turns`: expiring, per-session-turn action discovery, invocation, call-budget, quote,
   and async-run governance shared across harness transports and app instances.
 - `goat.capability_runs`: durable managed-capability approval, execution, settlement, and cost audit

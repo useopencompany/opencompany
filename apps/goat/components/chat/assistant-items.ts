@@ -1,3 +1,8 @@
+import {
+  GOAT_CHAT_ARTIFACT_DATA_PART_TYPE,
+  type GoatPublishedChatArtifact,
+  parseGoatPublishedChatArtifact,
+} from "@opencompany/agent-runtime";
 import { isBrowserToolName } from "@opencompany/browser-tools";
 import type { GoatTaskStatus } from "@opencompany/db/goat-schema";
 import type { GoatTaskView } from "@/components/GoatSurface";
@@ -35,6 +40,7 @@ export type AssistantRenderItem =
   | { type: "text"; key: string; text: string; citations: BrainCitation[] }
   | { type: "reasoning"; key: string; text: string }
   | { type: "task"; key: string; task: ChatTaskCardView }
+  | { type: "artifact"; key: string; artifact: GoatPublishedChatArtifact }
   | { type: "tool"; key: string; tool: ToolCallView }
   | { type: "subagent"; key: string; subagent: SubagentRenderView };
 
@@ -146,6 +152,13 @@ function collectRenderItems(
       if (!text.trim()) continue;
       flushText(`${keyPrefix}text-${index}`);
       items.push({ type: "reasoning", key: `${keyPrefix}reasoning-${index}`, text });
+      continue;
+    }
+    if (part.type === GOAT_CHAT_ARTIFACT_DATA_PART_TYPE) {
+      const artifact = parseGoatPublishedChatArtifact({ ok: true, artifact: part.data });
+      if (!artifact) continue;
+      flushText(`${keyPrefix}text-${index}`);
+      items.push({ type: "artifact", key: `${keyPrefix}artifact-${index}`, artifact });
       continue;
     }
     if (!isToolPartRecord(part)) continue;
