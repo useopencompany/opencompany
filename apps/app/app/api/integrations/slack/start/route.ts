@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/auth";
 import {
   appendSlackIntegrationStatus,
   buildSlackAuthorizationUrl,
   createSlackIntegrationState,
   isSlackIntegrationConfigured,
-} from "@/lib/integrations/slack";
+} from "@opencompany/core/integrations/slack";
+import { NextResponse } from "next/server";
+import { currentUser } from "@/lib/auth";
 
 export async function GET(request: Request) {
   const { user } = await currentUser();

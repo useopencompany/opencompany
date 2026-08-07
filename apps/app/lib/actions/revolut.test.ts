@@ -21,8 +21,8 @@ vi.mock("@opencompany/core/integrations/revolut", () => ({
   requestRevolutBusinessApi: mocks.requestRevolutBusinessApi,
 }));
 
-import { resolveRevolutActions } from "@/lib/actions/revolut";
-import { ActionAuthError, ActionInvalidParamsError } from "@/lib/actions/types";
+import { resolveRevolutActions } from "@opencompany/core/actions/revolut";
+import { ActionAuthError, ActionInvalidParamsError } from "@opencompany/core/actions/types";
 
 const connection = {
   workspaceId: "workspace_1",

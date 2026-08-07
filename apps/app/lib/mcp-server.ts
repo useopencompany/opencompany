@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { normalizeBrainReadToolInput } from "@opencompany/core/brain-surface";
+import type { BrainToolInput } from "@opencompany/core/chat-ui";
 import type { BrainWithWorkspace } from "@opencompany/db/workspaces";
 import { getBrainAccess, listAccessibleBrainsForUser } from "@opencompany/db/workspaces";
 import * as z from "zod/v4-mini";
 import { captureToBrainInbox } from "@/lib/brain-capture";
 import { runBrainToolForUser } from "@/lib/brain-cli";
-import { normalizeBrainReadToolInput } from "@/lib/brain-surface";
 import {
   BRAIN_ADVANCED_TOOL_DESCRIPTION,
   BRAIN_ADVANCED_TOOL_NAME,
@@ -38,7 +39,6 @@ import {
   searchBrainInputSchema,
   searchBrainToToolInput,
 } from "@/lib/brain-tools";
-import type { BrainToolInput } from "@/lib/chat-ui";
 
 // Tool registration for the user-level MCP connector: one surface spanning
 // every brain the token's user can access, addressed via an optional `brain`

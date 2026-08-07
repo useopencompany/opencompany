@@ -1,4 +1,4 @@
-import { ActionExecutionError } from "@/lib/actions/types";
+import { ActionExecutionError } from "@opencompany/core/actions/types";
 import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize";
 
 const MAX_PROVIDER_SEGMENTS = 20_000;

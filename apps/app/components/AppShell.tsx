@@ -1,4 +1,16 @@
 import { AnalyticsProvider } from "@opencompany/analytics/client";
+import {
+  type ClaudeCodeProviderState,
+  type CodexProviderState,
+  type InfisicalProviderState,
+  type IntegrationState,
+} from "@opencompany/core/integration-state";
+import { getAttioIntegrationState } from "@opencompany/core/integrations/attio";
+import { getGitHubIntegrationState } from "@opencompany/core/integrations/github";
+import { getLinearIntegrationState } from "@opencompany/core/integrations/linear-mcp";
+import { getPostHogIntegrationState } from "@opencompany/core/integrations/posthog-mcp";
+import { getSlackIntegrationState } from "@opencompany/core/integrations/slack";
+import { getStripeIntegrationState } from "@opencompany/core/integrations/stripe";
 import type { TaskStage, TaskStatus } from "@opencompany/db/schema";
 import { listWorkspaceMembers } from "@opencompany/db/workspaces";
 import type { ReactNode } from "react";
@@ -10,24 +22,12 @@ import { loadCurrentClaudeCodeAuthSettings } from "@/lib/claude-code-auth";
 import { loadCurrentCodexAuthSettings } from "@/lib/codex-auth";
 import { featureFlagsFromUser } from "@/lib/feature-flags";
 import { loadCurrentInfisicalAuthSettings } from "@/lib/infisical-auth";
-import {
-  type ClaudeCodeProviderState,
-  type CodexProviderState,
-  type InfisicalProviderState,
-  type IntegrationState,
-} from "@/lib/integration-state";
-import { getAttioIntegrationState } from "@/lib/integrations/attio";
 import { getFathomIntegrationState } from "@/lib/integrations/fathom";
-import { getGitHubIntegrationState } from "@/lib/integrations/github";
 import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGranolaIntegrationState } from "@/lib/integrations/granola";
 import { getImessageIntegrationState } from "@/lib/integrations/imessage";
 import { getJamieIntegrationState } from "@/lib/integrations/jamie";
-import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
-import { getPostHogIntegrationState } from "@/lib/integrations/posthog-mcp";
-import { getSlackIntegrationState } from "@/lib/integrations/slack";
-import { getStripeIntegrationState } from "@/lib/integrations/stripe";
 import { listCurrentUserTaskSchedules } from "@/lib/task-schedules";
 import { listCurrentUserTasks } from "@/lib/tasks";
 

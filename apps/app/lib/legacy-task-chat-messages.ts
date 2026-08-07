@@ -1,4 +1,4 @@
-import type { ChatUiMessage } from "@/lib/chat-ui";
+import type { ChatUiMessage } from "@opencompany/core/chat-ui";
 import type { HarnessRunToolCall, HarnessRunViewModel } from "@/lib/task-harness-run";
 
 // Read-only compatibility projection for task rows created before tasks became

@@ -1,9 +1,9 @@
 import "@testing-library/jest-dom/vitest";
+import type { JamieProviderState } from "@opencompany/core/integration-state";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { JamieIntegrationSetup } from "@/components/JamieIntegrationSetup";
-import type { JamieProviderState } from "@/lib/integration-state";
 import { saveJamieWebhookApiKeyAction } from "@/lib/integrations/jamie-actions";
 import { JAMIE_WEBHOOK_SECRET_HEADER } from "@/lib/integrations/jamie-constants";
 

@@ -1,6 +1,9 @@
+import {
+  appendLatitudeMcpStatus,
+  startLatitudeMcpOAuth,
+} from "@opencompany/core/integrations/latitude-mcp";
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
-import { appendLatitudeMcpStatus, startLatitudeMcpOAuth } from "@/lib/integrations/latitude-mcp";
 
 export async function GET(request: Request) {
   const { user } = await currentUser();

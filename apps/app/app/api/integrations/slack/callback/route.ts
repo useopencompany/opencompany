@@ -1,14 +1,14 @@
-import { connectSlackIntegration } from "@opencompany/db/integrations";
-import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/auth";
-import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
+import { captureIntegrationAddedAnalytics } from "@opencompany/core/integrations/analytics";
 import {
   appendSlackIntegrationStatus,
   exchangeSlackCode,
   fetchSlackIdentity,
   isSlackIntegrationConfigured,
   verifySlackIntegrationState,
-} from "@/lib/integrations/slack";
+} from "@opencompany/core/integrations/slack";
+import { connectSlackIntegration } from "@opencompany/db/integrations";
+import { NextResponse } from "next/server";
+import { currentUser } from "@/lib/auth";
 
 export async function GET(request: Request) {
   const current = await currentUser();

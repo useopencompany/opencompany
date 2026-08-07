@@ -1,11 +1,11 @@
 "use client";
 
+import type { FathomProviderState } from "@opencompany/core/integration-state";
 import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
-import type { FathomProviderState } from "@/lib/integration-state";
 import { saveFathomApiKeyAction } from "@/lib/integrations/fathom-actions";
 
 export function FathomIntegrationSetup({

@@ -33,7 +33,7 @@ vi.mock("@opencompany/core/integrations/linear-mcp", () => ({
   getLinearIntegrationState: mocks.getLinearIntegrationState,
 }));
 
-vi.mock("@/lib/integrations/latitude-mcp", () => ({
+vi.mock("@opencompany/core/integrations/latitude-mcp", () => ({
   getLatitudeIntegrationState: mocks.getLatitudeIntegrationState,
 }));
 

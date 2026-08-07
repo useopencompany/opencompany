@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { slackApiRequest } from "@opencompany/core/integrations/slack";
 import { getAppUrl } from "@/lib/workos";
-import { slackApiRequest } from "./slack";
 
 // The Slack answer bot is a second, separate Slack app from the user-token
 // ingestion app: it has a bot presence, receives app_mention events, and

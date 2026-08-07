@@ -1,6 +1,6 @@
+import type { ChatState } from "@opencompany/core/chat-ui";
 import { cn } from "@opencompany/ui/lib/utils";
 import { CheckCircle2, LoaderCircle } from "lucide-react";
-import type { ChatState } from "@/lib/chat-ui";
 
 type ChatStateIndicatorProps = {
   state: ChatState;

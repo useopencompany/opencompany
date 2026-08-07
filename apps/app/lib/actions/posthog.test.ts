@@ -1,11 +1,11 @@
 import { createMCPClient } from "@ai-sdk/mcp";
+import { resolvePostHogActions } from "@opencompany/core/actions/posthog";
+import { ActionInvalidParamsError, ActionPermissionError } from "@opencompany/core/actions/types";
 import {
   getPostHogIntegrationState,
   loadPostHogMcpWorkerConnection,
 } from "@opencompany/core/integrations/posthog-mcp";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolvePostHogActions } from "@/lib/actions/posthog";
-import { ActionInvalidParamsError, ActionPermissionError } from "@/lib/actions/types";
 
 const clientMocks = vi.hoisted(() => ({
   listTools: vi.fn(),

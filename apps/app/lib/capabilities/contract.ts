@@ -1,4 +1,4 @@
-import { ActionExecutionError } from "@/lib/actions/types";
+import { ActionExecutionError } from "@opencompany/core/actions/types";
 import type {
   ManagedCapabilityActionSpec,
   ManagedCapabilityMappedInput,

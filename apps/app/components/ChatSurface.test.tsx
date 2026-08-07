@@ -1,5 +1,16 @@
 import "@testing-library/jest-dom/vitest";
 import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/agent-runtime";
+import {
+  BRAIN_TOOL_PART_TYPE,
+  type ChatMessageMetadata,
+  type ChatSummaryView,
+  type ChatUiMessage,
+  type CodexRuntimeView,
+  START_TASK_TOOL_PART_TYPE,
+  START_WORKFLOW_TOOL_PART_TYPE,
+  WEB_FETCH_TOOL_PART_TYPE,
+  WEB_SEARCH_TOOL_PART_TYPE,
+} from "@opencompany/core/chat-ui";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
@@ -11,17 +22,6 @@ import {
   requestChatComposerFocus,
 } from "@/lib/chat-navigation";
 import { clearAllLocalChatStates, useLocalChatStates } from "@/lib/chat-session-state";
-import {
-  BRAIN_TOOL_PART_TYPE,
-  type ChatMessageMetadata,
-  type ChatSummaryView,
-  type ChatUiMessage,
-  type CodexRuntimeView,
-  START_TASK_TOOL_PART_TYPE,
-  START_WORKFLOW_TOOL_PART_TYPE,
-  WEB_FETCH_TOOL_PART_TYPE,
-  WEB_SEARCH_TOOL_PART_TYPE,
-} from "@/lib/chat-ui";
 import { CLAUDE_CHAT_DEFAULT_MODEL_ID } from "@/lib/claude-chat-constants";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import { buildOnboardingKickoffPrompt, queueOnboardingKickoff } from "@/lib/onboarding-kickoff";

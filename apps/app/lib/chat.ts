@@ -1,5 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import {
+  applyApprovalResponsesToStoredParts,
+  type ChatSessionView,
+  type ChatSummaryView,
+  type ChatUiMessage,
+  type CodexRuntimeView,
+  compareChatMessageOrder,
+  deriveChatState,
+  dismissPendingApprovalsInStoredParts,
+  PINNED_CHAT_LIMIT,
+  type StoredChatMessage,
+  settleIncompleteToolCallsInStoredParts,
+  toChatUiMessage,
+} from "@opencompany/core/chat-ui";
+import { codexComposerSettingsFromTurnSettings } from "@opencompany/core/codex-chat-settings";
 import { getDb } from "@opencompany/db/client";
 import {
   type ChatMessage,
@@ -32,22 +47,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { currentUser } from "@/lib/auth";
-import {
-  applyApprovalResponsesToStoredParts,
-  type ChatSessionView,
-  type ChatSummaryView,
-  type ChatUiMessage,
-  type CodexRuntimeView,
-  compareChatMessageOrder,
-  deriveChatState,
-  dismissPendingApprovalsInStoredParts,
-  PINNED_CHAT_LIMIT,
-  type StoredChatMessage,
-  settleIncompleteToolCallsInStoredParts,
-  toChatUiMessage,
-} from "@/lib/chat-ui";
 import { DEFAULT_CLAUDE_CHAT_REASONING_EFFORT } from "@/lib/claude-chat-settings";
-import { codexComposerSettingsFromTurnSettings } from "@/lib/codex-chat-settings";
 import { homeActivityCutoff } from "@/lib/home-activity";
 import { toTaskTitle } from "@/lib/task-display";
 
@@ -61,12 +61,12 @@ export type {
   ChatUiMessage,
   StartTaskToolOutput,
   StoredChatMessage,
-} from "@/lib/chat-ui";
+} from "@opencompany/core/chat-ui";
 export {
   textFromChatUiMessage,
   toChatMessageMetadata,
   toChatUiMessage,
-} from "@/lib/chat-ui";
+} from "@opencompany/core/chat-ui";
 
 export type ChatStore = {
   findOpenSession(input: {

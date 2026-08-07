@@ -1,22 +1,8 @@
 import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
 import { BROWSER_TOOL_NAMES } from "@opencompany/browser-tools";
+import { executeAction } from "@opencompany/core/actions/execute";
 import { ACTION_EFFECTS_READ } from "@opencompany/core/actions/types";
-import { recordChatModelRoutingAttempt } from "@opencompany/db/chat-model-routing";
-import { convertToModelMessages, streamText } from "ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
-import { executeAction } from "@/lib/actions/execute";
-import { captureToBrainInbox } from "@/lib/brain-capture";
-import { runBrainToolForUser } from "@/lib/brain-cli";
-import {
-  createChatApprovalContinuationTurn,
-  createChatUserTurn,
-  persistChatAssistantMessage,
-} from "@/lib/chat";
-import { OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX } from "@/lib/chat-agent";
-import { resolveAutoModel } from "@/lib/chat-model-router";
-import { resolveChatRequestContext } from "@/lib/chat-request-auth";
-import { generateChatTitleForMessage } from "@/lib/chat-title";
+import { OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX } from "@opencompany/core/chat-agent";
 import {
   BRAIN_TOOL_NAME,
   BRAIN_TOOL_PART_TYPE,
@@ -32,7 +18,21 @@ import {
   START_WORKFLOW_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
   USE_SKILL_TOOL_NAME,
-} from "@/lib/chat-ui";
+} from "@opencompany/core/chat-ui";
+import { recordChatModelRoutingAttempt } from "@opencompany/db/chat-model-routing";
+import { convertToModelMessages, streamText } from "ai";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
+import { captureToBrainInbox } from "@/lib/brain-capture";
+import { runBrainToolForUser } from "@/lib/brain-cli";
+import {
+  createChatApprovalContinuationTurn,
+  createChatUserTurn,
+  persistChatAssistantMessage,
+} from "@/lib/chat";
+import { resolveAutoModel } from "@/lib/chat-model-router";
+import { resolveChatRequestContext } from "@/lib/chat-request-auth";
+import { generateChatTitleForMessage } from "@/lib/chat-title";
 import { CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { isClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isCodexConnectedForUser } from "@/lib/codex-auth";
@@ -209,7 +209,7 @@ vi.mock("@/lib/actions/catalog", () => ({
   resolveActionCatalog: vi.fn(),
 }));
 
-vi.mock("@/lib/actions/execute", () => ({
+vi.mock("@opencompany/core/actions/execute", () => ({
   executeAction: vi.fn(),
 }));
 

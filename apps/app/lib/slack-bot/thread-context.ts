@@ -1,4 +1,4 @@
-import { slackApiRequest } from "@/lib/integrations/slack";
+import { slackApiRequest } from "@opencompany/core/integrations/slack";
 import { stripSlackBotMention, truncateForSlack } from "@/lib/slack-bot/format";
 
 // Role-typed conversation reconstruction: the bot's own replies come back as

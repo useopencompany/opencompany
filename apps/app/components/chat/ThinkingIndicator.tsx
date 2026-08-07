@@ -1,7 +1,7 @@
 "use client";
 
+import { formatChatDuration } from "@opencompany/core/chat-timing";
 import { useEffect, useState } from "react";
-import { formatChatDuration } from "@/lib/chat-timing";
 
 const TIMER_TICK_MS = 100;
 

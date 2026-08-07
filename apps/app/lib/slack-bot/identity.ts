@@ -1,9 +1,9 @@
+import { slackApiRequest } from "@opencompany/core/integrations/slack";
 import { getDb } from "@opencompany/db/client";
 import type { WorkspaceRole } from "@opencompany/db/schema";
 import { users } from "@opencompany/db/schema";
 import { getWorkspaceRole } from "@opencompany/db/workspaces";
 import { eq, sql } from "drizzle-orm";
-import { slackApiRequest } from "@/lib/integrations/slack";
 
 export type SlackMappedMember = {
   workosUserId: string;

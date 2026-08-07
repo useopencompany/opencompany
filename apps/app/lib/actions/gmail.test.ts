@@ -26,13 +26,13 @@ vi.mock("@opencompany/db/integrations", () => ({
   markIntegrationStatus: mocks.markStatus,
 }));
 
-import { executeAction } from "@/lib/actions/execute";
-import { resolveGmailActions } from "@/lib/actions/gmail";
+import { executeAction } from "@opencompany/core/actions/execute";
+import { resolveGmailActions } from "@opencompany/core/actions/gmail";
 import {
   ActionAuthError,
   type ActionExecuteContext,
   ActionPermissionError,
-} from "@/lib/actions/types";
+} from "@opencompany/core/actions/types";
 
 const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";

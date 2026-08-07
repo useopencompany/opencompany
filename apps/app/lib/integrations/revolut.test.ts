@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isPlausibleRevolutBusinessApiToken,
   loadRevolutBusinessConnection,
@@ -6,7 +5,8 @@ import {
   REVOLUT_BUSINESS_SANDBOX_API_BASE_URL,
   RevolutApiError,
   requestRevolutBusinessApi,
-} from "@/lib/integrations/revolut";
+} from "@opencompany/core/integrations/revolut";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
   vi.unstubAllEnvs();

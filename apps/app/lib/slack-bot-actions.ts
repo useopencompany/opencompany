@@ -1,5 +1,6 @@
 "use server";
 
+import { slackApiRequest } from "@opencompany/core/integrations/slack";
 import { getDb } from "@opencompany/db/client";
 import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
 import { brainSources } from "@opencompany/db/schema";
@@ -11,7 +12,6 @@ import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentUser } from "@/lib/auth";
 import { upsertBrainSourceWithAnalytics } from "@/lib/brain-source-analytics";
-import { slackApiRequest } from "@/lib/integrations/slack";
 import type { WorkspaceActionResult } from "@/lib/workspace-actions";
 
 export type SlackBotWorkspaceState = {

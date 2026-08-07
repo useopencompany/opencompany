@@ -7,6 +7,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type { BrainSkill } from "@opencompany/brain";
 import { emptyAssistantDebugTrace, nextChatMessageCreatedAt } from "@opencompany/core/chat-ui";
+import { parseCodexChatSettings } from "@opencompany/core/codex-chat-settings";
 import { getDb } from "@opencompany/db/client";
 import {
   type ChatMessageAttachment,
@@ -27,7 +28,6 @@ import {
   CODEX_CHAT_PROMPT_MAX_LENGTH,
   parseCodexChatModelId,
 } from "@/lib/codex-chat-constants";
-import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
 import { DEFAULT_MODEL, normalizeModel } from "@/lib/model-options";
 import { toTaskTitle } from "@/lib/task-display";
 import {

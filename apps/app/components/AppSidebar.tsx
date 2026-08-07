@@ -1,5 +1,6 @@
 "use client";
 
+import { type ChatSummaryView, chatSummaryState } from "@opencompany/core/chat-ui";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import type { LucideIcon } from "lucide-react";
@@ -28,7 +29,6 @@ import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import { closeChatSessionAction, setChatPinnedAction } from "@/lib/chat-actions";
 import { HOME_NAVIGATION_EVENT, requestChatComposerFocus } from "@/lib/chat-navigation";
 import { clearLocalChatState, useLocalChatStates } from "@/lib/chat-session-state";
-import { type ChatSummaryView, chatSummaryState } from "@/lib/chat-ui";
 import { createWorkspaceAction, switchWorkspaceAction } from "@/lib/workspace-actions";
 
 function Icon({ className }: { className?: string }) {

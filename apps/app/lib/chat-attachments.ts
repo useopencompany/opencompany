@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { modelSupportsAttachments } from "@opencompany/agent-runtime";
+import type { ChatUiMessage, StoredChatMessage } from "@opencompany/core/chat-ui";
 import type { ChatMessageAttachment } from "@opencompany/db/schema";
 import { extractDocxText, extractUtf8Text, extractXlsxText } from "@opencompany/file-extract";
 import { get } from "@vercel/blob";
@@ -7,7 +8,6 @@ import {
   CHAT_ATTACHMENT_MAX_PER_MESSAGE,
   validateChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
-import type { ChatUiMessage, StoredChatMessage } from "@/lib/chat-ui";
 
 // Extracted text shown to the chat model; matches the brain capture cap so a
 // save_to_brain of the same content never silently exceeds it.

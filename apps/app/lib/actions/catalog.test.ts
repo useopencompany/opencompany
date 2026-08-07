@@ -58,8 +58,8 @@ vi.mock("@opencompany/core/actions/revolut", () => ({
   resolveRevolutActions: mocks.resolveRevolutActions,
 }));
 
+import type { ActionProviderCatalog } from "@opencompany/core/actions/types";
 import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
-import type { ActionProviderCatalog } from "@/lib/actions/types";
 
 function providerCatalog(
   id:

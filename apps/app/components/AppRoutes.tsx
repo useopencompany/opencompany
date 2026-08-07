@@ -1,5 +1,7 @@
 "use client";
 
+import type { ChatSessionView } from "@opencompany/core/chat-ui";
+import type { IntegrationState } from "@opencompany/core/integration-state";
 import type { RepoConfigView, WorkspaceRepository } from "@opencompany/db/repo-configs";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -49,8 +51,6 @@ import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import type { BrainSnapshot } from "@/lib/brain";
 import type { BrainOverviewStats } from "@/lib/brain-overview";
-import type { ChatSessionView } from "@/lib/chat-ui";
-import type { IntegrationState } from "@/lib/integration-state";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import { archiveSkillAction, createSkillAction, updateSkillAction } from "@/lib/skill-actions";
 import type { SkillListItem, WorkspaceSkill } from "@/lib/skills";

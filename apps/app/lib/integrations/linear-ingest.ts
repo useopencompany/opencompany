@@ -1,9 +1,9 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import type { LinearSourceProviderState } from "@opencompany/core/integration-state";
 import { getDb } from "@opencompany/db/client";
 import { LINEAR_MCP_EXTERNAL_ID } from "@opencompany/db/linear";
 import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne } from "drizzle-orm";
-import type { LinearSourceProviderState } from "@/lib/integration-state";
 import { getAppUrl } from "@/lib/workos";
 
 export type LinearIngestStatePayload = {

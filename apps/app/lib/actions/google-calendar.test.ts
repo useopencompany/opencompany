@@ -24,14 +24,14 @@ vi.mock("@opencompany/core/integrations/google-access-token", async (importOrigi
   return { ...actual, googleApiCall: mocks.googleApiCall };
 });
 
-import { GoogleAccessAuthError } from "@opencompany/core/integrations/google-access-token";
-import { resolveGoogleCalendarActions } from "@/lib/actions/google-calendar";
+import { resolveGoogleCalendarActions } from "@opencompany/core/actions/google-calendar";
 import {
   ActionAuthError,
   type ActionExecuteContext,
   ActionInvalidParamsError,
   ActionPermissionError,
-} from "@/lib/actions/types";
+} from "@opencompany/core/actions/types";
+import { GoogleAccessAuthError } from "@opencompany/core/integrations/google-access-token";
 
 const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",

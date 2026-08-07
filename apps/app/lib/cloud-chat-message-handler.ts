@@ -1,3 +1,4 @@
+import { type ChatUiMessage, textFromChatUiMessage } from "@opencompany/core/chat-ui";
 import type { CodexChatEngine } from "@opencompany/db/schema";
 import { after, NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
@@ -5,7 +6,6 @@ import { captureChatMessageSent } from "@/lib/chat-analytics";
 import { parseChatAttachmentsInput } from "@/lib/chat-attachments";
 import { parseOptimisticChatSessionId } from "@/lib/chat-navigation";
 import { generateChatTitleForMessage } from "@/lib/chat-title";
-import { type ChatUiMessage, textFromChatUiMessage } from "@/lib/chat-ui";
 import { createCodexChatMessage } from "@/lib/codex-chat";
 import { readSkillMentionRefs, resolveSkillMentions, SkillMentionError } from "@/lib/skills";
 

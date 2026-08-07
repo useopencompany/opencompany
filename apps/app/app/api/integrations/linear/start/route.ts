@@ -1,6 +1,9 @@
+import {
+  appendLinearMcpStatus,
+  startLinearMcpOAuth,
+} from "@opencompany/core/integrations/linear-mcp";
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
-import { appendLinearMcpStatus, startLinearMcpOAuth } from "@/lib/integrations/linear-mcp";
 
 export async function GET(request: Request) {
   const { user } = await currentUser();

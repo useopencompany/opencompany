@@ -1,23 +1,26 @@
 import { createHmac } from "node:crypto";
 import { auth } from "@ai-sdk/mcp";
 import {
+  appendLatitudeMcpStatus,
+  startLatitudeMcpOAuth,
+  verifyLatitudeMcpState,
+} from "@opencompany/core/integrations/latitude-mcp";
+import {
+  loadLinearMcpWorkerConnection,
+  startLinearMcpOAuth,
+  verifyLinearMcpState,
+} from "@opencompany/core/integrations/linear-mcp";
+import { startNeonMcpOAuth, verifyNeonMcpState } from "@opencompany/core/integrations/neon-mcp";
+import {
+  startPostHogMcpOAuth,
+  verifyPostHogMcpState,
+} from "@opencompany/core/integrations/posthog-mcp";
+import {
   loadIntegrationCredential,
   markIntegrationStatus,
   saveIntegrationCredential,
 } from "@opencompany/db/integrations";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  appendLatitudeMcpStatus,
-  startLatitudeMcpOAuth,
-  verifyLatitudeMcpState,
-} from "@/lib/integrations/latitude-mcp";
-import {
-  loadLinearMcpWorkerConnection,
-  startLinearMcpOAuth,
-  verifyLinearMcpState,
-} from "@/lib/integrations/linear-mcp";
-import { startNeonMcpOAuth, verifyNeonMcpState } from "@/lib/integrations/neon-mcp";
-import { startPostHogMcpOAuth, verifyPostHogMcpState } from "@/lib/integrations/posthog-mcp";
 
 const observed = vi.hoisted(() => ({
   callbackUrl: "",

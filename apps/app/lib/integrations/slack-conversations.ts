@@ -1,5 +1,5 @@
+import { slackApiRequest } from "@opencompany/core/integrations/slack";
 import type { SlackConversationRef } from "@opencompany/db/slack";
-import { slackApiRequest } from "@/lib/integrations/slack";
 
 export type SlackChannelOption = SlackConversationRef & {
   isPrivate: boolean;

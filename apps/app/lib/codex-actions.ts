@@ -3,8 +3,14 @@ import {
   type ActionGatewayRequest,
   type ActionGatewayResponse,
 } from "@opencompany/agent-runtime";
+import { executeAction } from "@opencompany/core/actions/execute";
 import { projectActionCatalog } from "@opencompany/core/actions/policy";
 import { serveActionRequest } from "@opencompany/core/actions/service";
+import type {
+  CapabilityQuote,
+  CapabilityTurnState,
+  ResolvedActionCatalog,
+} from "@opencompany/core/actions/types";
 import {
   claimActionAsyncRun,
   claimActionInvocation,
@@ -18,12 +24,6 @@ import { getDb } from "@opencompany/db/client";
 import { codexChatSessions, codexChatTurns, users, workspaceMembers } from "@opencompany/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
-import { executeAction } from "@/lib/actions/execute";
-import type {
-  CapabilityQuote,
-  CapabilityTurnState,
-  ResolvedActionCatalog,
-} from "@/lib/actions/types";
 
 type ActionPrincipal = {
   userWorkosId: string;

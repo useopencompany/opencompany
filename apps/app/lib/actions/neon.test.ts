@@ -1,11 +1,11 @@
 import { createMCPClient } from "@ai-sdk/mcp";
+import { resolveNeonActions } from "@opencompany/core/actions/neon";
+import { ActionInvalidParamsError, ActionPermissionError } from "@opencompany/core/actions/types";
 import {
   getNeonIntegrationState,
   loadNeonMcpWorkerConnection,
 } from "@opencompany/core/integrations/neon-mcp";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveNeonActions } from "@/lib/actions/neon";
-import { ActionInvalidParamsError, ActionPermissionError } from "@/lib/actions/types";
 
 const clientMocks = vi.hoisted(() => ({
   listTools: vi.fn(),

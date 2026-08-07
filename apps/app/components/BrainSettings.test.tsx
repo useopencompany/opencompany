@@ -1,11 +1,11 @@
 import "@testing-library/jest-dom/vitest";
+import type { JamieProviderState } from "@opencompany/core/integration-state";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SourceProviderCard } from "@/components/BrainSourceCards";
 import type { BrainSourcesDetails, BrainSourceView } from "@/lib/brain-source-actions";
 import { BRAIN_SOURCE_PROVIDERS } from "@/lib/brain-sources/registry";
-import type { JamieProviderState } from "@/lib/integration-state";
 
 const brainSourceActionsMock = vi.hoisted(() => ({
   getBrainSourcesAction: vi.fn(),

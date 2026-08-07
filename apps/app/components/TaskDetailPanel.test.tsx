@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
+import type { ChatSessionView } from "@opencompany/core/chat-ui";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatSessionView } from "@/lib/chat-ui";
 import { buildHarnessRun } from "@/lib/task-harness-run";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 

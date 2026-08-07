@@ -1,7 +1,7 @@
 "use client";
 
+import type { ChatState } from "@opencompany/core/chat-ui";
 import { useSyncExternalStore } from "react";
-import type { ChatState } from "@/lib/chat-ui";
 
 const EMPTY_SNAPSHOT: ReadonlyMap<string, ChatState> = new Map();
 

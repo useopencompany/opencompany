@@ -1,5 +1,5 @@
+import { parseCodexChatSettings } from "@opencompany/core/codex-chat-settings";
 import { describe, expect, it } from "vitest";
-import { parseCodexChatSettings } from "@/lib/codex-chat-settings";
 
 describe("parseCodexChatSettings", () => {
   it("defaults sandboxed Codex chats to xhigh reasoning", () => {

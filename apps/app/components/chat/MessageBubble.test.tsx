@@ -1,9 +1,13 @@
 import "@testing-library/jest-dom/vitest";
 import { CODEX_PLAN_TOOL_NAME, CODEX_QUESTION_TOOL_NAME } from "@opencompany/agent-runtime";
+import {
+  BRAIN_TOOL_PART_TYPE,
+  type ChatUiMessage,
+  USE_ACTION_TOOL_PART_TYPE,
+} from "@opencompany/core/chat-ui";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BRAIN_TOOL_PART_TYPE, type ChatUiMessage, USE_ACTION_TOOL_PART_TYPE } from "@/lib/chat-ui";
 import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
 import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";

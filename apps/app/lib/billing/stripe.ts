@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 
-export { getAppUrl } from "@/lib/app-url";
+export { getAppUrl } from "@opencompany/core/app-url";
 
 let stripe: Stripe | undefined;
 

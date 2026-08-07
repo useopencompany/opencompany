@@ -1,16 +1,16 @@
-import { getDb } from "@opencompany/db/client";
-import type { IntegrationProvider, TaskToolName } from "@opencompany/db/schema";
-import { integrations } from "@opencompany/db/schema";
-import { and, desc, eq, inArray } from "drizzle-orm";
 import type {
   GmailSourceProviderState,
   GoogleDriveSourceProviderState,
   GoogleProviderState,
-} from "@/lib/integration-state";
-import { googleIntegrationStateFromRows } from "@/lib/integration-state";
-import { getGitHubIntegrationState } from "@/lib/integrations/github";
-import { getLatitudeIntegrationState } from "@/lib/integrations/latitude-mcp";
-import { getLinearIntegrationState } from "@/lib/integrations/linear-mcp";
+} from "@opencompany/core/integration-state";
+import { googleIntegrationStateFromRows } from "@opencompany/core/integration-state";
+import { getGitHubIntegrationState } from "@opencompany/core/integrations/github";
+import { getLatitudeIntegrationState } from "@opencompany/core/integrations/latitude-mcp";
+import { getLinearIntegrationState } from "@opencompany/core/integrations/linear-mcp";
+import { getDb } from "@opencompany/db/client";
+import type { IntegrationProvider, TaskToolName } from "@opencompany/db/schema";
+import { integrations } from "@opencompany/db/schema";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 const GOOGLE_PROVIDERS: IntegrationProvider[] = ["gmail", "google_calendar", "google_drive"];
 const BROWSER_TOOLS = [

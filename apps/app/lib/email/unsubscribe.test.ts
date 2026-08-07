@@ -9,7 +9,7 @@ vi.mock("@opencompany/db/onboarding-emails", () => ({
   skipPendingOnboardingEmailsForEmail: vi.fn(),
 }));
 
-vi.mock("@/lib/app-url", () => ({
+vi.mock("@opencompany/core/app-url", () => ({
   getAppUrl: () => "https://app.example.com",
 }));
 

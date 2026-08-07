@@ -1,15 +1,15 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { currentUser } from "@/lib/auth";
-import type { StripeProviderState } from "@/lib/integration-state";
+import type { StripeProviderState } from "@opencompany/core/integration-state";
 import {
   connectStripeIntegration,
   disconnectStripeIntegration,
   getStripeIntegrationState,
   isValidStripeRestrictedApiKey,
   validateStripeRestrictedApiKey,
-} from "@/lib/integrations/stripe";
+} from "@opencompany/core/integrations/stripe";
+import { revalidatePath } from "next/cache";
+import { currentUser } from "@/lib/auth";
 
 export type StripeConnectActionResult =
   | { ok: true; state: StripeProviderState }

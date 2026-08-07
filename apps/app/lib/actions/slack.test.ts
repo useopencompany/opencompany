@@ -24,8 +24,8 @@ vi.mock("@opencompany/db/client", () => ({
   }),
 }));
 
-import { resolveSlackActions } from "@/lib/actions/slack";
-import { ActionAuthError, type ActionExecuteContext } from "@/lib/actions/types";
+import { resolveSlackActions } from "@opencompany/core/actions/slack";
+import { ActionAuthError, type ActionExecuteContext } from "@opencompany/core/actions/types";
 
 const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",

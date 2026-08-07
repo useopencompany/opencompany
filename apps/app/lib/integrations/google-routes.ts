@@ -1,7 +1,7 @@
+import { captureIntegrationAddedAnalytics } from "@opencompany/core/integrations/analytics";
 import { connectGoogleIntegration } from "@opencompany/db/integrations";
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
-import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
   appendGoogleIntegrationStatus,
   buildGoogleAuthorizationUrl,

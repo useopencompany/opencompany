@@ -1,5 +1,3 @@
-import type { ChatMessageDebugTrace } from "@opencompany/db/schema";
-import { describe, expect, it } from "vitest";
 import {
   CODEX_COMMAND_TOOL_PART_TYPE,
   chatSummaryState,
@@ -15,7 +13,9 @@ import {
   toChatUiMessage,
   USE_SKILL_TOOL_PART_TYPE,
   usedSkillIdsFromMessages,
-} from "@/lib/chat-ui";
+} from "@opencompany/core/chat-ui";
+import type { ChatMessageDebugTrace } from "@opencompany/db/schema";
+import { describe, expect, it } from "vitest";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 
 describe("chatSummaryState", () => {

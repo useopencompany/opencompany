@@ -1,5 +1,5 @@
+import { getAppUrl } from "@opencompany/core/app-url";
 import { NextResponse } from "next/server";
-import { getAppUrl } from "@/lib/app-url";
 import { currentUser } from "@/lib/auth";
 import {
   appendLinearIngestStatus,

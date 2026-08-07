@@ -1,6 +1,4 @@
 import { isBrowserToolName } from "@opencompany/browser-tools";
-import type { TaskStatus } from "@opencompany/db/schema";
-import type { TaskView } from "@/components/ChatSurface";
 import {
   BRAIN_TOOL_NAME,
   type BrainToolOutput,
@@ -29,7 +27,9 @@ import {
   type UseSkillToolOutput,
   WEB_FETCH_TOOL_NAME,
   WEB_SEARCH_TOOL_NAME,
-} from "@/lib/chat-ui";
+} from "@opencompany/core/chat-ui";
+import type { TaskStatus } from "@opencompany/db/schema";
+import type { TaskView } from "@/components/ChatSurface";
 
 export type AssistantRenderItem =
   | { type: "text"; key: string; text: string; citations: BrainCitation[] }

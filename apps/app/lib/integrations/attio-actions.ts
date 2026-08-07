@@ -1,15 +1,6 @@
 "use server";
 
-import {
-  ATTIO_CREDENTIAL_KIND,
-  ATTIO_PROVIDER,
-  type AttioApiKeyCredentialPayload,
-} from "@opencompany/db/attio";
-import { loadIntegrationCredential } from "@opencompany/db/integrations";
-import { revalidatePath } from "next/cache";
-import { currentUser } from "@/lib/auth";
-import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
-import type { AttioProviderState } from "@/lib/integration-state";
+import type { AttioProviderState } from "@opencompany/core/integration-state";
 import {
   connectAttioIntegration,
   deleteAttioWebhook,
@@ -21,7 +12,16 @@ import {
   hasAttioRecordWriteScopes,
   isValidAttioApiKey,
   validateAttioApiKey,
-} from "@/lib/integrations/attio";
+} from "@opencompany/core/integrations/attio";
+import {
+  ATTIO_CREDENTIAL_KIND,
+  ATTIO_PROVIDER,
+  type AttioApiKeyCredentialPayload,
+} from "@opencompany/db/attio";
+import { loadIntegrationCredential } from "@opencompany/db/integrations";
+import { revalidatePath } from "next/cache";
+import { currentUser } from "@/lib/auth";
+import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
 
 export type AttioConnectActionResult =
   | { ok: true; state: AttioProviderState }

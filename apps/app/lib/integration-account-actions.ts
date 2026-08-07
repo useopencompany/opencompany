@@ -1,15 +1,15 @@
 "use server";
 
-import { getDb } from "@opencompany/db/client";
-import { brainSources, integrations } from "@opencompany/db/schema";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
 import {
   type CapabilityMode,
   isCapabilityId,
   isCapabilityMode,
   providerCapability,
-} from "@/lib/actions/capabilities";
+} from "@opencompany/core/actions/capabilities";
+import { getDb } from "@opencompany/db/client";
+import { brainSources, integrations } from "@opencompany/db/schema";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 import { resolveActionCatalog } from "@/lib/actions/catalog";
 import { currentUser } from "@/lib/auth";
 

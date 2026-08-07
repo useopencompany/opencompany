@@ -1,9 +1,9 @@
 "use client";
 
+import type { ChatSessionView } from "@opencompany/core/chat-ui";
 import { useAppData } from "@/components/AppDataProvider";
 import { ChatSurface } from "@/components/ChatSurface";
 import { TaskRunLiveProvider } from "@/components/TaskRunPanel";
-import type { ChatSessionView } from "@/lib/chat-ui";
 import { legacyHarnessRunToChatMessages } from "@/lib/legacy-task-chat-messages";
 import { normalizeModel } from "@/lib/model-options";
 import type { HarnessRunViewModel } from "@/lib/task-harness-run";

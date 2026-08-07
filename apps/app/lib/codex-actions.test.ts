@@ -1,11 +1,11 @@
 import { ACTION_MAX_CALLS_PER_TURN, type ActionGatewayRequest } from "@opencompany/agent-runtime";
+import type { ResolvedAction, ResolvedActionCatalog } from "@opencompany/core/actions/types";
 import {
   ACTION_EFFECTS_METERED_READ,
   ACTION_EFFECTS_READ,
   ACTION_EFFECTS_WRITE,
 } from "@opencompany/core/actions/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ResolvedAction, ResolvedActionCatalog } from "@/lib/actions/types";
 import { executeActionGateway } from "@/lib/codex-actions";
 
 function listRequest(source?: string): ActionGatewayRequest {

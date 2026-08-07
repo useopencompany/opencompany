@@ -1,8 +1,8 @@
 "use server";
 
+import type { GranolaProviderState } from "@opencompany/core/integration-state";
 import { revalidatePath } from "next/cache";
 import { currentUser } from "@/lib/auth";
-import type { GranolaProviderState } from "@/lib/integration-state";
 import {
   connectGranolaIntegration,
   getGranolaIntegrationState,

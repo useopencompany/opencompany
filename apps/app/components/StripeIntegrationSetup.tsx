@@ -1,9 +1,9 @@
 "use client";
 
+import type { StripeProviderState } from "@opencompany/core/integration-state";
 import { Check, ExternalLink } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import type { StripeProviderState } from "@/lib/integration-state";
 import {
   disconnectStripeIntegrationAction,
   saveStripeRestrictedApiKeyAction,

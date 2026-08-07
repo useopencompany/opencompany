@@ -7,7 +7,7 @@ vi.mock("@/components/chat/SharedChatView", () => ({
   SharedChatView: vi.fn(() => null),
 }));
 
-vi.mock("@/lib/app-url", () => ({
+vi.mock("@opencompany/core/app-url", () => ({
   getAppUrl: vi.fn(() => "https://app.example.com"),
 }));
 

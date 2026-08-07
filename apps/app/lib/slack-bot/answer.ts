@@ -1,6 +1,16 @@
 import { captureModelSpendRecorded } from "@opencompany/analytics/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
+import { type ActionResult, executeAction } from "@opencompany/core/actions/execute";
 import { projectActionCatalog } from "@opencompany/core/actions/policy";
+import type { ResolvedActionCatalog } from "@opencompany/core/actions/types";
+import {
+  type BrainMultiBrainTarget,
+  normalizeBrainReadToolInput,
+} from "@opencompany/core/brain-surface";
+import { runOpenCompanyChatAgent } from "@opencompany/core/chat-agent";
+import { executeChatExaSearch } from "@opencompany/core/chat-web-search";
+import { slackApiRequest } from "@opencompany/core/integrations/slack";
+import { createSlackSurfacePromptBlock } from "@opencompany/core/prompts/slack-surface";
 import { ensureMonthlyIncludedUsage, isCreditsEnforcementEnabled } from "@opencompany/db/billing";
 import { getDb } from "@opencompany/db/client";
 import { hasPositiveCreditBalance, recordCreditDebit } from "@opencompany/db/credits";
@@ -20,17 +30,10 @@ import { recordModelCost } from "@opencompany/telemetry";
 import type { LanguageModelUsage } from "ai";
 import { eq } from "drizzle-orm";
 import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
-import { type ActionResult, executeAction } from "@/lib/actions/execute";
-import type { ResolvedActionCatalog } from "@/lib/actions/types";
 import { captureToBrainInbox } from "@/lib/brain-capture";
 import { runBrainToolForUser } from "@/lib/brain-cli";
-import { type BrainMultiBrainTarget, normalizeBrainReadToolInput } from "@/lib/brain-surface";
-import { runOpenCompanyChatAgent } from "@/lib/chat-agent";
-import { executeChatExaSearch } from "@/lib/chat-web-search";
-import { slackApiRequest } from "@/lib/integrations/slack";
 import { slackBotHasScope } from "@/lib/integrations/slack-bot";
 import { DEFAULT_MODEL } from "@/lib/model-options";
-import { createSlackSurfacePromptBlock } from "@/lib/prompts/slack-surface";
 import {
   collectSlackMentionUserIds,
   mentionsSlackUser,

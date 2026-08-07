@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
+import type { SaveToBrainToolOutput, StoredChatMessage } from "@opencompany/core/chat-ui";
 import { put } from "@vercel/blob";
 import { brainAssetUploadPrefix, createBrainAssetForUser } from "@/lib/brain-assets";
 import { BRAIN_CAPTURE_FOLDER } from "@/lib/brain-capture";
 import { downloadChatAttachment } from "@/lib/chat-attachments";
-import type { SaveToBrainToolOutput, StoredChatMessage } from "@/lib/chat-ui";
 import { triggerBrainIngestWake } from "@/lib/task-runner";
 
 // save_to_brain with attachmentIds: files attached in the chat become brain

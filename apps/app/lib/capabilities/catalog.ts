@@ -1,7 +1,7 @@
+import { MAX_EXPANDED_ACTION_RESULT_CHARS } from "@opencompany/core/actions/execute";
+import { ActionInvalidParamsError } from "@opencompany/core/actions/types";
 import type { ManagedCapabilitySource } from "@opencompany/db/schema";
 import type { JSONSchema7 } from "ai";
-import { MAX_EXPANDED_ACTION_RESULT_CHARS } from "@/lib/actions/execute";
-import { ActionInvalidParamsError } from "@/lib/actions/types";
 import { shapeCompanyEmployeesOutput } from "@/lib/capabilities/lead-company-employees";
 import { shapePdlPersonEmailOutput } from "@/lib/capabilities/pdl-person";
 import { MAX_CAPABILITY_PAYLOAD_STRING_CHARS } from "@/lib/capabilities/sanitize";

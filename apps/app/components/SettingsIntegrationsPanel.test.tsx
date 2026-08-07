@@ -1,7 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import {
+  type IntegrationState,
+  integrationStateFromRows,
+} from "@opencompany/core/integration-state";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { type IntegrationState, integrationStateFromRows } from "@/lib/integration-state";
 import { SettingsIntegrationsPanel } from "./SettingsIntegrationsPanel";
 
 const {

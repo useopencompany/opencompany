@@ -1,12 +1,12 @@
 "use client";
 
+import type { ChatUiAttachment } from "@opencompany/core/chat-ui";
 import { Link2 } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 import { buildChatTaskLookup } from "@/components/chat/assistant-items";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import type { PublicChatView } from "@/lib/chat-sharing";
-import type { ChatUiAttachment } from "@/lib/chat-ui";
 
 export function SharedChatView({ chat }: { chat: PublicChatView }) {
   const shareSubject = sharedChatSubject(chat);

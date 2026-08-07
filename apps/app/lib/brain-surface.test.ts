@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
 import {
   BRAIN_READ_COMMANDS,
   BRAIN_READ_TOOL_INPUT_JSON_SCHEMA,
   buildBrainMultiBrainToolSchema,
   normalizeBrainReadToolInput,
-} from "@/lib/brain-surface";
+} from "@opencompany/core/brain-surface";
+import { describe, expect, it } from "vitest";
 
 describe("Brain read surface", () => {
   it("keeps the shared tool schema aligned with the read command list", () => {

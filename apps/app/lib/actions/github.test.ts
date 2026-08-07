@@ -25,8 +25,8 @@ vi.mock("@opencompany/core/integrations/github", () => ({
   searchGitHubIssues: mocks.searchIssues,
 }));
 
-import { resolveGitHubActions } from "@/lib/actions/github";
-import { ActionAuthError, type ActionExecuteContext } from "@/lib/actions/types";
+import { resolveGitHubActions } from "@opencompany/core/actions/github";
+import { ActionAuthError, type ActionExecuteContext } from "@opencompany/core/actions/types";
 
 const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",

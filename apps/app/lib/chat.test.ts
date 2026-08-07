@@ -1,3 +1,9 @@
+import { OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION } from "@opencompany/core/chat-agent";
+import {
+  type CodexRuntimeView,
+  PINNED_CHAT_LIMIT,
+  START_TASK_TOOL_NAME,
+} from "@opencompany/core/chat-ui";
 import type {
   ChatMessageDebugTrace,
   ChatSession,
@@ -22,8 +28,6 @@ import {
   settleStaleChatToolCalls,
   textFromChatUiMessage,
 } from "@/lib/chat";
-import { OPENCOMPANY_CHAT_DEBUG_SCHEMA_VERSION } from "@/lib/chat-agent";
-import { type CodexRuntimeView, PINNED_CHAT_LIMIT, START_TASK_TOOL_NAME } from "@/lib/chat-ui";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 
 vi.mock("next/cache", () => ({

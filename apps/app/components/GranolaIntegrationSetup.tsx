@@ -1,11 +1,11 @@
 "use client";
 
+import type { GranolaProviderState } from "@opencompany/core/integration-state";
 import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
-import type { GranolaProviderState } from "@/lib/integration-state";
 import { saveGranolaApiKeyAction } from "@/lib/integrations/granola-actions";
 
 export function GranolaIntegrationSetup({

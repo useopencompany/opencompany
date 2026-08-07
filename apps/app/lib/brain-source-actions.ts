@@ -1,6 +1,23 @@
 "use server";
 
 import { GITHUB_ACTIVITY_EVENT_TYPES, type GitHubActivityEventType } from "@opencompany/brain";
+import type {
+  AttioProviderState,
+  FathomProviderState,
+  GmailSourceProviderState,
+  GoogleDriveSourceProviderState,
+  GranolaProviderState,
+  HubspotSourceProviderState,
+  JamieProviderState,
+  LinearSourceProviderState,
+  SlackProviderState,
+} from "@opencompany/core/integration-state";
+import { getAttioIntegrationState } from "@opencompany/core/integrations/attio";
+import {
+  type GitHubProviderState,
+  getGitHubIntegrationState,
+} from "@opencompany/core/integrations/github";
+import { getSlackIntegrationState } from "@opencompany/core/integrations/slack";
 import {
   ATTIO_EVENT_TYPES,
   type AttioEventRef,
@@ -65,20 +82,7 @@ import { and, eq, isNull, ne, type SQL } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentUser } from "@/lib/auth";
 import { upsertBrainSourceWithAnalytics } from "@/lib/brain-source-analytics";
-import type {
-  AttioProviderState,
-  FathomProviderState,
-  GmailSourceProviderState,
-  GoogleDriveSourceProviderState,
-  GranolaProviderState,
-  HubspotSourceProviderState,
-  JamieProviderState,
-  LinearSourceProviderState,
-  SlackProviderState,
-} from "@/lib/integration-state";
-import { getAttioIntegrationState } from "@/lib/integrations/attio";
 import { getFathomIntegrationState } from "@/lib/integrations/fathom";
-import { type GitHubProviderState, getGitHubIntegrationState } from "@/lib/integrations/github";
 import {
   getGmailSourceIntegrationState,
   getGoogleDriveSourceIntegrationState,
@@ -98,7 +102,6 @@ import {
   getLinearSourceIntegrationState,
   linearGraphqlRequest,
 } from "@/lib/integrations/linear-ingest";
-import { getSlackIntegrationState } from "@/lib/integrations/slack";
 import {
   listSlackConversationOptions,
   type SlackChannelOption,

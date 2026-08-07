@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
+import type { ImessageProviderState } from "@opencompany/core/integration-state";
+import { captureIntegrationAddedAnalytics } from "@opencompany/core/integrations/analytics";
 import { getDb } from "@opencompany/db/client";
 import { IMESSAGE_PROVIDER, imessageExternalIdForUser } from "@opencompany/db/imessage";
 import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
-import type { ImessageProviderState } from "@/lib/integration-state";
-import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
 export {
   hashImessagePairingCode,

@@ -1,6 +1,16 @@
 "use client";
 
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import {
+  type ChatSummaryView,
+  deriveChatState,
+  isChatRuntimeActive,
+  PINNED_CHAT_LIMIT,
+} from "@opencompany/core/chat-ui";
+import {
+  type IntegrationState,
+  integrationStateFromRows,
+} from "@opencompany/core/integration-state";
 import type { McpClient } from "@opencompany/db/schema";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
@@ -14,15 +24,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { TaskView } from "@/components/ChatSurface";
-import {
-  type ChatSummaryView,
-  deriveChatState,
-  isChatRuntimeActive,
-  PINNED_CHAT_LIMIT,
-} from "@/lib/chat-ui";
 import type { FeatureFlags } from "@/lib/feature-flags";
 import { isRecentHomeActivity } from "@/lib/home-activity";
-import { type IntegrationState, integrationStateFromRows } from "@/lib/integration-state";
 import {
   type ChatSessionRow,
   type CodexChatSessionRow,

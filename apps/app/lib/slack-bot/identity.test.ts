@@ -1,6 +1,6 @@
+import { slackApiRequest } from "@opencompany/core/integrations/slack";
 import { getWorkspaceRole } from "@opencompany/db/workspaces";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { slackApiRequest } from "@/lib/integrations/slack";
 import { clearSlackSenderCacheForTests, resolveSlackSender } from "./identity";
 
 const dbState = vi.hoisted(() => ({ rows: [] as unknown[] }));
@@ -19,7 +19,7 @@ vi.mock("@opencompany/db/workspaces", () => ({
   getWorkspaceRole: vi.fn(async () => null),
 }));
 
-vi.mock("@/lib/integrations/slack", () => ({
+vi.mock("@opencompany/core/integrations/slack", () => ({
   slackApiRequest: vi.fn(),
 }));
 

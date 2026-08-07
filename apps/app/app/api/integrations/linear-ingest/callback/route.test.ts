@@ -11,7 +11,7 @@ vi.mock("@opencompany/db/integrations", () => ({
   connectLinearIngestIntegration: mocks.connectIntegration,
 }));
 
-vi.mock("@/lib/app-url", () => ({
+vi.mock("@opencompany/core/app-url", () => ({
   getAppUrl: () => "https://localhost:3443",
 }));
 

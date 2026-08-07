@@ -1,7 +1,7 @@
+import { BRAIN_READ_PLANE_COMMANDS } from "@opencompany/core/brain-surface";
 import { getDb } from "@opencompany/db/client";
 import { brainDocuments, brainSources, brainToolRuns } from "@opencompany/db/schema";
 import { and, count, eq, gte, inArray, ne } from "drizzle-orm";
-import { BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
 
 export type BrainOverviewStats = {
   windowStartedAt: string;

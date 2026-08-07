@@ -1,10 +1,10 @@
 "use client";
 
+import type { AttioProviderState } from "@opencompany/core/integration-state";
 import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import type { AttioProviderState } from "@/lib/integration-state";
 import {
   disconnectAttioIntegrationAction,
   saveAttioApiKeyAction,

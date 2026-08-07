@@ -1,5 +1,6 @@
 "use client";
 
+import { finiteDurationMs, formatChatDuration } from "@opencompany/core/chat-timing";
 import type {
   BrainIngestTrace,
   BrainIngestTraceToolCall,
@@ -21,7 +22,6 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Markdown } from "@/components/Markdown";
-import { finiteDurationMs, formatChatDuration } from "@/lib/chat-timing";
 
 export function BrainIngestTraceDialog({
   trace,

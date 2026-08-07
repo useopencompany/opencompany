@@ -1,11 +1,11 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { IntegrationProvider } from "@opencompany/db/schema";
-import { GMAIL_COMPOSE_SCOPE, GMAIL_READ_SCOPE } from "@/lib/integrations/gmail-scopes";
+import { GMAIL_COMPOSE_SCOPE, GMAIL_READ_SCOPE } from "@opencompany/core/integrations/gmail-scopes";
 import {
   GOOGLE_DOCS_WRITE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
   GOOGLE_SHEETS_WRITE_SCOPE,
-} from "@/lib/integrations/google-drive-scopes";
+} from "@opencompany/core/integrations/google-drive-scopes";
+import type { IntegrationProvider } from "@opencompany/db/schema";
 import { getAppUrl } from "@/lib/workos";
 
 export type GoogleIntegrationProvider = Extract<

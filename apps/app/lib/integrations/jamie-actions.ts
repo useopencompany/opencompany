@@ -1,8 +1,8 @@
 "use server";
 
+import { captureIntegrationAddedAnalytics } from "@opencompany/core/integrations/analytics";
 import { revalidatePath } from "next/cache";
 import { currentUser } from "@/lib/auth";
-import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 import {
   createOrResetJamieWebhookEndpoint,
   type JamieWebhookSetup,

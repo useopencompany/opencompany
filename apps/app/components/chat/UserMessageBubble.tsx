@@ -1,7 +1,11 @@
 "use client";
 
+import {
+  type ChatUiAttachment,
+  type ChatUiMessage,
+  textFromChatUiMessage,
+} from "@opencompany/core/chat-ui";
 import { ChatAttachmentCard } from "@/components/chat/ChatComposerAttachments";
-import { type ChatUiAttachment, type ChatUiMessage, textFromChatUiMessage } from "@/lib/chat-ui";
 
 export function UserMessageBubble({
   message,

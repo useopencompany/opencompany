@@ -2,6 +2,7 @@
 
 import { randomInt } from "node:crypto";
 import { resolveImessageProvider } from "@opencompany/core/imessage/provider";
+import type { ImessageProviderState } from "@opencompany/core/integration-state";
 import {
   consumeImessageChallenge,
   getImessagePairingChallenge,
@@ -11,7 +12,6 @@ import {
 } from "@opencompany/db/imessage";
 import { revalidatePath } from "next/cache";
 import { currentUser } from "@/lib/auth";
-import type { ImessageProviderState } from "@/lib/integration-state";
 import {
   connectImessageIntegration,
   getImessageIntegrationState,

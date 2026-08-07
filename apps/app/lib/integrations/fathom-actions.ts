@@ -1,8 +1,8 @@
 "use server";
 
+import type { FathomProviderState } from "@opencompany/core/integration-state";
 import { revalidatePath } from "next/cache";
 import { currentUser } from "@/lib/auth";
-import type { FathomProviderState } from "@/lib/integration-state";
 import {
   connectFathomIntegration,
   getFathomIntegrationState,

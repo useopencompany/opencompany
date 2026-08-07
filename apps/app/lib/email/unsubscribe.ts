@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { getAppUrl } from "@opencompany/core/app-url";
 import { skipPendingOnboardingEmailsForEmail } from "@opencompany/db/onboarding-emails";
-import { getAppUrl } from "@/lib/app-url";
 import { trimmed } from "@/lib/email/client";
 
 // Signed one-click unsubscribe, mirrored from apps/web/lib/email/unsubscribe.ts.

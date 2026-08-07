@@ -1,3 +1,4 @@
+import type { StoredChatMessage } from "@opencompany/core/chat-ui";
 import type { ChatMessageAttachment, ChatSession, ChatShare } from "@opencompany/db/schema";
 import { drizzle } from "drizzle-orm/neon-http";
 import { describe, expect, it, vi } from "vitest";
@@ -12,7 +13,6 @@ import {
   newChatShareId,
   revokeChatShareForUser,
 } from "@/lib/chat-sharing";
-import type { StoredChatMessage } from "@/lib/chat-ui";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 
 vi.mock("@/lib/auth", () => ({

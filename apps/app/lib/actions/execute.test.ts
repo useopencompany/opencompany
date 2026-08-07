@@ -1,17 +1,17 @@
-import { ACTION_EFFECTS_READ } from "@opencompany/core/actions/types";
-import { describe, expect, it, vi } from "vitest";
 import {
   clampActionResult,
   executeAction,
   MAX_ACTION_RESULT_CHARS,
   MAX_EXPANDED_ACTION_RESULT_CHARS,
-} from "@/lib/actions/execute";
+} from "@opencompany/core/actions/execute";
 import {
+  ACTION_EFFECTS_READ,
   ActionAuthError,
   ActionInvalidParamsError,
   type ResolvedAction,
   type ResolvedActionCatalog,
-} from "@/lib/actions/types";
+} from "@opencompany/core/actions/types";
+import { describe, expect, it, vi } from "vitest";
 
 function catalogWith(
   execute: ResolvedAction["execute"],

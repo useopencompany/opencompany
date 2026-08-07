@@ -1,4 +1,4 @@
-import { ActionInvalidParamsError } from "@/lib/actions/types";
+import { ActionInvalidParamsError } from "@opencompany/core/actions/types";
 
 export type ShapedCompanyEmployeesOutput = {
   companyUrl: string;

@@ -1,6 +1,6 @@
-import { getAppUrl } from "@/lib/app-url";
+import { getAppUrl } from "@opencompany/core/app-url";
 
-export { getAppUrl } from "@/lib/app-url";
+export { getAppUrl } from "@opencompany/core/app-url";
 
 export function getWorkOSRedirectUri() {
   const redirectUri = process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim();

@@ -1,11 +1,11 @@
-import { getDb } from "@opencompany/db/client";
-import { integrations } from "@opencompany/db/schema";
-import { and, eq, isNull } from "drizzle-orm";
 import {
   type IntegrationAccountView,
   type PersonalAccountProvider,
   personalAccountsFromRows,
-} from "@/lib/integration-state";
+} from "@opencompany/core/integration-state";
+import { getDb } from "@opencompany/db/client";
+import { integrations } from "@opencompany/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
 
 // Server-side mirror of the Electric-fed client state: all of the user's
 // personal (workspace_id IS NULL) integration rows, grouped per provider.

@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
 import {
   effectiveCapabilityMode,
   isCapabilityId,
   isCapabilityMode,
   PROVIDER_CAPABILITIES,
   providerCapability,
-} from "@/lib/actions/capabilities";
+} from "@opencompany/core/actions/capabilities";
+import { describe, expect, it } from "vitest";
 
 describe("PROVIDER_CAPABILITIES", () => {
   it("registers Gmail reads and drafts on by default and sends behind ask", () => {

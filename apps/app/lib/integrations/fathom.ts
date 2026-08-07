@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { FathomProviderState } from "@opencompany/core/integration-state";
+import { captureIntegrationAddedAnalytics } from "@opencompany/core/integrations/analytics";
 import { getDb } from "@opencompany/db/client";
 import {
   ensureFathomSyncState,
@@ -8,8 +10,6 @@ import {
 import { markIntegrationStatus, saveIntegrationCredential } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
-import type { FathomProviderState } from "@/lib/integration-state";
-import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
 export const FATHOM_API_BASE_URL = "https://api.fathom.ai/external/v1";
 

@@ -1,5 +1,30 @@
 "use client";
 
+import {
+  type CapabilityMode,
+  effectiveCapabilityMode,
+  type ProviderCapability,
+  providerCapabilities,
+} from "@opencompany/core/actions/capabilities";
+import {
+  type ClaudeCodeProviderState,
+  type CodexProviderState,
+  type GitHubProviderState,
+  type GoogleProviderState,
+  type ImessageProviderState,
+  type InfisicalProviderState,
+  type IntegrationAccountView,
+  type IntegrationState,
+  integrationStateFromRows,
+  type JamieProviderState,
+  type LinearProviderState,
+  type PersonalAccountProvider,
+  type PostHogProviderState,
+  type SlackProviderState,
+  type StripeProviderState,
+} from "@opencompany/core/integration-state";
+import { hasGmailDraftScope, hasGmailSendScope } from "@opencompany/core/integrations/gmail-scopes";
+import { hasGoogleDriveWriteScope } from "@opencompany/core/integrations/google-drive-scopes";
 import { toast } from "@opencompany/ui/components/sonner";
 import {
   AnthropicIcon,
@@ -25,12 +50,6 @@ import { ExternalLink, Globe2, Loader2, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useHydrated } from "@/components/useHydrated";
-import {
-  type CapabilityMode,
-  effectiveCapabilityMode,
-  type ProviderCapability,
-  providerCapabilities,
-} from "@/lib/actions/capabilities";
 import { disconnectClaudeCodeAuth, saveClaudeCodeToken } from "@/lib/claude-code-auth";
 import {
   type CodexDeviceAuthFlow,
@@ -49,25 +68,6 @@ import {
   getIntegrationAccountUsageAction,
   setIntegrationCapabilityModeAction,
 } from "@/lib/integration-account-actions";
-import {
-  type ClaudeCodeProviderState,
-  type CodexProviderState,
-  type GitHubProviderState,
-  type GoogleProviderState,
-  type ImessageProviderState,
-  type InfisicalProviderState,
-  type IntegrationAccountView,
-  type IntegrationState,
-  integrationStateFromRows,
-  type JamieProviderState,
-  type LinearProviderState,
-  type PersonalAccountProvider,
-  type PostHogProviderState,
-  type SlackProviderState,
-  type StripeProviderState,
-} from "@/lib/integration-state";
-import { hasGmailDraftScope, hasGmailSendScope } from "@/lib/integrations/gmail-scopes";
-import { hasGoogleDriveWriteScope } from "@/lib/integrations/google-drive-scopes";
 import {
   integrationConnectionError,
   integrationConnectionSuccess,

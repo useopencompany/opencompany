@@ -1,6 +1,6 @@
+import { appendNeonMcpStatus, startNeonMcpOAuth } from "@opencompany/core/integrations/neon-mcp";
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
-import { appendNeonMcpStatus, startNeonMcpOAuth } from "@/lib/integrations/neon-mcp";
 
 export async function GET(request: Request) {
   const { user } = await currentUser();

@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
 import {
   GMAIL_COMPOSE_SCOPE,
   GMAIL_SEND_SCOPE,
   hasGmailDraftScope,
   hasGmailSendScope,
-} from "./gmail-scopes";
+} from "@opencompany/core/integrations/gmail-scopes";
+import { describe, expect, it } from "vitest";
 
 describe("Gmail OAuth scope capabilities", () => {
   it("treats compose as draft- and send-capable", () => {

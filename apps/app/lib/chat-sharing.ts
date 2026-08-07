@@ -1,4 +1,10 @@
 import { randomUUID } from "node:crypto";
+import {
+  type ChatSessionView,
+  type ChatUiMessage,
+  type StoredChatMessage,
+  toChatUiMessage,
+} from "@opencompany/core/chat-ui";
 import { getDb } from "@opencompany/db/client";
 import {
   type ChatSessionKind,
@@ -9,12 +15,6 @@ import {
 } from "@opencompany/db/schema";
 import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import { type ChatStore, createDbChatStore } from "@/lib/chat";
-import {
-  type ChatSessionView,
-  type ChatUiMessage,
-  type StoredChatMessage,
-  toChatUiMessage,
-} from "@/lib/chat-ui";
 
 const CHAT_SHARE_ID_PATTERN =
   /^goat_chat_share_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

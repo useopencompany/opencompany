@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { GranolaProviderState } from "@opencompany/core/integration-state";
+import { captureIntegrationAddedAnalytics } from "@opencompany/core/integrations/analytics";
 import { getDb } from "@opencompany/db/client";
 import {
   ensureGranolaSyncState,
@@ -8,8 +10,6 @@ import {
 import { markIntegrationStatus, saveIntegrationCredential } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
-import type { GranolaProviderState } from "@/lib/integration-state";
-import { captureIntegrationAddedAnalytics } from "@/lib/integrations/analytics";
 
 export const GRANOLA_API_BASE_URL = "https://public-api.granola.ai/v1";
 

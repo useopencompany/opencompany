@@ -1,4 +1,4 @@
-import { slackApiRequest } from "@/lib/integrations/slack";
+import { slackApiRequest } from "@opencompany/core/integrations/slack";
 
 // Slack-side lifecycle for one answer: 👀 on the triggering message, a status
 // message that updates in place while the agent works, and a final in-place

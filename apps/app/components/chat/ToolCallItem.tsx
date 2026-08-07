@@ -1,6 +1,17 @@
 "use client";
 
 import {
+  BRAIN_TOOL_NAME,
+  CODEX_COMMAND_TOOL_NAME,
+  CODEX_PLAN_TOOL_NAME,
+  CODEX_QUESTION_TOOL_NAME,
+  type CodexCommandToolOutput,
+  DELETE_TASK_SCHEDULE_TOOL_NAME,
+  EDIT_TASK_SCHEDULE_TOOL_NAME,
+  SCHEDULE_TASK_TOOL_NAME,
+  USE_ACTION_TOOL_NAME,
+} from "@opencompany/core/chat-ui";
+import {
   AlertCircle,
   BookOpen,
   Bot,
@@ -15,17 +26,6 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import {
-  BRAIN_TOOL_NAME,
-  CODEX_COMMAND_TOOL_NAME,
-  CODEX_PLAN_TOOL_NAME,
-  CODEX_QUESTION_TOOL_NAME,
-  type CodexCommandToolOutput,
-  DELETE_TASK_SCHEDULE_TOOL_NAME,
-  EDIT_TASK_SCHEDULE_TOOL_NAME,
-  SCHEDULE_TASK_TOOL_NAME,
-  USE_ACTION_TOOL_NAME,
-} from "@/lib/chat-ui";
 import {
   formatDebugValue,
   isBrainToolOutput,

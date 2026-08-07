@@ -1,10 +1,10 @@
 "use client";
 
+import type { ImessageProviderState } from "@opencompany/core/integration-state";
 import { Check } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
-import type { ImessageProviderState } from "@/lib/integration-state";
 import {
   confirmImessagePairingAction,
   startImessagePairingAction,

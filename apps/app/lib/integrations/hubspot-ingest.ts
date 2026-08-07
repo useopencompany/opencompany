@@ -1,8 +1,8 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import type { HubspotSourceProviderState } from "@opencompany/core/integration-state";
 import { getDb } from "@opencompany/db/client";
 import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq } from "drizzle-orm";
-import type { HubspotSourceProviderState } from "@/lib/integration-state";
 import { getAppUrl } from "@/lib/workos";
 
 export type HubspotIngestStatePayload = {

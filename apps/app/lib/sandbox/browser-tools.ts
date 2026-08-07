@@ -7,6 +7,7 @@ import {
   readHttpUrl,
   readOptionalString,
 } from "@opencompany/browser-tools";
+import type { BrowserToolOutput } from "@opencompany/core/chat-ui";
 import { createLogger } from "@opencompany/observability";
 import { put } from "@vercel/blob";
 import {
@@ -19,7 +20,6 @@ import {
   chatScreenshotFilename,
   chatScreenshotUrl,
 } from "@/lib/chat-screenshot-storage";
-import type { BrowserToolOutput } from "@/lib/chat-ui";
 import {
   CHAT_SANDBOX_ACTION_POLICY_PATH,
   CHAT_SANDBOX_AGENT_BROWSER_BIN,

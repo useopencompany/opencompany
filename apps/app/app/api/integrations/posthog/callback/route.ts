@@ -1,10 +1,10 @@
-import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/auth";
 import {
   appendPostHogMcpStatus,
   completePostHogMcpOAuth,
   verifyPostHogMcpState,
-} from "@/lib/integrations/posthog-mcp";
+} from "@opencompany/core/integrations/posthog-mcp";
+import { NextResponse } from "next/server";
+import { currentUser } from "@/lib/auth";
 
 export async function GET(request: Request) {
   const { user } = await currentUser();

@@ -21,12 +21,12 @@ import {
   normalizeLinearListIssuesInput,
   normalizeLinearUpdateIssueInput,
   resolveLinearActions,
-} from "@/lib/actions/linear";
+} from "@opencompany/core/actions/linear";
 import {
   ActionAuthError,
   type ActionExecuteContext,
   ActionPermissionError,
-} from "@/lib/actions/types";
+} from "@opencompany/core/actions/types";
 
 const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",

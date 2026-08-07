@@ -4,7 +4,40 @@ import {
 } from "@opencompany/agent-runtime";
 import { captureLlmUsageRecorded, captureModelSpendRecorded } from "@opencompany/analytics/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
+import { executeAction } from "@opencompany/core/actions/execute";
 import { projectActionCatalog } from "@opencompany/core/actions/policy";
+import type { CapabilityTurnState, ResolvedActionCatalog } from "@opencompany/core/actions/types";
+import {
+  createOpenCompanyChatDebugTrace,
+  createOpenCompanyChatSystemPrompt,
+  createOpenCompanyChatToolContext,
+  normalizeAgentText,
+  OPENCOMPANY_CHAT_MAX_STEPS,
+  OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
+  prepareOpenCompanyChatStep,
+  type StartedTask,
+  stringifyFinishReason,
+} from "@opencompany/core/chat-agent";
+import {
+  type ChatMessageMetadata,
+  type ChatUiMessage,
+  chatContextTokensFromUsage,
+  type DeleteTaskScheduleToolOutput,
+  type EditTaskScheduleToolOutput,
+  listedActionSourceIdsFromMessages,
+  listedSkillIdsFromMessages,
+  replaceChatUiMessageText,
+  settleIncompleteToolCallsInStoredParts,
+  textFromChatUiMessage,
+  type UseActionToolOutput,
+  usedSkillIdsFromMessages,
+  type WebFetchToolInput,
+  type WebFetchToolOutput,
+  type WebSearchToolInput,
+  type WebSearchToolOutput,
+} from "@opencompany/core/chat-ui";
+import { executeChatExaFetch } from "@opencompany/core/chat-web-fetch";
+import { executeChatExaSearch } from "@opencompany/core/chat-web-search";
 import { resolveImessageProvider } from "@opencompany/core/imessage/provider";
 import { createSendUserMessageRunner } from "@opencompany/core/imessage/send-user-message";
 import { ensureMonthlyIncludedUsage, isCreditsEnforcementEnabled } from "@opencompany/db/billing";
@@ -45,8 +78,6 @@ import {
 } from "ai";
 import { after } from "next/server";
 import { isChatActionsKilled, resolveActionCatalog } from "@/lib/actions/catalog";
-import { executeAction } from "@/lib/actions/execute";
-import type { CapabilityTurnState, ResolvedActionCatalog } from "@/lib/actions/types";
 import { maybeTriggerAutoRefill } from "@/lib/billing/auto-refill";
 import { captureToBrainInbox } from "@/lib/brain-capture";
 import { runBrainToolForUser } from "@/lib/brain-cli";
@@ -66,17 +97,6 @@ import {
   persistChatAssistantMessage,
   settleStaleChatToolCalls,
 } from "@/lib/chat";
-import {
-  createOpenCompanyChatDebugTrace,
-  createOpenCompanyChatSystemPrompt,
-  createOpenCompanyChatToolContext,
-  normalizeAgentText,
-  OPENCOMPANY_CHAT_MAX_STEPS,
-  OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
-  prepareOpenCompanyChatStep,
-  type StartedTask,
-  stringifyFinishReason,
-} from "@/lib/chat-agent";
 import { captureChatMessageSent } from "@/lib/chat-analytics";
 import { saveChatAttachmentsToBrain } from "@/lib/chat-attachment-capture";
 import {
@@ -98,30 +118,10 @@ import {
 } from "@/lib/chat-streams";
 import { generateChatTitleForMessage } from "@/lib/chat-title";
 import {
-  type ChatMessageMetadata,
-  type ChatUiMessage,
-  chatContextTokensFromUsage,
-  type DeleteTaskScheduleToolOutput,
-  type EditTaskScheduleToolOutput,
-  listedActionSourceIdsFromMessages,
-  listedSkillIdsFromMessages,
-  replaceChatUiMessageText,
-  settleIncompleteToolCallsInStoredParts,
-  textFromChatUiMessage,
-  type UseActionToolOutput,
-  usedSkillIdsFromMessages,
-  type WebFetchToolInput,
-  type WebFetchToolOutput,
-  type WebSearchToolInput,
-  type WebSearchToolOutput,
-} from "@/lib/chat-ui";
-import {
   CHAT_OUT_OF_CREDITS_MESSAGE,
   CHAT_PROMPT_MAX_LENGTH,
   validateChatInput,
 } from "@/lib/chat-validation";
-import { executeChatExaFetch } from "@/lib/chat-web-fetch";
-import { executeChatExaSearch } from "@/lib/chat-web-search";
 import { isClaudeCodeConnectedForUser } from "@/lib/claude-code-auth";
 import { isCodexConnectedForUser } from "@/lib/codex-auth";
 import { DEFAULT_MODEL } from "@/lib/model-options";

@@ -1,4 +1,5 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import type { JamieProviderState } from "@opencompany/core/integration-state";
 import { getDb } from "@opencompany/db/client";
 import {
   loadIntegrationCredential,
@@ -7,7 +8,6 @@ import {
 } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/schema";
 import { and, desc, eq, ne } from "drizzle-orm";
-import type { JamieProviderState } from "@/lib/integration-state";
 import {
   JAMIE_CREDENTIAL_KIND,
   JAMIE_PROVIDER,

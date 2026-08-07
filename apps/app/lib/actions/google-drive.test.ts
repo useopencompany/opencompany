@@ -23,13 +23,13 @@ vi.mock("@opencompany/core/integrations/google-access-token", async (importOrigi
   return { ...original, googleApiCall: mocks.googleApiCall };
 });
 
-import { GoogleAccessAuthError } from "@opencompany/core/integrations/google-access-token";
-import { resolveGoogleDriveActions } from "@/lib/actions/google-drive";
+import { resolveGoogleDriveActions } from "@opencompany/core/actions/google-drive";
 import {
   ActionAuthError,
   type ActionExecuteContext,
   ActionPermissionError,
-} from "@/lib/actions/types";
+} from "@opencompany/core/actions/types";
+import { GoogleAccessAuthError } from "@opencompany/core/integrations/google-access-token";
 
 const DRIVE_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 const DOCS_WRITE_SCOPE = "https://www.googleapis.com/auth/documents";

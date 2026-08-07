@@ -1,5 +1,5 @@
+import { formatChatDuration } from "@opencompany/core/chat-timing";
 import { describe, expect, it } from "vitest";
-import { formatChatDuration } from "@/lib/chat-timing";
 
 describe("formatChatDuration", () => {
   it("formats sub-minute durations with tenths", () => {

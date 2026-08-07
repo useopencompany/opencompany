@@ -38,8 +38,8 @@ vi.mock("@/lib/billing/auto-refill", () => ({
   maybeTriggerAutoRefill: mocks.autoRefill,
 }));
 
-import type { ActionExecuteContext } from "@/lib/actions/types";
-import { ActionInvalidParamsError } from "@/lib/actions/types";
+import type { ActionExecuteContext } from "@opencompany/core/actions/types";
+import { ActionInvalidParamsError } from "@opencompany/core/actions/types";
 import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
 import {
   CAPABILITY_ASYNC_RUNS_PER_TURN,

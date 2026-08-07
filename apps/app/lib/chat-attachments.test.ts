@@ -1,3 +1,4 @@
+import type { ChatUiMessage } from "@opencompany/core/chat-ui";
 import type { ChatMessageAttachment } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -5,7 +6,6 @@ import {
   hydrateChatAttachmentParts,
   parseChatAttachmentsInput,
 } from "@/lib/chat-attachments";
-import type { ChatUiMessage } from "@/lib/chat-ui";
 
 const getMock = vi.hoisted(() => vi.fn());
 vi.mock("@vercel/blob", () => ({

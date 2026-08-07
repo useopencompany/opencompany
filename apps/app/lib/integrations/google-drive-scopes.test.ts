@@ -1,4 +1,3 @@
-import { describe, expect, it } from "vitest";
 import {
   GOOGLE_DOCS_WRITE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
@@ -6,7 +5,8 @@ import {
   hasGoogleDocsWriteScope,
   hasGoogleDriveWriteScope,
   hasGoogleSheetsWriteScope,
-} from "./google-drive-scopes";
+} from "@opencompany/core/integrations/google-drive-scopes";
+import { describe, expect, it } from "vitest";
 
 describe("Google Drive OAuth scope capabilities", () => {
   it("requires both Docs and Sheets grants for the fully upgraded Drive write scope", () => {

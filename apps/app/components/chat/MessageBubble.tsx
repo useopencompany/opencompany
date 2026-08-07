@@ -1,7 +1,7 @@
 "use client";
 
+import type { ChatUiAttachment, ChatUiMessage } from "@opencompany/core/chat-ui";
 import type { ReactNode } from "react";
-import type { ChatUiAttachment, ChatUiMessage } from "@/lib/chat-ui";
 import { AssistantTextBubble } from "./AssistantTextBubble";
 import {
   type AssistantRenderItem,

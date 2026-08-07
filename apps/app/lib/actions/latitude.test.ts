@@ -1,11 +1,11 @@
 import { createMCPClient } from "@ai-sdk/mcp";
+import { resolveLatitudeActions } from "@opencompany/core/actions/latitude";
+import { ActionInvalidParamsError, ActionPermissionError } from "@opencompany/core/actions/types";
 import {
   getLatitudeIntegrationState,
   loadLatitudeMcpWorkerConnection,
 } from "@opencompany/core/integrations/latitude-mcp";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveLatitudeActions } from "@/lib/actions/latitude";
-import { ActionInvalidParamsError, ActionPermissionError } from "@/lib/actions/types";
 
 const clientMocks = vi.hoisted(() => ({
   listTools: vi.fn(),

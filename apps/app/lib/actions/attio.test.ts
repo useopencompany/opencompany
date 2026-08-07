@@ -23,12 +23,12 @@ vi.mock("@opencompany/db/integrations", () => ({
   markIntegrationStatus: mocks.markStatus,
 }));
 
-import { resolveAttioActions } from "@/lib/actions/attio";
+import { resolveAttioActions } from "@opencompany/core/actions/attio";
 import {
   ActionAuthError,
   type ActionExecuteContext,
   ActionInvalidParamsError,
-} from "@/lib/actions/types";
+} from "@opencompany/core/actions/types";
 
 const CONTEXT: ActionExecuteContext = {
   userWorkosId: "user_1",

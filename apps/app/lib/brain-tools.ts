@@ -1,5 +1,5 @@
+import type { BrainToolInput } from "@opencompany/core/chat-ui";
 import * as z from "zod/v4-mini";
-import type { BrainToolInput } from "@/lib/chat-ui";
 
 // Single source of truth for the flat, intent-named Brain tool surface.
 //

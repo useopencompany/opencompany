@@ -1,5 +1,5 @@
+import { executeChatExaFetch, normalizePublicWebUrl } from "@opencompany/core/chat-web-fetch";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { executeChatExaFetch, normalizePublicWebUrl } from "@/lib/chat-web-fetch";
 
 describe("executeChatExaFetch", () => {
   afterEach(() => {

@@ -1,5 +1,5 @@
+import { ActionInvalidParamsError } from "@opencompany/core/actions/types";
 import { describe, expect, it } from "vitest";
-import { ActionInvalidParamsError } from "@/lib/actions/types";
 import { shapeCompanyEmployeesOutput } from "@/lib/capabilities/lead-company-employees";
 
 describe("shapeCompanyEmployeesOutput", () => {

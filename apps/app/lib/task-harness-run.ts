@@ -1,4 +1,5 @@
 import { getAgentModelDefinition } from "@opencompany/agent-runtime";
+import type { ChatSessionView } from "@opencompany/core/chat-ui";
 import type {
   HarnessEngine,
   TaskEvent,
@@ -15,7 +16,6 @@ import type {
   TaskToolName,
   TaskToolUsage,
 } from "@opencompany/db/schema";
-import type { ChatSessionView } from "@/lib/chat-ui";
 
 export type TaskRunTaskInput =
   | {

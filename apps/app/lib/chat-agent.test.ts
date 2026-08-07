@@ -1,6 +1,5 @@
 import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
 import { BROWSER_TOOL_NAMES, type BrowserToolName } from "@opencompany/browser-tools";
-import { describe, expect, it, vi } from "vitest";
 import {
   type ActionDispatcher,
   createOpenCompanyChatToolContext,
@@ -10,12 +9,12 @@ import {
   OPENCOMPANY_CHAT_MAX_STEPS_WITH_SANDBOX,
   prepareOpenCompanyChatStep,
   runOpenCompanyChatAgent,
-} from "@/lib/chat-agent";
+} from "@opencompany/core/chat-agent";
 import {
   MAX_BROWSER_CALLS_PER_TURN,
   MAX_WEB_FETCH_CALLS_PER_TURN,
   MAX_WEB_SEARCH_CALLS_PER_TURN,
-} from "@/lib/chat-limits";
+} from "@opencompany/core/chat-limits";
 import {
   BRAIN_TOOL_NAME,
   type BrainToolInput,
@@ -42,13 +41,14 @@ import {
   type WebFetchToolOutput,
   type WebSearchToolInput,
   type WebSearchToolOutput,
-} from "@/lib/chat-ui";
-import { DEFAULT_MODEL } from "@/lib/model-options";
+} from "@opencompany/core/chat-ui";
 import {
   OPENCOMPANY_CHAT_SOUL,
   OPENCOMPANY_CHAT_SYSTEM,
   START_TASK_PROMPT_DESCRIPTION,
-} from "@/lib/prompts";
+} from "@opencompany/core/prompts";
+import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_MODEL } from "@/lib/model-options";
 
 describe("runOpenCompanyChatAgent", () => {
   it("enables Gateway prompt caching for headless chat generation", async () => {

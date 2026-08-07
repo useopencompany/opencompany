@@ -1,10 +1,10 @@
 "use client";
 
+import type { JamieProviderState } from "@opencompany/core/integration-state";
 import { Check, Copy, RotateCw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import type { JamieProviderState } from "@/lib/integration-state";
 import {
   createOrResetJamieWebhookEndpointAction,
   saveJamieWebhookApiKeyAction,

@@ -1,6 +1,13 @@
 import "server-only";
 
 import { calculatePlatformFeeUsdMicros, USD_MICROS_PER_DOLLAR } from "@opencompany/billing";
+import {
+  type ActionExecuteContext,
+  ActionExecutionError,
+  ActionInvalidParamsError,
+  type CapabilityQuote,
+  type CapabilityTurnState,
+} from "@opencompany/core/actions/types";
 import { ensureMonthlyIncludedUsage } from "@opencompany/db/billing";
 import {
   consumeCapabilityApprovalByToolCall,
@@ -16,13 +23,6 @@ import {
 import { getCreditBalanceUsdMicros, recordCreditDebit } from "@opencompany/db/credits";
 import type { CapabilityRun } from "@opencompany/db/schema";
 import { METRICS, recordCounter, recordHistogram } from "@opencompany/telemetry";
-import {
-  type ActionExecuteContext,
-  ActionExecutionError,
-  ActionInvalidParamsError,
-  type CapabilityQuote,
-  type CapabilityTurnState,
-} from "@/lib/actions/types";
 import { maybeTriggerAutoRefill } from "@/lib/billing/auto-refill";
 import type { ManagedCapabilityActionSpec } from "@/lib/capabilities/catalog";
 import { assertManagedCapabilityInspection } from "@/lib/capabilities/contract";

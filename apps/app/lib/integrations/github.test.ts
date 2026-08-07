@@ -1,6 +1,4 @@
 import { generateKeyPairSync } from "node:crypto";
-import { integrationResources, integrations } from "@opencompany/db/schema";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createGitHubIntegrationState,
   GitHubApiError,
@@ -8,7 +6,9 @@ import {
   searchGitHubIssues,
   syncGitHubIntegrationRepositories,
   verifyGitHubIntegrationState,
-} from "./github";
+} from "@opencompany/core/integrations/github";
+import { integrationResources, integrations } from "@opencompany/db/schema";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TEST_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 })
   .privateKey.export({ type: "pkcs8", format: "pem" })

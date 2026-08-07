@@ -1,5 +1,5 @@
+import { getAppUrl } from "@opencompany/core/app-url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getAppUrl } from "@/lib/app-url";
 
 afterEach(() => {
   vi.unstubAllEnvs();

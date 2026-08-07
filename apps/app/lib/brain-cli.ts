@@ -11,6 +11,13 @@ import {
   normalizeBrainFolderForV1,
 } from "@opencompany/brain";
 import { getBrainCliSource } from "@opencompany/brain/cli-bundle";
+import { BRAIN_READ_PLANE_COMMANDS } from "@opencompany/core/brain-surface";
+import type {
+  BrainCliCommand,
+  BrainToolFlagValue,
+  BrainToolInput,
+  BrainToolOutput,
+} from "@opencompany/core/chat-ui";
 import {
   type MaterializedBrainFile,
   materializeBrainFilesToRoot,
@@ -30,13 +37,6 @@ import { createPooledDb } from "@opencompany/db/pool";
 import { brainToolRuns, users } from "@opencompany/db/schema";
 import { createGatewayAttribution } from "@opencompany/telemetry";
 import { and, eq, isNull } from "drizzle-orm";
-import { BRAIN_READ_PLANE_COMMANDS } from "@/lib/brain-surface";
-import type {
-  BrainCliCommand,
-  BrainToolFlagValue,
-  BrainToolInput,
-  BrainToolOutput,
-} from "@/lib/chat-ui";
 import { isMcpSetupCompletionRun } from "@/lib/mcp-setup";
 
 const BRAIN_CHAT_CLI_TIMEOUT_MS = 60_000;

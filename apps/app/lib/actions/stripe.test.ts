@@ -23,8 +23,8 @@ vi.mock("@opencompany/core/integrations/stripe", () => ({
   requestStripeApi: mocks.requestStripeApi,
 }));
 
-import { resolveStripeActions } from "@/lib/actions/stripe";
-import { ActionAuthError } from "@/lib/actions/types";
+import { resolveStripeActions } from "@opencompany/core/actions/stripe";
+import { ActionAuthError } from "@opencompany/core/actions/types";
 
 const connection = {
   integrationId: "gint_stripe",
