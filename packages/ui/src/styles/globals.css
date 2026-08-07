@@ -73,12 +73,42 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /*
+   * Elevation: several soft, low-opacity layers instead of Tailwind's stock
+   * 1-2 layer default, so larger shadows fall off gradually rather than
+   * reading as a single hard-edged blob.
+   */
+  --shadow-2xs: var(--shadow-blur-2xs);
+  --shadow-xs: var(--shadow-blur-xs);
+  --shadow-sm: var(--shadow-blur-sm);
+  --shadow-md: var(--shadow-blur-md);
+  --shadow-lg: var(--shadow-blur-lg);
+  --shadow-xl: var(--shadow-blur-xl);
+  --shadow-2xl: var(--shadow-blur-2xl);
 }
 
 :root {
   --radius: 0.5rem;
   --font-sans:
     -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica", "Arial", sans-serif;
+
+  --shadow-blur-2xs: 0 1px 1px rgb(0 0 0 / 0.025);
+  --shadow-blur-xs: 0 1px 2px rgb(0 0 0 / 0.03), 0 2px 4px rgb(0 0 0 / 0.025);
+  --shadow-blur-sm:
+    0 1px 2px rgb(0 0 0 / 0.03), 0 3px 6px rgb(0 0 0 / 0.04), 0 6px 12px rgb(0 0 0 / 0.03);
+  --shadow-blur-md:
+    0 1px 2px rgb(0 0 0 / 0.03), 0 4px 8px rgb(0 0 0 / 0.05), 0 10px 20px rgb(0 0 0 / 0.05),
+    0 18px 36px rgb(0 0 0 / 0.04);
+  --shadow-blur-lg:
+    0 2px 4px rgb(0 0 0 / 0.03), 0 6px 12px rgb(0 0 0 / 0.05), 0 14px 28px rgb(0 0 0 / 0.06),
+    0 26px 52px rgb(0 0 0 / 0.05);
+  --shadow-blur-xl:
+    0 2px 4px rgb(0 0 0 / 0.03), 0 8px 16px rgb(0 0 0 / 0.05), 0 18px 36px rgb(0 0 0 / 0.07),
+    0 34px 68px rgb(0 0 0 / 0.06);
+  --shadow-blur-2xl:
+    0 4px 8px rgb(0 0 0 / 0.04), 0 12px 24px rgb(0 0 0 / 0.06), 0 28px 56px rgb(0 0 0 / 0.08),
+    0 48px 96px rgb(0 0 0 / 0.07);
 
   --background: #f7f7f5;
   --foreground: #111111;
@@ -246,5 +276,38 @@
     color: var(--foreground);
     -webkit-font-smoothing: antialiased;
     font-feature-settings: "cv11", "ss01";
+  }
+}
+
+@layer components {
+  /*
+   * Elevation for surfaces that float over other content (menus, popovers,
+   * dialogs) and have no adjacent layout border to lean on for edge
+   * definition. A hairline ring keeps the edge crisp at any zoom/DPI — a
+   * real `border` would work too, but doubles up with `--shadow-blur-*`
+   * once both are present, producing a visible double edge.
+   */
+  .shadow-ring-sm {
+    box-shadow:
+      0 0 0 1px var(--border-strong),
+      var(--shadow-blur-sm);
+  }
+
+  .shadow-ring-md {
+    box-shadow:
+      0 0 0 1px var(--border-strong),
+      var(--shadow-blur-md);
+  }
+
+  .shadow-ring-lg {
+    box-shadow:
+      0 0 0 1px var(--border-strong),
+      var(--shadow-blur-lg);
+  }
+
+  .shadow-ring-xl {
+    box-shadow:
+      0 0 0 1px var(--border-strong),
+      var(--shadow-blur-xl);
   }
 }

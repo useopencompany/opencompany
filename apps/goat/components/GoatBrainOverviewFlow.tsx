@@ -432,7 +432,7 @@ function SourceConfigDialog({
       aria-modal="true"
       aria-label={`${provider.name} source settings`}
     >
-      <div className="flex max-h-[80vh] w-full max-w-[460px] flex-col gap-3 overflow-y-auto rounded-lg bg-canvas p-4 shadow-xl">
+      <div className="flex max-h-[80vh] w-full max-w-[460px] flex-col gap-3 overflow-y-auto shadow-ring-xl rounded-lg bg-canvas p-4">
         <div className="flex items-center justify-between">
           <span className="text-[14px] font-semibold text-ink">{provider.name} source</span>
           <button
