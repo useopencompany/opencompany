@@ -110,10 +110,11 @@ Selecting a workflow with `#<id>` changes the composer action from **Send messag
 task**. Submission posts directly to `/api/workflows`, creates a task-flavored chat session and its
 first durable turn, and leaves the current Home or chat surface in place. It does not call the
 foreground chat model.
-Skills mentioned by the workflow are resolved and snapshotted when the task is created. OpenCompany
-task runs receive those snapshots as workflow prompt blocks; Codex task runs materialize them under
-`.agents/skills` and invoke them as native app-server skill inputs, matching explicit skill mentions
-in main Codex chat.
+Skills mentioned by the workflow, plus explicit skill mentions on the workflow invocation, are
+resolved and snapshotted when the task is created. Invocation skills apply to the first workflow
+step. OpenCompany task runs receive the applicable snapshots as workflow prompt blocks; Codex and
+Claude Code task runs materialize them under `.agents/skills` and invoke them natively, matching
+explicit skill mentions in their main chat surfaces.
 
 The reserved `#task` token provides the same direct composer handoff for one-off work without a
 saved workflow. The composer posts the request to `/api/tasks`, removes the directive from the

@@ -6,7 +6,7 @@ import {
 } from "@/lib/chat-attachments";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
-import { GoatSkillMentionError } from "@/lib/skills";
+import { GoatSkillMentionError, readGoatSkillMentionRefs } from "@/lib/skills";
 import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
 import {
   GoatWorkflowMentionError,
@@ -66,6 +66,10 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  const parsedSkillMentions = readGoatSkillMentionRefs(input.mentions);
+  if (!parsedSkillMentions.ok) {
+    return NextResponse.json({ error: parsedSkillMentions.error }, { status: 400 });
+  }
   const parsedAttachments = parseGoatChatAttachmentsInput(
     input.attachments,
     context.user.workosUserId,
@@ -83,6 +87,7 @@ export async function POST(request: Request) {
       userWorkosId: context.user.workosUserId,
       workspaceId: context.workspace.id,
       mention: parsedMention.mention,
+      skillMentions: parsedSkillMentions.mentions,
       description,
       attachments: parsedAttachments.attachments,
       attachmentTexts,
