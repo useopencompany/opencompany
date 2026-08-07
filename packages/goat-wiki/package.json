@@ -27,6 +27,10 @@
     "./time": {
       "types": "./src/time.ts",
       "default": "./src/time.ts"
+    },
+    "./tool": {
+      "types": "./src/tool.ts",
+      "default": "./src/tool.ts"
     }
   },
   "scripts": {

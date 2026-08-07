@@ -24,11 +24,13 @@ import {
   type GoatWikiLinkKind,
   type GoatWikiPage,
   type GoatWikiTimelineEntry,
+  goatUsers,
   goatWikiLinks,
   goatWikiPages,
   goatWikiPageVersions,
   goatWikiTimelineEntries,
 } from "./goat-schema";
+import { listGoatWorkspacesForUser } from "./goat-workspaces";
 
 type DbClient = any;
 
@@ -57,6 +59,37 @@ function firstRow<T>(rows: T[], context: string): T {
 // ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
+
+export type WikiAccess = {
+  enabled: boolean;
+  workspaces: Array<{ id: string; name: string; slug: string | null }>;
+};
+
+/**
+ * Whether the user opted into the wiki preview, and which workspaces' wikis
+ * they can reach. Surfaces without a resolved workspace (MCP) use this to gate
+ * and target the `wiki` tool.
+ */
+export async function getWikiAccessForUser(
+  userWorkosId: string,
+  db: DbClient = getDb(),
+): Promise<WikiAccess> {
+  const [user]: Array<{ wikiEnabled: boolean }> = await db
+    .select({ wikiEnabled: goatUsers.wikiEnabled })
+    .from(goatUsers)
+    .where(eq(goatUsers.workosUserId, userWorkosId))
+    .limit(1);
+  if (!user?.wikiEnabled) return { enabled: false, workspaces: [] };
+  const memberships = await listGoatWorkspacesForUser(userWorkosId, { db });
+  return {
+    enabled: true,
+    workspaces: memberships.map(({ workspace }) => ({
+      id: workspace.id,
+      name: workspace.name,
+      slug: workspace.slug,
+    })),
+  };
+}
 
 export type WikiTreeEntry = {
   slug: string;

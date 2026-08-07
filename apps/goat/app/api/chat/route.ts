@@ -156,6 +156,7 @@ import {
   updateGoatTaskScheduleForUser,
 } from "@/lib/task-schedules";
 import { createGoatTaskForUser } from "@/lib/tasks";
+import { runWikiToolForUser } from "@/lib/wiki-tool";
 import { createGoatTaskFromWorkflow, generateGoatWorkflowTaskTitle } from "@/lib/workflow-tasks";
 import { listGoatWorkflowCatalog, readGoatWorkflowMentionRef } from "@/lib/workflows";
 
@@ -886,6 +887,18 @@ export async function POST(request: Request): Promise<Response> {
               };
             },
           },
+        }
+      : {}),
+    // Workspace wiki (preview): the whole read/write surface rides one tool,
+    // present only for users who enabled the flag in preferences.
+    ...(context.user.wikiEnabled
+      ? {
+          runWiki: (toolInput) =>
+            runWikiToolForUser({
+              workspaceId: context.workspace.id,
+              userWorkosId: context.user.workosUserId,
+              toolInput,
+            }),
         }
       : {}),
     // goat_brain is read-only for everyone (recall/inspect). The only write path

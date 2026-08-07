@@ -18,6 +18,13 @@ import {
 } from "@opencompany/goat-observability";
 import { flushLatitude, latitudeTelemetry } from "@opencompany/goat-observability/latitude";
 import {
+  WIKI_TOOL_DESCRIPTION,
+  WIKI_TOOL_INPUT_JSON_SCHEMA,
+  WIKI_TOOL_NAME,
+  type WikiToolInput,
+  type WikiToolOutput,
+} from "@opencompany/goat-wiki/tool";
+import {
   createGateway,
   generateText,
   type JSONSchema7,
@@ -223,6 +230,7 @@ type GoatBrainCliRunner = (
   executionContext?: unknown,
 ) => Promise<GoatBrainToolOutput>;
 type SaveToBrainRunner = (input: SaveToBrainToolInput) => Promise<SaveToBrainToolOutput>;
+type WikiToolRunner = (input: WikiToolInput) => Promise<WikiToolOutput>;
 type WebFetchRunner = (input: WebFetchToolInput) => Promise<WebFetchToolOutput>;
 type WebSearchRunner = (input: WebSearchToolInput) => Promise<WebSearchToolOutput>;
 export type BrowserToolRunner = (input: {
@@ -322,6 +330,7 @@ export async function runOpenCompanyChatAgent(input: {
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
+  runWiki?: WikiToolRunner;
   sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
@@ -380,6 +389,7 @@ export async function runOpenCompanyChatAgent(input: {
     ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
     ...(input.runBrainCli ? { runBrainCli: input.runBrainCli } : {}),
     ...(input.saveToBrain ? { saveToBrain: input.saveToBrain } : {}),
+    ...(input.runWiki ? { runWiki: input.runWiki } : {}),
     ...(input.sendUserMessage ? { sendUserMessage: input.sendUserMessage } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
@@ -475,6 +485,7 @@ export function createOpenCompanyChatToolContext(input: {
   deleteTaskSchedule?: DeleteTaskScheduleRunner;
   runBrainCli?: GoatBrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
+  runWiki?: WikiToolRunner;
   sendUserMessage?: SendUserMessageRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
@@ -655,6 +666,20 @@ export function createOpenCompanyChatToolContext(input: {
           throw new Error("start_workflow prompt is required.");
         }
         return startTrackedTask(() => workflows.execute({ workflowId, prompt }));
+      },
+    });
+  }
+
+  const runWiki = input.runWiki;
+  if (runWiki) {
+    tools[WIKI_TOOL_NAME] = tool<WikiToolInput, WikiToolOutput>({
+      description: WIKI_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<WikiToolInput>(
+        WIKI_TOOL_INPUT_JSON_SCHEMA as unknown as Parameters<typeof jsonSchema>[0],
+      ),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        return runWiki(args);
       },
     });
   }
