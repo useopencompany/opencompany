@@ -13,6 +13,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { registerGoatClaudeActionTools } from "./claude-actions";
 import type { executeGoatActionGateway } from "./codex-actions";
+import type { requestGoatChatArtifactPublication } from "./task-runner";
 
 type RegisteredTool = {
   config: Record<string, unknown>;
@@ -26,7 +27,10 @@ type RegisteredTool = {
   }>;
 };
 
-function registerTools(executeAction: typeof executeGoatActionGateway) {
+function registerTools(
+  executeAction: typeof executeGoatActionGateway,
+  publishArtifact = vi.fn<typeof requestGoatChatArtifactPublication>(),
+) {
   const tools = new Map<string, RegisteredTool>();
   const server = {
     registerTool: vi.fn(
@@ -38,7 +42,7 @@ function registerTools(executeAction: typeof executeGoatActionGateway) {
   registerGoatClaudeActionTools(
     server,
     { codexChatSessionId: "codex_session_1", codexChatTurnId: "codex_turn_1" },
-    { executeAction },
+    { executeAction, publishArtifact },
   );
   return tools;
 }
@@ -50,9 +54,9 @@ function getTool(tools: Map<string, RegisteredTool>, name: string): RegisteredTo
 }
 
 describe("registerGoatClaudeActionTools", () => {
-  it("registers list_actions and use_action", () => {
+  it("registers file publication and action tools", () => {
     const tools = registerTools(vi.fn<typeof executeGoatActionGateway>());
-    expect([...tools.keys()]).toEqual(["list_actions", "use_action"]);
+    expect([...tools.keys()]).toEqual(["publish_artifact", "list_actions", "use_action"]);
     expect(getTool(tools, "list_actions").config.annotations).toEqual(
       GOAT_ACTION_TOOL_CONTRACT.list.annotations,
     );
@@ -60,6 +64,45 @@ describe("registerGoatClaudeActionTools", () => {
       GOAT_ACTION_TOOL_CONTRACT.execute.annotations,
     );
     expect(GOAT_ACTION_TOOL_CONTRACT.execute.annotations.idempotentHint).toBe(false);
+  });
+
+  it("publishes a sandbox file through the turn-scoped runner bridge", async () => {
+    const publishArtifact = vi.fn<typeof requestGoatChatArtifactPublication>(async () => ({
+      ok: true,
+      artifact: {
+        artifactId: "artifact_1",
+        artifactVersionId: "artifact_version_1",
+        version: 1,
+        title: "Plan",
+        filename: "plan.md",
+        mediaType: "text/markdown",
+        sizeBytes: 42,
+        state: "ready",
+      },
+    }));
+    const tools = registerTools(vi.fn<typeof executeGoatActionGateway>(), publishArtifact);
+
+    const result = await getTool(tools, "publish_artifact").callback(
+      {
+        path: "/home/user/opencompany-goat/claude-chat/plan.md",
+        title: "Plan",
+      },
+      { requestId: "request_1", sessionId: "transport_1" },
+    );
+
+    expect(publishArtifact).toHaveBeenCalledWith({
+      codexChatSessionId: "codex_session_1",
+      codexChatTurnId: "codex_turn_1",
+      toolCallId: "mcp:codex_turn_1:transport_1:request_1",
+      arguments: {
+        path: "/home/user/opencompany-goat/claude-chat/plan.md",
+        title: "Plan",
+      },
+    });
+    expect(result.structuredContent).toMatchObject({
+      ok: true,
+      artifact: { artifactVersionId: "artifact_version_1" },
+    });
   });
 
   it("translates a list_actions call into a gateway list request", async () => {
@@ -204,6 +247,7 @@ describe("registerGoatClaudeActionTools", () => {
             ? { ok: true, sources: [{ id: "gmail", label: "Gmail", description: "d" }] }
             : { ok: true, action: request.action, result: { echoedParams: request.params } },
         ),
+        publishArtifact: vi.fn<typeof requestGoatChatArtifactPublication>(),
       },
     );
 
@@ -212,7 +256,18 @@ describe("registerGoatClaudeActionTools", () => {
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
     const tools = await client.listTools();
-    expect(tools.tools.map((tool) => tool.name)).toEqual(["list_actions", "use_action"]);
+    expect(tools.tools.map((tool) => tool.name)).toEqual([
+      "publish_artifact",
+      "list_actions",
+      "use_action",
+    ]);
+    expect(tools.tools.find((tool) => tool.name === "publish_artifact")?.inputSchema).toMatchObject(
+      {
+        type: "object",
+        required: ["path"],
+        properties: { path: { type: "string" }, expected_version: { type: "integer" } },
+      },
+    );
     expect(tools.tools.find((tool) => tool.name === "use_action")?.inputSchema).toMatchObject({
       type: "object",
       required: ["action", "params"],

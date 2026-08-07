@@ -1,3 +1,9 @@
+import {
+  GOAT_CHAT_ARTIFACT_DATA_PART_TYPE,
+  GOAT_PUBLISH_ARTIFACT_TOOL_NAME,
+  type GoatPublishedChatArtifact,
+  parseGoatPublishedChatArtifact,
+} from "./chat-artifacts";
 import type { CodexAppServerNormalizedEvent } from "./codex-app-server-events";
 
 // Shared projection of normalized Codex app-server events into AI SDK UIMessage parts.
@@ -28,6 +34,10 @@ export type CodexCommandToolOutput = {
 
 export type CodexUiTextPart = { type: "text"; text: string };
 export type CodexUiReasoningPart = { type: "reasoning"; text: string; state: "done" };
+export type CodexUiArtifactPart = {
+  type: typeof GOAT_CHAT_ARTIFACT_DATA_PART_TYPE;
+  data: GoatPublishedChatArtifact;
+};
 export type CodexUiCommandPart = {
   type: typeof CODEX_COMMAND_TOOL_PART_TYPE;
   toolCallId: string;
@@ -83,6 +93,7 @@ export type CodexUiSubagentPart = {
 export type CodexUiMessagePart =
   | CodexUiTextPart
   | CodexUiReasoningPart
+  | CodexUiArtifactPart
   | CodexUiCommandPart
   | CodexUiStatusPart
   | CodexUiSubagentPart;
@@ -106,6 +117,17 @@ export function applyCodexEventToUiMessageParts(
   event: CodexAppServerNormalizedEvent,
   options: ApplyCodexEventOptions = {},
 ): CodexUiMessageProjection {
+  // A published file belongs to the main assistant response even when a Claude subagent made the
+  // MCP call. Keep it out of the collapsible subagent trace so the user cannot miss the output.
+  if (
+    (event.type === "dynamic_tool.started" ||
+      event.type === "dynamic_tool.completed" ||
+      event.type === "mcp_tool.started" ||
+      event.type === "mcp_tool.completed") &&
+    readString(event.payload.tool) === GOAT_PUBLISH_ARTIFACT_TOOL_NAME
+  ) {
+    return applyPublishedArtifactEvent(parts, event);
+  }
   // Subagent steps carry the parent Task's tool call id; fold them into that part's children
   // rather than the top-level turn (see createClaudeCodeEventNormalizer's stampParent).
   const parentToolCallId = readString(event.payload.parentToolCallId);
@@ -371,6 +393,11 @@ export function parseCodexUiMessageParts(value: unknown): CodexUiMessagePart[] {
       parts.push({ type: "reasoning", text: part.text, state: "done" });
       continue;
     }
+    if (part.type === GOAT_CHAT_ARTIFACT_DATA_PART_TYPE) {
+      const artifact = parseGoatPublishedChatArtifact({ ok: true, artifact: part.data });
+      if (artifact) parts.push({ type: GOAT_CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact });
+      continue;
+    }
     if (part.type === CODEX_COMMAND_TOOL_PART_TYPE && typeof part.toolCallId === "string") {
       const command = readString((part.input as Record<string, unknown> | undefined)?.command);
       const input: CodexCommandToolInput = { command: command ?? "command" };
@@ -478,6 +505,35 @@ export function parseCodexUiMessageParts(value: unknown): CodexUiMessagePart[] {
     }
   }
   return parts;
+}
+
+function applyPublishedArtifactEvent(
+  parts: readonly CodexUiMessagePart[],
+  event: CodexAppServerNormalizedEvent,
+): CodexUiMessageProjection {
+  if (event.type !== "dynamic_tool.completed" && event.type !== "mcp_tool.completed") {
+    return unchanged(parts);
+  }
+  const artifact = parseGoatPublishedChatArtifact({ ok: true, artifact: event.payload.artifact });
+  if (!artifact) {
+    const toolName =
+      event.type === "dynamic_tool.completed" ? CODEX_DYNAMIC_TOOL_NAME : CODEX_MCP_TOOL_NAME;
+    const payload =
+      event.type === "dynamic_tool.completed"
+        ? dynamicToolStatusPart(event)
+        : mcpToolStatusPart(event);
+    return changed(upsertStatusPart(parts, event, toolName, payload));
+  }
+  if (
+    parts.some(
+      (part) =>
+        part.type === GOAT_CHAT_ARTIFACT_DATA_PART_TYPE &&
+        part.data.artifactVersionId === artifact.artifactVersionId,
+    )
+  ) {
+    return unchanged(parts);
+  }
+  return changed([...parts, { type: GOAT_CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact }]);
 }
 
 // Buffers command.output deltas per command item so a truncated tail can be attached

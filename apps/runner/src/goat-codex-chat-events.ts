@@ -8,6 +8,7 @@ import {
   normalizeCodexAppServerEvent,
   offerCodexPlanImplementation,
   parseCodexUiMessageParts,
+  parseGoatPublishedChatArtifact,
   resolveCodexUiInteraction,
 } from "@opencompany/agent-runtime";
 import type { GoatAnalyticsEngine } from "@opencompany/analytics/goat/events";
@@ -315,6 +316,37 @@ export function createGoatCodexChatProjector(input: {
     });
   };
 
+  // Publication commits before the engine emits its tool-completed event. If the runner dies in
+  // that narrow window, recover the immutable version into the assistant message at terminal
+  // projection so a durable file can never exist without its durable chat reference.
+  const reconcilePublishedArtifacts = async () => {
+    const result = await getDb().execute(sql`
+      SELECT version.id AS "artifactVersionId",
+             artifact.id AS "artifactId",
+             version.version,
+             version.title,
+             version.description,
+             version.filename,
+             version.media_type AS "mediaType",
+             version.size_bytes AS "sizeBytes",
+             CASE WHEN artifact.archived_at IS NULL THEN 'ready' ELSE 'deleted' END AS state
+      FROM goat.chat_artifact_versions AS version
+      INNER JOIN goat.chat_artifacts AS artifact ON artifact.id = version.artifact_id
+      WHERE version.source_turn_id = ${target.turnId}
+        AND version.source_message_id = ${target.assistantMessageId}
+        AND artifact.user_workos_id = ${target.userWorkosId}
+        AND artifact.chat_session_id = ${target.chatSessionId}
+      ORDER BY version.created_at ASC, version.id ASC
+    `);
+    const projectedVersionIds = collectProjectedArtifactVersionIds(parts);
+    for (const row of rowsFromExecute(result)) {
+      const artifact = parseGoatPublishedChatArtifact({ ok: true, artifact: row });
+      if (!artifact || projectedVersionIds.has(artifact.artifactVersionId)) continue;
+      parts = [...parts, { type: "data-artifact-file", data: artifact }];
+      projectedVersionIds.add(artifact.artifactVersionId);
+    }
+  };
+
   const turnLeaseSubquery = (options: { runningOnly: boolean }) => sql`
     SELECT 1
     FROM goat.codex_chat_turns AS lease_turn
@@ -446,6 +478,7 @@ export function createGoatCodexChatProjector(input: {
           summary,
           taskCompletion: options.taskCompletion,
         });
+        await reconcilePublishedArtifacts();
         if (summary.status === "success") {
           if (options.replacementContent?.trim()) {
             parts = [
@@ -499,6 +532,7 @@ export function createGoatCodexChatProjector(input: {
       return serializeProjection(async () => {
         const completedAt = new Date();
         await cancelPendingInteractions();
+        await reconcilePublishedArtifacts();
         parts = finalizeCodexUiMessageParts(parts, "interrupted").parts;
         await writeAssistantMessage({
           aborted: true,
@@ -524,6 +558,7 @@ export function createGoatCodexChatProjector(input: {
       return serializeProjection(async () => {
         const completedAt = new Date();
         await cancelPendingInteractions();
+        await reconcilePublishedArtifacts();
         parts = finalizeCodexUiMessageParts(parts, "failed", error).parts;
         await writeAssistantMessage({
           error,
@@ -612,6 +647,18 @@ function assertRowsChanged(result: unknown) {
 function elapsedTurnDurationMs(startedAt: Date | undefined, completedAt: Date) {
   if (!startedAt || Number.isNaN(startedAt.getTime())) return undefined;
   return Math.max(0, completedAt.getTime() - startedAt.getTime());
+}
+
+function collectProjectedArtifactVersionIds(parts: readonly CodexUiMessagePart[]) {
+  const ids = new Set<string>();
+  const visit = (values: readonly CodexUiMessagePart[]) => {
+    for (const part of values) {
+      if (part.type === "data-artifact-file") ids.add(part.data.artifactVersionId);
+      if ("children" in part) visit(part.children);
+    }
+  };
+  visit(parts);
+  return ids;
 }
 
 function codexChatEventKey(event: CodexAppServerNormalizedEvent) {

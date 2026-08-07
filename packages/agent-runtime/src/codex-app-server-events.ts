@@ -1,3 +1,5 @@
+import { GOAT_PUBLISH_ARTIFACT_TOOL_NAME, parseGoatPublishedChatArtifact } from "./chat-artifacts";
+
 export type CodexAppServerEventType =
   | "assistant.delta"
   | "assistant.completed"
@@ -405,13 +407,35 @@ function mcpToolCallPayload(item: Record<string, unknown>) {
 
 function dynamicToolCallPayload(item: Record<string, unknown>) {
   const success = typeof item.success === "boolean" ? item.success : undefined;
+  const tool = firstString(item.tool);
+  const artifact =
+    tool === GOAT_PUBLISH_ARTIFACT_TOOL_NAME
+      ? publishedArtifactFromContentItems(item.contentItems)
+      : null;
   return {
     namespace: firstString(item.namespace),
-    tool: firstString(item.tool),
+    tool,
     arguments: readRecord(item.arguments) ?? item.arguments,
     success,
     error: success === false ? dynamicToolError(item.contentItems) : undefined,
+    ...(artifact ? { artifact } : {}),
   };
+}
+
+function publishedArtifactFromContentItems(value: unknown) {
+  if (!Array.isArray(value)) return null;
+  for (const item of value) {
+    const record = readRecord(item);
+    const text = record?.type === "inputText" ? firstString(record.text) : null;
+    if (!text) continue;
+    try {
+      const artifact = parseGoatPublishedChatArtifact(JSON.parse(text) as unknown);
+      if (artifact) return artifact;
+    } catch {
+      // Invalid host-tool output cannot become a durable UI part.
+    }
+  }
+  return null;
 }
 
 function dynamicToolError(value: unknown) {
