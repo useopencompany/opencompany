@@ -39,8 +39,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The `schema-code-only` PR label skips this guard for schema-module changes with no
+      # DDL impact (renames, type-level edits). The label is reviewer-visible; remove it if
+      # the diff actually changes tables or columns.
       - name: Require a migration for schema changes
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'schema-code-only')
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -49,6 +52,7 @@ jobs:
           added_migrations="$(git diff --diff-filter=A --name-only "$BASE_SHA" "$HEAD_SHA")"
           if printf '%s\n' "$changed_files" | rg -q '^packages/db/src/(schema|legacy-billing-schema|llm-broker-schema)\.ts$' && ! printf '%s\n' "$added_migrations" | rg -q '^drizzle/[0-9][^/]*\.sql$'; then
             echo "A change to a packages/db schema file (schema.ts, legacy-billing-schema.ts, or llm-broker-schema.ts) requires a numbered Drizzle migration."
+            echo "If this change is code-only with no DDL impact, apply the schema-code-only label."
             exit 1
           fi
 
