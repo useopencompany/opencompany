@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  closeGoatCodexChatSessionForChat,
+  archiveGoatChatSessionForUser,
   createGoatCodexChatMessage as createGoatCodexChatMessageImpl,
   createGoatCodingWorkspaceRuntimeAccess,
   getGoatCodexChatSandboxStatus,
@@ -15,8 +15,6 @@ const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   select: vi.fn(),
   selectResults: [] as unknown[][],
-  update: vi.fn(),
-  updateResults: [] as unknown[][],
   codexConnected: vi.fn(),
   claudeConnected: vi.fn(),
   getSandboxStatus: vi.fn(),
@@ -29,7 +27,6 @@ vi.mock("@opencompany/db/client", () => ({
   getDb: () => ({
     execute: mocks.execute,
     select: mocks.select,
-    update: mocks.update,
   }),
 }));
 
@@ -76,15 +73,6 @@ function createSelectBuilder(rows: unknown[]) {
     builder[method] = vi.fn(() => builder);
   }
   builder.limit = vi.fn(async () => rows);
-  return builder;
-}
-
-function createUpdateBuilder(rows: unknown[]) {
-  const builder: Record<string, unknown> = {};
-  for (const method of ["set", "where"]) {
-    builder[method] = vi.fn(() => builder);
-  }
-  builder.returning = vi.fn(async () => rows);
   return builder;
 }
 
@@ -579,55 +567,66 @@ describe("interruptGoatCodexChatSession", () => {
   });
 });
 
-describe("closeGoatCodexChatSessionForChat", () => {
+describe("archiveGoatChatSessionForUser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.updateResults.length = 0;
     mocks.execute.mockResolvedValue({ rows: [] });
-    mocks.update.mockImplementation(() => createUpdateBuilder(mocks.updateResults.shift() ?? []));
     mocks.killSandbox.mockResolvedValue(true);
   });
 
-  it("settles a settled session to closed and kills its sandbox", async () => {
-    mocks.updateResults.push([{ sandboxId: "sbx_123" }]);
+  it("archives the chat, stops queued and running turns, and kills its sandbox", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "goat_chat_1", sandboxId: "sbx_123" }] });
 
-    await closeGoatCodexChatSessionForChat({
-      userWorkosId: "user_1",
-      chatSessionId: "goat_chat_1",
-    });
+    await expect(
+      archiveGoatChatSessionForUser({
+        userWorkosId: "user_1",
+        chatSessionId: "goat_chat_1",
+      }),
+    ).resolves.toBe(true);
 
-    expect(mocks.update).toHaveBeenCalledTimes(1);
-    expect(sqlText(mocks.execute.mock.calls[0]?.[0])).toContain("cancelled_wakeups AS");
-    expect(sqlText(mocks.execute.mock.calls[0]?.[0])).toContain("run_after IS NOT NULL");
+    const statement = sqlText(mocks.execute.mock.calls[0]?.[0]);
+    expect(statement).toContain("archived_chat AS MATERIALIZED");
+    expect(statement).toContain("chat.closed_at IS NULL");
+    expect(statement).toContain("turn.status IN ('queued', 'running')");
+    expect(statement).toContain("interrupt_requested_at");
+    expect(statement).toContain("WHEN turn.status = 'queued' THEN 'interrupted'");
+    expect(statement).toContain("SET status = 'closed'");
     expect(mocks.killSandbox).toHaveBeenCalledWith("sbx_123");
   });
 
-  it("skips the kill when no engine session matched or none has a sandbox", async () => {
-    mocks.updateResults.push([]);
-    await closeGoatCodexChatSessionForChat({
-      userWorkosId: "user_1",
-      chatSessionId: "goat_chat_plain",
-    });
+  it("returns false when the owned open chat did not match", async () => {
+    await expect(
+      archiveGoatChatSessionForUser({
+        userWorkosId: "user_1",
+        chatSessionId: "goat_chat_missing",
+      }),
+    ).resolves.toBe(false);
+    expect(mocks.killSandbox).not.toHaveBeenCalled();
+  });
 
-    mocks.updateResults.push([{ sandboxId: null }]);
-    await closeGoatCodexChatSessionForChat({
-      userWorkosId: "user_1",
-      chatSessionId: "goat_chat_no_sandbox",
-    });
+  it("archives a chat without a coding runtime", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "goat_chat_plain", sandboxId: null }] });
+
+    await expect(
+      archiveGoatChatSessionForUser({
+        userWorkosId: "user_1",
+        chatSessionId: "goat_chat_plain",
+      }),
+    ).resolves.toBe(true);
 
     expect(mocks.killSandbox).not.toHaveBeenCalled();
   });
 
-  it("does not throw when the sandbox kill fails", async () => {
-    mocks.updateResults.push([{ sandboxId: "sbx_123" }]);
+  it("does not fail the durable archive when the sandbox kill fails", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ id: "goat_chat_1", sandboxId: "sbx_123" }] });
     mocks.killSandbox.mockRejectedValue(new Error("runner down"));
 
     await expect(
-      closeGoatCodexChatSessionForChat({
+      archiveGoatChatSessionForUser({
         userWorkosId: "user_1",
         chatSessionId: "goat_chat_1",
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(true);
   });
 });
 
