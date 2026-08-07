@@ -11,6 +11,7 @@ import {
 import { getGoatWorkspaceRole } from "@opencompany/db/goat-workspaces";
 import { createLogger } from "@opencompany/observability";
 import { getDb } from "./db";
+import { createInfisicalBackupKeyEntry } from "./infisical-keyring";
 import { INFISICAL_CLI_LINUX_AMD64_SHA256, INFISICAL_CLI_VERSION } from "./infisical-version";
 import type { SandboxHandle } from "./sandbox";
 
@@ -20,7 +21,9 @@ const logger = createLogger({
 });
 
 const INFISICAL_CONFIG_ROOT = "/home/user/.infisical";
+const INFISICAL_CONFIG_PATH = `${INFISICAL_CONFIG_ROOT}/infisical-config.json`;
 const INFISICAL_KEYRING_ROOT = "/home/user/infisical-keyring";
+const INFISICAL_BACKUP_KEY_PATH = `${INFISICAL_KEYRING_ROOT}/infisical-backup-secret-encryption-key`;
 const INFISICAL_GENERATION_PATH = "/home/user/.opencompany/infisical-generation";
 const INFISICAL_VALIDATION_INTERVAL_MS = 6 * 60 * 60_000;
 const INFISICAL_BUNDLE_MAX_BYTES = 512 * 1024;
@@ -90,6 +93,7 @@ export async function reconcileGoatInfisicalSandboxAuth(input: {
     return needsReauthAuth();
   }
 
+  const redactionValues = new Set(connection.authBundle.redactionValues);
   try {
     await ensureInfisicalInstalled(input.sandbox);
     const currentGeneration = await readGeneration(input.sandbox);
@@ -101,6 +105,7 @@ export async function reconcileGoatInfisicalSandboxAuth(input: {
         connection.credentialGeneration,
       );
     }
+    redactionValues.add(await ensureInfisicalBackupKey(input.sandbox));
 
     const needsValidation =
       restored ||
@@ -127,7 +132,7 @@ export async function reconcileGoatInfisicalSandboxAuth(input: {
 
     return {
       available: true,
-      redactionValues: connection.authBundle.redactionValues,
+      redactionValues: [...redactionValues],
       promptFragment: [
         "<infisical_cli>",
         "The Infisical CLI is authenticated for this workspace and may be used directly.",
@@ -146,11 +151,33 @@ export async function reconcileGoatInfisicalSandboxAuth(input: {
     });
     return {
       available: false,
-      redactionValues: connection.authBundle.redactionValues,
+      redactionValues: [...redactionValues],
       promptFragment:
         "Infisical is connected, but its CLI authentication could not be prepared in this sandbox. Continue coding without it and tell the user if Infisical is required.",
     };
   }
+}
+
+async function ensureInfisicalBackupKey(sandbox: SandboxHandle) {
+  try {
+    const existing = sandboxFileText(await sandbox.files.read(INFISICAL_BACKUP_KEY_PATH)).trim();
+    if (existing) return existing;
+  } catch {
+    // Older stored auth bundles predate the cache key. Generate it below.
+  }
+
+  const configContents = sandboxFileText(await sandbox.files.read(INFISICAL_CONFIG_PATH));
+  const encryptedBackupKey = await createInfisicalBackupKeyEntry(configContents);
+  await sandbox.files.write(INFISICAL_BACKUP_KEY_PATH, encryptedBackupKey, { user: "user" });
+  await sandbox.commands.run(`chmod 600 ${shellQuote(INFISICAL_BACKUP_KEY_PATH)}`, {
+    user: "user",
+    timeoutMs: 30_000,
+  });
+  return encryptedBackupKey;
+}
+
+function sandboxFileText(value: string | Uint8Array) {
+  return typeof value === "string" ? value : Buffer.from(value).toString("utf8");
 }
 
 export function combineSandboxPromptFragments(...fragments: Array<string | null | undefined>) {
