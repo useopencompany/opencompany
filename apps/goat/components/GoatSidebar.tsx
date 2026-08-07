@@ -190,7 +190,6 @@ export function GoatSidebar({
         {/* Account / settings footer */}
         <div className="px-2 pb-3 pt-2">
           <GoatSidebarFeedback />
-          <SidebarNavRow href="/changelog" icon={ScrollText} label="Changelog" active={false} />
           <GoatSidebarAccountMenu />
         </div>
       </div>
@@ -236,6 +235,7 @@ function GoatSidebarAccountMenu() {
   const initials = getInitials(user.firstName, user.lastName, user.email);
   const planLabel = plan === "pro" ? "Pro plan" : "Hobby plan";
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
+  const changelogActive = pathname === "/changelog";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -299,6 +299,16 @@ function GoatSidebarAccountMenu() {
         >
           <Settings size={14} strokeWidth={1.75} className="shrink-0 text-ink/60" />
           <span className="truncate tracking-[-0.005em]">Settings</span>
+        </Link>
+        <Link
+          href="/changelog"
+          prefetch
+          onClick={() => setOpen(false)}
+          aria-current={changelogActive ? "page" : undefined}
+          className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <ScrollText size={14} strokeWidth={1.75} className="shrink-0 text-ink/60" />
+          <span className="truncate tracking-[-0.005em]">Changelog</span>
         </Link>
         <a
           href="/auth/sign-out"
