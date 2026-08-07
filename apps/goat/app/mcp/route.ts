@@ -5,7 +5,7 @@ import {
   userWorkosIdFromMcpAuth,
   verifyGoatMcpBearerToken,
 } from "@/lib/mcp-oauth";
-import { registerGoatBrainTools } from "@/lib/mcp-server";
+import { registerGoatBrainTools, registerGoatWikiTool } from "@/lib/mcp-server";
 import { OPENCOMPANY_MCP_SERVER_NAME } from "@/lib/mcp-setup";
 
 export const runtime = "nodejs";
@@ -40,6 +40,10 @@ async function handleMcpRequest(request: Request) {
             userWorkosId,
             gatewayApiKey,
             signal: authenticatedRequest.signal,
+          });
+          registerGoatWikiTool(server, {
+            userWorkosId,
+            gatewayApiKey,
           });
         },
         {
