@@ -190,14 +190,14 @@ describe("createClaudeCodeEventNormalizer", () => {
     expect(events[0]?.payload).toMatchObject({ delta: "/repo" });
   });
 
-  it("maps the Task tool to subagent lifecycle events", () => {
+  it.each(["Task", "Agent"])("maps the %s tool to subagent lifecycle events", (toolName) => {
     const normalizer = createClaudeCodeEventNormalizer();
     const started = normalizer.normalize(
       assistantEvent([
         {
           type: "tool_use",
           id: "task_1",
-          name: "Task",
+          name: toolName,
           input: { description: "Find bugs", subagent_type: "Explore", prompt: "Look for bugs" },
         },
       ]),
@@ -220,6 +220,40 @@ describe("createClaudeCodeEventNormalizer", () => {
       status: "completed",
       result: "Found 2 bugs",
     });
+  });
+
+  it("keeps an asynchronously launched Agent open for its nested event stream", () => {
+    const normalizer = createClaudeCodeEventNormalizer();
+    normalizer.normalize(
+      assistantEvent([
+        {
+          type: "tool_use",
+          id: "agent_1",
+          name: "Agent",
+          input: { description: "Implement the fix", prompt: "Make the change." },
+        },
+      ]),
+    );
+
+    expect(
+      normalizer.normalize(
+        toolResultEvent([
+          {
+            type: "tool_result",
+            tool_use_id: "agent_1",
+            content: "Async agent launched successfully.\nagentId: internal-1",
+          },
+        ]),
+      ),
+    ).toEqual([]);
+
+    expect(
+      normalizer.normalize(
+        assistantEvent([{ type: "text", text: "Working on it." }], {
+          parent_tool_use_id: "agent_1",
+        }),
+      )[0]?.payload,
+    ).toMatchObject({ content: "Working on it.", parentToolCallId: "agent_1" });
   });
 
   it("stamps subagent traffic (parent_tool_use_id) with the parent tool call id", () => {
@@ -268,6 +302,72 @@ describe("createClaudeCodeEventNormalizer", () => {
       usage: { input_tokens: 10, output_tokens: 20 },
       sessionId: "sess_1",
     });
+  });
+
+  it("resumes the root turn when a background Agent result arrives after its last root result", () => {
+    const normalizer = createClaudeCodeEventNormalizer();
+    normalizer.normalize({ type: "system", subtype: "init", session_id: "sess_1" });
+    normalizer.normalize({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "Initial agent batch finished.",
+      session_id: "sess_1",
+      usage: { input_tokens: 10, output_tokens: 20 },
+    });
+    normalizer.normalize(assistantEvent([{ type: "text", text: "Waiting for WP2." }]));
+
+    const notificationEvents = normalizer.normalize({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      origin: { kind: "task-notification" },
+      result: "WP2 finished.",
+      session_id: "sess_1",
+      usage: { input_tokens: 2, output_tokens: 8 },
+    });
+
+    expect(notificationEvents.map((event) => event.type)).toEqual(["usage.updated"]);
+    expect(normalizer.summary()).toBeNull();
+    expect(normalizer.needsBackgroundAgentContinuation()).toBe(true);
+
+    normalizer.beginRun();
+    normalizer.normalize(assistantEvent([{ type: "text", text: "All work is complete." }]));
+    normalizer.normalize({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "All work is complete.",
+      session_id: "sess_1",
+      usage: { input_tokens: 3, output_tokens: 12 },
+    });
+
+    expect(normalizer.summary()?.result).toBe("All work is complete.");
+    expect(normalizer.needsBackgroundAgentContinuation()).toBe(false);
+  });
+
+  it("does not resume when the root result follows background Agent notifications", () => {
+    const normalizer = createClaudeCodeEventNormalizer();
+    normalizer.normalize({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      origin: { kind: "task-notification" },
+      result: "Agent finished.",
+      session_id: "sess_1",
+      usage: { input_tokens: 2, output_tokens: 8 },
+    });
+    normalizer.normalize({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "Integrated the agent result.",
+      session_id: "sess_1",
+      usage: { input_tokens: 3, output_tokens: 12 },
+    });
+
+    expect(normalizer.summary()?.result).toBe("Integrated the agent result.");
+    expect(normalizer.needsBackgroundAgentContinuation()).toBe(false);
   });
 
   // Captured from claude CLI 2.1.49: a stale --resume id fails with is_error=true,
