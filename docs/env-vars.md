@@ -213,6 +213,8 @@ Set these in the separate Vercel project for Goat:
 | `GOAT_SLACK_BOT_CLIENT_ID` / `GOAT_SLACK_BOT_CLIENT_SECRET` | Slack bot only | Goat Slack answer-bot app OAuth credentials (bot-token app, `scope=` — separate Slack app from the ingestion one). Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/slack-bot/callback`. The Slack app manifest must grant the bot scopes in `GOAT_SLACK_BOT_SCOPES` (`app_mentions:read`, `chat:write`, `channels:read`, `groups:read`, `channels:history`, `groups:history`, `im:history`, `reactions:write`, `users:read`, `users:read.email`), subscribe to bot events `app_mention`, `message.channels`, `message.groups`, `message.im`, and enable App Home → Messages Tab ("Allow users to send … messages from the messages tab") so members can DM the bot. Workspaces installed before a scope was added keep working for mentions; the settings page shows a reconnect banner until they re-OAuth. |
 | `GOAT_SLACK_BOT_SIGNING_SECRET` | Slack bot only | Slack bot app signing secret used to verify Events API deliveries at `/api/webhooks/slack-bot/events`. |
 | `GOAT_SLACK_BOT_STATE_SECRET` | Slack bot only | Dedicated secret used to sign Goat Slack bot install state. Generate with `openssl rand -base64 32`. |
+| `GOAT_X_CLIENT_ID` / `GOAT_X_CLIENT_SECRET` | X only | Goat X (Twitter) personal-connection OAuth 2.0 + PKCE credentials (confidential client), posting tweets as the connecting user. Distinct from the unrelated read-only "x" managed capability (`APIFY_API_TOKEN`). Redirect URL: `${GOAT_NEXT_PUBLIC_APP_URL}/api/integrations/x-account/callback`. The runner also needs both values to refresh the 2-hour access tokens. |
+| `GOAT_X_STATE_SECRET` | X only | Dedicated secret used to sign Goat X OAuth setup state. Generate with `openssl rand -base64 32`. |
 | `RUNNER_INTERNAL_URL` / `RUNNER_PUBLIC_URL` | Yes | Server-to-server runner URL. `RUNNER_INTERNAL_URL` wins when set. |
 | `RUNNER_INTERNAL_TOKEN` | Yes | Bearer token for the runner wake route. Must match Render. |
 | `ELECTRIC_URL` | Yes | Electric shape service base URL. The Goat proxy exposes only `goat.tasks` scoped to the signed-in WorkOS user. |
@@ -379,6 +381,7 @@ Set these in the Render `opencompany-runner` service.
 | `RUNNER_CODEX_TIMEOUT_MS` | No | Wall-clock ceiling for a single Codex engine turn or `codex_coder` delegation, defaults to `3600000` (1 hour). Timeouts surface partial output and skip PR creation. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Decrypts workspace MCP, Goat MCP, and Google (Gmail/Calendar/Drive) credentials. Validated at runner boot — the runner fails to start if it is missing or malformed. Must match Vercel/Goat. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Used by the runner to refresh Gmail/Calendar/Drive access tokens against Google's token endpoint. Must match Vercel. |
+| `GOAT_X_CLIENT_ID` / `GOAT_X_CLIENT_SECRET` | X only | Used by the runner to refresh Goat X (Twitter) access tokens against X's token endpoint. Must match Vercel. |
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Must match Vercel. |
 | `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Must match Vercel. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |

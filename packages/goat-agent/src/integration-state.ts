@@ -165,6 +165,18 @@ export type GoatSlackProviderState = {
   statusReason: string | null;
 };
 
+// The connected X (Twitter) account posts on behalf of the user, distinct
+// from the unrelated "x" managed capability (public, read-only X data).
+export type GoatXAccountProviderState = {
+  provider: "x_account";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  handle: string | null;
+  statusReason: string | null;
+};
+
 export type GoatCodexProviderState = {
   provider: "codex";
   connected: boolean;
@@ -219,7 +231,8 @@ export type GoatPersonalAccountProvider =
   | "fathom"
   | "attio"
   | "latitude"
-  | "neon";
+  | "neon"
+  | "x_account";
 
 export type GoatIntegrationState = {
   gmail: GoatGoogleProviderState;
@@ -234,6 +247,7 @@ export type GoatIntegrationState = {
   fathom: GoatFathomProviderState;
   attio: GoatAttioProviderState;
   stripe: GoatStripeProviderState;
+  x_account: GoatXAccountProviderState;
   imessage: GoatImessageProviderState;
   codex: GoatCodexProviderState;
   claude_code: GoatClaudeCodeProviderState;
@@ -287,6 +301,7 @@ export function goatPersonalAccountsFromRows(
     attio: [],
     latitude: [],
     neon: [],
+    x_account: [],
   };
   for (const row of rows) {
     if (row.status === "disconnected") continue;
@@ -307,7 +322,8 @@ export function goatPersonalAccountsFromRows(
       row.provider === "fathom" ||
       row.provider === "attio" ||
       row.provider === "latitude" ||
-      row.provider === "neon"
+      row.provider === "neon" ||
+      row.provider === "x_account"
     ) {
       personalAccounts[row.provider].push(accountViewFromRow(row.provider, row));
     }
@@ -353,6 +369,7 @@ export function goatIntegrationStateFromRows(
     fathom: fathomProviderState(byProvider.get("fathom")),
     attio: attioProviderState(byProvider.get("attio")),
     stripe: stripeProviderState(byProvider.get("stripe")),
+    x_account: xAccountProviderState(byProvider.get("x_account")),
     imessage: imessageProviderState(byProvider.get("imessage")),
     codex: {
       provider: "codex",
@@ -513,6 +530,30 @@ function slackProviderState(row: IntegrationStateRow | undefined): GoatSlackProv
     integrationId: row.id ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     teamName: row.connectionLabel ?? row.connection_label ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+  };
+}
+
+function xAccountProviderState(row: IntegrationStateRow | undefined): GoatXAccountProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "x_account",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      handle: null,
+      statusReason: null,
+    };
+  }
+
+  return {
+    provider: "x_account",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
+    handle: row.connectionLabel ?? row.connection_label ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
   };
 }
