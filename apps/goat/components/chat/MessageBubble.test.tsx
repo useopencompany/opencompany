@@ -465,6 +465,57 @@ describe("MessageBubble assistant errors", () => {
     );
   });
 
+  it("renders proposed X posts instead of coercing structured params to object strings", () => {
+    const message: GoatChatUiMessage = {
+      id: "assistant_x_post_approval",
+      role: "assistant",
+      metadata: { sessionId: "goat_chat_1" },
+      parts: [
+        {
+          type: USE_ACTION_TOOL_PART_TYPE,
+          toolCallId: "tool_x_post_approval",
+          state: "approval-requested",
+          input: {
+            action: "x_account.post_tweet",
+            params: {
+              posts: [
+                {
+                  account: "@founder",
+                  text: "We built this for small teams that want to move faster.",
+                },
+                {
+                  account: "@company",
+                  text: "A faster workflow for the small teams building what comes next.",
+                },
+              ],
+            },
+          },
+          approval: { id: "approval_x_post" },
+        },
+      ],
+    };
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onActionApproval={vi.fn(async () => undefined)}
+        allowActionApproval
+      />,
+    );
+
+    expect(screen.getByText("Post to X?")).toBeVisible();
+    expect(
+      screen.getByText("@founder — We built this for small teams that want to move faster."),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "@company — A faster workflow for the small teams building what comes next.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument();
+  });
+
   it("renders historical use_capability parts through the generic tool row without crashing", () => {
     const message: GoatChatUiMessage = {
       id: "assistant_7",
