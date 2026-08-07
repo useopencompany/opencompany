@@ -46,6 +46,7 @@ Every PR runs on GitHub Actions: `format:check`, `lint`, `typecheck`, `build`, `
 
 ## Docs
 
+- [Working in this repo](./AGENTS.md) — conventions, work loop, and quality bar for humans and coding agents alike (`CLAUDE.md` just imports it)
 - [The `.agent` file format](./docs/agent-file.md) — deep dive into the file that defines every agent
 - [Getting started](./docs/getting-started.md) — new engineer checklist and local dev setup in under five minutes
 - [Architecture](./docs/architecture.md) — runtime shape, sync, and database model
@@ -54,6 +55,7 @@ Every PR runs on GitHub Actions: `format:check`, `lint`, `typecheck`, `build`, `
 - [Database](./docs/database.md) — Neon branching, schema changes, Drizzle
 - [Deployment](./docs/deployment.md) — production release flow, Vercel, Render, env, smoke checks
 - [Secret management](./docs/secret-management.md) — Infisical source of truth and sync setup
+- [LLM token broker](./docs/llm-token-broker.md) — per-delegation tokens that keep raw provider keys out of agent sandboxes
 - [Environment variables](./docs/env-vars.md) — where every runtime and release env var lives
 - [Agent MCP](./docs/agent-mcp.md) — local SigNoz MCP setup for Conductor, Claude Code, and Codex
 - [Auth](./docs/auth.md) — WorkOS AuthKit, env vars, identity model
