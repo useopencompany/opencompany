@@ -11,15 +11,15 @@ const dbMocks = vi.hoisted(() => ({
   getGoatWorkspaceRole: vi.fn(),
 }));
 
-vi.mock("@opencompany/db/goat-repo-configs", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@opencompany/db/goat-repo-configs")>();
+vi.mock("@opencompany/db/repo-configs", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@opencompany/db/repo-configs")>();
   return {
     ...original,
     listDecryptedGoatRepoConfigs: dbMocks.listDecryptedGoatRepoConfigs,
   };
 });
 
-vi.mock("@opencompany/db/goat-workspaces", () => ({
+vi.mock("@opencompany/db/workspaces", () => ({
   getGoatWorkspaceRole: dbMocks.getGoatWorkspaceRole,
 }));
 

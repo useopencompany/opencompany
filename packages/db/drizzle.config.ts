@@ -7,7 +7,7 @@ if (!databaseUrl) {
 }
 
 export default defineConfig({
-  schema: ["./src/goat-schema.ts", "./src/legacy-billing-schema.ts", "./src/llm-broker-schema.ts"],
+  schema: ["./src/schema.ts", "./src/legacy-billing-schema.ts", "./src/llm-broker-schema.ts"],
   out: "../../drizzle",
   dialect: "postgresql",
   dbCredentials: {

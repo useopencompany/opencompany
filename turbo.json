@@ -94,7 +94,7 @@
       "dependsOn": ["^build"],
       "outputs": [".next/**", "!.next/cache/**"]
     },
-    "@opencompany/goat-brain#build": {
+    "@opencompany/brain#build": {
       "dependsOn": ["^build"],
       "outputs": ["src/generated/cli-bundle.ts"]
     },

@@ -4,8 +4,8 @@ import {
   type DecryptedGoatRepoConfig,
   isValidGitHubRepositoryExternalId,
   listDecryptedGoatRepoConfigs,
-} from "@opencompany/db/goat-repo-configs";
-import { getGoatWorkspaceRole } from "@opencompany/db/goat-workspaces";
+} from "@opencompany/db/repo-configs";
+import { getGoatWorkspaceRole } from "@opencompany/db/workspaces";
 import { parse } from "dotenv";
 import { getDb } from "./db";
 import type { SandboxHandle } from "./sandbox";

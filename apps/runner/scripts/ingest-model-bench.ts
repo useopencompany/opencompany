@@ -19,9 +19,9 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { materializeGoatBrainFilesToRoot } from "@opencompany/db/goat-brain-files";
-import { isNormalizedGitHubActivitySourceItem } from "@opencompany/goat-brain";
-import { getGoatBrainCliSource } from "@opencompany/goat-brain/cli-bundle";
+import { isNormalizedGitHubActivitySourceItem } from "@opencompany/brain";
+import { getGoatBrainCliSource } from "@opencompany/brain/cli-bundle";
+import { materializeGoatBrainFilesToRoot } from "@opencompany/db/brain-files";
 import { sql } from "drizzle-orm";
 import { closeDb, getDb } from "../src/db";
 import {

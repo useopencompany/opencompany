@@ -70,7 +70,7 @@ LATITUDE_SERVICE_NAME=opencompany-goat   # runner deployments set opencompany-ru
 LATITUDE_TELEMETRY_DISABLED=1            # kill switch even when keyed
 ```
 
-When enabled, `@opencompany/goat-observability/latitude` sends full-content AI SDK spans
+When enabled, `@opencompany/telemetry/latitude` sends full-content AI SDK spans
 (prompts, completions, tool calls, token usage) to Latitude for three goat surfaces: main chat
 turns (`chat-turn`, session = chat session id), Slack bot answers (`slack-answer`, session =
 `slack:{team}:{channel}:{thread}`), and brain ingestion runs (`brain-ingest` +
@@ -178,7 +178,7 @@ access, and keep Braintrust disabled in environments where full AI content must 
 ## Goat Run Outcomes
 
 Goat signups, chat turns, task runs, and Brain agent ingest jobs emit a first-layer health signal
-through `@opencompany/goat-observability` when `GOAT_OBSERVABILITY_ENABLED=true` and
+through `@opencompany/telemetry` when `GOAT_OBSERVABILITY_ENABLED=true` and
 `GOAT_OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 
 For the SigNoz dashboard, saved trace views, MCP prompts, and event inventory, see

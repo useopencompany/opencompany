@@ -3,12 +3,12 @@ import {
   GOAT_ATTIO_OBJECT_SLUGS,
   GOAT_ATTIO_PROVIDER,
   type GoatAttioApiKeyCredentialPayload,
-} from "@opencompany/db/goat-attio";
+} from "@opencompany/db/attio";
 import {
   loadGoatIntegrationCredential,
   markGoatIntegrationStatus,
-} from "@opencompany/db/goat-integrations";
-import type { GoatAttioObjectType } from "@opencompany/db/goat-schema";
+} from "@opencompany/db/integrations";
+import type { GoatAttioObjectType } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
 import { getDb } from "./db";
 

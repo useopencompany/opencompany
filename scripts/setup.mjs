@@ -175,7 +175,7 @@ const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
 const LEGACY_LOCAL_GOAT_APP_URL = "http://localhost:3002";
 const LOCAL_GOAT_APP_URL = goatHttpsOrigin(process.env);
 const LOCAL_GOAT_WORKOS_REDIRECT_URI = `${LOCAL_GOAT_APP_URL}/auth/callback`;
-const GOAT_ENV_PATH = "apps/goat/.env.local";
+const GOAT_ENV_PATH = "apps/app/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",

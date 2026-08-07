@@ -1,22 +1,22 @@
 import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
+import { wakeGoatBrainImportWorker } from "./brain-import-worker";
+import { wakeGoatBrainIngestWorker } from "./brain-ingest-worker";
 import { pollGoatCodexDeviceAuthFlow, startGoatCodexDeviceAuthFlow } from "./codex-auth";
-import type { RunnerEnv } from "./env";
-import { wakeGoatBrainImportWorker } from "./goat-brain-import-worker";
-import { wakeGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
-import { wakeGoatCodexChatWorker } from "./goat-codex-chat-worker";
 import {
   GoatCodingWorkspaceAccessError,
   mintGoatCodingWorkspaceAccess,
-} from "./goat-coding-workspace-runtime";
-import { createGoatCodingWorkspaceTransport } from "./goat-coding-workspace-runtime-transport";
-import { createGoatDictationTicket } from "./goat-dictation-auth";
-import { wakeGoatGoogleDriveSyncWorker } from "./goat-google-drive-sync-worker";
-import { planGoatHarnessForTask } from "./goat-harness";
-import { getGoatHarnessPlannerContextForRunner } from "./goat-harness-planner";
+} from "./coding-workspace-runtime";
+import { createGoatCodingWorkspaceTransport } from "./coding-workspace-runtime-transport";
+import { createGoatDictationTicket } from "./dictation-auth";
+import type { RunnerEnv } from "./env";
+import { wakeGoatGoogleDriveSyncWorker } from "./google-drive-sync-worker";
+import { planGoatHarnessForTask } from "./harness";
+import { getGoatHarnessPlannerContextForRunner } from "./harness-planner";
 import { completeGoatInfisicalAuthFlow, startGoatInfisicalAuthFlow } from "./infisical-auth";
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
+import { wakeGoatCodexChatWorker } from "./turn-worker";
 
 const logger = createLogger({
   service: "opencompany-runner",

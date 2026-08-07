@@ -1,9 +1,6 @@
 import { shellQuote } from "@opencompany/agent-runtime";
-import {
-  newGoatCodexDeviceAuthFlowId,
-  saveGoatCodexCredential,
-} from "@opencompany/db/goat-codex-auth";
-import { goatCodexDeviceAuthFlows } from "@opencompany/db/goat-schema";
+import { newGoatCodexDeviceAuthFlowId, saveGoatCodexCredential } from "@opencompany/db/codex-auth";
+import { goatCodexDeviceAuthFlows } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, inArray } from "drizzle-orm";
 import { Sandbox } from "e2b";

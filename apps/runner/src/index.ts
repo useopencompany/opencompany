@@ -1,9 +1,4 @@
 import "./load-env";
-import { flushLatitude } from "@opencompany/goat-observability/latitude";
-import {
-  registerGoatNodeObservability,
-  shutdownGoatNodeObservability,
-} from "@opencompany/goat-observability/node";
 import {
   captureException,
   createLogger,
@@ -12,33 +7,38 @@ import {
   setExceptionReporter,
 } from "@opencompany/observability";
 import { flushBraintrust } from "@opencompany/observability/braintrust";
+import { flushLatitude } from "@opencompany/telemetry/latitude";
+import {
+  registerGoatNodeObservability,
+  shutdownGoatNodeObservability,
+} from "@opencompany/telemetry/node";
 import * as Sentry from "@sentry/bun";
+import { startGoatAttioFlushWorker } from "./attio-flush-worker";
+import { setGoatBrainImportWakeup, startGoatBrainImportWorker } from "./brain-import-worker";
+import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./brain-ingest-worker";
 import { assertRunnerDbConfig, closeDb } from "./db";
 import { loadEnv } from "./env";
-import { startGoatAttioFlushWorker } from "./goat-attio-flush-worker";
-import { setGoatBrainImportWakeup, startGoatBrainImportWorker } from "./goat-brain-import-worker";
-import { setGoatBrainIngestWakeup, startGoatBrainIngestWorker } from "./goat-brain-ingest-worker";
+import { startGoatFathomPollWorker } from "./fathom-poll-worker";
+import { startGoatGitHubFlushWorker } from "./github-flush-worker";
+import { startGoatGmailFlushWorker } from "./gmail-flush-worker";
+import { startGoatGmailPollWorker } from "./gmail-poll-worker";
+import {
+  setGoatGoogleDriveSyncWakeup,
+  startGoatGoogleDriveSyncWorker,
+} from "./google-drive-sync-worker";
+import { startGoatGranolaPollWorker } from "./granola-poll-worker";
+import { startGoatHubspotFlushWorker } from "./hubspot-flush-worker";
+import { startGoatLinearFlushWorker } from "./linear-flush-worker";
+import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
+import { assertPreviewIdentity } from "./preview-guard";
+import { startGoatTaskScheduleWorker } from "./scheduler";
+import { createServer } from "./server";
+import { startGoatSlackFlushWorker } from "./slack-flush-worker";
 import {
   setGoatCodexChatWakeup,
   startGoatCodexChatWorker,
   sweepTerminalGoatCodexChatSandboxes,
-} from "./goat-codex-chat-worker";
-import { startGoatFathomPollWorker } from "./goat-fathom-poll-worker";
-import { startGoatGitHubFlushWorker } from "./goat-github-flush-worker";
-import { startGoatGmailFlushWorker } from "./goat-gmail-flush-worker";
-import { startGoatGmailPollWorker } from "./goat-gmail-poll-worker";
-import {
-  setGoatGoogleDriveSyncWakeup,
-  startGoatGoogleDriveSyncWorker,
-} from "./goat-google-drive-sync-worker";
-import { startGoatGranolaPollWorker } from "./goat-granola-poll-worker";
-import { startGoatHubspotFlushWorker } from "./goat-hubspot-flush-worker";
-import { startGoatLinearFlushWorker } from "./goat-linear-flush-worker";
-import { startGoatTaskScheduleWorker } from "./goat-scheduler";
-import { startGoatSlackFlushWorker } from "./goat-slack-flush-worker";
-import { settleExpiredBrokerTokens } from "./llm-broker-tokens";
-import { assertPreviewIdentity } from "./preview-guard";
-import { createServer } from "./server";
+} from "./turn-worker";
 
 const logger = createLogger({
   service: "opencompany-runner",

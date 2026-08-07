@@ -5,9 +5,9 @@ import {
   type GoatInfisicalAuthBundle,
   newGoatInfisicalAuthFlowId,
   saveGoatInfisicalConnection,
-} from "@opencompany/db/goat-infisical-auth";
-import { goatInfisicalAuthFlows } from "@opencompany/db/goat-schema";
-import { requireGoatWorkspaceAdmin } from "@opencompany/db/goat-workspaces";
+} from "@opencompany/db/infisical-auth";
+import { goatInfisicalAuthFlows } from "@opencompany/db/schema";
+import { requireGoatWorkspaceAdmin } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { and, eq, inArray } from "drizzle-orm";
 import { Sandbox } from "e2b";

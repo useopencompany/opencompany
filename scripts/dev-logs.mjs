@@ -5,8 +5,8 @@ import { exit } from "node:process";
 
 const DEFAULT_LOG_FILE = ".context/logs/dev-turbo.json";
 const SOURCE_ALIASES = new Map([
-  ["app", "@opencompany/goat#dev"],
-  ["goat", "@opencompany/goat#dev"],
+  ["app", "@opencompany/app#dev"],
+  ["goat", "@opencompany/app#dev"],
   ["runner", "@opencompany/runner#dev"],
   ["stripe", "@opencompany/stripe-webhooks#dev"],
   ["turbo", "turbo"],

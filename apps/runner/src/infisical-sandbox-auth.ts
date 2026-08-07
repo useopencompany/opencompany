@@ -5,8 +5,8 @@ import {
   loadGoatInfisicalConnectionMetadata,
   markGoatInfisicalConnectionNeedsReauth,
   markGoatInfisicalConnectionValidated,
-} from "@opencompany/db/goat-infisical-auth";
-import { getGoatWorkspaceRole } from "@opencompany/db/goat-workspaces";
+} from "@opencompany/db/infisical-auth";
+import { getGoatWorkspaceRole } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { getDb } from "./db";
 import { INFISICAL_CLI_LINUX_AMD64_SHA256, INFISICAL_CLI_VERSION } from "./infisical-version";

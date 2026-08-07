@@ -322,7 +322,7 @@ bad trust boundary for agents. Use APIs or user-provided files.
 ## Implementation Direction
 
 Prefer implementing this as a first-party action provider in the goat app and
-`@opencompany/goat-agent`, matching the existing action catalog pattern.
+`@opencompany/core`, matching the existing action catalog pattern.
 
 Suggested code shape:
 

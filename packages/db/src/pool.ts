@@ -1,8 +1,8 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool, type PoolConfig } from "pg";
-import * as goatSchema from "./goat-schema";
 import * as legacyBillingSchema from "./legacy-billing-schema";
 import * as llmBrokerSchema from "./llm-broker-schema";
+import * as goatSchema from "./schema";
 
 const schema = { ...legacyBillingSchema, ...llmBrokerSchema, ...goatSchema };
 

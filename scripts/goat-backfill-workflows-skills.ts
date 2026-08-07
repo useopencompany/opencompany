@@ -14,18 +14,13 @@
 // Usage: DATABASE_URL=postgres://... bun run scripts/goat-backfill-workflows-skills.ts
 
 import { createHash, randomUUID } from "node:crypto";
-import { getDb } from "@opencompany/db/client";
-import {
-  goatBrainDocuments,
-  goatBrains,
-  goatSkills,
-  goatWorkflows,
-} from "@opencompany/db/goat-schema";
 import {
   goatBrainSkillFromDocument,
   goatBrainWorkflowFromDocument,
   parseGoatBrainDocument,
-} from "@opencompany/goat-brain";
+} from "@opencompany/brain";
+import { getDb } from "@opencompany/db/client";
+import { goatBrainDocuments, goatBrains, goatSkills, goatWorkflows } from "@opencompany/db/schema";
 import { eq, like, or } from "drizzle-orm";
 
 const GENERAL_BRAIN_SLUG = "general";

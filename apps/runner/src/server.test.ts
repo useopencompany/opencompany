@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mintGoatCodingWorkspaceAccess } from "./goat-coding-workspace-runtime";
-import { verifyGoatDictationTicket } from "./goat-dictation-auth";
+import { mintGoatCodingWorkspaceAccess } from "./coding-workspace-runtime";
+import { verifyGoatDictationTicket } from "./dictation-auth";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
 import { createServer } from "./server";
 
-vi.mock("./goat-coding-workspace-runtime", async (importOriginal) => {
-  const original = await importOriginal<typeof import("./goat-coding-workspace-runtime")>();
+vi.mock("./coding-workspace-runtime", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./coding-workspace-runtime")>();
   return {
     ...original,
     mintGoatCodingWorkspaceAccess: vi.fn(async () => ({

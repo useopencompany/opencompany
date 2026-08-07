@@ -176,7 +176,7 @@ jobs:
 
       - name: Check Goat billing env before production changes
         if: ${{ (github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true') && steps.release-scope.outputs.goat == 'true' }}
-        run: node scripts/check-goat-billing-production-env.mjs
+        run: node scripts/check-billing-production-env.mjs
 
       - name: Create GitHub deployment
         id: github-deployment
@@ -294,8 +294,8 @@ jobs:
               throw new Error("Fetched Vercel project id does not match GOAT_VERCEL_PROJECT_ID.");
             }
 
-            if (project.rootDirectory !== "apps/goat") {
-              throw new Error(`Goat Vercel project rootDirectory must be apps/goat, got ${project.rootDirectory ?? "<unset>"}.`);
+            if (project.rootDirectory !== "apps/app") {
+              throw new Error(`Goat Vercel project rootDirectory must be apps/app, got ${project.rootDirectory ?? "<unset>"}.`);
             }
 
             mkdirSync(".vercel", { recursive: true });

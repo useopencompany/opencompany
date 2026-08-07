@@ -116,7 +116,7 @@ Do not silently enrich every imported connection through paid providers. That wo
 
 1. Add `linkedin_export` parsing behind an upload route.
 2. Add `goat_network_imports` and `goat_network_contacts` tables plus tests for duplicate handling and CSV preamble/header tolerance.
-3. Add a `personal_network` action resolver in `@opencompany/goat-agent` and include it in `resolveGoatActionCatalog` when imported contacts exist.
+3. Add a `personal_network` action resolver in `@opencompany/core` and include it in `resolveGoatActionCatalog` when imported contacts exist.
 4. Add action execution tests for `search_people`, `find_intro_candidates`, and privacy behavior around emails.
 5. Add a small settings/import UI with upload, review, commit, refresh, delete, and last-import freshness.
 6. Add prompt guidance that personal-network answers require Brain or `personal_network`, not managed LinkedIn public lookups.

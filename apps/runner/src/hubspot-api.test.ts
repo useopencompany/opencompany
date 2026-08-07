@@ -7,7 +7,7 @@ const integrationsMock = vi.hoisted(() => ({
   refreshGoatIntegrationCredential: vi.fn(),
 }));
 
-vi.mock("@opencompany/db/goat-integrations", () => integrationsMock);
+vi.mock("@opencompany/db/integrations", () => integrationsMock);
 vi.mock("@opencompany/observability", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));

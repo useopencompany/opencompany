@@ -2,8 +2,8 @@ import {
   loadGoatIntegrationCredential,
   markGoatIntegrationStatus,
   refreshGoatIntegrationCredential,
-} from "@opencompany/db/goat-integrations";
-import type { GoatIntegrationProvider } from "@opencompany/db/goat-schema";
+} from "@opencompany/db/integrations";
+import type { GoatIntegrationProvider } from "@opencompany/db/schema";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 

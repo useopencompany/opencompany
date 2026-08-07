@@ -1,7 +1,7 @@
 export const RELEASE_SURFACES = ["goat", "marketing", "runner"];
 
 const PACKAGE_SURFACES = new Map([
-  ["@opencompany/goat", ["goat"]],
+  ["@opencompany/app", ["goat"]],
   ["@opencompany/marketing", ["marketing"]],
   ["@opencompany/runner", ["runner"]],
 ]);
@@ -25,7 +25,7 @@ const FORCE_RULES = [
     surfaces: ALL_SURFACES,
   },
   { files: ["scripts/release-vercel-deploy.mjs"], surfaces: VERCEL_SURFACES },
-  { files: ["scripts/next-goat.mjs"], surfaces: ["goat"] },
+  { files: ["scripts/next-app.mjs"], surfaces: ["goat"] },
   { files: ["scripts/load-env.mjs"], surfaces: ["goat"] },
   {
     files: [".dockerignore", "Dockerfile.runner", "render.yaml", "scripts/render-release.mjs"],

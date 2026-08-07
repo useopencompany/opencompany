@@ -47,8 +47,8 @@ jobs:
         run: |
           changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
           added_migrations="$(git diff --diff-filter=A --name-only "$BASE_SHA" "$HEAD_SHA")"
-          if printf '%s\n' "$changed_files" | rg -q '^packages/db/src/(goat-schema|legacy-billing-schema|llm-broker-schema)\.ts$' && ! printf '%s\n' "$added_migrations" | rg -q '^drizzle/[0-9][^/]*\.sql$'; then
-            echo "A change to a packages/db schema file (goat-schema.ts, legacy-billing-schema.ts, or llm-broker-schema.ts) requires a numbered Drizzle migration."
+          if printf '%s\n' "$changed_files" | rg -q '^packages/db/src/(schema|legacy-billing-schema|llm-broker-schema)\.ts$' && ! printf '%s\n' "$added_migrations" | rg -q '^drizzle/[0-9][^/]*\.sql$'; then
+            echo "A change to a packages/db schema file (schema.ts, legacy-billing-schema.ts, or llm-broker-schema.ts) requires a numbered Drizzle migration."
             exit 1
           fi
 

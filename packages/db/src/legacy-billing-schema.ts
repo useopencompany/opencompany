@@ -1,5 +1,5 @@
 // Storage contract for the legacy-product billing tables the shared Stripe webhook
-// still writes (apps/goat/lib/billing/legacy-*.ts). Physical table names, columns,
+// still writes (apps/app/lib/billing/legacy-*.ts). Physical table names, columns,
 // and constraints in the public schema must stay exactly as deployed; these tables
 // are retirement-tracked and go away when legacy billing is wound down.
 // workspace_id / user_id keep their database-level foreign keys to the legacy
