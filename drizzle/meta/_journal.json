@@ -1373,6 +1373,13 @@
       "when": 1785951000000,
       "tag": "0194_goat_x_account_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "7",
+      "when": 1785951001000,
+      "tag": "0195_goat_skill_import_source",
+      "breakpoints": true
     }
   ]
 }

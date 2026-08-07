@@ -8,10 +8,12 @@ import {
   GoatMcpSettingsRoute,
   GoatPreferencesSettingsRoute,
   GoatSkillEditorRoute,
+  GoatSkillsSettingsRoute,
 } from "./GoatRoutes";
 
 const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
+  push: vi.fn(),
 }));
 
 const appDataMock = vi.hoisted(() => ({
@@ -47,6 +49,18 @@ const skillActionsMock = vi.hoisted(() => ({
   updateGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
   archiveGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
   createGoatSkillAction: vi.fn(async () => ({ ok: true, slug: "test-skill" })),
+  previewGoatSkillImportAction: vi.fn(async () => ({
+    status: "resolved" as const,
+    proposedSlug: "imported-skill",
+    name: "Imported skill",
+    description: "Does an imported thing",
+    instructions: "Use this when imported.",
+    extraFiles: [] as string[],
+  })),
+  importGoatSkillAction: vi.fn(async () => ({
+    status: "imported" as const,
+    slug: "imported-skill",
+  })),
 }));
 
 const themeMock = vi.hoisted(() => ({
@@ -124,6 +138,8 @@ vi.mock("@/lib/skill-actions", () => ({
   updateGoatSkillAction: skillActionsMock.updateGoatSkillAction,
   archiveGoatSkillAction: skillActionsMock.archiveGoatSkillAction,
   createGoatSkillAction: skillActionsMock.createGoatSkillAction,
+  previewGoatSkillImportAction: skillActionsMock.previewGoatSkillImportAction,
+  importGoatSkillAction: skillActionsMock.importGoatSkillAction,
 }));
 
 vi.mock("@/components/ThemeProvider", () => ({
@@ -322,7 +338,7 @@ describe("GoatSkillEditorRoute", () => {
     };
 
     const { container } = render(
-      <GoatSkillEditorRoute skill={skill} initialStatus="draft" canEdit />,
+      <GoatSkillEditorRoute skill={skill} initialStatus="draft" canEdit source={null} />,
     );
 
     expect(container.querySelector("textarea")).toBeNull();
@@ -337,6 +353,67 @@ describe("GoatSkillEditorRoute", () => {
           instructions: "Use this when asked.",
         }),
       ),
+    );
+  });
+
+  it("renders an imported skill read-only, with no Save button", async () => {
+    const skill = {
+      id: "imported-skill",
+      name: "Imported skill",
+      description: "Does an imported thing",
+      instructions: "Use this when imported.",
+    };
+
+    render(
+      <GoatSkillEditorRoute
+        skill={skill}
+        initialStatus="active"
+        canEdit
+        source={{
+          type: "github",
+          url: "https://github.com/o/r",
+          ref: "main",
+          path: "",
+          resolvedCommit: "a".repeat(40),
+        }}
+      />,
+    );
+
+    expect(await screen.findByText(/Imported from/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Imported skill")).toBeDisabled();
+  });
+});
+
+describe("GoatSkillsSettingsRoute", () => {
+  beforeEach(() => {
+    skillActionsMock.previewGoatSkillImportAction.mockClear();
+    skillActionsMock.importGoatSkillAction.mockClear();
+    routerMock.push.mockReset();
+  });
+
+  it("previews then imports a skill from a pasted URL", async () => {
+    render(<GoatSkillsSettingsRoute skills={[]} canEdit />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Import from a link/ }));
+    await userEvent.type(screen.getByPlaceholderText("github.com/owner/repo"), "github.com/o/r");
+    await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(await screen.findByText("Use this when imported.")).toBeInTheDocument();
+    expect(skillActionsMock.previewGoatSkillImportAction).toHaveBeenCalledWith({
+      url: "github.com/o/r",
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Import skill" }));
+
+    await waitFor(() =>
+      expect(skillActionsMock.importGoatSkillAction).toHaveBeenCalledWith({
+        url: "github.com/o/r",
+      }),
+    );
+    await waitFor(() =>
+      expect(routerMock.push).toHaveBeenCalledWith("/settings/skills/imported-skill"),
     );
   });
 });
