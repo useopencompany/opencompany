@@ -1,5 +1,6 @@
 "use client";
 
+import type { GoatPublishedChatArtifact } from "@opencompany/agent-runtime";
 import { Link2 } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
@@ -21,6 +22,10 @@ export function SharedChatView({ chat }: { chat: PublicGoatChatView }) {
           messageId,
         )}/${encodeURIComponent(attachment.id)}`
       : undefined;
+  const artifactHref = (artifact: GoatPublishedChatArtifact) =>
+    `/share/${encodeURIComponent(chat.shareId)}/artifacts/${encodeURIComponent(
+      artifact.artifactId,
+    )}/versions/${encodeURIComponent(artifact.artifactVersionId)}`;
 
   return (
     <main className="h-dvh w-full overflow-y-auto bg-canvas text-ink">
@@ -52,6 +57,7 @@ export function SharedChatView({ chat }: { chat: PublicGoatChatView }) {
               readOnly
               isTaskSession={chat.kind === "task"}
               attachmentSrc={attachmentSrc}
+              artifactHref={artifactHref}
             />
           ))}
         </div>
