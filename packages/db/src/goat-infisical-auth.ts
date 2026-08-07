@@ -19,7 +19,24 @@ import type * as publicSchema from "./schema";
 
 const ENCRYPTION_KEY_VERSION = 1;
 export const GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION = 1 as const;
-export const GOAT_INFISICAL_HOST = "https://app.infisical.com";
+export const GOAT_INFISICAL_US_HOST = "https://app.infisical.com";
+export const GOAT_INFISICAL_EU_HOST = "https://eu.infisical.com";
+export const GOAT_INFISICAL_HOSTS = [GOAT_INFISICAL_US_HOST, GOAT_INFISICAL_EU_HOST] as const;
+export type GoatInfisicalHost = (typeof GOAT_INFISICAL_HOSTS)[number];
+
+export function isGoatInfisicalHost(value: unknown): value is GoatInfisicalHost {
+  return typeof value === "string" && GOAT_INFISICAL_HOSTS.includes(value as GoatInfisicalHost);
+}
+
+export function isGoatInfisicalSessionDomain(value: unknown, expectedHost: GoatInfisicalHost) {
+  if (typeof value !== "string") return false;
+  return (
+    value
+      .trim()
+      .replace(/\/+$/, "")
+      .replace(/\/api$/, "") === expectedHost
+  );
+}
 
 type DbSchema = typeof publicSchema & typeof goatSchema;
 type GoatInfisicalAuthDb = Pick<
@@ -45,7 +62,7 @@ export type LoadedGoatInfisicalConnection = {
   credentialGeneration: string;
   status: GoatInfisicalConnectionStatus;
   statusReason: string | null;
-  host: string;
+  host: GoatInfisicalHost;
   accountEmail: string | null;
   cliVersion: string | null;
   bundleFormatVersion: number | null;
@@ -66,6 +83,7 @@ export async function saveGoatInfisicalConnection(input: {
   db: GoatInfisicalAuthDb;
   workspaceId: string;
   authBundle: GoatInfisicalAuthBundle;
+  host: GoatInfisicalHost;
   accountEmail: string;
   cliVersion: string;
   expiresAt?: Date | null;
@@ -89,7 +107,7 @@ export async function saveGoatInfisicalConnection(input: {
       credentialGeneration,
       status: "connected",
       statusReason: null,
-      host: GOAT_INFISICAL_HOST,
+      host: input.host,
       accountEmail: input.accountEmail,
       cliVersion: input.cliVersion,
       bundleFormatVersion: GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
@@ -107,7 +125,7 @@ export async function saveGoatInfisicalConnection(input: {
         credentialGeneration,
         status: "connected",
         statusReason: null,
-        host: GOAT_INFISICAL_HOST,
+        host: input.host,
         accountEmail: input.accountEmail,
         cliVersion: input.cliVersion,
         bundleFormatVersion: GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
@@ -143,7 +161,7 @@ export async function disconnectGoatInfisicalConnection(input: {
       credentialGeneration,
       status: "disconnected",
       statusReason: null,
-      host: GOAT_INFISICAL_HOST,
+      host: GOAT_INFISICAL_US_HOST,
       accountEmail: null,
       cliVersion: null,
       bundleFormatVersion: null,
@@ -280,7 +298,7 @@ function metadataFromRow(
     credentialGeneration: row.credentialGeneration,
     status: row.status,
     statusReason: row.statusReason,
-    host: row.host,
+    host: isGoatInfisicalHost(row.host) ? row.host : GOAT_INFISICAL_US_HOST,
     accountEmail: row.accountEmail,
     cliVersion: row.cliVersion,
     bundleFormatVersion: row.bundleFormatVersion,

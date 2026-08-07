@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   disconnectGoatInfisicalConnection,
   GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
+  GOAT_INFISICAL_EU_HOST,
+  GOAT_INFISICAL_US_HOST,
+  isGoatInfisicalHost,
+  isGoatInfisicalSessionDomain,
   loadGoatInfisicalConnection,
   saveGoatInfisicalConnection,
 } from "./goat-infisical-auth";
@@ -48,6 +52,7 @@ describe("Goat Infisical credentials", () => {
       db: insertDb as never,
       workspaceId: "workspace_1",
       authBundle: bundle,
+      host: GOAT_INFISICAL_EU_HOST,
       accountEmail: "founder@example.com",
       cliVersion: "0.43.118",
       connectedByWorkosId: "user_1",
@@ -55,6 +60,7 @@ describe("Goat Infisical credentials", () => {
     });
     expect(stored).not.toBeNull();
     expect(JSON.stringify(stored)).not.toContain("signed.jwt.token");
+    expect(stored).toMatchObject({ host: GOAT_INFISICAL_EU_HOST });
 
     const row = {
       ...(stored as unknown as Record<string, unknown>),
@@ -77,6 +83,20 @@ describe("Goat Infisical credentials", () => {
         workspaceId: "workspace_2",
       }),
     ).rejects.toThrow("Infisical credential could not be decrypted.");
+  });
+
+  it("allows only the two Infisical Cloud hosts and matches their CLI session domains", () => {
+    expect(isGoatInfisicalHost(GOAT_INFISICAL_US_HOST)).toBe(true);
+    expect(isGoatInfisicalHost(GOAT_INFISICAL_EU_HOST)).toBe(true);
+    expect(isGoatInfisicalHost("https://evil.example")).toBe(false);
+
+    expect(isGoatInfisicalSessionDomain(GOAT_INFISICAL_EU_HOST, GOAT_INFISICAL_EU_HOST)).toBe(true);
+    expect(
+      isGoatInfisicalSessionDomain(`${GOAT_INFISICAL_EU_HOST}/api`, GOAT_INFISICAL_EU_HOST),
+    ).toBe(true);
+    expect(isGoatInfisicalSessionDomain(GOAT_INFISICAL_US_HOST, GOAT_INFISICAL_EU_HOST)).toBe(
+      false,
+    );
   });
 
   it("disconnects with a new generation and removes encrypted material", async () => {

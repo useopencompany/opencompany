@@ -332,6 +332,12 @@ function LiveSettingsIntegrations({
 }
 
 type IntegrationScope = "workspace" | "personal";
+type InfisicalHost = NonNullable<GoatInfisicalProviderState["host"]>;
+
+const INFISICAL_REGIONS = [
+  { host: "https://app.infisical.com", label: "US" },
+  { host: "https://eu.infisical.com", label: "EU" },
+] as const satisfies ReadonlyArray<{ host: InfisicalHost; label: string }>;
 
 // Group-card providers surfaced under each scope. These are all user-owned in the
 // data model (each member connects their own account), but the CRM / meeting /
@@ -1285,6 +1291,11 @@ function InfisicalIntegrationCard({
 }) {
   const router = useRouter();
   const [flow, setFlow] = useState<GoatInfisicalAuthFlow | null>(null);
+  const [host, setHost] = useState<InfisicalHost>(
+    integration.host === "https://eu.infisical.com"
+      ? "https://eu.infisical.com"
+      : "https://app.infisical.com",
+  );
   const [browserToken, setBrowserToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -1293,7 +1304,7 @@ function InfisicalIntegrationCard({
     setError(null);
     setBrowserToken("");
     startTransition(async () => {
-      const result = await startGoatInfisicalAuth();
+      const result = await startGoatInfisicalAuth({ host });
       if (result.ok) setFlow(result.flow);
       else setError(result.error);
     });
@@ -1340,10 +1351,13 @@ function InfisicalIntegrationCard({
     });
   };
 
+  const regionLabel = INFISICAL_REGIONS.find((region) => region.host === host)?.label ?? "US";
+  const connectedRegionLabel =
+    INFISICAL_REGIONS.find((region) => region.host === integration.host)?.label ?? regionLabel;
   const accountLabel = integration.connected
     ? integration.accountEmail
-      ? `Connected as ${integration.accountEmail}`
-      : "Connected"
+      ? `Connected as ${integration.accountEmail} · ${connectedRegionLabel}`
+      : `Connected · ${connectedRegionLabel}`
     : integration.statusReason;
 
   return (
@@ -1361,10 +1375,42 @@ function InfisicalIntegrationCard({
           {!canManage ? (
             <p className="text-[12px] leading-4 text-ink-subtle">Managed by workspace admins.</p>
           ) : null}
+          {canManage && flow?.status !== "link_ready" ? (
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[12px] leading-4 text-ink-subtle">Region</span>
+              <div
+                role="group"
+                aria-label="Infisical region"
+                className="inline-flex rounded-full bg-surface-muted p-0.5"
+              >
+                {INFISICAL_REGIONS.map((region) => {
+                  const selected = region.host === host;
+                  return (
+                    <button
+                      key={region.host}
+                      type="button"
+                      aria-pressed={selected}
+                      disabled={isPending}
+                      onClick={() => setHost(region.host)}
+                      className={cn(
+                        "rounded-full px-2.5 py-0.5 text-[11px] font-medium leading-4 transition-colors duration-150",
+                        selected
+                          ? "bg-surface text-ink shadow-sm"
+                          : "text-ink-subtle hover:text-ink",
+                      )}
+                    >
+                      {region.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
           {flow?.status === "link_ready" && flow.loginUrl ? (
             <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
               <span>
-                Open Infisical, finish signing in, then copy the browser token it gives you.
+                Open Infisical {regionLabel}, finish signing in without changing regions, then copy
+                the browser token immediately.
               </span>
               <a
                 href={flow.loginUrl}

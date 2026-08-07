@@ -167,6 +167,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
         status: infisical.status ?? "not_connected",
         statusReason: infisical.statusReason,
         accountEmail: infisical.accountEmail,
+        host: infisical.host,
         lastValidatedAt: infisical.lastValidatedAt,
       },
     }),

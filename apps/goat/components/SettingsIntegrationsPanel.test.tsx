@@ -201,6 +201,9 @@ describe("SettingsIntegrationsPanel", () => {
     fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Connect" }));
 
     await waitFor(() => {
+      expect(startInfisicalAuth).toHaveBeenCalledWith({
+        host: "https://app.infisical.com",
+      });
       expect(
         within(card as HTMLElement).getByRole("link", { name: /Open Infisical sign-in/ }),
       ).toHaveAttribute("href", "https://app.infisical.com/login?callback_port=12345");
@@ -216,6 +219,71 @@ describe("SettingsIntegrationsPanel", () => {
         browserToken: "browser-token",
       });
     });
+  });
+
+  it("starts Infisical authentication in the selected EU region", async () => {
+    startInfisicalAuth.mockResolvedValue({
+      ok: true,
+      flow: {
+        id: "ginff_eu",
+        status: "link_ready",
+        loginUrl: "https://eu.infisical.com/login?callback_port=23456",
+        statusReason: null,
+        expiresAt: "2026-08-05T17:00:00.000Z",
+      },
+    });
+
+    render(
+      <SettingsIntegrationsPanel
+        initialIntegrations={goatIntegrationStateFromRows([])}
+        isWorkspaceAdmin
+      />,
+    );
+    const card = screen
+      .getByText("Give workspace coding agents access to the real Infisical CLI.")
+      .closest("div.rounded-2xl");
+    expect(card).not.toBeNull();
+
+    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "EU" }));
+    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => {
+      expect(startInfisicalAuth).toHaveBeenCalledWith({
+        host: "https://eu.infisical.com",
+      });
+      expect(
+        within(card as HTMLElement).getByRole("link", { name: /Open Infisical sign-in/ }),
+      ).toHaveAttribute("href", "https://eu.infisical.com/login?callback_port=23456");
+    });
+    expect(
+      within(card as HTMLElement).getByText(/Open Infisical EU, finish signing in/),
+    ).toBeVisible();
+  });
+
+  it("restores the saved Infisical region for reconnects", () => {
+    const integrations = goatIntegrationStateFromRows([]);
+    integrations.infisical = {
+      provider: "infisical",
+      connected: true,
+      status: "connected",
+      statusReason: null,
+      accountEmail: "founder@example.com",
+      host: "https://eu.infisical.com",
+      lastValidatedAt: "2026-08-07T06:00:00.000Z",
+    };
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    const card = screen
+      .getByText("Give workspace coding agents access to the real Infisical CLI.")
+      .closest("div.rounded-2xl");
+    expect(card).not.toBeNull();
+    expect(
+      within(card as HTMLElement).getByText("Connected as founder@example.com · EU"),
+    ).toBeVisible();
+    expect(within(card as HTMLElement).getByRole("button", { name: "EU" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("keeps workspace Infisical read-only for non-admin members", () => {

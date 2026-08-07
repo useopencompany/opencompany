@@ -1,7 +1,12 @@
+import {
+  GOAT_INFISICAL_EU_HOST,
+  GOAT_INFISICAL_US_HOST,
+} from "@opencompany/db/goat-infisical-auth";
 import { describe, expect, it, vi } from "vitest";
 import {
   decodeInfisicalBrowserToken,
   ensureInfisicalTmuxInstalled,
+  infisicalHostFromLoginUrl,
   parseInfisicalLoginUrl,
 } from "./infisical-auth";
 import { INFISICAL_CLI_LINUX_AMD64_SHA256 } from "./infisical-version";
@@ -27,21 +32,54 @@ describe("Infisical CLI browser login", () => {
     );
   });
 
-  it("accepts only the pinned Infisical Cloud callback URL", () => {
+  it("accepts only the callback URL for the selected Infisical Cloud region", () => {
     expect(
       parseInfisicalLoginUrl(
         "To complete your login, open this address in your browser: https://app.infisical.com/login?callback_port=43123",
+        GOAT_INFISICAL_US_HOST,
       ),
     ).toBe("https://app.infisical.com/login?callback_port=43123");
     expect(
       parseInfisicalLoginUrl(
         "To complete your login, open this address in your browser: https://app.infisical\n.com/login?callback_port=43123",
+        GOAT_INFISICAL_US_HOST,
       ),
     ).toBe("https://app.infisical.com/login?callback_port=43123");
-    expect(parseInfisicalLoginUrl("https://evil.example/login?callback_port=43123")).toBeNull();
     expect(
-      parseInfisicalLoginUrl("https://app.infisical.com/login?callback_port=99999"),
+      parseInfisicalLoginUrl(
+        "https://eu.infisical.com/login?callback_port=43123",
+        GOAT_INFISICAL_EU_HOST,
+      ),
+    ).toBe("https://eu.infisical.com/login?callback_port=43123");
+    expect(
+      parseInfisicalLoginUrl(
+        "https://eu.infisical.com/login?callback_port=43123",
+        GOAT_INFISICAL_US_HOST,
+      ),
     ).toBeNull();
+    expect(
+      parseInfisicalLoginUrl(
+        "https://evil.example/login?callback_port=43123",
+        GOAT_INFISICAL_US_HOST,
+      ),
+    ).toBeNull();
+    expect(
+      parseInfisicalLoginUrl(
+        "https://app.infisical.com/login?callback_port=99999",
+        GOAT_INFISICAL_US_HOST,
+      ),
+    ).toBeNull();
+  });
+
+  it("recovers only an allowlisted region from a persisted login URL", () => {
+    expect(infisicalHostFromLoginUrl("https://eu.infisical.com/login?callback_port=43123")).toBe(
+      GOAT_INFISICAL_EU_HOST,
+    );
+    expect(infisicalHostFromLoginUrl("https://app.infisical.com/login?callback_port=43123")).toBe(
+      GOAT_INFISICAL_US_HOST,
+    );
+    expect(infisicalHostFromLoginUrl("https://evil.example/login?callback_port=43123")).toBeNull();
+    expect(infisicalHostFromLoginUrl("https://eu.infisical.com/dashboard")).toBeNull();
   });
 
   it("decodes the credential envelope used by Infisical's paste fallback", () => {

@@ -1,6 +1,8 @@
 import { shellQuote } from "@opencompany/agent-runtime";
 import {
   type GoatInfisicalAuthBundle,
+  type GoatInfisicalHost,
+  isGoatInfisicalSessionDomain,
   loadGoatInfisicalConnection,
   loadGoatInfisicalConnectionMetadata,
   markGoatInfisicalConnectionNeedsReauth,
@@ -105,7 +107,7 @@ export async function reconcileGoatInfisicalSandboxAuth(input: {
       !connection.lastValidatedAt ||
       Date.now() - connection.lastValidatedAt.getTime() >= INFISICAL_VALIDATION_INTERVAL_MS;
     if (needsValidation) {
-      const valid = await validateInfisicalLogin(input.sandbox);
+      const valid = await validateInfisicalLogin(input.sandbox, connection.host);
       if (!valid) {
         await markNeedsReauth({
           workspaceId: input.workspaceId,
@@ -129,6 +131,7 @@ export async function reconcileGoatInfisicalSandboxAuth(input: {
       promptFragment: [
         "<infisical_cli>",
         "The Infisical CLI is authenticated for this workspace and may be used directly.",
+        `The connected Infisical host is ${connection.host}.`,
         "Use the repository's .infisical.json or explicit flags to select a project and environment.",
         "Prefer `infisical run -- <command>` and never print, log, summarize, or expose secret values.",
         "</infisical_cli>",
@@ -240,7 +243,7 @@ function isAllowedBundlePath(path: string) {
   );
 }
 
-async function validateInfisicalLogin(sandbox: SandboxHandle) {
+async function validateInfisicalLogin(sandbox: SandboxHandle, host: GoatInfisicalHost) {
   const result = await sandbox.commands.run("HOME=/home/user infisical login status --json", {
     user: "user",
     timeoutMs: 30_000,
@@ -253,7 +256,7 @@ async function validateInfisicalLogin(sandbox: SandboxHandle) {
         (session) =>
           session.principalType === "user" &&
           session.status === "authenticated" &&
-          session.domain === "https://app.infisical.com",
+          isGoatInfisicalSessionDomain(session.domain, host),
       ),
     );
   } catch {

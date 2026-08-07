@@ -199,6 +199,7 @@ export type GoatInfisicalProviderState = {
   status: "connected" | "needs_reauth" | "disconnected" | "not_connected";
   statusReason: string | null;
   accountEmail: string | null;
+  host: "https://app.infisical.com" | "https://eu.infisical.com" | null;
   lastValidatedAt: string | null;
 };
 
@@ -391,6 +392,7 @@ export function goatIntegrationStateFromRows(
       status: "not_connected",
       statusReason: null,
       accountEmail: null,
+      host: null,
       lastValidatedAt: null,
     },
     personalAccounts,
