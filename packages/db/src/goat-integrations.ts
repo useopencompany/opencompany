@@ -148,6 +148,107 @@ export async function connectGoatGoogleIntegration(input: {
   return { integrationId: integration.id };
 }
 
+export type GoatXAccountOAuthCredentialPayload = {
+  access_token: string;
+  refresh_token?: string;
+  scope?: string;
+};
+
+// The X (Twitter) personal connection: OAuth 2.0 + PKCE, posting tweets as
+// the connecting user. Access tokens expire (2h) and are refreshed from the
+// stored refresh token, so expiresAt is always set.
+export async function connectGoatXAccountIntegration(input: {
+  userWorkosId: string;
+  xUserId: string;
+  username: string;
+  name: string | null;
+  accessToken: string;
+  refreshToken: string | null;
+  expiresAt: Date | null;
+  scopes: string[];
+  db?: GoatIntegrationDb;
+  now?: Date;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const connectionLabel = `@${input.username}`;
+
+  const [integration] = await db
+    .insert(goatIntegrations)
+    .values({
+      id: newGoatIntegrationId(),
+      userWorkosId: input.userWorkosId,
+      provider: "x_account",
+      // The X user id is stable across username changes; it is the routing key.
+      externalId: input.xUserId,
+      connectionLabel,
+      accountName: input.name,
+      accountEmail: null,
+      accountType: "x_user",
+      status: "connected",
+      statusReason: null,
+      scopes: input.scopes,
+      lastSyncedAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        goatIntegrations.userWorkosId,
+        goatIntegrations.provider,
+        goatIntegrations.externalId,
+      ],
+      // The personal-uniqueness index is partial; the arbiter must match it.
+      targetWhere: sql`${goatIntegrations.workspaceId} IS NULL`,
+      set: {
+        connectionLabel,
+        accountName: input.name,
+        accountType: "x_user",
+        status: "connected",
+        statusReason: null,
+        scopes: input.scopes,
+        lastSyncedAt: now,
+        updatedAt: now,
+      },
+    })
+    .returning({ id: goatIntegrations.id });
+
+  if (!integration) {
+    throw new Error("Could not persist Goat X integration.");
+  }
+
+  const payload: GoatXAccountOAuthCredentialPayload = {
+    access_token: input.accessToken,
+    ...(input.refreshToken ? { refresh_token: input.refreshToken } : {}),
+    ...(input.scopes.length > 0 ? { scope: input.scopes.join(" ") } : {}),
+  };
+
+  try {
+    await saveGoatIntegrationCredential({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "x_account",
+      kind: "oauth_token",
+      payload,
+      expiresAt: input.expiresAt,
+      db,
+      now,
+    });
+  } catch (error) {
+    await markGoatIntegrationStatus({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "x_account",
+      status: "sync_failed",
+      statusReason: "Failed to persist X integration credentials.",
+      db,
+      now: new Date(),
+    });
+    throw error;
+  }
+
+  return { integrationId: integration.id };
+}
+
 export type GoatSlackOAuthCredentialPayload = {
   access_token: string;
   authed_user_id: string;

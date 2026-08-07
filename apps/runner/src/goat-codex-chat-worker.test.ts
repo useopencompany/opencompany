@@ -102,6 +102,8 @@ describe("claimNextGoatCodexChatTurn", () => {
 
     const statement = sqlText(dbMock.execute.mock.calls[0]?.[0]);
     expect(statement.match(/run_after IS NULL OR (?:turn|earlier)\.run_after <=/g)).toHaveLength(2);
+    expect(statement).toContain("session.status <> 'closed'");
+    expect(statement).toContain("chat.closed_at IS NULL");
   });
 
   it("returns no work when the database skips a not-yet-due turn", async () => {

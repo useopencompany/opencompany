@@ -83,6 +83,17 @@ export async function claimNextGoatCodexChatTurn(input: {
           OR (turn.status = 'running' AND turn.lease_expires_at < ${now})
         )
         AND (turn.run_after IS NULL OR turn.run_after <= ${now})
+        AND EXISTS (
+          SELECT 1
+          FROM goat.codex_chat_sessions AS session
+          INNER JOIN goat.chat_sessions AS chat
+            ON chat.id = session.chat_session_id
+           AND chat.user_workos_id = session.user_workos_id
+          WHERE session.id = turn.codex_chat_session_id
+            AND session.user_workos_id = turn.user_workos_id
+            AND session.status <> 'closed'
+            AND chat.closed_at IS NULL
+        )
         AND NOT EXISTS (
           SELECT 1 FROM goat.codex_chat_turns AS sibling
           WHERE sibling.codex_chat_session_id = turn.codex_chat_session_id

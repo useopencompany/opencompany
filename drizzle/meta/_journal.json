@@ -1366,6 +1366,13 @@
       "when": 1785950000000,
       "tag": "0193_goat_text_like_assets",
       "breakpoints": true
+    },
+    {
+      "idx": 195,
+      "version": "7",
+      "when": 1785951000000,
+      "tag": "0194_goat_x_account_integration",
+      "breakpoints": true
     }
   ]
 }

@@ -153,6 +153,14 @@ export const GOAT_PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  x_account: [
+    {
+      id: "write",
+      label: "Post to X",
+      description: "Post new tweets from your connected X account.",
+      defaultMode: "ask",
+    },
+  ],
 };
 
 export function isGoatCapabilityMode(value: unknown): value is GoatCapabilityMode {
