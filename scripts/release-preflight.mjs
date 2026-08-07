@@ -189,17 +189,63 @@ const groups = {
   },
 };
 
+// Vercel projects whose env this script can verify against API metadata when a
+// value is unreadable locally. Secrets are managed in Infisical and synced to
+// Vercel; a sync (or a hand edit) can mark a var "sensitive", which makes
+// `vercel env pull` return it EMPTY even though Vercel still injects it at
+// build and runtime. Presence in project metadata is therefore the truth for
+// "is it set" — readability is not required for the deploy to work.
+const VERCEL_PROJECT_BY_GROUP = {
+  web: process.env.VERCEL_PROJECT_ID,
+  goat: process.env.GOAT_VERCEL_PROJECT_ID,
+};
+
+async function vercelProductionEnvKeys(projectId) {
+  const token = process.env.VERCEL_TOKEN;
+  const teamId = process.env.VERCEL_ORG_ID;
+  if (!token || !teamId || !projectId) return null;
+  try {
+    const response = await fetch(
+      `https://api.vercel.com/v9/projects/${projectId}/env?teamId=${teamId}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!response.ok) return null;
+    const body = await response.json();
+    return new Set(
+      (body.envs ?? [])
+        .filter((env) => (env.target ?? []).includes("production"))
+        .map((env) => env.key),
+    );
+  } catch {
+    return null;
+  }
+}
+
 const selected = selectGroups();
 let failed = false;
 
 for (const name of selected) {
   const group = groups[name];
-  const missing = group.required.filter((key) => isUnset(process.env[key]));
+  let missing = group.required.filter((key) => isUnset(process.env[key]));
+  let unreadable = [];
+  if (missing.length > 0 && VERCEL_PROJECT_BY_GROUP[name]) {
+    const remoteKeys = await vercelProductionEnvKeys(VERCEL_PROJECT_BY_GROUP[name]);
+    if (remoteKeys) {
+      unreadable = missing.filter((key) => remoteKeys.has(key));
+      missing = missing.filter((key) => !remoteKeys.has(key));
+    }
+  }
   const placeholders = group.required.filter((key) => isPlaceholder(process.env[key]));
   const optionalMissing = group.optional.filter((key) => isUnset(process.env[key]));
 
   console.log(`\n${group.label}`);
   console.log(`  required: ${group.required.length - missing.length}/${group.required.length} set`);
+
+  if (unreadable.length > 0) {
+    console.log(
+      `  set on Vercel but unreadable locally (sensitive type): ${unreadable.join(", ")}`,
+    );
+  }
 
   if (missing.length > 0) {
     failed = true;
