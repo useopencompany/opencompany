@@ -1,10 +1,7 @@
 "use client";
 
-import {
-  ADJUSTABLE_DEFAULT_BRAIN_FOLDERS,
-  HARD_DEFAULT_BRAIN_FOLDERS,
-  normalizeBrainFolder,
-} from "@opencompany/brain/schema";
+import { captureEvent, identifyUser } from "@opencompany/analytics/client";
+import type { OnboardingStep } from "@opencompany/analytics/events";
 import {
   Dialog,
   DialogContent,
@@ -13,37 +10,21 @@ import {
   DialogTitle,
 } from "@opencompany/ui/components/dialog";
 import { toast } from "@opencompany/ui/components/sonner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
   ArrowRight,
-  BookOpen,
-  Brain,
   Briefcase,
-  BriefcaseBusiness,
-  Building2,
-  CalendarDays,
   Check,
   Code2,
-  FlaskConical,
-  Folder,
-  GripVertical,
-  History,
-  Inbox,
-  Lightbulb,
   LineChart,
-  Lock,
   Megaphone,
   MessagesSquare,
   Microscope,
-  Plus,
   Rocket,
   Settings2,
   ShieldCheck,
   Target,
-  Users,
-  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -65,7 +46,6 @@ import {
 import {
   checkWorkspaceSlugAction,
   finishOnboardingAction,
-  saveOnboardingBrainFoldersAction,
   saveOnboardingProfileAction,
   saveOnboardingWorkspaceAction,
 } from "@/lib/onboarding-actions";
@@ -83,26 +63,25 @@ import {
   normalizeOnboardingCompanyUrl,
   ONBOARDING_COMPANY_URL_MAX_LENGTH,
   type OnboardingRole,
-  onboardingFoldersForRole,
 } from "@/lib/onboarding-profile";
 
 type OnboardingUser = {
+  workosUserId: string;
   name: string;
   email: string;
   avatarUrl: string | null;
 };
 
-type StepKey = "profile" | "workspace" | "brain" | "sources" | "finish" | "welcome";
+type StepKey = OnboardingStep;
 
 type StepDef = { key: StepKey; label: string };
 
-// Activation-optimized order: know them → name it → shape it (pre-tailored from
+// Activation-optimized order: know them → name it (and scaffold its Brain from
 // their role) → feed it → done. Referral is folded into the finish so it never
 // interrupts a value step.
 const OWNER_STEPS: StepDef[] = [
   { key: "profile", label: "About you" },
   { key: "workspace", label: "Create workspace" },
-  { key: "brain", label: "Set up your brain" },
   { key: "sources", label: "Connect sources" },
   { key: "finish", label: "You're all set" },
 ];
@@ -143,10 +122,6 @@ function countSourcesAuthorizedNotFeeding(details: BrainSourcesDetails | null): 
   }).length;
 }
 
-// Role presets — the first onboarding step. Picking one seeds the adjustable
-// brain folders with a set that matches how that person actually works (the
-// hard defaults inbox/people/companies/evidence are always added on top). Every
-// folder here must satisfy BRAIN_FOLDER_PATTERN (lowercase, single word).
 type RoleProfile = {
   id: OnboardingRole;
   label: string;
@@ -205,12 +180,6 @@ const ROLE_PROFILES: RoleProfile[] = [
   },
 ];
 
-// Folders to seed the brain step with for a given role — falls back to the
-// generic adjustable defaults when no role is chosen or recognized.
-function foldersForRole(role: OnboardingRole | null): string[] {
-  return onboardingFoldersForRole(role);
-}
-
 // ---------------------------------------------------------------------------
 
 type SlugStatus = "idle" | "checking" | "available" | "taken";
@@ -222,6 +191,7 @@ export function OnboardingWizard({
   brainRef,
   variant,
   initialStep,
+  initialWorkspaceId,
   initialWorkspaceName,
   initialSlug,
   initialRole,
@@ -235,6 +205,7 @@ export function OnboardingWizard({
   brainRef: string | null;
   variant: "owner" | "member";
   initialStep: number;
+  initialWorkspaceId: string | null;
   initialWorkspaceName: string;
   initialSlug: string;
   initialRole: string | null;
@@ -256,9 +227,8 @@ export function OnboardingWizard({
   const [referral, setReferral] = useState<string | null>(initialReferral);
   const [role, setRole] = useState<OnboardingRole | null>(normalizedInitialRole);
   const [companyUrl, setCompanyUrl] = useState(initialCompanyUrl);
-  const [workingFolders, setWorkingFolders] = useState<string[]>(() =>
-    foldersForRole(normalizedInitialRole),
-  );
+  const [activeBrainRef, setActiveBrainRef] = useState(brainRef);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(initialWorkspaceId);
   const [isPending, startTransition] = useTransition();
   const [slugCheck, setSlugCheck] = useState<{
     slug: string;
@@ -269,13 +239,15 @@ export function OnboardingWizard({
   const [sourceDetails, setSourceDetails] = useState(initialSourceDetails);
   const [sourcesGateConfirmed, setSourcesGateConfirmed] = useState(false);
   const [showSourcesGate, setShowSourcesGate] = useState(false);
+  const analyticsStartedRef = useRef(false);
+  const analyticsStepsViewedRef = useRef(new Set<StepKey>());
 
   const reloadSourceDetails = useCallback(async () => {
-    if (!brainRef) return null;
-    const next = await getBrainSourcesAction(brainRef);
+    if (!activeBrainRef) return null;
+    const next = await getBrainSourcesAction(activeBrainRef);
     setSourceDetails(next);
     return next;
-  }, [brainRef]);
+  }, [activeBrainRef]);
 
   const authorizedNotFeeding = useMemo(
     () => countSourcesAuthorizedNotFeeding(sourceDetails),
@@ -299,6 +271,40 @@ export function OnboardingWizard({
         ? "available"
         : "taken"
       : "checking";
+
+  useEffect(() => {
+    identifyUser({ userId: user.workosUserId, email: user.email });
+    if (analyticsStartedRef.current) return;
+    analyticsStartedRef.current = true;
+    captureEvent("onboarding_started", {
+      flow: variant,
+      initial_step: step.key,
+      initial_step_index: stepIndex,
+      total_steps: STEPS.length,
+      is_resume: stepIndex > 0,
+      ...(activeWorkspaceId ? { workspace_id: activeWorkspaceId } : {}),
+    });
+  }, [
+    activeWorkspaceId,
+    step.key,
+    stepIndex,
+    STEPS.length,
+    user.email,
+    user.workosUserId,
+    variant,
+  ]);
+
+  useEffect(() => {
+    if (analyticsStepsViewedRef.current.has(step.key)) return;
+    analyticsStepsViewedRef.current.add(step.key);
+    captureEvent("onboarding_step_viewed", {
+      flow: variant,
+      step: step.key,
+      step_index: stepIndex,
+      total_steps: STEPS.length,
+      ...(activeWorkspaceId ? { workspace_id: activeWorkspaceId } : {}),
+    });
+  }, [activeWorkspaceId, step.key, stepIndex, STEPS.length, variant]);
 
   // Persist the active step to a cookie so an OAuth round-trip (connecting a
   // source) resumes exactly here.
@@ -328,13 +334,10 @@ export function OnboardingWizard({
         name: workspaceName,
         slug: effectiveSlug,
       });
-      return r.ok || toastFail(r.error);
-    }
-    if (step.key === "brain") {
-      const r = await saveOnboardingBrainFoldersAction({
-        folders: workingFolders,
-      });
-      return r.ok || toastFail(r.error);
+      if (!r.ok) return toastFail(r.error);
+      setActiveBrainRef(r.brainRef);
+      setActiveWorkspaceId(r.workspaceId);
+      return true;
     }
     if (step.key === "finish") {
       const r = await finishOnboardingAction({ referralSource: referral });
@@ -347,6 +350,16 @@ export function OnboardingWizard({
     startTransition(async () => {
       if (!(await persistCurrentStep())) return;
       if (isLast) {
+        if (activeWorkspaceId) {
+          const sourcesFeeding = countSourcesFeeding(sourceDetails);
+          captureEvent("onboarding_completed", {
+            flow: variant,
+            total_steps: STEPS.length,
+            workspace_id: activeWorkspaceId,
+            sources_feeding: sourcesFeeding,
+            source_goal_met: sourcesFeeding >= SOURCE_GOAL,
+          });
+        }
         if (variant === "owner" && normalizedCompanyUrl) {
           if (!queueOnboardingKickoff(normalizedCompanyUrl)) {
             toast.error("Onboarding finished, but the first Brain run could not be started.");
@@ -370,15 +383,6 @@ export function OnboardingWizard({
     advance();
   };
   const goBack = () => setStepIndex((i) => Math.max(i - 1, 0));
-
-  // Picking a role re-seeds the brain folders with that role's preset. We only
-  // reseed on an actual change so a user who tweaked folders and stepped back
-  // doesn't lose their edits by re-clicking the role they already had.
-  const selectRole = (next: OnboardingRole) => {
-    if (next === role) return;
-    setRole(next);
-    setWorkingFolders(foldersForRole(next));
-  };
 
   const canContinue =
     step.key === "profile"
@@ -404,7 +408,7 @@ export function OnboardingWizard({
             <ProfileStep
               user={user}
               role={role}
-              onRole={selectRole}
+              onRole={setRole}
               companyUrl={companyUrl}
               onCompanyUrl={setCompanyUrl}
               companyUrlStatus={companyUrlStatus}
@@ -429,12 +433,9 @@ export function OnboardingWizard({
           {step.key === "welcome" && (
             <WelcomeStep user={user} workspaceName={currentWorkspaceName} />
           )}
-          {step.key === "brain" && (
-            <BrainStep workingFolders={workingFolders} onChange={setWorkingFolders} />
-          )}
           {step.key === "sources" && (
             <SourcesStep
-              brainRef={brainRef}
+              brainRef={activeBrainRef}
               details={sourceDetails}
               reload={reloadSourceDetails}
               initialConnectionResult={initialConnectionResult}
@@ -849,261 +850,6 @@ function HighlightRow({
 }
 
 // ---------------------------------------------------------------------------
-// Step — Brain folders (mini file tree)
-// ---------------------------------------------------------------------------
-
-// Icon mapping mirrors the real brain tree in BrainView so the step feels
-// like the app's own file tree.
-function FolderIcon({ path }: { path: string }) {
-  const [root] = path.split("/");
-  const cn = "shrink-0 text-ink-muted";
-  switch (root) {
-    case "inbox":
-      return <Inbox size={14} strokeWidth={1.8} className={cn} />;
-    case "thoughts":
-      return <Brain size={14} strokeWidth={1.8} className={cn} />;
-    case "projects":
-      return <BriefcaseBusiness size={14} strokeWidth={1.8} className={cn} />;
-    case "meetings":
-      return <CalendarDays size={14} strokeWidth={1.8} className={cn} />;
-    case "research":
-      return <FlaskConical size={14} strokeWidth={1.8} className={cn} />;
-    case "decisions":
-      return <BookOpen size={14} strokeWidth={1.8} className={cn} />;
-    case "concepts":
-      return <Lightbulb size={14} strokeWidth={1.8} className={cn} />;
-    case "people":
-      return <Users size={14} strokeWidth={1.8} className={cn} />;
-    case "companies":
-      return <Building2 size={14} strokeWidth={1.8} className={cn} />;
-    case "evidence":
-      return <History size={14} strokeWidth={1.8} className={cn} />;
-    default:
-      return <Folder size={14} strokeWidth={1.8} className={cn} />;
-  }
-}
-
-// Folders we ship as defaults — kept ones render grayed to set them apart from
-// folders the user adds themselves.
-const ADJUSTABLE_DEFAULT_SET = new Set<string>(ADJUSTABLE_DEFAULT_BRAIN_FOLDERS);
-
-function BrainStep({
-  workingFolders,
-  onChange,
-}: {
-  workingFolders: string[];
-  onChange: (next: string[]) => void;
-}) {
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [overIndex, setOverIndex] = useState<number | null>(null);
-
-  const tryAdd = (value: string) => {
-    const normalized = normalizeBrainFolder(value);
-    const reserved = new Set<string>([...HARD_DEFAULT_BRAIN_FOLDERS, ...workingFolders]);
-    if (!normalized || reserved.has(normalized)) return false;
-    onChange([...workingFolders, normalized]);
-    return true;
-  };
-
-  const remove = (folder: string) => onChange(workingFolders.filter((f) => f !== folder));
-
-  const reorder = (from: number, to: number) => {
-    if (from === to || from < 0 || to < 0 || from >= workingFolders.length) return;
-    const next = [...workingFolders];
-    const [moved] = next.splice(from, 1);
-    if (moved === undefined) return;
-    next.splice(to, 0, moved);
-    onChange(next);
-  };
-
-  const resetDrag = () => {
-    setDragIndex(null);
-    setOverIndex(null);
-  };
-
-  return (
-    <div>
-      <StepHeader
-        title="Set up your brain"
-        subtitle="Everything your brain learns gets filed into folders. A few are always here — add, remove, or reorder the rest to fit how you work."
-      />
-
-      <div className="overflow-hidden rounded-xl border border-border bg-surface">
-        <div className="flex h-9 items-center gap-1.5 border-b border-border-subtle px-3">
-          <Brain size={13} strokeWidth={2} className="text-ink-subtle" />
-          <span className="text-[12px] font-medium text-ink-subtle">Brain folders</span>
-        </div>
-
-        <div className="flex flex-col py-1.5">
-          <LockedTreeRow path="inbox" />
-          {workingFolders.map((folder, i) => (
-            <WorkingFolderRow
-              key={folder}
-              path={folder}
-              isDefault={ADJUSTABLE_DEFAULT_SET.has(folder)}
-              dragging={dragIndex === i}
-              dragOver={overIndex === i && dragIndex !== null && dragIndex !== i}
-              onRemove={() => remove(folder)}
-              onDragStart={() => setDragIndex(i)}
-              onDragOver={(e) => {
-                e.preventDefault();
-                if (overIndex !== i) setOverIndex(i);
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (dragIndex !== null) reorder(dragIndex, i);
-                resetDrag();
-              }}
-              onDragEnd={resetDrag}
-            />
-          ))}
-          {/* Add sits directly below the folders you can drag & drop */}
-          <NewFolderControl onAdd={tryAdd} />
-          <LockedTreeRow path="people" />
-          <LockedTreeRow path="companies" />
-          <LockedTreeRow path="evidence" />
-        </div>
-      </div>
-
-      <p className="mt-3 flex items-center gap-1.5 text-[11.5px] text-ink-subtle">
-        <Lock size={11} strokeWidth={2} />
-        Drag to reorder. Grayed folders are our defaults; locked ones can&apos;t be removed.
-      </p>
-    </div>
-  );
-}
-
-function WorkingFolderRow({
-  path,
-  isDefault,
-  dragging,
-  dragOver,
-  onRemove,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-}: {
-  path: string;
-  isDefault: boolean;
-  dragging: boolean;
-  dragOver: boolean;
-  onRemove: () => void;
-  onDragStart: () => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDrop: (e: React.DragEvent) => void;
-  onDragEnd: () => void;
-}) {
-  return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
-      className={`group relative mx-1.5 flex h-8 items-center gap-1.5 rounded-[6px] px-1.5 transition-colors hover:bg-surface-hover ${
-        dragging ? "opacity-40" : ""
-      } ${
-        dragOver
-          ? "before:absolute before:inset-x-1 before:-top-px before:h-0.5 before:rounded-full before:bg-ink"
-          : ""
-      }`}
-    >
-      <GripVertical
-        size={13}
-        strokeWidth={2}
-        className="shrink-0 cursor-grab text-ink-subtle opacity-0 transition-opacity group-hover:opacity-50"
-      />
-      <FolderIcon path={path} />
-      <span
-        className={`min-w-0 flex-1 truncate text-[13px] ${isDefault ? "text-ink-muted" : "text-ink"}`}
-      >
-        {path}
-      </span>
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label={`Remove ${path}`}
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-subtle opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
-      >
-        <X size={13} strokeWidth={2.2} />
-      </button>
-    </div>
-  );
-}
-
-function LockedTreeRow({ path }: { path: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger className="group mx-1.5 flex h-8 items-center gap-1.5 rounded-[6px] px-1.5 text-left transition-colors hover:bg-surface-hover">
-        <FolderIcon path={path} />
-        <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{path}</span>
-        <Lock
-          size={12}
-          strokeWidth={2}
-          className="shrink-0 text-ink-subtle opacity-0 transition-opacity group-hover:opacity-60"
-        />
-      </TooltipTrigger>
-      <TooltipContent>
-        Default folder — part of every brain and can&apos;t be removed.
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function NewFolderControl({ onAdd }: { onAdd: (value: string) => boolean }) {
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState("");
-
-  if (!adding) {
-    return (
-      <button
-        type="button"
-        onClick={() => setAdding(true)}
-        className="group mx-1.5 flex h-8 items-center gap-1.5 rounded-[6px] px-1.5 text-left transition-colors hover:bg-surface-hover"
-      >
-        <Plus size={14} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-        <span className="text-[13px] text-ink-muted transition-colors group-hover:text-ink">
-          New folder
-        </span>
-      </button>
-    );
-  }
-
-  const commit = () => {
-    if (draft.trim() && onAdd(draft)) {
-      setDraft(""); // keep open for rapid entry
-      return;
-    }
-    setDraft("");
-    setAdding(false);
-  };
-
-  return (
-    <div className="mx-1.5 flex h-8 items-center gap-1.5 rounded-[6px] px-1.5">
-      <Plus size={14} strokeWidth={2} className="shrink-0 text-ink-subtle" />
-      {/* biome-ignore lint/a11y/noAutofocus: expected when the add row is opened */}
-      <input
-        autoFocus
-        className="w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-subtle"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            commit();
-          } else if (e.key === "Escape") {
-            setDraft("");
-            setAdding(false);
-          }
-        }}
-        onBlur={commit}
-        placeholder="Folder name…"
-      />
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Step — Sources
 // ---------------------------------------------------------------------------

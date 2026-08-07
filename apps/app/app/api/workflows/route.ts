@@ -3,7 +3,7 @@ import { currentUser } from "@/lib/auth";
 import { extractChatAttachmentTexts, parseChatAttachmentsInput } from "@/lib/chat-attachments";
 import { CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
 import { TASKS_WORKFLOWS_BETA_DISABLED_MESSAGE } from "@/lib/feature-flags";
-import { SkillMentionError } from "@/lib/skills";
+import { readSkillMentionRefs, SkillMentionError } from "@/lib/skills";
 import { createTaskFromWorkflow, generateWorkflowTaskTitle } from "@/lib/workflow-tasks";
 import { listWorkflowCatalog, readWorkflowMentionRef, WorkflowMentionError } from "@/lib/workflows";
 
@@ -59,6 +59,10 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  const parsedSkillMentions = readSkillMentionRefs(input.mentions);
+  if (!parsedSkillMentions.ok) {
+    return NextResponse.json({ error: parsedSkillMentions.error }, { status: 400 });
+  }
   const parsedAttachments = parseChatAttachmentsInput(input.attachments, context.user.workosUserId);
   if (!parsedAttachments.ok) {
     return NextResponse.json({ error: parsedAttachments.error }, { status: 400 });
@@ -73,6 +77,7 @@ export async function POST(request: Request) {
       userWorkosId: context.user.workosUserId,
       workspaceId: context.workspace.id,
       mention: parsedMention.mention,
+      skillMentions: parsedSkillMentions.mentions,
       description,
       attachments: parsedAttachments.attachments,
       attachmentTexts,

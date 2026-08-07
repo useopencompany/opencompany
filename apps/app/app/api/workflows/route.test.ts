@@ -45,7 +45,8 @@ describe("POST /api/workflows", () => {
     const response = await POST(
       jsonRequest({
         workflow: { kind: "workflow", id: "morning-test" },
-        description: "#morning-test Review this screenshot",
+        description: "#morning-test Review this screenshot with @skill/visual-review",
+        mentions: [{ kind: "skill", id: "visual-review" }],
         attachments: [
           {
             id: "client_attachment_1",
@@ -71,7 +72,8 @@ describe("POST /api/workflows", () => {
       userWorkosId: "user_1",
       workspaceId: "workspace_1",
       mention: { id: "morning-test" },
-      description: "#morning-test Review this screenshot",
+      skillMentions: [{ id: "visual-review" }],
+      description: "#morning-test Review this screenshot with @skill/visual-review",
       attachments: [
         expect.objectContaining({
           id: expect.stringMatching(/^goat_chat_att_/),
@@ -91,6 +93,20 @@ describe("POST /api/workflows", () => {
         userWorkosId: "user_1",
       }),
     );
+  });
+
+  it("rejects malformed invocation skill mentions", async () => {
+    const response = await POST(
+      jsonRequest({
+        workflow: { kind: "workflow", id: "morning-test" },
+        description: "#morning-test Review this screenshot",
+        mentions: [{ kind: "skill", id: "../not-a-skill" }],
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Invalid skill mention." });
+    expect(createTaskFromWorkflow).not.toHaveBeenCalled();
   });
 });
 

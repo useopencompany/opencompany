@@ -8,6 +8,7 @@ import {
 import { recordSignup } from "@opencompany/telemetry";
 import { saveSession, withAuth } from "@workos-inc/authkit-nextjs";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACTIVE_BRAIN_COOKIE,
@@ -15,6 +16,7 @@ import {
   activateWorkspaceForOrganization,
   adoptWorkOSOrganizationMemberships,
   completeAuthentication,
+  currentIdentity,
   currentUser,
   syncUser,
 } from "@/lib/auth";
@@ -36,7 +38,6 @@ vi.mock("@opencompany/db/client", () => ({
 
 vi.mock("@opencompany/db/workspaces", () => ({
   adoptWorkspaceMembershipsFromOrgs: vi.fn(),
-  createDefaultWorkspaceForUser: vi.fn(),
   DEFAULT_BRAIN_SLUG: "default",
   getBrainAccess: vi.fn(),
   listAccessibleBrains: vi.fn(),
@@ -93,6 +94,7 @@ const recordSignupMock = vi.mocked(recordSignup);
 const withAuthMock = vi.mocked(withAuth);
 const saveSessionMock = vi.mocked(saveSession);
 const recordLastAuthMethodMock = vi.mocked(recordLastAuthMethod);
+const redirectMock = vi.mocked(redirect);
 
 const now = new Date("2026-01-01T00:00:00.000Z");
 const authUser = {
@@ -465,6 +467,45 @@ describe("completeAuthentication", () => {
 describe("currentUser", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("keeps a newly authenticated owner workspace-free until onboarding creates one", async () => {
+    const limit = vi.fn(async () => [user]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+
+    getDbMock.mockReturnValue({ select } as never);
+    withAuthMock.mockResolvedValue({ user: authUser } as never);
+    listWorkspacesForUserMock.mockResolvedValue([]);
+    ensureWorkspaceOrganizationsForEntriesMock.mockResolvedValue([]);
+
+    await expect(currentIdentity()).resolves.toEqual({
+      authUser,
+      organizationId: null,
+      user: user,
+      workspaces: [],
+    });
+
+    expect(listWorkspacesForUserMock).toHaveBeenCalledWith(authUser.id);
+    expect(listAccessibleBrainsMock).not.toHaveBeenCalled();
+  });
+
+  it("routes a workspace-free authenticated owner into onboarding", async () => {
+    const limit = vi.fn(async () => [user]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+
+    getDbMock.mockReturnValue({ select } as never);
+    withAuthMock.mockResolvedValue({ user: authUser } as never);
+    listWorkspacesForUserMock.mockResolvedValue([]);
+    ensureWorkspaceOrganizationsForEntriesMock.mockResolvedValue([]);
+
+    await currentUser();
+
+    expect(redirectMock).toHaveBeenCalledWith("/onboarding");
+    expect(listAccessibleBrainsMock).not.toHaveBeenCalled();
   });
 
   it("prefers the organization selected in the WorkOS session over the local cookie", async () => {

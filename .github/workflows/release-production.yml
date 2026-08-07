@@ -358,6 +358,9 @@ jobs:
             "HUBSPOT_CLIENT_ID",
             "HUBSPOT_CLIENT_SECRET",
             "HUBSPOT_STATE_SECRET",
+            "X_CLIENT_ID",
+            "X_CLIENT_SECRET",
+            "X_STATE_SECRET",
           ];
 
           async function listProductionEnv(projectId, label, teamId, token) {

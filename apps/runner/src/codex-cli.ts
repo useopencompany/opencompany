@@ -18,6 +18,7 @@ export type CodexCliAuth =
   | {
       kind: "chatgpt";
       authJson: Record<string, unknown>;
+      credentialLastRotatedAt: Date | null;
       brokered: false;
     };
 

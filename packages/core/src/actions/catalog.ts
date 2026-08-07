@@ -16,6 +16,7 @@ import type {
   ResolvedAction,
   ResolvedActionCatalog,
 } from "./types";
+import { resolveXAccountActions } from "./x-account";
 
 // Managed (Monid) capabilities need server-only execution + billing, so their
 // resolution lives in the host app (apps/app) and is injected here. The runner
@@ -65,6 +66,7 @@ export async function resolveActionCatalog(
     resolveGitHubActions(input.workspaceId).catch(() => null),
     resolveStripeActions(input.workspaceId).catch(() => null),
     resolveRevolutActions(input.workspaceId).catch(() => null),
+    resolveXAccountActions(input.userWorkosId).catch(() => null),
   ]);
   const providers = resolved.filter(
     (entry): entry is ActionProviderCatalog => entry !== null && entry.actions.length > 0,

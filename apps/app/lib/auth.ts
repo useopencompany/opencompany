@@ -3,7 +3,6 @@ import { getDb } from "@opencompany/db/client";
 import { type Brain, users, type Workspace, type WorkspaceRole } from "@opencompany/db/schema";
 import {
   adoptWorkspaceMembershipsFromOrgs,
-  createDefaultWorkspaceForUser,
   DEFAULT_BRAIN_SLUG,
   getBrainAccess,
   listAccessibleBrains,
@@ -20,12 +19,22 @@ import type { NextRequest } from "next/server";
 import { cache } from "react";
 import { recordLastAuthMethod } from "@/lib/auth-methods";
 import { syncStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
-import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureWorkspaceOrganizationsForEntries } from "@/lib/workos-organizations";
+import {
+  ACTIVE_BRAIN_COOKIE,
+  ACTIVE_WORKSPACE_COOKIE,
+  rememberActiveWorkspace,
+} from "@/lib/workspace-session";
 
-export const ACTIVE_WORKSPACE_COOKIE = "goat-active-workspace";
-export const ACTIVE_BRAIN_COOKIE = "goat-active-brain";
+export { ACTIVE_BRAIN_COOKIE, ACTIVE_WORKSPACE_COOKIE };
+
+export type IdentityContext = {
+  authUser: WorkOSUser;
+  organizationId: string | null;
+  user: typeof users.$inferSelect;
+  workspaces: WorkspaceWithRole[];
+};
 
 export type AuthContext = {
   authUser: WorkOSUser;
@@ -91,17 +100,11 @@ export async function syncUser(authUser: WorkOSUser) {
   return updatedUser;
 }
 
-function defaultWorkspaceName(user: typeof users.$inferSelect) {
-  const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-  const base = fullName || user.email.split("@")[0] || "My";
-  return `${base}'s Workspace`;
-}
-
 // Reconciles memberships for WorkOS organizations the user accepted an
 // invitation to. Authentication calls this even when the user already has a
-// personal workspace; otherwise that existing membership hides newly accepted
-// workspace invitations. Failures are swallowed: sign-in must not depend on
-// WorkOS API health.
+// workspace; otherwise existing local membership can hide newly accepted
+// invitations. Failures are swallowed: sign-in must not depend on WorkOS API
+// health.
 export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
   try {
     const memberships = await getWorkOSClient().userManagement.listOrganizationMemberships({
@@ -147,21 +150,10 @@ export async function activateWorkspaceForOrganization(input: {
   const activeBrain =
     brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
 
-  const cookieStore = await cookies();
-  cookieStore.set(ACTIVE_WORKSPACE_COOKIE, target.workspace.id, {
-    path: "/",
-    sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 365,
+  await rememberActiveWorkspace({
+    workspaceId: target.workspace.id,
+    brainId: activeBrain?.id ?? null,
   });
-  if (activeBrain) {
-    cookieStore.set(ACTIVE_BRAIN_COOKIE, activeBrain.id, {
-      path: "/",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 365,
-    });
-  } else {
-    cookieStore.delete(ACTIVE_BRAIN_COOKIE);
-  }
 
   return true;
 }
@@ -190,33 +182,11 @@ export async function completeAuthentication(
   }
 }
 
-async function ensureWorkspaces(
-  authUser: WorkOSUser,
-  user: typeof users.$inferSelect,
-): Promise<WorkspaceWithRole[]> {
-  let workspaces = await listWorkspacesForUser(user.workosUserId);
-  if (workspaces.length > 0) return ensureWorkspaceOrganizationsForEntries(workspaces);
-
-  await adoptWorkOSOrganizationMemberships(authUser);
-  workspaces = await listWorkspacesForUser(user.workosUserId);
-  if (workspaces.length > 0) return ensureWorkspaceOrganizationsForEntries(workspaces);
-
-  await createDefaultWorkspaceForUser({
-    userWorkosId: user.workosUserId,
-    name: defaultWorkspaceName(user),
-  });
-  // A user only reaches this branch when we create their own workspace (invited
-  // members return above), so this is the "brand-new owner" moment. Enroll them
-  // in the founder onboarding email drip and fire the welcome immediately.
-  // Best-effort: email/DB hiccups must never block sign-in.
-  await enrollOwnerInOnboardingEmails({ workosUserId: user.workosUserId }).catch((error) => {
-    console.error("[app] Failed to enroll owner in onboarding emails", error);
-  });
-  workspaces = await listWorkspacesForUser(user.workosUserId);
-  return ensureWorkspaceOrganizationsForEntries(workspaces);
-}
-
-const resolveAuthContext = cache(async (): Promise<AuthContext | null> => {
+// Authentication and workspace provisioning are separate product states. A
+// newly authenticated owner legitimately has zero workspaces until the
+// onboarding workspace step creates one; invited users receive memberships in
+// completeAuthentication() before this resolver runs.
+const resolveIdentity = cache(async (): Promise<IdentityContext | null> => {
   const session = await withAuth();
   if (!session.user) return null;
 
@@ -227,23 +197,43 @@ const resolveAuthContext = cache(async (): Promise<AuthContext | null> => {
     .where(eq(users.workosUserId, session.user.id))
     .limit(1);
   const user = existingUser ?? (await syncUser(session.user));
+  let accessibleWorkspaces = await listWorkspacesForUser(user.workosUserId);
+  if (accessibleWorkspaces.length === 0 && session.organizationId) {
+    // The auth callback normally adopts invitations. Retry only when AuthKit
+    // selected an organization but no local membership is visible, covering a
+    // transient callback-side WorkOS/DB failure without penalizing new owners.
+    await adoptWorkOSOrganizationMemberships(session.user);
+    accessibleWorkspaces = await listWorkspacesForUser(user.workosUserId);
+  }
+  const workspaces = await ensureWorkspaceOrganizationsForEntries(accessibleWorkspaces);
 
-  const workspaces = await ensureWorkspaces(session.user, user);
-  const first = workspaces[0];
+  return {
+    authUser: session.user,
+    organizationId: session.organizationId ?? null,
+    user,
+    workspaces,
+  };
+});
+
+const resolveAuthContext = cache(async (): Promise<AuthContext | null> => {
+  const identity = await resolveIdentity();
+  if (!identity) return null;
+
+  const first = identity.workspaces[0];
   if (!first) return null;
 
   const cookieStore = await cookies();
   const requestedWorkspaceId = cookieStore.get(ACTIVE_WORKSPACE_COOKIE)?.value;
   const active =
-    workspaces.find(
+    identity.workspaces.find(
       (entry) =>
-        session.organizationId && entry.workspace.workosOrganizationId === session.organizationId,
+        identity.organizationId && entry.workspace.workosOrganizationId === identity.organizationId,
     ) ??
-    workspaces.find((entry) => entry.workspace.id === requestedWorkspaceId) ??
+    identity.workspaces.find((entry) => entry.workspace.id === requestedWorkspaceId) ??
     first;
 
   const brains = await listAccessibleBrains({
-    userWorkosId: user.workosUserId,
+    userWorkosId: identity.user.workosUserId,
     workspaceId: active.workspace.id,
   });
   const requestedBrainId = cookieStore.get(ACTIVE_BRAIN_COOKIE)?.value;
@@ -254,23 +244,39 @@ const resolveAuthContext = cache(async (): Promise<AuthContext | null> => {
     null;
 
   return {
-    authUser: session.user,
-    user,
+    authUser: identity.authUser,
+    user: identity.user,
     workspace: active.workspace,
     role: active.role,
-    workspaces,
+    workspaces: identity.workspaces,
     brains,
     activeBrain,
   };
 });
 
+export async function currentIdentity(options: { optional: true }): Promise<IdentityContext | null>;
+export async function currentIdentity(options?: { optional?: false }): Promise<IdentityContext>;
+export async function currentIdentity(options: { optional?: boolean } = {}) {
+  const identity = await resolveIdentity();
+  if (!identity) {
+    if (options.optional) return null;
+    redirect("/signin");
+  }
+  return identity;
+}
+
 export async function currentUser(options: { optional: true }): Promise<AuthContext | null>;
 export async function currentUser(options?: { optional?: false }): Promise<AuthContext>;
 export async function currentUser(options: { optional?: boolean } = {}) {
+  const identity = await resolveIdentity();
+  if (!identity) {
+    if (options.optional) return null;
+    redirect("/signin");
+  }
   const context = await resolveAuthContext();
   if (!context) {
     if (options.optional) return null;
-    redirect("/signin");
+    redirect("/onboarding");
   }
   return context;
 }

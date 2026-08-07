@@ -2,7 +2,7 @@
 
 import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { AnalyticsProvider } from "./client";
+import { AnalyticsProvider, captureEvent, identifyUser } from "./client";
 
 const posthog = vi.hoisted(() => ({
   capture: vi.fn(),
@@ -107,6 +107,29 @@ describe("AnalyticsProvider", () => {
     expect(posthog.reset).toHaveBeenCalledOnce();
     expect(posthog.identify).toHaveBeenLastCalledWith("user_456", {
       workspace_id: "workspace_456",
+    });
+
+    vi.unstubAllEnvs();
+  });
+
+  it("identifies and captures onboarding events before a workspace exists", () => {
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_goat_test");
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
+
+    identifyUser({ userId: "user_123", email: "ada@example.com" });
+    captureEvent("onboarding_step_viewed", {
+      flow: "owner",
+      step: "profile",
+      step_index: 0,
+      total_steps: 4,
+    });
+
+    expect(posthog.identify).toHaveBeenCalledWith("user_123", { email: "ada@example.com" });
+    expect(posthog.capture).toHaveBeenCalledWith("onboarding_step_viewed", {
+      flow: "owner",
+      step: "profile",
+      step_index: 0,
+      total_steps: 4,
     });
 
     vi.unstubAllEnvs();

@@ -79,6 +79,8 @@ export type BrainSummaryView = {
 export type AppInitialData = {
   user: UserView;
   workspace: WorkspaceView;
+  // Billing plan of the current workspace, surfaced in the account menu.
+  plan: "hobby" | "pro";
   workspaces: WorkspaceView[];
   workspaceMembers: WorkspaceMemberView[];
   brains: BrainSummaryView[];

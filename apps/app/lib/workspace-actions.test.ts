@@ -173,6 +173,7 @@ describe("createWorkspaceAction", () => {
       workosOrganizationId: "org_new",
       userWorkosId: "user_123",
       name: "Analytical Co",
+      slug: null,
     });
     expect(switchToOrganizationMock).toHaveBeenCalledWith("org_new", {
       revalidationStrategy: "none",

@@ -1,3 +1,4 @@
+import { INFISICAL_US_HOST, isInfisicalHost } from "@opencompany/db/infisical-auth";
 import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
 import { wakeBrainImportWorker } from "./brain-import-worker";
@@ -261,17 +262,26 @@ export function createServer(
   app.post("/internal/goat/infisical-auth/start", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     const body = request.body as
-      | { workspaceId?: unknown; requestedByWorkosId?: unknown }
+      | { workspaceId?: unknown; requestedByWorkosId?: unknown; host?: unknown }
       | undefined;
     const workspaceId = typeof body?.workspaceId === "string" ? body.workspaceId.trim() : "";
     const requestedByWorkosId =
       typeof body?.requestedByWorkosId === "string" ? body.requestedByWorkosId.trim() : "";
-    if (!workspaceId || !requestedByWorkosId) {
-      reply.status(400).send({ error: "workspaceId and requestedByWorkosId are required." });
+    // Default omitted hosts to US while older opencompany deployments drain during a rolling release.
+    const host = body?.host === undefined ? INFISICAL_US_HOST : body.host;
+    if (!workspaceId || !requestedByWorkosId || !isInfisicalHost(host)) {
+      reply.status(400).send({
+        error: "workspaceId, requestedByWorkosId, and a supported Infisical host are required.",
+      });
       return;
     }
     try {
-      const flow = await startInfisicalAuthFlow({ workspaceId, requestedByWorkosId, env });
+      const flow = await startInfisicalAuthFlow({
+        workspaceId,
+        requestedByWorkosId,
+        host,
+        env,
+      });
       reply.send({ ok: true, flow });
     } catch (error) {
       const forbidden =

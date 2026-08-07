@@ -220,13 +220,38 @@ export async function grantMonthlyIncludedUsage(input: {
   const db = input.db ?? getDb();
   const grantKey = `included_usage_grant:${input.workspaceId}:${input.periodStart.toISOString()}:${targetAllowanceCents}`;
   const expireKey = `included_usage_expiration:${input.workspaceId}:${input.periodStart.toISOString()}`;
+  const expirationMetadata = JSON.stringify({
+    reason: "included_usage_no_rollover",
+    newPeriodStart: input.periodStart.toISOString(),
+    stripeEventId: input.eventId ?? null,
+  });
+  const grantMetadata = JSON.stringify({
+    reason: "monthly_included_usage",
+    plan: input.plan,
+    seatQuantity: input.seatQuantity,
+    allowanceCents: targetAllowanceCents,
+    periodStart: input.periodStart.toISOString(),
+    periodEnd: input.periodEnd.toISOString(),
+    stripeEventId: input.eventId ?? null,
+  });
+
+  // The billing row must exist before the grant statement starts. PostgreSQL
+  // data-modifying CTEs share one snapshot and cannot reliably modify the same
+  // row twice, so an upsert inside `current_billing` followed by
+  // `billing_update` leaves the period projection stale. A default row is a
+  // safe, retryable intermediate state if the grant statement later fails.
+  await db.execute(sql`
+    INSERT INTO goat.workspace_billing (workspace_id)
+    VALUES (${input.workspaceId})
+    ON CONFLICT (workspace_id) DO NOTHING
+  `);
+
   const result = await db.execute(sql`
     WITH current_billing AS MATERIALIZED (
-      INSERT INTO goat.workspace_billing (workspace_id)
-      VALUES (${input.workspaceId})
-      ON CONFLICT (workspace_id) DO UPDATE
-      SET workspace_id = excluded.workspace_id
-      RETURNING included_usage_period_start, included_usage_allowance_cents
+      SELECT included_usage_period_start, included_usage_allowance_cents
+      FROM goat.workspace_billing
+      WHERE workspace_id = ${input.workspaceId}
+      FOR UPDATE
     ),
     locked_balance AS MATERIALIZED (
       SELECT workspace_id, included_balance_usd_micros
@@ -264,11 +289,7 @@ export async function grantMonthlyIncludedUsage(input: {
         -COALESCE(included_balance_usd_micros, 0),
         'included_usage_expiration',
         ${expireKey},
-        jsonb_build_object(
-          'reason', 'included_usage_no_rollover',
-          'newPeriodStart', ${input.periodStart.toISOString()},
-          'stripeEventId', ${input.eventId ?? null}::text
-        )
+        ${expirationMetadata}::jsonb
       FROM locked_balance
       WHERE (SELECT value FROM should_rotate)
         AND COALESCE(included_balance_usd_micros, 0) > 0
@@ -290,15 +311,7 @@ export async function grantMonthlyIncludedUsage(input: {
         (SELECT cents FROM grant_amount)::bigint * ${USD_MICROS_PER_CENT},
         'included_usage_grant',
         ${grantKey},
-        jsonb_build_object(
-          'reason', 'monthly_included_usage',
-          'plan', ${input.plan},
-          'seatQuantity', ${input.seatQuantity},
-          'allowanceCents', ${targetAllowanceCents},
-          'periodStart', ${input.periodStart.toISOString()},
-          'periodEnd', ${input.periodEnd.toISOString()},
-          'stripeEventId', ${input.eventId ?? null}::text
-        )
+        ${grantMetadata}::jsonb
       WHERE (SELECT cents FROM grant_amount) > 0
       ON CONFLICT DO NOTHING
       RETURNING amount_usd_micros

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mintCodingWorkspaceAccess } from "./coding-workspace-runtime";
 import { verifyDictationTicket } from "./dictation-auth";
+import { startInfisicalAuthFlow } from "./infisical-auth";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
 import { createServer } from "./server";
 
@@ -19,6 +20,17 @@ vi.mock("./coding-workspace-runtime", async (importOriginal) => {
 vi.mock("./sandbox", () => ({
   getSandboxLifecycleStatus: vi.fn(async () => "running"),
   killSandbox: vi.fn(async () => true),
+}));
+
+vi.mock("./infisical-auth", () => ({
+  completeInfisicalAuthFlow: vi.fn(async () => null),
+  startInfisicalAuthFlow: vi.fn(async () => ({
+    id: "ginff_eu",
+    status: "link_ready",
+    loginUrl: "https://eu.infisical.com/login?callback_port=23456",
+    statusReason: null,
+    expiresAt: "2026-08-07T09:00:00.000Z",
+  })),
 }));
 
 const env = {
@@ -91,7 +103,72 @@ describe("runner server CORS", () => {
   });
 });
 
-describe("Coding workspace access", () => {
+describe("opencompany Infisical authentication", () => {
+  it("passes an allowlisted EU host to the auth flow", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/infisical-auth/start",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+      payload: {
+        workspaceId: "workspace_1",
+        requestedByWorkosId: "user_1",
+        host: "https://eu.infisical.com",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(startInfisicalAuthFlow).toHaveBeenCalledWith({
+      workspaceId: "workspace_1",
+      requestedByWorkosId: "user_1",
+      host: "https://eu.infisical.com",
+      env,
+    });
+  });
+
+  it("rejects an untrusted Infisical host before starting a sandbox", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/infisical-auth/start",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+      payload: {
+        workspaceId: "workspace_1",
+        requestedByWorkosId: "user_1",
+        host: "https://evil.example",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(startInfisicalAuthFlow).not.toHaveBeenCalled();
+  });
+
+  it("keeps omitted hosts on US during a rolling deployment", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/goat/infisical-auth/start",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+      payload: {
+        workspaceId: "workspace_1",
+        requestedByWorkosId: "user_1",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(startInfisicalAuthFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ host: "https://app.infisical.com" }),
+    );
+  });
+});
+
+describe("opencompany coding workspace access", () => {
   it("rejects missing owner claims", async () => {
     const server = createServer(env);
     servers.push(server);

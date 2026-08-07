@@ -106,10 +106,11 @@ Selecting a workflow with `#<id>` changes the composer action from **Send messag
 task**. Submission posts directly to `/api/workflows`, creates a task-flavored chat session and its
 first durable turn, and leaves the current Home or chat surface in place. It does not call the
 foreground chat model.
-Skills mentioned by the workflow are resolved and snapshotted when the task is created. OpenCompany
-task runs receive those snapshots as workflow prompt blocks; Codex task runs materialize them under
-`.agents/skills` and invoke them as native app-server skill inputs, matching explicit skill mentions
-in main Codex chat.
+Skills mentioned by the workflow, plus explicit skill mentions on the workflow invocation, are
+resolved and snapshotted when the task is created. Invocation skills apply to the first workflow
+step. OpenCompany task runs receive the applicable snapshots as workflow prompt blocks; Codex and
+Claude Code task runs materialize them under `.agents/skills` and invoke them natively, matching
+explicit skill mentions in their main chat surfaces.
 
 The reserved `#task` token provides the same direct composer handoff for one-off work without a
 saved workflow. The composer posts the request to `/api/tasks`, removes the directive from the
@@ -353,14 +354,15 @@ redactor so accidental command output cannot persist them in the chat transcript
 reconciliation still checks warm sandboxes on every turn, while unchanged configurations skip file
 uploads.
 
-Workspace admins can also connect one Infisical Cloud account under Settings → Integrations. The
-runner completes Infisical's real CLI browser-token fallback in a short-lived auth sandbox, stores
-only the encrypted file-vault bundle, and restores it into persistent Codex and Claude Code
-sandboxes. Credential generations reconcile reconnects and disconnects before coding turns, while
-Infisical project and environment selection remains repository-local through `.infisical.json` or
-explicit CLI flags. The connected account's Infisical permissions are the authorization boundary;
-admins should use a dedicated least-privilege account because coding agents can invoke read and
-write CLI commands directly.
+Workspace admins can also connect one Infisical Cloud account under Settings → Integrations. They
+select the US or EU region before login, and the runner keeps that allowlisted host bound to the
+entire authentication flow and saved connection. The runner completes Infisical's real CLI
+browser-token fallback in a short-lived auth sandbox, stores only the encrypted file-vault bundle,
+and restores it into persistent Codex and Claude Code sandboxes. Credential generations reconcile
+reconnects and disconnects before coding turns, while Infisical project and environment selection
+remains repository-local through `.infisical.json` or explicit CLI flags. The connected account's
+Infisical permissions are the authorization boundary; admins should use a dedicated least-privilege
+account because coding agents can invoke read and write CLI commands directly.
 
 ### Codex execution
 

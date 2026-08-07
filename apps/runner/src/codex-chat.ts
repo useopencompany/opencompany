@@ -314,6 +314,7 @@ export async function runCodexChatTurn(input: {
 
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
+  let authCacheStaged = false;
   let executionStage = "load_attachments";
   try {
     checkExternalAbort();
@@ -331,6 +332,7 @@ export async function runCodexChatTurn(input: {
     if (serializedAuthJson) {
       executionStage = "write_auth";
       await sandbox.files.write(`${CODEX_CHAT_HOME}/auth.json`, serializedAuthJson);
+      authCacheStaged = true;
       checkExternalAbort();
     }
     executionStage = "ensure_codex";
@@ -530,22 +532,6 @@ export async function runCodexChatTurn(input: {
         setSql: sql`codex_thread_id = ${summary.sessionId}, updated_at = ${new Date()}`,
       });
     }
-    await persistRefreshedCodexAuth({
-      sandbox,
-      userWorkosId: turn.userWorkosId,
-      auth,
-      codexHome: CODEX_CHAT_HOME,
-    }).catch((error) => {
-      captureException(error, {
-        event: "opencompany.goat_codex_chat_auth_persist_failed",
-        turn_id: turn.id,
-      });
-      logger.warn("Failed to persist refreshed Codex auth", {
-        event: "opencompany.goat_codex_chat_auth_persist_failed",
-        turn_id: turn.id,
-        error,
-      });
-    });
     if (taskContext && summary.status === "success") {
       const rawResult = summary.result?.trim() ?? "";
       if (!rawResult) {
@@ -616,19 +602,7 @@ export async function runCodexChatTurn(input: {
     if (effectiveError instanceof CodexChatHandoffError) {
       outcome = "handed_off";
       await projector.cancelPendingInteractions();
-      await persistRefreshedCodexAuth({
-        sandbox,
-        userWorkosId: turn.userWorkosId,
-        auth,
-        codexHome: CODEX_CHAT_HOME,
-      }).catch(() => undefined);
     } else if (effectiveError instanceof CodexChatInterruptedError) {
-      await persistRefreshedCodexAuth({
-        sandbox,
-        userWorkosId: turn.userWorkosId,
-        auth,
-        codexHome: CODEX_CHAT_HOME,
-      }).catch(() => undefined);
       if (taskContext) {
         await projector.interrupted(buildTaskTerminalProjection(taskContext));
       } else {
@@ -659,6 +633,25 @@ export async function runCodexChatTurn(input: {
       }
     }
   } finally {
+    if (authCacheStaged) {
+      await persistRefreshedCodexAuth({
+        sandbox,
+        userWorkosId: turn.userWorkosId,
+        auth,
+        codexHome: CODEX_CHAT_HOME,
+      }).catch((error) => {
+        captureException(error, {
+          event: "opencompany.goat_codex_chat_auth_persist_failed",
+          turn_id: turn.id,
+        });
+        logger.warn("Failed to persist refreshed Codex auth", {
+          event: "opencompany.goat_codex_chat_auth_persist_failed",
+          turn_id: turn.id,
+          error,
+        });
+      });
+    }
+
     // A handed-off turn is still running inside E2B. Keep its active timeout instead of parking it:
     // a deployment can take longer than an idle window, and pausing at the reclaim boundary leaves
     // the replacement worker with a connected handle whose command service is not ready. Settled

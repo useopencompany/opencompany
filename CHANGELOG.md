@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-08-06
+
+### Added
+- OpenCompany Hobby: a free plan with $5 of included usage refreshed monthly, for single-member workspaces, alongside Pro (#1095) — @opencompany-bot.
+- Connect Infisical as a workspace integration in Settings so Codex and Claude Code coding sandboxes can pull your secrets automatically (#1096) — @opencompany-bot.
+- Chat and Brain now accept CSV, TSV, Markdown, plain text, and JSON uploads, not just images and PDFs (#1104) — @opencompany-bot.
+
+### Changed
+- Cmd+K is now a real command palette: search your chats and jump to actions from one input, with compose as a separate step instead of crowding the search box (#1093) — @opencompany-bot.
+- Signing in and signing up now happen on our own pages instead of a WorkOS hosted picker — pick Google or email magic link, and we remember which one you used last (#1099) — @opencompany-bot.
+
+### Fixed
+- The home page's chat and task list scrolls properly again instead of getting cut off (#1098) — @opencompany-bot.
+- Fixed a bug where interrupting a tool call, like a browser action, could break the next message you sent in that chat (#1103) — @opencompany-bot.
+
 ## [1.8.0] - 2026-08-05
 
 ### Added

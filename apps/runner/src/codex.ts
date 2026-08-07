@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   loadCodexCredential,
   markCodexCredentialNeedsReauth,
@@ -22,7 +23,12 @@ export async function loadCodexCliAuth(userWorkosId: string): Promise<CodexCliAu
     return null;
   }
   if (!credential || credential.status !== "connected") return null;
-  return { kind: "chatgpt", authJson: credential.authJson, brokered: false };
+  return {
+    kind: "chatgpt",
+    authJson: credential.authJson,
+    credentialLastRotatedAt: credential.lastRotatedAt,
+    brokered: false,
+  };
 }
 
 export async function persistRefreshedCodexAuth(input: {
@@ -36,36 +42,25 @@ export async function persistRefreshedCodexAuth(input: {
   try {
     const raw = await input.sandbox.files.read(`${input.codexHome ?? CODEX_HOME}/auth.json`);
     content = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
-  } catch {
-    await markCodexCredentialNeedsReauth({
-      db: getDb(),
-      userWorkosId: input.userWorkosId,
-      statusReason: "Codex did not leave a readable auth cache after running.",
-    });
-    return;
+  } catch (error) {
+    throw new Error("Codex did not leave a readable auth cache after running.", { cause: error });
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
-  } catch {
-    await markCodexCredentialNeedsReauth({
-      db: getDb(),
-      userWorkosId: input.userWorkosId,
-      statusReason: "Codex auth cache was malformed after running.",
-    });
-    return;
+  } catch (error) {
+    throw new Error("Codex auth cache was malformed after running.", { cause: error });
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    await markCodexCredentialNeedsReauth({
-      db: getDb(),
-      userWorkosId: input.userWorkosId,
-      statusReason: "Codex auth cache was malformed after running.",
-    });
-    return;
+    throw new Error("Codex auth cache was malformed after running.");
   }
-  await rotateCodexCredential({
+  if (isDeepStrictEqual(parsed, input.auth.authJson)) return "unchanged" as const;
+
+  const rotated = await rotateCodexCredential({
     db: getDb(),
     userWorkosId: input.userWorkosId,
     authJson: parsed as Record<string, unknown>,
+    expectedLastRotatedAt: input.auth.credentialLastRotatedAt,
   });
+  return rotated ? ("rotated" as const) : ("superseded" as const);
 }

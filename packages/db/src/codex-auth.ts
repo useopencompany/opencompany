@@ -7,7 +7,7 @@ import {
   loadEncryptionKey,
   UnsupportedKeyVersionError,
 } from "@opencompany/crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type * as schema from "./schema";
 import {
@@ -96,6 +96,7 @@ export async function rotateCodexCredential(input: {
   db: CodexAuthDb;
   userWorkosId: string;
   authJson: CodexAuthJson;
+  expectedLastRotatedAt: Date | null;
   validatedAt?: Date | null;
   now?: Date;
 }) {
@@ -116,7 +117,14 @@ export async function rotateCodexCredential(input: {
       lastRotatedAt: now,
       updatedAt: now,
     })
-    .where(eq(codexCredentials.userWorkosId, input.userWorkosId))
+    .where(
+      and(
+        eq(codexCredentials.userWorkosId, input.userWorkosId),
+        input.expectedLastRotatedAt
+          ? eq(codexCredentials.lastRotatedAt, input.expectedLastRotatedAt)
+          : isNull(codexCredentials.lastRotatedAt),
+      ),
+    )
     .returning({ userWorkosId: codexCredentials.userWorkosId });
   return Boolean(credential);
 }

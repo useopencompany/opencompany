@@ -53,10 +53,6 @@ export function newBrainId(name = "brain") {
   return readableBrainId(name, randomUUID());
 }
 
-export function defaultBrainIdForUser(userWorkosId: string) {
-  return readableBrainId(DEFAULT_BRAIN_SLUG, userWorkosId);
-}
-
 function readableBrainId(name: string, entropy: string) {
   const suffix = createHash("sha256")
     .update(entropy)
@@ -303,70 +299,6 @@ export async function getDefaultBrainForUser(
   return brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
 }
 
-// Bootstraps the personal workspace + "General" brain for a user that has no
-// workspace membership yet. Deterministic ids (matching migration 0096's
-// backfill) make concurrent sign-in requests converge on the same rows.
-export async function createDefaultWorkspaceForUser(
-  input: { userWorkosId: string; name: string },
-  options: { db?: DbClient } = {},
-): Promise<void> {
-  const db = options.db ?? getDb();
-  const brainId = defaultBrainIdForUser(input.userWorkosId);
-  await db
-    .insert(workspaces)
-    .values({
-      id: `goat_ws_${input.userWorkosId}`,
-      name: input.name,
-      createdByWorkosId: input.userWorkosId,
-    })
-    .onConflictDoNothing();
-  await db
-    .insert(workspaceMembers)
-    .values({
-      id: `goat_wsm_${input.userWorkosId}`,
-      workspaceId: `goat_ws_${input.userWorkosId}`,
-      userWorkosId: input.userWorkosId,
-      role: "admin",
-    })
-    .onConflictDoNothing();
-  await db
-    .insert(brains)
-    .values({
-      id: brainId,
-      workspaceId: `goat_ws_${input.userWorkosId}`,
-      name: DEFAULT_BRAIN_NAME,
-      slug: DEFAULT_BRAIN_SLUG,
-      visibility: "workspace",
-      createdByWorkosId: input.userWorkosId,
-    })
-    .onConflictDoNothing();
-  await seedDefaultBrainFolders(
-    {
-      brainRef: brainId,
-      userWorkosId: input.userWorkosId,
-    },
-    { db },
-  );
-  // Seed the current Hobby allowance immediately; the hourly billing sweep
-  // repairs a transient failure without blocking sign-in.
-  try {
-    const { start, resetAt } = calendarMonthWindow(new Date());
-    await grantMonthlyIncludedUsage({
-      workspaceId: `goat_ws_${input.userWorkosId}`,
-      plan: "hobby",
-      seatQuantity: 1,
-      periodStart: start,
-      periodEnd: resetAt,
-      db,
-    });
-  } catch (error) {
-    console.warn(
-      `Failed to grant the monthly Hobby allowance for workspace goat_ws_${input.userWorkosId}.`,
-      error,
-    );
-  }
-}
-
 // Creates the local resources for a user-created WorkOS organization. The
 // workspace, admin membership, default brain, and required folder rows are one
 // Neon batch so a failed provision never leaves a partially usable workspace.
@@ -376,6 +308,7 @@ export async function createWorkspaceForUser(
     workosOrganizationId: string;
     userWorkosId: string;
     name: string;
+    slug?: string | null;
   },
   options: { db?: DbClient } = {},
 ): Promise<{ workspace: Workspace; brain: Brain }> {
@@ -390,6 +323,7 @@ export async function createWorkspaceForUser(
       id: input.workspaceId,
       workosOrganizationId: input.workosOrganizationId,
       name,
+      slug: input.slug ?? null,
       createdByWorkosId: input.userWorkosId,
     })
     .returning();

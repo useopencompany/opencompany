@@ -108,14 +108,24 @@ export function compileWorkflowHarnessSpec(input: {
   workflow: WorkspaceWorkflow;
   workspaceId: string;
   skills: WorkspaceSkill[];
+  invokedSkillIds?: readonly string[];
   tools: TaskToolName[];
   description: string;
 }): WorkflowHarnessSpec {
   const skillById = new Map(input.skills.map((skill) => [skill.id, skill]));
+  const invokedSkillIds = new Set(input.invokedSkillIds ?? []);
   const steps = input.workflow.steps.map((step, index) => {
     const selection = resolveWorkflowStepSelection(step);
-    const stepSkills = extractWorkflowSkillMentionRefs(step.instructions)
-      .map((mention) => skillById.get(mention.id))
+    const stepSkillIds = new Set(
+      extractWorkflowSkillMentionRefs(step.instructions).map((mention) => mention.id),
+    );
+    // Composer-invoked skills belong to the workflow's first user turn. Later steps run in
+    // isolated sessions and keep only the skills authored into those steps.
+    if (index === 0) {
+      for (const skillId of invokedSkillIds) stepSkillIds.add(skillId);
+    }
+    const stepSkills = [...stepSkillIds]
+      .map((skillId) => skillById.get(skillId))
       .filter((skill): skill is WorkspaceSkill => Boolean(skill));
     const skillBlocks =
       selection.engine === "opencompany"
@@ -201,6 +211,7 @@ export async function createTaskFromWorkflow(input: {
   userWorkosId: string;
   workspaceId: string | null;
   mention: WorkflowMentionRef;
+  skillMentions?: SkillMentionRef[];
   description: string;
   attachments?: ChatMessageAttachment[];
   attachmentTexts?: Record<string, string> | null;
@@ -216,6 +227,7 @@ export async function createTaskFromWorkflow(input: {
     workspaceId,
     workflow,
     description: input.description,
+    ...(input.skillMentions ? { skillMentions: input.skillMentions } : {}),
   });
 
   return createTaskForUser({
@@ -236,6 +248,7 @@ export async function prepareWorkflowRunForUser(input: {
   userWorkosId: string;
   workspaceId: string;
   workflow: WorkspaceWorkflow;
+  skillMentions?: SkillMentionRef[];
   description: string;
 }): Promise<{
   description: string;
@@ -257,11 +270,17 @@ export async function prepareWorkflowRunForUser(input: {
     );
   }
 
-  const skillRefs = [
+  const workflowSkillRefs = [
     ...new Map(
       workflow.steps
         .flatMap((step) => extractWorkflowSkillMentionRefs(step.instructions))
         .map((mention) => [mention.id, mention]),
+    ).values(),
+  ];
+  const invokedSkillRefs = input.skillMentions ?? [];
+  const skillRefs = [
+    ...new Map(
+      [...workflowSkillRefs, ...invokedSkillRefs].map((mention) => [mention.id, mention]),
     ).values(),
   ];
   const skills = await resolveSkillMentions({
@@ -275,6 +294,7 @@ export async function prepareWorkflowRunForUser(input: {
     workflow,
     workspaceId: input.workspaceId,
     skills,
+    invokedSkillIds: invokedSkillRefs.map((mention) => mention.id),
     tools,
     description,
   });

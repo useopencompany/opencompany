@@ -1,8 +1,10 @@
 import { shellQuote } from "@opencompany/agent-runtime";
 import {
   INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
-  INFISICAL_HOST,
   type InfisicalAuthBundle,
+  type InfisicalHost,
+  isInfisicalHost,
+  isInfisicalSessionDomain,
   newInfisicalAuthFlowId,
   saveInfisicalConnection,
 } from "@opencompany/db/infisical-auth";
@@ -33,6 +35,16 @@ const INFISICAL_BROWSER_TOKEN_MAX_LENGTH = 64 * 1024;
 const INFISICAL_BUNDLE_MAX_BYTES = 512 * 1024;
 const INFISICAL_KEYRING_MAX_FILES = 5;
 
+type InfisicalAuthStartStage =
+  | "supersede_active_flows"
+  | "create_sandbox"
+  | "set_sandbox_timeout"
+  | "install_infisical_cli"
+  | "install_tmux"
+  | "prepare_login"
+  | "wait_for_login_url"
+  | "persist_flow";
+
 export type InfisicalAuthFlowStatus = {
   id: string;
   status: "pending" | "link_ready" | "completed" | "failed" | "expired";
@@ -44,27 +56,45 @@ export type InfisicalAuthFlowStatus = {
 export async function startInfisicalAuthFlow(input: {
   workspaceId: string;
   requestedByWorkosId: string;
+  host: InfisicalHost;
   env: RunnerEnv;
 }): Promise<InfisicalAuthFlowStatus> {
   await ensureWorkspaceAdmin(input.workspaceId, input.requestedByWorkosId);
-  await supersedeActiveFlows(input.workspaceId);
-
-  const sandbox = await Sandbox.create(input.env.codexE2bTemplate ?? "codex", {
-    envs: {},
-    metadata: {
-      user_id: input.requestedByWorkosId,
-      workspace_id: input.workspaceId,
-      purpose: "infisical-auth",
-    },
-    timeoutMs: INFISICAL_AUTH_SANDBOX_TIMEOUT_MS,
-    lifecycle: { onTimeout: "kill" },
-  });
-  await sandbox.setTimeout(INFISICAL_AUTH_SANDBOX_TIMEOUT_MS);
-
+  if (!isInfisicalHost(input.host)) {
+    throw new Error("Unsupported Infisical host.");
+  }
+  let failureStage: InfisicalAuthStartStage = "supersede_active_flows";
+  let sandbox: SandboxHandle | null = null;
   try {
-    await ensureInfisicalInstalled(sandbox);
-    await prepareInfisicalAuthSandbox(sandbox);
-    const loginUrl = await waitForLoginUrl(sandbox);
+    await supersedeActiveFlows(input.workspaceId);
+
+    failureStage = "create_sandbox";
+    const createdSandbox = await Sandbox.create(input.env.codexE2bTemplate ?? "codex", {
+      envs: {},
+      metadata: {
+        user_id: input.requestedByWorkosId,
+        workspace_id: input.workspaceId,
+        purpose: "infisical-auth",
+      },
+      timeoutMs: INFISICAL_AUTH_SANDBOX_TIMEOUT_MS,
+      lifecycle: { onTimeout: "kill" },
+    });
+    sandbox = createdSandbox;
+
+    failureStage = "set_sandbox_timeout";
+    await createdSandbox.setTimeout(INFISICAL_AUTH_SANDBOX_TIMEOUT_MS);
+
+    failureStage = "install_infisical_cli";
+    await ensureInfisicalInstalled(createdSandbox);
+
+    failureStage = "install_tmux";
+    await ensureInfisicalTmuxInstalled(createdSandbox);
+
+    failureStage = "prepare_login";
+    await prepareInfisicalAuthSandbox(createdSandbox, input.host);
+
+    failureStage = "wait_for_login_url";
+    const loginUrl = await waitForLoginUrl(createdSandbox, input.host);
     if (!loginUrl) {
       throw new Error("Infisical did not provide a browser login link.");
     }
@@ -72,11 +102,12 @@ export async function startInfisicalAuthFlow(input: {
     const id = newInfisicalAuthFlowId();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + INFISICAL_AUTH_FLOW_TTL_MS);
+    failureStage = "persist_flow";
     await getDb().insert(infisicalAuthFlows).values({
       id,
       workspaceId: input.workspaceId,
       requestedByWorkosId: input.requestedByWorkosId,
-      sandboxId: sandbox.sandboxId,
+      sandboxId: createdSandbox.sandboxId,
       loginUrl,
       status: "link_ready",
       statusReason: null,
@@ -87,7 +118,8 @@ export async function startInfisicalAuthFlow(input: {
       event: "opencompany.runner_infisical_auth_link_ready",
       workspace_id: input.workspaceId,
       flow_id: id,
-      sandbox_id: sandbox.sandboxId,
+      sandbox_id: createdSandbox.sandboxId,
+      infisical_host: input.host,
     });
     return {
       id,
@@ -97,11 +129,12 @@ export async function startInfisicalAuthFlow(input: {
       expiresAt: expiresAt.toISOString(),
     };
   } catch (error) {
-    await killSandbox(sandbox.sandboxId).catch(() => undefined);
+    if (sandbox) await killSandbox(sandbox.sandboxId).catch(() => undefined);
     logger.warn("Infisical auth flow could not start", {
       event: "opencompany.runner_infisical_auth_start_failed",
       workspace_id: input.workspaceId,
-      sandbox_id: sandbox.sandboxId,
+      sandbox_id: sandbox?.sandboxId,
+      failure_stage: failureStage,
       error_name: errorName(error),
     });
     throw error;
@@ -118,6 +151,11 @@ export async function completeInfisicalAuthFlow(input: {
   const flow = await loadFlow(input.workspaceId, input.requestedByWorkosId, input.flowId);
   if (!flow) return null;
   if (isTerminalStatus(flow.status)) return flowStatus(flow);
+
+  const host = infisicalHostFromLoginUrl(flow.loginUrl);
+  if (!host) {
+    throw new Error("Infisical authentication flow has an unsupported host.");
+  }
 
   const now = new Date();
   if (flow.expiresAt <= now) {
@@ -169,7 +207,7 @@ export async function completeInfisicalAuthFlow(input: {
       throw new Error("Infisical rejected the browser token.");
     }
 
-    const loginStatus = await validateInfisicalLogin(sandbox);
+    const loginStatus = await validateInfisicalLogin(sandbox, host);
     if (loginStatus.email !== browserCredentials.email) {
       throw new Error("Infisical authenticated a different account than the browser token.");
     }
@@ -183,6 +221,7 @@ export async function completeInfisicalAuthFlow(input: {
       db: getDb(),
       workspaceId: input.workspaceId,
       authBundle,
+      host,
       accountEmail: loginStatus.email,
       cliVersion: INFISICAL_CLI_VERSION,
       expiresAt: loginStatus.expiresAt,
@@ -201,6 +240,7 @@ export async function completeInfisicalAuthFlow(input: {
       workspace_id: input.workspaceId,
       flow_id: input.flowId,
       sandbox_id: flow.sandboxId,
+      infisical_host: host,
     });
     return {
       ...flowStatus(flow),
@@ -229,8 +269,11 @@ export async function completeInfisicalAuthFlow(input: {
   }
 }
 
-export function parseInfisicalLoginUrl(output: string) {
-  const match = output.match(/https:\/\/app\.infisical\.com\/login\?callback_port=\d+/);
+export function parseInfisicalLoginUrl(output: string, expectedHost: InfisicalHost) {
+  if (!isInfisicalHost(expectedHost)) return null;
+  const unwrappedOutput = output.replace(/\r?\n/g, "");
+  const escapedHost = expectedHost.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = unwrappedOutput.match(new RegExp(`${escapedHost}/login\\?callback_port=\\d+`));
   if (!match) return null;
   try {
     const url = new URL(match[0]);
@@ -238,6 +281,16 @@ export function parseInfisicalLoginUrl(output: string) {
     return Number.isInteger(callbackPort) && callbackPort > 0 && callbackPort <= 65_535
       ? url.toString()
       : null;
+  } catch {
+    return null;
+  }
+}
+
+export function infisicalHostFromLoginUrl(loginUrl: string | null): InfisicalHost | null {
+  if (!loginUrl) return null;
+  try {
+    const url = new URL(loginUrl);
+    return url.pathname === "/login" && isInfisicalHost(url.origin) ? url.origin : null;
   } catch {
     return null;
   }
@@ -320,7 +373,20 @@ async function ensureInfisicalInstalled(sandbox: SandboxHandle) {
   );
 }
 
-async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle) {
+export async function ensureInfisicalTmuxInstalled(sandbox: SandboxHandle) {
+  await sandbox.commands.run(
+    [
+      "if ! command -v tmux >/dev/null 2>&1; then",
+      "export DEBIAN_FRONTEND=noninteractive;",
+      "apt-get update -qq && apt-get install -y -qq --no-install-recommends tmux;",
+      "fi;",
+      "command -v tmux >/dev/null",
+    ].join(" "),
+    { user: "root", timeoutMs: 120_000 },
+  );
+}
+
+async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle, host: InfisicalHost) {
   await sandbox.commands.run(
     [
       `rm -rf ${shellQuote(INFISICAL_AUTH_HOME)} ${shellQuote("/home/user/.infisical")} ${shellQuote(INFISICAL_KEYRING_ROOT)}`,
@@ -334,7 +400,7 @@ async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle) {
     [
       "#!/usr/bin/env bash",
       "export HOME=/home/user",
-      `infisical login --domain=${shellQuote(INFISICAL_HOST)}`,
+      `infisical login --domain=${shellQuote(host)}`,
       "login_exit=$?",
       `printf '%s' "$login_exit" > ${shellQuote(INFISICAL_LOGIN_EXIT)}`,
       'exit "$login_exit"',
@@ -352,11 +418,11 @@ async function prepareInfisicalAuthSandbox(sandbox: SandboxHandle) {
   );
 }
 
-async function waitForLoginUrl(sandbox: SandboxHandle) {
+async function waitForLoginUrl(sandbox: SandboxHandle, host: InfisicalHost) {
   const deadline = Date.now() + INFISICAL_LINK_WAIT_MS;
   while (Date.now() < deadline) {
     const output = await captureLoginPane(sandbox);
-    const loginUrl = parseInfisicalLoginUrl(output);
+    const loginUrl = parseInfisicalLoginUrl(output, host);
     if (loginUrl) return loginUrl;
     await delay(250);
   }
@@ -375,7 +441,7 @@ async function waitForBrowserTokenPrompt(sandbox: SandboxHandle) {
 
 async function captureLoginPane(sandbox: SandboxHandle) {
   const result = await sandbox.commands.run(
-    `tmux capture-pane -p -S -200 -t ${shellQuote(INFISICAL_TMUX_SESSION)} 2>/dev/null || true`,
+    `tmux capture-pane -p -J -S -200 -t ${shellQuote(INFISICAL_TMUX_SESSION)} 2>/dev/null || true`,
     { user: "user", timeoutMs: 10_000 },
   );
   return result.stdout;
@@ -420,7 +486,7 @@ async function waitForLoginExit(sandbox: SandboxHandle) {
   throw new Error("Infisical authentication timed out.");
 }
 
-async function validateInfisicalLogin(sandbox: SandboxHandle) {
+async function validateInfisicalLogin(sandbox: SandboxHandle, host: InfisicalHost) {
   const result = await sandbox.commands.run("HOME=/home/user infisical login status --json", {
     user: "user",
     timeoutMs: 30_000,
@@ -442,7 +508,8 @@ async function validateInfisicalLogin(sandbox: SandboxHandle) {
       candidate &&
         typeof candidate === "object" &&
         (candidate as Record<string, unknown>).principalType === "user" &&
-        (candidate as Record<string, unknown>).status === "authenticated",
+        (candidate as Record<string, unknown>).status === "authenticated" &&
+        isInfisicalSessionDomain((candidate as Record<string, unknown>).domain, host),
     ),
   );
   const email = typeof session?.email === "string" ? session.email.trim() : "";

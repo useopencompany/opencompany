@@ -6,8 +6,11 @@ import { type ReactNode, useEffect } from "react";
 import type { AnalyticsEventName, AnalyticsEventProperties } from "./events";
 import { type AnalyticsPerson, analyticsPersonProperties } from "./person";
 
-export type AnalyticsIdentity = AnalyticsPerson & {
+export type AnalyticsUserIdentity = AnalyticsPerson & {
   userId: string;
+};
+
+export type AnalyticsIdentity = AnalyticsUserIdentity & {
   workspaceId: string;
 };
 
@@ -112,7 +115,7 @@ export function captureEvent<EventName extends AnalyticsEventName>(
   }
 }
 
-function identifyUser(identity: AnalyticsIdentity) {
+export function identifyUser(identity: AnalyticsUserIdentity) {
   initClientAnalytics();
   if (!initialized) return;
 

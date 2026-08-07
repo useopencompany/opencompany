@@ -108,10 +108,11 @@ export type IntegrationProvider =
   | "latitude"
   | "posthog"
   | "neon"
-  | "imessage";
+  | "imessage"
+  | "x_account";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
-// Calendar, Slack user token, Linear, PostHog, Neon) are always personal. Installation-bound
+// Calendar, Slack user token, Linear, PostHog, Neon, X) are always personal. Installation-bound
 // connections (GitHub App org installs, Jamie webhook secrets, the Slack
 // answer-bot install) are workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
@@ -1505,7 +1506,7 @@ export const integrations = oc.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1550,7 +1551,7 @@ export const integrationCredentials = oc.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1600,7 +1601,7 @@ export const integrationResources = oc.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage')`,
+      sql`${table.provider} IN ('gmail', 'google_calendar', 'google_drive', 'linear', 'github', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'stripe', 'latitude', 'posthog', 'neon', 'imessage', 'x_account')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",

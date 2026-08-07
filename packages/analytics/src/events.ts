@@ -5,6 +5,8 @@ export type TaskSpawnOrigin = "adhoc" | "workflow";
 export type TaskSpawnTrigger = "manual" | "schedule";
 export type AnalyticsEngine = "opencompany" | "codex" | "claude_code";
 export type AnalyticsUsageSource = "owned_platform" | "external_harness";
+export type OnboardingFlow = "owner" | "member";
+export type OnboardingStep = "profile" | "workspace" | "sources" | "welcome" | "finish";
 
 export type AnalyticsEventPropertiesByName = {
   app_opened: {
@@ -12,6 +14,28 @@ export type AnalyticsEventPropertiesByName = {
   };
   signup_completed: {
     source: "user_sync";
+  };
+  onboarding_started: {
+    flow: OnboardingFlow;
+    initial_step: OnboardingStep;
+    initial_step_index: number;
+    total_steps: number;
+    is_resume: boolean;
+    workspace_id?: string;
+  };
+  onboarding_step_viewed: {
+    flow: OnboardingFlow;
+    step: OnboardingStep;
+    step_index: number;
+    total_steps: number;
+    workspace_id?: string;
+  };
+  onboarding_completed: {
+    flow: OnboardingFlow;
+    total_steps: number;
+    workspace_id: string;
+    sources_feeding: number;
+    source_goal_met: boolean;
   };
   chat_message_sent: {
     workspace_id: string;
@@ -133,6 +157,28 @@ export const analyticsEvents = {
     name: "signup_completed",
     description: "A WorkOS user was synced into opencompany for the first time.",
     safeProperties: ["source"],
+  },
+  onboarding_started: {
+    name: "onboarding_started",
+    description: "A user entered or resumed the opencompany onboarding flow.",
+    safeProperties: [
+      "flow",
+      "initial_step",
+      "initial_step_index",
+      "total_steps",
+      "is_resume",
+      "workspace_id",
+    ],
+  },
+  onboarding_step_viewed: {
+    name: "onboarding_step_viewed",
+    description: "A user reached a step in the opencompany onboarding flow.",
+    safeProperties: ["flow", "step", "step_index", "total_steps", "workspace_id"],
+  },
+  onboarding_completed: {
+    name: "onboarding_completed",
+    description: "A user completed the opencompany onboarding flow.",
+    safeProperties: ["flow", "total_steps", "workspace_id", "sources_feeding", "source_goal_met"],
   },
   chat_message_sent: {
     name: "chat_message_sent",

@@ -30,14 +30,30 @@ type ClaudeToolUse = {
 };
 
 const FILE_CHANGE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+const SUBAGENT_TOOLS = new Set(["Task", "Agent"]);
 const PLAN_ITEM_ID = "claude-plan";
+const ASYNC_AGENT_LAUNCH_PREFIX = "Async agent launched successfully.";
 
 export function createClaudeCodeEventNormalizer() {
   const toolUses = new Map<string, ClaudeToolUse>();
   let sessionId: string | null = null;
   let summary: ClaudeCodeTurnSummary | null = null;
+  let eventSequence = 0;
+  let rootSummarySequence = -1;
+  let lastRootActivitySequence = -1;
+  let lastTaskNotificationSequence = -1;
+
+  const beginRun = () => {
+    toolUses.clear();
+    summary = null;
+    eventSequence = 0;
+    rootSummarySequence = -1;
+    lastRootActivitySequence = -1;
+    lastTaskNotificationSequence = -1;
+  };
 
   const normalize = (raw: Record<string, unknown>): CodexAppServerNormalizedEvent[] => {
+    const sequence = eventSequence++;
     const type = readString(raw.type);
 
     if (type === "system") {
@@ -54,13 +70,26 @@ export function createClaudeCodeEventNormalizer() {
       return [normalized("unknown", raw, { subtype: readString(raw.subtype) })];
     }
 
-    if (type === "assistant") return normalizeAssistantMessage(raw, toolUses);
-    if (type === "user") return normalizeUserMessage(raw, toolUses);
+    if (type === "assistant" || type === "user") {
+      if (!readString(raw.parent_tool_use_id)) lastRootActivitySequence = sequence;
+      return type === "assistant"
+        ? normalizeAssistantMessage(raw, toolUses)
+        : normalizeUserMessage(raw, toolUses);
+    }
 
     if (type === "result") {
       const subtype = readString(raw.subtype);
       sessionId = readString(raw.session_id) ?? sessionId;
       const usage = readUsage(raw.usage);
+      if (readString(readRecord(raw.origin)?.kind) === "task-notification") {
+        lastTaskNotificationSequence = sequence;
+        return [
+          normalized("usage.updated", raw, {
+            turnId: sessionId,
+            tokenUsage: usage,
+          }),
+        ];
+      }
       // API failures report subtype "success" with is_error=true (observed on a 401),
       // so is_error is the authoritative failure signal.
       const success = subtype === "success" && raw.is_error !== true;
@@ -86,6 +115,7 @@ export function createClaudeCodeEventNormalizer() {
         usage,
         sessionId,
       };
+      rootSummarySequence = sequence;
       return [
         normalized("turn.completed", raw, {
           turnId: sessionId,
@@ -103,9 +133,14 @@ export function createClaudeCodeEventNormalizer() {
   };
 
   return {
+    beginRun,
     normalize,
     sessionId: () => sessionId,
-    summary: () => summary,
+    summary: () => (rootSummarySequence > lastRootActivitySequence ? summary : null),
+    // Claude Code can emit a root-looking result before asynchronous Agent work finishes. If a
+    // task notification arrives later, the root model has not incorporated that result yet and
+    // must be resumed before the durable turn can be considered complete.
+    needsBackgroundAgentContinuation: () => lastTaskNotificationSequence > rootSummarySequence,
   };
 }
 
@@ -113,9 +148,9 @@ function normalizeAssistantMessage(
   raw: Record<string, unknown>,
   toolUses: Map<string, ClaudeToolUse>,
 ): CodexAppServerNormalizedEvent[] {
-  // Subagent traffic (Task tool) carries parent_tool_use_id. Rather than dropping it, we stamp
-  // every emitted event with the parent tool call id so the UI-parts reducer nests the subagent's
-  // steps under its parent Task part (see applyEventToSubagentChild).
+  // Subagent traffic (Agent in current Claude Code, Task in older versions) carries
+  // parent_tool_use_id. Stamp every emitted event with the parent tool call id so the UI-parts
+  // reducer nests the subagent's steps under its parent part (see applyEventToSubagentChild).
   const parentToolCallId = readString(raw.parent_tool_use_id);
   const message = readRecord(raw.message);
   const content = Array.isArray(message?.content) ? message.content : [];
@@ -179,7 +214,7 @@ function normalizeAssistantMessage(
       return;
     }
 
-    if (name === "Task") {
+    if (SUBAGENT_TOOLS.has(name)) {
       const description = readString(input.description) ?? undefined;
       const subagentType = readString(input.subagent_type) ?? undefined;
       const prompt = readString(input.prompt) ?? undefined;
@@ -228,9 +263,18 @@ function normalizeUserMessage(
     if (!toolUseId) continue;
     const started = toolUses.get(toolUseId);
     if (!started) continue;
-    toolUses.delete(toolUseId);
     const isError = record.is_error === true;
     const outputText = toolResultText(record.content);
+    if (
+      started.kind === "subagent" &&
+      !isError &&
+      outputText?.startsWith(ASYNC_AGENT_LAUNCH_PREFIX)
+    ) {
+      // Claude 2.1.220's Agent tool returns an immediate launch acknowledgement, then streams the
+      // real child events under parent_tool_use_id. Keep the parent open for that nested trace.
+      continue;
+    }
+    toolUses.delete(toolUseId);
 
     if (started.kind === "command") {
       if (outputText) {

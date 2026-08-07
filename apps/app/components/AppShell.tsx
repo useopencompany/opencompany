@@ -11,6 +11,7 @@ import { getLinearIntegrationState } from "@opencompany/core/integrations/linear
 import { getPostHogIntegrationState } from "@opencompany/core/integrations/posthog-mcp";
 import { getSlackIntegrationState } from "@opencompany/core/integrations/slack";
 import { getStripeIntegrationState } from "@opencompany/core/integrations/stripe";
+import { getWorkspacePlan } from "@opencompany/db/billing";
 import type { TaskStage, TaskStatus } from "@opencompany/db/schema";
 import { listWorkspaceMembers } from "@opencompany/db/workspaces";
 import type { ReactNode } from "react";
@@ -28,6 +29,7 @@ import { getGranolaIntegrationState } from "@/lib/integrations/granola";
 import { getImessageIntegrationState } from "@/lib/integrations/imessage";
 import { getJamieIntegrationState } from "@/lib/integrations/jamie";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
+import { getXAccountIntegrationState } from "@/lib/integrations/x-account";
 import { listCurrentUserTaskSchedules } from "@/lib/task-schedules";
 import { listCurrentUserTasks } from "@/lib/tasks";
 
@@ -48,12 +50,14 @@ export async function AppShell({ children }: { children: ReactNode }) {
     fathom,
     attio,
     stripe,
+    xAccount,
     imessage,
     codex,
     claudeCode,
     infisical,
     workspaceMembers,
     personalAccounts,
+    plan,
   ] = await Promise.all([
     listCurrentUserTasks(),
     featureFlags.taskSpawning ? listCurrentUserTaskSchedules() : Promise.resolve([]),
@@ -68,12 +72,14 @@ export async function AppShell({ children }: { children: ReactNode }) {
     getFathomIntegrationState(user.workosUserId),
     getAttioIntegrationState(user.workosUserId),
     getStripeIntegrationState(workspace.id),
+    getXAccountIntegrationState(user.workosUserId),
     getImessageIntegrationState(user.workosUserId),
     loadCurrentCodexAuthSettings(),
     loadCurrentClaudeCodeAuthSettings(),
     loadCurrentInfisicalAuthSettings(),
     listWorkspaceMembers(workspace.id),
     getPersonalAccounts(user.workosUserId),
+    getWorkspacePlan(workspace.id),
   ]);
 
   const initialData: AppInitialData = {
@@ -89,6 +95,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
       name: workspace.name,
       role,
     },
+    plan,
     workspaces: workspaces.map((entry) => ({
       id: entry.workspace.id,
       name: entry.workspace.name,
@@ -136,6 +143,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
       fathom,
       attio,
       stripe,
+      xAccount,
       imessage,
       personalAccounts,
       codex: {
@@ -158,6 +166,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
         status: infisical.status ?? "not_connected",
         statusReason: infisical.statusReason,
         accountEmail: infisical.accountEmail,
+        host: infisical.host,
         lastValidatedAt: infisical.lastValidatedAt,
       },
     }),
@@ -213,6 +222,7 @@ function buildIntegrationState(input: {
   fathom: IntegrationState["fathom"];
   attio: IntegrationState["attio"];
   stripe: IntegrationState["stripe"];
+  xAccount: IntegrationState["x_account"];
   imessage: IntegrationState["imessage"];
   personalAccounts: IntegrationState["personalAccounts"];
   codex: CodexProviderState;
@@ -232,6 +242,7 @@ function buildIntegrationState(input: {
     fathom: input.fathom,
     attio: input.attio,
     stripe: input.stripe,
+    x_account: input.xAccount,
     imessage: input.imessage,
     codex: input.codex,
     claude_code: input.claudeCode,

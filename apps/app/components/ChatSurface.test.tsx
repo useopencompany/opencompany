@@ -2427,7 +2427,15 @@ describe("ChatSurface chat streaming UI", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/skills") {
-        return Response.json({ skills: [] });
+        return Response.json({
+          skills: [
+            {
+              id: "smooth-shadow-ring",
+              name: "Smooth shadow ring",
+              description: "Polish elevation styles.",
+            },
+          ],
+        });
       }
       if (url === "/api/workflows" && init?.method === "POST") {
         return Response.json(
@@ -2481,7 +2489,8 @@ describe("ChatSurface chat streaming UI", () => {
     expect(overlay?.querySelectorAll('[data-chat-mention="workflow"]')).toHaveLength(1);
     expect(overlay).toHaveTextContent("#morning-test");
     expect(textarea).toHaveClass("text-transparent");
-    await user.type(textarea, "run today's checks");
+    await user.type(textarea, "run today's checks with @");
+    await user.click(await screen.findByRole("option", { name: /Smooth shadow ring/i }));
     await user.type(textarea, "{Enter}");
 
     await waitFor(() =>
@@ -2498,7 +2507,8 @@ describe("ChatSurface chat streaming UI", () => {
         kind: "workflow",
         id: "morning-test",
       },
-      description: "#morning-test run today's checks",
+      description: "#morning-test run today's checks with @skill/smooth-shadow-ring",
+      mentions: [{ kind: "skill", id: "smooth-shadow-ring" }],
     });
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();

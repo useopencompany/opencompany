@@ -165,6 +165,18 @@ export type SlackProviderState = {
   statusReason: string | null;
 };
 
+// The connected X (Twitter) account posts on behalf of the user, distinct
+// from the unrelated "x" managed capability (public, read-only X data).
+export type XAccountProviderState = {
+  provider: "x_account";
+  connected: boolean;
+  status: "connected" | "needs_reauth" | "sync_failed" | "disconnected" | "not_connected";
+  integrationId: string | null;
+  accountName: string | null;
+  handle: string | null;
+  statusReason: string | null;
+};
+
 export type CodexProviderState = {
   provider: "codex";
   connected: boolean;
@@ -187,6 +199,7 @@ export type InfisicalProviderState = {
   status: "connected" | "needs_reauth" | "disconnected" | "not_connected";
   statusReason: string | null;
   accountEmail: string | null;
+  host: "https://app.infisical.com" | "https://eu.infisical.com" | null;
   lastValidatedAt: string | null;
 };
 
@@ -219,7 +232,8 @@ export type PersonalAccountProvider =
   | "fathom"
   | "attio"
   | "latitude"
-  | "neon";
+  | "neon"
+  | "x_account";
 
 export type IntegrationState = {
   gmail: GoogleProviderState;
@@ -234,6 +248,7 @@ export type IntegrationState = {
   fathom: FathomProviderState;
   attio: AttioProviderState;
   stripe: StripeProviderState;
+  x_account: XAccountProviderState;
   imessage: ImessageProviderState;
   codex: CodexProviderState;
   claude_code: ClaudeCodeProviderState;
@@ -287,6 +302,7 @@ export function personalAccountsFromRows(
     attio: [],
     latitude: [],
     neon: [],
+    x_account: [],
   };
   for (const row of rows) {
     if (row.status === "disconnected") continue;
@@ -307,7 +323,8 @@ export function personalAccountsFromRows(
       row.provider === "fathom" ||
       row.provider === "attio" ||
       row.provider === "latitude" ||
-      row.provider === "neon"
+      row.provider === "neon" ||
+      row.provider === "x_account"
     ) {
       personalAccounts[row.provider].push(accountViewFromRow(row.provider, row));
     }
@@ -351,6 +368,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
     fathom: fathomProviderState(byProvider.get("fathom")),
     attio: attioProviderState(byProvider.get("attio")),
     stripe: stripeProviderState(byProvider.get("stripe")),
+    x_account: xAccountProviderState(byProvider.get("x_account")),
     imessage: imessageProviderState(byProvider.get("imessage")),
     codex: {
       provider: "codex",
@@ -372,6 +390,7 @@ export function integrationStateFromRows(rows: readonly IntegrationStateRow[]): 
       status: "not_connected",
       statusReason: null,
       accountEmail: null,
+      host: null,
       lastValidatedAt: null,
     },
     personalAccounts,
@@ -511,6 +530,30 @@ function slackProviderState(row: IntegrationStateRow | undefined): SlackProvider
     integrationId: row.id ?? null,
     accountName: row.accountName ?? row.account_name ?? null,
     teamName: row.connectionLabel ?? row.connection_label ?? null,
+    statusReason: row.statusReason ?? row.status_reason ?? null,
+  };
+}
+
+function xAccountProviderState(row: IntegrationStateRow | undefined): XAccountProviderState {
+  if (!row || row.status === "disconnected") {
+    return {
+      provider: "x_account",
+      connected: false,
+      status: "not_connected",
+      integrationId: null,
+      accountName: null,
+      handle: null,
+      statusReason: null,
+    };
+  }
+
+  return {
+    provider: "x_account",
+    connected: row.status === "connected",
+    status: row.status,
+    integrationId: row.id ?? null,
+    accountName: row.accountName ?? row.account_name ?? null,
+    handle: row.connectionLabel ?? row.connection_label ?? null,
     statusReason: row.statusReason ?? row.status_reason ?? null,
   };
 }

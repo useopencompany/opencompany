@@ -5,7 +5,6 @@ import { defaultBrainFolderManifestEntries } from "../../brain/src/index";
 import { brainFolders, brains, workspaceMembers, workspaces } from "./schema";
 import {
   createWorkspaceForUser,
-  defaultBrainIdForUser,
   getBrainEnrichmentEnabled,
   newBrainId,
   replaceBrainMembers,
@@ -14,14 +13,7 @@ import {
 
 const pgDialect = new PgDialect();
 
-describe("brain ids", () => {
-  it("generates readable default brain ids without embedding the WorkOS user id", () => {
-    const id = defaultBrainIdForUser("user_01JXYZ123456789");
-
-    expect(id).toMatch(/^general-[a-f0-9]{12}$/);
-    expect(id).not.toContain("user_01JXYZ123456789");
-  });
-
+describe("opencompany brain ids", () => {
   it("prefixes new brain ids with the normalized brain name", () => {
     expect(newBrainId("Customer Research")).toMatch(/^customer-research-[a-f0-9]{12}$/);
   });
@@ -66,6 +58,7 @@ describe("Workspace creation", () => {
         workosOrganizationId: "org_new",
         userWorkosId: "user_123",
         name: "  Analytical Co  ",
+        slug: "analytical-co",
       },
       { db: { insert, batch, execute } },
     );
@@ -75,6 +68,7 @@ describe("Workspace creation", () => {
         id: "goat_ws_new",
         workosOrganizationId: "org_new",
         name: "Analytical Co",
+        slug: "analytical-co",
       }),
     );
     expect(result.brain).toEqual(
@@ -91,7 +85,7 @@ describe("Workspace creation", () => {
     expect(batchedQueries.filter((query) => query.table === brainFolders)).toHaveLength(
       defaultBrainFolderManifestEntries().length,
     );
-    expect(execute).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 });
 

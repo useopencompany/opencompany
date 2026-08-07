@@ -17,7 +17,7 @@ import {
   chatSessions,
   codexChatSessions,
 } from "@opencompany/db/schema";
-import { and, eq, isNull, notInArray, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { newChatMessageId } from "@/lib/chat";
 import { CLAUDE_CHAT_DEFAULT_MODEL_ID, parseClaudeChatModelId } from "@/lib/claude-chat-constants";
 import { parseClaudeChatSettings } from "@/lib/claude-chat-settings";
@@ -319,41 +319,85 @@ export async function createCodingWorkspaceRuntimeAccess(input: {
   }
 }
 
-// Settles the engine session and kills its e2b sandbox after the parent chat is closed.
-// A session with in-flight work (queued/starting/running) is left alone: the runner settles it
-// and the sandbox idle timeout pauses the sandbox regardless, so nothing keeps running either way.
-export async function closeCodexChatSessionForChat(input: {
+// Archive is a stop boundary, not just a visibility toggle. Closing the parent chat, cancelling
+// queued work, and requesting interruption of running work happen in one statement so a successful
+// archive cannot leave a scheduled wakeup able to claim the persistent sandbox later.
+export async function archiveChatSessionForUser(input: {
   userWorkosId: string;
   chatSessionId: string;
 }) {
   const now = new Date();
-  const [session] = await getDb()
-    .update(codexChatSessions)
-    .set({ status: "closed", activeTurnId: null, updatedAt: now })
-    .where(
-      and(
-        eq(codexChatSessions.chatSessionId, input.chatSessionId),
-        eq(codexChatSessions.userWorkosId, input.userWorkosId),
-        notInArray(codexChatSessions.status, ["queued", "starting", "running", "closed"]),
-      ),
+  const result = await getDb().execute(sql`
+    WITH archived_chat AS MATERIALIZED (
+      UPDATE goat.chat_sessions AS chat
+      SET closed_at = ${now},
+          updated_at = ${now}
+      WHERE chat.id = ${input.chatSessionId}
+        AND chat.user_workos_id = ${input.userWorkosId}
+        AND chat.kind = 'chat'
+        AND chat.closed_at IS NULL
+      RETURNING chat.id
+    ),
+    stopped_turns AS (
+      UPDATE goat.codex_chat_turns AS turn
+      SET status = CASE WHEN turn.status = 'queued' THEN 'interrupted' ELSE turn.status END,
+          interrupt_requested_at = CASE
+            WHEN turn.status = 'running' THEN COALESCE(turn.interrupt_requested_at, ${now})
+            ELSE turn.interrupt_requested_at
+          END,
+          completed_at = CASE
+            WHEN turn.status = 'queued' THEN ${now}
+            ELSE turn.completed_at
+          END,
+          updated_at = ${now}
+      WHERE turn.chat_session_id = ${input.chatSessionId}
+        AND turn.user_workos_id = ${input.userWorkosId}
+        AND turn.status IN ('queued', 'running')
+        AND EXISTS (SELECT 1 FROM archived_chat)
+      RETURNING turn.assistant_message_id, turn.status
+    ),
+    aborted_queued_messages AS (
+      UPDATE goat.chat_messages AS message
+      SET debug_trace = COALESCE(
+            message.debug_trace,
+            jsonb_build_object('schemaVersion', ${CODEX_CHAT_DEBUG_SCHEMA_VERSION}::text)
+          ) || jsonb_build_object('aborted', true),
+          updated_at = ${now}
+      FROM stopped_turns
+      WHERE stopped_turns.status = 'interrupted'
+        AND message.id = stopped_turns.assistant_message_id
+        AND message.role = 'assistant'
+      RETURNING message.id
+    ),
+    closed_runtime AS (
+      UPDATE goat.codex_chat_sessions AS runtime
+      SET status = 'closed',
+          active_turn_id = NULL,
+          updated_at = ${now}
+      WHERE runtime.chat_session_id = ${input.chatSessionId}
+        AND runtime.user_workos_id = ${input.userWorkosId}
+        AND EXISTS (SELECT 1 FROM archived_chat)
+      RETURNING runtime.sandbox_id
     )
-    .returning({ sandboxId: codexChatSessions.sandboxId });
-  await cancelQueuedCodexChatWakeups({
-    userWorkosId: input.userWorkosId,
-    chatSessionId: input.chatSessionId,
-    now,
-  });
-  if (!session?.sandboxId) return;
+    SELECT archived_chat.id, closed_runtime.sandbox_id AS "sandboxId"
+    FROM archived_chat
+    LEFT JOIN closed_runtime ON true
+  `);
+  const [archived] = rowsFromExecute<{ id: string; sandboxId: string | null }>(result);
+  if (!archived) return false;
+  if (!archived.sandboxId) return true;
 
   // Best-effort: a paused sandbox that outlives the kill only costs storage until e2b's
-  // retention window deletes it.
-  await killCodexSandbox(session.sandboxId).catch((error) => {
-    console.warn("Codex sandbox kill on chat close failed.", {
+  // retention window deletes it. The durable interrupt and worker archive gate remain authoritative
+  // if the runner endpoint is temporarily unavailable.
+  await killCodexSandbox(archived.sandboxId).catch((error) => {
+    console.warn("opencompany codex sandbox kill on chat close failed.", {
       event: "goat.codex_chat_close_sandbox_kill_failed",
       chat_session_id: input.chatSessionId,
       error,
     });
   });
+  return true;
 }
 
 async function loadCodexChatSessionForChat(input: {
@@ -761,6 +805,15 @@ function emptyDurableAssistantDebugTrace(engine: CodexChatEngine, model: string)
     };
   }
   return emptyAssistantDebugTrace(model);
+}
+
+function rowsFromExecute<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && "rows" in result) {
+    const rows = (result as { rows?: unknown }).rows;
+    if (Array.isArray(rows)) return rows as T[];
+  }
+  return [];
 }
 
 function safeClientMessageId(value: string | null | undefined) {

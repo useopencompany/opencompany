@@ -5,7 +5,6 @@ import { getDb } from "@opencompany/db/client";
 import { type BrainIntelligence, type BrainVisibility, workspaces } from "@opencompany/db/schema";
 import {
   createBrain,
-  createWorkspaceForUser,
   DEFAULT_BRAIN_SLUG,
   getBrainAccess,
   hasOwnedHobbyWorkspace,
@@ -13,7 +12,6 @@ import {
   listBrainMemberIds,
   listWorkspaceMembers,
   listWorkspacesForUser,
-  newWorkspaceId,
   removeWorkspaceMember,
   replaceBrainMembers,
   updateBrainEnrichmentEnabled,
@@ -21,18 +19,18 @@ import {
   updateBrainVisibility,
   updateWorkspaceName,
 } from "@opencompany/db/workspaces";
-import { switchToOrganization } from "@workos-inc/authkit-nextjs";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
-import { ACTIVE_BRAIN_COOKIE, ACTIVE_WORKSPACE_COOKIE, currentUser } from "@/lib/auth";
+import { currentUser } from "@/lib/auth";
 import { syncStripeSeatQuantityForWorkspace } from "@/lib/billing/seats";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureWorkspaceOrganization } from "@/lib/workos-organizations";
+import { provisionWorkspace, WorkspaceProvisioningError } from "@/lib/workspace-provisioning";
+import { ACTIVE_BRAIN_COOKIE, activateWorkspace } from "@/lib/workspace-session";
 
 const MEMBER_ROLE = "member";
-const ADMIN_ROLE = "admin";
 const WORKSPACE_NAME_MAX_LENGTH = 80;
 const CREATE_WORKSPACE_ERROR_MESSAGE = "Could not create the organization. Please try again.";
 const ACTIVATE_WORKSPACE_ERROR_MESSAGE = "Could not switch organizations. Please try again.";
@@ -80,35 +78,6 @@ function validateWorkspaceName(name: unknown) {
     return { ok: false as const, error: "Name is too long (max 80 chars)." };
   }
   return { ok: true as const, name: trimmed };
-}
-
-async function activateWorkspace(input: {
-  workspaceId: string;
-  workosOrganizationId: string;
-  brainId: string | null;
-}) {
-  // WorkOS owns the authenticated organization context, including any
-  // organization-specific SSO/MFA requirements. the app's cookies only remember
-  // which local workspace and brain to render after AuthKit has switched.
-  await switchToOrganization(input.workosOrganizationId, {
-    revalidationStrategy: "none",
-  });
-
-  const cookieStore = await cookies();
-  cookieStore.set(ACTIVE_WORKSPACE_COOKIE, input.workspaceId, {
-    path: "/",
-    sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 365,
-  });
-  if (input.brainId) {
-    cookieStore.set(ACTIVE_BRAIN_COOKIE, input.brainId, {
-      path: "/",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 365,
-    });
-  } else {
-    cookieStore.delete(ACTIVE_BRAIN_COOKIE);
-  }
 }
 
 export async function switchBrainAction(brainRef: string): Promise<WorkspaceActionResult> {
@@ -182,70 +151,35 @@ export async function createWorkspaceAction(name: unknown): Promise<WorkspaceCre
     console.error("[app] Failed to verify Hobby workspace ownership", error);
     return { ok: false, error: CREATE_WORKSPACE_ERROR_MESSAGE };
   }
-  const workspaceId = newWorkspaceId();
-  const workos = getWorkOSClient();
-  let workosOrganizationId: string | null = null;
-  let localWorkspacePersisted = false;
-  let created: Awaited<ReturnType<typeof createWorkspaceForUser>> | null = null;
-
+  let created: Awaited<ReturnType<typeof provisionWorkspace>>;
   try {
-    const organization = await workos.organizations.createOrganization(
-      {
-        name: validation.name,
-        externalId: workspaceId,
-        metadata: {
-          goat_workspace_id: workspaceId,
-        },
-      },
-      { idempotencyKey: workspaceId },
-    );
-    workosOrganizationId = organization.id;
-
-    await workos.userManagement.createOrganizationMembership({
-      organizationId: organization.id,
-      userId: context.authUser.id,
-      roleSlug: ADMIN_ROLE,
-    });
-
-    created = await createWorkspaceForUser({
-      workspaceId,
-      workosOrganizationId: organization.id,
+    created = await provisionWorkspace({
+      authUserId: context.authUser.id,
       userWorkosId: context.user.workosUserId,
-      name: organization.name || validation.name,
+      name: validation.name,
     });
-    localWorkspacePersisted = true;
   } catch (error) {
-    console.error("[app] Failed to create workspace organization", {
-      workspaceId,
-      workosOrganizationId,
-      localWorkspacePersisted,
+    const provisioning = error instanceof WorkspaceProvisioningError ? error : null;
+    console.error("[goat] Failed to create workspace organization", {
+      workspaceId: provisioning?.workspaceId,
+      workosOrganizationId: provisioning?.workosOrganizationId,
+      localWorkspacePersisted: provisioning?.localWorkspacePersisted,
       error,
     });
-    if (workosOrganizationId && !localWorkspacePersisted) {
-      try {
-        await workos.organizations.deleteOrganization(workosOrganizationId);
-      } catch (cleanupError) {
-        console.error("[app] Failed to clean up workspace organization", {
-          workspaceId,
-          workosOrganizationId,
-          error: cleanupError,
-        });
-      }
-    }
     return { ok: false, error: CREATE_WORKSPACE_ERROR_MESSAGE };
   }
 
   try {
     await activateWorkspace({
       workspaceId: created.workspace.id,
-      workosOrganizationId: created.workspace.workosOrganizationId ?? workosOrganizationId,
+      workosOrganizationId: created.workspace.workosOrganizationId,
       brainId: created.brain.id,
     });
   } catch (error) {
     unstable_rethrow(error);
     console.error("[app] Failed to activate newly created workspace organization", {
       workspaceId: created.workspace.id,
-      workosOrganizationId: created.workspace.workosOrganizationId ?? workosOrganizationId,
+      workosOrganizationId: created.workspace.workosOrganizationId,
       error,
     });
     // The WorkOS organization and local workspace are durable at this point.

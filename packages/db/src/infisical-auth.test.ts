@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   disconnectInfisicalConnection,
   INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
+  INFISICAL_EU_HOST,
+  INFISICAL_US_HOST,
+  isInfisicalHost,
+  isInfisicalSessionDomain,
   loadInfisicalConnection,
   saveInfisicalConnection,
 } from "./infisical-auth";
@@ -48,6 +52,7 @@ describe("Infisical credentials", () => {
       db: insertDb as never,
       workspaceId: "workspace_1",
       authBundle: bundle,
+      host: INFISICAL_EU_HOST,
       accountEmail: "founder@example.com",
       cliVersion: "0.43.118",
       connectedByWorkosId: "user_1",
@@ -55,6 +60,7 @@ describe("Infisical credentials", () => {
     });
     expect(stored).not.toBeNull();
     expect(JSON.stringify(stored)).not.toContain("signed.jwt.token");
+    expect(stored).toMatchObject({ host: INFISICAL_EU_HOST });
 
     const row = {
       ...(stored as unknown as Record<string, unknown>),
@@ -77,6 +83,16 @@ describe("Infisical credentials", () => {
         workspaceId: "workspace_2",
       }),
     ).rejects.toThrow("Infisical credential could not be decrypted.");
+  });
+
+  it("allows only the two Infisical Cloud hosts and matches their CLI session domains", () => {
+    expect(isInfisicalHost(INFISICAL_US_HOST)).toBe(true);
+    expect(isInfisicalHost(INFISICAL_EU_HOST)).toBe(true);
+    expect(isInfisicalHost("https://evil.example")).toBe(false);
+
+    expect(isInfisicalSessionDomain(INFISICAL_EU_HOST, INFISICAL_EU_HOST)).toBe(true);
+    expect(isInfisicalSessionDomain(`${INFISICAL_EU_HOST}/api`, INFISICAL_EU_HOST)).toBe(true);
+    expect(isInfisicalSessionDomain(INFISICAL_US_HOST, INFISICAL_EU_HOST)).toBe(false);
   });
 
   it("disconnects with a new generation and removes encrypted material", async () => {

@@ -265,6 +265,7 @@ function initialData(): AppInitialData {
       avatarUrl: null,
     },
     workspace: { id: "workspace_1", name: "Acme", role: "admin" },
+    plan: "hobby",
     workspaces: [],
     workspaceMembers: [],
     brains: [],

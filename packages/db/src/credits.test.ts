@@ -1,3 +1,5 @@
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import {
   fulfillTopUpCheckoutSession,
@@ -100,9 +102,20 @@ describe("goat credits", () => {
   });
 
   it("reports a monthly included-usage grant and resulting allowance", async () => {
-    const db = fakeDb([
-      { grants: "1", expirations: "1", balanceUsdMicros: "5000000", allowanceCents: "500" },
-    ]);
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            grants: "1",
+            expirations: "1",
+            balanceUsdMicros: "5000000",
+            allowanceCents: "500",
+          },
+        ],
+      });
+    const db = { execute };
     await expect(
       grantMonthlyIncludedUsage({
         workspaceId: "goat_ws_1",
@@ -119,6 +132,39 @@ describe("goat credits", () => {
       balanceUsdMicros: 5_000_000,
       allowanceCents: 500,
     });
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    const dialect = new PgDialect();
+    const ensureQuery = dialect.sqlToQuery(execute.mock.calls[0]![0] as SQL);
+    const grantQuery = dialect.sqlToQuery(execute.mock.calls[1]![0] as SQL);
+    const normalizedEnsureSql = ensureQuery.sql.toLowerCase().replace(/\s+/g, " ");
+    const normalizedGrantSql = grantQuery.sql.toLowerCase().replace(/\s+/g, " ");
+    expect(normalizedEnsureSql).toContain("insert into goat.workspace_billing");
+    expect(normalizedEnsureSql).toContain("on conflict (workspace_id) do nothing");
+    expect(normalizedGrantSql).toContain("from goat.workspace_billing");
+    expect(normalizedGrantSql).toContain("for update");
+    expect(normalizedGrantSql.match(/update goat\.workspace_billing/g)).toHaveLength(1);
+    expect(normalizedGrantSql).not.toContain("jsonb_build_object");
+    expect(normalizedGrantSql.match(/::jsonb/g)).toHaveLength(2);
+    const metadata = grantQuery.params
+      .filter((value): value is string => typeof value === "string" && value.startsWith("{"))
+      .map((value) => JSON.parse(value));
+    expect(metadata).toEqual([
+      {
+        reason: "included_usage_no_rollover",
+        newPeriodStart: "2026-08-01T00:00:00.000Z",
+        stripeEventId: null,
+      },
+      {
+        reason: "monthly_included_usage",
+        plan: "hobby",
+        seatQuantity: 1,
+        allowanceCents: 500,
+        periodStart: "2026-08-01T00:00:00.000Z",
+        periodEnd: "2026-09-01T00:00:00.000Z",
+        stripeEventId: null,
+      },
+    ]);
   });
 
   it("rejects top-up fulfillment for unpaid or malformed sessions", async () => {

@@ -18,7 +18,24 @@ import {
 
 const ENCRYPTION_KEY_VERSION = 1;
 export const INFISICAL_AUTH_BUNDLE_FORMAT_VERSION = 1 as const;
-export const INFISICAL_HOST = "https://app.infisical.com";
+export const INFISICAL_US_HOST = "https://app.infisical.com";
+export const INFISICAL_EU_HOST = "https://eu.infisical.com";
+export const INFISICAL_HOSTS = [INFISICAL_US_HOST, INFISICAL_EU_HOST] as const;
+export type InfisicalHost = (typeof INFISICAL_HOSTS)[number];
+
+export function isInfisicalHost(value: unknown): value is InfisicalHost {
+  return typeof value === "string" && INFISICAL_HOSTS.includes(value as InfisicalHost);
+}
+
+export function isInfisicalSessionDomain(value: unknown, expectedHost: InfisicalHost) {
+  if (typeof value !== "string") return false;
+  return (
+    value
+      .trim()
+      .replace(/\/+$/, "")
+      .replace(/\/api$/, "") === expectedHost
+  );
+}
 
 type DbSchema = typeof schema;
 type InfisicalAuthDb = Pick<PgDatabase<PgQueryResultHKT, DbSchema>, "insert" | "select" | "update">;
@@ -41,7 +58,7 @@ export type LoadedInfisicalConnection = {
   credentialGeneration: string;
   status: InfisicalConnectionStatus;
   statusReason: string | null;
-  host: string;
+  host: InfisicalHost;
   accountEmail: string | null;
   cliVersion: string | null;
   bundleFormatVersion: number | null;
@@ -62,6 +79,7 @@ export async function saveInfisicalConnection(input: {
   db: InfisicalAuthDb;
   workspaceId: string;
   authBundle: InfisicalAuthBundle;
+  host: InfisicalHost;
   accountEmail: string;
   cliVersion: string;
   expiresAt?: Date | null;
@@ -85,7 +103,7 @@ export async function saveInfisicalConnection(input: {
       credentialGeneration,
       status: "connected",
       statusReason: null,
-      host: INFISICAL_HOST,
+      host: input.host,
       accountEmail: input.accountEmail,
       cliVersion: input.cliVersion,
       bundleFormatVersion: INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
@@ -103,7 +121,7 @@ export async function saveInfisicalConnection(input: {
         credentialGeneration,
         status: "connected",
         statusReason: null,
-        host: INFISICAL_HOST,
+        host: input.host,
         accountEmail: input.accountEmail,
         cliVersion: input.cliVersion,
         bundleFormatVersion: INFISICAL_AUTH_BUNDLE_FORMAT_VERSION,
@@ -139,7 +157,7 @@ export async function disconnectInfisicalConnection(input: {
       credentialGeneration,
       status: "disconnected",
       statusReason: null,
-      host: INFISICAL_HOST,
+      host: INFISICAL_US_HOST,
       accountEmail: null,
       cliVersion: null,
       bundleFormatVersion: null,
@@ -276,7 +294,7 @@ function metadataFromRow(
     credentialGeneration: row.credentialGeneration,
     status: row.status,
     statusReason: row.statusReason,
-    host: row.host,
+    host: isInfisicalHost(row.host) ? row.host : INFISICAL_US_HOST,
     accountEmail: row.accountEmail,
     cliVersion: row.cliVersion,
     bundleFormatVersion: row.bundleFormatVersion,

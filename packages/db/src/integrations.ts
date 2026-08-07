@@ -137,6 +137,103 @@ export async function connectGoogleIntegration(input: {
   return { integrationId: integration.id };
 }
 
+export type XAccountOAuthCredentialPayload = {
+  access_token: string;
+  refresh_token?: string;
+  scope?: string;
+};
+
+// The X (Twitter) personal connection: OAuth 2.0 + PKCE, posting tweets as
+// the connecting user. Access tokens expire (2h) and are refreshed from the
+// stored refresh token, so expiresAt is always set.
+export async function connectXAccountIntegration(input: {
+  userWorkosId: string;
+  xUserId: string;
+  username: string;
+  name: string | null;
+  accessToken: string;
+  refreshToken: string | null;
+  expiresAt: Date | null;
+  scopes: string[];
+  db?: IntegrationDb;
+  now?: Date;
+}) {
+  const db = input.db ?? getDb();
+  const now = input.now ?? new Date();
+  const connectionLabel = `@${input.username}`;
+
+  const [integration] = await db
+    .insert(integrations)
+    .values({
+      id: newIntegrationId(),
+      userWorkosId: input.userWorkosId,
+      provider: "x_account",
+      // The X user id is stable across username changes; it is the routing key.
+      externalId: input.xUserId,
+      connectionLabel,
+      accountName: input.name,
+      accountEmail: null,
+      accountType: "x_user",
+      status: "connected",
+      statusReason: null,
+      scopes: input.scopes,
+      lastSyncedAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [integrations.userWorkosId, integrations.provider, integrations.externalId],
+      // The personal-uniqueness index is partial; the arbiter must match it.
+      targetWhere: sql`${integrations.workspaceId} IS NULL`,
+      set: {
+        connectionLabel,
+        accountName: input.name,
+        accountType: "x_user",
+        status: "connected",
+        statusReason: null,
+        scopes: input.scopes,
+        lastSyncedAt: now,
+        updatedAt: now,
+      },
+    })
+    .returning({ id: integrations.id });
+
+  if (!integration) {
+    throw new Error("Could not persist X integration.");
+  }
+
+  const payload: XAccountOAuthCredentialPayload = {
+    access_token: input.accessToken,
+    ...(input.refreshToken ? { refresh_token: input.refreshToken } : {}),
+    ...(input.scopes.length > 0 ? { scope: input.scopes.join(" ") } : {}),
+  };
+
+  try {
+    await saveIntegrationCredential({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "x_account",
+      kind: "oauth_token",
+      payload,
+      expiresAt: input.expiresAt,
+      db,
+      now,
+    });
+  } catch (error) {
+    await markIntegrationStatus({
+      userWorkosId: input.userWorkosId,
+      integrationId: integration.id,
+      provider: "x_account",
+      status: "sync_failed",
+      statusReason: "Failed to persist X integration credentials.",
+      db,
+      now: new Date(),
+    });
+    throw error;
+  }
+
+  return { integrationId: integration.id };
+}
+
 export type SlackOAuthCredentialPayload = {
   access_token: string;
   authed_user_id: string;

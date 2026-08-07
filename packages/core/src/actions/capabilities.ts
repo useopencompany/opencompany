@@ -153,6 +153,14 @@ export const PROVIDER_CAPABILITIES: Partial<
       defaultMode: "ask",
     },
   ],
+  x_account: [
+    {
+      id: "write",
+      label: "Post to X",
+      description: "Post new tweets from your connected X account.",
+      defaultMode: "ask",
+    },
+  ],
 };
 
 export function isCapabilityMode(value: unknown): value is CapabilityMode {

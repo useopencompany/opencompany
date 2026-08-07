@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { currentUser } from "@/lib/auth";
 import {
-  closeChatSessionForUser,
   markChatSessionSeenForUser,
   reopenChatSessionForUser,
   setChatSessionPinnedForUser,
@@ -13,7 +12,7 @@ import {
   findChatShareForUser,
   revokeChatShareForUser,
 } from "@/lib/chat-sharing";
-import { closeCodexChatSessionForChat } from "@/lib/codex-chat";
+import { archiveChatSessionForUser } from "@/lib/codex-chat";
 
 export type CloseChatResult = {
   ok: boolean;
@@ -80,26 +79,13 @@ export async function closeChatSessionAction(sessionId: string | null): Promise<
   if (!trimmed) return { ok: true, error: null };
 
   const { user } = await currentUser();
-  const closed = await closeChatSessionForUser({
-    userWorkosId: user.workosUserId,
-    sessionId: trimmed,
-  });
-  if (!closed) {
-    return { ok: false, error: "Could not close that chat." };
-  }
-
-  // Best-effort engine cleanup; the chat close itself must not fail on it. No-op for
-  // non-Codex chats (there is no matching engine session row).
-  await closeCodexChatSessionForChat({
+  const closed = await archiveChatSessionForUser({
     userWorkosId: user.workosUserId,
     chatSessionId: trimmed,
-  }).catch((error) => {
-    console.warn("Codex chat close cleanup failed.", {
-      event: "goat.codex_chat_close_cleanup_failed",
-      chat_session_id: trimmed,
-      error,
-    });
   });
+  if (!closed) {
+    return { ok: false, error: "Could not archive that chat." };
+  }
 
   revalidatePath("/");
   return { ok: true, error: null };

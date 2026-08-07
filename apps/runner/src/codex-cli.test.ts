@@ -56,6 +56,7 @@ describe("buildCodexConfig", () => {
     const config = buildCodexConfigForAuth({
       kind: "chatgpt",
       authJson: { OPENAI_REFRESH_TOKEN: "secret" },
+      credentialLastRotatedAt: null,
       brokered: false,
     });
 

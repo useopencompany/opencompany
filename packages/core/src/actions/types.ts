@@ -14,7 +14,8 @@ export type ActionProviderId =
   | "stripe"
   | "revolut"
   | "latitude"
-  | "neon";
+  | "neon"
+  | "x_account";
 
 export type ActionSourceId = ActionProviderId | ManagedCapabilitySource;
 

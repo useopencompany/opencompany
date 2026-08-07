@@ -26,6 +26,7 @@ import {
   type EditTaskScheduleToolOutput,
   listedActionSourceIdsFromMessages,
   listedSkillIdsFromMessages,
+  pendingApprovalIdsFromStoredParts,
   replaceChatUiMessageText,
   settleIncompleteToolCallsInStoredParts,
   textFromChatUiMessage,
@@ -1566,6 +1567,7 @@ export async function POST(request: Request): Promise<Response> {
       const settledResponseMessage = { ...responseMessage, parts: responseParts };
       const rawContent = textFromChatUiMessage(settledResponseMessage);
       const hasAssistantParts = hasDisplayableAssistantParts(settledResponseMessage);
+      const isAwaitingApproval = pendingApprovalIdsFromStoredParts(responseParts).length > 0;
       if (isAborted && !rawContent && !startedTask && !hasAssistantParts) {
         finishChatTelemetry("aborted", {
           "goat.chat_session_id": turn.session.id,
@@ -1589,7 +1591,7 @@ export async function POST(request: Request): Promise<Response> {
         sessionId: turn.session.id,
         ...(responseMessageId ? { messageId: responseMessageId } : {}),
         content:
-          isAborted && !rawContent && hasAssistantParts && !startedTask
+          !rawContent && !startedTask && ((isAborted && hasAssistantParts) || isAwaitingApproval)
             ? ""
             : normalizeAgentText(rawContent, startedTask),
         // A continuation upsert must not drop a task the paused turn already

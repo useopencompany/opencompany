@@ -893,6 +893,19 @@ export function isCommandTimeoutError(error: unknown) {
   );
 }
 
+// E2B can lose the RPC watch for a still-running background command without raising its regular
+// TimeoutError (which means the command exceeded timeoutMs and was killed). The observed provider
+// shape is an Unknown-code SandboxError. That stream loss is recoverable by fencing the old process
+// and resuming the durable engine turn; other SandboxErrors remain terminal to avoid replaying
+// arbitrary command failures.
+export function isRetryableCommandStreamError(error: unknown) {
+  return Boolean(
+    error instanceof Error &&
+      error.name === "SandboxError" &&
+      /^2:\s*\[unknown\]\s+the operation timed out\.?$/i.test(error.message.trim()),
+  );
+}
+
 // Sandbox create/connect uses the E2B control plane, which can reject healthy durable sessions
 // during capacity pressure, rate limiting, or a network timeout. Keep this policy scoped to
 // acquisition: the same broad errors during filesystem or command execution can be application

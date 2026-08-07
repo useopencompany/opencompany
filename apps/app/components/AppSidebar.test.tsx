@@ -96,6 +96,7 @@ vi.mock("@/components/AppDataProvider", () => ({
       avatarUrl: null,
     },
     workspace: { id: "goat_ws_1", name: "Ada's Workspace", role: workspaceRoleMock.value },
+    plan: "hobby",
     workspaces: workspacesMock.value,
     workspaceMembers: [],
     brains: [
@@ -161,14 +162,35 @@ describe("AppSidebar", () => {
       screen.queryByRole("button", { name: "Manage access to General" }),
     ).not.toBeInTheDocument();
 
-    const settings = screen.getByRole("link", { name: /Ada Lovelace/ });
-    expect(settings).toHaveAttribute("href", "/settings");
+    const account = screen.getByRole("button", { name: "Account menu for Ada Lovelace" });
+    expect(account).toBeInTheDocument();
 
     const feedback = screen.getByRole("button", { name: "Feedback" });
-    const changelog = screen.getByRole("link", { name: "Changelog" });
-    expect(changelog).toHaveAttribute("href", "/changelog");
-    expect(feedback.nextElementSibling).toBe(changelog);
-    expect(changelog.nextElementSibling).toBe(settings);
+    expect(feedback.nextElementSibling).toBe(account);
+    expect(screen.queryByRole("link", { name: "Changelog" })).not.toBeInTheDocument();
+  });
+
+  it("opens the account menu with settings, changelog, and sign out", async () => {
+    const user = userEvent.setup();
+    render(<AppSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Account menu for Ada Lovelace" }));
+
+    const menu = screen.getByRole("dialog");
+    expect(within(menu).getByText("ada@example.com")).toBeInTheDocument();
+    expect(within(menu).getByText("Hobby plan")).toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(within(menu).getByRole("link", { name: "Changelog" })).toHaveAttribute(
+      "href",
+      "/changelog",
+    );
+    expect(within(menu).getByRole("link", { name: "Sign out" })).toHaveAttribute(
+      "href",
+      "/auth/sign-out",
+    );
   });
 
   it("opens an organization picker even when the user has one organization", async () => {
@@ -279,7 +301,6 @@ describe("AppSidebar", () => {
     const setup = screen.getByRole("link", { name: "Connect your brain" });
     expect(setup).toHaveAttribute("href", "/settings/mcp");
     expect(setup).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: /Ada Lovelace/ })).not.toHaveAttribute("aria-current");
   });
 
   it("hides MCP setup after completion", () => {
@@ -288,10 +309,9 @@ describe("AppSidebar", () => {
     render(<AppSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(screen.queryByRole("link", { name: "Connect your brain" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Ada Lovelace/ })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    expect(
+      screen.getByRole("button", { name: "Account menu for Ada Lovelace" }),
+    ).toBeInTheDocument();
   });
 
   it("does not mark home active on chat subroutes", () => {

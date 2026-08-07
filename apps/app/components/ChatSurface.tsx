@@ -1660,6 +1660,7 @@ export function ChatSurface({
 
       const workflowMention = mentions.find(isWorkflowMention);
       if (workflowMention) {
+        const skillMentions = backgroundMentions.filter(isSkillMention);
         clearError();
         setInput("");
         setMentionToken(null);
@@ -1669,6 +1670,7 @@ export function ChatSurface({
         void startWorkflowTask({
           workflow: workflowMention,
           description: messagePrompt,
+          ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
           ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
         })
           .then(({ task }) => {
@@ -1850,6 +1852,7 @@ export function ChatSurface({
 
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
+      const skillMentions = mentions.filter(isSkillMention);
       clearComposerDraft(chatSessionId);
       clearError();
       setInput("");
@@ -1860,6 +1863,7 @@ export function ChatSurface({
       void startWorkflowTask({
         workflow: workflowMention,
         description: prompt,
+        ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
         ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
       })
         .then(({ task }) => {
@@ -3641,6 +3645,7 @@ function QuickChatComposer({
 
     const workflowMention = mentions.find(isWorkflowMention);
     if (workflowMention) {
+      const skillMentions = mentions.filter(isSkillMention);
       setIsSubmitting(true);
       setInput("");
       setMentionToken(null);
@@ -3650,6 +3655,7 @@ function QuickChatComposer({
       void startWorkflowTask({
         workflow: workflowMention,
         description: prompt,
+        ...(skillMentions.length > 0 ? { mentions: skillMentions } : {}),
         ...(attachmentsMetadata.length > 0 ? { attachments: attachmentsMetadata } : {}),
       })
         .then(({ task }) => {
@@ -5077,6 +5083,7 @@ async function startAdHocTask(input: { description: string; model: string; engin
 async function startWorkflowTask(input: {
   workflow: Extract<ChatMention, { kind: "workflow" }>;
   description: string;
+  mentions?: Extract<ChatMention, { kind: "skill" }>[];
   attachments?: ChatUiAttachment[];
 }) {
   const response = await fetch("/api/workflows", {
