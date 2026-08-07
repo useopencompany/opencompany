@@ -174,6 +174,7 @@ async function dispatch(input: RunWikiToolInput): Promise<unknown> {
           path,
           body: toolInput.body,
           ...(isValidWikiKind(toolInput.kind) ? { kind: toolInput.kind } : {}),
+          ...(toolInput.title?.trim() ? { title: toolInput.title.trim() } : {}),
           actorWorkosId: userWorkosId,
         },
         db,

@@ -16,6 +16,10 @@ import {
   createSkillMentionDecorationPlugin,
   createSkillMentionPlugin,
 } from "@/components/SkillMentionSuggestion";
+import {
+  createWikiSlashCommandPlugin,
+  type WikiSlashCommandHandlers,
+} from "@/components/WikiSlashCommand";
 import { isExternalHref, sourceChipDisplay, sourceHrefForRef } from "@/lib/brain-source-links";
 import type { GoatSkillCatalogItem } from "@/lib/skills";
 
@@ -30,6 +34,7 @@ export function MarkdownGoatBrainEditor({
   compact = false,
   placeholder = "Start writing...",
   skillMentions,
+  wikiSlashCommands,
 }: {
   content: string;
   onChange: (content: string) => void;
@@ -47,6 +52,9 @@ export function MarkdownGoatBrainEditor({
   // resolves at fire time. Captured once at mount, like `content`; callers
   // that need this pass a stable, server-fetched catalog.
   skillMentions?: GoatSkillCatalogItem[];
+  // Wiki surfaces only: typing "/" opens a Notion-style command menu (e.g.
+  // "page" creates a sub-page). Captured once at mount like skillMentions.
+  wikiSlashCommands?: WikiSlashCommandHandlers;
 }) {
   const [isEmpty, setIsEmpty] = useState(content.trim().length === 0);
   const [, refreshToolbar] = useState(0);
@@ -83,6 +91,17 @@ export function MarkdownGoatBrainEditor({
           editingEnabled: !readOnly,
           onNavigateInternal: navigateInternal,
         }),
+        ...(wikiSlashCommands
+          ? [
+              Extension.create({
+                name: "wikiSlashCommand",
+                addProseMirrorPlugins() {
+                  if (readOnly) return [];
+                  return [createWikiSlashCommandPlugin(this.editor, wikiSlashCommands)];
+                },
+              }),
+            ]
+          : []),
         ...(skillMentions
           ? [
               Extension.create({

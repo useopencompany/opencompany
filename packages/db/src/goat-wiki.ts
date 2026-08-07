@@ -127,6 +127,38 @@ export async function getWikiTree(
 }
 
 /**
+ * Every page in the workspace wiki, bodies included — the payload behind the
+ * instant client-side navigation in the UI. Wikis are lightweight-Notion
+ * scale, so shipping all bodies at once is deliberate.
+ */
+export async function listWikiPagesWithBodies(
+  workspaceId: string,
+  db: DbClient = getDb(),
+): Promise<GoatWikiPage[]> {
+  return db
+    .select()
+    .from(goatWikiPages)
+    .where(eq(goatWikiPages.workspaceId, workspaceId))
+    .orderBy(asc(goatWikiPages.path));
+}
+
+/** Timeline entry count per page id, for badges without loading entries. */
+export async function getWikiTimelineCounts(
+  workspaceId: string,
+  db: DbClient = getDb(),
+): Promise<Map<string, number>> {
+  const rows: Array<{ pageId: string; count: number }> = await db
+    .select({
+      pageId: goatWikiTimelineEntries.pageId,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(goatWikiTimelineEntries)
+    .where(eq(goatWikiTimelineEntries.workspaceId, workspaceId))
+    .groupBy(goatWikiTimelineEntries.pageId);
+  return new Map(rows.map((row) => [row.pageId, row.count]));
+}
+
+/**
  * Resolves page references that may be slugs or paths ("website-redesign" or
  * "projects/website-redesign"). Unknown refs are reported, not thrown, so a
  * multi-ref read can partially succeed.
@@ -203,6 +235,13 @@ export type WikiWriteInput = {
   path: string;
   body: string;
   kind?: WikiKind;
+  /**
+   * Explicit display name (the Notion-style "name" field). When absent the
+   * title derives from the body's first H1, falling back to the existing
+   * title on updates so agent rewrites without an H1 never clobber a
+   * human-set name.
+   */
+  title?: string;
   actorWorkosId?: string | null;
 };
 
@@ -244,10 +283,10 @@ export async function writeWikiPage(
 
   if (existing) {
     const kind = input.kind ?? existing.kind;
-    if (existing.content === input.body && existing.kind === kind) {
+    const title = input.title?.trim() || deriveWikiTitle(input.body, existing.title.trim() || slug);
+    if (existing.content === input.body && existing.kind === kind && existing.title === title) {
       return { page: existing, action: "unchanged", createdAncestors };
     }
-    const title = deriveWikiTitle(input.body, slug);
     const delta = lineDelta(existing.content, input.body);
     const updated: GoatWikiPage[] = await db
       .update(goatWikiPages)
@@ -273,6 +312,7 @@ export async function writeWikiPage(
     path,
     body: input.body,
     kind: input.kind ?? DEFAULT_WIKI_KIND,
+    ...(input.title?.trim() ? { title: input.title.trim() } : {}),
     actorWorkosId: input.actorWorkosId ?? null,
   });
   return { page, action: "created", createdAncestors };
@@ -630,6 +670,7 @@ async function insertPage(
     path: string;
     body: string;
     kind: WikiKind;
+    title?: string;
     actorWorkosId: string | null;
   },
 ): Promise<GoatWikiPage> {
@@ -641,7 +682,7 @@ async function insertPage(
       workspaceId: input.workspaceId,
       slug,
       path: input.path,
-      title: deriveWikiTitle(input.body, slug),
+      title: input.title ?? deriveWikiTitle(input.body, slug),
       kind: input.kind,
       content: input.body,
       contentHash: hashWikiContent(input.body),
