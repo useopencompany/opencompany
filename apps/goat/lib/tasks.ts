@@ -512,7 +512,8 @@ export async function continueGoatTaskAction(
   // that executed them is gone, so they can only be read, not continued.
   return {
     ok: false,
-    error: "This task predates durable task sessions and can no longer be continued. Start a new task instead.",
+    error:
+      "This task predates durable task sessions and can no longer be continued. Start a new task instead.",
     messageId: null,
   };
 }

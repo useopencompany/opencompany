@@ -828,6 +828,11 @@ export function getAgentModelRuntimeOptions(id: string) {
   };
 }
 
+export function modelSupportsAttachments(modelId: string): { images: boolean; pdf: boolean } {
+  const model = AGENT_MODEL_CATALOG.find((entry) => entry.id === modelId);
+  return { images: Boolean(model?.supportsImages), pdf: Boolean(model?.supportsPdf) };
+}
+
 export function mergeModelProviderOptions(
   ...options: Array<ModelProviderOptions | undefined>
 ): ModelProviderOptions {

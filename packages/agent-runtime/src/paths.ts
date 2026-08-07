@@ -36,3 +36,7 @@ export function resolveWorkspacePath(workdir: string, inputPath = ".", personal 
 export function shellQuote(value: string) {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
+
+// File name of the memory CLI bundle delivered to the sandbox's read-only skills
+// mount (`<skillsRoot>/memory/`). The runner builds the memory tool command from it.
+export const MEMORY_CLI_FILE = "memory.mjs";

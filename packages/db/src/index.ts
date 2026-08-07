@@ -1,5 +1,4 @@
 export * from "./client";
-export * from "./codex-auth";
 export * from "./goat-action-governance";
 export * from "./goat-brain-files";
 export * from "./goat-brain-import";
@@ -13,4 +12,5 @@ export * from "./goat-infisical-auth";
 export * from "./goat-integrations";
 export * from "./goat-repo-configs";
 export * from "./goat-schema";
-export * from "./schema";
+export * from "./legacy-billing-schema";
+export * from "./llm-broker-schema";

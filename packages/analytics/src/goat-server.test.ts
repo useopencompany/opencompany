@@ -287,8 +287,9 @@ describe("PostHog server analytics", () => {
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_TOKEN", "phc_web_test");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://eu.i.posthog.com");
 
-    await captureServerEvent("signup_started", "anonymous_123", {
-      entrypoint: "signup_page",
+    await captureServerEvent("goat_billing_payment_failed", "workspace_123", {
+      workspace_id: "workspace_123",
+      subscription_id: "sub_123",
     });
 
     expect(posthog.constructor).toHaveBeenCalledWith(
@@ -296,9 +297,9 @@ describe("PostHog server analytics", () => {
       expect.objectContaining({ host: "https://eu.i.posthog.com" }),
     );
     expect(posthog.capture).toHaveBeenCalledWith({
-      distinctId: "anonymous_123",
-      event: "signup_started",
-      properties: { entrypoint: "signup_page" },
+      distinctId: "workspace_123",
+      event: "goat_billing_payment_failed",
+      properties: { workspace_id: "workspace_123", subscription_id: "sub_123" },
     });
   });
 });

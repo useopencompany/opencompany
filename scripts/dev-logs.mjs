@@ -5,9 +5,9 @@ import { exit } from "node:process";
 
 const DEFAULT_LOG_FILE = ".context/logs/dev-turbo.json";
 const SOURCE_ALIASES = new Map([
-  ["web", "@opencompany/web#dev"],
+  ["app", "@opencompany/goat#dev"],
+  ["goat", "@opencompany/goat#dev"],
   ["runner", "@opencompany/runner#dev"],
-  ["inngest", "@opencompany/inngest-dev#dev"],
   ["stripe", "@opencompany/stripe-webhooks#dev"],
   ["turbo", "turbo"],
 ]);
@@ -197,7 +197,7 @@ function printHelp() {
   console.log(`Usage: bun run dev:logs -- [options] [query]
 
 Options:
-  --source <name>      Filter by source. Aliases: web, runner, inngest, stripe, turbo.
+  --source <name>      Filter by source. Aliases: app, runner, stripe, turbo.
   --tail <lines>       Number of matching records to print. Default: 200.
   --grep <query>       Filter records by text/source/level.
   --errors            Show likely errors and failures.
@@ -206,7 +206,7 @@ Options:
 
 Examples:
   bun run dev:logs -- --source runner --tail 100
-  bun run dev:logs -- --source web --grep ECONNREFUSED
+  bun run dev:logs -- --source app --grep ECONNREFUSED
   bun run dev:logs -- --errors --follow
 `);
 }

@@ -16,7 +16,6 @@ if (paths.length === 0) {
 const preserveLocalKeys = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
-  "INNGEST_DEV",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
   "GOAT_PORT",
   "GOAT_HTTPS_PORT",

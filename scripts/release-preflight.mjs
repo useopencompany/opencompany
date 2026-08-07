@@ -1,50 +1,11 @@
 #!/usr/bin/env node
 
 // Called by: release workflow checks and root `bun run release:preflight`.
-// Purpose: validates required release, web, runner, and smoke-check environment variables.
+// Purpose: validates required release, Goat, runner, and smoke-check environment variables.
 
 import "./load-env.mjs";
 
 const groups = {
-  web: {
-    label: "Vercel web app",
-    required: [
-      "DATABASE_URL",
-      "WORKOS_CLIENT_ID",
-      "WORKOS_API_KEY",
-      "WORKOS_COOKIE_PASSWORD",
-      "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
-      "OPENCOMPANY_GITHUB_ORG",
-      "GITHUB_APP_ID",
-      "GITHUB_APP_INSTALLATION_ID",
-      "GITHUB_APP_PRIVATE_KEY",
-      "GITHUB_INTEGRATION_APP_ID",
-      "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
-      "GITHUB_INTEGRATION_APP_SLUG",
-      "GITHUB_INTEGRATION_APP_CLIENT_ID",
-      "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
-      "GITHUB_INTEGRATION_STATE_SECRET",
-      "INNGEST_EVENT_KEY",
-      "INNGEST_SIGNING_KEY",
-      "STRIPE_SECRET_KEY",
-      "STRIPE_WEBHOOK_SECRET",
-      "RUNNER_PUBLIC_URL",
-      "RUNNER_INTERNAL_TOKEN",
-      "RUNNER_STREAM_TOKEN_SECRET",
-      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
-      "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
-      "NEXT_PUBLIC_GOAT_POSTHOG_HOST",
-    ],
-    optional: [
-      "RUNNER_INTERNAL_URL",
-      "NEXT_PUBLIC_POSTHOG_TOKEN",
-      "NEXT_PUBLIC_POSTHOG_HOST",
-      "BETTER_STACK_ERRORS_DSN",
-      "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
-      "LINEAR_API_KEY",
-      "LINEAR_TEAM_ID",
-    ],
-  },
   goat: {
     label: "Vercel Goat app",
     required: [
@@ -135,10 +96,7 @@ const groups = {
       "EXA_API_KEY",
       "APIFY_API_TOKEN",
       "X_API_BEARER_TOKEN",
-      "SUPADATA_API_KEY",
       "OPENCOMPANY_E2B_TEMPLATE",
-      "AMP_API_KEY",
-      "OPENCOMPANY_AMP_E2B_TEMPLATE",
       "RUNNER_E2B_IDLE_TIMEOUT_MS",
       "RUNNER_INSTANCE_ID",
       "RUNNER_PREVIEW_BASE_DOMAIN",
@@ -172,12 +130,10 @@ const groups = {
       "PRODUCTION_DATABASE_URL",
       "VERCEL_TOKEN",
       "VERCEL_ORG_ID",
-      "VERCEL_PROJECT_ID",
       "GOAT_VERCEL_PROJECT_ID",
       "MARKETING_VERCEL_PROJECT_ID",
       "RENDER_SERVICE_ID",
       "RENDER_API_KEY",
-      "PRODUCTION_WEB_URL",
       "PRODUCTION_GOAT_URL",
       "RUNNER_PUBLIC_URL",
     ],
@@ -235,12 +191,6 @@ if (!isUnset(githubIntegrationStateSecret) && githubIntegrationStateSecret.lengt
   console.log("\nGITHUB_INTEGRATION_STATE_SECRET must be at least 32 characters.");
 }
 
-const redirectUri = process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI;
-if (redirectUri && !redirectUri.startsWith("https://") && !redirectUri.includes("localhost")) {
-  failed = true;
-  console.log("\nNEXT_PUBLIC_WORKOS_REDIRECT_URI should be https:// outside local development.");
-}
-
 const goatRedirectUri = process.env.GOAT_NEXT_PUBLIC_WORKOS_REDIRECT_URI;
 if (
   goatRedirectUri &&
@@ -267,7 +217,7 @@ function selectGroups() {
     .map((arg) => arg.slice(2))
     .filter((arg) => groups[arg]);
 
-  return requested.length > 0 ? requested : ["web", "runner"];
+  return requested.length > 0 ? requested : ["goat", "runner"];
 }
 
 function isUnset(value) {

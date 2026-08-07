@@ -28,6 +28,7 @@ import {
   runClaudeCodeCliProcess,
 } from "./claude-code-cli";
 import type { CodexAppServerSummary } from "./codex-app-server";
+import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
 import { buildGitHubCommandEnv, createKnownSecretRedactor } from "./coding-agent-shared";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -83,7 +84,6 @@ import {
   createOrConnectSandbox,
   type SandboxHandle,
 } from "./sandbox";
-import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
 
 const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory;
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";

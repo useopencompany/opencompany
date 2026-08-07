@@ -37,9 +37,6 @@ const PERSONAL_ENV_TEMPLATE = `# Personal local overrides.
 # NEON_API_KEY=""
 # NEON_PARENT_BRANCH=""
 # NEON_BRANCH_TTL_HOURS="24"
-#
-# Optional: point local workspace repos at a personal/dev GitHub org.
-# OPENCOMPANY_GITHUB_ORG=""
 `;
 
 // .nvmrc pins this project to Node 22.
@@ -56,12 +53,7 @@ const LINEAR_ENV_KEYS = [
   "LINEAR_FEEDBACK_PROJECT_ID",
   "LINEAR_FEEDBACK_LABELS",
 ];
-const GITHUB_ENV_KEYS = [
-  "OPENCOMPANY_GITHUB_ORG",
-  "GITHUB_APP_ID",
-  "GITHUB_APP_INSTALLATION_ID",
-  "GITHUB_APP_PRIVATE_KEY",
-];
+const GITHUB_ENV_KEYS = ["GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY"];
 const GITHUB_WORK_INTEGRATION_ENV_KEYS = [
   "GITHUB_INTEGRATION_APP_ID",
   "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
@@ -88,11 +80,8 @@ const RUNNER_ENV_KEYS = [
   "EXA_API_KEY",
   "APIFY_API_TOKEN",
   "X_API_BEARER_TOKEN",
-  "SUPADATA_API_KEY",
-  "AMP_API_KEY",
   "OPENAI_CODEX_API_KEY",
   "OPENCOMPANY_E2B_TEMPLATE",
-  "OPENCOMPANY_AMP_E2B_TEMPLATE",
   "RUNNER_E2B_IDLE_TIMEOUT_MS",
   "RUNNER_LLM_BROKER_ENABLED",
   "RUNNER_CODEX_MODEL",
@@ -108,7 +97,7 @@ const LOCAL_RUNNER_REQUIRED_ENV_KEYS = [
   "E2B_API_KEY",
   "VERCEL_AI_GATEWAY_API_KEY",
 ];
-const STRIPE_ENV_KEYS = ["STRIPE_SECRET_KEY"];
+const STRIPE_ENV_KEYS = ["GOAT_STRIPE_WEBHOOK_SECRET"];
 const STRIPE_OPTIONAL_ENV_KEYS = [
   "GOAT_STRIPE_API_KEY",
   "GOAT_STRIPE_CHECKOUT_ENABLED",
@@ -156,7 +145,6 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "NEON_ROLE_NAME",
   "NEON_BRANCH_NAME",
   "WORKOS_REDIRECT_URI",
-  "PLAYWRIGHT_PORT",
   "NEXT_PUBLIC_POSTHOG_TOKEN",
   "NEXT_PUBLIC_POSTHOG_HOST",
   "NEXT_PUBLIC_GOAT_POSTHOG_TOKEN",
@@ -191,7 +179,6 @@ const GOAT_ENV_PATH = "apps/goat/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
-  "INNGEST_DEV",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
   "GOAT_PORT",
   "GOAT_HTTPS_PORT",
@@ -218,6 +205,7 @@ const GOAT_LOCAL_ENV_KEYS = [
   "RUNNER_INTERNAL_URL",
   "RUNNER_INTERNAL_TOKEN",
   "GOAT_STRIPE_API_KEY",
+  "GOAT_STRIPE_WEBHOOK_SECRET",
   "GOAT_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
   ...GITHUB_WORK_INTEGRATION_ENV_KEYS,
@@ -384,8 +372,7 @@ function inspectState() {
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
     neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
-    stripeSecretKey: isPlaceholder(env.STRIPE_SECRET_KEY) ? "placeholder" : "set",
-    stripeWebhookSecret: isPlaceholder(env.STRIPE_WEBHOOK_SECRET) ? "placeholder" : "set",
+    stripeWebhookSecret: isPlaceholder(env.GOAT_STRIPE_WEBHOOK_SECRET) ? "placeholder" : "set",
     goatBilling: goatBillingMissing.length === 0 ? "ready" : "placeholder",
     goatBillingMissingKeys: goatBillingMissing,
   };
@@ -868,21 +855,6 @@ async function ensureStripe(state) {
     cliCredentials ??= readStripeSecretKeyFromCli();
     return cliCredentials;
   };
-  if (state.stripeSecretKey === "set") {
-    ok("STRIPE_SECRET_KEY is set");
-  } else {
-    const result = getCliCredentials();
-    if (result.ok) {
-      updates.STRIPE_SECRET_KEY = result.key;
-      ok(`Will write STRIPE_SECRET_KEY from Stripe CLI profile "${result.projectName}"`);
-    } else {
-      warn(
-        `STRIPE_SECRET_KEY is missing and could not be read from Stripe CLI: ${result.message} ` +
-          "Credit checkout will fail until it is set.",
-      );
-    }
-  }
-
   const env = { ...readEffectiveLocalEnv(), ...updates };
   if (isPlaceholder(env.GOAT_STRIPE_API_KEY)) {
     const result = getCliCredentials();
@@ -919,15 +891,15 @@ async function ensureStripe(state) {
   }
 
   if (state.stripeWebhookSecret === "set") {
-    ok("STRIPE_WEBHOOK_SECRET is set");
+    ok("GOAT_STRIPE_WEBHOOK_SECRET is set");
   } else {
     const result = readStripeWebhookSecretFromCli();
     if (result.ok) {
-      updates.STRIPE_WEBHOOK_SECRET = result.secret;
-      ok("Will write STRIPE_WEBHOOK_SECRET from Stripe CLI");
+      updates.GOAT_STRIPE_WEBHOOK_SECRET = result.secret;
+      ok("Will write GOAT_STRIPE_WEBHOOK_SECRET from Stripe CLI");
     } else {
       warn(
-        `STRIPE_WEBHOOK_SECRET is missing and could not be read from Stripe CLI: ${result.message} ` +
+        `GOAT_STRIPE_WEBHOOK_SECRET is missing and could not be read from Stripe CLI: ${result.message} ` +
           "Forwarded Stripe webhooks will fail signature verification until it is set.",
       );
     }
@@ -1170,11 +1142,8 @@ async function main() {
         reason: `pull shared development env vars into .env.local (${missingShared.join(", ")})`,
       });
     }
-    if (state.stripeSecretKey === "placeholder" || state.stripeWebhookSecret === "placeholder") {
-      const missingStripe = [
-        ...(state.stripeSecretKey === "placeholder" ? ["STRIPE_SECRET_KEY"] : []),
-        ...(state.stripeWebhookSecret === "placeholder" ? ["STRIPE_WEBHOOK_SECRET"] : []),
-      ];
+    if (state.stripeWebhookSecret === "placeholder") {
+      const missingStripe = ["GOAT_STRIPE_WEBHOOK_SECRET"];
       nextSteps.push({
         command: "bun run setup:stripe",
         reason: `copy local Stripe CLI credentials into .env.local (${missingStripe.join(", ")})`,

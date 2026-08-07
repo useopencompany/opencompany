@@ -15,13 +15,12 @@ import {
   type GoatIntegrationCredentialEncryptedPayload,
   goatInfisicalConnections,
 } from "./goat-schema";
-import type * as publicSchema from "./schema";
 
 const ENCRYPTION_KEY_VERSION = 1;
 export const GOAT_INFISICAL_AUTH_BUNDLE_FORMAT_VERSION = 1 as const;
 export const GOAT_INFISICAL_HOST = "https://app.infisical.com";
 
-type DbSchema = typeof publicSchema & typeof goatSchema;
+type DbSchema = typeof goatSchema;
 type GoatInfisicalAuthDb = Pick<
   PgDatabase<PgQueryResultHKT, DbSchema>,
   "insert" | "select" | "update"

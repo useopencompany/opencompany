@@ -1,8 +1,0 @@
-{
-  "name": "@opencompany/inngest-dev",
-  "version": "0.2.0",
-  "private": true,
-  "scripts": {
-    "dev": "node ../../scripts/inngest-dev.mjs"
-  }
-}

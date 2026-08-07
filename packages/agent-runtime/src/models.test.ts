@@ -9,6 +9,7 @@ import {
   codexCliModelNameForModelId,
   getAgentModelRuntimeOptions,
   isCodexModelId,
+  modelSupportsAttachments,
 } from "./models";
 
 describe("Codex model catalog", () => {
@@ -57,5 +58,17 @@ describe("DeepSeek model catalog", () => {
       },
       reasoningExposure: "raw",
     });
+  });
+});
+
+describe("modelSupportsAttachments", () => {
+  it("reports image support for a vision model id", () => {
+    const visionModel = AGENT_MODEL_CATALOG.find((m) => m.supportsImages);
+    expect(visionModel).toBeDefined();
+    expect(modelSupportsAttachments(visionModel!.id).images).toBe(true);
+  });
+
+  it("returns all-false for an unknown model id", () => {
+    expect(modelSupportsAttachments("nonexistent/model")).toEqual({ images: false, pdf: false });
   });
 });

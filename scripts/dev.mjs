@@ -1,17 +1,12 @@
-// Called by: root `bun run dev` and `bun run dev:stream`.
-// Purpose: starts ngrok when available, then runs the local Turbo dev stack.
+// Called by: root `bun run dev`, `bun run dev:goat`, and `bun run dev:tui`.
+// Purpose: starts the Goat dev proxy, local HTTPS, and ngrok when available, then runs
+// the local Turbo dev stack (Goat app + runner).
 
 import "./load-env.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { exit } from "node:process";
 import { goatHttpsDisabled, goatHttpsPort, startGoatLocalHttpsProxy } from "./lib/caddy-dev.mjs";
-import {
-  DURABLE_STREAMS_DEV_HOST,
-  DURABLE_STREAMS_DEV_PORT,
-  DURABLE_STREAMS_DEV_URL,
-  startDurableStreamsDevServer,
-} from "./lib/durable-streams-dev.mjs";
 import { resolveGoatDevEnv } from "./lib/goat-dev-env.mjs";
 import { isolatedGoatDevEnvironment, selectGoatDevPorts } from "./lib/goat-dev-ports.mjs";
 import { startGoatDevProxy } from "./lib/goat-dev-proxy.mjs";
@@ -25,23 +20,20 @@ import {
 } from "./lib/ngrok-dev.mjs";
 import { findPortListeners } from "./lib/port-kill.mjs";
 
-const { appMode, turboArgs } = parseArgs(process.argv.slice(2));
-const goatDevPorts =
-  appMode === "goat" ? selectGoatDevPorts({ httpsDisabled: goatHttpsDisabled() }) : null;
+const { turboArgs } = parseArgs(process.argv.slice(2));
+const goatDevPorts = selectGoatDevPorts({ httpsDisabled: goatHttpsDisabled() });
 if (goatDevPorts?.isolated) {
   console.log(
     `\nConfigured Goat ports are already in use; using this workspace's isolated ports ` +
-      `(${goatDevPorts.app}-${goatDevPorts.electric ?? goatDevPorts.durableStreams}).`,
+      `(${goatDevPorts.app}-${goatDevPorts.electric}).`,
   );
   Object.assign(
     process.env,
     isolatedGoatDevEnvironment(goatDevPorts, { httpsDisabled: goatHttpsDisabled() }),
   );
 }
-const defaultPort = appMode === "goat" ? (process.env.GOAT_PORT ?? "3002") : "3000";
-const port =
-  valueFor(turboArgs, "--port") ??
-  (appMode === "goat" ? defaultPort : (process.env.PORT ?? defaultPort));
+const defaultPort = process.env.GOAT_PORT ?? "3002";
+const port = valueFor(turboArgs, "--port") ?? defaultPort;
 const isCI = process.env.CI === "true" || process.env.CI === "1";
 const tunnelDisabled = process.env.OPENCOMPANY_NGROK_DISABLED === "1" || isCI;
 configureDevLogFile(turboArgs);
@@ -51,8 +43,6 @@ let goatHttpsEnv = {};
 let goatDevProxy = null;
 let goatLocalHttps = null;
 let goatProxyTarget = null;
-let durableStreams = null;
-let durableEnv = {};
 let dev = null;
 let shuttingDown = false;
 
@@ -74,7 +64,6 @@ for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
     shuttingDown = true;
     const childSignal = signal === "SIGHUP" ? "SIGTERM" : signal;
     if (ngrok && !ngrok.killed) ngrok.kill(childSignal);
-    stopDurableStreams();
     stopGoatLocalHttps();
     stopGoatDevProxy();
     if (dev) {
@@ -85,25 +74,15 @@ for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
   });
 }
 
-if (appMode === "goat") {
-  assertGoatDevPortsAvailable();
-  goatProxyTarget = await prepareGoatProxyTarget(port);
-  goatLocalHttps = await startGoatHttps(goatProxyTarget.port);
-}
+assertGoatDevPortsAvailable();
+goatProxyTarget = await prepareGoatProxyTarget(port);
+goatLocalHttps = await startGoatHttps(goatProxyTarget.port);
 
 if (!tunnelDisabled) {
-  const tunnelTarget = goatProxyTarget ?? { port, exposesRunnerCallbacks: false };
-  ngrok = await startDefaultTunnel(tunnelTarget.port, {
+  ngrok = await startDefaultTunnel(goatProxyTarget.port, {
     appPort: port,
-    exposesRunnerCallbacks: tunnelTarget.exposesRunnerCallbacks,
+    exposesRunnerCallbacks: goatProxyTarget.exposesRunnerCallbacks,
   });
-}
-
-// Local session-transcript streaming. The web proxy and runner read
-// DURABLE_STREAMS_URL; without it they 503 / no-op. Start the in-memory
-// reference server and inject the URL so transcripts stream with no extra setup.
-if (!isCI) {
-  durableStreams = await startDurableStreams();
 }
 
 const turboBin = existsSync("node_modules/.bin/turbo") ? "node_modules/.bin/turbo" : "turbo";
@@ -113,18 +92,9 @@ dev = spawn(turboBin, ["dev", ...turboArgs], {
     ...process.env,
     ...tunnelEnv,
     ...goatHttpsEnv,
-    ...durableEnv,
-    ...envForAppMode(),
-    INNGEST_DEV: process.env.INNGEST_DEV ?? "1",
+    ...resolveGoatDevEnv({ port, processEnv: process.env, tunnelEnv, goatHttpsEnv }),
   },
 });
-
-function stopDurableStreams() {
-  if (durableStreams) {
-    durableStreams.stop().catch(() => {});
-    durableStreams = null;
-  }
-}
 
 function stopGoatDevProxy() {
   if (goatDevProxy) {
@@ -170,28 +140,20 @@ function recordSupervisorCrash(error, origin) {
 }
 
 function parseArgs(args) {
-  let appMode = "web";
   const turboArgs = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    // Historical flag from the two-app era; the Goat stack is the only mode now.
     if (arg === "--app") {
-      appMode = args[index + 1] === "goat" ? "goat" : "web";
       index += 1;
       continue;
     }
     if (arg.startsWith("--app=")) {
-      appMode = arg.slice("--app=".length) === "goat" ? "goat" : "web";
       continue;
     }
     turboArgs.push(arg);
   }
-  return { appMode, turboArgs };
-}
-
-function envForAppMode() {
-  if (appMode !== "goat") return {};
-
-  return resolveGoatDevEnv({ port, processEnv: process.env, tunnelEnv, goatHttpsEnv });
+  return { turboArgs };
 }
 
 function stopDevProcess(signal = "SIGTERM") {
@@ -246,7 +208,6 @@ function descendantPids(rootPid) {
 
 dev.on("exit", (code, signal) => {
   if (ngrok && !ngrok.killed) ngrok.kill("SIGTERM");
-  stopDurableStreams();
   stopGoatLocalHttps();
   stopGoatDevProxy();
   if (shuttingDown) exit(0);
@@ -256,49 +217,11 @@ dev.on("exit", (code, signal) => {
 
 dev.on("error", (error) => {
   if (ngrok && !ngrok.killed) ngrok.kill("SIGTERM");
-  stopDurableStreams();
   stopGoatLocalHttps();
   stopGoatDevProxy();
   console.error(`\nFailed to start turbo dev: ${error.message}\n`);
   exit(1);
 });
-
-// Start the local Durable Streams server and set `durableEnv` so the URL reaches
-// the web + runner dev processes. Respects an explicitly configured
-// DURABLE_STREAMS_URL (e.g. Electric Cloud), reuses an already-running local
-// server, and degrades to a warning (transcripts just won't stream) on failure.
-async function startDurableStreams() {
-  const configured = process.env.DURABLE_STREAMS_URL?.trim();
-  if (configured && !configured.includes("...")) {
-    console.log(`\nUsing configured Durable Streams: ${configured}\n`);
-    return null;
-  }
-
-  try {
-    const durablePort = Number(goatDevPorts?.durableStreams ?? DURABLE_STREAMS_DEV_PORT);
-    const { url, server } = await startDurableStreamsDevServer({ port: durablePort });
-    durableEnv = { DURABLE_STREAMS_URL: url };
-    console.log(`\nDurable Streams (local) ready: ${url}`);
-    console.log(
-      "Injected DURABLE_STREAMS_URL into the dev process — session transcripts stream.\n",
-    );
-    return server;
-  } catch (error) {
-    if (error?.code === "EADDRINUSE") {
-      const durableUrl = goatDevPorts
-        ? `http://${DURABLE_STREAMS_DEV_HOST}:${goatDevPorts.durableStreams}`
-        : DURABLE_STREAMS_DEV_URL;
-      durableEnv = { DURABLE_STREAMS_URL: durableUrl };
-      console.log(`\nDurable Streams already running at ${durableUrl}; reusing it.\n`);
-      return null;
-    }
-    console.warn(
-      `\nCould not start local Durable Streams: ${error.message}\n` +
-        "  Session transcripts won't live-stream (the proxy returns 503). Continuing.\n",
-    );
-    return null;
-  }
-}
 
 async function prepareGoatProxyTarget(appPort) {
   const runnerPort = localRunnerPort();
@@ -321,11 +244,6 @@ function assertGoatDevPortsAvailable() {
   if (!goatHttpsDisabled()) {
     ports.push({ label: "Goat HTTPS", port: goatHttpsPort() });
   }
-  const configuredDurableUrl = process.env.DURABLE_STREAMS_URL?.trim();
-  if (goatDevPorts?.isolated && (!configuredDurableUrl || configuredDurableUrl.includes("..."))) {
-    ports.push({ label: "Durable Streams", port: goatDevPorts.durableStreams });
-  }
-
   const busy = [];
   for (const { label, port } of dedupePorts(ports)) {
     const pids = findPortListeners(port);
@@ -434,7 +352,7 @@ async function startDefaultTunnel(
   const publicUrl = await waitForNgrokUrl(targetPort);
   if (!publicUrl) {
     child.kill("SIGTERM");
-    const message = "\nngrok did not expose the local web app in time.\n";
+    const message = "\nngrok did not expose the local app in time.\n";
     if (required) {
       console.error(message);
       exit(1);

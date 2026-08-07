@@ -10,7 +10,7 @@ import {
   autoRefillAttempts,
   type WorkspaceBillingSettings,
   workspaceBillingSettings,
-} from "@opencompany/db/schema";
+} from "@opencompany/db/legacy-billing-schema";
 import { and, eq, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 
