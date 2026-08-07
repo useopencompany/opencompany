@@ -31,6 +31,7 @@ import {
   START_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
+  USE_ACTION_TOOL_PART_TYPE,
   USE_SKILL_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { GOAT_CHAT_PROMPT_MAX_LENGTH } from "@/lib/chat-validation";
@@ -2515,6 +2516,67 @@ describe("POST /api/chat", () => {
               errorText: GOAT_INCOMPLETE_TOOL_CALL_REASON,
             },
           ],
+        }),
+      },
+      expect.anything(),
+    );
+  });
+
+  it("persists no failure fallback while an action waits for approval", async () => {
+    mockAuth();
+    mockCreateTurn();
+    const approvalPart = {
+      type: USE_ACTION_TOOL_PART_TYPE,
+      toolCallId: "post_tweet_1",
+      state: "approval-requested",
+      input: {
+        action: "x_account.post_tweet",
+        params: { text: "Back to shipping." },
+      },
+      approval: { id: "approval_1" },
+    } as const;
+    mockStreamText().mockImplementation(
+      () =>
+        ({
+          toUIMessageStreamResponse: vi.fn(
+            async (options: {
+              onFinish: (event: {
+                responseMessage: {
+                  id: string;
+                  role: "assistant";
+                  parts: Array<typeof approvalPart>;
+                };
+                finishReason: string;
+                isAborted: boolean;
+              }) => Promise<void>;
+            }) => {
+              await options.onFinish({
+                responseMessage: {
+                  id: "assistant_1",
+                  role: "assistant",
+                  parts: [approvalPart],
+                },
+                finishReason: "tool-calls",
+                isAborted: false,
+              });
+              return new Response(null, { status: 200 });
+            },
+          ),
+        }) as never,
+    );
+
+    const response = await POST(validChatRequest("Post: Back to shipping."));
+
+    expect(response.status).toBe(200);
+    expect(persistGoatChatAssistantMessage).toHaveBeenCalledWith(
+      {
+        sessionId: "session_1",
+        messageId: "assistant_1",
+        content: "",
+        taskId: null,
+        debugTrace: expect.objectContaining({
+          finishReason: "tool-calls",
+          uiMessageParts: [approvalPart],
         }),
       },
       expect.anything(),
