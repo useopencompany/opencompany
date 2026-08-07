@@ -85,7 +85,7 @@ describe("refreshIntegrationCredential", () => {
         db,
         now: new Date("2026-07-14T09:15:00.000Z"),
       }),
-    ).rejects.toThrow("Could not refresh Goat integration credential.");
+    ).rejects.toThrow("Could not refresh opencompany integration credential.");
 
     expect(query).toHaveBeenCalledTimes(2);
     expect(transaction).toHaveBeenCalledOnce();

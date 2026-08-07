@@ -5,7 +5,7 @@ Date: 2026-08-04
 
 ## User Job
 
-Founders and small teams want Goat to help with finance admin that is easy to
+Founders and small teams want opencompany to help with finance admin that is easy to
 miss and annoying to do manually:
 
 - "Which Revolut card expenses are missing receipts?"
@@ -19,7 +19,7 @@ expects, without moving money or changing bank records by default."
 
 ## Short Answer
 
-Yes, we can give Goat useful Revolut access, but the first useful version should
+Yes, we can give opencompany useful Revolut access, but the first useful version should
 be a workspace-owned, read-only Revolut Business connector.
 
 The good first feature is:
@@ -28,7 +28,7 @@ The good first feature is:
 - detect expenses in `missing_info` or expenses with empty `receipt_ids`;
 - retrieve receipt files that already exist in Revolut;
 - reconcile Revolut expenses against Gmail/Drive/Slack/user uploads already
-  connected to Goat;
+  connected to opencompany;
 - export evidence and reports into Google Drive, Brain, or another user-chosen
   destination when the user asks.
 
@@ -78,7 +78,7 @@ means production validation will need a real Revolut Business account and a
 non-destructive read-only test plan. Source: [Retrieve expenses and
 receipts](https://developer.revolut.com/docs/guides/manage-accounts/accounts-and-transactions/retrieve-expenses).
 
-Useful expense fields for Goat:
+Useful expense fields for opencompany:
 
 - `id`
 - `state`
@@ -94,7 +94,7 @@ Useful expense fields for Goat:
 - `spent_amount`
 
 The expense guide defines `missing_info` as the initial state while required
-information is missing. It also documents filtering by `state`, so Goat can ask
+information is missing. It also documents filtering by `state`, so opencompany can ask
 for `state=missing_info` and then inspect `receipt_ids`. Source: [Retrieve
 expenses and receipts](https://developer.revolut.com/docs/guides/manage-accounts/accounts-and-transactions/retrieve-expenses).
 
@@ -145,7 +145,7 @@ I did not find a documented Business API endpoint to upload receipt content to
 an expense. The API docs expose retrieve/list expense operations and receipt
 content retrieval, not a `POST /expenses/.../receipts` style endpoint.
 
-Product implication: Goat can identify missing receipts and find candidate files.
+Product implication: opencompany can identify missing receipts and find candidate files.
 It can save them to Drive/Brain or send them to a human. Directly attaching the
 receipt back into Revolut should remain out of scope until Revolut documents an
 API or we build a clearly user-driven email-forwarding workaround.
@@ -172,7 +172,7 @@ accounting system with explicit user approval.
 
 ### Upload invoices somewhere else
 
-This is viable now. Goat can already use existing integrations such as Gmail and
+This is viable now. opencompany can already use existing integrations such as Gmail and
 Google Drive in the action framework. For v1, "upload them somewhere if needed"
 should mean:
 
@@ -184,7 +184,7 @@ should mean:
 ## Recommended Product Shape
 
 Build a Revolut Business connector that is workspace-owned and read-only by
-default, following the existing Stripe pattern in Goat:
+default, following the existing Stripe pattern in opencompany:
 
 - workspace admin connects it;
 - credentials stay encrypted server-side;

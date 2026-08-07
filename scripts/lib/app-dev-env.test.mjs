@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { resolveDevEnv } from "./app-dev-env.mjs";
 
-test("Goat local HTTPS WorkOS redirect wins over the ngrok tunnel", () => {
+test("opencompany local HTTPS WorkOS redirect wins over the ngrok tunnel", () => {
   const env = resolveDevEnv({
     port: "3002",
     processEnv: {
@@ -29,7 +29,7 @@ test("Goat local HTTPS WorkOS redirect wins over the ngrok tunnel", () => {
   assert.equal(env.RUNNER_PREVIEW_PROTOCOL, "https");
 });
 
-test("Goat redirect falls back to localhost when Caddy is unavailable", () => {
+test("opencompany redirect falls back to localhost when Caddy is unavailable", () => {
   const env = resolveDevEnv({
     port: "3002",
     processEnv: {

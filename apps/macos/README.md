@@ -45,7 +45,7 @@ Command-line verification:
 ```sh
 xcodebuild \
   -project apps/macos/GoatQuick.xcodeproj \
-  -scheme GoatQuick \
+  -scheme opencompanyQuick \
   -configuration Debug \
   -destination 'platform=macOS' \
   CODE_SIGNING_ALLOWED=NO \
@@ -53,7 +53,7 @@ xcodebuild \
 
 xcodebuild \
   -project apps/macos/GoatQuick.xcodeproj \
-  -scheme GoatQuick \
+  -scheme opencompanyQuick \
   -configuration Debug \
   -destination 'platform=macOS' \
   CODE_SIGNING_ALLOWED=NO \

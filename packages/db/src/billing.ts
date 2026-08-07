@@ -146,10 +146,7 @@ export async function refreshMonthlyIncludedUsage(
       if (result.ok) refreshed += 1;
     } catch (error) {
       failed += 1;
-      console.error(
-        `Failed to refresh monthly usage for workspace ${row.workspaceId}.`,
-        error,
-      );
+      console.error(`Failed to refresh monthly usage for workspace ${row.workspaceId}.`, error);
     }
   }
   return { candidates: rows.length, refreshed, failed };

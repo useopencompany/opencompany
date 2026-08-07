@@ -568,7 +568,7 @@ function shouldReplaceLocalDefault(key, current, next) {
 }
 
 async function ensureAppEnvFile() {
-  step("Goat app env file");
+  step("app env file");
 
   const env = readEffectiveLocalEnv();
   const appUrl = env.NEXT_PUBLIC_APP_URL || LOCAL_APP_URL;
@@ -589,7 +589,7 @@ async function ensureAppEnvFile() {
 
   writeEnvValues(ENV_PATH, values);
   ok(
-    `Updated ${ENV_PATH} with Goat-local DB/Auth/runner/GitHub/Electric/observability/analytics env`,
+    `Updated ${ENV_PATH} with opencompany-local DB/Auth/runner/GitHub/Electric/observability/analytics env`,
   );
 }
 
@@ -839,7 +839,7 @@ async function ensureStripe(state) {
 
   const pulledBillingKeys = pullBillingDevEnvFromInfisical();
   if (pulledBillingKeys.length > 0) {
-    ok(`Loaded Goat billing values from Infisical dev: ${pulledBillingKeys.join(", ")}`);
+    ok(`Loaded billing values from Infisical dev: ${pulledBillingKeys.join(", ")}`);
   }
 
   const updates = {};
@@ -854,15 +854,15 @@ async function ensureStripe(state) {
     if (result.ok && (result.key.startsWith("rk_test_") || result.expiresAt)) {
       updates.STRIPE_API_KEY = result.key;
       if (result.key.startsWith("rk_test_")) {
-        ok(`Will use restricted Stripe CLI profile "${result.projectName}" for local Goat billing`);
+        ok(`Will use restricted Stripe CLI profile "${result.projectName}" for local billing`);
       } else {
         warn(
-          `Will use the expiring Stripe CLI test key from profile "${result.projectName}" for local Goat billing only. Hosted environments still require a dedicated restricted key.`,
+          `Will use the expiring Stripe CLI test key from profile "${result.projectName}" for local billing only. Hosted environments still require a dedicated restricted key.`,
         );
       }
     } else if (result.ok) {
       warn(
-        "Stripe CLI returned a non-restricted test key without an expiry. Run `stripe login` to refresh the CLI profile, or create a restricted test key for Goat billing and store it in Infisical dev /web.",
+        "Stripe CLI returned a non-restricted test key without an expiry. Run `stripe login` to refresh the CLI profile, or create a restricted test key for opencompany billing and store it in Infisical dev /web.",
       );
     } else {
       warn(`STRIPE_API_KEY is missing: ${result.message}`);
@@ -873,7 +873,7 @@ async function ensureStripe(state) {
 
   if (isPlaceholder(env.STRIPE_CHECKOUT_ENABLED)) {
     updates.STRIPE_CHECKOUT_ENABLED = "false";
-    ok("Will keep live Goat Checkout disabled by default");
+    ok("Will keep live opencompany Checkout disabled by default");
   }
 
   if (isPlaceholder(env.CRON_SECRET)) {
@@ -900,7 +900,7 @@ async function ensureStripe(state) {
 
   if (Object.keys(updates).length > 0) {
     writeEnvValues(".env.local", updates);
-    ok("Updated .env.local with local Stripe and Goat billing credentials");
+    ok("Updated .env.local with local Stripe and billing credentials");
   }
 }
 
@@ -1045,16 +1045,16 @@ async function ensureElectric() {
 }
 
 async function ensureLocalHttps() {
-  step("Goat local HTTPS");
+  step("opencompany local HTTPS");
 
   if (httpsDisabled(process.env)) {
-    warn("APP_HTTPS_DISABLED is set; Goat local dev will use HTTP.");
+    warn("APP_HTTPS_DISABLED is set; opencompany local dev will use HTTP.");
     return;
   }
 
   let state = caddyState();
   if (!state.available && process.platform === "darwin" && homebrewAvailable()) {
-    warn("Caddy is not installed. Installing it with Homebrew for Goat local HTTPS/HTTP2.");
+    warn("Caddy is not installed. Installing it with Homebrew for opencompany local HTTPS/HTTP2.");
     const install = installCaddyWithHomebrew();
     if (install.status === 0) {
       state = caddyState();
@@ -1067,12 +1067,12 @@ async function ensureLocalHttps() {
   if (!state.available) {
     warn(
       "Caddy is not installed. Install it with `brew install caddy` " +
-        "to enable Goat local HTTPS/HTTP2.",
+        "to enable opencompany local HTTPS/HTTP2.",
     );
     return;
   }
 
-  ok(`Caddy is installed; dev:goat will serve Goat at ${httpsOrigin(process.env)}`);
+  ok(`Caddy is installed; dev:goat will serve opencompany at ${httpsOrigin(process.env)}`);
 }
 
 async function main() {
@@ -1145,7 +1145,7 @@ async function main() {
     if (state.billing === "placeholder") {
       nextSteps.push({
         command: "bun run setup:stripe",
-        reason: `configure local Goat billing (${state.billingMissingKeys.join(", ")})`,
+        reason: `configure local billing (${state.billingMissingKeys.join(", ")})`,
       });
     }
     if (!SHARED_DATABASE_MODE && state.neonProject === "set") {
@@ -1186,13 +1186,14 @@ async function main() {
     if (!existsSync(ENV_PATH)) {
       nextSteps.push({
         command: "bun run setup",
-        reason: `write ${ENV_PATH} for direct Goat app local tooling`,
+        reason: `write ${ENV_PATH} for direct app local tooling`,
       });
     }
     if (!httpsDisabled(process.env) && !caddy.available) {
       nextSteps.push({
         command: "bun run setup",
-        reason: "install/check Caddy so `bun run dev:goat` serves local Goat over HTTPS/HTTP2",
+        reason:
+          "install/check Caddy so `bun run dev:goat` serves local opencompany over HTTPS/HTTP2",
       });
     }
     console.log(

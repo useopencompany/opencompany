@@ -312,7 +312,7 @@ export function wavFromPcm16(pcm: Buffer) {
 }
 
 function logDictationReject(reason: string, context: Record<string, unknown>) {
-  logger.warn("Rejected Goat dictation connection", {
+  logger.warn("Rejected opencompany dictation connection", {
     event: "opencompany.goat_dictation_rejected",
     reject_reason: reason,
     ...context,

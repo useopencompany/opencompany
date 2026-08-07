@@ -55,9 +55,7 @@ describe("MCP metadata URLs", () => {
   });
 
   it("uses the stable MCP resource indicator in protected-resource metadata", () => {
-    const request = new Request(
-      "https://app.example.com/.well-known/oauth-protected-resource/mcp",
-    );
+    const request = new Request("https://app.example.com/.well-known/oauth-protected-resource/mcp");
 
     expect(mcpProtectedResourceMetadata(request, "https://authkit.example.com")).toMatchObject({
       resource: "https://app.example.com/mcp",

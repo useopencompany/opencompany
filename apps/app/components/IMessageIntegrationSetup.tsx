@@ -211,8 +211,8 @@ export function IMessageIntegrationSetup({
           </li>
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
-          Messages are one-way for now: opencompany can text you, but replies to those messages are not
-          read.
+          Messages are one-way for now: opencompany can text you, but replies to those messages are
+          not read.
         </p>
       </section>
     </div>

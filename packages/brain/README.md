@@ -1,6 +1,6 @@
-# Goat Brain
+# Brain
 
-Shared Goat Brain contracts for Markdown documents, validation, retrieval, and CLI behavior.
+Shared Brain contracts for Markdown documents, validation, retrieval, and CLI behavior.
 
 Brain-owned skills are Markdown pages under `skills/`. `src/skills.ts` validates eligible pages and
 materializes them as standard single-file `SKILL.md` content. Default list/query retrieval excludes

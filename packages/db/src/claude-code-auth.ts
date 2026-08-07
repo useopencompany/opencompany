@@ -211,9 +211,7 @@ function decryptAuthJson(
     key = loadEncryptionKey(keyVersion);
   } catch (error) {
     if (error instanceof UnsupportedKeyVersionError) {
-      throw new Error(
-        `Unsupported Claude Code credential encryption key version ${keyVersion}.`,
-      );
+      throw new Error(`Unsupported Claude Code credential encryption key version ${keyVersion}.`);
     }
     throw error;
   }

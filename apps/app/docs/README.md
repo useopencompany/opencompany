@@ -143,7 +143,7 @@ matching `/chat/<id>` URL immediately with the native History API, without start
 navigation; the server persists that exact id. The stream attaches `sessionId` in message metadata so
 the client can confirm ownership and start the authorized message subscription. Persisted chat
 sessions and messages then arrive through TanStack DB collections backed by Electric shapes. Other
-persisted Goat app state such as tasks, task run events, integrations, and Brain documents uses the
+persisted app state such as tasks, task run events, integrations, and Brain documents uses the
 same live-data path.
 
 Stopping generation calls `stop()`, which aborts the HTTP request. Closing chat clears local state,
@@ -156,7 +156,7 @@ The link button in a persisted chat header opens sharing controls. The owner can
 one opaque `goat.chat_session_shares` token for their session, copy `/share/<token>`, or stop
 sharing. Stopping sharing deletes the token so the public transcript and its attachment routes stop
 resolving immediately. Sharing again creates a new token; a revoked URL never becomes valid again.
-Shared routes sit outside the authenticated Goat app shell, render the existing transcript UI
+Shared routes sit outside the authenticated app shell, render the existing transcript UI
 without a composer or mutation controls, and can serve that session's attachments through a
 token-scoped byte route. The link reads the current session on each request, so later messages are
 included; the copy confirmation says this explicitly. Normal `/chat/<id>` routes remain
@@ -167,7 +167,7 @@ any other session data.
 
 `POST /api/chat` does the foreground work:
 
-1. Authenticates the current Goat user.
+1. Authenticates the current user.
 2. Parses and validates the submitted UI message, model, and optional session id.
 3. Requires `VERCEL_AI_GATEWAY_API_KEY`.
 4. Finds or creates an open `goat.chat_sessions` row.
@@ -187,7 +187,7 @@ changes in another tab.
 When a background task that was started from chat succeeds or fails, the runner appends a synthetic
 assistant message to the originating chat session if that session is still open. The message includes
 the task link and final result or error so the next user reply has the completed task in context.
-This is only a persisted notification; Goat does not automatically spend another foreground chat
+This is only a persisted notification; opencompany does not automatically spend another foreground chat
 model turn when the task finishes.
 
 The chat agent's system prompt is built by `createOpenCompanyChatSystemPrompt`, assembled from
@@ -277,7 +277,7 @@ main chat even though ordinary deeper or multi-source work routes to a backgroun
 prompt guidance, schedule context, background-task rows, routines, and runner claims are enabled
 only when the user opts into **Tasks & Workflows** in Preferences. When disabled, Tasks and
 Workflows stay out of the primary navigation and direct routes show the beta opt-in prompt. The
-database flag defaults off, so the standard Goat experience is chat plus Brain without workflows
+database flag defaults off, so the standard opencompany experience is chat plus Brain without workflows
 or background task spawning. `start_workflow` is advertised only when active workflows exist and
 is reserved for explicit requests; name and description matches alone do not authorize a run. Tool
 descriptions live in `packages/goat-agent/src/prompts/tool-descriptions.ts`.
@@ -330,7 +330,7 @@ browser requests an owner-bound, short-lived ticket from
 `/goat/runtime` with the `goat-coding-workspace-v1` WebSocket protocol. The runner revalidates the
 open session and sandbox before connecting, chooses the working directory from its trusted engine
 descriptor, and never accepts a directory from the browser. Preview URLs use signed,
-session-and-port-bound capabilities and the runner proxy; Goat does not expose raw sandbox ids or
+session-and-port-bound capabilities and the runner proxy; opencompany does not expose raw sandbox ids or
 E2B hosts.
 
 The sidebar is available only for persistent Codex and Claude Code chats. Foreground OpenCompany
@@ -376,12 +376,12 @@ OpenCompany path yet. It is exercisable only through the bearer-authenticated
 `POST /api/internal/opencompany-chat/messages` endpoint, which accepts an explicit user, workspace,
 prompt, and optional Brain/session/model before enqueueing through the same durable queue.
 
-Cloud Codex uses a persistent sandbox per Goat chat and resumes the same Codex app-server thread on
+Cloud Codex uses a persistent sandbox per chat and resumes the same Codex app-server thread on
 follow-up turns. New turns remain `queued` until the runner claims them, then move through
 `starting` and `running`; the worker uses the runner-wide concurrency setting rather than a
 Cloud-Codex-specific limit. OpenCompany sessions leave the sandbox/thread columns null and are
 ignored by terminal-sandbox reconciliation. The composer accepts the same private-blob uploads as
-normal Goat chat.
+normal chat.
 At run time, the worker downloads the current turn's files into
 `~/.opencompany-goat/codex-chat-attachments/<turn-id>/` and includes those paths in the user task.
 Image uploads are additionally passed to `turn/start` as `localImage` inputs, so screenshots are
@@ -421,7 +421,7 @@ New Cloud Codex chats pin the user's active Brain and workspace on `goat.codex_c
 together with the host-tool contract version used to start the Codex thread. On `thread/start`, the
 runner registers `goat_brain`, `save_to_brain`, `list_actions`, and `use_action` through app-server's
 experimental `dynamicTools` API. The read-only `goat_brain` tool is handled directly by the runner.
-`save_to_brain` calls a private Goat gateway with `RUNNER_INTERNAL_TOKEN`, rechecks the running turn
+`save_to_brain` calls a private opencompany gateway with `RUNNER_INTERNAL_TOKEN`, rechecks the running turn
 and current Brain access, then uses the same immediate-inbox-draft and background-curation pipeline
 as main chat. Its content-derived idempotency key lets a recovered Codex turn reuse the same
 completed capture.
@@ -490,7 +490,7 @@ Native permission-escalation requests return an empty grant set for the same fai
 Pending dynamic host-tool calls also force a guarded recovery, since their result belongs to the
 runner proxy connection that received the original request.
 
-On the Goat home, persistent Codex and Claude Code sessions stay in the Chats section because they
+On the home, persistent Codex and Claude Code sessions stay in the Chats section because they
 are user-triggered chat sessions. The Tasks section is reserved for real `goat.tasks` rows created
 from `#task`, workflow, or schedule entry points. Selecting a coding chat still opens
 `/chat/<session-id>`, while selecting a task opens `/tasks/<display-id>`.
@@ -563,14 +563,14 @@ The planner is a separate AI SDK `generateObject` Gateway call using:
 The planner returns a `GoatHarnessSpec`:
 
 ```ts
-type GoatHarnessSpec = {
+type opencompanyHarnessSpec = {
   schemaVersion: "goat.harness.v1";
   engine: "opencompany" | "codex";
   model: AgentModelId;
   systemPrompt: string;
   initialUserMessage: string;
-  tools: GoatTaskToolName[];
-  skills: GoatTaskSkillId[];
+  tools: opencompanyTaskToolName[];
+  skills: opencompanyTaskSkillId[];
   maxModelSteps: number;
   resultMode: "assistant_final" | "brain_markdown_report";
   codex?: {
@@ -601,11 +601,11 @@ Normalization is intentionally conservative:
 - `systemPrompt` must be non-empty; there is no fallback task system prompt.
 - `resultMode` is `assistant_final` for ordinary tasks and `brain_markdown_report` for deep
   research/report deliverables that should be saved as Brain artifacts.
-- Codex engine runs use `codex.repository` for a Goat-connected GitHub repository and only open a
+- Codex engine runs use `codex.repository` for a connected GitHub repository and only open a
   draft PR when `codex.createPullRequest` is true.
 - Codex engine runs may use `codex.goalMode` for iterative coding tasks with a clear finish line
   and verification surface. Objectives are trimmed to Codex's 4,000-character limit, omitted token
-  budgets default to `200000`, and v1 goal-mode tasks run within one Goat worker execution.
+  budgets default to `200000`, and v1 goal-mode tasks run within one opencompany worker execution.
 
 The planner request and response content are stored in `debugTrace.planner`.
 
@@ -704,7 +704,7 @@ notifications appear without a manual refresh.
 
 Settings and Brain use the same pattern for `goat.integrations`, `goat.brain_folders`, and
 `goat.brain_documents`. Server props are initial render fallbacks; after hydration, live Electric
-rows are the source of truth for persisted Goat state.
+rows are the source of truth for persisted opencompany state.
 
 ## Company bootstrap imports
 
@@ -746,7 +746,7 @@ Key files:
 - `apps/runner/src/delegation.ts`
 - `apps/runner/src/tool-dispatcher.ts`
 
-That path works differently from Goat tasks:
+That path works differently from tasks:
 
 - Sessions are rows in `agent_sessions`.
 - The runtime config is compiled from a `.agent` file plus bundle context.
@@ -760,12 +760,12 @@ That path works differently from Goat tasks:
 - Runs can suspend for approvals, user questions, or child-agent waits.
 - Brain and agent bundle changes are synced back after turns.
 
-In other words, the current Goat task harness is a small specialized LLM worker. The full runner is
+In other words, the current task harness is a small specialized LLM worker. The full runner is
 the general multi-agent substrate.
 
 ## What "Multi-Agent" Means Today
 
-For Goat specifically, there are multiple LLM roles but not yet multiple durable agents:
+For opencompany specifically, there are multiple LLM roles but not yet multiple durable agents:
 
 - Foreground chat model: triages the user's input and may start a task.
 - Harness planner model: selects the execution harness spec.
@@ -780,7 +780,7 @@ For the broader platform, multi-agent means actual nested agent sessions:
   transcript.
 - Parent sessions can await child completion and receive child results.
 
-Goat does not currently expose that parent/child session model in its app surface.
+opencompany does not currently expose that parent/child session model in its app surface.
 
 ## Tweak Points
 
@@ -798,16 +798,16 @@ Common changes and where they belong:
 - Change chat streaming behavior: `apps/goat/app/api/chat/route.ts` and
   `apps/goat/components/GoatSurface.tsx`.
 - Change task creation defaults: `createGoatTaskForUser` in `apps/goat/lib/tasks.ts`.
-- Change runner dispatch: `apps/goat/lib/task-runner.ts` and the Goat route in
+- Change runner dispatch: `apps/goat/lib/task-runner.ts` and the opencompany route in
   `apps/runner/src/server.ts`.
 - Change planner behavior or harness spec schema: `planGoatHarnessForTask` in
   `apps/runner/src/goat-harness.ts` and prompt blocks in
   `apps/runner/src/prompts/harness-creation.ts`.
-- Change Goat Codex subscription auth: `apps/goat/lib/codex-auth.ts`,
+- Change Codex subscription auth: `apps/goat/lib/codex-auth.ts`,
   `apps/runner/src/codex-auth.ts`, and `packages/db/src/goat-codex-auth.ts`.
-- Change Goat Codex execution: `apps/runner/src/goat-codex-chat.ts` (credential helpers live in
+- Change Codex execution: `apps/runner/src/goat-codex-chat.ts` (credential helpers live in
   `apps/runner/src/goat-codex.ts`).
-- Add or change shared chat/task tools: `packages/goat-agent/src/chat-agent.ts` and the Goat app or
+- Add or change shared chat/task tools: `packages/goat-agent/src/chat-agent.ts` and the app or
   runner callbacks passed into `createOpenCompanyChatToolContext`.
 - Change the task model loop: `runGoatTaskTurn` in `apps/runner/src/goat-task-turn.ts` and the
   engine adapters in `apps/runner/src/goat-opencompany-chat.ts` / `goat-codex-chat.ts`.
@@ -815,12 +815,12 @@ Common changes and where they belong:
 ## Current Constraints And Risks
 
 - Direct chat is not durable beyond persisted messages. It does not use runner leases.
-- Goat tasks are text-result only. They do not persist files or artifacts from task tools.
-- Gateway and Exa keys are used in the Goat route and runner process. Google credentials stay
+- tasks are text-result only. They do not persist files or artifacts from task tools.
+- Gateway and Exa keys are used in the opencompany route and runner process. Google credentials stay
   server-side.
 - Debug traces can contain prompts, tool arguments, snippets, and truncated private Google results.
   Treat them as sensitive application data.
 - The task worker reclaims expired running work, but failed tasks are terminal unless a future
   feature explicitly requeues them.
-- Goat's current harness has no built-in child-agent delegation. Adding true multi-agent behavior
+- opencompany's current harness has no built-in child-agent delegation. Adding true multi-agent behavior
   means either adopting the full agent session runner or designing a task-local child-agent model.

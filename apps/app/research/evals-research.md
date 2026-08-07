@@ -1,19 +1,19 @@
-# Goat Evaluation Research
+# opencompany Evaluation Research
 
 Status: research note for future implementation.
 
 This document captures the current understanding of Vercel eve evals, how that pattern maps to
-Goat, and where DSPy-style optimization could fit later.
+opencompany, and where DSPy-style optimization could fit later.
 
 ## Summary
 
-Goat should start with a custom evaluation harness, not a direct adoption of Vercel eve.
+opencompany should start with a custom evaluation harness, not a direct adoption of Vercel eve.
 
 The useful idea from eve is not the framework dependency. The useful idea is the shape of the test:
 drive the agent with a realistic user message, let the real system run, capture the messages, tool
 calls, task events, and final output, then assert that the behavior matched the product contract.
 
-For Goat, this should become a small suite of behavior evals across the main chat agent, the task
+For opencompany, this should become a small suite of behavior evals across the main chat agent, the task
 harness planner, and the background task executor. If we later want automatic prompt optimization,
 DSPy can use a subset of those evals as the scoring function for bounded subproblems.
 
@@ -48,7 +48,7 @@ Reference sources:
 
 ## Why Not Use eve Directly
 
-Goat is already its own durable agent/task system:
+opencompany is already its own durable agent/task system:
 
 - `apps/goat` owns the product UI and task creation flow.
 - `apps/runner` owns task planning, execution, tool lifecycle, usage recording, and result writes.
@@ -57,15 +57,15 @@ Goat is already its own durable agent/task system:
 - The runner already emits structured task, message, and tool events.
 
 eve evals expect an eve project and the eve `/eve/v1/session` protocol. Using `eve eval` directly
-would require either moving Goat behind eve's runtime model or writing an adapter that mimics that
+would require either moving opencompany behind eve's runtime model or writing an adapter that mimics that
 protocol. That is too much coupling for the value we need right now.
 
-Instead, Goat should copy the eval pattern and build a native runner that understands Goat's own
+Instead, opencompany should copy the eval pattern and build a native runner that understands opencompany's own
 task events and product contracts.
 
-## Recommended Goat Eval Layers
+## Recommended opencompany Eval Layers
 
-### 1. Main Goat chat behavior
+### 1. Main chat behavior
 
 The main chat agent should be evaluated with realistic user prompts and assertions over the chat
 result plus side effects.
@@ -123,7 +123,7 @@ Examples:
 This layer tests whether the model actually follows the harness, not just whether the planner
 produced a good harness.
 
-## Shape of a Goat-Native Eval Harness
+## Shape of a opencompany-Native Eval Harness
 
 A future implementation can be small. It does not need to be a general external framework.
 
@@ -161,7 +161,7 @@ The eval harness defines what "good" means. DSPy can later search for better pro
 instructions, or few-shot examples that improve scores on a training subset. Humans still need to
 choose the metric, review the generated prompt, and confirm it generalizes beyond the training set.
 
-Good DSPy targets for Goat:
+Good DSPy targets for opencompany:
 
 - harness planner prompt optimization
 - tool-selection and result-mode classification
@@ -172,14 +172,14 @@ Good DSPy targets for Goat:
 
 Poor first DSPy targets:
 
-- the entire long-running Goat task loop
+- the entire long-running task loop
 - live connected-account workflows with side effects
 - sandbox-heavy GitHub tasks
 - anything where the metric is unclear or mostly subjective
 
 The practical sequence should be:
 
-1. Build deterministic Goat-native evals.
+1. Build deterministic opencompany-native evals.
 2. Add enough representative cases to catch regressions.
 3. Split train/dev sets only when we have a stable scoring function.
 4. Use DSPy for bounded subproblems.
@@ -189,7 +189,7 @@ The practical sequence should be:
 
 Main chat:
 
-- "What is Goat?" should answer inline and not spawn a task.
+- "What is opencompany?" should answer inline and not spawn a task.
 - "Research the top five competitors in this market and save the result" should spawn a durable
   task.
 - "Look at my latest Gmail threads about pricing" should require Gmail availability and route to a
@@ -226,7 +226,7 @@ Executor:
 
 ## Recommendation
 
-Start with a small custom Goat eval harness focused on hard behavioral gates. The first milestone
+Start with a small custom opencompany eval harness focused on hard behavioral gates. The first milestone
 should cover the harness planner and a handful of main-chat routing cases. Add executor/tool-path
 evals once we have stable fixtures.
 

@@ -413,7 +413,7 @@ export async function markCheckoutRecordFailed(input: { id: string; error: strin
 }
 
 // Called from the shared Stripe webhook for immediate or delayed successful
-// Goat top-up Checkout events. The `fulfilled_at IS NULL` guard is the
+// opencompany top-up Checkout events. The `fulfilled_at IS NULL` guard is the
 // idempotency: overlapping event types and Stripe retries no-op.
 export async function fulfillTopUpCheckoutSession(
   session: {

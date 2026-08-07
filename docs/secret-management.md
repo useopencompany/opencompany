@@ -24,7 +24,7 @@ Use secret paths by deployment surface:
 | Path | Used by | Purpose |
 |---|---|---|
 | `/web` | Vercel web, local web | Next.js app, WorkOS, Inngest, GitHub App, analytics, feedback, runner client config. |
-| `/goat` | Vercel Goat | Complete Goat runtime set, including the Goat-specific WorkOS Application credentials. |
+| `/goat` | Vercel opencompany | Complete opencompany runtime set, including the opencompany-specific WorkOS Application credentials. |
 | `/runner` | Render runner, local runner | Fastify runner, E2B, AI Gateway, runner auth, GitHub App Brain sync. |
 | `/release` | GitHub Actions release workflow | Production migration/deploy orchestration. |
 
@@ -126,8 +126,8 @@ For Infisical `dev`, `/web` should include:
   credential encryption key)
 - runner connection vars
 - optional Linear, analytics, and observability vars
-- the dedicated Goat project's `NEXT_PUBLIC_POSTHOG_TOKEN` and
-  `NEXT_PUBLIC_POSTHOG_HOST` when testing Goat analytics locally
+- the dedicated opencompany project's `NEXT_PUBLIC_POSTHOG_TOKEN` and
+  `NEXT_PUBLIC_POSTHOG_HOST` when testing opencompany analytics locally
 
 For Infisical `dev`, `/runner` should include:
 
@@ -140,7 +140,7 @@ For Infisical `dev`, `/runner` should include:
 - GitHub workspace app vars
 - GitHub integration app vars: `GITHUB_INTEGRATION_APP_ID` and
   `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
-- the dedicated Goat project's `NEXT_PUBLIC_POSTHOG_TOKEN` and
+- the dedicated opencompany project's `NEXT_PUBLIC_POSTHOG_TOKEN` and
   `NEXT_PUBLIC_POSTHOG_HOST` for completed Brain ingestion events
 - optional hosted tool and observability vars
 
@@ -162,13 +162,13 @@ In Infisical:
 
 Repeat for:
 
-- `prod` + `/goat` -> Goat Vercel Production
+- `prod` + `/goat` -> opencompany Vercel Production
 - `dev` + `/web` -> Vercel Development
 - `staging` + `/web` -> Vercel Preview
 
 Keep `prod` + `/goat` self-contained. It intentionally duplicates shared runtime values from
 `/web` so its Vercel sync has one unambiguous source, while its `WORKOS_CLIENT_ID` and
-`WORKOS_API_KEY` belong to the separate Goat WorkOS Application. When a shared production value
+`WORKOS_API_KEY` belong to the separate opencompany WorkOS Application. When a shared production value
 changes, update both paths if both apps consume it.
 
 ## Render Sync
@@ -211,12 +211,12 @@ Put these keys in Infisical `prod` + `/release`:
 | `VERCEL_TOKEN` | Vercel deploy token. |
 | `VERCEL_ORG_ID` | Vercel org/team id. |
 | `VERCEL_PROJECT_ID` | Vercel web project id. |
-| `APP_VERCEL_PROJECT_ID` | Vercel Goat project id. |
+| `APP_VERCEL_PROJECT_ID` | Vercel opencompany project id. |
 | `MARKETING_VERCEL_PROJECT_ID` | Vercel marketing project id. |
 | `RENDER_SERVICE_ID` | Render service id for the runner. |
 | `RENDER_API_KEY` | Render API key used to trigger and poll runner deploys. |
 | `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |
-| `PRODUCTION_APP_URL` | Canonical production Goat URL for smoke checks. |
+| `PRODUCTION_APP_URL` | Canonical production opencompany URL for smoke checks. |
 | `RUNNER_PUBLIC_URL` | Canonical production runner URL for smoke checks. |
 
 The workflow maps `PRODUCTION_DATABASE_URL` to `DATABASE_URL` before running Drizzle migrations.

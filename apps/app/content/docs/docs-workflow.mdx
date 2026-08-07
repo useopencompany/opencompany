@@ -1,6 +1,6 @@
 ---
 title: Docs workflow
-description: How to keep Goat documentation current while the app changes.
+description: How to keep opencompany documentation current while the app changes.
 ---
 
 ## Source files
@@ -22,9 +22,9 @@ Update `apps/goat/content/docs/meta.json` when adding, removing, or reordering p
 
 Update these docs when a change affects:
 
-- User-facing Goat behavior.
+- User-facing opencompany behavior.
 - Chat or task flow.
-- Runner behavior for Goat tasks.
+- Runner behavior for tasks.
 - Tool availability, model selection, or task planning.
 - Setup, local development, or operational debugging.
 
@@ -39,4 +39,4 @@ bun --filter @opencompany/app typecheck
 bun --filter @opencompany/app build
 ```
 
-For copy-only changes, typecheck is usually enough. For route or rendering changes, open `/docs` in the Goat app and click at least one nested docs page.
+For copy-only changes, typecheck is usually enough. For route or rendering changes, open `/docs` in the app and click at least one nested docs page.

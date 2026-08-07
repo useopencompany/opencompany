@@ -1,7 +1,7 @@
 # GBrain ingestion, Minions, schema, and nightly evolution deep dive
 
 Companion follow-up to `apps/goat/research/gbrain-deep-dive.md`. The earlier
-research covers GBrain's broad architecture, schema design, and lessons for Goat
+research covers GBrain's broad architecture, schema design, and lessons for opencompany
 Brain. This note drills into the operational layer: ingestion mechanics, Minions
 workers, exact prompting patterns, entity/page types, nightly jobs, and schema
 evolution.

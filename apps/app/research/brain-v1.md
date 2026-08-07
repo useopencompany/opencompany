@@ -1,9 +1,9 @@
-# Goat Brain v1 Best-Practice Scope
+# Brain v1 Best-Practice Scope
 
 Status: v1 implementation contract and research notes.
 
-This document defines the Goat Brain v1 product and technical contract for a durable, trustworthy,
-agent-readable brain that Goat can use across chat, tasks, research, and connected-account
+This document defines the Brain v1 product and technical contract for a durable, trustworthy,
+agent-readable brain that opencompany can use across chat, tasks, research, and connected-account
 workflows.
 
 Reference inputs:
@@ -20,14 +20,14 @@ Reference inputs:
 
 ## North Star
 
-Goat Brain should be the user's durable private knowledge layer for everything Goat learns, creates,
+Brain should be the user's durable private knowledge layer for everything opencompany learns, creates,
 imports, and needs to reason over later. It should feel like a small personal operating system:
 structured enough for reliable agent use, readable enough for humans, and auditable enough that a
 user can trust where a claim came from.
 
 The core promise:
 
-> Goat remembers important knowledge as cited, structured Markdown; retrieves it with hybrid search
+> opencompany remembers important knowledge as cited, structured Markdown; retrieves it with hybrid search
 > plus graph traversal; and keeps agent-maintained memory separate from user-owned knowledge.
 
 ## Design Principles
@@ -52,13 +52,13 @@ The core promise:
 
 ## Information Layers
 
-Goat should use three explicit information layers.
+opencompany should use three explicit information layers.
 
 ### 1. Brain: user-owned knowledge
 
 This is the durable knowledge base. It stores canonical records for people, companies, projects,
 decisions, meetings, research, and concepts, plus first-class evidence records under typed evidence
-subfolders. It is user-private by default and should be editable through Goat's Brain UI.
+subfolders. It is user-private by default and should be editable through opencompany's Brain UI.
 
 The Brain answers: "What does the user know about the world, their work, and their own artifacts?"
 
@@ -68,7 +68,7 @@ This is the agent's distilled memory about how to serve the user: preferences, r
 communication style, durable instructions, past corrections, and workflow habits. It should be
 tool-managed, cited, and visible read-only unless we intentionally add an editing surface.
 
-The Memory answers: "How should Goat behave for this user?"
+The Memory answers: "How should opencompany behave for this user?"
 
 Memory should reuse the personal agent model's strongest contracts:
 
@@ -178,7 +178,7 @@ threshold.
 
 ## Resolver Contract
 
-Goat Brain needs a machine-readable resolver, even if the first version is Markdown. The resolver is
+Brain needs a machine-readable resolver, even if the first version is Markdown. The resolver is
 the filing decision tree the agent reads before creating or moving records.
 
 Suggested first-match rules:
@@ -264,7 +264,7 @@ New first-class types should require:
 
 ## Identity, Aliases, And Merges
 
-Goat Brain needs identity resolution from day one, even if the first version is simple.
+Brain needs identity resolution from day one, even if the first version is simple.
 
 Each canonical record should have:
 
@@ -288,7 +288,7 @@ The system should avoid large destructive file rewrites for ordinary deduplicati
 
 ## Evidence And Citation Contract
 
-Evidence should be first-class. It is how Goat avoids turning model output into unsupported truth.
+Evidence should be first-class. It is how opencompany avoids turning model output into unsupported truth.
 
 Evidence records should include:
 
@@ -340,7 +340,7 @@ particular relations become important to product behavior, they should move into
 
 ## Retrieval Scope
 
-Goat Brain retrieval should combine multiple signals:
+Brain retrieval should combine multiple signals:
 
 1. **Lexical search** for exact names, ids, identifiers, and phrases.
 2. **Semantic/vector search** for paraphrase and conceptual similarity.
@@ -367,7 +367,7 @@ modes for debugging.
 
 ## Write Paths
 
-Goat should support four write paths, each with clear authority.
+opencompany should support four write paths, each with clear authority.
 
 ### User-authored writes
 
@@ -381,7 +381,7 @@ for high-impact canonical truth changes.
 
 ### Agent-automatic evidence writes
 
-Trusted background tasks can append evidence records automatically when the user asked Goat to do
+Trusted background tasks can append evidence records automatically when the user asked opencompany to do
 work that clearly produces durable evidence, such as a research run or imported meeting summary.
 
 ### Integration ingest writes
@@ -407,7 +407,7 @@ This keeps "what happened" separate from "what we now believe."
 
 ## Tooling Surface
 
-Goat Brain should have a small tool/CLI surface that agents can use safely.
+Brain should have a small tool/CLI surface that agents can use safely.
 
 Core commands:
 
@@ -470,7 +470,7 @@ Needed surfaces:
 - doctor/health warnings
 
 The UI should not expose implementation complexity, but it should expose provenance. Users should be
-able to answer: "Why does Goat believe this?"
+able to answer: "Why does opencompany believe this?"
 
 ## Background Jobs
 
@@ -490,7 +490,7 @@ user-approved or leave an auditable proposal.
 
 ## Evaluation
 
-We should build a small Goat Brain eval before relying on intuition.
+We should build a small Brain eval before relying on intuition.
 
 Minimum v1 eval:
 
@@ -511,7 +511,7 @@ The eval should compare:
 
 ## V1 Acceptance Criteria
 
-Goat Brain v1 should be considered real when:
+Brain v1 should be considered real when:
 
 - Records have validated frontmatter, stable ids, and two-layer bodies.
 - Brain, Memory, and session context are separate in product and tooling.
@@ -520,7 +520,7 @@ Goat Brain v1 should be considered real when:
 - The resolver can classify new material into a primary home or inbox.
 - Wikilinks or explicit relations create deterministic graph edges.
 - Retrieval can return cited snippets with graph context.
-- A user can inspect and correct why Goat believes something.
+- A user can inspect and correct why opencompany believes something.
 - A doctor command can find broken records, broken citations, bad links, duplicate ids, and invalid
   frontmatter.
 - There is at least one eval showing the graph layer improves relational retrieval.
@@ -531,7 +531,7 @@ Goat Brain v1 should be considered real when:
 - Large domain-specific schema packs.
 - Perfect entity resolution.
 - Silent canonical truth rewriting from every integration event.
-- Treating Goat Brain as a general document management system.
+- Treating Brain as a general document management system.
 - Building a public/team-shared knowledge graph before private single-user semantics are solid.
 - Optimizing for the current implementation's constraints at the expense of the ideal contract.
 
@@ -539,7 +539,7 @@ Goat Brain v1 should be considered real when:
 
 These are the decisions we should make before implementation planning.
 
-1. Should Goat Brain's first source of truth be Markdown files, database rows with Markdown content,
+1. Should Brain's first source of truth be Markdown files, database rows with Markdown content,
    or a hybrid that always exports to Markdown?
 2. Should Brain and Memory share one underlying package with different schemas, or remain separate
    packages with shared primitives?
@@ -549,5 +549,5 @@ These are the decisions we should make before implementation planning.
 6. Should periodic summaries stay in `research/` or `inbox/`, or become a later subtype?
 7. Do we want schema packs in v1, or just design the contracts so they can arrive cleanly in v2?
 8. How strict should citation validation be for active Brain records?
-9. How visible should Memory be in the Goat UI?
+9. How visible should Memory be in the the UI?
 10. What is the first retrieval eval we want to trust?

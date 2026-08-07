@@ -1,4 +1,4 @@
-# Goat Brain Tools and CLI
+# Brain Tools and CLI
 
 Every surface that reads or writes a brain, and what each is allowed to do.
 
@@ -65,7 +65,7 @@ argument (id, or slug when unique; auto-selected when the user has exactly one b
 wrappers `query_brain` and `get_document` remain available for older clients and delegate through
 the same tool runner. Reads are served by the read plane. `save_to_brain` requires workspace-admin
 access and immediately creates a draft in `inbox/`, then queues the same durable curation pipeline
-used by Goat chat. MCP clients do not receive raw document mutation tools.
+used by chat. MCP clients do not receive raw document mutation tools.
 
 ### MCP setup and completion
 
@@ -74,11 +74,11 @@ prominence, remembers the user's chosen client, defaults to the active brain, an
 useful query from the user's display name, workspace, and selected brain. The permanent Settings →
 Integrations entry links to the guide; MCP setup is not part of onboarding.
 
-Setup completion is global per Goat user, not per workspace, brain, or client. The sidebar reminder
+Setup completion is global per user, not per workspace, brain, or client. The sidebar reminder
 stays visible until the user completes one successful `query` command through MCP against any brain
 they can access. `goat.brain_tool_runs` remains the audit source of truth: completion requires
 `ok = true`, `action = 'query'`, and a `source_ref` beginning with `mcp:`. OAuth alone, failed calls,
-other MCP commands, and Goat chat queries do not qualify. A successful query with no hits does
+other MCP commands, and chat queries do not qualify. A successful query with no hits does
 qualify because it proves the authenticated connector path works.
 
 The first qualifying trace and the user's `mcp_setup_completed_at` update are written in one
@@ -91,7 +91,7 @@ signal from the earliest qualifying historical tool run.
 | Consumer | Read | Write |
 | --- | --- | --- |
 | Runner ingestion agents | ✓ (CLI — needs read-your-writes against its job root) | ✓ (CLI, allow-listed) |
-| Goat chat `goat_brain` | ✓ (read plane) | never |
-| Goat chat `save_to_brain` | — | capture → curation job only (all members with active-brain access) |
+| chat `goat_brain` | ✓ (read plane) | never |
+| chat `save_to_brain` | — | capture → curation job only (all members with active-brain access) |
 | Cloud Codex `save_to_brain` | — | capture → curation job only against the Brain pinned to the Codex chat |
 | External agents (MCP) | ✓ (read plane: `goat_brain`, plus compatibility `query_brain`/`get_document`) | capture → curation job only (`save_to_brain`, workspace admins) |

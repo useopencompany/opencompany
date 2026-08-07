@@ -2035,7 +2035,9 @@ export function ChatSurface({
         setSelectedMentions(mentions);
         composerAttachments.setAttachments(pendingAttachments);
       }
-      toast.error(error instanceof Error ? error.message : "opencompany could not answer that right now.");
+      toast.error(
+        error instanceof Error ? error.message : "opencompany could not answer that right now.",
+      );
     });
   };
 

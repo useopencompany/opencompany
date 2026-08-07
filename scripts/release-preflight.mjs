@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 // Called by: release workflow checks and root `bun run release:preflight`.
-// Purpose: validates required release, Goat, runner, and smoke-check environment variables.
+// Purpose: validates required release, opencompany, runner, and smoke-check environment variables.
 
 import "./load-env.mjs";
 
 const groups = {
-  goat: {
-    label: "Vercel Goat app",
+  app: {
+    label: "Vercel app",
     required: [
       "DATABASE_URL",
       "WORKOS_CLIENT_ID",
@@ -168,7 +168,7 @@ for (const name of selected) {
   }
 }
 
-if (selected.some((name) => name === "goat" || name === "runner")) {
+if (selected.some((name) => name === "app" || name === "runner")) {
   const latitudeApiKeySet = !isUnset(process.env.LATITUDE_API_KEY);
   const latitudeProjectSet = !isUnset(process.env.LATITUDE_PROJECT_SLUG);
   if (latitudeApiKeySet !== latitudeProjectSet) {
@@ -211,7 +211,7 @@ function selectGroups() {
     .map((arg) => arg.slice(2))
     .filter((arg) => groups[arg]);
 
-  return requested.length > 0 ? requested : ["goat", "runner"];
+  return requested.length > 0 ? requested : ["app", "runner"];
 }
 
 function isUnset(value) {

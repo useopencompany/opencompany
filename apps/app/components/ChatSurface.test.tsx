@@ -1670,7 +1670,10 @@ describe("ChatSurface chat streaming UI", () => {
     await user.click(
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
     );
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Inspect this repository");
+    await user.type(
+      screen.getByPlaceholderText("Ask opencompany anything..."),
+      "Inspect this repository",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
@@ -1874,7 +1877,10 @@ describe("ChatSurface chat streaming UI", () => {
     await user.click(screen.getByRole("checkbox", { name: "Goal mode" }));
     await user.type(screen.getByPlaceholderText("Objective"), "Fix the flaky tests");
     await user.type(screen.getByPlaceholderText("Token budget"), "200000");
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Run the failing suite");
+    await user.type(
+      screen.getByPlaceholderText("Ask opencompany anything..."),
+      "Run the failing suite",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() =>
@@ -3007,7 +3013,10 @@ describe("ChatSurface chat streaming UI", () => {
 
     render(<ChatSurface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Hello opencompany");
+    await user.type(
+      screen.getByPlaceholderText("Ask opencompany anything..."),
+      "Hello opencompany",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findAllByText("Hello opencompany")).toHaveLength(2);

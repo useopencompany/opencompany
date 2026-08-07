@@ -34,7 +34,7 @@ services:
         sync: false
       - key: NEXT_PUBLIC_POSTHOG_HOST
         sync: false
-      # Canonical Goat origin for private, bearer-protected host calls made on behalf of
+      # Canonical opencompany origin for private, bearer-protected host calls made on behalf of
       # Cloud Codex. Credentials and this origin are never injected into E2B.
       - key: NEXT_PUBLIC_APP_URL
         sync: false
@@ -55,7 +55,7 @@ services:
         sync: false
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
-      # Optional Goat OpenTelemetry export to SigNoz. Populated from Infisical prod `/runner`.
+      # Optional opencompany OpenTelemetry export to SigNoz. Populated from Infisical prod `/runner`.
       - key: TELEMETRY_ENABLED
         sync: false
       - key: OTEL_EXPORTER_OTLP_ENDPOINT
@@ -86,7 +86,7 @@ services:
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
-      # Optional Goat rendered-browser task tools.
+      # Optional opencompany rendered-browser task tools.
       - key: RUNNER_BROWSER_ENABLED
         sync: false
       - key: OPENCOMPANY_CODEX_E2B_TEMPLATE

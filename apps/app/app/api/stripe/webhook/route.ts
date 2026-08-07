@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ received: true });
     }
-    // Goat credit top-ups can complete immediately or after a delayed payment
+    // opencompany credit top-ups can complete immediately or after a delayed payment
     // method succeeds. Fulfillment itself verifies payment_status and is
     // idempotent across both webhook events and Stripe retries.
     if (isTopUp) {

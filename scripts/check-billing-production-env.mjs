@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Runs before production migrations when Goat is in the release scope. It
+// Runs before production migrations when opencompany is in the release scope. It
 // reads Vercel env values only to validate them and never prints them.
 
 const requiredKeys = [
@@ -19,22 +19,24 @@ const values = await readRequiredValues(projectId, env, requiredKeys, "Goat");
 
 const invalid = [];
 if (!values.STRIPE_API_KEY.startsWith("rk_live_")) {
-  invalid.push("Goat STRIPE_API_KEY must be a live restricted Stripe key.");
+  invalid.push("opencompany STRIPE_API_KEY must be a live restricted Stripe key.");
 }
 if (!values.STRIPE_WEBHOOK_SECRET.startsWith("whsec_")) {
-  invalid.push("Goat STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.");
+  invalid.push("opencompany STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret.");
 }
 if (values.STRIPE_CHECKOUT_ENABLED !== "true") {
-  invalid.push("Goat STRIPE_CHECKOUT_ENABLED must be true before a production billing release.");
+  invalid.push(
+    "opencompany STRIPE_CHECKOUT_ENABLED must be true before a production billing release.",
+  );
 }
 if (values.CRON_SECRET.length < 32) {
-  invalid.push("Goat CRON_SECRET must be at least 32 characters.");
+  invalid.push("opencompany CRON_SECRET must be at least 32 characters.");
 }
 if (invalid.length > 0) {
-  throw new Error(`Production Goat billing configuration is invalid:\n- ${invalid.join("\n- ")}`);
+  throw new Error(`Production billing configuration is invalid:\n- ${invalid.join("\n- ")}`);
 }
 
-console.log("Verified production Goat billing, webhook, and reconciliation configuration.");
+console.log("Verified production billing, webhook, and reconciliation configuration.");
 
 async function listProductionEnv(projectId, label) {
   const response = await fetch(
@@ -80,6 +82,6 @@ async function readEnvValue(projectId, envs, key, label) {
 
 function requiredProcessEnv(key) {
   const value = process.env[key]?.trim();
-  if (!value) throw new Error(`${key} is required to verify production Goat billing.`);
+  if (!value) throw new Error(`${key} is required to verify production billing.`);
   return value;
 }

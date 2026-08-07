@@ -1,4 +1,4 @@
-# Goat Brain Pointer/Copy Contract
+# Brain Pointer/Copy Contract
 
 How brain writers cite external sources. This is design principle 6 of the brain foundation
 (issue #597): the brain keeps claims and pointers, and copies content only when it has to.
@@ -67,7 +67,7 @@ URL, and one-line state. The interface shape is defined (and only defined — no
 or invokes it yet) in `packages/goat-brain/src/source-resolvers.ts`:
 
 ```ts
-type GoatBrainSourceResolver = {
+type opencompanyBrainSourceResolver = {
   provider: string; // e.g. "linear"
   resolve(ref: ParsedGoatBrainSourceRef): Promise<GoatBrainResolvedSource | null>;
 };

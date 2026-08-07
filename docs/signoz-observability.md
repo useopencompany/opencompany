@@ -1,6 +1,6 @@
-# SigNoz Goat Observability
+# SigNoz opencompany Observability
 
-This runbook covers the SigNoz dashboard and MCP workflow for investigating Goat chat turns, task
+This runbook covers the SigNoz dashboard and MCP workflow for investigating chat turns, task
 runs, and Brain agent ingest jobs.
 
 ## Dashboard
@@ -15,9 +15,9 @@ Created dashboard:
 
 | Asset | Name | ID |
 |---|---|---|
-| Dashboard | `OpenCompany Goat Run Outcomes` | `019f4b71-e314-7a19-9921-434c8dfff619` |
-| Trace view | `OpenCompany Goat Failed Runs` | `019f4b72-28d9-7ba6-8a6c-3bd914033ea1` |
-| Trace view | `OpenCompany Goat All Run Spans` | `019f4b72-295f-7dbc-acb7-ee94d1ea6d03` |
+| Dashboard | `OpenCompany opencompany Run Outcomes` | `019f4b71-e314-7a19-9921-434c8dfff619` |
+| Trace view | `OpenCompany opencompany Failed Runs` | `019f4b72-28d9-7ba6-8a6c-3bd914033ea1` |
+| Trace view | `OpenCompany opencompany All Run Spans` | `019f4b72-295f-7dbc-acb7-ee94d1ea6d03` |
 
 Dashboard URL:
 
@@ -34,7 +34,7 @@ Current panels:
 - `Brain Ingest Span Count by Source Provider and Type` (`table`, trace-backed).
 
 The dashboard intentionally uses trace-backed aggregates for the first layer of run observability.
-Those panels return current data and preserve drill-down paths to trace IDs and Goat lookup IDs.
+Those panels return current data and preserve drill-down paths to trace IDs and opencompany lookup IDs.
 Metric-native panels can be added once the newer run counters have emitted enough fresh production
 traffic to be useful in SigNoz.
 
@@ -42,12 +42,12 @@ No SigNoz alerts have been created yet.
 
 ## Current Tenant State
 
-As of July 10, 2026, the tenant has these Goat services:
+As of July 10, 2026, the tenant has these opencompany services:
 
 - `opencompany-goat`
 - `opencompany-runner-goat`
 
-Observed Goat metrics:
+Observed opencompany metrics:
 
 - `goat.chat.tasks_started_total`
 - `goat.chat.turns_total`
@@ -235,7 +235,7 @@ Useful SigNoz MCP tools:
 Example prompts for Codex or Claude Code after `/mcp` shows `signoz` connected:
 
 ```text
-Use SigNoz MCP. Open dashboard "OpenCompany Goat Run Outcomes" and summarize Goat failures in the
+Use SigNoz MCP. Open dashboard "OpenCompany opencompany Run Outcomes" and summarize opencompany failures in the
 last 24 hours by span name, goat.outcome, and goat.failure_category.
 ```
 
@@ -248,7 +248,7 @@ goat.source_type, and goat.failure_category when present.
 ```
 
 ```text
-Use SigNoz MCP. Get trace details for <trace_id>. Identify the first failing Goat span, summarize
+Use SigNoz MCP. Get trace details for <trace_id>. Identify the first failing opencompany span, summarize
 the failure category, and list the DB lookup IDs. Do not print prompts, tool args, model output, or
 secrets.
 ```
@@ -260,9 +260,9 @@ missing and whether traces exist for goat.chat.turn, goat.task.run, and goat.bra
 
 ## Investigation Steps
 
-1. Open the `OpenCompany Goat Run Outcomes` dashboard and select the incident window.
+1. Open the `OpenCompany opencompany Run Outcomes` dashboard and select the incident window.
 2. Check run outcome volume first. Look for spikes in `failure`, `aborted`, or `skipped`.
-3. Open the `OpenCompany Goat Failed Runs` trace view.
+3. Open the `OpenCompany opencompany Failed Runs` trace view.
 4. Filter by the failing surface:
    - Chat: `name = goat.chat.turn`
    - Task: `name = goat.task.run`
@@ -272,7 +272,7 @@ missing and whether traces exist for goat.chat.turn, goat.task.run, and goat.bra
 7. Query Postgres with the IDs:
 
 ```sql
--- Goat chat
+-- chat
 select id, title, model, engine, closed_at, updated_at
 from goat.chat_sessions
 where id = '<chat_session_id>';
@@ -281,7 +281,7 @@ select id, role, task_id, created_at, updated_at
 from goat.chat_messages
 where id = '<chat_message_id>';
 
--- Goat task
+-- task
 select id, display_id, status, stage, error, model, updated_at
 from goat.tasks
 where id = '<task_id>' or display_id = '<display_id>';
@@ -296,12 +296,12 @@ where id = '<job_id>';
 8. If SigNoz traces show a terminal failure but the DB row looks healthy, inspect the full trace for
    lease loss or a failed terminal write span.
 9. If traces are missing but production behavior failed, check Better Stack logs. As of setup,
-   structured Goat logs are not visible in the SigNoz tenant.
+   structured opencompany logs are not visible in the SigNoz tenant.
 
 ## Dashboard Maintenance
 
-If a panel unexpectedly shows no data, first confirm the selected dashboard time range includes Goat
-traffic. The Goat outcome value for failures is `failure`, not `failed`; use `aborted` separately
+If a panel unexpectedly shows no data, first confirm the selected dashboard time range includes opencompany
+traffic. The opencompany outcome value for failures is `failure`, not `failed`; use `aborted` separately
 for abandoned runs.
 
 After production has emitted fresh traffic from the merged run-outcome instrumentation, update the

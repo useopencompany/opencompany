@@ -74,7 +74,7 @@ type SlackAnswerMode = "mention" | "follow_up" | "dm";
 // Runs after the webhook has already acked Slack (via next/server after()):
 // resolve the install → route to brains by channel → answer → post in-thread.
 // Individual integration failures reply best-effort and are logged so another
-// Goat workspace connected to the same Slack team can still answer.
+// workspace connected to the same Slack team can still answer.
 export async function processSlackBotMention(input: SlackBotMentionInput) {
   // Mentioning the bot inside its DM raises app_mention too; that conversation
   // is personal, so route it through the DM rules (identity required).

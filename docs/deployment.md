@@ -23,7 +23,7 @@ Production releases are intentionally guarded:
 
 1. Run CI on `main`.
 2. Compare the commit range since the last successful production deployment with Turbo's package
-   graph and plan which of web, Goat, marketing, and runner need deployment.
+   graph and plan which of web, opencompany, marketing, and runner need deployment.
 3. Run Drizzle migrations against production Neon.
 4. Build the affected Vercel apps for the exact commit.
 5. Re-check that the release is still current.
@@ -57,12 +57,12 @@ The `CI` workflow uses branch/PR concurrency with `cancel-in-progress: true`, so
 same PR or to `main` cancels superseded lint/typecheck/build/test work. This keeps rapid merge
 bursts from spending Actions minutes on commits that can no longer release.
 
-The web and Goat smoke checks use `PRODUCTION_WEB_URL` and `PRODUCTION_APP_URL` from Infisical
+The web and opencompany smoke checks use `PRODUCTION_WEB_URL` and `PRODUCTION_APP_URL` from Infisical
 `prod` + `/release`, not the raw Vercel deployment URLs, so Vercel deployment protection can remain
 enabled on generated preview-style URLs. All three production surfaces receive a basic health check;
 only surfaces selected by the release plan must report the new commit SHA. In production the canonical
 web URL is `https://my.opencompany.cloud`. The Better Stack status page monitors the same web
-`/api/healthz`, Goat `/api/healthz`, and runner `/healthz` endpoints as the release smoke check, so
+`/api/healthz`, opencompany `/api/healthz`, and runner `/healthz` endpoints as the release smoke check, so
 keep those health endpoints stable when changing deployment or monitoring behavior.
 
 Release attribution is not managed as an Infisical secret. Vercel and Render expose commit metadata
@@ -132,7 +132,7 @@ Forward production web logs to the Better Stack source `opencompany-web-producti
 Vercel Better Stack integration or a Vercel Log Drain. Keep the source token in Vercel/Infisical,
 not in git.
 
-### Vercel Goat
+### Vercel opencompany
 
 `apps/goat` deploys as a separate Vercel project/domain for the experiment. Set the Vercel project
 root to `apps/goat`:
@@ -144,9 +144,9 @@ root to `apps/goat`:
 - Automatic Git deploys: off for v1; deploy manually after migrations and runner compatibility are
   confirmed.
 
-Set the Goat project envs in Infisical `prod` + `/goat` and sync that path into the Goat Vercel
-Production environment. Create a separate Goat WorkOS Application in the same WorkOS environment as
-the core app, then register the Goat redirect URI on that Application:
+Set the opencompany project envs in Infisical `prod` + `/goat` and sync that path into the opencompany Vercel
+Production environment. Create a separate opencompany WorkOS Application in the same WorkOS environment as
+the core app, then register the opencompany redirect URI on that Application:
 
 Create a separate `Goat` project in the existing PostHog organization. Store its
 `NEXT_PUBLIC_POSTHOG_TOKEN` and `NEXT_PUBLIC_POSTHOG_HOST` values in this path; do not
@@ -163,8 +163,8 @@ enabled even during a kill-switch incident so already-started runs and their fin
 https://<goat-domain>/auth/callback
 ```
 
-The first Goat release needs the `goat` schema migration applied to the shared Neon database before
-the app is served. Rollback is additive for the MVP: disabling the Goat Vercel project stops new
+The first opencompany release needs the `goat` schema migration applied to the shared Neon database before
+the app is served. Rollback is additive for the MVP: disabling the opencompany Vercel project stops new
 task creation without affecting core `public` schema data.
 
 ### Vercel Marketing
@@ -192,7 +192,7 @@ Create the runner from `render.yaml`.
 - Health check: `/healthz`
 - Shutdown delay: `300` seconds, Render's documented maximum. Render sends `SIGTERM` to the old
   instance during deploys and follows with `SIGKILL` after this delay. The runner stops claiming
-  new work immediately and gives active jobs and Goat Codex turns up to 240 seconds to finish in
+  new work immediately and gives active jobs and Codex turns up to 240 seconds to finish in
   place before interrupting or handing them off, leaving time for bounded cleanup and telemetry
   flushes. This is still a mitigation, not a guarantee that every long turn finishes before deploy.
 - Auto deploy: off, so GitHub Actions controls release order
@@ -204,7 +204,7 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `RUNNER_INTERNAL_TOKEN`
 - `RUNNER_STREAM_TOKEN_SECRET`
 - `RUNNER_ALLOWED_ORIGINS`
-- `RUNNER_PREVIEW_BASE_DOMAIN` (optional; required for Goat cloud coding workspace previews)
+- `RUNNER_PREVIEW_BASE_DOMAIN` (optional; required for opencompany cloud coding workspace previews)
 - `RUNNER_PREVIEW_PROTOCOL` (optional; defaults to `https`)
 - `DURABLE_STREAMS_URL`
 - `DURABLE_STREAMS_TOKEN`
@@ -212,9 +212,9 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `NEXT_PUBLIC_POSTHOG_TOKEN`
 - `NEXT_PUBLIC_POSTHOG_HOST`
-- `EXA_API_KEY` (required when Goat tasks are enabled)
-- `RUNNER_BROWSER_ENABLED` (optional; set `true` to allow Goat rendered-browser tasks)
-- `BROWSERLESS_API_KEY` (required when Goat Browser is enabled with the production Browserless default)
+- `EXA_API_KEY` (required when tasks are enabled)
+- `RUNNER_BROWSER_ENABLED` (optional; set `true` to allow opencompany rendered-browser tasks)
+- `BROWSERLESS_API_KEY` (required when opencompany Browser is enabled with the production Browserless default)
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
@@ -228,19 +228,19 @@ Stream. Keep the source token in Render/Infisical, not in git.
 `https://app.example.com`. Add preview origins only if you intentionally allow previews to connect
 to the production runner.
 
-For Goat persistent cloud coding workspace previews (Codex and Claude Code), set
+For opencompany persistent cloud coding workspace previews (Codex and Claude Code), set
 `RUNNER_PREVIEW_BASE_DOMAIN` to a dedicated hostname such as `preview.goat.example.com`. Add both
 `preview.goat.example.com` and
 `*.preview.goat.example.com` to the Render runner's custom domains and configure the corresponding
 DNS records. The wildcard is required because each preview uses a short-lived signed capability as
-its leftmost label. Keep the preview hostname on the runner service; it must not point at Goat or
+its leftmost label. Keep the preview hostname on the runner service; it must not point at opencompany or
 directly at E2B. `RUNNER_PREVIEW_PROTOCOL` defaults to `https`; override it only for an HTTP preview
 environment such as local development.
 
-Use a separate registrable domain (or eTLD+1) for the preview hostname than the one Goat's own
+Use a separate registrable domain (or eTLD+1) for the preview hostname than the one opencompany's own
 cookies are scoped to. Preview content runs in a `sandbox="allow-same-origin allow-scripts"` iframe,
-so if the preview domain shares a registrable domain with Goat and Goat sets broadly-scoped
-(`Domain=.example.com`) cookies, the untrusted preview could read the user's Goat session cookies.
+so if the preview domain shares a registrable domain with opencompany and opencompany sets broadly-scoped
+(`Domain=.example.com`) cookies, the untrusted preview could read the user's opencompany session cookies.
 Hosting previews on an unrelated domain keeps that boundary intact.
 
 ### Neon
@@ -280,13 +280,13 @@ definitions Inngest Cloud uses to invoke production jobs.
 
 Create or switch to the production WorkOS environment.
 
-- Create separate Applications for legacy web and Goat so they can share users and Organizations
+- Create separate Applications for legacy web and opencompany so they can share users and Organizations
   without sharing application-level redirect and invitation context.
 - Add the legacy web production redirect URI:
   `https://<production-web-domain>/auth/callback`
-- Add the Goat production redirect URI to the Goat Application:
+- Add the opencompany production redirect URI to the opencompany Application:
   `https://<production-goat-domain>/auth/callback`
-- Set the Goat Application's User invitation URL to:
+- Set the opencompany Application's User invitation URL to:
   `https://<production-goat-domain>/auth/invite`
 - Set `NEXT_PUBLIC_WORKOS_REDIRECT_URI` to the same value in Vercel.
 - Generate a 32+ character `WORKOS_COOKIE_PASSWORD`.
@@ -356,7 +356,7 @@ bun run release:smoke
   `apps/marketing`.
 - Infisical syncs to Vercel and Render are enabled.
 - GitHub Actions production vars for Infisical OIDC are set.
-- Legacy web and Goat use separate WorkOS Application credentials, and both production callbacks work.
+- Legacy web and opencompany use separate WorkOS Application credentials, and both production callbacks work.
 - Inngest production app can sync functions from `/api/inngest`.
 - Neon backups/PITR are enabled.
 - Render API deploy works for the runner service.

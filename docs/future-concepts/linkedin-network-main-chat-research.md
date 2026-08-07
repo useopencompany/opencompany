@@ -132,4 +132,4 @@ Do not silently enrich every imported connection through paid providers. That wo
 
 ## Current repo note
 
-Goat already exposes a managed `linkedin` source for public LinkedIn research in `apps/goat/lib/capabilities/catalog.ts`. That source explicitly does not connect to the user's account, so it should remain separate from this feature. The new surface should be a first-party `personal_network` connected/internal source backed by user-imported data.
+opencompany already exposes a managed `linkedin` source for public LinkedIn research in `apps/goat/lib/capabilities/catalog.ts`. That source explicitly does not connect to the user's account, so it should remain separate from this feature. The new surface should be a first-party `personal_network` connected/internal source backed by user-imported data.

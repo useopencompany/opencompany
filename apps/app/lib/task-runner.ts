@@ -158,7 +158,7 @@ export async function requestCodingWorkspaceRuntimeAccess(input: {
   const publicBaseUrl = runnerPublicBaseUrl();
   const token = runnerToken();
   if (!internalBaseUrl || !publicBaseUrl || !token) {
-    throw new Error("Goat runner runtime access is not configured.");
+    throw new Error("runner runtime access is not configured.");
   }
 
   const controller = new AbortController();
@@ -193,7 +193,7 @@ export async function requestCodingWorkspaceRuntimeAccess(input: {
     typeof body.expiresAt !== "number" ||
     (body.sandboxStatus !== "running" && body.sandboxStatus !== "sleeping")
   ) {
-    throw new Error("Goat runner returned invalid runtime access.");
+    throw new Error("runner returned invalid runtime access.");
   }
   const websocketUrl = new URL("/goat/runtime", `${publicBaseUrl}/`);
   websocketUrl.protocol = websocketUrl.protocol === "https:" ? "wss:" : "ws:";
@@ -213,7 +213,7 @@ export async function requestDictationAccess(input: {
   const publicBaseUrl = runnerPublicBaseUrl();
   const token = runnerToken();
   if (!internalBaseUrl || !publicBaseUrl || !token) {
-    throw new Error("Goat runner dictation access is not configured.");
+    throw new Error("runner dictation access is not configured.");
   }
 
   const controller = new AbortController();
@@ -241,7 +241,7 @@ export async function requestDictationAccess(input: {
 
   const body = (await response.json()) as Record<string, unknown>;
   if (typeof body.ticket !== "string" || typeof body.expiresAt !== "number") {
-    throw new Error("Goat runner returned invalid dictation access.");
+    throw new Error("runner returned invalid dictation access.");
   }
   const websocketUrl = new URL("/goat/dictation", `${publicBaseUrl}/`);
   websocketUrl.protocol = websocketUrl.protocol === "https:" ? "wss:" : "ws:";

@@ -1,4 +1,4 @@
-// Called by: scripts/dev.mjs in Goat app mode.
+// Called by: scripts/dev.mjs in app mode.
 // Purpose: isolate each Conductor workspace's local services without changing
 // the conventional fixed ports used outside Conductor.
 
@@ -15,7 +15,7 @@ export function resolveDevPorts({ env = process.env } = {}) {
     return {
       app: conductorBase,
       runner: offsetPort(conductorBase, 1, "runner"),
-      https: offsetPort(conductorBase, 2, "Goat HTTPS"),
+      https: offsetPort(conductorBase, 2, "opencompany HTTPS"),
       durableStreams: offsetPort(conductorBase, 3, "Durable Streams"),
       electric: offsetPort(conductorBase, 4, "Electric"),
       isolated: true,

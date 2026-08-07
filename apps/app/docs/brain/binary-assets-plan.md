@@ -1,4 +1,4 @@
-# Binary assets in the Goat Brain (PDF v1)
+# Binary assets in the Brain (PDF v1)
 
 > **Status: implemented** (single PR, migration `0102_goat_brain_binary_assets`).
 > The shipped contract lives in [data-model.md — Binary assets](./data-model.md#binary-assets-pdf);

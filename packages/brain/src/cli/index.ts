@@ -451,9 +451,7 @@ async function create(ctx: CommandContext): Promise<CommandResult> {
   }
   if (!isBuiltInBrainEntityType(typeInput)) {
     return fail(
-      `Unsupported Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(
-        ", ",
-      )}.`,
+      `Unsupported Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
     );
   }
   const kindInput = ctx.args.get("kind")?.trim();
@@ -871,9 +869,7 @@ async function set(ctx: CommandContext): Promise<CommandResult> {
   const type = typeInput ? normalizeBuiltInBrainEntityType(typeInput) : undefined;
   if (typeInput && !type) {
     return fail(
-      `Unsupported Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(
-        ", ",
-      )}.`,
+      `Unsupported Brain entity type "${typeInput}". Use one of: ${BRAIN_ENTITY_TYPES.join(", ")}.`,
     );
   }
   const status =

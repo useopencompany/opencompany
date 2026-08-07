@@ -592,7 +592,7 @@ export async function saveIntegrationCredential(
     .returning(INTEGRATION_CREDENTIAL_WRITE_RETURNING);
 
   if (!credential) {
-    throw new Error("Could not persist Goat integration credential.");
+    throw new Error("Could not persist opencompany integration credential.");
   }
 
   return credential;
@@ -636,7 +636,7 @@ export async function refreshIntegrationCredential(
     const credential = credentials[0];
 
     if (!credential) {
-      throw new Error("Could not refresh Goat integration credential.");
+      throw new Error("Could not refresh opencompany integration credential.");
     }
 
     return credential;

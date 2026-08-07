@@ -68,7 +68,7 @@ const definitions = {
   ],
 };
 
-describe("Goat runner remote MCP tools", () => {
+describe("runner remote MCP tools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.limit.mockResolvedValue([{ id: "gint_latitude", status: "connected" }]);

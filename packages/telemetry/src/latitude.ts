@@ -258,10 +258,7 @@ function getLatitudeClient(): Latitude | null {
       }),
     };
   } catch (error) {
-    console.warn(
-      "[telemetry] Latitude telemetry init failed; continuing without it.",
-      error,
-    );
+    console.warn("[telemetry] Latitude telemetry init failed; continuing without it.", error);
     cached = { client: null };
   }
   return cached.client;

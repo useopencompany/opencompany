@@ -300,7 +300,7 @@ export function createRemoteMcpIntegration<const TProvider extends IntegrationPr
       .returning({ id: integrations.id });
 
     if (!integration) {
-      throw new Error(`Could not persist Goat ${config.displayName} integration.`);
+      throw new Error(`Could not persist opencompany ${config.displayName} integration.`);
     }
     return integration;
   }

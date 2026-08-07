@@ -120,10 +120,7 @@ export async function adoptWorkOSOrganizationMemberships(authUser: WorkOSUser) {
       await Promise.all(
         workspaces.map((entry) =>
           syncStripeSeatQuantityForWorkspace(entry.workspace.id).catch((error) => {
-            console.error(
-              "[app] Failed to sync Stripe seat quantity after invite adoption",
-              error,
-            );
+            console.error("[app] Failed to sync Stripe seat quantity after invite adoption", error);
           }),
         ),
       );

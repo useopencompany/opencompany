@@ -1,13 +1,13 @@
 ---
 title: Revolut Business
-description: Test read-only Revolut Business API access from Goat main chat.
+description: Test read-only Revolut Business API access from opencompany main chat.
 ---
 
 ## What the connection does
 
 Revolut Business is an experimental, env-gated, read-only tool connector for main chat. It is meant to let us test the Business API shape before building the full admin connection flow.
 
-Once configured for one workspace, Goat can answer bounded questions about:
+Once configured for one workspace, opencompany can answer bounded questions about:
 
 - Revolut Business accounts visible to the access token.
 - Expenses for a date range.
@@ -19,11 +19,11 @@ This connector does not upload receipts, create bills, create payment drafts, in
 
 ## Configure the test connector
 
-Set these server-side env vars in the Goat app and runner environment where chat actions resolve:
+Set these server-side env vars in the app and runner environment where chat actions resolve:
 
 | Var | Required | Purpose |
 |---|---:|---|
-| `REVOLUT_BUSINESS_WORKSPACE_ID` | Yes | The only workspace that should see the Revolut action source. Goat hides the source for every other workspace. |
+| `REVOLUT_BUSINESS_WORKSPACE_ID` | Yes | The only workspace that should see the Revolut action source. opencompany hides the source for every other workspace. |
 | `REVOLUT_BUSINESS_API_TOKEN` | Yes | A short-lived Revolut Business API access token with `READ` scope. It should start with `oa_prod_` or `oa_sand_`. Do not use a refresh token, client assertion JWT, private key, or `PAY`-scoped token here. |
 | `REVOLUT_BUSINESS_ACCOUNT_LABEL` | No | Friendly label shown in the action source, for example `Acme Revolut`. |
 | `REVOLUT_BUSINESS_API_BASE_URL` | No | HTTPS Business API base URL. Defaults to `https://b2b.revolut.com/api/1.0` for `oa_prod_` tokens and `https://sandbox-b2b.revolut.com/api/1.0` for `oa_sand_` tokens. |

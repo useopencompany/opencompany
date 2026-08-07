@@ -1,6 +1,6 @@
-# Goat Brain
+# Brain
 
-The brain is Goat's per-user (and per-workspace) knowledge store: Markdown documents with typed
+The brain is opencompany's per-user (and per-workspace) knowledge store: Markdown documents with typed
 frontmatter, an append-only evidence timeline, and a lightweight graph of wiki-links and typed
 relations. Documents live in `goat.brain_documents` rows — Markdown is the source of truth, the
 database is the storage. Writes are agent-mediated; reads are moving toward a fast deterministic

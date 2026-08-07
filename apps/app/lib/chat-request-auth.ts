@@ -55,7 +55,9 @@ export async function verifyMacAccessToken(
   if (!audience) {
     return {
       ok: false,
-      response: new Response("opencompany Quick authentication is not configured.", { status: 503 }),
+      response: new Response("opencompany Quick authentication is not configured.", {
+        status: 503,
+      }),
     };
   }
 
@@ -106,7 +108,9 @@ export async function resolveMacChatContext(
   if (!user) {
     return {
       ok: false,
-      response: new Response("Open opencompany in your browser before using opencompany Quick.", { status: 403 }),
+      response: new Response("Open opencompany in your browser before using opencompany Quick.", {
+        status: 403,
+      }),
     };
   }
   if (!user.onboardedAt) {

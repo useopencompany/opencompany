@@ -156,7 +156,7 @@ function escapeXmlText(value: string) {
 }
 
 export const HARNESS_CREATION_SYSTEM = promptBlock("system", [
-  "You plan a Goat durable task harness.",
+  "You plan a opencompany durable task harness.",
   "Return a strict goat.harness.v1 object.",
 ]);
 

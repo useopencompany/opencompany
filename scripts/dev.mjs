@@ -1,6 +1,6 @@
 // Called by: root `bun run dev`, `bun run dev:goat`, and `bun run dev:tui`.
-// Purpose: starts the Goat dev proxy, local HTTPS, and ngrok when available, then runs
-// the local Turbo dev stack (Goat app + runner).
+// Purpose: starts the opencompany dev proxy, local HTTPS, and ngrok when available, then runs
+// the local Turbo dev stack (app + runner).
 
 import "./load-env.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -24,7 +24,7 @@ const { turboArgs } = parseArgs(process.argv.slice(2));
 const devPorts = selectDevPorts({ httpsDisabled: httpsDisabled() });
 if (devPorts?.isolated) {
   console.log(
-    `\nConfigured Goat ports are already in use; using this workspace's isolated ports ` +
+    `\nConfigured opencompany ports are already in use; using this workspace's isolated ports ` +
       `(${devPorts.app}-${devPorts.electric}).`,
   );
   Object.assign(process.env, isolatedDevEnvironment(devPorts, { httpsDisabled: httpsDisabled() }));
@@ -140,7 +140,7 @@ function parseArgs(args) {
   const turboArgs = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    // Historical flag from the two-app era; the Goat stack is the only mode now.
+    // Historical flag from the two-app era; the opencompany stack is the only mode now.
     if (arg === "--app") {
       index += 1;
       continue;
@@ -223,7 +223,7 @@ dev.on("error", (error) => {
 async function prepareProxyTarget(appPort) {
   const runnerPort = localRunnerPort();
   devProxy = await startDevProxy({ appPort, runnerPort });
-  console.log(`\nGoat dev proxy ready: http://127.0.0.1:${devProxy.port}`);
+  console.log(`\nopencompany dev proxy ready: http://127.0.0.1:${devProxy.port}`);
   console.log(`  app routes    -> ${devProxy.routes.app}`);
   console.log(
     `  runner routes -> ${devProxy.routes.runner} (/broker/*, /goat/runtime, /goat/dictation, *.preview.localhost)\n`,
@@ -235,11 +235,11 @@ function assertDevPortsAvailable() {
   if (isCI) return;
 
   const ports = [
-    { label: "Goat app", port },
+    { label: "app", port },
     { label: "runner", port: localRunnerPort() },
   ];
   if (!httpsDisabled()) {
-    ports.push({ label: "Goat HTTPS", port: httpsPort() });
+    ports.push({ label: "opencompany HTTPS", port: httpsPort() });
   }
   const busy = [];
   for (const { label, port } of dedupePorts(ports)) {
@@ -253,7 +253,7 @@ function assertDevPortsAvailable() {
     .map(({ label, port, pids }) => `  ${label} :${port} (PID ${pids.join(", ")})`)
     .join("\n");
   console.error(
-    `\nCannot start Goat dev because required ports are already in use:\n${details}\n\n` +
+    `\nCannot start opencompany dev because required ports are already in use:\n${details}\n\n` +
       "Another dev stack may be running. Stop it first; dev:goat will not terminate " +
       "processes owned by another workspace.\n",
   );
@@ -285,10 +285,10 @@ async function startHttps(targetPort) {
     WORKOS_REDIRECT_URI: redirectUri,
   };
 
-  console.log(`\nGoat local HTTPS ready: ${proxy.url}`);
+  console.log(`\nopencompany local HTTPS ready: ${proxy.url}`);
   console.log(`  Caddy config: ${proxy.configPath}`);
   console.log(`  WorkOS redirect URI: ${redirectUri}`);
-  console.log("  Open this URL for local Goat dev so Electric shapes use HTTP/2.\n");
+  console.log("  Open this URL for local opencompany dev so Electric shapes use HTTP/2.\n");
   console.log(
     "  If the browser warns about the certificate, run `caddy trust` while dev is running.\n",
   );
@@ -370,8 +370,8 @@ async function startDefaultTunnel(
     }
     console.log(`\nngrok tunnel ready: ${publicUrl}`);
     if (exposesRunnerCallbacks) {
-      console.log(`Goat public URL: ${publicUrl}`);
-      console.log(`Goat GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
+      console.log(`opencompany public URL: ${publicUrl}`);
+      console.log(`opencompany GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
     } else {
       console.log(`GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
       console.log(`WorkOS redirect URI: ${tunnelEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI}`);

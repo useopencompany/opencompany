@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Called by: @opencompany/stripe-webhooks `bun run dev`, usually through the root dev stack.
-// Purpose: forwards Stripe CLI webhook events to the local Goat app.
+// Purpose: forwards Stripe CLI webhook events to the local app.
 
 import "./load-env.mjs";
 import { spawn } from "node:child_process";
@@ -13,7 +13,7 @@ if (disabled) {
   process.exit(0);
 }
 
-// Forward straight to the Goat Next.js HTTP port rather than the Caddy HTTPS
+// Forward straight to the opencompany Next.js HTTP port rather than the Caddy HTTPS
 // origin so the Stripe CLI does not trip over the self-signed certificate.
 // scripts/dev.mjs exports APP_PORT into the dev stack when it picks isolated
 // Conductor ports, so this always matches the running app.
@@ -29,7 +29,7 @@ const stripeCliProjectName = process.env.STRIPE_CLI_PROJECT_NAME?.trim();
 
 if (!process.env.STRIPE_WEBHOOK_SECRET?.trim()) {
   console.warn(
-    "STRIPE_WEBHOOK_SECRET is not set. The Goat app will reject forwarded Stripe webhooks until .env.local uses the whsec_ value printed by stripe listen.",
+    "STRIPE_WEBHOOK_SECRET is not set. The app will reject forwarded Stripe webhooks until .env.local uses the whsec_ value printed by stripe listen.",
   );
 }
 

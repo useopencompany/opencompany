@@ -1,5 +1,5 @@
 // Called by: scripts/dev.mjs.
-// Purpose: resolves Goat dev environment without letting public tunnels replace
+// Purpose: resolves opencompany dev environment without letting public tunnels replace
 // local WorkOS callbacks.
 
 export function resolveDevEnv({

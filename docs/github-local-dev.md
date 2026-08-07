@@ -35,7 +35,7 @@ For the current integration flow:
 - Set **Setup URL** to `https://your-static-domain.ngrok.app/api/integrations/github/callback`.
 - Enable **Redirect on update** if you want repository access changes to return to the local app.
 - Add **Callback URL** `https://your-static-domain.ngrok.app/api/integrations/github/callback`.
-- For Goat local integration testing, add the equivalent Goat callback URL for its public origin:
+- For opencompany local integration testing, add the equivalent opencompany callback URL for its public origin:
   `https://your-goat-static-domain.ngrok.app/api/integrations/github/callback`.
 - Do not enable **Request user authorization (OAuth) during installation** for local development.
   The app callback receives `installation_id`, then the local app starts the OAuth flow with an
@@ -103,14 +103,14 @@ through WorkOS with the localhost callback, and start the GitHub integration fro
 
 Set `OPENCOMPANY_NGROK_DISABLED=1` to skip ngrok for a dev session.
 
-## Goat Local Flow
+## opencompany Local Flow
 
 `bun run setup` and `bun run env:pull` reuse the main app's existing
 `GITHUB_INTEGRATION_APP_*` and `GITHUB_INTEGRATION_STATE_SECRET` values from Infisical. Setup also
-mirrors those values into `apps/goat/.env.local` so direct Goat app commands use the same GitHub App
+mirrors those values into `apps/goat/.env.local` so direct app commands use the same GitHub App
 credentials as the main app.
 
-Run Goat with the local runner and ngrok proxy:
+Run opencompany with the local runner and ngrok proxy:
 
 ```bash
 bun run dev:goat

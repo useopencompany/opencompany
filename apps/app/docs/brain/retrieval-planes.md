@@ -1,4 +1,4 @@
-# Goat Brain Retrieval (v2 design)
+# Brain Retrieval (v2 design)
 
 Rework of the read plane. The consumer of retrieval is an **agent in a tool loop** — every design
 choice below follows from that. Agents reformulate queries themselves, read snippets before
@@ -50,7 +50,7 @@ contentHash), `goat.brain_edges` (indexed by brain_ref × from/to/relation), and
 `@opencompany/brain`). Callers do authz first (`requireGoatBrainAccess`), then:
 
 ```ts
-type GoatBrainReadContext = {
+type opencompanyBrainReadContext = {
   brainRef: string;
   gatewayApiKey?: string;   // absent → lexical-only ranking
   db?: DbClient;            // neon-http (web) or pooled (runner)
@@ -87,7 +87,7 @@ limit.
 ### Hit shape (built for the agent's next move)
 
 ```ts
-type GoatBrainSearchHit = {
+type opencompanyBrainSearchHit = {
   id: string; title: string; type: string; kind: string;
   folder: string; status: string; updatedAt: string;
   score: number;
@@ -97,7 +97,7 @@ type GoatBrainSearchHit = {
     id: string; title: string; kind: string; type: string; folder: string; status: string;
     relationType: string; sourceKind: string; direction: "out" | "in";
   }>;
-  via?: GoatBrainGraphHop[];     // only for hop-expanded hits
+  via?: opencompanyBrainGraphHop[];     // only for hop-expanded hits
 };
 ```
 

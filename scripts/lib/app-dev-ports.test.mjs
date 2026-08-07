@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isolatedDevEnvironment, resolveDevPorts, selectDevPorts } from "./app-dev-ports.mjs";
 
-test("Goat dev keeps conventional ports outside Conductor", () => {
+test("opencompany dev keeps conventional ports outside Conductor", () => {
   assert.deepEqual(resolveDevPorts({ env: {} }), {
     app: "3002",
     runner: "3040",
@@ -12,7 +12,7 @@ test("Goat dev keeps conventional ports outside Conductor", () => {
   });
 });
 
-test("Goat dev respects explicitly configured fixed ports outside Conductor", () => {
+test("opencompany dev respects explicitly configured fixed ports outside Conductor", () => {
   assert.deepEqual(
     resolveDevPorts({
       env: {
@@ -32,7 +32,7 @@ test("Goat dev respects explicitly configured fixed ports outside Conductor", ()
   );
 });
 
-test("Conductor allocation provides isolated ports for every Goat service", () => {
+test("Conductor allocation provides isolated ports for every opencompany service", () => {
   const ports = resolveDevPorts({
     env: {
       CONDUCTOR_PORT: "55010",
@@ -128,7 +128,7 @@ test("disabled local HTTPS does not force an isolated range when only 3443 is bu
   assert.equal(ports.app, "3002");
 });
 
-test("Conductor allocation uses the HTTP Goat origin when local HTTPS is disabled", () => {
+test("Conductor allocation uses the HTTP opencompany origin when local HTTPS is disabled", () => {
   const ports = resolveDevPorts({ env: { CONDUCTOR_PORT: "55010" } });
 
   assert.equal(

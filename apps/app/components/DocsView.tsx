@@ -101,7 +101,7 @@ function TopBar({ title }: { title: string }) {
         className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-ink-muted transition-colors hover:bg-surface-subtle hover:text-ink md:hidden"
       >
         <ArrowLeft size={13} strokeWidth={1.75} />
-        Goat
+        opencompany
       </Link>
       <div className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-muted">
         <span className="hidden truncate md:inline">Documentation</span>

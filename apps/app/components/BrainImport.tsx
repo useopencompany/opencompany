@@ -192,7 +192,8 @@ export function BrainImport({
             />
           </label>
           <label className="grid gap-1 text-[12px] font-medium text-ink-muted">
-            What should opencompany focus on? <span className="font-normal text-ink-subtle">Optional</span>
+            What should opencompany focus on?{" "}
+            <span className="font-normal text-ink-subtle">Optional</span>
             <textarea
               value={focus}
               onChange={(event) => setFocus(event.target.value)}

@@ -1,4 +1,4 @@
-# Goat Brain v1 Implementation Tracker
+# Brain v1 Implementation Tracker
 
 Current phase: implementation complete; ready for review/discussion.
 
@@ -8,7 +8,7 @@ Current phase: implementation complete; ready for review/discussion.
 - Updated `@opencompany/brain` to the v1 taxonomy, schema-pack constant, evidence subtype
   contract, structured timeline evidence ids, citation extraction, active-record citation
   validation, and richer query hits.
-- Rebuilt the generated Goat Brain CLI bundle.
+- Rebuilt the generated Brain CLI bundle.
 - Replaced the DB Brain helper internals with `goat.brain_documents` reads/writes and inline
   timeline, edge, folder, and version projections.
 - Added migration `0088_goat_brain_v1_documents.sql` for legacy backfill, evidence ids, v1
@@ -18,7 +18,7 @@ Current phase: implementation complete; ready for review/discussion.
   `evidence_kind`/folder alignment.
 - Updated Goat chat and runner materialization to operate on `goat.brain_documents` through the
   existing agent-facing bundled CLI path.
-- Updated Goat Electric scoping and collections for `brain_documents`, `brain_timeline_entries`,
+- Updated opencompany Electric scoping and collections for `brain_documents`, `brain_timeline_entries`,
   `brain_edges`, and `brain_folders`.
 - Updated the Brain UI into a trust-panel MVP over the v1 taxonomy, live timeline evidence ids,
   citation copy text, and projected graph edges.

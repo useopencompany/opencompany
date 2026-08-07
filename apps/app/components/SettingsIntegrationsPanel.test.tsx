@@ -155,7 +155,9 @@ describe("SettingsIntegrationsPanel", () => {
     expect(
       screen.getByText("Bring pull requests and issues from your repositories into opencompany."),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Let opencompany read and act on your email.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Let opencompany read and act on your email."),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
 
@@ -684,7 +686,9 @@ describe("SettingsIntegrationsPanel", () => {
     render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
 
     const stripeCard = screen
-      .getByText("Give opencompany read-only access to payment activity, subscriptions, and receivables.")
+      .getByText(
+        "Give opencompany read-only access to payment activity, subscriptions, and receivables.",
+      )
       .closest("div.rounded-2xl");
     expect(stripeCard).not.toBeNull();
     expect(within(stripeCard as HTMLElement).getByText("Connected")).toBeInTheDocument();

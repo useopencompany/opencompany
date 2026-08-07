@@ -1,4 +1,4 @@
-# Goat Brain Data Model
+# Brain Data Model
 
 Source of truth for the brain's enums, grammars, document anatomy, and database tables. Every
 value here mirrors a constant in `packages/goat-brain/src/schema.ts`; if this page and that file
@@ -142,7 +142,7 @@ listed or resolved as skills.
 
 `serializeGoatBrainSkillMarkdown` materializes an eligible page as a standard single-file
 `SKILL.md`. The stable document id becomes the native lowercase/hyphenated `name`; the editable
-title remains Goat display metadata. When present, descriptions follow the cross-runtime
+title remains opencompany display metadata. When present, descriptions follow the cross-runtime
 1,024-character, no-XML contract. Default Brain `list` and `query` retrieval
 exclude the skills zone; callers must explicitly pass `folder=skills` (or a descendant). Direct
 lookup by document id remains available.

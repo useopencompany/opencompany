@@ -174,7 +174,8 @@ const INTEGRATION_META: Record<IntegrationMetaKey, IntegrationMeta> = {
   },
   stripe: {
     label: "Stripe",
-    description: "Give opencompany read-only access to payment activity, subscriptions, and receivables.",
+    description:
+      "Give opencompany read-only access to payment activity, subscriptions, and receivables.",
     Icon: StripeIcon,
     tileClass: "bg-[#635BFF] text-white",
   },

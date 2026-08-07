@@ -1,4 +1,4 @@
-# Goat Brain Ingestion
+# Brain Ingestion
 
 How external content becomes brain documents. One durable pattern: normalize the source into a
 `goat.brain_source_items` row, enqueue a `goat.brain_ingest_jobs` row, and let the runner's ingest

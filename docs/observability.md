@@ -175,9 +175,9 @@ inputs, and tool results are captured verbatim. Input/output capture is governed
 `wrapAISDK` defaults (`recordInputs`/`recordOutputs`). Treat Braintrust access as production data
 access, and keep Braintrust disabled in environments where full AI content must not leave the platform.
 
-## Goat Run Outcomes
+## opencompany Run Outcomes
 
-Goat signups, chat turns, task runs, and Brain agent ingest jobs emit a first-layer health signal
+opencompany signups, chat turns, task runs, and Brain agent ingest jobs emit a first-layer health signal
 through `@opencompany/telemetry` when `TELEMETRY_ENABLED=true` and
 `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 
@@ -236,7 +236,7 @@ Suggested first alerts:
 For DB follow-up:
 
 ```sql
--- Goat chat
+-- chat
 select id, title, model, engine, closed_at, updated_at
 from goat.chat_sessions
 where id = '<chat_session_id>';
@@ -245,7 +245,7 @@ select id, role, task_id, created_at, updated_at
 from goat.chat_messages
 where id = '<chat_message_id>';
 
--- Goat task
+-- task
 select id, display_id, status, stage, error, model, updated_at
 from goat.tasks
 where id = '<task_id>' or display_id = '<display_id>';

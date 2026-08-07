@@ -1,11 +1,11 @@
 ---
 title: Stripe
-description: Give Goat read-only access to founder metrics from a workspace Stripe account.
+description: Give opencompany read-only access to founder metrics from a workspace Stripe account.
 ---
 
 ## What the connection does
 
-Stripe is a workspace-owned, read-only tool connector for main chat. Once connected, Goat can answer bounded questions about:
+Stripe is a workspace-owned, read-only tool connector for main chat. Once connected, opencompany can answer bounded questions about:
 
 - Payment and balance activity for a period, including captured payment volume, refunds, disputes, net Stripe fees, and net payment activity by currency.
 - Current available and pending Stripe balances.
@@ -24,9 +24,9 @@ Only a workspace admin can connect or disconnect Stripe.
 2. Create a restricted key named **Goat**.
 3. Give the key read access to **Balance**, **Subscriptions**, and **Invoices**. Balance read access includes balance transactions. Leave all write permissions off.
 4. Copy the `rk_live_…` key, or an `rk_test_…` key while testing.
-5. In Goat, open **Settings → Integrations → Stripe**, paste the restricted key, and connect.
+5. In opencompany, open **Settings → Integrations → Stripe**, paste the restricted key, and connect.
 
-Goat validates each required read endpoint before saving the key. Unrestricted `sk_…` keys are rejected. The restricted key is encrypted with the integration credential key, remains server-side, and is never sent to the model or browser after submission.
+opencompany validates each required read endpoint before saving the key. Unrestricted `sk_…` keys are rejected. The restricted key is encrypted with the integration credential key, remains server-side, and is never sent to the model or browser after submission.
 
 ## Use it in chat
 

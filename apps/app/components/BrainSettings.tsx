@@ -412,7 +412,7 @@ function McpSetupLink() {
     >
       <PlugZap size={16} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
       <div className="min-w-0 flex-1">
-        <span className="block text-[13px] font-medium text-ink">Connect Goat</span>
+        <span className="block text-[13px] font-medium text-ink">Connect opencompany</span>
         <span className="block text-[12px] leading-5 text-ink-subtle">
           Set up Claude, ChatGPT, or Cursor and verify your first Brain query. One connector covers
           every brain you can access.

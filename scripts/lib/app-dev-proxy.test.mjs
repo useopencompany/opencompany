@@ -6,7 +6,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { startDevProxy } from "./app-dev-proxy.mjs";
 
-test("Goat dev proxy routes app traffic and runner callback traffic", async (t) => {
+test("opencompany dev proxy routes app traffic and runner callback traffic", async (t) => {
   const app = await startJsonServer("app");
   const runner = await startJsonServer("runner");
   const proxy = await startDevProxy({ appPort: app.port, runnerPort: runner.port });
@@ -28,7 +28,7 @@ test("Goat dev proxy routes app traffic and runner callback traffic", async (t) 
   );
 });
 
-test("Goat dev proxy survives an HTTP client disconnect", async (t) => {
+test("opencompany dev proxy survives an HTTP client disconnect", async (t) => {
   const app = await startStreamingServer();
   const runner = await startJsonServer("runner");
   const proxy = await startDevProxy({ appPort: app.port, runnerPort: runner.port });
@@ -48,7 +48,7 @@ test("Goat dev proxy survives an HTTP client disconnect", async (t) => {
   assert.equal((await getJson(proxy.port, "/health")).target, "streaming-app");
 });
 
-test("Goat dev proxy survives an upgraded client disconnect", async (t) => {
+test("opencompany dev proxy survives an upgraded client disconnect", async (t) => {
   const app = await startUpgradeServer();
   const runner = await startJsonServer("runner");
   const proxy = await startDevProxy({ appPort: app.port, runnerPort: runner.port });

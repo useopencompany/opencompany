@@ -205,14 +205,10 @@ describe("goat brain inline links", () => {
 
   it("rejects invalid formatted targets and labels", () => {
     expect(() => formatBrainPageLink("Bad Id")).toThrow("Invalid Brain page link target.");
-    expect(() => formatBrainEvidenceLink("seed")).toThrow(
-      "Invalid Brain evidence link target.",
-    );
+    expect(() => formatBrainEvidenceLink("seed")).toThrow("Invalid Brain evidence link target.");
     expect(() => formatBrainSourceLink("gmail:1", "bad]label")).toThrow(
       "Invalid Brain link label.",
     );
-    expect(() => formatBrainPageLink("acme", "bad[label")).toThrow(
-      "Invalid Brain link label.",
-    );
+    expect(() => formatBrainPageLink("acme", "bad[label")).toThrow("Invalid Brain link label.");
   });
 });

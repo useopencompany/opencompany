@@ -593,7 +593,7 @@ export function isBrowserProfileHostBlocked(siteHost: string) {
 
 function assertAllowedProfileHost(siteHost: string) {
   if (isBrowserProfileHostBlocked(siteHost)) {
-    throw new Error("Goat cannot connect browser profiles for this site.");
+    throw new Error("opencompany cannot connect browser profiles for this site.");
   }
 }
 

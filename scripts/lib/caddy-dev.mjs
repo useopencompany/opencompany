@@ -1,5 +1,5 @@
 // Called by: scripts/dev.mjs and scripts/setup.mjs.
-// Purpose: local HTTPS/HTTP2 proxy for Goat dev so Electric long-poll shapes
+// Purpose: local HTTPS/HTTP2 proxy for opencompany dev so Electric long-poll shapes
 // do not consume the browser's small HTTP/1.1 connection pool.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -79,7 +79,7 @@ export async function startLocalHttpsProxy({
   onWarning = console.warn,
 } = {}) {
   if (httpsDisabled(env)) {
-    onWarning("\nGoat local HTTPS is disabled by APP_HTTPS_DISABLED=1.\n");
+    onWarning("\nopencompany local HTTPS is disabled by APP_HTTPS_DISABLED=1.\n");
     return null;
   }
   if (!targetPort) {
@@ -89,7 +89,7 @@ export async function startLocalHttpsProxy({
   const state = caddyState();
   if (!state.available) {
     onWarning(
-      "\nCaddy is not installed, so Goat local dev will use HTTP/1.1. " +
+      "\nCaddy is not installed, so opencompany local dev will use HTTP/1.1. " +
         "Run `bun run setup` or `brew install caddy` to enable local HTTPS/HTTP2.\n",
     );
     return null;
@@ -116,7 +116,7 @@ export async function startLocalHttpsProxy({
   const earlyExit = await waitForEarlyExit(child, 900);
   if (earlyExit) {
     const details = stderr.trim() ? `\n${indent(stderr.trim())}` : "";
-    onWarning(`\nCaddy could not start Goat local HTTPS; falling back to HTTP.${details}\n`);
+    onWarning(`\nCaddy could not start opencompany local HTTPS; falling back to HTTP.${details}\n`);
     return null;
   }
 
