@@ -5,7 +5,7 @@ import { expectedReleaseFor } from "./release-smoke.mjs";
 
 test("uses a surface-specific expected release", () => {
   assert.equal(
-    expectedReleaseFor("goat", {
+    expectedReleaseFor("app", {
       EXPECTED_RELEASE: "fallback",
       EXPECTED_APP_RELEASE: "goat-sha",
     }),
@@ -15,7 +15,7 @@ test("uses a surface-specific expected release", () => {
 
 test("an explicit empty surface release disables the global fallback", () => {
   assert.equal(
-    expectedReleaseFor("goat", {
+    expectedReleaseFor("app", {
       EXPECTED_RELEASE: "fallback",
       EXPECTED_APP_RELEASE: "",
     }),

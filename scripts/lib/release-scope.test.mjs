@@ -8,13 +8,13 @@ test("maps Turbo affected packages to production surfaces", () => {
     planReleaseSurfaces({
       affectedPackages: ["@opencompany/analytics", "@opencompany/app", "@opencompany/runner"],
     }),
-    { goat: true, marketing: false, runner: true },
+    { app: true, marketing: false, runner: true },
   );
 });
 
 test("manual releases deploy every requested surface", () => {
   assert.deepEqual(planReleaseSurfaces({ deployAll: true, deployRunner: false }), {
-    goat: true,
+    app: true,
     marketing: true,
     runner: false,
   });
@@ -23,13 +23,13 @@ test("manual releases deploy every requested surface", () => {
 test("release workflow changes conservatively deploy every surface", () => {
   assert.deepEqual(
     planReleaseSurfaces({ changedFiles: [".github/workflows/release-production.yml"] }),
-    { goat: true, marketing: true, runner: true },
+    { app: true, marketing: true, runner: true },
   );
 });
 
 test("Vercel orchestration changes deploy only Vercel surfaces", () => {
   assert.deepEqual(planReleaseSurfaces({ changedFiles: ["scripts/release-vercel-deploy.mjs"] }), {
-    goat: true,
+    app: true,
     marketing: true,
     runner: false,
   });
@@ -37,7 +37,7 @@ test("Vercel orchestration changes deploy only Vercel surfaces", () => {
 
 test("runner image changes deploy only the runner", () => {
   assert.deepEqual(planReleaseSurfaces({ changedFiles: ["Dockerfile.runner"] }), {
-    goat: false,
+    app: false,
     marketing: false,
     runner: true,
   });
@@ -45,7 +45,7 @@ test("runner image changes deploy only the runner", () => {
 
 test("unrelated documentation changes do not deploy an application", () => {
   assert.deepEqual(planReleaseSurfaces({ changedFiles: ["docs/getting-started.md"] }), {
-    goat: false,
+    app: false,
     marketing: false,
     runner: false,
   });
