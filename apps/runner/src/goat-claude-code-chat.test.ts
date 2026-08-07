@@ -28,6 +28,7 @@ const chatMocks = vi.hoisted(() => ({
 }));
 
 const cliMocks = vi.hoisted(() => ({
+  buildClaudeTurnCommand: vi.fn(),
   ensureClaudeInstalled: vi.fn(),
   killLeftoverClaudeTurnProcesses: vi.fn(),
   runClaudeCodeCliProcess: vi.fn(),
@@ -79,7 +80,7 @@ vi.mock("@opencompany/db/goat-harness", () => ({
 
 vi.mock("./claude-code-cli", () => ({
   buildClaudeCommandEnv: () => ({ CLAUDE_CODE_OAUTH_TOKEN: "claude_token" }),
-  buildClaudeTurnCommand: () => "claude -p prompt",
+  buildClaudeTurnCommand: cliMocks.buildClaudeTurnCommand,
   ensureClaudeInstalled: cliMocks.ensureClaudeInstalled,
   killLeftoverClaudeTurnProcesses: cliMocks.killLeftoverClaudeTurnProcesses,
   runClaudeCodeCliProcess: cliMocks.runClaudeCodeCliProcess,
@@ -238,6 +239,7 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     chatMocks.updateCodexChatSessionIfLeaseHeld.mockResolvedValue(true);
     cliMocks.ensureClaudeInstalled.mockResolvedValue(undefined);
     cliMocks.killLeftoverClaudeTurnProcesses.mockResolvedValue(undefined);
+    cliMocks.buildClaudeTurnCommand.mockReturnValue("claude -p prompt");
     cliMocks.runClaudeCodeCliProcess.mockResolvedValue({
       exitCode: 0,
       timedOut: false,
@@ -392,6 +394,128 @@ describe("runGoatClaudeCodeChatTurn sandbox lifecycle", () => {
     );
     expect(wakeupMocks.persistGoatCodexChatScheduledWakeup).toHaveBeenCalledOnce();
     expect(wakeupMocks.enqueueGoatCodexChatWakeup).not.toHaveBeenCalled();
+  });
+
+  it("resumes once to integrate completed background Agent work before finalizing", async () => {
+    const sandbox = fakeSandbox("sbx_existing");
+    const projector = {
+      push: vi.fn(async () => undefined),
+      finalize: vi.fn(async () => undefined),
+      fail: vi.fn(async () => undefined),
+      interrupted: vi.fn(async () => undefined),
+    };
+    sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
+    eventMocks.createGoatCodexChatProjector.mockImplementationOnce(
+      (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
+        ...projector,
+        push: vi.fn(async (events: Record<string, unknown>[]) => {
+          for (const event of events) input.normalizeEvent?.(event);
+        }),
+      }),
+    );
+    cliMocks.runClaudeCodeCliProcess
+      .mockImplementationOnce(
+        async (input: { onEvent: (event: Record<string, unknown>) => Promise<void> }) => {
+          await input.onEvent({ type: "system", subtype: "init", session_id: "claude_thread_1" });
+          await input.onEvent(
+            assistantEvent([{ type: "text", text: "Waiting for the implementation agent." }]),
+          );
+          await input.onEvent({
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            origin: { kind: "task-notification" },
+            result: "The implementation agent finished.",
+            session_id: "claude_thread_1",
+            usage: { input_tokens: 2, output_tokens: 8 },
+          });
+          return { exitCode: 0, timedOut: false, killed: false, stderrTail: "" };
+        },
+      )
+      .mockImplementationOnce(
+        async (input: { onEvent: (event: Record<string, unknown>) => Promise<void> }) => {
+          await input.onEvent({ type: "system", subtype: "init", session_id: "claude_thread_1" });
+          await input.onEvent(assistantEvent([{ type: "text", text: "All work is complete." }]));
+          await input.onEvent({
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            result: "All work is complete.",
+            session_id: "claude_thread_1",
+            usage: { input_tokens: 3, output_tokens: 12 },
+          });
+          return { exitCode: 0, timedOut: false, killed: false, stderrTail: "" };
+        },
+      );
+
+    await expect(
+      runGoatClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(cliMocks.runClaudeCodeCliProcess).toHaveBeenCalledTimes(2);
+    expect(cliMocks.buildClaudeTurnCommand).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ resumeSessionId: "claude_thread_1" }),
+    );
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      expect.stringContaining("prompt-goat_codex_turn_1.txt"),
+      expect.stringContaining("background Agent work"),
+    );
+    expect(projector.finalize).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "success", result: "All work is complete." }),
+    );
+  });
+
+  it("fails explicitly instead of looping when the continuation also leaves Agent work", async () => {
+    const projector = {
+      push: vi.fn(async () => undefined),
+      finalize: vi.fn(async () => undefined),
+      fail: vi.fn(async () => undefined),
+      interrupted: vi.fn(async () => undefined),
+    };
+    eventMocks.createGoatCodexChatProjector.mockImplementationOnce(
+      (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
+        ...projector,
+        push: vi.fn(async (events: Record<string, unknown>[]) => {
+          for (const event of events) input.normalizeEvent?.(event);
+        }),
+      }),
+    );
+    cliMocks.runClaudeCodeCliProcess.mockImplementation(
+      async (input: { onEvent: (event: Record<string, unknown>) => Promise<void> }) => {
+        await input.onEvent({ type: "system", subtype: "init", session_id: "claude_thread_1" });
+        await input.onEvent({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          origin: { kind: "task-notification" },
+          result: "Another background agent finished.",
+          session_id: "claude_thread_1",
+          usage: { input_tokens: 2, output_tokens: 8 },
+        });
+        return { exitCode: 0, timedOut: false, killed: false, stderrTail: "" };
+      },
+    );
+
+    await expect(
+      runGoatClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).resolves.toBe("settled");
+
+    expect(cliMocks.runClaudeCodeCliProcess).toHaveBeenCalledTimes(2);
+    expect(projector.finalize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "error",
+        error: expect.stringContaining("one automatic continuation"),
+      }),
+    );
   });
 });
 
