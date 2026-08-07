@@ -736,6 +736,44 @@ describe("SettingsIntegrationsPanel", () => {
     ).toHaveAttribute("href", "/api/integrations/neon/start?returnTo=/settings/integrations");
   });
 
+  it("shows two connected X identities and keeps the add-account path available", () => {
+    const integrations = goatIntegrationStateFromRows([
+      {
+        id: "gint_x_founder",
+        provider: "x_account",
+        externalId: "x_user_1",
+        connectionLabel: "@founder",
+        accountName: "Founder",
+        status: "connected",
+        capabilityModes: {},
+      },
+      {
+        id: "gint_x_company",
+        provider: "x_account",
+        externalId: "x_user_2",
+        connectionLabel: "@acme",
+        accountName: "Acme",
+        status: "connected",
+        capabilityModes: {},
+      },
+    ]) as GoatIntegrationState;
+
+    render(<SettingsIntegrationsPanel initialIntegrations={integrations} isWorkspaceAdmin />);
+    fireEvent.click(screen.getByRole("button", { name: /Personal/ }));
+
+    const xCard = screen
+      .getByText("Connect X accounts and publish account-specific posts from chat.")
+      .closest("div.rounded-2xl");
+    expect(xCard).not.toBeNull();
+    expect(within(xCard as HTMLElement).getByText("@founder · Founder")).toBeVisible();
+    expect(within(xCard as HTMLElement).getByText("@acme · Acme")).toBeVisible();
+    expect(within(xCard as HTMLElement).getAllByText("Connected")).toHaveLength(2);
+    expect(within(xCard as HTMLElement).getByRole("link", { name: "Add account" })).toHaveAttribute(
+      "href",
+      "/api/integrations/x-account/start?returnTo=/settings/integrations",
+    );
+  });
+
   it("shows a workspace-owned Stripe connection and test-mode label", () => {
     const integrations = goatIntegrationStateFromRows([
       {
