@@ -1,4 +1,5 @@
 import {
+  getGoatOnboarding,
   hasOwnedGoatHobbyWorkspace,
   isGoatWorkspaceSlugAvailable,
   updateGoatWorkspaceNameAndSlug,
@@ -7,6 +8,7 @@ import {
 import { revalidatePath } from "next/cache";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentGoatIdentity, currentGoatUser } from "@/lib/auth";
+import { createGoatBrainFolderForUser, deleteGoatBrainFolderForUser } from "@/lib/brain";
 import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { provisionGoatWorkspace } from "@/lib/workspace-provisioning";
@@ -18,6 +20,7 @@ import {
 } from "./onboarding-actions";
 
 vi.mock("@opencompany/db/goat-workspaces", () => ({
+  getGoatOnboarding: vi.fn(),
   hasOwnedGoatHobbyWorkspace: vi.fn(),
   isGoatWorkspaceSlugAvailable: vi.fn(),
   markGoatUserOnboarded: vi.fn(),
@@ -66,8 +69,11 @@ vi.mock("next/navigation", () => ({
 
 const currentGoatIdentityMock = vi.mocked(currentGoatIdentity);
 const currentGoatUserMock = vi.mocked(currentGoatUser);
+const createGoatBrainFolderForUserMock = vi.mocked(createGoatBrainFolderForUser);
+const deleteGoatBrainFolderForUserMock = vi.mocked(deleteGoatBrainFolderForUser);
 const enrollOwnerInOnboardingEmailsMock = vi.mocked(enrollOwnerInOnboardingEmails);
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
+const getGoatOnboardingMock = vi.mocked(getGoatOnboarding);
 const hasOwnedGoatHobbyWorkspaceMock = vi.mocked(hasOwnedGoatHobbyWorkspace);
 const isGoatWorkspaceSlugAvailableMock = vi.mocked(isGoatWorkspaceSlugAvailable);
 const provisionGoatWorkspaceMock = vi.mocked(provisionGoatWorkspace);
@@ -103,6 +109,7 @@ describe("Goat owner onboarding", () => {
     vi.clearAllMocks();
     currentGoatIdentityMock.mockResolvedValue(identity as never);
     currentGoatUserMock.mockResolvedValue(null as never);
+    getGoatOnboardingMock.mockResolvedValue({ role: "founder" } as never);
     isGoatWorkspaceSlugAvailableMock.mockResolvedValue(true);
     hasOwnedGoatHobbyWorkspaceMock.mockResolvedValue(false);
     provisionGoatWorkspaceMock.mockResolvedValue(created as never);
@@ -164,6 +171,16 @@ describe("Goat owner onboarding", () => {
     expect(upsertGoatOnboardingMock).toHaveBeenCalledWith({
       userWorkosId: "user_123",
       workspaceId: "goat_ws_new",
+    });
+    expect(deleteGoatBrainFolderForUserMock).toHaveBeenCalledWith({
+      brainRef: "brain_general",
+      userWorkosId: "user_123",
+      folderPath: "concepts",
+    });
+    expect(createGoatBrainFolderForUserMock).toHaveBeenCalledWith({
+      brainRef: "brain_general",
+      userWorkosId: "user_123",
+      folderPath: "fundraising",
     });
     expect(enrollOwnerInOnboardingEmailsMock).toHaveBeenCalledWith({
       workosUserId: "user_123",
