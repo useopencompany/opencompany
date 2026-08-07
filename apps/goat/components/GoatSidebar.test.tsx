@@ -166,13 +166,11 @@ describe("GoatSidebar", () => {
     expect(account).toBeInTheDocument();
 
     const feedback = screen.getByRole("button", { name: "Feedback" });
-    const changelog = screen.getByRole("link", { name: "Changelog" });
-    expect(changelog).toHaveAttribute("href", "/changelog");
-    expect(feedback.nextElementSibling).toBe(changelog);
-    expect(changelog.nextElementSibling).toBe(account);
+    expect(feedback.nextElementSibling).toBe(account);
+    expect(screen.queryByRole("link", { name: "Changelog" })).not.toBeInTheDocument();
   });
 
-  it("opens the account menu with settings and sign out", async () => {
+  it("opens the account menu with settings, changelog, and sign out", async () => {
     const user = userEvent.setup();
     render(<GoatSidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
@@ -184,6 +182,10 @@ describe("GoatSidebar", () => {
     expect(within(menu).getByRole("link", { name: "Settings" })).toHaveAttribute(
       "href",
       "/settings",
+    );
+    expect(within(menu).getByRole("link", { name: "Changelog" })).toHaveAttribute(
+      "href",
+      "/changelog",
     );
     expect(within(menu).getByRole("link", { name: "Sign out" })).toHaveAttribute(
       "href",
