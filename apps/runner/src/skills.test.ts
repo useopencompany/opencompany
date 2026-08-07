@@ -38,7 +38,11 @@ const dbMock = vi.hoisted(() => {
 });
 vi.mock("./db", () => ({ getDb: dbMock.getDb }));
 
-import { materializeCodexSkillsForSession, materializeSkillsForSession } from "./skills";
+import {
+  materializeClaudeSkillSnapshotsForSession,
+  materializeCodexSkillsForSession,
+  materializeSkillsForSession,
+} from "./skills";
 
 function personalSkillMd(name: string, description: string) {
   return `---\nname: ${name}\ndescription: ${description}\n---\nBody.`;
@@ -377,6 +381,33 @@ describe("materializeCodexSkillsForSession", () => {
         },
       ]),
     );
+  });
+
+  it("materializes skill snapshots where Claude Code scans project skills", async () => {
+    const sandbox = fakeSandbox();
+
+    const result = await materializeClaudeSkillSnapshotsForSession({
+      sandbox: sandbox as never,
+      claudeWorkRoot: "/home/user/opencompany-goat/claude-chat",
+      skills: [
+        {
+          id: "product-work",
+          files: [{ path: "SKILL.md", content: "product instructions" }],
+        },
+      ],
+    });
+
+    expect(result.count).toBe(1);
+    expect(writtenSkillFiles(sandbox)).toEqual([
+      {
+        path: "/home/user/opencompany-goat/claude-chat/.claude/skills/product-work/SKILL.md",
+        data: "product instructions",
+      },
+    ]);
+    expect(writtenManifest(sandbox)).toEqual({
+      path: "/home/user/opencompany-goat/claude-chat/.claude/skills/.opencompany-managed-skills.json",
+      data: JSON.stringify({ version: 1, skillIds: ["product-work"] }, null, 2),
+    });
   });
 
   it("does not expose default OpenCompany built-ins to native Codex sessions", async () => {

@@ -24,10 +24,10 @@ import { loadExternalSkillFiles } from "./skill-snapshots";
 
 const SANDBOX_ROOT_USER = "root";
 const SANDBOX_USER = "user";
-const CODEX_MANAGED_SKILLS_MANIFEST = ".opencompany-managed-skills.json";
+const MANAGED_SKILLS_MANIFEST = ".opencompany-managed-skills.json";
 type WorkspaceSkillReference = AgentExternalSkillReference & { source: AgentWorkspaceSkillSource };
 type MountedSkill = { id: string; files: AgentSkillFile[] };
-export type CodexSkillSnapshot = { id: string; files: AgentSkillFile[] };
+export type NativeSkillSnapshot = { id: string; files: AgentSkillFile[] };
 
 // Materialize the session's enabled skills into a read-only ./skills root. Each skill becomes
 // skills/<id>/<file> (e.g. skills/agent-self-edit/SKILL.md). Files are root-owned and
@@ -84,27 +84,39 @@ export async function materializeCodexSkillsForSession(input: {
   const layout = sandboxLayout(input.workdir);
   const root = `${layout.codexRoot}/.agents/skills`;
   const skills = await loadCodexSkillsForMount(input.workspaceId, input.config);
-  return materializeCodexManagedSkillTree({ sandbox: input.sandbox, root, skills });
+  return materializeManagedNativeSkillTree({ sandbox: input.sandbox, root, skills });
 }
 
 export async function materializeCodexSkillSnapshotsForSession(input: {
   sandbox: SandboxHandle;
   codexWorkRoot: string;
-  skills: CodexSkillSnapshot[];
+  skills: NativeSkillSnapshot[];
 }): Promise<{ fingerprint: string; count: number }> {
-  return materializeCodexManagedSkillTree({
+  return materializeManagedNativeSkillTree({
     sandbox: input.sandbox,
     root: `${input.codexWorkRoot}/.agents/skills`,
     skills: input.skills,
   });
 }
 
-async function materializeCodexManagedSkillTree(input: {
+export async function materializeClaudeSkillSnapshotsForSession(input: {
+  sandbox: SandboxHandle;
+  claudeWorkRoot: string;
+  skills: NativeSkillSnapshot[];
+}): Promise<{ fingerprint: string; count: number }> {
+  return materializeManagedNativeSkillTree({
+    sandbox: input.sandbox,
+    root: `${input.claudeWorkRoot}/.claude/skills`,
+    skills: input.skills,
+  });
+}
+
+async function materializeManagedNativeSkillTree(input: {
   sandbox: SandboxHandle;
   root: string;
-  skills: CodexSkillSnapshot[];
+  skills: NativeSkillSnapshot[];
 }) {
-  const manifestPath = `${input.root}/${CODEX_MANAGED_SKILLS_MANIFEST}`;
+  const manifestPath = `${input.root}/${MANAGED_SKILLS_MANIFEST}`;
   const skills = input.skills;
   for (const skill of skills) assertSafeSkillId(skill.id);
   const skillFiles = skills.flatMap((skill) =>
@@ -115,7 +127,7 @@ async function materializeCodexManagedSkillTree(input: {
   );
   const currentSkillIds = [...new Set(skills.map((skill) => skill.id))];
 
-  await reconcileCodexManagedSkillTree({
+  await reconcileManagedNativeSkillTree({
     sandbox: input.sandbox,
     root: input.root,
     manifestPath,
@@ -129,14 +141,14 @@ async function materializeCodexManagedSkillTree(input: {
   };
 }
 
-async function reconcileCodexManagedSkillTree(input: {
+async function reconcileManagedNativeSkillTree(input: {
   sandbox: SandboxHandle;
   root: string;
   manifestPath: string;
   skillIds: string[];
   files: Array<{ path: string; content: string }>;
 }) {
-  const previousSkillIds = await readCodexManagedSkillIds(input.sandbox, input.manifestPath);
+  const previousSkillIds = await readManagedNativeSkillIds(input.sandbox, input.manifestPath);
   const resetSkillIds = [...new Set([...previousSkillIds, ...input.skillIds])];
   const resetCommands = [
     `chown ${SANDBOX_USER}:${SANDBOX_USER} ${shellQuote(input.root)}`,
@@ -180,7 +192,7 @@ async function reconcileCodexManagedSkillTree(input: {
   });
 }
 
-async function readCodexManagedSkillIds(sandbox: SandboxHandle, manifestPath: string) {
+async function readManagedNativeSkillIds(sandbox: SandboxHandle, manifestPath: string) {
   let content: string;
   try {
     content = String(await sandbox.files.read(manifestPath));
@@ -202,7 +214,7 @@ async function readCodexManagedSkillIds(sandbox: SandboxHandle, manifestPath: st
 
 function assertSafeSkillId(id: string) {
   if (isSafeSkillId(id)) return;
-  throw new Error(`Cannot materialize Codex skill with unsafe id: ${id}`);
+  throw new Error(`Cannot materialize native skill with unsafe id: ${id}`);
 }
 
 function isSafeSkillId(id: string) {

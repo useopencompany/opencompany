@@ -85,7 +85,7 @@ import {
   isRetryableCommandStreamError,
   type SandboxHandle,
 } from "./sandbox";
-import { materializeCodexSkillSnapshotsForSession } from "./skills";
+import { materializeClaudeSkillSnapshotsForSession } from "./skills";
 
 const CLAUDE_CHAT_WORKDIR = CLOUD_CODING_ENGINE_CONFIG.claude_code.workDirectory;
 const CLAUDE_CHAT_PROMPTS_ROOT = "/home/user/.opencompany-goat/claude-chat-prompts";
@@ -396,9 +396,9 @@ export async function runGoatClaudeCodeChatTurn(input: {
     });
     await checkAbort();
     executionStage = "materialize_skills";
-    await materializeCodexSkillSnapshotsForSession({
+    await materializeClaudeSkillSnapshotsForSession({
       sandbox,
-      codexWorkRoot: CLAUDE_CHAT_WORKDIR,
+      claudeWorkRoot: CLAUDE_CHAT_WORKDIR,
       skills: turnSkills.snapshots.map((skill) => ({
         id: skill.id,
         files: [
@@ -411,7 +411,7 @@ export async function runGoatClaudeCodeChatTurn(input: {
     });
     await checkAbort();
     const invokedSkillPaths = turnSkills.invokedSkillIds.map(
-      (skillId) => `${CLAUDE_CHAT_WORKDIR}/.agents/skills/${skillId}/SKILL.md`,
+      (skillId) => `${CLAUDE_CHAT_WORKDIR}/.claude/skills/${skillId}/SKILL.md`,
     );
     executionStage = "materialize_attachments";
     const materializedAttachments = await materializeGoatCodexChatAttachments({
