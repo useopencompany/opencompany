@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-08-07
+
+### Added
+- Post to X (Twitter) right from chat — connect one or more accounts in Settings, then ask Goat to post to one account or several at once (#1109, #1121) — @opencompany-bot.
+- Goat can now generate real files in chat — spreadsheets, PDFs, slides, docs, and images — that you can preview, download, and share, instead of only markdown replies (#1137) — @opencompany-bot.
+- Wiki (preview): a self-building company wiki that lives alongside chat, with linked pages, cited sources, and a Notion-style editor. Turn it on under Preferences > Beta features (#1133, #1136, #1138, #1139, #1143) — @opencompany-bot.
+- A new pricing page lays out the Hobby and Pro plans side by side, and the marketing site nav gained a "Book demo" option (#1110) — @opencompany-bot.
+
+### Changed
+- Onboarding is shorter — new workspaces get their Brain folders set up automatically instead of asking you to arrange them upfront (#1114) — @opencompany-bot.
+- Chats you start now show up in the sidebar the moment you send them, instead of a moment later (#1130, #1135) — @opencompany-bot.
+- The changelog moved from the sidebar footer into the account menu (#1115) — @opencompany-bot.
+- Popovers, dialogs, and menus now use softer, more natural shadows instead of hard-edged ones (#1124) — @opencompany-bot.
+
+### Fixed
+- Chat tables no longer split words letter-by-letter into narrow columns (#1128) — @opencompany-bot.
+- A chat open in two browser tabs now shows the same running or finished status in both, instead of disagreeing (#1129) — @opencompany-bot.
+- Approving an X post now shows a clear, readable summary of what's about to be posted instead of raw data (#1125) — @opencompany-bot.
+- Approving an action no longer briefly flashes a false "could not produce a response" error before the real answer (#1118) — @opencompany-bot.
+- Claude Code no longer shows your account as disconnected just because you temporarily hit a usage limit (#1127) — @opencompany-bot.
+- Claude Code skills are discovered reliably again, and skills mentioned when starting a workflow are no longer dropped (#1131, #1120) — @opencompany-bot.
+- Claude Code sessions that run background subagents now reliably return with an answer instead of stopping silently (#1113) — @opencompany-bot.
+- Coding tasks recover automatically after brief sandbox network hiccups instead of failing outright, and archiving a chat now reliably stops any coding work still scheduled for it (#1112, #1111) — @opencompany-bot.
+- Codex sessions stay connected instead of periodically asking you to reconnect (#1117) — @opencompany-bot.
+- Connecting Infisical is more reliable, including for the EU region and for sandboxes that previously failed to provision secrets (#1116, #1119, #1122) — @opencompany-bot.
+
 ## [1.9.0] - 2026-08-06
 
 ### Added
