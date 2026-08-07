@@ -7,7 +7,7 @@ import {
   loadEncryptionKey,
   UnsupportedKeyVersionError,
 } from "@opencompany/crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type * as goatSchema from "./goat-schema";
 import {
@@ -97,6 +97,7 @@ export async function rotateGoatCodexCredential(input: {
   db: GoatCodexAuthDb;
   userWorkosId: string;
   authJson: GoatCodexAuthJson;
+  expectedLastRotatedAt: Date | null;
   validatedAt?: Date | null;
   now?: Date;
 }) {
@@ -117,7 +118,14 @@ export async function rotateGoatCodexCredential(input: {
       lastRotatedAt: now,
       updatedAt: now,
     })
-    .where(eq(goatCodexCredentials.userWorkosId, input.userWorkosId))
+    .where(
+      and(
+        eq(goatCodexCredentials.userWorkosId, input.userWorkosId),
+        input.expectedLastRotatedAt
+          ? eq(goatCodexCredentials.lastRotatedAt, input.expectedLastRotatedAt)
+          : isNull(goatCodexCredentials.lastRotatedAt),
+      ),
+    )
     .returning({ userWorkosId: goatCodexCredentials.userWorkosId });
   return Boolean(credential);
 }

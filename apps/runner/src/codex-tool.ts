@@ -94,6 +94,7 @@ export type CodexCliAuth =
   | {
       kind: "chatgpt";
       authJson: Record<string, unknown>;
+      credentialLastRotatedAt: Date | null;
       brokered: false;
     };
 
@@ -633,6 +634,7 @@ export async function loadWorkspaceCodexCliAuth(workspaceId: string): Promise<Co
   return {
     kind: "chatgpt",
     authJson: credential.authJson,
+    credentialLastRotatedAt: credential.lastRotatedAt,
     brokered: false,
   };
 }
