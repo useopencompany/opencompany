@@ -6,8 +6,11 @@ import { type ReactNode, useEffect } from "react";
 import type { GoatAnalyticsEventName, GoatAnalyticsEventProperties } from "./goat-events";
 import { type GoatAnalyticsPerson, goatAnalyticsPersonProperties } from "./goat-person";
 
-export type GoatAnalyticsIdentity = GoatAnalyticsPerson & {
+export type GoatAnalyticsUserIdentity = GoatAnalyticsPerson & {
   userId: string;
+};
+
+export type GoatAnalyticsIdentity = GoatAnalyticsUserIdentity & {
   workspaceId: string;
 };
 
@@ -112,7 +115,7 @@ export function captureGoatEvent<EventName extends GoatAnalyticsEventName>(
   }
 }
 
-function identifyGoatUser(identity: GoatAnalyticsIdentity) {
+export function identifyGoatUser(identity: GoatAnalyticsUserIdentity) {
   initGoatClientAnalytics();
   if (!initialized) return;
 

@@ -67,6 +67,7 @@ export default async function OnboardingPage({
   return (
     <OnboardingWizard
       user={{
+        workosUserId: identity.user.workosUserId,
         name,
         email: identity.user.email,
         avatarUrl: identity.user.avatarUrl,
@@ -75,6 +76,7 @@ export default async function OnboardingPage({
       brainRef={context?.activeBrain?.id ?? null}
       variant={variant}
       initialStep={initialStep}
+      initialWorkspaceId={context?.workspace.id ?? null}
       initialWorkspaceName={savedSlug ? (context?.workspace.name ?? "") : ""}
       initialSlug={savedSlug}
       initialRole={onboarding?.role ?? null}

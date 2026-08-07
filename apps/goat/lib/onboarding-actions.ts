@@ -1,23 +1,20 @@
 "use server";
 
 import {
+  getGoatOnboarding,
   hasOwnedGoatHobbyWorkspace,
   isGoatWorkspaceSlugAvailable,
   markGoatUserOnboarded,
   updateGoatWorkspaceNameAndSlug,
   upsertGoatOnboarding,
 } from "@opencompany/db/goat-workspaces";
-import {
-  ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS,
-  HARD_DEFAULT_GOAT_BRAIN_FOLDERS,
-  normalizeGoatBrainFolder,
-} from "@opencompany/goat-brain/schema";
+import { ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS } from "@opencompany/goat-brain/schema";
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { currentGoatIdentity, currentGoatUser } from "@/lib/auth";
 import { createGoatBrainFolderForUser, deleteGoatBrainFolderForUser } from "@/lib/brain";
 import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
-import { parseGoatOnboardingProfile } from "@/lib/onboarding-profile";
+import { goatOnboardingFoldersForRole, parseGoatOnboardingProfile } from "@/lib/onboarding-profile";
 import { getWorkOSClient } from "@/lib/workos-client";
 import { ensureGoatWorkspaceOrganization } from "@/lib/workos-organizations";
 import {
@@ -104,6 +101,10 @@ export async function saveGoatOnboardingWorkspaceAction(input: {
         userWorkosId: identity.user.workosUserId,
         workspaceId: context.workspace.id,
       });
+      await scaffoldGoatOnboardingBrainFolders({
+        brainRef: brain.id,
+        userWorkosId: identity.user.workosUserId,
+      });
       await activateGoatWorkspace({
         workspaceId: context.workspace.id,
         workosOrganizationId,
@@ -126,6 +127,10 @@ export async function saveGoatOnboardingWorkspaceAction(input: {
     await upsertGoatOnboarding({
       userWorkosId: identity.user.workosUserId,
       workspaceId: created.workspace.id,
+    });
+    await scaffoldGoatOnboardingBrainFolders({
+      brainRef: created.brain.id,
+      userWorkosId: identity.user.workosUserId,
     });
     await enrollOwnerInOnboardingEmails({
       workosUserId: identity.user.workosUserId,
@@ -154,39 +159,28 @@ export async function saveGoatOnboardingWorkspaceAction(input: {
   }
 }
 
-export async function saveGoatOnboardingBrainFoldersAction(input: {
-  folders: string[];
-}): Promise<GoatOnboardingActionResult> {
-  const context = await currentGoatUser();
-  if (context.role !== "admin") {
-    return { ok: false, error: "Only workspace admins can set this up." };
-  }
-  const brain = context.activeBrain;
-  if (!brain) return { ok: false, error: "No brain to configure." };
-
-  const target = new Set(
-    input.folders.map((f) => normalizeGoatBrainFolder(f)).filter((f) => f.length > 0),
-  );
-  const hard = new Set<string>(HARD_DEFAULT_GOAT_BRAIN_FOLDERS);
+async function scaffoldGoatOnboardingBrainFolders(input: {
+  brainRef: string;
+  userWorkosId: string;
+}) {
+  const onboarding = await getGoatOnboarding(input.userWorkosId);
+  const target = new Set(goatOnboardingFoldersForRole(onboarding?.role));
   const adjustable = new Set<string>(ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS);
-  const userWorkosId = context.user.workosUserId;
 
-  // Reconcile the seeded adjustable defaults with what the user kept, then add
-  // any custom folders. Mutations are idempotent, so we ignore no-op failures.
+  // Workspace provisioning seeds the generic defaults. Reconcile them with the
+  // role preset automatically so users get a useful Brain without being asked
+  // to design its information architecture during onboarding.
   for (const folder of ADJUSTABLE_DEFAULT_GOAT_BRAIN_FOLDERS) {
     if (target.has(folder)) {
-      await createGoatBrainFolderForUser({ brainRef: brain.id, userWorkosId, folderPath: folder });
+      await createGoatBrainFolderForUser({ ...input, folderPath: folder });
     } else {
-      await deleteGoatBrainFolderForUser({ brainRef: brain.id, userWorkosId, folderPath: folder });
+      await deleteGoatBrainFolderForUser({ ...input, folderPath: folder });
     }
   }
   for (const folder of target) {
-    if (hard.has(folder) || adjustable.has(folder)) continue;
-    await createGoatBrainFolderForUser({ brainRef: brain.id, userWorkosId, folderPath: folder });
+    if (adjustable.has(folder)) continue;
+    await createGoatBrainFolderForUser({ ...input, folderPath: folder });
   }
-
-  revalidatePath("/", "layout");
-  return { ok: true };
 }
 
 export async function saveGoatOnboardingProfileAction(input: {
