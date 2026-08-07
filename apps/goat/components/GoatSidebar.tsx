@@ -267,7 +267,7 @@ function GoatSidebarAccountMenu() {
         side="top"
         align="start"
         sideOffset={6}
-        className="w-[240px] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+        className="w-[240px] bg-surface p-1 text-ink"
       >
         <div className="flex items-center gap-2.5 px-2 py-2">
           <GoatAccountAvatar
@@ -668,11 +668,7 @@ function GoatWorkspaceSwitcher() {
           <ChevronsUpDown size={13} strokeWidth={1.75} className="shrink-0 text-ink/45" />
         )}
       </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        sideOffset={6}
-        className="w-[232px] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
-      >
+      <PopoverContent align="start" sideOffset={6} className="w-[232px] bg-surface p-1 text-ink">
         <div className="max-h-[280px] overflow-y-auto">
           {workspaces.map((entry) => {
             const active = entry.id === workspace.id;

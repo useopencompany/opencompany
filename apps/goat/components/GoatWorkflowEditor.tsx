@@ -418,11 +418,7 @@ function StatusPicker({
         {value === "active" ? "Active" : "Draft"}
         {disabled ? null : <ChevronDown size={12} strokeWidth={2} className="text-ink-subtle" />}
       </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        sideOffset={6}
-        className="w-[176px] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
-      >
+      <PopoverContent align="end" sideOffset={6} className="w-[176px] bg-surface p-1 text-ink">
         {(["draft", "active"] as const).map((option) => (
           <button
             key={option}
@@ -918,7 +914,7 @@ function StepRuntimePicker({
       <PopoverContent
         align="end"
         sideOffset={8}
-        className="w-[288px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+        className="w-[288px] max-w-[calc(100vw-1.5rem)] bg-surface p-1 text-ink"
       >
         <ModelOption
           label="Default"
@@ -1024,7 +1020,7 @@ function StepCloudModelPicker({
       <PopoverContent
         align="start"
         sideOffset={8}
-        className="w-[312px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+        className="w-[312px] max-w-[calc(100vw-1.5rem)] bg-surface p-1 text-ink"
       >
         {options.map((option) => (
           <ModelOption
@@ -1081,11 +1077,7 @@ function StepEffortPicker({
         <span className="truncate">{selectedLabel}</span>
         {disabled ? null : <ChevronDown size={11} strokeWidth={2} className="shrink-0" />}
       </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        sideOffset={8}
-        className="w-[220px] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
-      >
+      <PopoverContent align="start" sideOffset={8} className="w-[220px] bg-surface p-1 text-ink">
         {WORKFLOW_EFFORT_OPTIONS.map((option) => (
           <ModelOption
             key={option.value}
@@ -1189,11 +1181,7 @@ function EditorMoreMenu({
       >
         <MoreHorizontal size={16} strokeWidth={2} />
       </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        sideOffset={6}
-        className="w-[180px] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
-      >
+      <PopoverContent align="end" sideOffset={6} className="w-[180px] bg-surface p-1 text-ink">
         <button
           type="button"
           disabled={isArchiving}

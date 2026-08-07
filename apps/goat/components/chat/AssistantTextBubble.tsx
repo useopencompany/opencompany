@@ -215,7 +215,7 @@ function BrainCitationOverflow({
       <PopoverContent
         align="start"
         sideOffset={4}
-        className="w-[300px] max-w-[calc(100vw-1.5rem)] border-border bg-surface p-1 text-ink shadow-[0_12px_32px_rgba(15,15,15,0.14)]"
+        className="w-[300px] max-w-[calc(100vw-1.5rem)] bg-surface p-1 text-ink"
       >
         <div className="px-2 py-1 text-[11px] font-medium leading-4 text-ink-subtle">
           Other sources

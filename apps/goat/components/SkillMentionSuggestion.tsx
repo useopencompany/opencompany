@@ -70,7 +70,7 @@ const SkillMentionList = forwardRef<SkillMentionListHandle, SkillMentionListProp
 
     if (items.length === 0) {
       return (
-        <div className="w-72 rounded-lg border border-border bg-surface px-3 py-2.5 text-[12.5px] leading-4 text-ink-subtle shadow-[0_8px_24px_rgba(15,15,15,0.12)]">
+        <div className="w-72 shadow-ring-md rounded-lg bg-surface px-3 py-2.5 text-[12.5px] leading-4 text-ink-subtle">
           No matching skills
         </div>
       );
@@ -80,7 +80,7 @@ const SkillMentionList = forwardRef<SkillMentionListHandle, SkillMentionListProp
       <div
         role="listbox"
         aria-label="Skill mentions"
-        className="max-h-72 w-80 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-[0_8px_24px_rgba(15,15,15,0.12)]"
+        className="max-h-72 w-80 overflow-y-auto shadow-ring-md rounded-lg bg-surface p-1"
       >
         {items.map((item, itemIndex) => (
           <button

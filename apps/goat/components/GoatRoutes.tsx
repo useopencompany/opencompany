@@ -1321,7 +1321,7 @@ function NewItemDialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative w-full max-w-[420px] rounded-xl border border-border bg-surface p-5 shadow-[0_12px_32px_rgba(15,15,15,0.18)]"
+        className="shadow-ring-xl relative w-full max-w-[420px] rounded-xl bg-surface p-5"
       >
         <h2 className="text-[15px] font-semibold leading-tight text-ink">{title}</h2>
         <div className="mt-4 flex flex-col gap-3">
