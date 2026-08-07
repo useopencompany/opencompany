@@ -5,7 +5,6 @@ import { defaultGoatBrainFolderManifestEntries } from "../../goat-brain/src/inde
 import { goatBrainFolders, goatBrains, goatWorkspaceMembers, goatWorkspaces } from "./goat-schema";
 import {
   createGoatWorkspaceForUser,
-  defaultGoatBrainIdForUser,
   getGoatBrainEnrichmentEnabled,
   newGoatBrainId,
   replaceGoatBrainMembers,
@@ -15,13 +14,6 @@ import {
 const pgDialect = new PgDialect();
 
 describe("Goat brain ids", () => {
-  it("generates readable default brain ids without embedding the WorkOS user id", () => {
-    const id = defaultGoatBrainIdForUser("user_01JXYZ123456789");
-
-    expect(id).toMatch(/^general-[a-f0-9]{12}$/);
-    expect(id).not.toContain("user_01JXYZ123456789");
-  });
-
   it("prefixes new brain ids with the normalized brain name", () => {
     expect(newGoatBrainId("Customer Research")).toMatch(/^customer-research-[a-f0-9]{12}$/);
   });
@@ -66,6 +58,7 @@ describe("Goat workspace creation", () => {
         workosOrganizationId: "org_new",
         userWorkosId: "user_123",
         name: "  Analytical Co  ",
+        slug: "analytical-co",
       },
       { db: { insert, batch, execute } },
     );
@@ -75,6 +68,7 @@ describe("Goat workspace creation", () => {
         id: "goat_ws_new",
         workosOrganizationId: "org_new",
         name: "Analytical Co",
+        slug: "analytical-co",
       }),
     );
     expect(result.brain).toEqual(
@@ -91,7 +85,7 @@ describe("Goat workspace creation", () => {
     expect(batchedQueries.filter((query) => query.table === goatBrainFolders)).toHaveLength(
       defaultGoatBrainFolderManifestEntries().length,
     );
-    expect(execute).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 });
 
