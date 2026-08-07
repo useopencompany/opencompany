@@ -1,11 +1,15 @@
 "use client";
 
 // The wiki surface: a Notion-lite tree of markdown pages with subpages.
-// Server components load the data; every mutation goes through the same
-// storage layer as the `wiki` agent tool. No live sync in the preview — the
-// route re-renders on navigation and after actions.
+//
+// The server ships every page (bodies included) once; selection, the tree, and
+// backlinks are pure client state, so navigating between pages is instant —
+// the URL updates via history.pushState and the App Router keeps usePathname
+// in sync without a server round-trip. Mutations go through server actions
+// (the same storage layer as the `wiki` agent tool) with optimistic local
+// updates; router.refresh() reconciles in the background.
 
-import { WIKI_KINDS } from "@opencompany/goat-wiki";
+import { movedWikiPath, WIKI_KINDS, wikiPageLinkTargets } from "@opencompany/goat-wiki";
 import {
   BookOpen,
   ChevronDown,
@@ -15,59 +19,124 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownGoatBrainEditor } from "@/components/MarkdownGoatBrainEditor";
 import {
   addWikiTimelineEntryAction,
   createWikiPageAction,
   deleteWikiPageAction,
+  getWikiTimelineAction,
   moveWikiPageAction,
   saveWikiPageAction,
   setWikiPageKindAction,
 } from "@/lib/wiki-actions";
 
-export type WikiTreeItem = {
-  slug: string;
-  path: string;
-  title: string;
-  kind: string;
-  updatedAt: string;
-};
-
-export type WikiPageProps = {
+export type WikiPageData = {
   slug: string;
   path: string;
   title: string;
   kind: string;
   body: string;
   updatedAt: string;
-  timeline: Array<{ id: string; at: string; text: string }>;
-  backlinks: Array<{ path: string; title: string }>;
+  timelineCount: number;
 };
 
-type TreeNode = WikiTreeItem & { children: TreeNode[] };
+type TreeNode = WikiPageData & { children: TreeNode[] };
 
 const SAVE_DEBOUNCE_MS = 800;
 
-export function GoatWikiView({ tree, page }: { tree: WikiTreeItem[]; page: WikiPageProps | null }) {
+export function GoatWikiView({
+  pages: serverPages,
+  initialPath,
+}: {
+  pages: WikiPageData[];
+  initialPath: string | null;
+}) {
   const router = useRouter();
+  const pathname = usePathname();
+  const [pages, setPages] = useState(serverPages);
   const [error, setError] = useState<string | null>(null);
 
-  const nodes = useMemo(() => buildTree(tree), [tree]);
+  // Server data wins whenever a fresh RSC payload arrives (router.refresh()
+  // after mutations, or a hard navigation). Render-time adjustment, per the
+  // React "derived state from props" pattern — no effect, no extra paint.
+  const [prevServerPages, setPrevServerPages] = useState(serverPages);
+  if (prevServerPages !== serverPages) {
+    setPrevServerPages(serverPages);
+    setPages(serverPages);
+  }
+
+  const selectedPath = useMemo(() => {
+    const fromUrl = pathname.replace(/^\/wiki\/?/, "");
+    return fromUrl ? decodeURIComponent(fromUrl) : (initialPath ?? null);
+  }, [pathname, initialPath]);
+
+  const navigate = useCallback((path: string | null) => {
+    window.history.pushState(null, "", path ? `/wiki/${path}` : "/wiki");
+  }, []);
+
+  const nodes = useMemo(() => buildTree(pages), [pages]);
   const wikiLinks = useMemo(
-    () => Object.fromEntries(tree.map((item) => [item.slug, `/wiki/${item.path}`])),
-    [tree],
+    () => Object.fromEntries(pages.map((page) => [page.slug, `/wiki/${page.path}`])),
+    [pages],
   );
+  const backlinksBySlug = useMemo(() => {
+    const index = new Map<string, Array<{ path: string; title: string }>>();
+    for (const page of pages) {
+      for (const target of wikiPageLinkTargets(page.body)) {
+        const existing = index.get(target);
+        const entry = { path: page.path, title: page.title };
+        if (existing) existing.push(entry);
+        else index.set(target, [entry]);
+      }
+    }
+    return index;
+  }, [pages]);
+
+  const page = selectedPath ? (pages.find((entry) => entry.path === selectedPath) ?? null) : null;
 
   const surfaceError = useCallback((message: string | undefined) => {
     setError(message ?? "Something went wrong.");
     window.setTimeout(() => setError(null), 6_000);
   }, []);
 
+  const createPage = useCallback(
+    async (parentPath: string | null, title: string) => {
+      const result = await createWikiPageAction({ parentPath, title });
+      if (!result.ok) {
+        surfaceError(result.error);
+        return null;
+      }
+      setPages((current) => [
+        ...current,
+        {
+          slug: result.slug,
+          path: result.path,
+          title: result.title,
+          kind: "other",
+          body: "",
+          updatedAt: new Date().toISOString(),
+          timelineCount: 0,
+        },
+      ]);
+      router.refresh();
+      return result;
+    },
+    [router, surfaceError],
+  );
+
   return (
     <div className="flex h-full min-h-0 w-full">
-      <WikiTreeSidebar nodes={nodes} selectedPath={page?.path ?? null} onError={surfaceError} />
+      <WikiTreeSidebar
+        nodes={nodes}
+        selectedPath={selectedPath}
+        onSelect={navigate}
+        onCreate={async (title) => {
+          const created = await createPage(null, title);
+          if (created) navigate(created.path);
+        }}
+      />
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         {error ? (
           <div className="mx-6 mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">
@@ -76,14 +145,39 @@ export function GoatWikiView({ tree, page }: { tree: WikiTreeItem[]; page: WikiP
         ) : null}
         {page ? (
           <WikiPageEditor
-            key={page.path}
+            key={page.slug}
             page={page}
-            tree={tree}
+            pages={pages}
             wikiLinks={wikiLinks}
+            backlinks={backlinksBySlug.get(page.slug) ?? []}
             onError={surfaceError}
+            onNavigate={navigate}
+            onLocalUpdate={(slug, patch) =>
+              setPages((current) =>
+                current.map((entry) => (entry.slug === slug ? { ...entry, ...patch } : entry)),
+              )
+            }
+            onMove={(slug, fromPath, toPath) =>
+              setPages((current) =>
+                current.map((entry) => ({
+                  ...entry,
+                  path: movedWikiPath(entry.path, fromPath, toPath),
+                })),
+              )
+            }
+            onDelete={(deletedPaths) =>
+              setPages((current) => current.filter((entry) => !deletedPaths.includes(entry.path)))
+            }
+            onCreateSubpage={(title) => createPage(page.path, title)}
           />
         ) : (
-          <WikiEmptyState hasPages={tree.length > 0} onError={surfaceError} />
+          <WikiEmptyState
+            hasPages={pages.length > 0}
+            onCreate={async (title) => {
+              const created = await createPage(null, title);
+              if (created) navigate(created.path);
+            }}
+          />
         )}
       </div>
     </div>
@@ -95,13 +189,14 @@ export function GoatWikiView({ tree, page }: { tree: WikiTreeItem[]; page: WikiP
 function WikiTreeSidebar({
   nodes,
   selectedPath,
-  onError,
+  onSelect,
+  onCreate,
 }: {
   nodes: TreeNode[];
   selectedPath: string | null;
-  onError: (message: string | undefined) => void;
+  onSelect: (path: string) => void;
+  onCreate: (title: string) => Promise<void>;
 }) {
-  const router = useRouter();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
 
@@ -132,12 +227,10 @@ function WikiTreeSidebar({
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {creating ? (
           <NewPageInput
-            parentPath={null}
-            onDone={(path) => {
+            onDone={async (title) => {
               setCreating(false);
-              if (path) router.push(`/wiki/${path}`);
+              if (title) await onCreate(title);
             }}
-            onError={onError}
           />
         ) : null}
         {nodes.map((node) => (
@@ -148,6 +241,7 @@ function WikiTreeSidebar({
             selectedPath={selectedPath}
             collapsed={collapsed}
             onToggle={toggle}
+            onSelect={onSelect}
           />
         ))}
         {nodes.length === 0 && !creating ? (
@@ -164,14 +258,15 @@ function WikiTreeRow({
   selectedPath,
   collapsed,
   onToggle,
+  onSelect,
 }: {
   node: TreeNode;
   depth: number;
   selectedPath: string | null;
   collapsed: Set<string>;
   onToggle: (path: string) => void;
+  onSelect: (path: string) => void;
 }) {
-  const router = useRouter();
   const isCollapsed = collapsed.has(node.path);
   const isSelected = selectedPath === node.path;
 
@@ -203,7 +298,7 @@ function WikiTreeRow({
         )}
         <button
           type="button"
-          onClick={() => router.push(`/wiki/${node.path}`)}
+          onClick={() => onSelect(node.path)}
           className="min-w-0 flex-1 truncate text-left"
           title={node.path}
         >
@@ -219,6 +314,7 @@ function WikiTreeRow({
               selectedPath={selectedPath}
               collapsed={collapsed}
               onToggle={onToggle}
+              onSelect={onSelect}
             />
           ))
         : null}
@@ -226,29 +322,17 @@ function WikiTreeRow({
   );
 }
 
-function NewPageInput({
-  parentPath,
-  onDone,
-  onError,
-}: {
-  parentPath: string | null;
-  onDone: (createdPath: string | null) => void;
-  onError: (message: string | undefined) => void;
-}) {
+function NewPageInput({ onDone }: { onDone: (title: string | null) => Promise<void> | void }) {
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
+    if (busy) return;
     const trimmed = title.trim();
-    if (!trimmed || busy) return onDone(null);
+    if (!trimmed) return void onDone(null);
     setBusy(true);
-    const result = await createWikiPageAction({ parentPath, title: trimmed });
+    await onDone(trimmed);
     setBusy(false);
-    if (result.ok) onDone(result.path);
-    else {
-      onError(result.error);
-      onDone(null);
-    }
   };
 
   return (
@@ -259,7 +343,7 @@ function NewPageInput({
       onChange={(event) => setTitle(event.target.value)}
       onKeyDown={(event) => {
         if (event.key === "Enter") void submit();
-        if (event.key === "Escape") onDone(null);
+        if (event.key === "Escape") void onDone(null);
       }}
       onBlur={() => void submit()}
       placeholder="Page title…"
@@ -272,20 +356,33 @@ function NewPageInput({
 
 function WikiPageEditor({
   page,
-  tree,
+  pages,
   wikiLinks,
+  backlinks,
   onError,
+  onNavigate,
+  onLocalUpdate,
+  onMove,
+  onDelete,
+  onCreateSubpage,
 }: {
-  page: WikiPageProps;
-  tree: WikiTreeItem[];
+  page: WikiPageData;
+  pages: WikiPageData[];
   wikiLinks: Record<string, string>;
+  backlinks: Array<{ path: string; title: string }>;
   onError: (message: string | undefined) => void;
+  onNavigate: (path: string | null) => void;
+  onLocalUpdate: (slug: string, patch: Partial<WikiPageData>) => void;
+  onMove: (slug: string, fromPath: string, toPath: string) => void;
+  onDelete: (deletedPaths: string[]) => void;
+  onCreateSubpage: (title: string) => Promise<{ slug: string; title: string; path: string } | null>;
 }) {
   const router = useRouter();
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">("saved");
-  const [showTimeline, setShowTimeline] = useState(page.timeline.length > 0);
-  const [creatingSubpage, setCreatingSubpage] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
+  const [name, setName] = useState(page.title);
   const latestBody = useRef(page.body);
+  const latestName = useRef(page.title);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flush = useCallback(async () => {
@@ -294,25 +391,27 @@ function WikiPageEditor({
       saveTimer.current = null;
     }
     setSaveState("saving");
-    const result = await saveWikiPageAction({ path: page.path, body: latestBody.current });
-    if (result.ok) setSaveState("saved");
-    else {
+    const result = await saveWikiPageAction({
+      path: page.path,
+      body: latestBody.current,
+      title: latestName.current,
+    });
+    if (result.ok) {
+      setSaveState("saved");
+      onLocalUpdate(page.slug, { body: latestBody.current, title: result.title });
+    } else {
       setSaveState("dirty");
       onError(result.error);
     }
-  }, [page.path, onError]);
+  }, [page.slug, page.path, onLocalUpdate, onError]);
 
-  const onChange = useCallback(
-    (content: string) => {
-      latestBody.current = content;
-      setSaveState("dirty");
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => void flush(), SAVE_DEBOUNCE_MS);
-    },
-    [flush],
-  );
+  const queueSave = useCallback(() => {
+    setSaveState("dirty");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => void flush(), SAVE_DEBOUNCE_MS);
+  }, [flush]);
 
-  // Flush pending edits when the tab hides or the component unmounts.
+  // Flush pending edits when the tab hides or the page unmounts.
   useEffect(() => {
     const onHide = () => {
       if (saveTimer.current) void flush();
@@ -325,8 +424,8 @@ function WikiPageEditor({
   }, [flush]);
 
   const parentOptions = useMemo(
-    () => tree.filter((item) => item.path !== page.path && !item.path.startsWith(`${page.path}/`)),
-    [tree, page.path],
+    () => pages.filter((item) => item.path !== page.path && !item.path.startsWith(`${page.path}/`)),
+    [pages, page.path],
   );
   const segments = page.path.split("/");
 
@@ -339,18 +438,20 @@ function WikiPageEditor({
           {segments.map((segment, index) => {
             const ancestorPath = segments.slice(0, index + 1).join("/");
             const isLast = index === segments.length - 1;
+            const ancestor = pages.find((entry) => entry.path === ancestorPath);
+            const label = ancestor?.title || segment;
             return (
               <span key={ancestorPath} className="flex min-w-0 items-center gap-1">
                 <span className="text-ink-subtle/60">/</span>
                 {isLast ? (
-                  <span className="truncate text-ink-muted">{segment}</span>
+                  <span className="truncate text-ink-muted">{label}</span>
                 ) : (
                   <button
                     type="button"
                     className="truncate hover:text-ink"
-                    onClick={() => router.push(`/wiki/${ancestorPath}`)}
+                    onClick={() => onNavigate(ancestorPath)}
                   >
-                    {segment}
+                    {label}
                   </button>
                 )}
               </span>
@@ -362,15 +463,28 @@ function WikiPageEditor({
         </span>
       </div>
 
+      {/* Name (Notion-style page title, separate from the markdown body) */}
+      <input
+        value={name}
+        onChange={(event) => {
+          setName(event.target.value);
+          latestName.current = event.target.value;
+          onLocalUpdate(page.slug, { title: event.target.value });
+          queueSave();
+        }}
+        placeholder="Untitled"
+        className="mt-3 w-full bg-transparent text-[26px] font-semibold leading-8 text-ink outline-none placeholder:text-ink-subtle/50"
+      />
+
       {/* Page controls */}
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-[12.5px]">
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px]">
         <select
           value={page.kind}
           onChange={(event) => {
+            onLocalUpdate(page.slug, { kind: event.target.value });
             void setWikiPageKindAction({ slug: page.slug, kind: event.target.value }).then(
               (result) => {
                 if (!result.ok) onError(result.error);
-                router.refresh();
               },
             );
           }}
@@ -385,22 +499,31 @@ function WikiPageEditor({
         </select>
         <button
           type="button"
-          onClick={() => setCreatingSubpage(true)}
+          onClick={async () => {
+            const created = await onCreateSubpage("Untitled");
+            if (created) onNavigate(created.path);
+          }}
           className="flex items-center gap-1 rounded-md border border-edge px-2 py-0.5 text-ink-muted hover:bg-surface-sunken hover:text-ink"
         >
           <CornerDownRight className="h-3 w-3" /> Subpage
         </button>
         <select
           value=""
-          onChange={(event) => {
+          onChange={async (event) => {
             const to = event.target.value;
             if (!to) return;
+            // A pending debounced save targets the current path; land it
+            // before the path changes underneath it.
+            if (saveTimer.current) await flush();
+            const fromPath = page.path;
             void moveWikiPageAction({
               slug: page.slug,
               newParentPath: to === "/" ? null : to,
             }).then((result) => {
-              if (result.ok) router.push(`/wiki/${result.path}`);
-              else onError(result.error);
+              if (result.ok) {
+                onMove(page.slug, fromPath, result.path);
+                onNavigate(result.path);
+              } else onError(result.error);
             });
           }}
           className="rounded-md border border-edge bg-surface px-1.5 py-0.5 text-ink-muted"
@@ -420,19 +543,22 @@ function WikiPageEditor({
           className={`flex items-center gap-1 rounded-md border border-edge px-2 py-0.5 hover:bg-surface-sunken hover:text-ink ${showTimeline ? "text-ink" : "text-ink-muted"}`}
         >
           <History className="h-3 w-3" /> Timeline
-          {page.timeline.length > 0 ? ` (${page.timeline.length})` : ""}
+          {page.timelineCount > 0 ? ` (${page.timelineCount})` : ""}
         </button>
         <button
           type="button"
           onClick={() => {
-            const hasChildren = tree.some((item) => item.path.startsWith(`${page.path}/`));
+            const hasChildren = pages.some((item) => item.path.startsWith(`${page.path}/`));
             const message = hasChildren
               ? `Delete "${page.title || page.slug}" and all its subpages?`
               : `Delete "${page.title || page.slug}"?`;
             if (!window.confirm(message)) return;
             void deleteWikiPageAction({ slug: page.slug, recursive: true }).then((result) => {
-              if (result.ok) router.push("/wiki");
-              else onError(result.error);
+              if (result.ok) {
+                onDelete(result.deletedPaths);
+                onNavigate(null);
+                router.refresh();
+              } else onError(result.error);
             });
           }}
           className="ml-auto flex items-center gap-1 rounded-md px-2 py-0.5 text-ink-subtle hover:bg-red-50 hover:text-red-600"
@@ -441,46 +567,48 @@ function WikiPageEditor({
         </button>
       </div>
 
-      {creatingSubpage ? (
-        <div className="mt-2 max-w-xs">
-          <NewPageInput
-            parentPath={page.path}
-            onDone={(path) => {
-              setCreatingSubpage(false);
-              if (path) router.push(`/wiki/${path}`);
-            }}
-            onError={onError}
-          />
-        </div>
-      ) : null}
-
       {/* Body */}
       <div className="mt-4 flex-1">
         <MarkdownGoatBrainEditor
           content={page.body}
-          onChange={onChange}
+          onChange={(content) => {
+            latestBody.current = content;
+            queueSave();
+          }}
           brainLinks={wikiLinks}
           onNavigateInternal={(href) => {
-            router.push(href);
+            onNavigate(href.replace(/^\/wiki\//, ""));
             return true;
           }}
-          placeholder="Write the page…"
+          placeholder="Write, or type / for commands…"
+          wikiSlashCommands={{
+            createPage: async () => {
+              const created = await onCreateSubpage("Untitled");
+              return created ? { slug: created.slug, title: created.title } : null;
+            },
+          }}
         />
       </div>
 
-      {showTimeline ? <WikiTimelinePanel page={page} onError={onError} /> : null}
+      {showTimeline ? (
+        <WikiTimelinePanel
+          page={page}
+          onError={onError}
+          onAdded={() => onLocalUpdate(page.slug, { timelineCount: page.timelineCount + 1 })}
+        />
+      ) : null}
 
-      {page.backlinks.length > 0 ? (
+      {backlinks.length > 0 ? (
         <div className="mt-6 border-t border-edge pt-3">
           <span className="text-[11.5px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
             Linked from
           </span>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {page.backlinks.map((backlink) => (
+            {backlinks.map((backlink) => (
               <button
                 key={backlink.path}
                 type="button"
-                onClick={() => router.push(`/wiki/${backlink.path}`)}
+                onClick={() => onNavigate(backlink.path)}
                 className="rounded-full border border-edge px-2 py-0.5 text-[12px] text-ink-muted hover:bg-surface-sunken hover:text-ink"
               >
                 {backlink.title || backlink.path}
@@ -498,13 +626,29 @@ function WikiPageEditor({
 function WikiTimelinePanel({
   page,
   onError,
+  onAdded,
 }: {
-  page: WikiPageProps;
+  page: WikiPageData;
   onError: (message: string | undefined) => void;
+  onAdded: () => void;
 }) {
-  const router = useRouter();
+  const [entries, setEntries] = useState<Array<{ id: string; at: string; text: string }> | null>(
+    null,
+  );
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getWikiTimelineAction({ slug: page.slug }).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setEntries(result.entries);
+      else onError(result.error);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [page.slug, onError]);
 
   const submit = async () => {
     const trimmed = text.trim();
@@ -514,7 +658,11 @@ function WikiTimelinePanel({
     setBusy(false);
     if (result.ok) {
       setText("");
-      router.refresh();
+      setEntries((current) => [
+        { id: `local-${result.at}`, at: result.at, text: trimmed },
+        ...(current ?? []),
+      ]);
+      onAdded();
     } else onError(result.error);
   };
 
@@ -536,15 +684,16 @@ function WikiTimelinePanel({
         />
       </div>
       <ul className="mt-2 flex flex-col gap-1.5">
-        {page.timeline.map((entry) => (
+        {(entries ?? []).map((entry) => (
           <li key={entry.id} className="flex gap-2 text-[13px] leading-5">
             <span className="shrink-0 tabular-nums text-ink-subtle">{entry.at.slice(0, 10)}</span>
             <span className="min-w-0 text-ink-muted">{entry.text}</span>
           </li>
         ))}
-        {page.timeline.length === 0 ? (
+        {entries !== null && entries.length === 0 ? (
           <li className="text-[12.5px] text-ink-subtle">No entries yet.</li>
         ) : null}
+        {entries === null ? <li className="text-[12.5px] text-ink-subtle">Loading…</li> : null}
       </ul>
     </div>
   );
@@ -554,12 +703,11 @@ function WikiTimelinePanel({
 
 function WikiEmptyState({
   hasPages,
-  onError,
+  onCreate,
 }: {
   hasPages: boolean;
-  onError: (message: string | undefined) => void;
+  onCreate: (title: string) => Promise<void>;
 }) {
-  const router = useRouter();
   const [creating, setCreating] = useState(false);
 
   return (
@@ -578,12 +726,10 @@ function WikiEmptyState({
       {creating ? (
         <div className="w-56">
           <NewPageInput
-            parentPath={null}
-            onDone={(path) => {
+            onDone={async (title) => {
               setCreating(false);
-              if (path) router.push(`/wiki/${path}`);
+              if (title) await onCreate(title);
             }}
-            onError={onError}
           />
         </div>
       ) : (
@@ -601,11 +747,11 @@ function WikiEmptyState({
 
 // --- helpers ----------------------------------------------------------------
 
-function buildTree(items: WikiTreeItem[]): TreeNode[] {
+function buildTree(items: WikiPageData[]): TreeNode[] {
   const nodesByPath = new Map<string, TreeNode>();
   const roots: TreeNode[] = [];
-  // Items arrive path-sorted, so parents precede children.
-  for (const item of items) {
+  const sorted = [...items].sort((a, b) => a.path.localeCompare(b.path));
+  for (const item of sorted) {
     const node: TreeNode = { ...item, children: [] };
     nodesByPath.set(item.path, node);
     const separator = item.path.lastIndexOf("/");

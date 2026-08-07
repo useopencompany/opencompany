@@ -41,6 +41,8 @@ export type WikiToolInput = {
   body?: string | undefined;
   /** write: page kind. */
   kind?: string | undefined;
+  /** write: display name for the page (defaults to the body's first H1). */
+  title?: string | undefined;
   /** search: query text. grep: regex pattern. */
   query?: string | undefined;
   /** recent/timeline: window like "2d", "6h", "1w", or an ISO timestamp. */
@@ -63,7 +65,7 @@ export type WikiToolOutput = { ok: true; result: unknown } | { ok: false; error:
 
 export const WIKI_TOOL_DESCRIPTION = [
   "Workspace wiki: markdown pages in a tree (Notion-like pages with subpages). Every page has a stable `slug` used by [[wiki-links]] and a tree `path` of slugs like projects/website-redesign. Retrieval is filesystem-first: start with `tree`, `read` the promising pages, `grep` when hunting for a phrase.",
-  'Commands: tree (list the page tree) · read {pages: slug|path|[...]} (page bodies + subpages + backlinks) · grep {query: regex} (matching lines across pages) · search {query} (keyword search when grep/tree are not enough) · recent {since: "2d"} (pages changed, with +added/-removed lines) · timeline {pages: slug, since?} (a page\'s dated history) · write {path, body, kind?} (create or overwrite; missing parent pages are auto-created) · move {pages: slug, to: parent-path|"/"} · delete {pages: slug, recursive?} · timeline-add {pages: slug, text, at?}.',
+  'Commands: tree (list the page tree) · read {pages: slug|path|[...]} (page bodies + subpages + backlinks) · grep {query: regex} (matching lines across pages) · search {query} (keyword search when grep/tree are not enough) · recent {since: "2d"} (pages changed, with +added/-removed lines) · timeline {pages: slug, since?} (a page\'s dated history) · write {path, body, kind?, title?} (create or overwrite; missing parent pages are auto-created) · move {pages: slug, to: parent-path|"/"} · delete {pages: slug, recursive?} · timeline-add {pages: slug, text, at?}.',
   "Pages link to each other inline with [[slug]] or [[slug|Label]], and to artifacts in other tools with [[source:provider:id]] (e.g. [[source:linear:issue:ENG-123]]) — keep those links when rewriting. `kind` is one of project, person, company, research, meeting, other. Writes overwrite the whole page body: read before you rewrite.",
 ].join(" ");
 
@@ -96,6 +98,11 @@ export const WIKI_TOOL_INPUT_JSON_SCHEMA = {
       type: "string",
       enum: ["project", "person", "company", "research", "meeting", "other"],
       description: "write: what the page is about.",
+    },
+    title: {
+      type: "string",
+      description:
+        "write: display name for the page. Optional — defaults to the body's first H1, and an existing name is kept when omitted.",
     },
     query: {
       type: "string",

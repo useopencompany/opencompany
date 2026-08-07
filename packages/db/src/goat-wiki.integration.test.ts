@@ -78,6 +78,23 @@ describe("writeWikiPage", () => {
     expect(tree[1]?.childCount).toBe(1);
   });
 
+  it("honors an explicit title and preserves it across body rewrites", async () => {
+    await writeWikiPage(
+      { workspaceId: WS, path: "q3-planning", body: "goals go here", title: "Q3 Planning" },
+      db,
+    );
+    let { pages } = await resolveWikiPages(WS, ["q3-planning"], db);
+    expect(pages[0]?.title).toBe("Q3 Planning");
+    // An agent rewrite without an H1 keeps the human-set name...
+    await writeWikiPage({ workspaceId: WS, path: "q3-planning", body: "updated goals" }, db);
+    ({ pages } = await resolveWikiPages(WS, ["q3-planning"], db));
+    expect(pages[0]?.title).toBe("Q3 Planning");
+    // ...while a body with an H1 still wins when no explicit title is given.
+    await writeWikiPage({ workspaceId: WS, path: "q3-planning", body: "# Q3 Plan v2" }, db);
+    ({ pages } = await resolveWikiPages(WS, ["q3-planning"], db));
+    expect(pages[0]?.title).toBe("Q3 Plan v2");
+  });
+
   it("updates in place and reports unchanged writes", async () => {
     await writeWikiPage({ workspaceId: WS, path: "notes", body: "a\nb" }, db);
     const updated = await writeWikiPage({ workspaceId: WS, path: "notes", body: "a\nb\nc" }, db);
