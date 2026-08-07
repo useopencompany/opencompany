@@ -109,6 +109,7 @@ export function GoatHomeRoute({
         taskSpawningEnabled={data.featureFlags.taskSpawning}
         autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
         chatResumeEnabled={data.chatResumeEnabled}
+        workspaceId={data.workspace.id}
         userName={userName}
         userWorkosId={data.user.workosUserId}
       />

@@ -178,6 +178,10 @@ import {
   normalizeGoatModel,
 } from "@/lib/model-options";
 import { consumeGoatOnboardingKickoffPrompt } from "@/lib/onboarding-kickoff";
+import {
+  addOptimisticGoatChatSummary,
+  removeOptimisticGoatChatSummary,
+} from "@/lib/optimistic-chat-summaries";
 import type { GoatSkillCatalogItem } from "@/lib/skills";
 import {
   createGoatCollections,
@@ -377,6 +381,7 @@ export function GoatSurface({
   taskSpawningEnabled = false,
   autoModelRoutingEnabled = false,
   chatResumeEnabled = false,
+  workspaceId = "",
   userName = "there",
   userWorkosId = "",
   taskConversation = null,
@@ -392,6 +397,7 @@ export function GoatSurface({
   taskSpawningEnabled?: boolean;
   autoModelRoutingEnabled?: boolean;
   chatResumeEnabled?: boolean;
+  workspaceId?: string;
   userName?: string;
   // Scopes chat attachment uploads; attachments are disabled when absent.
   userWorkosId?: string;
@@ -1738,6 +1744,13 @@ export function GoatSurface({
         const engine = backgroundEngine;
         const config = ENGINE_CHAT_CONFIG[engine];
         const newSessionId = newOptimisticGoatChatSessionId();
+        addOptimisticGoatChatSummary({
+          workspaceId,
+          sessionId: newSessionId,
+          prompt: messagePrompt,
+          model: String(chatModel),
+          engine,
+        });
         setLocalGoatChatState(newSessionId, "working");
         void sendEngineChatMessage({
           endpoint: config.messagesEndpoint,
@@ -1762,6 +1775,7 @@ export function GoatSurface({
             toast.success(`${config.label} is ready.`);
           })
           .catch((error) => {
+            removeOptimisticGoatChatSummary(newSessionId);
             clearLocalGoatChatState(newSessionId, "working");
             if (!mountedRef.current) return;
             restoreDraft();
@@ -1788,6 +1802,13 @@ export function GoatSurface({
       toast("Started a new chat in the background.");
 
       const newSessionId = newOptimisticGoatChatSessionId();
+      addOptimisticGoatChatSummary({
+        workspaceId,
+        sessionId: newSessionId,
+        prompt: messagePrompt,
+        model: String(chatModel),
+        engine: "opencompany",
+      });
       setLocalGoatChatState(newSessionId, "working");
       void runBackgroundChatTurn({
         prompt: messagePrompt,
@@ -1802,6 +1823,7 @@ export function GoatSurface({
           toast.success("Background chat is ready.");
         })
         .catch((error) => {
+          removeOptimisticGoatChatSummary(newSessionId);
           if (!mountedRef.current) return;
           restoreDraft();
           toast.error(error instanceof Error ? error.message : "Could not start that chat.");
@@ -2518,6 +2540,7 @@ export function GoatSurface({
                 taskSpawningEnabled={taskSpawningEnabled}
                 autoModelRoutingEnabled={autoModelRoutingEnabled}
                 creditBalance={creditBalance}
+                workspaceId={workspaceId}
                 onSubmitted={closeCommandPalette}
               />
             </>
@@ -3177,6 +3200,7 @@ function QuickChatComposer({
   taskSpawningEnabled,
   autoModelRoutingEnabled,
   creditBalance,
+  workspaceId,
   onSubmitted,
 }: {
   open: boolean;
@@ -3188,6 +3212,7 @@ function QuickChatComposer({
   taskSpawningEnabled: boolean;
   autoModelRoutingEnabled: boolean;
   creditBalance: ReturnType<typeof useGoatCreditBalance>["balance"];
+  workspaceId: string;
   onSubmitted: () => void;
 }) {
   const router = useRouter();
@@ -3723,6 +3748,13 @@ function QuickChatComposer({
       const config = ENGINE_CHAT_CONFIG[engine];
       const userMessageId = `goat_chat_msg_${crypto.randomUUID()}`;
       const newSessionId = newOptimisticGoatChatSessionId();
+      addOptimisticGoatChatSummary({
+        workspaceId,
+        sessionId: newSessionId,
+        prompt,
+        model: String(chatModel),
+        engine,
+      });
       setLocalGoatChatState(newSessionId, "working");
       void sendEngineChatMessage({
         endpoint: config.messagesEndpoint,
@@ -3746,6 +3778,7 @@ function QuickChatComposer({
           toast.success(`${config.label} is ready.`);
         })
         .catch((error) => {
+          removeOptimisticGoatChatSummary(newSessionId);
           clearLocalGoatChatState(newSessionId, "working");
           toast.error(
             error instanceof Error ? error.message : `${config.label} could not start that turn.`,
@@ -3763,6 +3796,13 @@ function QuickChatComposer({
     toast("Started a new chat in the background.");
 
     const newSessionId = newOptimisticGoatChatSessionId();
+    addOptimisticGoatChatSummary({
+      workspaceId,
+      sessionId: newSessionId,
+      prompt,
+      model: String(chatModel),
+      engine: "opencompany",
+    });
     setLocalGoatChatState(newSessionId, "working");
     const backgroundChatMentions = isBackgroundChatDirective
       ? mentions.filter((mention) => !isWorkflowMention(mention))
@@ -3783,6 +3823,7 @@ function QuickChatComposer({
         toast.success("Background chat is ready.");
       })
       .catch((error) => {
+        removeOptimisticGoatChatSummary(newSessionId);
         toast.error(error instanceof Error ? error.message : "Could not start that chat.");
       })
       .finally(() => {
