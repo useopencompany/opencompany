@@ -1,4 +1,5 @@
 import { GoatAnalyticsProvider } from "@opencompany/analytics/goat/client";
+import { getGoatWorkspacePlan } from "@opencompany/db/goat-billing";
 import type { GoatTaskStage, GoatTaskStatus } from "@opencompany/db/goat-schema";
 import { listGoatWorkspaceMembers } from "@opencompany/db/goat-workspaces";
 import type { ReactNode } from "react";
@@ -55,6 +56,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     infisical,
     workspaceMembers,
     personalAccounts,
+    plan,
   ] = await Promise.all([
     listCurrentUserGoatTasks(),
     featureFlags.taskSpawning ? listCurrentUserGoatTaskSchedules() : Promise.resolve([]),
@@ -75,6 +77,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
     loadCurrentGoatInfisicalAuthSettings(),
     listGoatWorkspaceMembers(workspace.id),
     getGoatPersonalAccounts(user.workosUserId),
+    getGoatWorkspacePlan(workspace.id),
   ]);
 
   const initialData: GoatAppInitialData = {
@@ -90,6 +93,7 @@ export async function GoatAppShell({ children }: { children: ReactNode }) {
       name: workspace.name,
       role,
     },
+    plan,
     workspaces: workspaces.map((entry) => ({
       id: entry.workspace.id,
       name: entry.workspace.name,
