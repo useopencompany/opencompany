@@ -92,6 +92,11 @@ services:
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
+      # X OAuth client, used by the runner to refresh access tokens before posting.
+      - key: GOAT_X_CLIENT_ID
+        sync: false
+      - key: GOAT_X_CLIENT_SECRET
+        sync: false
       # Optional Goat rendered-browser task tools. Production uses Browserless by default when
       # RUNNER_GOAT_BROWSER_ENABLED=true unless AGENT_BROWSER_PROVIDER overrides it.
       - key: RUNNER_GOAT_BROWSER_ENABLED
